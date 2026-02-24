@@ -195,7 +195,7 @@ async def build_env_overrides(
 
     Returns {container_id: {env_key: plain_value}} for every container.
     """
-    from ..models import ContainerConnection
+    from ..models import Container, ContainerConnection
 
     # 1. Start with each container's own env vars (decoded)
     overrides: dict[UUID, dict[str, str]] = {
@@ -222,7 +222,11 @@ async def build_env_overrides(
     for conn in connections:
         source = container_map.get(conn.source_container_id)
         if source is None:
-            continue
+            # Source container not in provided list — fetch from DB
+            source = await db.get(Container, conn.source_container_id)
+            if source is None:
+                continue
+            container_map[source.id] = source
 
         service_def = get_service(source.service_slug) if source.service_slug else None
 
