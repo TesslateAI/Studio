@@ -10,7 +10,6 @@ import {
   type Node,
   type NodeTypes,
   type OnConnect,
-  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
@@ -366,9 +365,14 @@ const ProjectGraphCanvasInner = () => {
       try {
         const deploymentTargetsRes = await deploymentTargetsApi.list(slug!);
         deploymentTargets = deploymentTargetsRes || [];
-      } catch {
-        // Deployment targets might not exist yet - that's OK
-        console.debug('No deployment targets found');
+      } catch (error) {
+        const axiosError = error as { response?: { status?: number } };
+        if (axiosError.response?.status === 404) {
+          console.debug('Deployment targets endpoint not available');
+        } else {
+          console.error('Failed to load deployment targets:', error);
+          toast.error('Failed to load deployment targets');
+        }
       }
 
       // Convert containers to React Flow nodes
@@ -609,50 +613,61 @@ const ProjectGraphCanvasInner = () => {
   );
 
   // Stable callback for deleting deployment target nodes
-  const handleDeleteDeploymentTarget = useCallback(async (targetId: string) => {
-    if (!confirm('Delete this deployment target? Connected containers will be disconnected.')) return;
+  const handleDeleteDeploymentTarget = useCallback(
+    async (targetId: string) => {
+      if (!confirm('Delete this deployment target? Connected containers will be disconnected.'))
+        return;
 
-    try {
-      await deploymentTargetsApi.delete(slugRef.current!, targetId);
+      try {
+        await deploymentTargetsApi.delete(slugRef.current!, targetId);
 
-      // Remove the deployment target node
-      setNodes((nds) => nds.filter((node) => node.id !== targetId));
-      // Remove any edges connected to this target
-      setEdges((eds) => eds.filter((edge) => edge.source !== targetId && edge.target !== targetId));
-      toast.success('Deployment target removed');
-    } catch (error) {
-      console.error('Failed to delete deployment target:', error);
-      toast.error('Failed to delete deployment target');
-    }
-  }, [setNodes, setEdges]);
+        // Remove the deployment target node
+        setNodes((nds) => nds.filter((node) => node.id !== targetId));
+        // Remove any edges connected to this target
+        setEdges((eds) =>
+          eds.filter((edge) => edge.source !== targetId && edge.target !== targetId)
+        );
+        toast.success('Deployment target removed');
+      } catch (error) {
+        console.error('Failed to delete deployment target:', error);
+        toast.error('Failed to delete deployment target');
+      }
+    },
+    [setNodes, setEdges]
+  );
 
   // Stable callback for deploying from a deployment target
-  const handleDeployFromTarget = useCallback(async (targetId: string) => {
-    try {
-      toast.loading('Starting deployment...', { id: `deploy-${targetId}` });
-      const result = await deploymentTargetsApi.deploy(slugRef.current!, targetId);
+  const handleDeployFromTarget = useCallback(
+    async (targetId: string) => {
+      try {
+        toast.loading('Starting deployment...', { id: `deploy-${targetId}` });
+        const result = await deploymentTargetsApi.deploy(slugRef.current!, targetId);
 
-      if (result.failed === 0 && result.success > 0) {
-        toast.success(`Deployed ${result.success} container(s) successfully!`, { id: `deploy-${targetId}` });
-        // Refresh the deployment history
-        const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
-        setNodes((nds) =>
-          nds.map((node) =>
-            node.id === targetId
-              ? { ...node, data: { ...node.data, deploymentHistory: history } }
-              : node
-          )
-        );
-      } else {
-        const failedResults = result.results.filter((r) => r.status === 'failed');
-        const errorMsg = failedResults[0]?.error || 'Unknown error';
-        toast.error(`Deployment failed: ${errorMsg}`, { id: `deploy-${targetId}` });
+        if (result.failed === 0 && result.success > 0) {
+          toast.success(`Deployed ${result.success} container(s) successfully!`, {
+            id: `deploy-${targetId}`,
+          });
+          // Refresh the deployment history
+          const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === targetId
+                ? { ...node, data: { ...node.data, deploymentHistory: history } }
+                : node
+            )
+          );
+        } else {
+          const failedResults = result.results.filter((r) => r.status === 'failed');
+          const errorMsg = failedResults[0]?.error || 'Unknown error';
+          toast.error(`Deployment failed: ${errorMsg}`, { id: `deploy-${targetId}` });
+        }
+      } catch (error) {
+        console.error('Failed to deploy:', error);
+        toast.error('Deployment failed', { id: `deploy-${targetId}` });
       }
-    } catch (error) {
-      console.error('Failed to deploy:', error);
-      toast.error('Deployment failed', { id: `deploy-${targetId}` });
-    }
-  }, [setNodes]);
+    },
+    [setNodes]
+  );
 
   // Stable callback for connecting OAuth to deployment target
   const handleConnectDeploymentTarget = useCallback(async (targetId: string) => {
@@ -683,32 +698,41 @@ const ProjectGraphCanvasInner = () => {
   }, []);
 
   // Stable callback for rolling back a deployment
-  const handleRollbackDeployment = useCallback(async (targetId: string, deploymentId: string) => {
-    if (!confirm('Rollback to this deployment? This will redeploy the previous version.')) return;
+  const handleRollbackDeployment = useCallback(
+    async (targetId: string, deploymentId: string) => {
+      if (!confirm('Rollback to this deployment? This will redeploy the previous version.')) return;
 
-    try {
-      toast.loading('Rolling back...', { id: `rollback-${deploymentId}` });
-      const result = await deploymentTargetsApi.rollback(slugRef.current!, targetId, deploymentId);
-
-      if (result.status === 'success') {
-        toast.success('Rollback successful!', { id: `rollback-${deploymentId}` });
-        // Refresh the deployment history
-        const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
-        setNodes((nds) =>
-          nds.map((node) =>
-            node.id === targetId
-              ? { ...node, data: { ...node.data, deploymentHistory: history } }
-              : node
-          )
+      try {
+        toast.loading('Rolling back...', { id: `rollback-${deploymentId}` });
+        const result = await deploymentTargetsApi.rollback(
+          slugRef.current!,
+          targetId,
+          deploymentId
         );
-      } else {
-        toast.error(`Rollback failed: ${result.error || 'Unknown error'}`, { id: `rollback-${deploymentId}` });
+
+        if (result.status === 'success') {
+          toast.success('Rollback successful!', { id: `rollback-${deploymentId}` });
+          // Refresh the deployment history
+          const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === targetId
+                ? { ...node, data: { ...node.data, deploymentHistory: history } }
+                : node
+            )
+          );
+        } else {
+          toast.error(`Rollback failed: ${result.error || 'Unknown error'}`, {
+            id: `rollback-${deploymentId}`,
+          });
+        }
+      } catch (error) {
+        console.error('Failed to rollback:', error);
+        toast.error('Rollback failed', { id: `rollback-${deploymentId}` });
       }
-    } catch (error) {
-      console.error('Failed to rollback:', error);
-      toast.error('Rollback failed', { id: `rollback-${deploymentId}` });
-    }
-  }, [setNodes]);
+    },
+    [setNodes]
+  );
 
   // Debounced position update for deployment targets
   const debouncedDeploymentTargetPositionUpdate = useMemo(
@@ -845,11 +869,16 @@ const ProjectGraphCanvasInner = () => {
           );
 
           // Add the edge with deployment type
-          setEdges((eds) => addEdge({
-            ...connection,
-            type: 'deployment',
-            animated: false,
-          }, eds));
+          setEdges((eds) =>
+            addEdge(
+              {
+                ...connection,
+                type: 'deployment',
+                animated: false,
+              },
+              eds
+            )
+          );
 
           toast.success(`Connected ${containerName} to ${provider}`);
         } catch (error) {
@@ -997,7 +1026,9 @@ const ProjectGraphCanvasInner = () => {
           // Remove the optimistic node on error
           setNodes((nds) => nds.filter((node) => node.id !== tempId));
           const axiosError = error as { response?: { data?: { detail?: string } } };
-          const errorMessage = axiosError.response?.data?.detail || (error instanceof Error ? error.message : 'Unknown error');
+          const errorMessage =
+            axiosError.response?.data?.detail ||
+            (error instanceof Error ? error.message : 'Unknown error');
           toast.error(`Failed to create deployment target: ${errorMessage}`);
         }
         return;
@@ -1056,7 +1087,17 @@ const ProjectGraphCanvasInner = () => {
       // For container services and bases, create immediately
       await createContainerNode(item, dropPosition);
     },
-    [slug, project, setNodes, handleDeleteBrowser, reactFlowInstance, handleDeployFromTarget, handleConnectDeploymentTarget, handleDeleteDeploymentTarget, handleRollbackDeployment]
+    [
+      slug,
+      project,
+      setNodes,
+      handleDeleteBrowser,
+      reactFlowInstance,
+      handleDeployFromTarget,
+      handleConnectDeploymentTarget,
+      handleDeleteDeploymentTarget,
+      handleRollbackDeployment,
+    ]
   );
 
   // Instantiate a workflow template (creates multiple nodes and connections)
@@ -1499,7 +1540,11 @@ const ProjectGraphCanvasInner = () => {
         debouncedContainerPositionUpdate(node.id, node.position.x, node.position.y);
       }
     },
-    [debouncedContainerPositionUpdate, debouncedBrowserPositionUpdate, debouncedDeploymentTargetPositionUpdate]
+    [
+      debouncedContainerPositionUpdate,
+      debouncedBrowserPositionUpdate,
+      debouncedDeploymentTargetPositionUpdate,
+    ]
   );
 
   // Auto layout handler - arranges nodes using dagre algorithm
@@ -1670,7 +1715,11 @@ const ProjectGraphCanvasInner = () => {
             // Find the deployment target node and disconnect the container
             const deploymentTargetId = edge.target;
             const containerId = edge.source;
-            await deploymentTargetsApi.disconnect(slugRef.current!, deploymentTargetId, containerId);
+            await deploymentTargetsApi.disconnect(
+              slugRef.current!,
+              deploymentTargetId,
+              containerId
+            );
 
             // Update the deployment target node to remove the connected container
             setNodes((nds) =>

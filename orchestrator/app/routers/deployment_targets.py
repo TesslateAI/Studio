@@ -48,9 +48,12 @@ class DeploymentTargetCreate(BaseModel):
     """Request to create a deployment target node."""
 
     provider: str = Field(
-        ..., description="Deployment provider: vercel, netlify, cloudflare, digitalocean, railway, fly"
+        ...,
+        description="Deployment provider: vercel, netlify, cloudflare, digitalocean, railway, fly",
     )
-    environment: str = Field(default="production", description="Environment: production, staging, preview")
+    environment: str = Field(
+        default="production", description="Environment: production, staging, preview"
+    )
     name: str | None = Field(None, description="Optional custom display name")
     position_x: float = Field(default=0, description="X position on canvas")
     position_y: float = Field(default=0, description="Y position on canvas")
@@ -134,7 +137,9 @@ class ConnectionValidation(BaseModel):
 class DeployRequest(BaseModel):
     """Request to deploy connected containers."""
 
-    env_vars: dict[str, str] = Field(default_factory=dict, description="Additional environment variables")
+    env_vars: dict[str, str] = Field(
+        default_factory=dict, description="Additional environment variables"
+    )
     build_command: str | None = Field(None, description="Custom build command override")
 
 
@@ -143,14 +148,10 @@ class DeployRequest(BaseModel):
 # ============================================================================
 
 
-async def get_project_or_404(
-    slug: str, db: AsyncSession, user: User
-) -> Project:
+async def get_project_or_404(slug: str, db: AsyncSession, user: User) -> Project:
     """Get project by slug or raise 404."""
     result = await db.execute(
-        select(Project).where(
-            and_(Project.slug == slug, Project.owner_id == user.id)
-        )
+        select(Project).where(and_(Project.slug == slug, Project.owner_id == user.id))
     )
     project = result.scalar_one_or_none()
     if not project:
@@ -196,7 +197,9 @@ def build_target_response(
         is_connected_override: If provided, uses this value instead of target.is_connected.
             Used to reflect live credential status rather than the stale stored value.
     """
-    is_connected = is_connected_override if is_connected_override is not None else target.is_connected
+    is_connected = (
+        is_connected_override if is_connected_override is not None else target.is_connected
+    )
     provider_info = get_provider_info(target.provider)
     return DeploymentTargetResponse(
         id=target.id,
@@ -322,7 +325,9 @@ async def list_deployment_targets(
         # Sync stale DB value if it diverged (credential added/removed after target creation)
         if target.is_connected != live_is_connected:
             target.is_connected = live_is_connected
-            target.credential_id = connected_providers.get(target.provider) if live_is_connected else None
+            target.credential_id = (
+                connected_providers.get(target.provider) if live_is_connected else None
+            )
             # Non-blocking: commit happens at end
         # Get connected containers
         connected = []
@@ -374,10 +379,18 @@ async def list_deployment_targets(
                 )
             )
 
-        responses.append(build_target_response(target, connected, history, is_connected_override=live_is_connected))
+        responses.append(
+            build_target_response(
+                target, connected, history, is_connected_override=live_is_connected
+            )
+        )
 
     # Persist any stale is_connected updates (non-blocking best-effort)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        logger.warning("Failed to persist stale is_connected sync (non-blocking): %s", e)
+        await db.rollback()
 
     return responses
 
@@ -393,27 +406,27 @@ async def list_providers(
 
     # Get user's connected providers
     credentials_result = await db.execute(
-        select(DeploymentCredential.provider).where(
-            DeploymentCredential.user_id == user.id
-        )
+        select(DeploymentCredential.provider).where(DeploymentCredential.user_id == user.id)
     )
-    connected_providers = set(r[0] for r in credentials_result.all())
+    connected_providers = {r[0] for r in credentials_result.all()}
 
     providers = []
     for provider_slug, info in list_all_providers().items():
-        providers.append({
-            "slug": provider_slug,
-            "display_name": info["display_name"],
-            "icon": info["icon"],
-            "color": info["color"],
-            "types": info["types"],
-            "frameworks": info["frameworks"],
-            "supports_serverless": info["supports_serverless"],
-            "supports_static": info["supports_static"],
-            "supports_fullstack": info["supports_fullstack"],
-            "deployment_mode": info["deployment_mode"],
-            "is_connected": provider_slug in connected_providers,
-        })
+        providers.append(
+            {
+                "slug": provider_slug,
+                "display_name": info["display_name"],
+                "icon": info["icon"],
+                "color": info["color"],
+                "types": info["types"],
+                "frameworks": info["frameworks"],
+                "supports_serverless": info["supports_serverless"],
+                "supports_static": info["supports_static"],
+                "supports_fullstack": info["supports_fullstack"],
+                "deployment_mode": info["deployment_mode"],
+                "is_connected": provider_slug in connected_providers,
+            }
+        )
 
     return providers
 
@@ -482,9 +495,7 @@ async def get_deployment_target(
     for dep in deployments:
         container_name = None
         if dep.container_id:
-            c_result = await db.execute(
-                select(Container).where(Container.id == dep.container_id)
-            )
+            c_result = await db.execute(select(Container).where(Container.id == dep.container_id))
             c = c_result.scalar_one_or_none()
             if c:
                 container_name = c.name
@@ -501,7 +512,9 @@ async def get_deployment_target(
             )
         )
 
-    return build_target_response(target, connected, history, is_connected_override=live_is_connected)
+    return build_target_response(
+        target, connected, history, is_connected_override=live_is_connected
+    )
 
 
 @router.patch("/{slug}/deployment-targets/{target_id}", response_model=DeploymentTargetResponse)
@@ -665,9 +678,7 @@ async def disconnect_container_from_target(
     await db.delete(connection)
     await db.commit()
 
-    logger.info(
-        f"Disconnected container {container_id} from deployment target {target_id}"
-    )
+    logger.info(f"Disconnected container {container_id} from deployment target {target_id}")
 
     return {
         "status": "disconnected",
@@ -746,10 +757,7 @@ async def deploy_target(
     # Get connected containers
     connections_result = await db.execute(
         select(DeploymentTargetConnection)
-        .options(
-            selectinload(DeploymentTargetConnection.container)
-            .selectinload(Container.base)
-        )
+        .options(selectinload(DeploymentTargetConnection.container).selectinload(Container.base))
         .where(DeploymentTargetConnection.deployment_target_id == target_id)
     )
     connections = connections_result.scalars().all()
@@ -785,14 +793,16 @@ async def deploy_target(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to decrypt credentials. Please reconnect your account.",
-        )
+        ) from e
 
     # Deploy each connected container
     results = []
     builder = get_deployment_builder()
 
     # Prepare provider credentials
-    provider_metadata = credential.provider_metadata if hasattr(credential, 'provider_metadata') else None
+    provider_metadata = (
+        credential.provider_metadata if hasattr(credential, "provider_metadata") else None
+    )
     provider_credentials = prepare_provider_credentials(
         target.provider, access_token, provider_metadata
     )
@@ -849,9 +859,7 @@ async def deploy_target(
 
             # Determine framework: connection settings > container base tech_stack > default
             framework = (
-                conn.deployment_settings.get("framework")
-                if conn.deployment_settings
-                else None
+                conn.deployment_settings.get("framework") if conn.deployment_settings else None
             )
             if not framework and container.base and container.base.tech_stack:
                 tech_stack = container.base.tech_stack
@@ -877,9 +885,10 @@ async def deploy_target(
 
             # Build if needed
             if deployment_mode == "pre-built":
-                custom_build_cmd = (
-                    request.build_command
-                    or (conn.deployment_settings.get("build_command") if conn.deployment_settings else None)
+                custom_build_cmd = request.build_command or (
+                    conn.deployment_settings.get("build_command")
+                    if conn.deployment_settings
+                    else None
                 )
                 success, build_output = await builder.trigger_build(
                     user_id=str(user.id),
@@ -916,7 +925,9 @@ async def deploy_target(
 
             env_vars = {
                 **(request.env_vars or {}),
-                **(conn.deployment_settings.get("env_vars", {}) if conn.deployment_settings else {}),
+                **(
+                    conn.deployment_settings.get("env_vars", {}) if conn.deployment_settings else {}
+                ),
             }
 
             config = DeploymentConfig(
@@ -940,14 +951,16 @@ async def deploy_target(
             deployment.completed_at = datetime.utcnow()
             await db.commit()
 
-            results.append({
-                "container_id": str(container.id),
-                "container_name": container.name,
-                "status": "success" if result.success else "failed",
-                "deployment_id": str(deployment.id),
-                "deployment_url": result.deployment_url,
-                "error": result.error,
-            })
+            results.append(
+                {
+                    "container_id": str(container.id),
+                    "container_name": container.name,
+                    "status": "success" if result.success else "failed",
+                    "deployment_id": str(deployment.id),
+                    "deployment_url": result.deployment_url,
+                    "error": result.error,
+                }
+            )
 
         except Exception as e:
             logger.error(f"Deployment failed for {container.name}: {e}")
@@ -957,13 +970,15 @@ async def deploy_target(
             deployment.completed_at = datetime.utcnow()
             await db.commit()
 
-            results.append({
-                "container_id": str(container.id),
-                "container_name": container.name,
-                "status": "failed",
-                "deployment_id": str(deployment.id),
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "container_id": str(container.id),
+                    "container_name": container.name,
+                    "status": "failed",
+                    "deployment_id": str(deployment.id),
+                    "error": str(e),
+                }
+            )
 
     # Count results
     success_count = sum(1 for r in results if r["status"] == "success")
@@ -1006,9 +1021,7 @@ async def get_deployment_history(
     for dep in deployments:
         container_name = None
         if dep.container_id:
-            c_result = await db.execute(
-                select(Container).where(Container.id == dep.container_id)
-            )
+            c_result = await db.execute(select(Container).where(Container.id == dep.container_id))
             c = c_result.scalar_one_or_none()
             if c:
                 container_name = c.name
@@ -1100,5 +1113,3 @@ async def rollback_deployment(
         "rollback_to_version": deployment.version,
         "message": "Rollback deployment created. Full provider rollback support coming soon.",
     }
-
-
