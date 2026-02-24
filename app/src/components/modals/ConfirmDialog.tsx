@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { Warning, X, CheckCircle, Trash } from '@phosphor-icons/react';
 
 interface ConfirmDialogProps {
@@ -21,7 +22,7 @@ export function ConfirmDialog({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   variant = 'info',
-  isLoading = false
+  isLoading = false,
 }: ConfirmDialogProps) {
   if (!isOpen) return null;
 
@@ -44,14 +45,14 @@ export function ConfirmDialog({
           iconBg: 'bg-red-500/20',
           iconColor: 'text-red-400',
           icon: Trash,
-          confirmButton: 'bg-red-500 hover:bg-red-600 disabled:bg-gray-600'
+          confirmButton: 'bg-red-500 hover:bg-red-600 disabled:bg-gray-600',
         };
       case 'warning':
         return {
           iconBg: 'bg-yellow-500/20',
           iconColor: 'text-yellow-400',
           icon: Warning,
-          confirmButton: 'bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-600'
+          confirmButton: 'bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-600',
         };
       case 'info':
       default:
@@ -59,7 +60,7 @@ export function ConfirmDialog({
           iconBg: 'bg-blue-500/20',
           iconColor: 'text-blue-400',
           icon: CheckCircle,
-          confirmButton: 'bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600'
+          confirmButton: 'bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600',
         };
     }
   };
@@ -67,9 +68,9 @@ export function ConfirmDialog({
   const styles = getVariantStyles();
   const Icon = styles.icon;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[300]"
       onClick={handleClose}
     >
       <div
@@ -79,16 +80,14 @@ export function ConfirmDialog({
         {/* Header */}
         <div className="flex items-start justify-between mb-6">
           <div className="flex items-start gap-4 flex-1">
-            <div className={`w-12 h-12 ${styles.iconBg} rounded-xl flex items-center justify-center flex-shrink-0`}>
+            <div
+              className={`w-12 h-12 ${styles.iconBg} rounded-xl flex items-center justify-center flex-shrink-0`}
+            >
               <Icon className={`w-6 h-6 ${styles.iconColor}`} weight="fill" />
             </div>
             <div className="flex-1">
-              <h2 className="font-heading text-xl font-bold text-[var(--text)] mb-2">
-                {title}
-              </h2>
-              <p className="text-sm text-gray-400 leading-relaxed">
-                {message}
-              </p>
+              <h2 className="font-heading text-xl font-bold text-[var(--text)] mb-2">{title}</h2>
+              <p className="text-sm text-gray-400 leading-relaxed">{message}</p>
             </div>
           </div>
           {!isLoading && (
@@ -117,11 +116,7 @@ export function ConfirmDialog({
           >
             {isLoading ? (
               <span className="flex items-center justify-center gap-2">
-                <svg
-                  className="w-4 h-4 animate-spin"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                >
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
                   <circle
                     className="opacity-25"
                     cx="12"
@@ -144,6 +139,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

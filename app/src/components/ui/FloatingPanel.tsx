@@ -341,7 +341,7 @@ export function FloatingPanel({
         </div>
 
         {/* Panel content */}
-        <div className="panel-content flex-1 overflow-y-auto">{children}</div>
+        <div className="panel-content flex-1 min-h-0 overflow-y-auto">{children}</div>
 
         {/* Resize handles - Desktop only */}
         {!isDocked && (
@@ -411,10 +411,18 @@ function getDockStyle(dock: DockPosition): React.CSSProperties {
 
 function getResizeCursor(dir: ResizeDirection): string {
   switch (dir) {
-    case 'se': case 'nw': return 'nwse-resize';
-    case 'sw': case 'ne': return 'nesw-resize';
-    case 'n': case 's': return 'ns-resize';
-    case 'e': case 'w': return 'ew-resize';
+    case 'se':
+    case 'nw':
+      return 'nwse-resize';
+    case 'sw':
+    case 'ne':
+      return 'nesw-resize';
+    case 'n':
+    case 's':
+      return 'ns-resize';
+    case 'e':
+    case 'w':
+      return 'ew-resize';
   }
 }
 

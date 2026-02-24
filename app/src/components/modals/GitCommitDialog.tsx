@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { GitCommit, X, Check } from '@phosphor-icons/react';
 import { gitApi } from '../../lib/git-api';
 import type { GitFileChange } from '../../types/git';
@@ -17,15 +18,26 @@ const COMMIT_PREFIXES = [
   { value: 'fix', label: 'fix', description: 'Bug fix', color: 'text-red-400' },
   { value: 'docs', label: 'docs', description: 'Documentation', color: 'text-blue-400' },
   { value: 'style', label: 'style', description: 'Formatting', color: 'text-purple-400' },
-  { value: 'refactor', label: 'refactor', description: 'Code refactoring', color: 'text-yellow-400' },
+  {
+    value: 'refactor',
+    label: 'refactor',
+    description: 'Code refactoring',
+    color: 'text-yellow-400',
+  },
   { value: 'test', label: 'test', description: 'Tests', color: 'text-cyan-400' },
   { value: 'chore', label: 'chore', description: 'Maintenance', color: 'text-gray-400' },
 ];
 
-export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess }: GitCommitDialogProps) {
+export function GitCommitDialog({
+  isOpen,
+  onClose,
+  projectId,
+  changes,
+  onSuccess,
+}: GitCommitDialogProps) {
   const [message, setMessage] = useState('');
   const [selectedPrefix, setSelectedPrefix] = useState<string | null>(null);
-  const [selectedFiles, setSelectedFiles] = useState<string[]>(changes.map(c => c.file_path));
+  const [selectedFiles, setSelectedFiles] = useState<string[]>(changes.map((c) => c.file_path));
   const [isCommitting, setIsCommitting] = useState(false);
 
   if (!isOpen) return null;
@@ -54,7 +66,9 @@ export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess
       onSuccess();
       onClose();
     } catch (error: unknown) {
-      const errorMessage = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to create commit';
+      const errorMessage =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Failed to create commit';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
       setIsCommitting(false);
@@ -70,15 +84,13 @@ export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess
   };
 
   const toggleFile = (filePath: string) => {
-    setSelectedFiles(prev =>
-      prev.includes(filePath)
-        ? prev.filter(f => f !== filePath)
-        : [...prev, filePath]
+    setSelectedFiles((prev) =>
+      prev.includes(filePath) ? prev.filter((f) => f !== filePath) : [...prev, filePath]
     );
   };
 
   const selectAll = () => {
-    setSelectedFiles(changes.map(c => c.file_path));
+    setSelectedFiles(changes.map((c) => c.file_path));
   };
 
   const deselectAll = () => {
@@ -87,18 +99,24 @@ export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess
 
   const getFileStatusIcon = (status: string) => {
     switch (status) {
-      case 'M': return <span className="text-yellow-400">M</span>;
-      case 'A': return <span className="text-green-400">A</span>;
-      case 'D': return <span className="text-red-400">D</span>;
-      case 'R': return <span className="text-blue-400">R</span>;
-      case '??': return <span className="text-gray-400">?</span>;
-      default: return <span className="text-gray-400">{status}</span>;
+      case 'M':
+        return <span className="text-yellow-400">M</span>;
+      case 'A':
+        return <span className="text-green-400">A</span>;
+      case 'D':
+        return <span className="text-red-400">D</span>;
+      case 'R':
+        return <span className="text-blue-400">R</span>;
+      case '??':
+        return <span className="text-gray-400">?</span>;
+      default:
+        return <span className="text-gray-400">{status}</span>;
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[300]"
       onClick={handleClose}
     >
       <div
@@ -137,7 +155,9 @@ export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess
               {COMMIT_PREFIXES.map((prefix) => (
                 <button
                   key={prefix.value}
-                  onClick={() => setSelectedPrefix(prev => prev === prefix.value ? null : prefix.value)}
+                  onClick={() =>
+                    setSelectedPrefix((prev) => (prev === prefix.value ? null : prefix.value))
+                  }
                   disabled={isCommitting}
                   className={`p-2 rounded-lg text-sm font-medium transition-all ${
                     selectedPrefix === prefix.value
@@ -162,13 +182,15 @@ export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess
               onChange={(e) => setMessage(e.target.value)}
               className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-gray-500 resize-none"
               rows={3}
-              placeholder={selectedPrefix ? `${selectedPrefix}: add your message here` : 'add your message here'}
+              placeholder={
+                selectedPrefix
+                  ? `${selectedPrefix}: add your message here`
+                  : 'add your message here'
+              }
               disabled={isCommitting}
               autoFocus
             />
-            <p className="text-xs text-gray-500 mt-1">
-              {message.length}/500 characters
-            </p>
+            <p className="text-xs text-gray-500 mt-1">{message.length}/500 characters</p>
           </div>
 
           {/* File Selection */}
@@ -207,11 +229,13 @@ export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess
                       : 'hover:bg-white/5'
                   }`}
                 >
-                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
-                    selectedFiles.includes(change.file_path)
-                      ? 'bg-green-500 border-green-500'
-                      : 'border-white/30'
-                  }`}>
+                  <div
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                      selectedFiles.includes(change.file_path)
+                        ? 'bg-green-500 border-green-500'
+                        : 'border-white/30'
+                    }`}
+                  >
                     {selectedFiles.includes(change.file_path) && (
                       <Check className="w-3 h-3 text-white" weight="bold" />
                     )}
@@ -244,6 +268,7 @@ export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
