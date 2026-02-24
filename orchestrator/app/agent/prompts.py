@@ -169,7 +169,11 @@ async def get_user_message_wrapper(
 
     # 4. Git context (repository information and status)
     if project_context and project_context.get("git_context"):
-        message_parts.append(project_context["git_context"])
+        git_ctx = project_context["git_context"]
+        if isinstance(git_ctx, dict):
+            message_parts.append(git_ctx.get("formatted", ""))
+        else:
+            message_parts.append(git_ctx)
 
     # 5. User request at the end
     message_parts.append(f"\n=== User Request ===\n{user_request}")
@@ -257,7 +261,9 @@ def substitute_markers(
         "timestamp": datetime.now().isoformat(),
         "user_name": context.get("user_name", ""),
         "project_path": "/app",  # Standard container path
-        "git_branch": project_context.get("git_context", {}).get("branch", ""),
+        "git_branch": project_context.get("git_context", {}).get("branch", "")
+        if isinstance(project_context.get("git_context"), dict)
+        else "",
         "tool_list": ", ".join(tool_names) if tool_names else "",
     }
 

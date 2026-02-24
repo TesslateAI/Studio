@@ -31,7 +31,9 @@ Key Concepts:
 
 import asyncio
 import logging
+import os
 from datetime import UTC
+from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
 
@@ -479,7 +481,9 @@ fi
                     f"Git clone failed for {container_directory}: directory has {file_count} files after clone"
                 )
 
-            logger.info(f"[K8S] ✅ Files initialized for {container_directory} ({file_count} files)")
+            logger.info(
+                f"[K8S] ✅ Files initialized for {container_directory} ({file_count} files)"
+            )
             return True
 
         except Exception as e:
@@ -805,10 +809,16 @@ fi
                             pod_name,
                             namespace,
                             "file-manager",
-                            ["/bin/sh", "-c", f"ls -1A /app/{container_directory} 2>/dev/null | wc -l"],
+                            [
+                                "/bin/sh",
+                                "-c",
+                                f"ls -1A /app/{container_directory} 2>/dev/null | wc -l",
+                            ],
                             10,
                         )
-                        file_count = int(check_result.strip()) if check_result.strip().isdigit() else 0
+                        file_count = (
+                            int(check_result.strip()) if check_result.strip().isdigit() else 0
+                        )
                         if file_count >= 3:
                             logger.info(
                                 f"[K8S] Skipping git clone - {skip_reason} "
@@ -852,7 +862,9 @@ fi
             base_config = await self._get_tesslate_config_from_pod(namespace, container_directory)
 
             # Determine port: TESSLATE.md runtime override > container.effective_port (DB)
-            port = (base_config.port if base_config and base_config.port else None) or container.effective_port
+            port = (
+                base_config.port if base_config and base_config.port else None
+            ) or container.effective_port
 
             # Get startup command as a string for tmux (convert newlines to &&)
             if base_config and base_config.start_command:
@@ -1524,6 +1536,32 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
     # FILE OPERATIONS (via file-manager pod)
     # =========================================================================
 
+    @staticmethod
+    def _build_pod_path(file_path: str, subdir: str | None = None) -> str:
+        """Build a normalized path inside /app in the container.
+
+        Handles:
+        - Absolute paths (e.g. /app/src/file.tsx) used as-is
+        - subdir="." treated as no subdir
+        - Path normalization (collapsing .., ., double slashes)
+        - Containment check to ensure path stays within /app/
+        """
+        base = PurePosixPath("/app")
+        if subdir and subdir != ".":
+            base = base / subdir
+
+        normalized = PurePosixPath(os.path.normpath(str(base / file_path)))
+
+        # Containment: must still be under /app
+        try:
+            normalized.relative_to(PurePosixPath("/app"))
+        except ValueError as err:
+            raise ValueError(
+                f"Path escapes container boundary: {file_path!r} (resolved to {normalized})"
+            ) from err
+
+        return str(normalized)
+
     async def read_file(
         self,
         user_id: UUID,
@@ -1537,7 +1575,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         namespace = self._get_namespace(str(project_id))
 
         # Build full path including subdir for multi-container projects
-        full_path = f"/app/{subdir}/{file_path}" if subdir else f"/app/{file_path}"
+        full_path = self._build_pod_path(file_path, subdir)
 
         try:
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
@@ -1579,7 +1617,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         namespace = self._get_namespace(str(project_id))
 
         # Build full path including subdir for multi-container projects
-        full_path = f"/app/{subdir}/{file_path}" if subdir else f"/app/{file_path}"
+        full_path = self._build_pod_path(file_path, subdir)
 
         try:
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
@@ -1636,7 +1674,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             namespace,
             container,
             data,
-            f"/app/{file_path}",
+            self._build_pod_path(file_path),
             timeout=120,
         )
 
@@ -1661,7 +1699,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 pod_name,
                 namespace,
                 "file-manager",
-                ["rm", "-f", f"/app/{file_path}"],
+                ["rm", "-f", self._build_pod_path(file_path)],
                 timeout=10,
             )
 
@@ -1688,7 +1726,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 )
 
             # Use ls with JSON-friendly output
-            full_path = f"/app/{directory}" if directory != "." else "/app"
+            full_path = self._build_pod_path(directory)
             result = await asyncio.to_thread(
                 self.k8s_client._exec_in_pod,
                 pod_name,
@@ -1741,7 +1779,11 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         # Build full command with working directory
         if working_dir:
-            full_command = ["sh", "-c", f"cd /app/{working_dir} && {' '.join(command)}"]
+            full_command = [
+                "sh",
+                "-c",
+                f"cd {self._build_pod_path(working_dir)} && {' '.join(command)}",
+            ]
         else:
             full_command = command
 
@@ -1943,12 +1985,13 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             proj_namespaces = [
                 ns.metadata.name
                 for ns in all_ns.items
-                if ns.metadata.name.startswith("proj-")
-                and ns.status.phase == "Active"
+                if ns.metadata.name.startswith("proj-") and ns.status.phase == "Active"
             ]
 
             if proj_namespaces:
-                logger.info(f"[K8S:CLEANUP] Scanning {len(proj_namespaces)} project namespaces for orphans")
+                logger.info(
+                    f"[K8S:CLEANUP] Scanning {len(proj_namespaces)} project namespaces for orphans"
+                )
 
                 async with AsyncSessionLocal() as db:
                     # Get all project IDs that should have active namespaces

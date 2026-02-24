@@ -38,11 +38,16 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) -> str | None:
+async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) -> dict | None:
     """
     Build Git context for agent if project has a Git repository connected.
 
-    Returns formatted string with Git information and command examples, or None if no Git repo.
+    Returns a dict with structured git info, or None if no Git repo.
+    Keys:
+        - "formatted": Human-readable string for user message context
+        - "branch": Current branch name (for {git_branch} marker)
+        - "repo_url": Repository URL
+        - "auto_push": Whether auto-push is enabled
     """
     try:
         from ..models import GitRepository
@@ -71,8 +76,10 @@ async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) 
             f"Repository: {git_repo.repo_url}",
         ]
 
+        branch = ""
         if git_status:
-            context_lines.append(f"Branch: {git_status['branch']}")
+            branch = git_status.get("branch", "")
+            context_lines.append(f"Branch: {branch}")
 
             total_changes = (
                 git_status.get("staged_count", 0)
@@ -101,7 +108,12 @@ async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) 
         else:
             context_lines.append("Auto-push: DISABLED")
 
-        return "\n".join(context_lines)
+        return {
+            "formatted": "\n".join(context_lines),
+            "branch": branch,
+            "repo_url": git_repo.repo_url,
+            "auto_push": git_repo.auto_push,
+        }
 
     except Exception as e:
         logger.error(f"[GIT-CONTEXT] Failed to build Git context: {e}", exc_info=True)
@@ -867,6 +879,9 @@ async def agent_chat(
         git_context = await _build_git_context(project, current_user.id, db)
         if git_context:
             project_context["git_context"] = git_context
+
+        # Add project_context to agent execution context
+        context["project_context"] = project_context
 
         # ============================================================================
         # NEW: Run Agent and Collect Events (HTTP Adapter for AsyncIterator)
@@ -1905,7 +1920,9 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         if tesslate_context:
             project_context_str += tesslate_context
         if git_context:
-            project_context_str += git_context
+            project_context_str += (
+                git_context.get("formatted", "") if isinstance(git_context, dict) else git_context
+            )
         if arch_context:
             project_context_str += arch_context
 

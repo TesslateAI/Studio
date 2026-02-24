@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import GitRepository, Project, User
+from ..models import Container, GitRepository, Project, User
 from ..schemas import (
     GitBranchesResponse,
     GitBranchInfo,
@@ -170,6 +170,19 @@ async def clone_repository(
         # Update project
         project.has_git_repo = True
         project.git_remote_url = request.repo_url
+
+        # Git clone puts files at /app/ root, so reset container directories
+        # to "." so file operations resolve paths correctly
+        container_result = await db.execute(
+            select(Container).where(Container.project_id == project_id)
+        )
+        for container in container_result.scalars().all():
+            if container.directory and container.directory != ".":
+                logger.info(
+                    f"[GIT] Resetting container '{container.name}' directory "
+                    f"from '{container.directory}' to '.' for git clone"
+                )
+                container.directory = "."
 
         # Create or update git_repository record
         result = await db.execute(
