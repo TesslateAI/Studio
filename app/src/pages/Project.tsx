@@ -788,8 +788,8 @@ export default function Project() {
     {
       icon: <GitBranch size={18} />,
       title: 'GitHub Sync',
-      onClick: () => toast('GitHub Sync coming soon!'),
-      disabled: true,
+      onClick: () => togglePanel('github'),
+      active: activePanel === 'github',
     },
     {
       icon: <Books size={18} />,

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Download, X } from '@phosphor-icons/react';
 import { gitProvidersApi } from '../../../lib/git-providers-api';
 import { gitApi } from '../../../lib/git-api';
+import { ConfirmDialog } from '../ConfirmDialog';
 import type { GitProvider, AllProvidersStatus, GitProviderRepository } from '../../../types/git-providers';
 import toast from 'react-hot-toast';
 
@@ -25,6 +26,7 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
   const [repoUrl, setRepoUrl] = useState('');
   const [projectName, setProjectName] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [providerStatus, setProviderStatus] = useState<AllProvidersStatus>({
     github: { connected: false },
     gitlab: { connected: false },
@@ -73,25 +75,46 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
     }
   }, [isImporting, onClose, reset]);
 
-  const handleImport = async () => {
+  const handleImportClick = () => {
     const finalRepoUrl = resolver.repo?.clone_url || repoUrl.trim();
-    const finalBranch = resolver.selectedBranch?.name || 'main';
-    const provider = resolver.provider || 'github';
 
     if (!finalRepoUrl) {
       toast.error('Please enter a repository URL');
       return;
     }
 
+    if (isNewProjectMode) {
+      let finalProjectName = projectName.trim();
+      if (!finalProjectName) {
+        const urlParts = finalRepoUrl.replace(/\.git$/, '').split('/');
+        finalProjectName = urlParts[urlParts.length - 1] || 'imported-project';
+      }
+      if (!finalProjectName) {
+        toast.error('Please enter a project name');
+        return;
+      }
+    }
+
+    // For existing projects, show confirmation before overriding files
+    if (!isNewProjectMode) {
+      setShowConfirm(true);
+      return;
+    }
+
+    performImport();
+  };
+
+  const performImport = async () => {
+    setShowConfirm(false);
+
+    const finalRepoUrl = resolver.repo?.clone_url || repoUrl.trim();
+    const finalBranch = resolver.selectedBranch?.name || 'main';
+    const provider = resolver.provider || 'github';
+
     let finalProjectName = projectName.trim();
     if (!finalProjectName && isNewProjectMode) {
       const urlParts = finalRepoUrl.replace(/\.git$/, '').split('/');
       finalProjectName = urlParts[urlParts.length - 1] || 'imported-project';
-    }
-
-    if (isNewProjectMode && !finalProjectName) {
-      toast.error('Please enter a project name');
-      return;
     }
 
     setIsImporting(true);
@@ -125,9 +148,10 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
     resolver.status !== 'detecting' &&
     resolver.status !== 'fetching-repo';
 
-  if (!isOpen) return null;
+  if (!isOpen && !showConfirm) return null;
 
   return (
+    <>
     <AnimatePresence>
       {isOpen && (
         <motion.div
@@ -271,7 +295,7 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
             {/* Actions */}
             <div className="flex flex-col sm:flex-row gap-3 pt-5 sm:pt-6 mt-4 sm:mt-6 border-t border-white/10">
               <button
-                onClick={handleImport}
+                onClick={handleImportClick}
                 disabled={!canImport}
                 className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 min-h-[44px] order-1 sm:order-1"
               >
@@ -299,6 +323,18 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
         </motion.div>
       )}
     </AnimatePresence>
+
+    <ConfirmDialog
+      isOpen={showConfirm}
+      onClose={() => setShowConfirm(false)}
+      onConfirm={performImport}
+      title="Override existing files?"
+      message="Importing this repository will override all existing files in your project. Make sure to back up any unsaved work before proceeding."
+      confirmText="Import anyway"
+      cancelText="Cancel"
+      variant="warning"
+    />
+    </>
   );
 }
 

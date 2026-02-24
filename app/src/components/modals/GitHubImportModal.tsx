@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Download, X, GitBranch, MagnifyingGlass } from '@phosphor-icons/react';
 import { githubApi } from '../../lib/github-api';
 import { gitApi } from '../../lib/git-api';
+import { ConfirmDialog } from './ConfirmDialog';
 import type { GitHubRepository } from '../../types/git';
 import toast from 'react-hot-toast';
 
@@ -24,6 +25,7 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepository | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (isOpen && mode === 'list') {
@@ -63,29 +65,30 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
     }
   };
 
-  const handleImport = async () => {
-    let finalRepoUrl = repoUrl;
-    let finalBranch = branch;
-
+  const handleImportClick = () => {
     if (mode === 'list') {
       if (!selectedRepo) {
         toast.error('Please select a repository');
         return;
       }
-      finalRepoUrl = selectedRepo.clone_url;
-      finalBranch = selectedRepo.default_branch;
     } else {
-      if (!finalRepoUrl.trim()) {
+      if (!repoUrl.trim()) {
         toast.error('Please enter a repository URL');
         return;
       }
-
-      // Validate URL format
-      if (!finalRepoUrl.includes('github.com')) {
+      if (!repoUrl.includes('github.com')) {
         toast.error('Please enter a valid GitHub repository URL');
         return;
       }
     }
+    setShowConfirm(true);
+  };
+
+  const handleImport = async () => {
+    setShowConfirm(false);
+
+    const finalRepoUrl = mode === 'list' ? selectedRepo!.clone_url : repoUrl;
+    const finalBranch = mode === 'list' ? selectedRepo!.default_branch : branch;
 
     setIsImporting(true);
     const loadingToast = toast.loading('Cloning repository...');
@@ -119,11 +122,12 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm overflow-y-auto z-50"
       onClick={handleClose}
     >
+      <div className="min-h-full flex items-center justify-center p-4">
       <div
-        className="bg-[var(--surface)] p-8 rounded-3xl w-full max-w-2xl shadow-2xl border border-white/10 max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-[var(--surface)] p-8 rounded-3xl w-full max-w-2xl shadow-2xl border border-white/10 my-4"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -174,7 +178,7 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto space-y-4">
+        <div className="space-y-4">
           {mode === 'url' ? (
             <>
               {/* URL Input */}
@@ -224,7 +228,7 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
               </div>
 
               {/* Repository List */}
-              <div className="space-y-2 max-h-96 overflow-y-auto">
+              <div className="space-y-2">
                 {isLoading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin h-8 w-8 mx-auto mb-2 border-2 border-blue-500 border-t-transparent rounded-full" />
@@ -278,7 +282,7 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
         {/* Actions */}
         <div className="flex gap-3 pt-6 mt-6 border-t border-white/10">
           <button
-            onClick={handleImport}
+            onClick={handleImportClick}
             disabled={isImporting || (mode === 'url' && !repoUrl.trim()) || (mode === 'list' && !selectedRepo)}
             className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
           >
@@ -293,6 +297,18 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
           </button>
         </div>
       </div>
+      </div>
+
+      <ConfirmDialog
+        isOpen={showConfirm}
+        onClose={() => setShowConfirm(false)}
+        onConfirm={handleImport}
+        title="Override existing files?"
+        message="Importing this repository will override all existing files in your project. Make sure to back up any unsaved work before proceeding."
+        confirmText="Import anyway"
+        cancelText="Cancel"
+        variant="warning"
+      />
     </div>
   );
 }
