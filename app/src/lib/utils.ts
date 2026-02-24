@@ -5,7 +5,7 @@ import { twMerge } from 'tailwind-merge';
  * Deployment providers that are not yet available for use.
  * Remove a provider from this list to enable it across the entire UI.
  */
-export const COMING_SOON_PROVIDERS: string[] = ['vercel', 'cloudflare'];
+export const COMING_SOON_PROVIDERS: string[] = ['vercel'];
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
