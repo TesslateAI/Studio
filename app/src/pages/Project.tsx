@@ -89,7 +89,6 @@ export default function Project() {
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
 
-
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const isPointerOverPreviewRef = useRef(false);
@@ -251,6 +250,14 @@ export default function Project() {
   // Load containers on mount and when containerId changes
   useEffect(() => {
     if (slug) {
+      // If no container specified in URL, restore last-viewed container
+      if (!containerId) {
+        const savedContainerId = localStorage.getItem(`tesslate-container-${slug}`);
+        if (savedContainerId) {
+          navigate(`/project/${slug}/builder?container=${savedContainerId}`, { replace: true });
+          return; // Navigation will re-trigger this effect with the containerId
+        }
+      }
       loadContainer();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -480,6 +487,11 @@ export default function Project() {
 
       if (foundContainer) {
         setContainer(foundContainer);
+
+        // Persist last-viewed container for this project
+        if (slug) {
+          localStorage.setItem(`tesslate-container-${slug}`, foundContainer.id as string);
+        }
 
         // Check if container is already running before starting
         try {
@@ -943,7 +955,9 @@ export default function Project() {
                 className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
                   item.disabled
                     ? 'opacity-40 cursor-not-allowed'
-                    : item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                    : item.active
+                      ? 'bg-[var(--sidebar-active)]'
+                      : 'hover:bg-[var(--sidebar-hover)]'
                 }`}
               >
                 {React.cloneElement(item.icon, {
@@ -958,14 +972,21 @@ export default function Project() {
                 <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
               </button>
             ) : (
-              <Tooltip key={index} content={item.disabled ? `${item.title} (Coming soon)` : item.title} side="right" delay={200}>
+              <Tooltip
+                key={index}
+                content={item.disabled ? `${item.title} (Coming soon)` : item.title}
+                side="right"
+                delay={200}
+              >
                 <button
                   onClick={item.disabled ? undefined : item.onClick}
                   disabled={item.disabled}
                   className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
                     item.disabled
                       ? 'opacity-40 cursor-not-allowed'
-                      : item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                      : item.active
+                        ? 'bg-[var(--sidebar-active)]'
+                        : 'hover:bg-[var(--sidebar-hover)]'
                   }`}
                 >
                   {React.cloneElement(item.icon, {
@@ -1065,15 +1086,18 @@ export default function Project() {
             {container?.deployment_provider && (
               <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg">
                 <span className="text-xs text-purple-400">Deploy to:</span>
-                <span className={`text-xs font-semibold flex items-center gap-1
+                <span
+                  className={`text-xs font-semibold flex items-center gap-1
                   ${container.deployment_provider === 'vercel' ? 'text-white' : ''}
                   ${container.deployment_provider === 'netlify' ? 'text-[#00C7B7]' : ''}
                   ${container.deployment_provider === 'cloudflare' ? 'text-[#F38020]' : ''}
-                `}>
+                `}
+                >
                   {container.deployment_provider === 'vercel' && '▲'}
                   {container.deployment_provider === 'netlify' && '◆'}
                   {container.deployment_provider === 'cloudflare' && '🔥'}
-                  {(container.deployment_provider as string).charAt(0).toUpperCase() + (container.deployment_provider as string).slice(1)}
+                  {(container.deployment_provider as string).charAt(0).toUpperCase() +
+                    (container.deployment_provider as string).slice(1)}
                 </span>
               </div>
             )}
@@ -1092,7 +1116,14 @@ export default function Project() {
                 isOpen={showDeploymentsDropdown}
                 onClose={() => setShowDeploymentsDropdown(false)}
                 onOpenDeployModal={() => setShowDeployModal(true)}
-                assignedDeploymentTarget={container?.deployment_provider as 'vercel' | 'netlify' | 'cloudflare' | null | undefined}
+                assignedDeploymentTarget={
+                  container?.deployment_provider as
+                    | 'vercel'
+                    | 'netlify'
+                    | 'cloudflare'
+                    | null
+                    | undefined
+                }
                 containerName={container?.name as string | undefined}
               />
             </div>
