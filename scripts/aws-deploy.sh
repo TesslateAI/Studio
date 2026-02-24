@@ -469,8 +469,8 @@ case "$COMMAND" in
         for img in $IMAGES; do
             LABEL="${K8S_LABELS[$img]:-}"
             if [ -n "$LABEL" ]; then
-                info "[$img] Deleting pod..."
-                kubectl delete pod -n tesslate -l "$LABEL" 2>/dev/null || true
+                info "[$img] Rolling restart..."
+                kubectl rollout restart "deployment/tesslate-${img}" -n tesslate
             fi
         done
 

@@ -13,6 +13,11 @@ metadata:
     component: backend
 spec:
   replicas: 1  # Overridden by overlays for production
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Start new pod before killing old one
+      maxUnavailable: 0   # Never kill old pod until new is ready
   selector:
     matchLabels:
       app: tesslate-backend
@@ -23,9 +28,14 @@ spec:
         app: tesslate-backend
         component: backend
     spec:
+      terminationGracePeriodSeconds: 60  # Allow long SSE streams to drain
       serviceAccountName: tesslate-backend-sa
       containers:
       - name: backend
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "5"]  # Let NGINX remove endpoint before SIGTERM
         image: tesslate-backend:latest  # Overridden by kustomization images
         imagePullPolicy: IfNotPresent  # Overridden to Always for production
         ports:
@@ -352,7 +362,7 @@ spec:
 
         readinessProbe:
           httpGet:
-            path: /health
+            path: /ready
             port: 8000
           periodSeconds: 5
           timeoutSeconds: 3

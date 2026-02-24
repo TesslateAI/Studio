@@ -11,6 +11,11 @@ metadata:
     component: frontend
 spec:
   replicas: 1  # Overridden by overlays for production
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Start new pod before killing old one
+      maxUnavailable: 0   # Never kill old pod until new is ready
   selector:
     matchLabels:
       app: tesslate-frontend
@@ -21,8 +26,13 @@ spec:
         app: tesslate-frontend
         component: frontend
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
       - name: frontend
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "5"]  # Let NGINX remove endpoint before SIGTERM
         image: tesslate-frontend:latest  # Overridden by kustomization images
         imagePullPolicy: IfNotPresent  # Overridden to Always for production
         ports:

@@ -425,6 +425,13 @@ async def startup():
         logger.info("Skipping base cache manager initialization (Kubernetes mode)")
 
 
+@app.on_event("shutdown")
+async def shutdown():
+    logger.info("Shutdown initiated - closing database pool...")
+    await engine.dispose()
+    logger.info("Shutdown complete")
+
+
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods
 # app.mount("/preview", StaticFiles(directory="users"), name="preview")
@@ -640,8 +647,11 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
 
             try:
                 decode_jwt(state, settings.secret_key, [STATE_TOKEN_AUDIENCE])
-            except (jose_jwt.DecodeError, jose_jwt.ExpiredSignatureError,
-                    jose_jwt.InvalidAudienceError) as login_err:
+            except (
+                jose_jwt.DecodeError,
+                jose_jwt.ExpiredSignatureError,
+                jose_jwt.InvalidAudienceError,
+            ) as login_err:
                 # Login JWT decode failed — check if this is a repo-connect flow
                 from .services.oauth_state import (
                     REPO_CONNECT_AUDIENCE,
@@ -909,6 +919,23 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "tesslate-backend"}
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness probe - can this pod handle traffic?
+    Checks DB connectivity. Failure removes pod from Service
+    endpoints but does NOT restart it.
+    """
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(sa.text("SELECT 1"))
+        return {"status": "ready", "service": "tesslate-backend"}
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "service": "tesslate-backend"},
+        )
 
 
 @app.get("/api/config")
