@@ -37,8 +37,18 @@ router_settings:
   routing_strategy: simple-shuffle
   allowed_fails: 3
   cooldown_time: 60
-  num_retries: 3
+  num_retries: 2
   timeout: 300
+  retry_policy:
+    RateLimitErrorRetries: 0
+    TimeoutErrorRetries: 2
+    InternalServerErrorRetries: 2
+    AuthenticationErrorRetries: 0
+    BadRequestErrorRetries: 0
+    ContentPolicyViolationErrorRetries: 0
+  allowed_fails_policy:
+    RateLimitErrorAllowedFails: 100
+    AuthenticationErrorAllowedFails: 1
 
 # ----------------------------------------------------------------------------------
 # LiteLLM Core Settings

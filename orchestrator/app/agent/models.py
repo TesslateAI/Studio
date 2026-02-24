@@ -328,7 +328,7 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
         if not user.litellm_api_key:
             raise ValueError("User does not have a LiteLLM API key. Please contact support.")
 
-        return AsyncOpenAI(api_key=user.litellm_api_key, base_url=settings.litellm_api_base)
+        return AsyncOpenAI(api_key=user.litellm_api_key, base_url=settings.litellm_api_base, max_retries=1)
 
 
 class ModelAdapter(ABC):

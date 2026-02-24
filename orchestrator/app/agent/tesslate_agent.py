@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # Retry constants (exponential backoff with jitter)
 INITIAL_DELAY_MS = 200
-MAX_RETRIES = 5
+MAX_RETRIES = 2
 RETRYABLE_KEYWORDS = frozenset(
     {
         "timeout",
