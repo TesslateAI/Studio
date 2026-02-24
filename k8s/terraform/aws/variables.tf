@@ -218,7 +218,7 @@ variable "litellm_master_key" {
 variable "litellm_default_models" {
   description = "Default LiteLLM models (comma-separated)"
   type        = string
-  default     = "claude-sonnet-4.6"
+  default     = "claude-sonnet-4.6,claude-opus-4.6"
 }
 
 variable "google_client_id" {

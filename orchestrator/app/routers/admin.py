@@ -1148,7 +1148,7 @@ async def get_available_models(
             models = [m.strip() for m in models_str.split(",") if m.strip()]
 
         if not models:
-            models = ["qwen-3-235b-a22b-thinking-2507"]  # Final fallback
+            models = [settings.default_model]
 
         return {"models": models}
 
@@ -1160,7 +1160,7 @@ async def get_available_models(
         settings = get_settings()
         models_str = settings.litellm_default_models
         models = [m.strip() for m in models_str.split(",") if m.strip()]
-        return {"models": models if models else ["qwen-3-235b-a22b-thinking-2507"]}
+        return {"models": models if models else [settings.default_model]}
 
 
 # ============================================================================

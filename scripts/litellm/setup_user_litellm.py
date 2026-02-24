@@ -4,7 +4,7 @@ Add users to the internal team and update their keys.
 
 This script:
 1. Adds each user to the "internal" team in LiteLLM
-2. Updates their API key to access cerebras/qwen-3-coder-480b
+2. Updates their API key to access the configured default models
 
 Usage:
     python setup_user_litellm.py
@@ -104,11 +104,11 @@ async def setup_users():
                 if not added:
                     logger.warning(f"⚠️ Couldn't add user to team, but will try updating key anyway")
 
-                # Step 2: Update key to access cerebras model
+                # Step 2: Update key to access default models
                 result = await litellm_service.update_user_team(
                     api_key=user.litellm_api_key,
                     team_id="internal",
-                    models=["cerebras/qwen-3-coder-480b"]
+                    models=settings.default_models_list
                 )
 
                 if result:

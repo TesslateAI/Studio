@@ -82,7 +82,7 @@ POSTGRES_PASSWORD=dev_password_change_me
 # AI Configuration (required for agent features)
 LITELLM_API_BASE=https://your-litellm-url.com/v1
 LITELLM_MASTER_KEY=your-litellm-master-key
-LITELLM_DEFAULT_MODELS=gpt-4o-mini
+LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6
 
 # Domain
 APP_PROTOCOL=http

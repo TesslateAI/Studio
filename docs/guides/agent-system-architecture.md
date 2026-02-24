@@ -239,7 +239,7 @@ flowchart LR
     subgraph Values["Example Values"]
         A1["http://litellm:8000"]
         B1["sk-master-xxx"]
-        C1["qwen-3-235b,gpt-4"]
+        C1["claude-sonnet-4.6,claude-opus-4.6"]
         D1["default"]
         E1["10.0 USD"]
     end

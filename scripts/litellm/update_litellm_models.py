@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Update LiteLLM user keys to allow access to cerebras/qwen-3-coder-480b model.
+Update LiteLLM user keys to allow access to the configured default models.
 
-This script updates all existing user API keys to include the new default model.
+This script updates all existing user API keys to include the default models from LITELLM_DEFAULT_MODELS.
 
 Usage:
     python update_litellm_models.py
@@ -49,8 +49,8 @@ async def update_user_models():
 
         logger.info(f"Found {len(users_with_keys)} users with LiteLLM keys")
 
-        # New model list (including the Cerebras model)
-        new_models = ["cerebras/qwen-3-coder-480b"]
+        # Use models from LITELLM_DEFAULT_MODELS config
+        new_models = settings.default_models_list
 
         # Update each user's key
         success_count = 0

@@ -44,7 +44,7 @@ SECRET_KEY=your-secret-key-here-change-this
 # REQUIRED: LiteLLM API configuration (for AI features)
 LITELLM_API_BASE=https://your-litellm-url.com/v1
 LITELLM_MASTER_KEY=your-litellm-master-key
-LITELLM_DEFAULT_MODELS=gpt-4o-mini,claude-3-5-sonnet-20241022
+LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6
 ```
 
 Everything else has sensible defaults for local development. See the `.env.example` file for the full list of optional settings (OAuth, Stripe, Deployment providers, etc).
@@ -378,7 +378,7 @@ See [dependency-management.md](../infrastructure/docker/symlink-fix.md) for deta
 If you see `The "LITELLM_DEFAULT_MODELS" variable is not set. Defaulting to a blank string.` — this is harmless. Set it in `.env` to suppress:
 
 ```bash
-LITELLM_DEFAULT_MODELS=gpt-4o-mini
+LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6
 ```
 
 ## Optional Configuration

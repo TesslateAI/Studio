@@ -1218,7 +1218,7 @@ async def create_custom_agent(
     system_prompt: str = Body(...),
     mode: str = Body(default="stream"),
     agent_type: str = Body(default="StreamAgent"),
-    model: str = Body(default="qwen-3-235b-a22b-thinking-2507"),
+    model: str = Body(default=None),
     category: str = Body(default="custom"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
@@ -1226,6 +1226,10 @@ async def create_custom_agent(
     """
     Create a custom agent from scratch.
     """
+    if not model:
+        from ..config import get_settings
+        model = get_settings().default_model
+
     # Generate slug from name
     import re
 

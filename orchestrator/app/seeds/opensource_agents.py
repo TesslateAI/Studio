@@ -39,7 +39,7 @@ Always:
 - Consider the project context and requirements""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f50d",
         "preview_image": None,
         "pricing_type": "free",
@@ -76,7 +76,7 @@ Documentation guidelines:
 - Follow markdown best practices""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f4dd",
         "preview_image": None,
         "pricing_type": "free",
@@ -114,7 +114,7 @@ Refactoring principles:
 - Follow SOLID principles""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f527",
         "preview_image": None,
         "pricing_type": "free",
@@ -157,7 +157,7 @@ Testing best practices:
 - Aim for high code coverage""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f9ea",
         "preview_image": None,
         "pricing_type": "free",
@@ -197,7 +197,7 @@ API design principles:
 - Make APIs intuitive and discoverable""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f310",
         "preview_image": None,
         "pricing_type": "free",
@@ -237,7 +237,7 @@ Database design principles:
 - Handle data integrity""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f5c4\ufe0f",
         "preview_image": None,
         "pricing_type": "free",
@@ -261,11 +261,15 @@ async def seed_opensource_agents(db: AsyncSession) -> int:
     Returns:
         Number of newly created agents.
     """
+    from ..config import get_settings
+    default_model = get_settings().default_model
+
     tesslate_user = await get_or_create_tesslate_account(db)
     created = 0
     updated = 0
 
     for agent_data in OPENSOURCE_AGENTS:
+        agent_data = {**agent_data, "model": default_model}
         result = await db.execute(
             select(MarketplaceAgent).where(MarketplaceAgent.slug == agent_data["slug"])
         )

@@ -43,7 +43,7 @@ LiteLLM routes to provider
 LITELLM_API_BASE=http://localhost:4000/v1
 LITELLM_MASTER_KEY=sk-1234...  # Admin key for management API
 LITELLM_TEAM_ID=internal  # Default access group
-LITELLM_DEFAULT_MODELS=gpt-4,claude-3-sonnet-20240229
+LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6
 LITELLM_INITIAL_BUDGET=10.00  # $10 initial credits
 LITELLM_EMAIL_DOMAIN=tesslate.com
 ```

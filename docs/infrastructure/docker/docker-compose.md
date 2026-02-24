@@ -51,7 +51,7 @@ Create `.env` file:
 SECRET_KEY=xxx
 LITELLM_API_BASE=https://your-litellm.com
 LITELLM_MASTER_KEY=xxx
-LITELLM_DEFAULT_MODELS=claude-3-5-sonnet-20241022
+LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6
 
 # Database
 POSTGRES_PASSWORD=dev_password_change_me

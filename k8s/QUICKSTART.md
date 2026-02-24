@@ -124,8 +124,8 @@ from app.config import get_settings
 from app.models import MarketplaceAgent
 
 DEFAULT_AGENTS = [
-    {'name': 'Stream Builder', 'slug': 'stream-builder', 'description': 'Real-time streaming code generation', 'category': 'builder', 'mode': 'stream', 'agent_type': 'StreamAgent', 'model': 'qwen-3-235b-a22b-instruct-2507', 'icon': '⚡', 'pricing_type': 'free', 'price': 0, 'source_type': 'open', 'is_forkable': True, 'requires_user_keys': False, 'is_featured': True, 'is_active': True, 'system_prompt': 'You are an expert React developer.'},
-    {'name': 'Tesslate Agent', 'slug': 'tesslate-agent', 'description': 'Autonomous engineering agent', 'category': 'fullstack', 'mode': 'agent', 'agent_type': 'IterativeAgent', 'model': 'qwen-3-235b-a22b-instruct-2507', 'icon': '🤖', 'pricing_type': 'free', 'price': 0, 'source_type': 'open', 'is_forkable': True, 'requires_user_keys': False, 'is_featured': True, 'is_active': True, 'system_prompt': 'You are an autonomous software engineering agent.'},
+    {'name': 'Stream Builder', 'slug': 'stream-builder', 'description': 'Real-time streaming code generation', 'category': 'builder', 'mode': 'stream', 'agent_type': 'StreamAgent', 'model': 'claude-sonnet-4.6', 'icon': '⚡', 'pricing_type': 'free', 'price': 0, 'source_type': 'open', 'is_forkable': True, 'requires_user_keys': False, 'is_featured': True, 'is_active': True, 'system_prompt': 'You are an expert React developer.'},
+    {'name': 'Tesslate Agent', 'slug': 'tesslate-agent', 'description': 'Autonomous engineering agent', 'category': 'fullstack', 'mode': 'agent', 'agent_type': 'IterativeAgent', 'model': 'claude-sonnet-4.6', 'icon': '🤖', 'pricing_type': 'free', 'price': 0, 'source_type': 'open', 'is_forkable': True, 'requires_user_keys': False, 'is_featured': True, 'is_active': True, 'system_prompt': 'You are an autonomous software engineering agent.'},
 ]
 
 async def seed():

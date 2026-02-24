@@ -2,7 +2,7 @@
 """
 Create the "internal" team in LiteLLM for access control.
 
-This team is required for users to access cerebras/qwen-3-coder-480b models.
+This team is required for users to access the configured default models.
 
 Usage:
     python create_litellm_team.py
@@ -42,7 +42,7 @@ async def create_internal_team():
             team_data = {
                 "team_alias": "internal",
                 "team_id": "internal",
-                "models": ["cerebras/qwen-3-coder-480b"],
+                "models": settings.default_models_list,
                 "max_budget": 1000.0,  # $1000 budget for the team
                 "max_parallel_requests": 100,
                 "metadata": {

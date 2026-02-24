@@ -57,7 +57,7 @@ Critical Guidelines:
 7. CODE ONLY: Output code in specified format, minimal conversation""",
         "mode": "stream",
         "agent_type": "StreamAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\u26a1",
         "preview_image": None,
         "pricing_type": "free",
@@ -153,7 +153,7 @@ Your final message should read naturally, like an update from a teammate:
 - If there's a logical next step, suggest it concisely""",
         "mode": "agent",
         "agent_type": "TesslateAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f916",
         "preview_image": None,
         "pricing_type": "free",
@@ -219,7 +219,7 @@ Additional React-Specific Guidelines:
 6. Consider performance implications (avoid unnecessary re-renders)""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\u269b\ufe0f",
         "preview_image": None,
         "pricing_type": "free",
@@ -285,7 +285,7 @@ Additional API-Specific Guidelines:
 8. Never expose sensitive credentials in client code, validate and sanitize all API responses""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f50c",
         "preview_image": None,
         "pricing_type": "free",
@@ -338,7 +338,7 @@ Key Principles:
 When you have fully completed the user's request and verified the solution works, output TASK_COMPLETE.""",
         "mode": "agent",
         "agent_type": "ReActAgent",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
         "icon": "\U0001f9e0",
         "preview_image": None,
         "pricing_type": "free",
@@ -399,11 +399,15 @@ async def seed_marketplace_agents(db: AsyncSession) -> int:
     Returns:
         Number of newly created agents.
     """
+    from ..config import get_settings
+    default_model = get_settings().default_model
+
     tesslate_user = await get_or_create_tesslate_account(db)
     created = 0
     updated = 0
 
     for agent_data in DEFAULT_AGENTS:
+        agent_data = {**agent_data, "model": default_model}
         result = await db.execute(
             select(MarketplaceAgent).where(MarketplaceAgent.slug == agent_data["slug"])
         )

@@ -82,7 +82,7 @@ app_secret_key = "your-app-secret-key"
 # Master key for LiteLLM admin API access
 # Generate with: openssl rand -hex 32
 litellm_master_key         = "your-litellm-master-key"
-litellm_default_models     = "claude-sonnet-4.6"
+litellm_default_models     = "claude-sonnet-4.6,claude-opus-4.6"
 
 # LiteLLM database: true = RDS (production), false = K8s-managed PostgreSQL (dev/beta)
 litellm_create_rds         = false

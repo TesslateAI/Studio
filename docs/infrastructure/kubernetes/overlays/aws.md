@@ -196,7 +196,7 @@ kubectl create secret generic tesslate-app-secrets -n tesslate \
   --from-literal=DATABASE_URL=postgresql+asyncpg://tesslate_user:xxx@postgres:5432/tesslate_prod \
   --from-literal=LITELLM_API_BASE=https://your-litellm.com \
   --from-literal=LITELLM_MASTER_KEY=xxx \
-  --from-literal=LITELLM_DEFAULT_MODELS=claude-3-5-sonnet-20241022 \
+  --from-literal=LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6 \
   --from-literal=APP_DOMAIN=your-domain.com \
   --from-literal=APP_BASE_URL=https://your-domain.com \
   --from-literal=DEV_SERVER_BASE_URL=https://*.your-domain.com \

@@ -14,8 +14,19 @@ class Settings(BaseSettings):
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""
     litellm_master_key: str = ""
-    litellm_default_models: str = "claude-sonnet-4.6"  # Comma-separated list
+    litellm_default_models: str = "claude-sonnet-4.6,claude-opus-4.6"  # Comma-separated list
     litellm_team_id: str = "default"  # Team/access group for users
+
+    @property
+    def default_model(self) -> str:
+        """Return the first model from litellm_default_models."""
+        models = [m.strip() for m in self.litellm_default_models.split(",") if m.strip()]
+        return models[0] if models else "claude-sonnet-4.6"
+
+    @property
+    def default_models_list(self) -> list[str]:
+        """Return all default models as a list."""
+        return [m.strip() for m in self.litellm_default_models.split(",") if m.strip()]
     litellm_email_domain: str = "localhost"  # Domain for internal emails
     litellm_initial_budget: float = 10.0  # Initial budget per user in USD
 

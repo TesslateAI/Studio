@@ -155,7 +155,7 @@ This document provides a comprehensive overview of Tesslate Studio's architectur
 **Supported Models** (via LiteLLM):
 - OpenAI: GPT-4, GPT-3.5
 - Anthropic: Claude 3.5 Sonnet, Claude 3 Opus
-- Custom: qwen-3-235b-a22b-thinking-2507 (default)
+- Default: claude-sonnet-4.6, claude-opus-4.6 (configurable via LITELLM_DEFAULT_MODELS)
 
 **Agent Tools** (from `orchestrator/app/agent/tools/`):
 - `read_write.py` - Read/write files in project
@@ -335,9 +335,9 @@ This document provides a comprehensive overview of Tesslate Studio's architectur
 
 | Provider | Models | Purpose |
 |----------|--------|---------|
-| **OpenAI** | GPT-4, GPT-3.5 | Code generation, chat |
-| **Anthropic** | Claude 3.5 Sonnet, Claude 3 Opus | Code generation, chat |
-| **Custom** | Qwen, DeepSeek | Alternative models |
+| **Anthropic** | Claude Sonnet 4.6, Claude Opus 4.6 | Code generation, chat (default) |
+| **OpenAI** | GPT-4o, GPT-4o-mini | Code generation, chat |
+| **Custom** | Qwen, DeepSeek, Llama, Mistral | Alternative models |
 
 **Gateway**: LiteLLM (unified interface, rate limiting, usage tracking)
 

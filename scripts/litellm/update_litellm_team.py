@@ -2,7 +2,7 @@
 """
 Update LiteLLM user keys to use "internal" team/access group.
 
-This allows users to access cerebras/qwen-3-coder-480b which requires
+This allows users to access the configured default models which require
 the "internal" access group in LiteLLM config.
 
 Usage:
@@ -62,7 +62,7 @@ async def update_user_teams():
                 result = await litellm_service.update_user_team(
                     api_key=user.litellm_api_key,
                     team_id="internal",
-                    models=["cerebras/qwen-3-coder-480b"]
+                    models=settings.default_models_list
                 )
 
                 if result:
