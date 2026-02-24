@@ -75,6 +75,10 @@ export function ChatInput({
   const [compactLevel, setCompactLevel] = useState<'normal' | 'compact' | 'veryCompact'>('normal');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLFormElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const commandsRef = useRef<HTMLDivElement>(null);
+  const commandsButtonRef = useRef<HTMLButtonElement>(null);
 
   // Derived compact states
   const isCompact = compactLevel === 'compact' || compactLevel === 'veryCompact';
@@ -116,6 +120,34 @@ export function ChatInput({
       resizeObserver.disconnect();
     };
   }, [isDocked]);
+
+  // Close settings/commands dropdowns on click outside
+  useEffect(() => {
+    if (!showSettings && !showCommands) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (showSettings && settingsRef.current && !settingsRef.current.contains(target) && (!settingsButtonRef.current || !settingsButtonRef.current.contains(target))) {
+        setShowSettings(false);
+      }
+      if (showCommands && commandsRef.current && !commandsRef.current.contains(target) && (!commandsButtonRef.current || !commandsButtonRef.current.contains(target))) {
+        setShowCommands(false);
+      }
+    };
+
+    // Capture phase so it fires before children can stopPropagation
+    const handleBlur = () => {
+      setShowSettings(false);
+      setShowCommands(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside, true);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [showSettings, showCommands]);
 
   // Available slash commands
   const slashCommands = [
@@ -310,7 +342,7 @@ export function ChatInput({
     >
       {/* Command suggestions bar - Minecraft style */}
       {showCommands && filteredCommands.length > 0 && (
-        <div className="absolute bottom-full left-0 right-0 mb-2 px-3">
+        <div ref={commandsRef} className="absolute bottom-full left-0 right-0 mb-2 px-3">
           <div className="bg-[var(--surface)] border-2 border-[var(--primary)]/40 rounded-xl p-2 shadow-lg shadow-[var(--primary)]/10">
             {filteredCommands.map((cmd, idx) => (
               <div
@@ -334,7 +366,7 @@ export function ChatInput({
 
       {/* Settings dropdown */}
       {showSettings && (
-        <div className="absolute bottom-full right-0 mb-2 mr-3">
+        <div ref={settingsRef} className="absolute bottom-full right-0 mb-2 mr-3">
           <div className="bg-[var(--surface)] border-2 border-[var(--border-color)] rounded-xl p-2 shadow-lg min-w-[200px]">
             {tools.map((tool, idx) => (
               <button
@@ -411,6 +443,7 @@ export function ChatInput({
           {/* Settings button - hidden when very compact */}
           {!isVeryCompact && (
             <button
+              ref={settingsButtonRef}
               type="button"
               onClick={() => {
                 setShowSettings(!showSettings);
@@ -430,6 +463,7 @@ export function ChatInput({
           {/* Slash command button - hidden when very compact */}
           {!isVeryCompact && (
             <button
+              ref={commandsButtonRef}
               type="button"
               onClick={() => {
                 if (showCommands) {
