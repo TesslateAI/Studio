@@ -324,11 +324,14 @@ def create_container_deployment(
         # No need to check/install here - just start the dev server
         # rm -rf .next/dev/lock is a walkaround to avoid startup failure,
         # needs better solution
+        # NOTE: Do NOT set working_dir on the container spec. containerd creates
+        # the working directory as root before the container process starts, causing
+        # EACCES errors for uid 1000. Instead, mkdir -p + cd in the command itself
+        # so the directory is created by the running user (node/1000).
         args=[
-            f"cd {working_dir} && rm -rf .next/dev/lock && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"
+            f"mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"
         ],
         ports=[client.V1ContainerPort(container_port=port, name="http")],
-        working_dir=working_dir,
         volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],
         env=env_vars,
         resources=client.V1ResourceRequirements(

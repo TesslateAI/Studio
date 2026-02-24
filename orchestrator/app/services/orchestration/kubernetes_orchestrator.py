@@ -114,6 +114,103 @@ class KubernetesOrchestrator(BaseOrchestrator):
         """Get namespace for a project."""
         return self.k8s_client.get_project_namespace(project_id)
 
+    async def _sync_db_files_to_pvc(
+        self,
+        project,
+        container_directory: str,
+        raw_directory: str | None,
+        namespace: str,
+        db: AsyncSession,
+    ) -> None:
+        """
+        Sync ProjectFile records from the database to the PVC.
+
+        Used for forked projects and bases without a git_repo_url.
+        Files are written via the file-manager pod (uid 1000) so
+        ownership is correct for the dev container.
+
+        For multi-container projects, only files belonging to this
+        container are synced (matched by raw_directory prefix).
+
+        Args:
+            project: Project model
+            container_directory: Sanitized K8s directory name (target on PVC)
+            raw_directory: Original container.directory (".", "", None, or "frontend")
+            namespace: K8s namespace
+            db: Database session
+        """
+        from sqlalchemy import select
+
+        from ...models import ProjectFile
+
+        result = await db.execute(select(ProjectFile).where(ProjectFile.project_id == project.id))
+        all_files = result.scalars().all()
+
+        if not all_files:
+            logger.warning(f"[K8S] No ProjectFile records for {project.slug} — PVC will be empty")
+            return
+
+        # Scope files to this container:
+        # - root dir (".", "", None): all files belong to this container, no prefix stripping
+        # - specific dir (e.g., "frontend"): only files with that prefix, strip it
+        is_root = raw_directory in (".", "", None)
+        if is_root:
+            files_to_sync = [(pf.file_path, pf.content) for pf in all_files]
+        else:
+            prefix = f"{raw_directory}/"
+            files_to_sync = [
+                (pf.file_path[len(prefix) :], pf.content)
+                for pf in all_files
+                if pf.file_path.startswith(prefix)
+            ]
+
+        if not files_to_sync:
+            logger.warning(
+                f"[K8S] No files matched container directory '{raw_directory}' "
+                f"(total project files: {len(all_files)})"
+            )
+            return
+
+        pod_name = await self.k8s_client.get_file_manager_pod(namespace)
+        if not pod_name:
+            logger.error("[K8S] File-manager pod not found — cannot sync DB files to PVC")
+            return
+
+        base_path = f"/app/{container_directory}"
+
+        # Create the directory first
+        await asyncio.to_thread(
+            self.k8s_client._exec_in_pod,
+            pod_name,
+            namespace,
+            "file-manager",
+            ["/bin/sh", "-c", f"mkdir -p '{base_path}'"],
+            10,
+        )
+
+        synced = 0
+        for rel_path, content in files_to_sync:
+            try:
+                pod_path = f"{base_path}/{rel_path}"
+                data = content.encode("utf-8") if isinstance(content, str) else content
+                await asyncio.to_thread(
+                    self.k8s_client._write_bytes_to_pod,
+                    pod_name,
+                    namespace,
+                    "file-manager",
+                    data,
+                    pod_path,
+                    timeout=30,
+                )
+                synced += 1
+            except Exception as e:
+                logger.warning(f"[K8S] Failed to sync {rel_path}: {e}")
+
+        logger.info(
+            f"[K8S] ✅ Synced {synced}/{len(files_to_sync)} files from DB to PVC "
+            f"for {container_directory}"
+        )
+
     async def _get_tesslate_config_from_pod(
         self, namespace: str, container_directory: str
     ) -> Any | None:
@@ -435,12 +532,24 @@ fi
                     )
                     # Fall through to clone
 
-            # git_url is required to clone — if missing, files must already exist
+            # No git_url — ensure the directory at least exists with correct ownership
+            # so the dev container (uid 1000) can write to it.
+            # This handles forked projects and git-imported containers where
+            # files may arrive later via the editor or agent.
             if not git_url:
-                raise RuntimeError(
-                    f"Container '{container_directory}' has no git_url and no files on PVC. "
-                    "Either import files first or create the container from a marketplace base."
+                await asyncio.to_thread(
+                    self.k8s_client._exec_in_pod,
+                    pod_name,
+                    namespace,
+                    "file-manager",
+                    ["/bin/sh", "-c", f"mkdir -p '{target_dir}'"],
+                    10,
                 )
+                logger.warning(
+                    f"[K8S] No git_url for '{container_directory}' — created empty directory. "
+                    "Files should be imported via editor or agent."
+                )
+                return True
 
             # Clone from git repository
             # install_deps=False - dependencies are installed by the container's start_command
@@ -851,10 +960,16 @@ fi
                         container_directory=container_directory,
                         git_url=git_url,
                     )
-                elif not skip_reason:
-                    logger.warning(
-                        f"[K8S] No git_url and no skip_reason for {container_directory} — "
-                        "container may not have files"
+                else:
+                    # No git_url — sync files from database to PVC
+                    # This handles forked projects and bases without a git repo
+                    await send_progress("initializing_files", "Syncing project files...", 50)
+                    await self._sync_db_files_to_pvc(
+                        project=project,
+                        container_directory=container_directory,
+                        raw_directory=container.directory,
+                        namespace=namespace,
+                        db=db,
                     )
 
             # Get base config for port and startup command

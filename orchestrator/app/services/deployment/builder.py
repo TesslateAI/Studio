@@ -127,7 +127,9 @@ class DeploymentBuilder:
             else:
                 work_dir = "/app"
 
-            logger.info(f"Running build command in container: {build_command} (work_dir: {work_dir})")
+            logger.info(
+                f"Running build command in container: {build_command} (work_dir: {work_dir})"
+            )
 
             # Execute build command in container using orchestrator
             # This works with both Docker and Kubernetes modes
@@ -164,7 +166,7 @@ class DeploymentBuilder:
                     )
 
                 full_cmd = (
-                    f"set -e && cd {work_dir} "
+                    f"set -e && mkdir -p {work_dir} && cd {work_dir} "
                     f"&& ([ -d node_modules ] || ({install_cmd})) "
                     f"{pre_build_cmd}"
                     f"&& {build_command} "
@@ -186,7 +188,9 @@ class DeploymentBuilder:
 
             # Verify the build actually produced output
             if "BUILD_EXIT_CODE=0" not in output:
-                logger.error(f"Build command did not complete successfully. Output: {output[:1000]}")
+                logger.error(
+                    f"Build command did not complete successfully. Output: {output[:1000]}"
+                )
                 raise BuildError(f"Build command failed. Output: {output[:1000]}")
 
             logger.info(f"Build completed successfully for project {project_id}")
@@ -290,16 +294,12 @@ class DeploymentBuilder:
 
                 logger.info(f"Collecting files from shared volume at {volume_dir}")
                 if not os.path.exists(volume_dir):
-                    raise FileNotFoundError(
-                        f"Build output directory not found: {volume_dir}"
-                    )
+                    raise FileNotFoundError(f"Build output directory not found: {volume_dir}")
                 files = await self._collect_files_recursive(volume_dir, ".")
                 logger.info(f"Collected {len(files)} files from volume")
                 return files
 
-            raise FileNotFoundError(
-                "No container_name or volume_name provided for file collection"
-            )
+            raise FileNotFoundError("No container_name or volume_name provided for file collection")
 
         except Exception as e:
             logger.error(f"Failed to collect deployment files: {e}", exc_info=True)
@@ -390,9 +390,12 @@ class DeploymentBuilder:
             user_id=UUID(user_id),
             project_id=UUID(project_id),
             container_name=container_name,
-            command=["/bin/sh", "-c",
-                     f"if [ -d {target_dir} ]; then echo EXISTS; "
-                     f"else echo NOT_FOUND; echo '---'; ls -la $(dirname {target_dir}) 2>&1 || true; fi"],
+            command=[
+                "/bin/sh",
+                "-c",
+                f"if [ -d {target_dir} ]; then echo EXISTS; "
+                f"else echo NOT_FOUND; echo '---'; ls -la $(dirname {target_dir}) 2>&1 || true; fi",
+            ],
             timeout=10,
         )
 
