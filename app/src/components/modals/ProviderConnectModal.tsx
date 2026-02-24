@@ -1,14 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  X,
-  Check,
-  Key,
-  ShieldCheck,
-  LinkSimple,
-  Spinner,
-  Warning
-} from '@phosphor-icons/react';
+import { X, Check, Key, ShieldCheck, LinkSimple, Spinner } from '@phosphor-icons/react';
 import { deploymentCredentialsApi } from '../../lib/api';
+import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
 import toast from 'react-hot-toast';
 
@@ -97,7 +90,7 @@ export function ProviderConnectModal({
 
   const initializeCredentialsForm = (provider: Provider) => {
     const form: Record<string, string> = {};
-    (provider.required_fields || []).forEach(field => {
+    (provider.required_fields || []).forEach((field) => {
       form[field] = '';
     });
     setManualCredentials(form);
@@ -119,23 +112,28 @@ export function ProviderConnectModal({
     }
   }, []);
 
-  const checkForNewCredential = useCallback(async (provider: string) => {
-    try {
-      const data = await deploymentCredentialsApi.list(provider);
-      const credentials = data.credentials || [];
-      if (credentials.some((c: { provider: string }) => c.provider === provider)) {
-        // Credential found, OAuth was successful
-        clearOAuthPolling();
-        setIsOAuthPending(false);
-        toast.success(`${provider.charAt(0).toUpperCase() + provider.slice(1)} connected successfully!`);
-        // Await onConnected to ensure credential state is refreshed before closing
-        await onConnected(provider);
-        onClose();
+  const checkForNewCredential = useCallback(
+    async (provider: string) => {
+      try {
+        const data = await deploymentCredentialsApi.list(provider);
+        const credentials = data.credentials || [];
+        if (credentials.some((c: { provider: string }) => c.provider === provider)) {
+          // Credential found, OAuth was successful
+          clearOAuthPolling();
+          setIsOAuthPending(false);
+          toast.success(
+            `${provider.charAt(0).toUpperCase() + provider.slice(1)} connected successfully!`
+          );
+          // Await onConnected to ensure credential state is refreshed before closing
+          await onConnected(provider);
+          onClose();
+        }
+      } catch (_error) {
+        // Silently handle errors during polling - user may cancel or close popup
       }
-    } catch (error) {
-      // Silently handle errors during polling - user may cancel or close popup
-    }
-  }, [clearOAuthPolling, onConnected, onClose]);
+    },
+    [clearOAuthPolling, onConnected, onClose]
+  );
 
   const handleOAuthConnect = async (provider: Provider) => {
     try {
@@ -175,13 +173,16 @@ export function ProviderConnectModal({
         }, 2000);
 
         // Timeout after 5 minutes
-        oauthTimeoutRef.current = setTimeout(() => {
-          if (oauthCheckIntervalRef.current) {
-            clearOAuthPolling();
-            setIsOAuthPending(false);
-            toast.error('OAuth authorization timed out. Please try again.');
-          }
-        }, 5 * 60 * 1000);
+        oauthTimeoutRef.current = setTimeout(
+          () => {
+            if (oauthCheckIntervalRef.current) {
+              clearOAuthPolling();
+              setIsOAuthPending(false);
+              toast.error('OAuth authorization timed out. Please try again.');
+            }
+          },
+          5 * 60 * 1000
+        );
       } else {
         throw new Error('Failed to start OAuth flow');
       }
@@ -195,7 +196,7 @@ export function ProviderConnectModal({
     if (!selectedProvider) return;
 
     const missingFields = selectedProvider.required_fields.filter(
-      field => !manualCredentials[field]?.trim()
+      (field) => !manualCredentials[field]?.trim()
     );
 
     if (missingFields.length > 0) {
@@ -222,7 +223,7 @@ export function ProviderConnectModal({
   const formatFieldName = (fieldName: string) => {
     return fieldName
       .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
   };
 
@@ -249,7 +250,9 @@ export function ProviderConnectModal({
         <div className="p-4 border-b border-white/10">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-[var(--text)]">
-              {selectedProvider ? `Connect ${selectedProvider.display_name}` : 'Connect Deployment Provider'}
+              {selectedProvider
+                ? `Connect ${selectedProvider.display_name}`
+                : 'Connect Deployment Provider'}
             </h2>
             {!isSaving && !isOAuthPending && (
               <button
@@ -299,10 +302,12 @@ export function ProviderConnectModal({
                   <input
                     type={field.includes('token') || field.includes('key') ? 'password' : 'text'}
                     value={manualCredentials[field] || ''}
-                    onChange={(e) => setManualCredentials({
-                      ...manualCredentials,
-                      [field]: e.target.value
-                    })}
+                    onChange={(e) =>
+                      setManualCredentials({
+                        ...manualCredentials,
+                        [field]: e.target.value,
+                      })
+                    }
                     placeholder={`Enter your ${formatFieldName(field).toLowerCase()}`}
                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                     disabled={isSaving}
@@ -331,7 +336,10 @@ export function ProviderConnectModal({
                 </button>
                 <button
                   onClick={handleSaveManualCredentials}
-                  disabled={isSaving || selectedProvider.required_fields.some(f => !manualCredentials[f]?.trim())}
+                  disabled={
+                    isSaving ||
+                    selectedProvider.required_fields.some((f) => !manualCredentials[f]?.trim())
+                  }
                   className="flex-1 px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"
                 >
                   {isSaving ? (
@@ -347,9 +355,13 @@ export function ProviderConnectModal({
             // Provider selection
             <div className="space-y-2">
               {providers.map((provider) => {
-                const info = PROVIDER_INFO[provider.name] || { icon: '🚀', color: 'text-white', bgColor: 'bg-purple-500' };
+                const info = PROVIDER_INFO[provider.name] || {
+                  icon: '🚀',
+                  color: 'text-white',
+                  bgColor: 'bg-purple-500',
+                };
                 const connected = isProviderConnected(provider.name);
-                const isComingSoon = ['vercel', 'cloudflare'].includes(provider.name.toLowerCase());
+                const isComingSoon = COMING_SOON_PROVIDERS.includes(provider.name.toLowerCase());
 
                 return (
                   <button
@@ -371,11 +383,15 @@ export function ProviderConnectModal({
                           : 'bg-white/5 border-white/10 hover:border-[var(--primary)] hover:bg-white/10'
                     }`}
                   >
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${info.bgColor} ${info.color}`}>
+                    <div
+                      className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${info.bgColor} ${info.color}`}
+                    >
                       {info.icon}
                     </div>
                     <div className="flex-1 text-left">
-                      <p className="text-sm font-medium text-[var(--text)]">{provider.display_name}</p>
+                      <p className="text-sm font-medium text-[var(--text)]">
+                        {provider.display_name}
+                      </p>
                       <p className="text-xs text-[var(--text)]/60">{provider.description}</p>
                     </div>
                     {connected ? (
@@ -406,7 +422,7 @@ export function ProviderConnectModal({
                 );
               })}
 
-              {providers.filter(p => !isProviderConnected(p.name)).length === 0 && (
+              {providers.filter((p) => !isProviderConnected(p.name)).length === 0 && (
                 <div className="text-center py-6">
                   <Check size={32} className="text-green-400 mx-auto mb-2" weight="bold" />
                   <p className="text-sm text-[var(--text)]">All providers connected!</p>

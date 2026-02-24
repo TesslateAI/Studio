@@ -18,6 +18,7 @@ import {
   Rocket,
 } from '@phosphor-icons/react';
 import api from '../lib/api';
+import { COMING_SOON_PROVIDERS } from '../lib/utils';
 import { MainTechIcon, TechStackIcons } from './ui/TechStackIcons';
 
 interface CredentialField {
@@ -58,45 +59,47 @@ const ItemTypeBadge = ({ item }: { item: MarketplaceItem }) => {
     badge = {
       icon: <FlowArrow size={12} weight="fill" />,
       label: 'Workflow',
-      color: 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+      color: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
     };
   } else if (item.type === 'deployment' || item.service_type === 'deployment_target') {
     badge = {
       icon: <Rocket size={12} weight="fill" />,
       label: 'Deploy',
-      color: 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+      color: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
     };
   } else if (item.type === 'service' && item.service_type) {
     const serviceBadges: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
       container: {
         icon: <HardDrive size={12} weight="fill" />,
         label: 'Container',
-        color: 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+        color: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
       },
       external: {
         icon: <Cloud size={12} weight="fill" />,
         label: 'External',
-        color: 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+        color: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
       },
       hybrid: {
         icon: <Database size={12} weight="fill" />,
         label: 'Hybrid',
-        color: 'bg-green-500/20 text-green-400 border-green-500/30'
-      }
+        color: 'bg-green-500/20 text-green-400 border-green-500/30',
+      },
     };
     badge = serviceBadges[item.service_type] || null;
   } else if (item.type === 'base') {
     badge = {
       icon: <Cube size={12} weight="fill" />,
       label: 'Base',
-      color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
+      color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
     };
   }
 
   if (!badge) return null;
 
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border ${badge.color}`}>
+    <span
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border ${badge.color}`}
+    >
       {badge.icon}
       {badge.label}
     </span>
@@ -117,7 +120,9 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(true);
   const [isAutoOpen, setIsAutoOpen] = useState(false);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['base', 'service', 'deployment', 'workflow']));
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
+    new Set(['base', 'service', 'deployment', 'workflow'])
+  );
   const dropdownRef = useRef<HTMLDivElement>(null);
   const autoRef = useRef<HTMLDivElement>(null);
 
@@ -151,7 +156,7 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
   };
 
   const toggleCategory = (categoryId: string) => {
-    setExpandedCategories(prev => {
+    setExpandedCategories((prev) => {
       const next = new Set(prev);
       if (next.has(categoryId)) {
         next.delete(categoryId);
@@ -162,26 +167,31 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
     });
   };
 
-  const filteredItems = items.filter(item =>
-    item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.tech_stack?.some(tech => tech.toLowerCase().includes(searchQuery.toLowerCase()))
+  const filteredItems = items.filter(
+    (item) =>
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.tech_stack?.some((tech) => tech.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   // Group items by their actual type
-  const itemsByType = filteredItems.reduce((acc, item) => {
-    const type = item.type || 'base';
-    if (!acc[type]) acc[type] = [];
-    acc[type].push(item);
-    return acc;
-  }, {} as Record<string, MarketplaceItem[]>);
+  const itemsByType = filteredItems.reduce(
+    (acc, item) => {
+      const type = item.type || 'base';
+      if (!acc[type]) acc[type] = [];
+      acc[type].push(item);
+      return acc;
+    },
+    {} as Record<string, MarketplaceItem[]>
+  );
 
   const onDragStart = (event: React.DragEvent, item: MarketplaceItem) => {
     event.dataTransfer.effectAllowed = 'move';
     // Use different node type for deployment targets so drop handler can distinguish
-    const nodeType = item.type === 'deployment' || item.service_type === 'deployment_target'
-      ? 'deploymentTarget'
-      : 'containerNode';
+    const nodeType =
+      item.type === 'deployment' || item.service_type === 'deployment_target'
+        ? 'deploymentTarget'
+        : 'containerNode';
     event.dataTransfer.setData('application/reactflow', nodeType);
     event.dataTransfer.setData('base', JSON.stringify(item));
   };
@@ -189,7 +199,10 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
   const onBrowserDragStart = (event: React.DragEvent) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('application/reactflow', 'browserPreview');
-    event.dataTransfer.setData('base', JSON.stringify({ type: 'browser', name: 'Browser Preview' }));
+    event.dataTransfer.setData(
+      'base',
+      JSON.stringify({ type: 'browser', name: 'Browser Preview' })
+    );
   };
 
   return (
@@ -201,7 +214,9 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
           className="flex items-center gap-2 px-3 py-2 bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-lg shadow-lg hover:bg-[var(--sidebar-hover)] transition-colors"
         >
           <Package size={16} className="text-[var(--primary)]" weight="fill" />
-          <span className="text-sm font-medium text-[var(--text)] hidden sm:inline">Components</span>
+          <span className="text-sm font-medium text-[var(--text)] hidden sm:inline">
+            Components
+          </span>
           <CaretDown
             size={14}
             className={`text-[var(--text)]/60 transition-transform ${isOpen ? 'rotate-180' : ''}`}
@@ -247,7 +262,9 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                 <>
                   {/* Browser Preview Tool */}
                   <div className="px-3 py-2 border-b border-[var(--sidebar-border)]">
-                    <p className="text-[10px] uppercase tracking-wider text-[var(--text)]/40 font-medium mb-2">Tools</p>
+                    <p className="text-[10px] uppercase tracking-wider text-[var(--text)]/40 font-medium mb-2">
+                      Tools
+                    </p>
                     <div
                       draggable
                       onDragStart={onBrowserDragStart}
@@ -255,8 +272,12 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                     >
                       <Browser size={18} weight="fill" className="text-purple-400" />
                       <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium text-[var(--text)]">Browser Preview</span>
-                        <p className="text-[10px] text-[var(--text)]/50">Preview running containers</p>
+                        <span className="text-sm font-medium text-[var(--text)]">
+                          Browser Preview
+                        </span>
+                        <p className="text-[10px] text-[var(--text)]/50">
+                          Preview running containers
+                        </p>
                       </div>
                       <Plus size={14} className="text-purple-400" weight="bold" />
                     </div>
@@ -291,70 +312,85 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                           {isExpanded && categoryItems.length > 0 && (
                             <div className="px-3 pb-2 space-y-1">
                               {categoryItems.map((item) => {
-                                const isComingSoon = (item.type === 'deployment' || item.service_type === 'deployment_target') &&
-                                  ['vercel', 'cloudflare'].some(p => item.slug?.toLowerCase().includes(p));
+                                const isComingSoon =
+                                  (item.type === 'deployment' ||
+                                    item.service_type === 'deployment_target') &&
+                                  COMING_SOON_PROVIDERS.some((p) =>
+                                    item.slug?.toLowerCase().includes(p)
+                                  );
 
                                 return (
-                                <div
-                                  key={item.id}
-                                  draggable={!isComingSoon}
-                                  onDragStart={(e) => {
-                                    if (isComingSoon) { e.preventDefault(); return; }
-                                    onDragStart(e, item);
-                                  }}
-                                  onClick={() => {
-                                    if (isComingSoon) return;
-                                    onSelectItem?.(item);
-                                    setIsOpen(false);
-                                  }}
-                                  className={`group bg-[var(--bg)] border border-[var(--border-color)] rounded-lg p-2 transition-all ${
-                                    isComingSoon
-                                      ? 'opacity-50 cursor-not-allowed'
-                                      : 'cursor-move hover:border-[var(--primary)] hover:shadow-md'
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-2">
-                                    <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-[var(--primary)]/10 rounded-lg text-[var(--primary)]">
-                                      <MainTechIcon
-                                        techStack={item.tech_stack || []}
-                                        itemName={item.name}
-                                        fallbackEmoji={item.icon}
-                                        size={18}
-                                      />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-1.5">
-                                        <h3 className={`font-medium text-sm truncate transition-colors ${
-                                          isComingSoon ? 'text-[var(--text)]/50' : 'text-[var(--text)] group-hover:text-[var(--primary)]'
-                                        }`}>
-                                          {item.name}
-                                        </h3>
-                                        {isComingSoon && (
-                                          <span className="flex-shrink-0 text-[9px] font-semibold bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded-full">
-                                            Soon
-                                          </span>
-                                        )}
+                                  <div
+                                    key={item.id}
+                                    draggable={!isComingSoon}
+                                    onDragStart={(e) => {
+                                      if (isComingSoon) {
+                                        e.preventDefault();
+                                        return;
+                                      }
+                                      onDragStart(e, item);
+                                    }}
+                                    onClick={() => {
+                                      if (isComingSoon) return;
+                                      onSelectItem?.(item);
+                                      setIsOpen(false);
+                                    }}
+                                    className={`group bg-[var(--bg)] border border-[var(--border-color)] rounded-lg p-2 transition-all ${
+                                      isComingSoon
+                                        ? 'opacity-50 cursor-not-allowed'
+                                        : 'cursor-move hover:border-[var(--primary)] hover:shadow-md'
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-[var(--primary)]/10 rounded-lg text-[var(--primary)]">
+                                        <MainTechIcon
+                                          techStack={item.tech_stack || []}
+                                          itemName={item.name}
+                                          fallbackEmoji={item.icon}
+                                          size={18}
+                                        />
                                       </div>
-                                      <p className="text-[10px] text-[var(--text)]/60 line-clamp-1">
-                                        {item.description}
-                                      </p>
-                                      <div className="flex items-center gap-2 mt-1">
-                                        <ItemTypeBadge item={item} />
-                                        {item.tech_stack && item.tech_stack.length > 0 && (
-                                          <TechStackIcons
-                                            techStack={item.tech_stack}
-                                            maxIcons={3}
-                                            size={12}
-                                            className="text-[var(--text)]/70"
-                                          />
-                                        )}
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          <h3
+                                            className={`font-medium text-sm truncate transition-colors ${
+                                              isComingSoon
+                                                ? 'text-[var(--text)]/50'
+                                                : 'text-[var(--text)] group-hover:text-[var(--primary)]'
+                                            }`}
+                                          >
+                                            {item.name}
+                                          </h3>
+                                          {isComingSoon && (
+                                            <span className="flex-shrink-0 text-[9px] font-semibold bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded-full">
+                                              Soon
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="text-[10px] text-[var(--text)]/60 line-clamp-1">
+                                          {item.description}
+                                        </p>
+                                        <div className="flex items-center gap-2 mt-1">
+                                          <ItemTypeBadge item={item} />
+                                          {item.tech_stack && item.tech_stack.length > 0 && (
+                                            <TechStackIcons
+                                              techStack={item.tech_stack}
+                                              maxIcons={3}
+                                              size={12}
+                                              className="text-[var(--text)]/70"
+                                            />
+                                          )}
+                                        </div>
                                       </div>
+                                      {!isComingSoon && (
+                                        <Plus
+                                          size={14}
+                                          className="text-[var(--text)]/40 opacity-0 group-hover:opacity-100 transition-opacity"
+                                          weight="bold"
+                                        />
+                                      )}
                                     </div>
-                                    {!isComingSoon && (
-                                      <Plus size={14} className="text-[var(--text)]/40 opacity-0 group-hover:opacity-100 transition-opacity" weight="bold" />
-                                    )}
                                   </div>
-                                </div>
                                 );
                               })}
                             </div>

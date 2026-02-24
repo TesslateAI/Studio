@@ -1,16 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  X,
-  Rocket,
-  Warning,
-  Plus,
-  Trash,
-  Gear,
-  Info,
-  CaretDown
-} from '@phosphor-icons/react';
+import { X, Rocket, Warning, Plus, Trash, Gear, Info, CaretDown } from '@phosphor-icons/react';
 import { deploymentsApi, deploymentCredentialsApi } from '../../lib/api';
+import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import toast from 'react-hot-toast';
 
 interface DeploymentModalProps {
@@ -18,7 +10,7 @@ interface DeploymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  defaultProvider?: string;  // Pre-select this provider if set (from container's deployment_provider)
+  defaultProvider?: string; // Pre-select this provider if set (from container's deployment_provider)
 }
 
 interface Provider {
@@ -39,7 +31,7 @@ export function DeploymentModal({
   isOpen,
   onClose,
   onSuccess,
-  defaultProvider
+  defaultProvider,
 }: DeploymentModalProps) {
   const navigate = useNavigate();
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -86,12 +78,18 @@ export function DeploymentModal({
       // Check if there's an active deployment in progress
       const deployments = Array.isArray(deploymentsData) ? deploymentsData : [];
       const activeDeployment = deployments.find(
-        (d: { status: string }) => d.status === 'building' || d.status === 'deploying' || d.status === 'pending'
+        (d: { status: string }) =>
+          d.status === 'building' || d.status === 'deploying' || d.status === 'pending'
       );
       setHasActiveDeployment(!!activeDeployment);
 
       // Auto-select provider: prefer defaultProvider, then first connected provider
-      if (defaultProvider && credentialsData.credentials?.some((c: DeploymentCredential) => c.provider === defaultProvider)) {
+      if (
+        defaultProvider &&
+        credentialsData.credentials?.some(
+          (c: DeploymentCredential) => c.provider === defaultProvider
+        )
+      ) {
         // Use the default provider from container's deployment target
         setSelectedProvider(defaultProvider);
       } else if (credentialsData.credentials && credentialsData.credentials.length > 0) {
@@ -100,7 +98,9 @@ export function DeploymentModal({
       }
     } catch (error: unknown) {
       console.error('Failed to load deployment data:', error);
-      const errorMessage = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to load deployment options';
+      const errorMessage =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Failed to load deployment options';
       toast.error(errorMessage);
     } finally {
       setLoading(false);
@@ -175,7 +175,9 @@ export function DeploymentModal({
       }
     } catch (error: unknown) {
       console.error('Deployment failed:', error);
-      const errorMessage = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to start deployment';
+      const errorMessage =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Failed to start deployment';
       toast.error(errorMessage);
     } finally {
       setIsDeploying(false);
@@ -197,7 +199,7 @@ export function DeploymentModal({
   };
 
   const getProviderDisplay = (providerName: string) => {
-    const provider = providers.find(p => p.name === providerName);
+    const provider = providers.find((p) => p.name === providerName);
     return provider?.display_name || providerName.charAt(0).toUpperCase() + providerName.slice(1);
   };
 
@@ -214,8 +216,9 @@ export function DeploymentModal({
     }
   };
 
-  const COMING_SOON_PROVIDERS = ['vercel', 'cloudflare'];
-  const connectedProviders = credentials.map(c => c.provider).filter(p => !COMING_SOON_PROVIDERS.includes(p.toLowerCase()));
+  const connectedProviders = credentials
+    .map((c) => c.provider)
+    .filter((p) => !COMING_SOON_PROVIDERS.includes(p.toLowerCase()));
   const hasConnectedProviders = connectedProviders.length > 0;
 
   if (!isOpen) return null;
@@ -300,8 +303,13 @@ export function DeploymentModal({
                     />
                     <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                       <div className="text-xs text-[var(--text)]/80 space-y-2">
-                        <p className="font-semibold text-[var(--text)]">Select deployment provider</p>
-                        <p>Choose which hosting provider to deploy your project to. You can connect additional providers in Settings.</p>
+                        <p className="font-semibold text-[var(--text)]">
+                          Select deployment provider
+                        </p>
+                        <p>
+                          Choose which hosting provider to deploy your project to. You can connect
+                          additional providers in Settings.
+                        </p>
                       </div>
                       <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white/20"></div>
                     </div>
@@ -321,13 +329,17 @@ export function DeploymentModal({
                     className="w-full px-4 py-3 pr-10 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-orange-500 appearance-none cursor-pointer"
                   >
                     {connectedProviders.map((provider) => {
-                      const credential = credentials.find(c => c.provider === provider);
+                      const credential = credentials.find((c) => c.provider === provider);
                       const accountInfo = credential?.metadata?.account_name;
                       const displayText = accountInfo
                         ? `${getProviderDisplay(provider)} - ${accountInfo}`
                         : getProviderDisplay(provider);
                       return (
-                        <option key={provider} value={provider} className="bg-[var(--surface)] text-[var(--text)]">
+                        <option
+                          key={provider}
+                          value={provider}
+                          className="bg-[var(--surface)] text-[var(--text)]"
+                        >
                           {displayText}
                         </option>
                       );
@@ -358,8 +370,14 @@ export function DeploymentModal({
                       <div className="text-xs text-[var(--text)]/80 space-y-2">
                         <p className="font-semibold text-[var(--text)]">About deployment modes</p>
                         <ul className="space-y-1.5 list-disc list-inside">
-                          <li><strong>Pre-built:</strong> Build locally and upload only the production files. Faster deployment, consistent with local builds.</li>
-                          <li><strong>Source Build:</strong> Upload source code and let the provider build your project remotely. Only supported by some providers (Vercel).</li>
+                          <li>
+                            <strong>Pre-built:</strong> Build locally and upload only the production
+                            files. Faster deployment, consistent with local builds.
+                          </li>
+                          <li>
+                            <strong>Source Build:</strong> Upload source code and let the provider
+                            build your project remotely. Only supported by some providers (Vercel).
+                          </li>
                         </ul>
                       </div>
                       <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white/20"></div>
@@ -371,16 +389,21 @@ export function DeploymentModal({
                     onClick={() => setDeploymentMode('pre-built')}
                     className={`
                       p-4 rounded-lg border-2 transition-all text-left
-                      ${deploymentMode === 'pre-built'
-                        ? 'border-purple-500 bg-purple-500/10'
-                        : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
+                      ${
+                        deploymentMode === 'pre-built'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
                       }
                     `}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
-                        deploymentMode === 'pre-built' ? 'border-purple-500' : 'border-[var(--text)]/30'
-                      }`}>
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                          deploymentMode === 'pre-built'
+                            ? 'border-purple-500'
+                            : 'border-[var(--text)]/30'
+                        }`}
+                      >
                         {deploymentMode === 'pre-built' && (
                           <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
                         )}
@@ -393,16 +416,21 @@ export function DeploymentModal({
                     onClick={() => setDeploymentMode('source')}
                     className={`
                       p-4 rounded-lg border-2 transition-all text-left
-                      ${deploymentMode === 'source'
-                        ? 'border-purple-500 bg-purple-500/10'
-                        : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
+                      ${
+                        deploymentMode === 'source'
+                          ? 'border-purple-500 bg-purple-500/10'
+                          : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
                       }
                     `}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
-                        deploymentMode === 'source' ? 'border-purple-500' : 'border-[var(--text)]/30'
-                      }`}>
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                          deploymentMode === 'source'
+                            ? 'border-purple-500'
+                            : 'border-[var(--text)]/30'
+                        }`}
+                      >
                         {deploymentMode === 'source' && (
                           <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
                         )}
@@ -416,7 +444,10 @@ export function DeploymentModal({
               {/* Custom Domain */}
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  <label htmlFor="customDomain" className="block text-sm font-semibold text-[var(--text)]">
+                  <label
+                    htmlFor="customDomain"
+                    className="block text-sm font-semibold text-[var(--text)]"
+                  >
                     Custom Domain (Optional)
                   </label>
                   <div className="group relative">
@@ -428,7 +459,10 @@ export function DeploymentModal({
                     <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                       <div className="text-xs text-[var(--text)]/80 space-y-2">
                         <p className="font-semibold text-[var(--text)]">Custom domain</p>
-                        <p>Enter a custom domain name for your deployment. You'll need to configure DNS settings to point to your deployment after it's created.</p>
+                        <p>
+                          Enter a custom domain name for your deployment. You'll need to configure
+                          DNS settings to point to your deployment after it's created.
+                        </p>
                       </div>
                       <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white/20"></div>
                     </div>
@@ -459,11 +493,15 @@ export function DeploymentModal({
                       />
                       <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                         <div className="text-xs text-[var(--text)]/80 space-y-2">
-                          <p className="font-semibold text-[var(--text)]">About environment variables</p>
+                          <p className="font-semibold text-[var(--text)]">
+                            About environment variables
+                          </p>
                           <ul className="space-y-1.5 list-disc list-inside">
                             <li>Environment variables are securely passed to your deployment</li>
                             <li>Use them for API keys, secrets, and configuration values</li>
-                            <li>Values are encrypted in transit and at rest on the provider's platform</li>
+                            <li>
+                              Values are encrypted in transit and at rest on the provider's platform
+                            </li>
                           </ul>
                         </div>
                         <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white/20"></div>
@@ -549,11 +587,7 @@ export function DeploymentModal({
               >
                 {isDeploying ? (
                   <>
-                    <svg
-                      className="w-4 h-4 animate-spin"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                    >
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
                       <circle
                         className="opacity-25"
                         cx="12"

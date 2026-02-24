@@ -1,16 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
-import {
-  X,
-  Trash,
-  Plus,
-  Key,
-  ShieldCheck,
-  Check,
-  LinkSimple,
-  Info,
-} from '@phosphor-icons/react';
+import { X, Trash, Plus, Key, ShieldCheck, Check, LinkSimple, Info } from '@phosphor-icons/react';
 import { deploymentCredentialsApi } from '../../lib/api';
+import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { SettingsSection } from '../../components/settings';
@@ -51,14 +43,13 @@ export default function DeploymentSettings() {
 
   const loadData = useCallback(() => {
     executeAll(
-      [
-        () => deploymentCredentialsApi.getProviders(),
-        () => deploymentCredentialsApi.list(),
-      ],
+      [() => deploymentCredentialsApi.getProviders(), () => deploymentCredentialsApi.list()],
       {
         onAllSuccess: ([providersData, credentialsData]) => {
           setProviders((providersData as { providers?: Provider[] }).providers || []);
-          setCredentials((credentialsData as { credentials?: DeploymentCredential[] }).credentials || []);
+          setCredentials(
+            (credentialsData as { credentials?: DeploymentCredential[] }).credentials || []
+          );
         },
         onError: (error) => {
           console.error('Failed to load deployment data:', error);
@@ -137,12 +128,15 @@ export default function DeploymentSettings() {
       }, 2000);
 
       // Timeout after 5 minutes
-      oauthTimeoutRef.current = setTimeout(() => {
-        if (oauthCheckIntervalRef.current) {
-          clearInterval(oauthCheckIntervalRef.current);
-          oauthCheckIntervalRef.current = null;
-        }
-      }, 5 * 60 * 1000);
+      oauthTimeoutRef.current = setTimeout(
+        () => {
+          if (oauthCheckIntervalRef.current) {
+            clearInterval(oauthCheckIntervalRef.current);
+            oauthCheckIntervalRef.current = null;
+          }
+        },
+        5 * 60 * 1000
+      );
     } catch (error: unknown) {
       console.error('OAuth flow error:', error);
       const err = error as { response?: { data?: { detail?: string } } };
@@ -153,7 +147,7 @@ export default function DeploymentSettings() {
   const handleManualConnect = (provider: Provider) => {
     setSelectedProvider(provider);
     const initialForm: ManualCredentialsForm = {};
-    provider.required_fields.forEach(field => {
+    provider.required_fields.forEach((field) => {
       initialForm[field] = '';
     });
     setManualCredentials(initialForm);
@@ -164,7 +158,7 @@ export default function DeploymentSettings() {
     if (!selectedProvider) return;
 
     const missingFields = selectedProvider.required_fields.filter(
-      field => !manualCredentials[field]?.trim()
+      (field) => !manualCredentials[field]?.trim()
     );
 
     if (missingFields.length > 0) {
@@ -235,13 +229,13 @@ export default function DeploymentSettings() {
   };
 
   const isProviderConnected = (providerName: string) => {
-    return credentials.some(c => c.provider === providerName);
+    return credentials.some((c) => c.provider === providerName);
   };
 
   const formatFieldName = (fieldName: string) => {
     return fieldName
       .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
   };
 
@@ -252,7 +246,7 @@ export default function DeploymentSettings() {
       day: 'numeric',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   };
 
@@ -277,8 +271,8 @@ export default function DeploymentSettings() {
             <div className="text-sm text-blue-400">
               <p className="font-semibold mb-1">Your credentials, your control</p>
               <p className="text-xs">
-                All credentials are encrypted and stored securely. Deployments happen to your own cloud accounts,
-                giving you full ownership and control of your applications.
+                All credentials are encrypted and stored securely. Deployments happen to your own
+                cloud accounts, giving you full ownership and control of your applications.
               </p>
             </div>
           </div>
@@ -293,7 +287,7 @@ export default function DeploymentSettings() {
             </h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {credentials.map((credential) => {
-                const provider = providers.find(p => p.name === credential.provider);
+                const provider = providers.find((p) => p.name === credential.provider);
                 if (!provider) return null;
 
                 return (
@@ -303,7 +297,9 @@ export default function DeploymentSettings() {
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-start gap-3 flex-1">
-                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getProviderColor(provider.name)}`}>
+                        <div
+                          className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getProviderColor(provider.name)}`}
+                        >
                           {getProviderIcon(provider.name)}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -337,8 +333,19 @@ export default function DeploymentSettings() {
                       >
                         {deletingCredentialId === credential.id ? (
                           <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
                           </svg>
                         ) : (
                           <Trash size={18} />
@@ -360,16 +367,18 @@ export default function DeploymentSettings() {
           </h3>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {providers
-              .filter(provider => !isProviderConnected(provider.name))
+              .filter((provider) => !isProviderConnected(provider.name))
               .map((provider) => {
-                const isComingSoon = ['vercel', 'cloudflare'].includes(provider.name.toLowerCase());
+                const isComingSoon = COMING_SOON_PROVIDERS.includes(provider.name.toLowerCase());
                 return (
                   <div
                     key={provider.name}
                     className={`p-4 bg-[var(--surface)] border border-white/10 rounded-xl transition-all ${isComingSoon ? 'opacity-60' : 'hover:border-white/20'}`}
                   >
                     <div className="flex items-start gap-3 mb-4">
-                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getProviderColor(provider.name)}`}>
+                      <div
+                        className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getProviderColor(provider.name)}`}
+                      >
                         {getProviderIcon(provider.name)}
                       </div>
                       <div className="flex-1">
@@ -381,9 +390,7 @@ export default function DeploymentSettings() {
                             </span>
                           )}
                         </h4>
-                        <p className="text-xs text-[var(--text)]/60">
-                          {provider.description}
-                        </p>
+                        <p className="text-xs text-[var(--text)]/60">{provider.description}</p>
                       </div>
                     </div>
 
@@ -433,7 +440,7 @@ export default function DeploymentSettings() {
               })}
           </div>
 
-          {providers.filter(p => !isProviderConnected(p.name)).length === 0 && (
+          {providers.filter((p) => !isProviderConnected(p.name)).length === 0 && (
             <div className="text-center py-8">
               <p className="text-[var(--text)]/40 text-sm">
                 All available providers are connected!
@@ -464,9 +471,7 @@ export default function DeploymentSettings() {
                     <h2 className="text-lg md:text-xl font-bold text-[var(--text)]">
                       Connect {selectedProvider.display_name}
                     </h2>
-                    <p className="text-sm text-[var(--text)]/60 mt-1">
-                      Enter your API credentials
-                    </p>
+                    <p className="text-sm text-[var(--text)]/60 mt-1">Enter your API credentials</p>
                   </div>
                 </div>
                 {!isSaving && (
@@ -484,7 +489,10 @@ export default function DeploymentSettings() {
             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
               {selectedProvider.required_fields.map((field) => (
                 <div key={field}>
-                  <label htmlFor={field} className="block text-sm font-semibold text-[var(--text)] mb-2">
+                  <label
+                    htmlFor={field}
+                    className="block text-sm font-semibold text-[var(--text)] mb-2"
+                  >
                     {formatFieldName(field)}
                     <span className="text-red-400 ml-1">*</span>
                   </label>
@@ -492,10 +500,12 @@ export default function DeploymentSettings() {
                     id={field}
                     type={field.includes('token') || field.includes('key') ? 'password' : 'text'}
                     value={manualCredentials[field] || ''}
-                    onChange={(e) => setManualCredentials({
-                      ...manualCredentials,
-                      [field]: e.target.value
-                    })}
+                    onChange={(e) =>
+                      setManualCredentials({
+                        ...manualCredentials,
+                        [field]: e.target.value,
+                      })
+                    }
                     placeholder={`Enter your ${formatFieldName(field).toLowerCase()}`}
                     className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                     disabled={isSaving}
@@ -515,8 +525,8 @@ export default function DeploymentSettings() {
                   <div className="text-sm text-green-400">
                     <p className="font-semibold mb-1">Your credentials are secure</p>
                     <p className="text-xs">
-                      All API tokens are encrypted using Fernet encryption before being stored.
-                      We never log or display your credentials in plain text.
+                      All API tokens are encrypted using Fernet encryption before being stored. We
+                      never log or display your credentials in plain text.
                     </p>
                   </div>
                 </div>
@@ -534,14 +544,28 @@ export default function DeploymentSettings() {
               </button>
               <button
                 onClick={handleSaveManualCredentials}
-                disabled={isSaving || selectedProvider.required_fields.some(f => !manualCredentials[f]?.trim())}
+                disabled={
+                  isSaving ||
+                  selectedProvider.required_fields.some((f) => !manualCredentials[f]?.trim())
+                }
                 className="px-6 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all flex items-center justify-center gap-2 min-h-[48px]"
               >
                 {isSaving ? (
                   <>
                     <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
                     </svg>
                     Saving...
                   </>
