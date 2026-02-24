@@ -3,6 +3,7 @@ Git Manager for executing Git operations in user development environments.
 Works with both Docker and Kubernetes deployments.
 """
 
+import contextlib
 import logging
 import shlex
 from typing import Any
@@ -99,10 +100,8 @@ class GitManager:
             if sentinel in raw_output:
                 parts = raw_output.rsplit(sentinel, 1)
                 output = parts[0]
-                try:
+                with contextlib.suppress(ValueError, IndexError):
                     exit_code = int(parts[1].strip())
-                except (ValueError, IndexError):
-                    pass
 
             output = output.strip()
 
@@ -321,8 +320,12 @@ class GitManager:
                     continue
 
                 # Parse status code and file path
+                # Porcelain format: XY PATH (positions 0-1 = status, 2 = space, 3+ = path)
+                # K8s exec can inject a channel byte at the Y position, so after
+                # any stripping the separator space may be at position 1 instead of 2.
+                # Taking line[2:] and stripping whitespace handles both cases safely.
                 status_code = line[:2]
-                file_path = line[3:].strip()
+                file_path = line[2:].strip()
 
                 # Map to single-letter status codes matching frontend expectations
                 staged = status_code[0] != " " and status_code[0] != "?"
@@ -534,7 +537,7 @@ class GitManager:
                 conflicts = []
                 for line in status_output.split("\n"):
                     if line.startswith("UU ") or line.startswith("AA ") or line.startswith("DD "):
-                        file_path = line[3:].strip()
+                        file_path = line[2:].strip()
                         conflicts.append(file_path)
 
                 if conflicts:
