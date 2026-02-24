@@ -41,11 +41,13 @@ import { MobileWarning } from '../components/MobileWarning';
 import { MobileMenu } from '../components/ui/MobileMenu';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { GitHubPanel, NotesPanel, SettingsPanel, KanbanPanel } from '../components/panels';
+import { ChatContainer } from '../components/chat/ChatContainer';
 import { DiscordSupport } from '../components/DiscordSupport';
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, configApi, deploymentTargetsApi } from '../lib/api';
+import api, { projectsApi, configApi, deploymentTargetsApi, marketplaceApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
+import { type ChatAgent } from '../types/chat';
 import { fileEvents } from '../utils/fileEvents';
 import { connectionEvents } from '../utils/connectionEvents';
 import toast from 'react-hot-toast';
@@ -125,6 +127,11 @@ const ProjectGraphCanvasInner = () => {
     const saved = localStorage.getItem('graphCanvasSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
   });
+  const [agents, setAgents] = useState<ChatAgent[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(() => {
+    if (!slug) return null;
+    return localStorage.getItem(`tesslate-graph-agent-${slug}`);
+  });
   const [selectedContainer, setSelectedContainer] = useState<{
     id: string;
     name: string;
@@ -183,6 +190,7 @@ const ProjectGraphCanvasInner = () => {
     if (slug) {
       fetchProjectData();
       loadFiles();
+      loadAgents();
     }
   }, [slug]);
 
@@ -503,6 +511,48 @@ const ProjectGraphCanvasInner = () => {
       console.error('Failed to load files:', error);
     }
   };
+
+  const loadAgents = async () => {
+    try {
+      const libraryData = await marketplaceApi.getMyAgents();
+      const enabledAgents = libraryData.agents.filter(
+        (agent: Record<string, unknown>) => agent.is_enabled
+      );
+
+      const uiAgents: ChatAgent[] = enabledAgents.map((agent: Record<string, unknown>) => ({
+        id: agent.slug as string,
+        name: agent.name as string,
+        icon: (agent.icon as string) || '🤖',
+        avatar_url: (agent.avatar_url as string) || undefined,
+        backendId: agent.id as number,
+        mode: agent.mode as 'stream' | 'agent',
+        model: agent.model as string | undefined,
+        selectedModel: agent.selected_model as string | null | undefined,
+        sourceType: agent.source_type as 'open' | 'closed' | undefined,
+        isCustom: agent.is_custom as boolean | undefined,
+      }));
+
+      setAgents(uiAgents);
+    } catch (error) {
+      console.error('Failed to load agents:', error);
+    }
+  };
+
+  const currentAgent = useMemo(() => {
+    if (selectedAgentId) {
+      const found = agents.find((a) => a.id === selectedAgentId);
+      if (found) return found;
+    }
+    return agents[0] ?? null;
+  }, [agents, selectedAgentId]);
+
+  const handleAgentSelect = useCallback(
+    (agent: ChatAgent) => {
+      setSelectedAgentId(agent.id);
+      if (slug) localStorage.setItem(`tesslate-graph-agent-${slug}`, agent.id);
+    },
+    [slug]
+  );
 
   const handleFileUpdate = useCallback(
     async (filePath: string, content: string) => {
@@ -1567,6 +1617,17 @@ const ProjectGraphCanvasInner = () => {
     // The EdgeDeleteButton component renders a delete button on the selected edge
   }, []);
 
+  // Pane click handler - collapse chat panel when clicking on the canvas
+  // React Flow captures pointer events internally, so mousedown doesn't bubble
+  // to document where ChatContainer's click-outside handler listens.
+  // Dispatching a synthetic mousedown on the body triggers that handler.
+  const handlePaneClick = useCallback(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  }, []);
+
   // Prevent keyboard delete from removing nodes - only allow edge deletion
   const handleBeforeDelete = useCallback(
     async ({ edges: edgesToDelete }: { nodes: Node[]; edges: Edge[] }) => {
@@ -2008,6 +2069,7 @@ const ProjectGraphCanvasInner = () => {
                 onEdgeClick={handleEdgeClick}
                 onEdgesDelete={handleEdgesDelete}
                 onBeforeDelete={handleBeforeDelete}
+                onPaneClick={handlePaneClick}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 theme={theme}
@@ -2096,25 +2158,21 @@ const ProjectGraphCanvasInner = () => {
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
 
-      {/* Coming Soon Banner */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[calc(100vw-2rem)]">
-        <div className="bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-2xl shadow-2xl px-4 py-3 md:px-8 md:py-5 flex items-center gap-3 md:gap-4">
-          <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
-            <FlowArrow className="text-blue-400 w-5 h-5 md:w-6 md:h-6" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="font-heading text-sm md:text-base font-bold text-[var(--text)]">
-              Architecture Chat Coming Soon
-            </h3>
-            <p className="text-xs md:text-sm text-[var(--text)]/60 truncate">
-              AI-powered architecture editing is in development.
-            </p>
-          </div>
-          <span className="text-xs px-2 py-1 rounded-full bg-blue-500/20 text-blue-400 font-semibold whitespace-nowrap hidden sm:inline">
-            Coming Soon
-          </span>
-        </div>
-      </div>
+      {/* Chat Interface */}
+      {agents.length > 0 && currentAgent && (
+        <ChatContainer
+          projectId={project?.id}
+          containerId={selectedContainer?.id}
+          viewContext="graph"
+          agents={agents}
+          currentAgent={currentAgent}
+          onSelectAgent={handleAgentSelect}
+          onFileUpdate={handleFileUpdate}
+          projectFiles={files}
+          projectName={project?.name}
+          sidebarExpanded={isLeftSidebarExpanded}
+        />
+      )}
 
       {/* Discord Support */}
       <DiscordSupport />

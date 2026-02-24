@@ -36,6 +36,7 @@ interface GraphCanvasProps {
   onEdgesDelete?: (edges: Edge[]) => void;
   onBeforeDelete?: OnBeforeDelete;
   onInit?: (instance: ReactFlowInstance) => void;
+  onPaneClick?: (event: React.MouseEvent) => void;
   nodeTypes: NodeTypes;
   edgeTypes: EdgeTypes;
   theme: 'dark' | 'light';
@@ -64,6 +65,7 @@ const GraphCanvasComponent = ({
   onEdgesDelete,
   onBeforeDelete,
   onInit,
+  onPaneClick,
   nodeTypes,
   edgeTypes,
   theme,
@@ -87,6 +89,7 @@ const GraphCanvasComponent = ({
       onEdgesDelete={onEdgesDelete}
       onBeforeDelete={onBeforeDelete}
       onInit={onInit}
+      onPaneClick={onPaneClick}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       defaultViewport={DEFAULT_VIEWPORT}
@@ -177,7 +180,8 @@ const arePropsEqual = (prev: GraphCanvasProps, next: GraphCanvasProps): boolean 
     prev.onEdgeClick === next.onEdgeClick &&
     prev.onEdgesDelete === next.onEdgesDelete &&
     prev.onBeforeDelete === next.onBeforeDelete &&
-    prev.onInit === next.onInit
+    prev.onInit === next.onInit &&
+    prev.onPaneClick === next.onPaneClick
   );
 };
 
