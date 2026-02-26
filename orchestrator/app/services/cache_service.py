@@ -46,22 +46,38 @@ T = TypeVar("T")
 
 # Global Redis client (lazy initialized)
 _redis_client = None
-_redis_available: bool | None = None  # None = not checked, True/False = checked
+_redis_last_attempt: float = 0
+_redis_last_ping: float = 0
+_REDIS_RETRY_COOLDOWN = 5.0  # seconds between reconnection attempts
+_REDIS_PING_INTERVAL = 30.0  # seconds between health-check pings
 
 
 async def get_redis_client():
     """
     Get or create Redis client.
     Returns None if Redis is not configured or unavailable.
+    Retries connection after cooldown period on failure.
     """
-    global _redis_client, _redis_available
+    global _redis_client, _redis_last_attempt, _redis_last_ping
 
-    # If we already know Redis is unavailable, don't retry
-    if _redis_available is False:
-        return None
-
+    # Fast path: return cached client, only ping periodically to detect stale connections
     if _redis_client is not None:
-        return _redis_client
+        now = time.time()
+        if now - _redis_last_ping < _REDIS_PING_INTERVAL:
+            return _redis_client
+        try:
+            await _redis_client.ping()
+            _redis_last_ping = now
+            return _redis_client
+        except Exception:
+            logger.warning("Redis connection lost, will attempt reconnection")
+            _redis_client = None
+
+    # Cooldown: don't hammer Redis if it's down
+    now = time.time()
+    if now - _redis_last_attempt < _REDIS_RETRY_COOLDOWN:
+        return None
+    _redis_last_attempt = now
 
     # Import config here to avoid circular imports
     from ..config import get_settings
@@ -71,8 +87,6 @@ async def get_redis_client():
     # Check if Redis URL is configured
     redis_url = getattr(settings, "redis_url", None) or ""
     if not redis_url:
-        logger.info("Redis URL not configured, distributed caching disabled")
-        _redis_available = False
         return None
 
     try:
@@ -87,27 +101,26 @@ async def get_redis_client():
         )
         # Test connection
         await _redis_client.ping()
-        _redis_available = True
         logger.info(f"Redis cache connected: {redis_url}")
         return _redis_client
     except ImportError:
         logger.warning("redis package not installed, using in-memory cache only")
-        _redis_available = False
         return None
     except Exception as e:
         logger.warning(f"Redis connection failed, falling back to in-memory cache: {e}")
-        _redis_available = False
+        _redis_client = None
         return None
 
 
 async def close_redis_client():
     """Close Redis connection (call on app shutdown)."""
-    global _redis_client, _redis_available
+    global _redis_client, _redis_last_attempt, _redis_last_ping
     if _redis_client:
         with contextlib.suppress(Exception):
             await _redis_client.close()
         _redis_client = None
-        _redis_available = None
+        _redis_last_attempt = 0
+        _redis_last_ping = 0
 
 
 # =============================================================================

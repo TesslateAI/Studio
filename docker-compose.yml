@@ -81,7 +81,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru --appendonly yes
 
   orchestrator:
     build: ./orchestrator

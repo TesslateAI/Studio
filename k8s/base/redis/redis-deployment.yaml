@@ -31,17 +31,20 @@ spec:
         command:
           - redis-server
           - --maxmemory
-          - "256mb"
+          - "512mb"
           - --maxmemory-policy
-          - allkeys-lru
+          - volatile-lru
           - --appendonly
           - "yes"
+        volumeMounts:
+          - name: redis-data
+            mountPath: /data
         resources:
           requests:
             memory: "128Mi"
             cpu: "100m"
           limits:
-            memory: "512Mi"
+            memory: "768Mi"
             cpu: "500m"
         livenessProbe:
           exec:
@@ -59,3 +62,7 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 3
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-data

@@ -142,6 +142,12 @@ enable_external_dns       = true
 enable_cert_manager       = true
 
 # -----------------------------------------------------------------------------
+# Redis / ElastiCache Configuration
+# -----------------------------------------------------------------------------
+create_elasticache    = false
+elasticache_node_type = "cache.t4g.micro"
+
+# -----------------------------------------------------------------------------
 # GitHub Actions CI/CD (Optional)
 # -----------------------------------------------------------------------------
 # Set true to create an IAM user with access keys for GitHub Actions.
