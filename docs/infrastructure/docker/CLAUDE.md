@@ -74,6 +74,8 @@ docker compose up --build -d
 | `orchestrator` | `tesslate-orchestrator` | 8000 | FastAPI backend |
 | `postgres` | `tesslate-postgres-dev` | 5432 | PostgreSQL database |
 | `traefik` | `tesslate-traefik` | 80, 443, 8080 | Reverse proxy + dashboard |
+| `redis` | `tesslate-redis` | 6379 | Redis (pub/sub, task queue, cache) |
+| `worker` | `tesslate-worker` | — | ARQ worker (agent task execution) |
 
 ## Access URLs
 
@@ -91,6 +93,7 @@ docker compose up --build -d
 
 **Backend**: Uvicorn watches `./orchestrator/app/` — auto-reloads on save
 **Frontend**: Vite HMR watches `./app/src/` — instant browser updates
+**Worker**: Same as backend — Uvicorn watches `./orchestrator/app/` via volume mount
 
 ## Volumes
 
@@ -99,6 +102,7 @@ docker compose up --build -d
 | `tesslate-postgres-dev-data` | PostgreSQL data (persists between restarts) |
 | `tesslate-base-cache` | Pre-installed marketplace bases |
 | `tesslate-projects-data` | All user project source code |
+| `tesslate-redis-data` | Redis persistence data |
 
 ## Dependency Management
 

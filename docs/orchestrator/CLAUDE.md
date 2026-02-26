@@ -13,6 +13,8 @@ The orchestrator is Tesslate Studio's FastAPI backend handling all API requests,
 | [models.py](../../orchestrator/app/models.py) | 39 SQLAlchemy database models |
 | [database.py](../../orchestrator/app/database.py) | Async SQLAlchemy engine setup |
 | [schemas.py](../../orchestrator/app/schemas.py) | Pydantic request/response schemas |
+| [worker.py](../../orchestrator/app/worker.py) | ARQ worker for distributed agent execution |
+| [auth_external.py](../../orchestrator/app/auth_external.py) | API key authentication for external agent API |
 
 ## Related Contexts (Load These For)
 
@@ -90,6 +92,7 @@ await orchestrator.start_project(project, containers, connections, user_id, db)
 | `APP_DOMAIN` | Base domain | `your-domain.com` |
 | `LITELLM_API_BASE` | LLM proxy URL | `http://litellm:8000` |
 | `S3_BUCKET_NAME` | Project storage | `tesslate-projects-prod` |
+| `REDIS_URL` | Redis connection | `redis://redis:6379/0` |
 
 ### Key Routers
 
@@ -101,6 +104,7 @@ await orchestrator.start_project(project, containers, connections, user_id, db)
 | marketplace | `/api/marketplace` | Agent/base marketplace |
 | billing | `/api/billing` | Subscriptions, credits |
 | git | `/api/git` | Git operations |
+| external_agent | `/api/external` | External agent API (API key auth, SSE events) |
 
 ### Middleware Stack (Order Matters)
 

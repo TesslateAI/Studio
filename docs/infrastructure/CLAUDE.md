@@ -456,7 +456,7 @@ Example: Expire inactive projects after 180 days (uncomment rule)
 ## Quick Reference
 
 ### Namespaces
-- `tesslate`: Platform services
+- `tesslate`: Platform services (backend, frontend, postgres, Redis, worker)
 - `ingress-nginx`: Ingress controller
 - `minio-system`: MinIO (Minikube only)
 - `proj-{uuid}`: User projects
@@ -468,6 +468,7 @@ Example: Expire inactive projects after 180 days (uncomment rule)
 - `tesslate-app-secrets`: API keys, OAuth, domain config
 - `postgres-secret`: Database credentials
 - `s3-credentials`: S3/MinIO credentials
+- `redis-credentials`: Redis connection URL (if using ElastiCache)
 
 ### ConfigMaps
 - `tesslate-config`: Deployment mode, K8s settings
@@ -475,6 +476,7 @@ Example: Expire inactive projects after 180 days (uncomment rule)
 ### PersistentVolumeClaims
 - `postgres-pvc`: Database data (10Gi)
 - `{project-slug}-pvc`: User project data (5Gi ephemeral)
+- `redis-data-pvc`: Redis persistence data (1Gi)
 
 ### CronJobs
 - `dev-environment-cleanup`: Runs every 2 minutes, hibernates idle projects
@@ -489,6 +491,31 @@ Example: Expire inactive projects after 180 days (uncomment rule)
 6. **Test in Minikube before AWS**: Catches K8s-specific issues early
 7. **Monitor S3 costs**: Exclude generated dirs (node_modules, .next, dist, etc.) from S3 archives
 8. **Check namespace quotas**: Resource quotas prevent runaway project creation
+
+## Redis Infrastructure
+
+Redis is used for cross-pod communication, task queuing, caching, and distributed locks.
+
+### Docker Compose
+Redis runs as a service in `docker-compose.yml`:
+- Port: 6379
+- Volume: `tesslate-redis-data` for persistence
+- Config: `maxmemory 256mb`, `maxmemory-policy volatile-lru`
+
+### Kubernetes (Base)
+Standalone Redis pod in `k8s/base/redis/`:
+- `redis-deployment.yaml` - Single replica with PVC persistence
+- `redis-service.yaml` - ClusterIP service on port 6379
+- `redis-pvc.yaml` - 1Gi persistent storage
+- Config via ConfigMap: `maxmemory 512mb`, `volatile-lru` eviction, `appendonly yes`
+
+### AWS Production (ElastiCache)
+Terraform-managed ElastiCache Redis in `k8s/terraform/aws/elasticache.tf`:
+- Engine: Redis 7.x
+- Node type: `cache.t3.micro` (configurable)
+- Encryption at rest and in transit
+- Automatic failover (multi-AZ optional)
+- Security group: allows access from EKS worker nodes only
 
 ## Emergency Procedures
 

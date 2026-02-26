@@ -189,6 +189,17 @@ useEffect(() => {
 }, [projectId, token]);
 ```
 
+### Multi-Session Chat Components
+
+New chat components for multi-session support:
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `ChatSessionPopover` | `chat/ChatSessionPopover.tsx` (292 lines) | Popover dropdown for switching between chat sessions per project |
+| `ChatSessionModal` | `chat/ChatSessionModal.tsx` (258 lines) | Full modal for session management (create, rename, delete) |
+
+These integrate with ChatContainer.tsx, which now manages an `activeChatId` state and loads session-specific message history.
+
 ### Monaco Editor Integration
 
 **CodeEditor Component Pattern**:

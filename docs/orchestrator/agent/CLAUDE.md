@@ -84,12 +84,55 @@ Key distinction: A model like `z-ai/glm-5` means different things depending on c
 2. It automatically becomes available for BYOK in the marketplace API
 3. `is_byok_model()` in credit service auto-detects it (zero-cost routing)
 
+## Worker-Based Execution
+
+The real-time agent system introduces a decoupled execution model where agents run on dedicated worker pods instead of inline in the API request:
+
+### Execution Flow
+
+```
+API Pod                          Worker Pod
+  │                                │
+  ├─ Build AgentTaskPayload        │
+  ├─ Enqueue to ARQ (Redis)  ──►  ├─ Pick up job
+  ├─ Return task_id to client      ├─ Acquire project lock
+  │                                ├─ Create placeholder Message
+  │   ◄── Redis Stream events ──── ├─ Run agent.run() loop
+  │                                │  ├─ INSERT AgentStep per iteration
+  │                                │  ├─ Check cancellation signal
+  │                                │  └─ Heartbeat lock extension
+  │                                ├─ Finalize Message
+  │                                └─ Release lock + webhook callback
+```
+
+### Progressive Step Persistence
+
+Each agent iteration is persisted as an `AgentStep` row immediately — not batched at the end. This means:
+- **Crash recovery**: Partial work survives pod crashes
+- **Real-time visibility**: Steps stream to clients via Redis Streams
+- **History reconstruction**: Chat context loads from AgentStep table (metadata flag `steps_table: True`)
+
+### Key Files
+- `orchestrator/app/worker.py` - ARQ worker implementation
+- `orchestrator/app/services/agent_task.py` - Task payload serialization
+- `orchestrator/app/services/agent_context.py` - Context building
+- `orchestrator/app/services/pubsub.py` - Event streaming
+- `orchestrator/app/services/distributed_lock.py` - Project-level locks
+
+### Configuration
+- `worker_max_jobs`: Concurrent tasks per pod (default: 10)
+- `worker_job_timeout`: Task timeout in seconds (default: 600)
+- `worker_max_tries`: Retry count for transient failures (default: 2)
+
 ## Related Contexts
 
 This context relates to:
 - **Tools Context** (`orchestrator/app/agent/tools/CLAUDE.md`) - Tool development
 - **Chat Router** (`orchestrator/app/routers/chat.py`) - Agent execution endpoint
 - **Services Context** - Orchestration services that tools interact with
+- **Worker** (`orchestrator/app/worker.py`) - Distributed agent execution
+- **Pub/Sub** (`orchestrator/app/services/pubsub.py`) - Real-time event streaming
+- **External API** (`orchestrator/app/routers/external_agent.py`) - External agent invocation
 
 ## Agent Execution Patterns
 

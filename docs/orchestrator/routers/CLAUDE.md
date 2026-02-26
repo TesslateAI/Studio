@@ -10,7 +10,7 @@
 Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 
 - `projects.py` (5218 lines) - Project CRUD, file operations, container lifecycle, assets, deployment target assignment
-- `chat.py` (~2050 lines) - Chat management, agent streaming, WebSocket support (max_iterations default: unlimited, cost limit: $5/run)
+- `chat.py` (~2050 lines) - Chat management, agent streaming, WebSocket support, multi-session chat, ARQ worker dispatch (max_iterations default: unlimited, cost limit: $5/run)
 - `marketplace.py` (~2800 lines) - Agent/base marketplace, purchases, reviews, user-submitted bases, community bases browse with pagination, base versioning (git tags)
 - `admin.py` (~3700 lines) - Platform metrics, user management, moderation, audit logs, project admin, billing admin, deployment monitoring
 - `deployments.py` (1,197 lines) - External deployments (Vercel, Netlify, Cloudflare), deploy-all endpoint
@@ -24,7 +24,7 @@ Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 - `feedback.py` (401 lines) - User feedback submission
 - `agent.py` (374 lines) - Legacy agent endpoints
 - `secrets.py` (293 lines) - Project environment variables
-- `tasks.py` (258 lines) - Background task status queries
+- `tasks.py` (~350 lines) - Background task status queries, agent task status with Redis cross-pod lookup
 - `shell.py` (246 lines) - Interactive shell sessions
 - `creators.py` (238 lines) - Creator program management
 - `two_fa.py` (218 lines) - Email 2FA login, code verification, resend, password reset
@@ -34,6 +34,7 @@ Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 - `themes.py` - Public theme API (no auth required)
 - `webhooks.py` (52 lines) - Webhook endpoints
 - `referrals.py` (46 lines) - Referral program
+- `external_agent.py` (500 lines) - External API for agent invocation (API key auth, SSE events, webhook callbacks)
 
 ### Supporting Files
 - `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/main.py` - FastAPI app setup, middleware, router registration

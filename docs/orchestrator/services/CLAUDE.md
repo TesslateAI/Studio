@@ -58,6 +58,15 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - **email_service.py** (174 lines) - `EmailService` for async SMTP email (2FA codes, password reset links), falls back to console logging in dev
 - **two_fa_service.py** (165 lines) - `TwoFAService` for 6-digit code generation, verification (argon2 hash), temp token signing (itsdangerous)
 
+### Real-Time Agent Infrastructure
+- **pubsub.py** (643 lines) - `PubSubService` for cross-pod communication via Redis Pub/Sub channels, Redis Streams for durable agent events, and project locks
+- **worker.py** (509 lines) - ARQ worker for decoupled agent task execution with progressive step persistence and real-time streaming
+- **agent_context.py** (494 lines) - Build agent execution context (project info, git status, architecture, chat history, TESSLATE.md)
+- **agent_task.py** (72 lines) - `AgentTaskPayload` serializable envelope for dispatching tasks to the worker fleet
+- **distributed_lock.py** (225 lines) - Redis-based distributed lock for coordinating background loops across replicas
+- **session_router.py** (116 lines) - Track shell session ownership across pods via Redis keys
+- **task_manager.py** (184 lines) - Track background task status with Redis fallback for cross-pod visibility (enhanced with Redis store)
+
 ### Container Startup
 - **tmux_session_manager.py** - Tmux session startup strategies per base type (nextjs-16, vite-react-fastapi, vite-react-go, expo-react-native)
 
@@ -86,6 +95,12 @@ Service definitions now include deployment targets (Vercel, Netlify, Cloudflare)
 - [cache.md](./cache.md) - Distributed cache with Redis + in-memory fallback
 - [credit-system.md](./credit-system.md) - Multi-source credit system architecture
 - [model-pricing.md](./model-pricing.md) - LiteLLM dynamic pricing
+- [pubsub.md](./pubsub.md) - Cross-pod communication via Redis Pub/Sub and Streams
+- [worker.md](./worker.md) - ARQ worker for distributed agent execution
+- [agent-context.md](./agent-context.md) - Agent execution context building
+- [agent-task.md](./agent-task.md) - Agent task payload serialization
+- [distributed-lock.md](./distributed-lock.md) - Redis-based distributed locks
+- [session-router.md](./session-router.md) - Cross-pod shell session routing
 
 ## Common Service Patterns
 
@@ -558,4 +573,21 @@ code = await two_fa.create_verification_code(user_id, "2fa_login", db)
 is_valid = await two_fa.verify_code(user_id, "2fa_login", submitted_code, db)
 temp_token = two_fa.create_temp_token(str(user_id))
 user_id = two_fa.validate_temp_token(temp_token)
+
+# Use pub/sub for cross-pod communication
+from services.pubsub import get_pubsub
+pubsub = get_pubsub()
+await pubsub.publish_ws_event(user_id, project_id, {"type": "status", "data": "running"})
+await pubsub.publish_agent_event(task_id, {"type": "agent_step", "data": step})
+
+# Use distributed lock for singleton background tasks
+from services.distributed_lock import get_distributed_lock
+lock = get_distributed_lock()
+await lock.run_with_lock("cleanup", cleanup_loop, lock_ttl=120, renew_interval=30)
+
+# Use session router for cross-pod shell sessions
+from services.session_router import get_session_router
+router = get_session_router()
+await router.register_session(session_id)
+is_local = await router.is_local(session_id)
 ```

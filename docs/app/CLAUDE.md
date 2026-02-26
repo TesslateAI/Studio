@@ -228,6 +228,8 @@ const sendMessage = (message: string) => {
 };
 ```
 
+**Real-Time Agent Events (via Redis)**: Agent execution events from worker pods are forwarded through Redis Streams to WebSocket connections. New event types include `agent_task_started`, `agent_step`, `agent_task_completed`, and `agent_task_error`. These complement the existing SSE-based streaming for inline agent execution.
+
 ### 3. File Events
 
 **Pattern**: Use custom event system for file changes
@@ -959,6 +961,29 @@ function Header({ user }) {
 ```
 
 Includes: Credits display, Subscriptions, Settings, Logout
+
+### 23. Multi-Session Chat
+
+**Pattern**: Multiple chat sessions per project with session switching
+
+```typescript
+import { chatApi } from '../lib/api';
+
+// List sessions for a project
+const sessions = await chatApi.getSessions(projectId);
+
+// Create a new session
+const newSession = await chatApi.createSession(projectId, 'Bug fixing session');
+
+// Switch active session in ChatContainer
+<ChatSessionPopover
+  projectId={projectId}
+  activeChatId={activeChatId}
+  onSessionChange={(chatId) => setActiveChatId(chatId)}
+/>
+```
+
+Sessions have `title`, `origin` (browser/api/slack/cli), `status` (active/running/completed), and `updated_at` fields.
 
 ## Best Practices
 

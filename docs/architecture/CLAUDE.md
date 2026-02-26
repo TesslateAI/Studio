@@ -26,9 +26,11 @@ Tesslate Studio uses a **multi-tier architecture** with clear separation of conc
 ```
 User Browser (React)
     ↓ HTTP/WebSocket
-Orchestrator (FastAPI)
-    ↓ Database queries
-PostgreSQL
+API Pod (FastAPI)
+    ↓ Database queries          ↓ Task queue
+PostgreSQL                    Redis (Pub/Sub, Streams, ARQ)
+                                ↓ Job execution
+                            Worker Pod (ARQ)
     ↓ Container orchestration
 Docker Compose OR Kubernetes
     ↓ User project containers
@@ -208,18 +210,45 @@ S3_BUCKET_NAME=tesslate-project-storage-prod
 ```
 1. User types message in frontend chat UI
    ↓
-2. Frontend: POST /api/chat/stream (Server-Sent Events)
+2. Frontend: POST /api/chat/agent/stream (SSE) or WebSocket message
    ↓
-3. Backend: chat.py router receives request
+3. Backend: chat.py builds AgentTaskPayload
+   ├─ Create/reuse Chat session
+   ├─ Build project context (agent_context.py)
+   └─ Enqueue to ARQ Redis queue
    ↓
-4. Backend: agent/factory.py creates agent instance
+4. Worker: worker.py picks up task
+   ├─ Acquire project lock (prevent concurrent runs)
+   ├─ Create placeholder Message
+   ├─ Run agent loop with progressive persistence
+   │  ├─ INSERT AgentStep per iteration
+   │  ├─ Publish events to Redis Stream
+   │  └─ Check cancellation between iterations
+   ├─ Finalize Message with summary
+   └─ Release lock + optional webhook callback
    ↓
-5. Backend: agent/stream_agent.py runs agent loop
-   ├─ LLM call (via litellm_service.py)
-   ├─ Tool execution (agent/tools/*)
-   └─ Stream events to frontend
+5. Redis Stream → API Pod → WebSocket → Frontend
    ↓
-6. Frontend: Renders streaming events in real-time
+6. Frontend: Renders agent steps in real-time
+```
+
+### External Agent API Flow
+
+```
+1. External client: POST /api/external/agent/invoke (Bearer token)
+   ↓
+2. Backend: Authenticate API key, validate project scope
+   ↓
+3. Backend: Build context + enqueue ARQ task (same as browser flow)
+   ↓
+4. Client receives task_id + events_url immediately
+   ↓
+5. Client: GET /api/external/agent/events/{task_id} (SSE)
+   └─ OR: GET /api/external/agent/status/{task_id} (polling)
+   ↓
+6. Worker executes agent, streams events via Redis
+   ↓
+7. Optional: POST webhook_url with final results
 ```
 
 ### Container Start Flow
@@ -279,6 +308,7 @@ S3_BUCKET_NAME=tesslate-project-storage-prod
 | `DATABASE_URL` | PostgreSQL connection | ❌ Required |
 | `DEPLOYMENT_MODE` | `docker` or `kubernetes` | `docker` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
+| `REDIS_URL` | Redis connection string | `` (disabled) |
 | `APP_DOMAIN` | Main app domain | `localhost` |
 | `CORS_ORIGINS` | Allowed CORS origins | `` |
 

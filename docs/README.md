@@ -48,6 +48,12 @@ Tesslate Studio is an AI-powered web application builder that lets users create,
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                     Real-Time Layer                              │   │
+│  │  Redis (pub/sub, streams, task queue, caching)                  │   │
+│  │  ARQ Worker (distributed agent execution)                       │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │                     External Services                             │   │
 │  │  LiteLLM (AI)   Stripe (billing)   OAuth (GitHub/Google)         │   │
 │  │  SMTP Email (2FA, password reset)                                │   │
@@ -67,6 +73,7 @@ Tesslate Studio is an AI-powered web application builder that lets users create,
 | **AI/LLM** | LiteLLM → OpenAI, Anthropic, Qwen models |
 | **Containers** | Docker Compose (dev), Kubernetes (prod) |
 | **Storage** | AWS S3 / MinIO (project hibernation) |
+| **Task Queue** | Redis, ARQ (distributed agent execution) |
 | **Routing** | Traefik (Docker), NGINX Ingress (K8s) |
 | **Payments** | Stripe |
 
@@ -107,6 +114,16 @@ Tesslate supports multiple deployment targets:
 
 See: [Deployment Documentation](orchestrator/services/deployment-providers.md)
 
+### 5. Real-Time Agent System
+Distributed agent execution with progressive persistence and cross-pod visibility.
+
+- **ARQ Workers**: Agents execute on dedicated worker pods, not inline in API requests
+- **Redis Pub/Sub + Streams**: Real-time event streaming across pods
+- **Progressive Persistence**: Each iteration saved as AgentStep row immediately
+- **External API**: API key-based access for Slack, CLI, and webhook integrations
+
+See: [Real-Time Agent Architecture](guides/real-time-agent-architecture.md)
+
 ## Repository Structure
 
 ```
@@ -116,6 +133,7 @@ tesslate-studio/
 │       ├── main.py        # Entry point
 │       ├── routers/       # API endpoints
 │       ├── services/      # Business logic
+│       ├── worker.py      # ARQ worker for agent tasks
 │       ├── agent/         # AI agent system
 │       └── models.py      # Database models
 │

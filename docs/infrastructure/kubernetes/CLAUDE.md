@@ -55,6 +55,18 @@ kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
 - Overrides images with registry and tag
 - Applies patches for environment-specific config
 
+**Worker Deployment** (`k8s/base/core/worker-deployment.yaml`):
+- Runs same image as backend with `arq orchestrator.app.worker.WorkerSettings` command
+- Shares `tesslate-secrets` and config with backend
+- Separate resource limits for worker pods
+- AWS overlay patch: `k8s/overlays/aws-base/worker-patch.yaml`
+
+**Redis** (`k8s/base/redis/`):
+- `redis-deployment.yaml` - Single replica Redis with PVC persistence
+- `redis-service.yaml` - ClusterIP service (port 6379)
+- `redis-pvc.yaml` - 1Gi persistent volume claim
+- ConfigMap with `maxmemory 512mb`, `volatile-lru` eviction, `appendonly yes`
+
 ## Common Tasks
 
 ### Adding Environment Variable

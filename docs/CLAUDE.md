@@ -14,6 +14,7 @@ Tesslate Studio consists of four major systems:
 | **App** | Frontend UI, code editor, chat interface | React 19, TypeScript |
 | **Infrastructure** | Kubernetes, Docker, Terraform | K8s, Kustomize, AWS |
 | **Database** | User data, projects, chat history | PostgreSQL |
+| **Redis** | Pub/sub, task queue, caching, distributed locks | Redis 7.x |
 
 ## Key Source Files
 
@@ -26,6 +27,8 @@ Tesslate Studio consists of four major systems:
 | [app/src/lib/api.ts](../app/src/lib/api.ts) | API client (1300+ lines) |
 | [docker-compose.yml](../docker-compose.yml) | Local development stack |
 | [k8s/base/kustomization.yaml](../k8s/base/kustomization.yaml) | Kubernetes base config |
+| [orchestrator/app/worker.py](../orchestrator/app/worker.py) | ARQ worker for distributed agent execution |
+| [orchestrator/app/routers/external_agent.py](../orchestrator/app/routers/external_agent.py) | External agent API |
 
 ## Related Contexts (Load These For)
 
@@ -60,6 +63,7 @@ Tesslate Studio consists of four major systems:
 | `SMTP_PASSWORD` | SMTP authentication password |
 | `SMTP_SENDER_EMAIL` | Sender email address (e.g., noreply@domain.com) |
 | `TWO_FA_ENABLED` | Enable email 2FA for logins (default: false) |
+| `REDIS_URL` | Redis connection string (cross-pod comms) |
 
 ### Project URL Patterns
 
@@ -140,6 +144,9 @@ Load this root CLAUDE.md when:
 | Fix Kubernetes issues | [infrastructure/kubernetes/CLAUDE.md](infrastructure/kubernetes/CLAUDE.md) |
 | Update Minikube config | [infrastructure/kubernetes/overlays/CLAUDE.md](infrastructure/kubernetes/overlays/CLAUDE.md) |
 | Deploy to AWS | [guides/aws-deployment.md](guides/aws-deployment.md) |
+| Understand real-time agent system | [guides/real-time-agent-architecture.md](guides/real-time-agent-architecture.md) |
+| External agent API | [orchestrator/routers/external-agent.md](orchestrator/routers/external-agent.md) |
+| Redis/pub-sub infrastructure | [orchestrator/services/pubsub.md](orchestrator/services/pubsub.md) |
 
 ## Important Notes
 

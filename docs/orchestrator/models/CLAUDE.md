@@ -68,14 +68,18 @@
 
 ### Chat & Agent Execution Models
 **Chat** (models.py)
-- Purpose: Conversation threads with AI agents
-- Key fields: `user_id`, `project_id`, `created_at`
-- Related: Messages (one-to-many)
+- Purpose: Conversation threads with AI agents, supports multi-session per project
+- Key fields: `user_id`, `project_id`, `title`, `origin`, `status`, `created_at`, `updated_at`
+- `origin`: Where the chat was initiated from ("browser", "api", "slack", "cli")
+- `status`: Session lifecycle ("active", "running", "completed")
+- Related: Messages (one-to-many), AgentSteps
+- Index: Composite on (user_id, project_id)
 
 **Message** (models.py)
 - Purpose: Individual messages in chat (user or assistant)
-- Key fields: `chat_id`, `role`, `content`, `message_metadata`
-- Related: Stores agent execution steps in metadata JSON
+- Key fields: `chat_id`, `role`, `content`, `message_metadata`, `updated_at`
+- Related: Stores agent execution steps in metadata JSON or linked AgentStep rows
+- `updated_at`: Auto-refreshed when message content changes
 
 **AgentCommandLog** (models.py)
 - Purpose: Audit log for shell commands executed by agents
@@ -86,6 +90,19 @@
 - Purpose: Persistent terminal sessions for WebSocket connections
 - Key fields: `session_id`, `container_name`, `status`, `bytes_read`, `bytes_written`
 - Related: Resource tracking and cleanup
+
+**AgentStep** (models.py)
+- Purpose: Append-only log of agent execution steps, enables progressive persistence
+- Key fields: `message_id` (FK), `chat_id`, `step_index`, `step_data` (JSON), `created_at`
+- `step_data` JSON: `{iteration, thought, tool_calls[], tool_results[], response_text, timestamp, is_complete}`
+- Index: Composite on (message_id, step_index)
+- Related: Message (many-to-one), replaces inline metadata["steps"] for worker-executed tasks
+
+**ExternalAPIKey** (models.py)
+- Purpose: API keys for external agent invocation (Slack, CLI, Discord integrations)
+- Key fields: `user_id`, `key_hash` (SHA-256), `key_prefix` (tsk_), `name`, `scopes`, `project_ids`, `is_active`, `expires_at`, `last_used_at`
+- Security: Keys stored as SHA-256 hash, raw key only returned on creation
+- Related: User (many-to-one)
 
 **PodAccessLog** (models.py)
 - Purpose: Audit log for Kubernetes pod access (compliance & security)
@@ -503,8 +520,10 @@ external_endpoint, credentials_id, status, position_x, position_y
 
 ### Chat/Message Fields
 ```
-Chat: id, user_id, project_id, created_at
-Message: id, chat_id, role, content, message_metadata, created_at
+Chat: id, user_id, project_id, title, origin, status, created_at, updated_at
+Message: id, chat_id, role, content, message_metadata, created_at, updated_at
+AgentStep: id, message_id, chat_id, step_index, step_data (JSON), created_at
+ExternalAPIKey: id, user_id, key_hash, key_prefix, name, scopes, project_ids, is_active, expires_at, last_used_at
 ```
 
 ### MarketplaceAgent Fields

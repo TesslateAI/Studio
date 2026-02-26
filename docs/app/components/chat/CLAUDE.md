@@ -8,6 +8,9 @@
 - Agent steps are rendered separately from final responses
 - Approval requests are separate message types
 - Mobile/desktop have different UI patterns
+- **Multi-session chat**: Users can have multiple chat sessions per project, managed via ChatSessionPopover
+- **Real-time agent visibility**: Agent execution events stream via Redis → WebSocket, not just SSE
+- **Progressive step loading**: Steps may come from AgentStep table (metadata flag `steps_table: True`)
 
 ## Common Modifications
 
@@ -154,6 +157,87 @@ const messages = [
 ];
 
 // ChatMessage.tsx already renders actions, no changes needed
+```
+
+## Multi-Session Chat
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `ChatSessionPopover` | `components/chat/ChatSessionPopover.tsx` | Dropdown to switch between chat sessions |
+| `ChatSessionModal` | `components/chat/ChatSessionModal.tsx` | Full modal for session management (create, rename, delete) |
+
+### Session Model
+
+Each chat session is a `Chat` record with:
+- `title`: User-editable session name
+- `origin`: Where it was created ("browser", "api", "slack", "cli")
+- `status`: Lifecycle state ("active", "running", "completed")
+- `updated_at`: Auto-refreshed on new messages
+
+### Switching Sessions
+
+```typescript
+// ChatContainer manages active session
+const [activeChatId, setActiveChatId] = useState<string | null>(null);
+
+// ChatSessionPopover shows session list
+<ChatSessionPopover
+  projectId={projectId}
+  activeChatId={activeChatId}
+  onSessionChange={setActiveChatId}
+/>
+```
+
+### API Endpoints (lib/api.ts)
+
+```typescript
+// List sessions for a project
+chatApi.getSessions(projectId): Promise<ChatSession[]>
+
+// Create new session
+chatApi.createSession(projectId, title?): Promise<ChatSession>
+
+// Delete session
+chatApi.deleteSession(sessionId): Promise<void>
+```
+
+## Real-Time Agent Visibility
+
+Agent execution events now flow through Redis Streams → WebSocket instead of only SSE:
+
+### Event Flow
+```
+Worker Pod → Redis Stream → API Pod (pubsub subscriber) → WebSocket → Frontend
+```
+
+### WebSocket Event Types (New)
+```typescript
+// Agent execution started (from another source like API)
+{ type: "agent_task_started", task_id: string, chat_id: string }
+
+// Agent step completed
+{ type: "agent_step", step: AgentStepData }
+
+// Agent execution completed
+{ type: "agent_task_completed", task_id: string, response: string }
+
+// Agent execution failed
+{ type: "agent_task_error", task_id: string, error: string }
+```
+
+### Progressive Step Loading
+When loading chat history, messages from worker execution have `metadata.steps_table: true`. The frontend should load steps from the AgentStep API instead of inline metadata:
+
+```typescript
+// Check if steps are in separate table
+if (message.metadata?.steps_table) {
+  const steps = await chatApi.getMessageSteps(messageId);
+  // Render steps from API response
+} else {
+  // Render steps from inline metadata (legacy)
+}
 ```
 
 ## Approval Flow Deep Dive

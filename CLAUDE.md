@@ -34,6 +34,11 @@ AI-powered web application builder that lets users create, edit, deploy, and man
 │  - Chat UI                 │   - AI Agent System            │
 │  - File Browser            │   - Container Orchestration    │
 ├─────────────────────────────────────────────────────────────┤
+│  Redis                │  ARQ Worker                          │
+│  - Pub/Sub + Streams  │  - Distributed agent execution       │
+│  - Task queue (ARQ)   │  - Progressive step persistence      │
+│  - Distributed locks  │  - Webhook callbacks                 │
+├─────────────────────────────────────────────────────────────┤
 │  PostgreSQL        │  Docker/Kubernetes Container Manager   │
 │  (User data,       │  (User project environments)           │
 │   projects, chat)  │  - Per-project isolation               │
@@ -47,6 +52,7 @@ AI-powered web application builder that lets users create, edit, deploy, and man
 | Frontend | React 19, TypeScript, Vite, Tailwind, Monaco Editor |
 | Backend | FastAPI, Python 3.11, SQLAlchemy, LiteLLM |
 | Database | PostgreSQL (asyncpg) |
+| Task Queue | Redis 7.x, ARQ |
 | Containers | Docker Compose (dev), Kubernetes (prod) |
 | Routing | Traefik (Docker), NGINX Ingress (K8s) |
 | AI | LiteLLM → OpenAI/Anthropic models |
@@ -66,14 +72,34 @@ POST /api/projects → routers/projects.py
 
 ### 2. Agent Chat (AI Code Generation)
 ```
-POST /api/chat/stream → routers/chat.py
-  ├─> create_agent_from_db_model() → agent/factory.py
-  │     └─> Instantiate agent with tools + system prompt
-  ├─> agent.run(user_request, context) → agent/stream_agent.py
-  │     ├─ LLM call with system prompt + tools
-  │     ├─ Tool execution loop (write files, run commands, etc.)
-  │     └─ Yield streaming events to client
-  └─> Client renders agent steps in real-time
+POST /api/chat/agent/stream → routers/chat.py
+  ├─> Build AgentTaskPayload (agent_context.py)
+  │     └─> Project info, git status, chat history, TESSLATE.md
+  ├─> Enqueue to ARQ Redis queue
+  │     └─> Worker picks up task (worker.py)
+  │           ├─ Acquire project lock (prevent concurrent runs)
+  │           ├─ Run agent loop with progressive persistence
+  │           │   ├─ INSERT AgentStep per iteration
+  │           │   ├─ Publish events to Redis Stream
+  │           │   └─ Check cancellation signal between iterations
+  │           ├─ Finalize Message with summary
+  │           └─ Release lock + optional webhook callback
+  └─> Redis Stream → WebSocket → Client renders steps in real-time
+```
+
+### 2b. External Agent API
+```
+POST /api/external/agent/invoke → routers/external_agent.py
+  ├─> Authenticate via Bearer token (API key)
+  ├─> Build AgentTaskPayload (same as browser flow)
+  ├─> Enqueue to ARQ Redis queue
+  └─> Return task_id + events_url immediately
+
+GET /api/external/agent/events/{task_id} (SSE)
+  └─> Subscribe to Redis Stream for real-time events
+
+GET /api/external/agent/status/{task_id} (Polling)
+  └─> Query TaskManager for current status
 ```
 
 ### 3. Container Lifecycle
@@ -121,6 +147,7 @@ tesslate-studio/
 │       │   ├── billing.py    # Stripe subscriptions
 │       │   ├── deployments.py # Vercel/Netlify/Cloudflare
 │       │   ├── git.py        # Git operations
+│       │   ├── external_agent.py # External agent API (API keys, SSE, webhooks)
 │       │   └── ...
 │       ├── services/
 │       │   ├── docker_compose_orchestrator.py  # Docker container mgmt
@@ -131,7 +158,14 @@ tesslate-studio/
 │       │   │       └── helpers.py              # Deployment manifests
 │       │   ├── snapshot_manager.py             # EBS VolumeSnapshot for project persistence
 │       │   ├── litellm_service.py              # AI model routing
+│       │   ├── pubsub.py                   # Cross-pod Redis pub/sub + streams
+│       │   ├── distributed_lock.py         # Redis-based distributed locks
+│       │   ├── agent_context.py            # Agent execution context builder
+│       │   ├── agent_task.py               # Agent task payload serialization
+│       │   ├── session_router.py           # Cross-pod shell session routing
 │       │   └── ...
+│       ├── worker.py         # ARQ worker for agent tasks
+│       ├── auth_external.py  # API key authentication
 │       └── agent/            # AI agent system
 │           ├── base.py       # Abstract agent interface
 │           ├── stream_agent.py # Streaming agent implementation
@@ -156,6 +190,7 @@ tesslate-studio/
 │   │   ├── database/         # PostgreSQL deployment
 │   │   ├── ingress/          # NGINX Ingress rules
 │   │   ├── security/         # RBAC, network policies
+│   │   ├── redis/            # Redis deployment, service, PVC
 │   │   └── minio/            # S3-compatible storage (local dev)
 │   ├── overlays/
 │   │   ├── minikube/         # Local dev patches
@@ -185,6 +220,8 @@ tesslate-studio/
 - **Deployment**: External deployment records
 - **DeploymentCredential**: OAuth tokens for Vercel/Netlify/etc.
 - **Theme**: Customizable theme presets with colors, typography, spacing, animations
+- **AgentStep**: Append-only agent execution steps (progressive persistence)
+- **ExternalAPIKey**: API keys for external agent invocation (SHA-256 hashed)
 
 ## Agent Tools (orchestrator/app/agent/tools/)
 
@@ -277,6 +314,10 @@ Each `CLAUDE.md` file contains:
 | Settings pages | `docs/app/pages/settings.md` |
 | Marketplace pages | `docs/app/pages/marketplace-browse.md` |
 | Page layouts | `docs/app/layouts/CLAUDE.md` |
+| Real-time agent architecture | `docs/guides/real-time-agent-architecture.md` |
+| External agent API | `docs/orchestrator/routers/external-agent.md` |
+| Redis/pub-sub infrastructure | `docs/orchestrator/services/pubsub.md` |
+| Worker system | `docs/orchestrator/services/worker.md` |
 
 ## Deployment Modes
 
@@ -292,6 +333,7 @@ Each `CLAUDE.md` file contains:
 cp .env.example .env           # configure SECRET_KEY, LITELLM_API_BASE, LITELLM_MASTER_KEY
 docker compose up --build -d   # build images and start all services
 docker compose ps              # verify all 4 services are healthy
+# Services started: app (frontend), orchestrator (backend), postgres, traefik, redis, worker
 # Access: http://localhost (frontend), http://localhost:8000/docs (API docs)
 
 # IMPORTANT: Build devserver image (required for user project containers)
@@ -402,6 +444,9 @@ k8s_snapshot_class: str            # VolumeSnapshotClass (tesslate-ebs-snapshots
 k8s_snapshot_retention_days: int   # Days to keep soft-deleted snapshots (30)
 k8s_max_snapshots_per_project: int # Max snapshots in timeline (5)
 k8s_enable_pod_affinity: bool      # Keep multi-container projects on same node
+redis_url: str                     # Redis connection string (empty = in-memory fallback)
+worker_max_jobs: int               # Concurrent agent tasks per worker pod (10)
+worker_job_timeout: int            # Task timeout in seconds (600)
 ```
 
 #### Minikube vs Production Config
