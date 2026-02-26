@@ -68,11 +68,16 @@ class Task:
     error: str | None = None
     logs: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Internal: callback for debounced Redis sync (set by TaskManager, excluded from serialization)
+    _sync_callback: Callable | None = field(default=None, repr=False)
 
     def add_log(self, message: str):
         """Add a log message with timestamp"""
         timestamp = datetime.utcnow().isoformat()
         self.logs.append(f"[{timestamp}] {message}")
+        # Trigger debounced Redis sync if a task manager is tracking this task
+        if self._sync_callback:
+            self._sync_callback(self)
 
     def update_progress(self, current: int, total: int, message: str = ""):
         """Update task progress"""
@@ -80,7 +85,10 @@ class Task:
         self.progress.total = total
         if message:
             self.progress.message = message
-            self.add_log(message)
+            self.add_log(message)  # add_log triggers sync
+        elif self._sync_callback:
+            # Progress changed without a message — still sync
+            self._sync_callback(self)
 
     def to_dict(self) -> dict:
         """Convert task to dictionary for API responses"""
@@ -139,12 +147,37 @@ class TaskManager:
     for cross-pod visibility in horizontally scaled deployments.
     """
 
+    # Minimum interval between Redis syncs for log/progress updates (seconds)
+    _SYNC_DEBOUNCE_INTERVAL = 0.5
+
     def __init__(self):
         self._tasks: dict[str, Task] = {}
         self._user_tasks: dict[UUID, list[str]] = defaultdict(list)  # Changed from int to UUID
         self._background_tasks: dict[str, asyncio.Task] = {}
         self._callbacks: dict[str, list[Callable]] = defaultdict(list)
         self._lock = asyncio.Lock()
+        self._pending_syncs: dict[str, asyncio.Task] = {}  # debounced sync tasks
+
+    def _schedule_debounced_sync(self, task: Task):
+        """Schedule a debounced Redis sync for task state (logs/progress).
+
+        Ensures task state is synced to Redis within _SYNC_DEBOUNCE_INTERVAL
+        seconds, coalescing rapid updates into a single write.
+        """
+        task_id = task.id
+
+        # Cancel any pending sync for this task
+        existing = self._pending_syncs.pop(task_id, None)
+        if existing and not existing.done():
+            existing.cancel()
+
+        async def _do_sync():
+            await asyncio.sleep(self._SYNC_DEBOUNCE_INTERVAL)
+            self._pending_syncs.pop(task_id, None)
+            await self._store_task_redis(task)
+
+        with contextlib.suppress(RuntimeError):
+            self._pending_syncs[task_id] = asyncio.create_task(_do_sync())
 
     async def _store_task_redis(self, task: Task):
         """Store task state in Redis for cross-pod visibility."""
@@ -224,6 +257,9 @@ class TaskManager:
             created_at=datetime.utcnow(),
             metadata=metadata or {},
         )
+
+        # Wire up debounced Redis sync so add_log/update_progress are visible cross-pod
+        task._sync_callback = self._schedule_debounced_sync
 
         self._tasks[task_id] = task
         self._user_tasks[user_id].append(task_id)
@@ -311,8 +347,12 @@ class TaskManager:
                     if not raw:
                         ids_to_prune.append(tid)
                         continue
-                    task = Task.from_dict(json.loads(raw))
-                    self._tasks[tid] = task  # cache locally
+                    # Prefer local task (fresher state + sync callback intact)
+                    if tid in self._tasks:
+                        task = self._tasks[tid]
+                    else:
+                        task = Task.from_dict(json.loads(raw))
+                        self._tasks[tid] = task  # cache locally
                     if active_only and task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
                         ids_to_prune.append(tid)
                         continue
@@ -365,6 +405,11 @@ class TaskManager:
                     return
                 # Cache locally for future lookups
                 self._tasks[task_id] = task
+
+            # Cancel any pending debounced sync — we're about to do a full sync
+            pending = self._pending_syncs.pop(task_id, None)
+            if pending and not pending.done():
+                pending.cancel()
 
             task.status = status
 
@@ -468,6 +513,10 @@ class TaskManager:
                     del self._background_tasks[task_id]
                 if task_id in self._callbacks:
                     del self._callbacks[task_id]
+                # Cancel any pending debounced sync
+                pending = self._pending_syncs.pop(task_id, None)
+                if pending and not pending.done():
+                    pending.cancel()
 
 
 # Global task manager instance

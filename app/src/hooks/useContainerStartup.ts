@@ -81,14 +81,15 @@ export function useContainerStartup(
         const progress = task.progress?.percentage ?? 0;
         const phase = task.progress?.message || task.status || 'running';
         const message = PHASE_MESSAGES[phase] || PHASE_MESSAGES[task.status] || 'Processing...';
-        const logs = task.logs || [];
+        const taskLogs = task.logs || [];
 
         setState((prev) => ({
           ...prev,
           phase,
           progress,
           message,
-          logs,
+          // Don't replace existing logs with empty array (race: task not yet running)
+          logs: taskLogs.length > 0 ? taskLogs : prev.logs,
         }));
 
         // Check if task completed
@@ -187,7 +188,8 @@ export function useContainerStartup(
         // Check if max retries reached
         if (healthCheckRetriesRef.current >= healthCheckMaxRetries) {
           cleanup();
-          const errorMsg = 'HEALTH_CHECK_TIMEOUT:Container started but server did not respond in time';
+          const errorMsg =
+            'HEALTH_CHECK_TIMEOUT:Container started but server did not respond in time';
           setState((prev) => ({
             ...prev,
             status: 'error',

@@ -30,7 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
-
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
@@ -121,7 +120,7 @@ async def _validate_git_repo_accessible(
                 f"(or that you have connected the right account for private repos). "
                 f"Git error: {err_text}"
             )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise RuntimeError(
             f"Repository check timed out after {timeout}s for {repo_url}. "
             f"The remote server may be unreachable."
@@ -5049,13 +5048,15 @@ async def rename_container(
         raise HTTPException(status_code=500, detail=f"Failed to rename container: {str(e)}") from e
 
 
-@router.patch("/{project_slug}/containers/{container_id}/deployment-target", response_model=ContainerSchema)
+@router.patch(
+    "/{project_slug}/containers/{container_id}/deployment-target", response_model=ContainerSchema
+)
 async def assign_deployment_target(
     project_slug: str,
     container_id: UUID,
     assignment: DeploymentTargetAssignment,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Assign or remove a deployment target from a container.
@@ -5063,15 +5064,13 @@ async def assign_deployment_target(
     Validates that the container type and framework are compatible with the
     deployment provider before assignment.
     """
-    from ..services.service_definitions import is_deployment_compatible, DEPLOYMENT_COMPATIBILITY
+    from ..services.service_definitions import DEPLOYMENT_COMPATIBILITY, is_deployment_compatible
 
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     # Get container with base relationship for tech stack info
     result = await db.execute(
-        select(Container)
-        .where(Container.id == container_id)
-        .options(selectinload(Container.base))
+        select(Container).where(Container.id == container_id).options(selectinload(Container.base))
     )
     container = result.scalar_one_or_none()
 
@@ -5095,20 +5094,22 @@ async def assign_deployment_target(
     if provider not in DEPLOYMENT_COMPATIBILITY:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid deployment provider. Must be one of: {', '.join(DEPLOYMENT_COMPATIBILITY.keys())}"
+            detail=f"Invalid deployment provider. Must be one of: {', '.join(DEPLOYMENT_COMPATIBILITY.keys())}",
         )
 
     # Get tech stack from base if available
     tech_stack = []
     if container.base and container.base.tech_stack:
-        tech_stack = container.base.tech_stack if isinstance(container.base.tech_stack, list) else []
+        tech_stack = (
+            container.base.tech_stack if isinstance(container.base.tech_stack, list) else []
+        )
 
     # Validate compatibility
     is_compatible, reason = is_deployment_compatible(
         container_type=container.container_type,
         service_slug=container.service_slug,
         tech_stack=tech_stack,
-        provider=provider
+        provider=provider,
     )
 
     if not is_compatible:
@@ -5378,7 +5379,16 @@ async def _start_container_background_task(
 
         # Check if container is already running - skip full startup if so
         orchestrator = get_orchestrator()
-        status = await orchestrator.get_project_status(project.slug, project.id)
+        try:
+            status = await asyncio.wait_for(
+                orchestrator.get_project_status(project.slug, project.id),
+                timeout=15,
+            )
+        except Exception as e:
+            # If status check fails/times out, proceed with startup
+            task.add_log(f"Status check skipped ({type(e).__name__}), proceeding with startup")
+            logger.warning(f"[ORCHESTRATOR] get_project_status timed out or failed: {e}")
+            status = {"status": "unknown", "containers": {}}
 
         # Build the lookup key matching what K8s uses for the pod label:
         # service containers key by service_slug, base containers by directory
@@ -5460,13 +5470,16 @@ async def _start_container_background_task(
             # Stage 4: Start container in K8s (55%)
             task.update_progress(55, 100, f"Creating Kubernetes resources for '{container.name}'")
 
-            result = await orchestrator.start_container(
-                project=project,
-                container=container,
-                all_containers=all_containers,
-                connections=all_connections,
-                user_id=user_id,
-                db=db,
+            result = await asyncio.wait_for(
+                orchestrator.start_container(
+                    project=project,
+                    container=container,
+                    all_containers=all_containers,
+                    connections=all_connections,
+                    user_id=user_id,
+                    db=db,
+                ),
+                timeout=300,  # 5 min timeout for K8s container startup
             )
 
             task.add_log(f"Container '{container.name}' deployed to Kubernetes")
@@ -5527,8 +5540,6 @@ async def _start_container_background_task(
                     )
 
             # Give container a moment to fully initialize
-            import asyncio
-
             await asyncio.sleep(2)
             task.add_log("Container health check passed")
 
