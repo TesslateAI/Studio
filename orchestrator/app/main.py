@@ -28,6 +28,7 @@ from .routers import (
     deployment_oauth,
     deployment_targets,
     deployments,
+    external_agent,
     feedback,
     git,
     git_providers,
@@ -399,20 +400,56 @@ async def startup():
     asyncio.create_task(run_all_seeds())
     logger.info("Database seeding started as background task")
 
-    # Start background cleanup tasks
-    asyncio.create_task(shell_session_cleanup_loop())
-    asyncio.create_task(container_cleanup_loop())
-    asyncio.create_task(stats_flush_loop())
+    # Initialize Redis connection (non-blocking) — must happen before distributed locks
+    from .services.cache_service import get_redis_client
 
-    # Start model health check loop (non-blocking, tests each LiteLLM model every 10 min)
+    redis = await get_redis_client()
+    if redis:
+        logger.info("Redis connected — distributed caching and horizontal scaling enabled")
+
+        # Start Redis Pub/Sub subscriber for WebSocket fanout across pods
+        from .services.pubsub import get_pubsub
+
+        pubsub = get_pubsub()
+        if pubsub:
+            asyncio.create_task(pubsub.start_subscriber())
+            logger.info("Redis Pub/Sub subscriber started for WebSocket fanout")
+    else:
+        logger.info("Redis not available — running in single-pod mode (in-memory fallback)")
+
+    # Start background cleanup tasks (with distributed locking for multi-pod)
+    from .services.distributed_lock import get_distributed_lock
     from .services.model_health import model_health_check_loop
-
-    asyncio.create_task(model_health_check_loop())
-
-    # Start daily credit reset background task
     from .services.daily_credit_reset import daily_credit_reset_loop
 
-    asyncio.create_task(daily_credit_reset_loop())
+    dlock = get_distributed_lock()
+
+    if redis:
+        # Redis available: use distributed locks so only one pod runs each loop
+        asyncio.create_task(
+            dlock.run_with_lock("shell_cleanup", shell_session_cleanup_loop)
+        )
+        asyncio.create_task(
+            dlock.run_with_lock("container_cleanup", container_cleanup_loop)
+        )
+        asyncio.create_task(
+            dlock.run_with_lock("stats_flush", stats_flush_loop)
+        )
+        asyncio.create_task(
+            dlock.run_with_lock("model_health", model_health_check_loop)
+        )
+        asyncio.create_task(
+            dlock.run_with_lock("credit_reset", daily_credit_reset_loop)
+        )
+        logger.info("Background loops started with distributed locking")
+    else:
+        # No Redis: run all loops locally (single-pod fallback)
+        asyncio.create_task(shell_session_cleanup_loop())
+        asyncio.create_task(container_cleanup_loop())
+        asyncio.create_task(stats_flush_loop())
+        asyncio.create_task(model_health_check_loop())
+        asyncio.create_task(daily_credit_reset_loop())
+        logger.info("Background loops started without distributed locking (single-pod mode)")
 
     # Initialize base cache (Docker mode only - async - doesn't block startup)
     if is_docker_mode():
@@ -425,9 +462,13 @@ async def startup():
         logger.info("Skipping base cache manager initialization (Kubernetes mode)")
 
 
+
 @app.on_event("shutdown")
 async def shutdown():
-    logger.info("Shutdown initiated - closing database pool...")
+    from .services.cache_service import close_redis_client
+
+    await close_redis_client()
+    logger.info("Redis connection closed")
     await engine.dispose()
     logger.info("Shutdown complete")
 
@@ -909,6 +950,7 @@ app.include_router(deployment_oauth.router)
 app.include_router(deployment_targets.router)  # Deployment target nodes in React Flow
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
+app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)
 
 
 @app.get("/")
@@ -918,7 +960,14 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "tesslate-backend"}
+    from .services.cache_service import get_redis_client
+
+    redis = await get_redis_client()
+    return {
+        "status": "healthy",
+        "service": "tesslate-backend",
+        "redis": "connected" if redis else "unavailable",
+    }
 
 
 @app.get("/ready")

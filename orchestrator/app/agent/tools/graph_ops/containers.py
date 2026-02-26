@@ -188,7 +188,9 @@ async def graph_stop_container_executor(
         stop_kwargs: dict = {
             "project_slug": project_slug,
             "project_id": project_id,
-            "container_name": container.directory or container.name,
+            "container_name": (
+                container.name if container.directory in (".", "", None) else container.directory
+            ).lower().replace(" ", "-").replace("_", "-").replace(".", "-"),
             "user_id": user_id,
         }
         if is_kubernetes_mode() and getattr(container, "container_type", "base") == "service":

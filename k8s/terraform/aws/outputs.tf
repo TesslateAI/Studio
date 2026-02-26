@@ -196,6 +196,24 @@ output "litellm_public_url" {
 }
 
 # -----------------------------------------------------------------------------
+# Redis Outputs (if ElastiCache is enabled)
+# -----------------------------------------------------------------------------
+output "redis_endpoint" {
+  description = "Redis endpoint"
+  value       = var.create_elasticache ? aws_elasticache_replication_group.redis[0].primary_endpoint_address : "Using K8s-managed Redis"
+}
+
+output "redis_port" {
+  description = "Redis port"
+  value       = 6379
+}
+
+output "redis_url" {
+  description = "Full Redis connection URL"
+  value       = var.create_elasticache ? "redis://${aws_elasticache_replication_group.redis[0].primary_endpoint_address}:6379/0" : "redis://redis:6379/0"
+}
+
+# -----------------------------------------------------------------------------
 # Useful Commands
 # -----------------------------------------------------------------------------
 output "configure_kubectl_command" {

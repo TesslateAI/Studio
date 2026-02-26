@@ -259,6 +259,10 @@ spec:
               name: s3-credentials
               key: S3_REGION
 
+        # Redis - Distributed backplane for horizontal scaling
+        - name: REDIS_URL
+          value: "redis://redis:6379/0"  # Patched by overlays for production (ElastiCache)
+
         # Kubernetes Settings (patched by overlays)
         - name: K8S_NAMESPACE_PER_PROJECT
           value: "true"

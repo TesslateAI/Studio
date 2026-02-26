@@ -579,6 +579,64 @@ export const chatApi = {
       response: response,
     });
   },
+
+  // Cancel a running agent task
+  cancelAgentTask: async (taskId: string) => {
+    const response = await api.post(`/api/chat/agent/cancel/${taskId}`);
+    return response.data;
+  },
+
+  // Check for active agent task on a project
+  getActiveTask: async (projectId: string) => {
+    const response = await api.get('/api/chat/agent/active', {
+      params: { project_id: projectId },
+    });
+    return response.data;
+  },
+
+  // Subscribe to agent events (SSE) for reconnection
+  subscribeToTask: (taskId: string, lastEventId?: string) => {
+    const params = lastEventId ? `?last_event_id=${lastEventId}` : '';
+    const url = `${API_URL}/api/chat/agent/events/${taskId}${params}`;
+    return new EventSource(url, { withCredentials: true });
+  },
+
+  // List chat sessions for a project
+  getProjectSessions: async (projectId: string) => {
+    const response = await api.get(`/api/chat/${projectId}/sessions`);
+    return response.data;
+  },
+
+  // Update a chat session
+  updateChatSession: async (chatId: string, data: { title?: string; status?: string }) => {
+    const response = await api.patch(`/api/chat/${chatId}/update`, data);
+    return response.data;
+  },
+
+  // Get messages for a specific chat session
+  getSessionMessages: async (projectId: string, chatId?: string) => {
+    const params = chatId ? { chat_id: chatId } : {};
+    const response = await api.get(`/api/chat/${projectId}/messages`, { params });
+    return response.data;
+  },
+};
+
+export const externalApi = {
+  // API key management
+  createKey: async (data: { name: string; scopes?: string[]; project_ids?: string[]; expires_in_days?: number }) => {
+    const response = await api.post('/api/external/keys', data);
+    return response.data;
+  },
+
+  listKeys: async () => {
+    const response = await api.get('/api/external/keys');
+    return response.data;
+  },
+
+  deleteKey: async (keyId: string) => {
+    const response = await api.delete(`/api/external/keys/${keyId}`);
+    return response.data;
+  },
 };
 
 export const marketplaceApi = {

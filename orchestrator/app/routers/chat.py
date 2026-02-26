@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import json
 import logging
@@ -18,6 +19,7 @@ from ..agent.models import create_model_adapter
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
+    AgentStep,
     Chat,
     Container,
     MarketplaceAgent,
@@ -32,437 +34,57 @@ from ..schemas import Chat as ChatSchema
 from ..schemas import Message as MessageSchema
 from ..users import current_active_user
 from ..utils.resource_naming import get_project_path
+from ..services.agent_context import (
+    _resolve_container_name,
+    _build_git_context,
+    _build_architecture_context,
+    _get_chat_history,
+    _build_tesslate_context,
+)
 
 settings = get_settings()
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) -> dict | None:
-    """
-    Build Git context for agent if project has a Git repository connected.
+# ARQ Redis pool (lazy initialized)
+_arq_pool = None
 
-    Returns a dict with structured git info, or None if no Git repo.
-    Keys:
-        - "formatted": Human-readable string for user message context
-        - "branch": Current branch name (for {git_branch} marker)
-        - "repo_url": Repository URL
-        - "auto_push": Whether auto-push is enabled
-    """
-    try:
-        from ..models import GitRepository
-        from ..services.git_manager import GitManager
 
-        # Check if project has Git repository
-        result = await db.execute(
-            select(GitRepository).where(GitRepository.project_id == project.id)
-        )
-        git_repo = result.scalar_one_or_none()
+async def _get_arq_pool():
+    """Get or create the ARQ Redis pool for task dispatch."""
+    global _arq_pool
+    if _arq_pool is not None:
+        return _arq_pool
 
-        if not git_repo:
-            return None
+    from ..services.cache_service import get_redis_client
 
-        # Get current Git status
-        git_manager = GitManager(user_id=user_id, project_id=str(project.id))
-        try:
-            git_status = await git_manager.get_status()
-        except Exception as status_error:
-            logger.warning(f"[GIT-CONTEXT] Could not get Git status: {status_error}")
-            git_status = None
-
-        # Build concise Git context
-        context_lines = [
-            "\n=== Git Repository ===",
-            f"Repository: {git_repo.repo_url}",
-        ]
-
-        branch = ""
-        if git_status:
-            branch = git_status.get("branch", "")
-            context_lines.append(f"Branch: {branch}")
-
-            total_changes = (
-                git_status.get("staged_count", 0)
-                + git_status.get("unstaged_count", 0)
-                + git_status.get("untracked_count", 0)
-            )
-            if total_changes > 0:
-                context_lines.append(f"Uncommitted Changes: {total_changes}")
-
-            sync_info = []
-            if git_status.get("ahead", 0) > 0:
-                sync_info.append(f"{git_status['ahead']} ahead")
-            if git_status.get("behind", 0) > 0:
-                sync_info.append(f"{git_status['behind']} behind")
-            if sync_info:
-                context_lines.append(f"Remote: {', '.join(sync_info)}")
-
-            if git_status.get("last_commit"):
-                last_commit = git_status["last_commit"]
-                context_lines.append(
-                    f"Last Commit: {last_commit['message']} ({last_commit['sha'][:8]})"
-                )
-
-        if git_repo.auto_push:
-            context_lines.append("Auto-push: ENABLED")
-        else:
-            context_lines.append("Auto-push: DISABLED")
-
-        return {
-            "formatted": "\n".join(context_lines),
-            "branch": branch,
-            "repo_url": git_repo.repo_url,
-            "auto_push": git_repo.auto_push,
-        }
-
-    except Exception as e:
-        logger.error(f"[GIT-CONTEXT] Failed to build Git context: {e}", exc_info=True)
+    redis = await get_redis_client()
+    if not redis:
         return None
 
-
-async def _build_architecture_context(project: Project, db: AsyncSession) -> str | None:
-    """
-    Build architecture context describing containers, connections, and
-    auto-injected environment variables so the agent knows what services
-    are available and which env vars it can use in code.
-    """
     try:
-        from ..models import ContainerConnection
-        from ..services.secret_manager_env import (
-            get_injected_env_vars_for_container,
-        )
+        from arq import create_pool
+        from arq.connections import RedisSettings
+        from urllib.parse import urlparse
 
-        # Fetch containers
-        result = await db.execute(select(Container).where(Container.project_id == project.id))
-        containers = result.scalars().all()
-        if not containers:
+        redis_url = settings.redis_url if hasattr(settings, "redis_url") else ""
+        if not redis_url:
             return None
 
-        # Fetch connections
-        conn_result = await db.execute(
-            select(ContainerConnection).where(ContainerConnection.project_id == project.id)
-        )
-        connections = conn_result.scalars().all()
-
-        # Build container lookup
-        container_map = {str(c.id): c for c in containers}
-
-        lines = ["\n=== Project Architecture ==="]
-
-        # List containers
-        lines.append("\nContainers:")
-        for c in containers:
-            svc_label = f" ({c.service_slug})" if c.service_slug else ""
-            mode_label = ""
-            if c.deployment_mode == "external":
-                mode_label = " [external]"
-            port_label = f" port:{c.effective_port}"
-            lines.append(f"  - {c.name}{svc_label}{mode_label}{port_label} [{c.status}]")
-
-        # List connections
-        if connections:
-            lines.append("\nConnections:")
-            for conn in connections:
-                src = container_map.get(str(conn.source_container_id))
-                tgt = container_map.get(str(conn.target_container_id))
-                if src and tgt:
-                    lines.append(f"  - {src.name} -> {tgt.name} ({conn.connector_type})")
-
-        # List injected env vars per container, grouped by source
-        has_injected = False
-        for c in containers:
-            injected = await get_injected_env_vars_for_container(db, c.id, project.id)
-            if injected:
-                if not has_injected:
-                    lines.append("\nAuto-injected environment variables (from connections):")
-                    has_injected = True
-                # Group by source so multi-source containers read clearly
-                by_source: dict[str, list[str]] = {}
-                for iv in injected:
-                    by_source.setdefault(iv["source_container_name"], []).append(iv["key"])
-                for src_name, keys in by_source.items():
-                    lines.append(f"  {c.name}: {', '.join(keys)}  (from {src_name})")
-
-        if has_injected:
-            lines.append(
-                "\nThese env vars are automatically available at runtime — "
-                "use them directly in code (e.g. process.env.DATABASE_URL) "
-                "without asking the user to configure them."
+        parsed = urlparse(redis_url)
+        _arq_pool = await create_pool(
+            RedisSettings(
+                host=parsed.hostname or "redis",
+                port=parsed.port or 6379,
+                database=int(parsed.path.lstrip("/") or "0"),
+                password=parsed.password,
             )
-
-        return "\n".join(lines)
-
-    except Exception as e:
-        logger.error(
-            f"[ARCH-CONTEXT] Failed to build architecture context: {e}",
-            exc_info=True,
         )
-        return None
-
-
-async def _get_chat_history(
-    chat_id: UUID, db: AsyncSession, limit: int = 10
-) -> list[dict[str, str]]:
-    """
-    Fetch recent chat history for context.
-
-    Args:
-        chat_id: Chat ID to fetch messages from
-        db: Database session
-        limit: Maximum number of message pairs to fetch (default 10, max 20)
-
-    Returns:
-        List of message dictionaries with 'role' and 'content' keys
-    """
-    try:
-        # Limit to prevent token overflow
-        limit = min(limit, 20)
-
-        # Fetch recent messages, excluding the current one (it will be added separately)
-        messages_result = await db.execute(
-            select(Message)
-            .where(Message.chat_id == chat_id)
-            .order_by(Message.created_at.desc())
-            .limit(limit * 2)  # *2 to account for user+assistant pairs
-        )
-        messages = list(messages_result.scalars().all())
-
-        # Reverse to get chronological order (oldest first)
-        messages.reverse()
-
-        # Format messages for LLM
-        formatted_messages = []
-        for msg in messages:
-            # Skip system messages or empty content
-            if not msg.content or msg.role not in ["user", "assistant"]:
-                continue
-
-            # For user messages, just add the content
-            if msg.role == "user":
-                formatted_messages.append({"role": msg.role, "content": msg.content})
-            # For assistant messages, check if there are agent iterations in metadata
-            elif msg.role == "assistant":
-                metadata = msg.message_metadata or {}
-                steps = metadata.get("steps", [])
-
-                if steps:
-                    # Agent message with iterations - reconstruct full conversation
-                    # Include each iteration's response as a separate assistant message
-                    # to preserve the full context of the agent's thought process
-                    for step in steps:
-                        # Build a detailed response for each iteration
-                        thought = step.get("thought", "")
-                        response_text = step.get("response_text", "")
-                        tool_calls = step.get("tool_calls", [])
-
-                        iteration_content = ""
-
-                        # Add thought if present
-                        if thought:
-                            iteration_content += f"THOUGHT: {thought}\n\n"
-
-                        # Add tool calls if present
-                        if tool_calls:
-                            iteration_content += "Tool Calls:\n"
-                            for tc in tool_calls:
-                                tool_name = tc.get("name", "unknown")
-                                tool_result = tc.get("result", {})
-                                success = tool_result.get("success", False)
-
-                                iteration_content += (
-                                    f"- {tool_name}: {'✓ Success' if success else '✗ Failed'}\n"
-                                )
-
-                                # Add brief result summary
-                                if success and tool_result.get("result"):
-                                    result_data = tool_result["result"]
-                                    if isinstance(result_data, dict):
-                                        if "message" in result_data:
-                                            iteration_content += f"  {result_data['message']}\n"
-                                    else:
-                                        iteration_content += f"  {str(result_data)[:200]}\n"
-
-                            iteration_content += "\n"
-
-                        # Add response text
-                        if response_text:
-                            iteration_content += response_text
-
-                        if iteration_content.strip():
-                            formatted_messages.append(
-                                {"role": "assistant", "content": iteration_content}
-                            )
-
-                            # Add tool results as user feedback (simulating the iterative flow)
-                            if tool_calls:
-                                tool_results_feedback = "Tool Results:\n"
-                                for idx, tc in enumerate(tool_calls):
-                                    tool_name = tc.get("name", "unknown")
-                                    tool_result = tc.get("result", {})
-                                    success = tool_result.get("success", False)
-
-                                    tool_results_feedback += f"\n{idx + 1}. {tool_name}: {'✓ Success' if success else '✗ Failed'}\n"
-
-                                    if tool_result.get("result"):
-                                        result_data = tool_result["result"]
-                                        if isinstance(result_data, dict):
-                                            # Add key result fields
-                                            for key in ["message", "content", "stdout", "output"]:
-                                                if key in result_data:
-                                                    content = str(result_data[key])[
-                                                        :500
-                                                    ]  # Limit content length
-                                                    tool_results_feedback += (
-                                                        f"   {key}: {content}\n"
-                                                    )
-                                                    break
-                                        else:
-                                            tool_results_feedback += (
-                                                f"   {str(result_data)[:500]}\n"
-                                            )
-
-                                formatted_messages.append(
-                                    {"role": "user", "content": tool_results_feedback}
-                                )
-                else:
-                    # Regular assistant message without iterations
-                    formatted_messages.append({"role": msg.role, "content": msg.content})
-
-        logger.info(f"[CHAT-HISTORY] Fetched {len(formatted_messages)} messages for chat {chat_id}")
-        return formatted_messages
-
+        logger.info("[ARQ] Redis pool created for agent task dispatch")
+        return _arq_pool
     except Exception as e:
-        logger.error(f"[CHAT-HISTORY] Failed to fetch chat history: {e}", exc_info=True)
-        return []
-
-
-async def _build_tesslate_context(
-    project: Project,
-    user_id: UUID,
-    db: AsyncSession,
-    container_name: str | None = None,
-    container_directory: str | None = None,
-) -> str | None:
-    """
-    Build TESSLATE.md context for agent.
-
-    Reads TESSLATE.md from the user's project container. For container-scoped agents,
-    reads from the container's directory. If it doesn't exist, copies the generic
-    template from orchestrator/template/TESSLATE.md.
-
-    Args:
-        project: Project model
-        user_id: User UUID
-        db: Database session
-        container_name: Optional container name for multi-container projects
-        container_directory: Optional container directory for file path resolution
-
-    Returns the TESSLATE.md content as a formatted string, or None if unable to read.
-    """
-    try:
-        # Read TESSLATE.md from the user's project (deployment-aware)
-        tesslate_content = None
-
-        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
-
-        # Try unified orchestrator first
-        try:
-            orchestrator = get_orchestrator()
-            tesslate_content = await orchestrator.read_file(
-                user_id=user_id,
-                project_id=project.id,
-                container_name=container_name,  # Use specific container if provided
-                file_path="TESSLATE.md",
-                project_slug=project.slug,
-                subdir=container_directory,  # Read from container's subdirectory
-            )
-
-            # If TESSLATE.md doesn't exist, copy the template
-            if tesslate_content is None:
-                logger.info(
-                    f"[TESSLATE-CONTEXT] TESSLATE.md not found in project {project.id}, copying template"
-                )
-
-                # Read the generic template
-                template_path = os.path.join(
-                    os.path.dirname(__file__), "..", "..", "template", "TESSLATE.md"
-                )
-                try:
-                    async with aiofiles.open(template_path, encoding="utf-8") as f:
-                        template_content = await f.read()
-
-                    # Write template to container's subdirectory
-                    success = await orchestrator.write_file(
-                        user_id=user_id,
-                        project_id=project.id,
-                        container_name=container_name,
-                        file_path="TESSLATE.md",
-                        content=template_content,
-                        project_slug=project.slug,
-                        subdir=container_directory,  # Write to container's subdirectory
-                    )
-
-                    if success:
-                        tesslate_content = template_content
-                        logger.info(
-                            f"[TESSLATE-CONTEXT] Successfully copied template to project {project.id}"
-                        )
-                    else:
-                        logger.warning("[TESSLATE-CONTEXT] Failed to write template to container")
-
-                except Exception as e:
-                    logger.error(f"[TESSLATE-CONTEXT] Failed to read template file: {e}")
-
-        except Exception as e:
-            logger.debug(f"[TESSLATE-CONTEXT] Could not read via orchestrator: {e}")
-
-        # Fallback: Docker mode - read from local filesystem
-        if tesslate_content is None and not is_kubernetes_mode():
-            # Docker mode: Read from local filesystem
-            project_dir = get_project_path(user_id, project.id)
-            tesslate_path = os.path.join(project_dir, "TESSLATE.md")
-
-            if os.path.exists(tesslate_path):
-                try:
-                    async with aiofiles.open(tesslate_path, encoding="utf-8") as f:
-                        tesslate_content = await f.read()
-                except Exception as e:
-                    logger.error(f"[TESSLATE-CONTEXT] Failed to read TESSLATE.md: {e}")
-            else:
-                # Copy template
-                logger.info(
-                    f"[TESSLATE-CONTEXT] TESSLATE.md not found in project {project.id}, copying template"
-                )
-                template_path = os.path.join(
-                    os.path.dirname(__file__), "..", "..", "template", "TESSLATE.md"
-                )
-
-                try:
-                    # Ensure project directory exists
-                    os.makedirs(project_dir, exist_ok=True)
-
-                    async with aiofiles.open(template_path, encoding="utf-8") as f:
-                        template_content = await f.read()
-
-                    async with aiofiles.open(tesslate_path, "w", encoding="utf-8") as f:
-                        await f.write(template_content)
-
-                    tesslate_content = template_content
-                    logger.info(
-                        f"[TESSLATE-CONTEXT] Successfully copied template to project {project.id}"
-                    )
-
-                except Exception as e:
-                    logger.error(f"[TESSLATE-CONTEXT] Failed to copy template: {e}")
-
-        if tesslate_content:
-            # Return formatted context
-            return f"\n=== Project Context (TESSLATE.md) ===\n\n{tesslate_content}\n"
-        else:
-            return None
-
-    except Exception as e:
-        logger.error(f"[TESSLATE-CONTEXT] Failed to build TESSLATE context: {e}", exc_info=True)
+        logger.warning(f"[ARQ] Failed to create Redis pool: {e}")
         return None
 
 
@@ -482,38 +104,115 @@ async def create_chat(
     db: AsyncSession = Depends(get_db),
 ):
     project_id = chat_data.get("project_id")
+    title = chat_data.get("title")
 
-    # Check if chat already exists for this user and project
-    if project_id:
-        result = await db.execute(
-            select(Chat).where(Chat.user_id == current_user.id, Chat.project_id == project_id)
-        )
-        existing_chat = result.scalar_one_or_none()
-        if existing_chat:
-            return existing_chat
-
-    db_chat = Chat(user_id=current_user.id, project_id=project_id)
+    db_chat = Chat(
+        user_id=current_user.id,
+        project_id=project_id,
+        title=title,
+        origin="browser",
+    )
     db.add(db_chat)
     await db.commit()
     await db.refresh(db_chat)
     return db_chat
 
 
-@router.get("/{project_id}/messages", response_model=list[MessageSchema])
-async def get_project_messages(
+@router.get("/{project_id}/sessions")
+async def list_chat_sessions(
     project_id: str,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all messages for a specific project's chat."""
-    # Get the chat for this user and project
+    """List all chat sessions for a project with status and message count."""
+    from sqlalchemy import func as sa_func
+
     result = await db.execute(
-        select(Chat).where(Chat.user_id == current_user.id, Chat.project_id == project_id)
+        select(
+            Chat,
+            sa_func.count(Message.id).label("message_count"),
+        )
+        .outerjoin(Message, Message.chat_id == Chat.id)
+        .where(Chat.user_id == current_user.id, Chat.project_id == project_id)
+        .group_by(Chat.id)
+        .order_by(Chat.updated_at.desc().nullslast(), Chat.created_at.desc())
     )
+    rows = result.all()
+
+    sessions = []
+    for chat, message_count in rows:
+        sessions.append({
+            "id": str(chat.id),
+            "title": chat.title,
+            "origin": chat.origin or "browser",
+            "status": chat.status or "active",
+            "created_at": chat.created_at.isoformat() if chat.created_at else None,
+            "updated_at": chat.updated_at.isoformat() if chat.updated_at else None,
+            "message_count": message_count,
+        })
+
+    return sessions
+
+
+@router.patch("/{chat_id}/update")
+async def update_chat_session(
+    chat_id: str,
+    update_data: dict,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a chat session (title, archive status)."""
+    result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == current_user.id)
+    )
+    chat = result.scalar_one_or_none()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if "title" in update_data:
+        chat.title = update_data["title"]
+    if "status" in update_data and update_data["status"] in ("active", "archived"):
+        chat.status = update_data["status"]
+
+    await db.commit()
+    await db.refresh(chat)
+    return {"id": str(chat.id), "title": chat.title, "status": chat.status}
+
+
+@router.get("/{project_id}/messages")
+async def get_project_messages(
+    project_id: str,
+    chat_id: str | None = None,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all messages for a specific project's chat.
+
+    Supports multi-session: pass chat_id to load a specific session.
+    Without chat_id, loads the most recent session (backward compatible).
+    Messages with progressive step persistence (steps_table=True) have
+    their steps loaded from the agent_steps table.
+    """
+
+    if chat_id:
+        # Specific session
+        result = await db.execute(
+            select(Chat).where(
+                Chat.id == chat_id,
+                Chat.user_id == current_user.id,
+            )
+        )
+    else:
+        # Legacy: get most recent chat for project
+        result = await db.execute(
+            select(Chat).where(
+                Chat.user_id == current_user.id,
+                Chat.project_id == project_id,
+            ).order_by(Chat.created_at.desc()).limit(1)
+        )
     chat = result.scalar_one_or_none()
 
     if not chat:
-        # No chat exists yet for this project, return empty list
         return []
 
     # Get all messages for this chat
@@ -521,7 +220,33 @@ async def get_project_messages(
         select(Message).where(Message.chat_id == chat.id).order_by(Message.created_at.asc())
     )
     messages = messages_result.scalars().all()
-    return messages
+
+    # Enrich messages that use steps_table with AgentStep data
+    enriched = []
+    for msg in messages:
+        msg_dict = {
+            "id": str(msg.id),
+            "chat_id": str(msg.chat_id),
+            "role": msg.role,
+            "content": msg.content,
+            "message_metadata": msg.message_metadata,
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        }
+        metadata = msg.message_metadata or {}
+        if metadata.get("steps_table"):
+            steps_result = await db.execute(
+                select(AgentStep)
+                .where(AgentStep.message_id == msg.id)
+                .order_by(AgentStep.step_index)
+            )
+            steps = steps_result.scalars().all()
+            msg_dict["message_metadata"] = {
+                **metadata,
+                "steps": [s.step_data for s in steps],
+            }
+        enriched.append(msg_dict)
+
+    return enriched
 
 
 @router.delete("/{project_id}/messages")
@@ -803,23 +528,13 @@ async def agent_chat(
                 container = container_result.scalar_one_or_none()
                 if container:
                     container_id = container.id
-                    # Use directory as service name for shell ops (it's already sanitized)
-                    # This gets prefixed with project_slug in _get_container_name()
-                    container_name = (
-                        container.directory
-                        if container.directory and container.directory != "."
-                        else None
-                    )
+                    container_name = _resolve_container_name(container)
                     # Set container directory for scoped file operations
                     if container.directory and container.directory != ".":
                         container_directory = container.directory
-                        logger.info(
-                            f"[AGENT-CHAT] Container-scoped agent: {container_name} ({container_id}), directory: {container_directory}"
-                        )
-                    else:
-                        logger.info(
-                            f"[AGENT-CHAT] Using specified container: {container_name} ({container_id})"
-                        )
+                    logger.info(
+                        f"[AGENT-CHAT] Using container: {container_name} ({container_id}), directory: {container_directory}"
+                    )
                 else:
                     logger.warning(f"[AGENT-CHAT] Container not found: {request.container_id}")
             except Exception as e:
@@ -832,12 +547,7 @@ async def agent_chat(
             container = container_result.scalar_one_or_none()
             if container:
                 container_id = container.id
-                # Use directory as service name for shell ops (it's already sanitized)
-                container_name = (
-                    container.directory
-                    if container.directory and container.directory != "."
-                    else None
-                )
+                container_name = _resolve_container_name(container)
                 logger.info(
                     f"[AGENT-CHAT] Using default container: {container_name} ({container_id})"
                 )
@@ -1081,7 +791,7 @@ async def handle_agent_approval(
     Returns:
         Success confirmation
     """
-    from ..agent.tools.approval_manager import get_approval_manager
+    from ..agent.tools.approval_manager import get_approval_manager, publish_approval_response
 
     approval_id = approval_data.get("approval_id")
     response = approval_data.get("response")  # 'allow_once', 'allow_all', 'stop'
@@ -1091,8 +801,12 @@ async def handle_agent_approval(
 
     logger.info(f"[APPROVAL] Received approval response: {response} for {approval_id}")
 
+    # Try local first (in-process agent execution / same pod)
     approval_mgr = get_approval_manager()
     approval_mgr.respond_to_approval(approval_id, response)
+
+    # Also publish to Redis so workers on other pods receive the approval
+    await publish_approval_response(approval_id, response)
 
     return {"success": True, "message": "Approval response processed"}
 
@@ -1171,12 +885,7 @@ async def agent_chat_stream(
                 container = container_result.scalar_one_or_none()
                 if container:
                     container_id = container.id
-                    # Use directory as service name for shell ops (it's already sanitized)
-                    container_name = (
-                        container.directory
-                        if container.directory and container.directory != "."
-                        else None
-                    )
+                    container_name = _resolve_container_name(container)
                     # Capture container directory for scoped file operations
                     if container.directory and container.directory != ".":
                         container_directory = container.directory
@@ -1354,124 +1063,198 @@ async def agent_chat_stream(
                 "agent_id": agent_model.id if agent_model else None,
             }
 
-            # Accumulate results for database persistence
-            collected_steps = []
-            final_response = ""
-            iterations = 0
-            tool_calls_made = 0
-            completion_reason = "task_complete"
-            session_id = None
+            # ================================================================
+            # Dispatch: ARQ Worker (if Redis available) or In-Process
+            # ================================================================
+            arq_pool = await _get_arq_pool()
 
-            logger.info(
-                f"[SSE-AGENT] Starting agent.run() for project {request.project_id}, message: {request.message[:100]}..."
-            )
+            if arq_pool:
+                # --- QUEUE-BASED EXECUTION ---
+                # Enqueue to ARQ worker fleet. Worker handles agent.run(),
+                # DB persistence, and bash cleanup. We just relay events.
+                import uuid as _uuid
 
-            # Stream events from agent and collect metadata
-            event_count = 0
-            async for event in agent_instance.run(request.message, context):
-                event_count += 1
-                event_type = event.get("type", "unknown")
-                logger.info(f"[SSE-AGENT] Event #{event_count}: type={event_type}")
+                from ..services.agent_task import AgentTaskPayload
+                from ..services.pubsub import get_pubsub
 
-                # Collect step data for persistence (use safe .get() to avoid KeyError)
-                if event["type"] == "agent_step":
-                    step_data = event.get("data", {})
-                    collected_steps.append(step_data)
-                    tool_calls = step_data.get("tool_calls", [])
-                    logger.info(
-                        f"[SSE-AGENT] Agent step - iteration={step_data.get('iteration')}, tools={[tc.get('name') for tc in tool_calls]}"
-                    )
-                elif event["type"] == "complete":
-                    complete_data = event.get("data", {})
-                    final_response = complete_data.get("final_response", "")
-                    iterations = complete_data.get("iterations", iterations)
-                    tool_calls_made = complete_data.get("tool_calls_made", tool_calls_made)
-                    completion_reason = complete_data.get("completion_reason", completion_reason)
-                    session_id = complete_data.get("session_id")
-                    logger.info(
-                        f"[SSE-AGENT] Agent complete - iterations={iterations}, tool_calls={tool_calls_made}, reason={completion_reason}"
-                    )
-                elif event["type"] == "error":
-                    # Error events may use 'content' key instead of 'data'
-                    error_msg = event.get(
-                        "content", event.get("data", {}).get("message", "Unknown error")
-                    )
-                    logger.error(f"[SSE-AGENT] Agent error event: {error_msg}")
-
-                # Send event in SSE format
-                yield f"data: {json.dumps(event)}\n\n"
-                logger.debug(f"[SSE-AGENT] Yielded event #{event_count} to SSE stream")
-
-            logger.info(f"[SSE-AGENT] Agent.run() finished, total events: {event_count}")
-
-            # Increment usage_count for the agent
-            if agent_model:
-                agent_model.usage_count = (agent_model.usage_count or 0) + 1
-                db.add(agent_model)
-                logger.info(
-                    f"[USAGE-TRACKING] Incremented usage_count for agent {agent_model.name} to {agent_model.usage_count}"
+                agent_task_id = str(_uuid.uuid4())
+                payload = AgentTaskPayload(
+                    task_id=agent_task_id,
+                    user_id=str(current_user.id),
+                    project_id=str(request.project_id),
+                    project_slug=project_slug,
+                    chat_id=str(chat.id),
+                    message=request.message,
+                    agent_id=str(agent_model.id) if agent_model else None,
+                    model_name=model_name,
+                    edit_mode=request.edit_mode,
+                    view_context={"view": request.view_context} if request.view_context else None,
+                    container_id=str(container_id) if container_id else None,
+                    container_name=container_name,
+                    container_directory=container_directory,
+                    chat_history=chat_history,
+                    project_context=project_context,
                 )
 
-            # Save agent response with metadata (same format as HTTP endpoint)
-            agent_metadata = {
-                "agent_mode": True,
-                "agent_type": agent_model.agent_type,
-                "iterations": iterations,
-                "tool_calls_made": tool_calls_made,
-                "completion_reason": completion_reason,
-                "session_id": session_id,
-                "trajectory_path": f".tesslate/trajectories/trajectory_{session_id}.json"
-                if session_id
-                else None,
-                "steps": [
-                    {
-                        "iteration": step.get("iteration"),
-                        "thought": step.get("thought"),
-                        "tool_calls": [
-                            {
-                                "name": tc.get("name"),
-                                "parameters": _convert_uuids_to_strings(tc.get("parameters", {})),
-                                "result": _convert_uuids_to_strings(
-                                    step.get("tool_results", [])[idx]
-                                    if idx < len(step.get("tool_results", []))
-                                    else {}
-                                ),
-                            }
-                            for idx, tc in enumerate(step.get("tool_calls", []))
-                        ],
-                        "response_text": step.get("response_text", ""),
-                        "is_complete": step.get("is_complete", False),
-                        "timestamp": step.get("timestamp", ""),
-                    }
-                    for step in collected_steps
-                ],
-            }
+                # Enqueue the job
+                await arq_pool.enqueue_job(
+                    "execute_agent_task", payload.to_dict()
+                )
+                logger.info(
+                    f"[SSE-AGENT] Enqueued agent task {agent_task_id} to ARQ worker"
+                )
 
-            assistant_message = Message(
-                chat_id=chat.id,
-                role="assistant",
-                content=final_response,
-                message_metadata=agent_metadata,
-            )
-            db.add(assistant_message)
-            await db.commit()
+                # Register task with TaskManager for cross-pod visibility
+                from ..services.task_manager import get_task_manager, TaskStatus
+                task_manager = get_task_manager()
+                task = task_manager.create_task(
+                    user_id=current_user.id,
+                    task_type="agent_execution",
+                    metadata={
+                        "project_id": str(request.project_id),
+                        "chat_id": str(chat.id),
+                        "message": request.message[:200],
+                    },
+                )
+                # Override with our agent_task_id for consistency
+                task.id = agent_task_id
+                await task_manager.update_task_status(task.id, TaskStatus.RUNNING)
 
-            # Cleanup: Close any bash session that was opened during this agent run
-            if context.get("_bash_session_id"):
-                try:
-                    from ..services.shell_session_manager import get_shell_session_manager
+                # Subscribe to Redis Pub/Sub and relay events to SSE
+                pubsub = get_pubsub()
+                if pubsub:
+                    try:
+                        async for event in pubsub.subscribe_agent_events(agent_task_id):
+                            event_type = event.get("type", "unknown")
+                            if event_type == "done":
+                                # Worker finished — don't forward "done" meta-event
+                                break
+                            yield f"data: {json.dumps(event)}\n\n"
+                    except (asyncio.CancelledError, GeneratorExit):
+                        # Client disconnected — agent keeps running in worker
+                        # User can reconnect via GET /agent/events/{task_id}
+                        logger.info(
+                            f"[SSE-AGENT] Client disconnected from task {agent_task_id} "
+                            f"— agent continues running in worker"
+                        )
+                        return
 
-                    shell_manager = get_shell_session_manager()
-                    await shell_manager.close_session(context["_bash_session_id"])
-                    logger.info(
-                        f"[SSE-AGENT] Cleaned up bash session {context['_bash_session_id']}"
-                    )
-                except Exception as cleanup_err:
-                    logger.warning(f"[SSE-AGENT] Failed to cleanup bash session: {cleanup_err}")
+                logger.info(
+                    f"[SSE-AGENT] Worker-based streaming complete for task {agent_task_id}"
+                )
 
-            logger.info(
-                f"[SSE-AGENT] Streaming complete - user: {current_user.id}, project: {request.project_id}, saved to database"
-            )
+            else:
+                # --- IN-PROCESS EXECUTION (fallback) ---
+                # No Redis/ARQ available. Run agent directly in this pod.
+                # This is the original code path for single-pod deployments.
+
+                # Accumulate results for database persistence
+                collected_steps = []
+                final_response = ""
+                iterations = 0
+                tool_calls_made = 0
+                completion_reason = "task_complete"
+                session_id = None
+
+                logger.info(
+                    f"[SSE-AGENT] Starting in-process agent.run() for project {request.project_id}"
+                )
+
+                event_count = 0
+                async for event in agent_instance.run(request.message, context):
+                    event_count += 1
+                    event_type = event.get("type", "unknown")
+                    logger.info(f"[SSE-AGENT] Event #{event_count}: type={event_type}")
+
+                    if event["type"] == "agent_step":
+                        step_data = event.get("data", {})
+                        collected_steps.append(step_data)
+                        tool_calls = step_data.get("tool_calls", [])
+                        logger.info(
+                            f"[SSE-AGENT] Agent step - iteration={step_data.get('iteration')}, tools={[tc.get('name') for tc in tool_calls]}"
+                        )
+                    elif event["type"] == "complete":
+                        complete_data = event.get("data", {})
+                        final_response = complete_data.get("final_response", "")
+                        iterations = complete_data.get("iterations", iterations)
+                        tool_calls_made = complete_data.get("tool_calls_made", tool_calls_made)
+                        completion_reason = complete_data.get("completion_reason", completion_reason)
+                        session_id = complete_data.get("session_id")
+                        logger.info(
+                            f"[SSE-AGENT] Agent complete - iterations={iterations}, tool_calls={tool_calls_made}, reason={completion_reason}"
+                        )
+                    elif event["type"] == "error":
+                        error_msg = event.get(
+                            "content", event.get("data", {}).get("message", "Unknown error")
+                        )
+                        logger.error(f"[SSE-AGENT] Agent error event: {error_msg}")
+
+                    yield f"data: {json.dumps(event)}\n\n"
+
+                logger.info(f"[SSE-AGENT] Agent.run() finished, total events: {event_count}")
+
+                # Increment usage_count for the agent
+                if agent_model:
+                    agent_model.usage_count = (agent_model.usage_count or 0) + 1
+                    db.add(agent_model)
+
+                # Save agent response with metadata
+                agent_metadata = {
+                    "agent_mode": True,
+                    "agent_type": agent_model.agent_type,
+                    "iterations": iterations,
+                    "tool_calls_made": tool_calls_made,
+                    "completion_reason": completion_reason,
+                    "session_id": session_id,
+                    "trajectory_path": f".tesslate/trajectories/trajectory_{session_id}.json"
+                    if session_id
+                    else None,
+                    "steps": [
+                        {
+                            "iteration": step.get("iteration"),
+                            "thought": step.get("thought"),
+                            "tool_calls": [
+                                {
+                                    "name": tc.get("name"),
+                                    "parameters": _convert_uuids_to_strings(tc.get("parameters", {})),
+                                    "result": _convert_uuids_to_strings(
+                                        step.get("tool_results", [])[idx]
+                                        if idx < len(step.get("tool_results", []))
+                                        else {}
+                                    ),
+                                }
+                                for idx, tc in enumerate(step.get("tool_calls", []))
+                            ],
+                            "response_text": step.get("response_text", ""),
+                            "is_complete": step.get("is_complete", False),
+                            "timestamp": step.get("timestamp", ""),
+                        }
+                        for step in collected_steps
+                    ],
+                }
+
+                assistant_message = Message(
+                    chat_id=chat.id,
+                    role="assistant",
+                    content=final_response,
+                    message_metadata=agent_metadata,
+                )
+                db.add(assistant_message)
+                await db.commit()
+
+                # Cleanup bash session
+                if context.get("_bash_session_id"):
+                    try:
+                        from ..services.shell_session_manager import get_shell_session_manager
+
+                        shell_manager = get_shell_session_manager()
+                        await shell_manager.close_session(context["_bash_session_id"])
+                    except Exception as cleanup_err:
+                        logger.warning(f"[SSE-AGENT] Failed to cleanup bash session: {cleanup_err}")
+
+                logger.info(
+                    f"[SSE-AGENT] In-process streaming complete - user: {current_user.id}, project: {request.project_id}"
+                )
 
         except Exception as e:
             import traceback
@@ -1489,6 +1272,89 @@ async def agent_chat_stream(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.post("/agent/cancel/{task_id}")
+async def cancel_agent_task(
+    task_id: str,
+    current_user: User = Depends(current_active_user),
+):
+    """Explicitly cancel a running agent task."""
+    from ..services.pubsub import get_pubsub
+
+    pubsub = get_pubsub()
+    if not pubsub:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    await pubsub.request_cancellation(task_id)
+    return {"status": "cancellation_requested", "task_id": task_id}
+
+
+@router.get("/agent/active")
+async def get_active_agent_task(
+    project_id: str,
+    current_user: User = Depends(current_active_user),
+):
+    """Check if there's an active agent task for a project."""
+    from ..services.task_manager import get_task_manager
+
+    task_manager = get_task_manager()
+    tasks = await task_manager.get_user_tasks_async(current_user.id)
+
+    for task in tasks:
+        if (
+            task.metadata
+            and task.metadata.get("project_id") == project_id
+            and task.status.value in ("running", "queued")
+        ):
+            return {
+                "task_id": task.id,
+                "chat_id": task.metadata.get("chat_id"),
+                "message": task.metadata.get("message"),
+                "started_at": task.started_at.isoformat() if task.started_at else None,
+            }
+
+    return None
+
+
+@router.get("/agent/events/{task_id}")
+async def subscribe_agent_events(
+    task_id: str,
+    last_event_id: str | None = None,
+    current_user: User = Depends(current_active_user),
+):
+    """Subscribe to agent events via SSE. Supports reconnection with last_event_id."""
+    from starlette.responses import StreamingResponse as StarletteStreamingResponse
+    from ..services.pubsub import get_pubsub
+
+    pubsub = get_pubsub()
+    if not pubsub:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    async def event_stream():
+        try:
+            if last_event_id:
+                async for event in pubsub.subscribe_agent_events_from(task_id, last_event_id):
+                    yield f"data: {json.dumps(event)}\n\n"
+                    if event.get("type") in ("done",):
+                        break
+            else:
+                async for event in pubsub.subscribe_agent_events(task_id):
+                    if event.get("type") == "done":
+                        break
+                    yield f"data: {json.dumps(event)}\n\n"
+        except (asyncio.CancelledError, GeneratorExit):
+            return
+
+    return StarletteStreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
     )
@@ -1514,6 +1380,9 @@ class ConnectionManager:
         """
         Send project/container status update to connected client.
 
+        Delivers locally if user is connected to this pod, and also publishes
+        to Redis Pub/Sub for cross-pod delivery when horizontally scaled.
+
         Used for:
         - Container startup progress (creating_environment, installing_dependencies, etc.)
         - Hibernation notifications (hibernating, hibernated)
@@ -1530,8 +1399,20 @@ class ConnectionManager:
                 - message: Human-readable status message
                 - action: Optional action like 'redirect_to_projects'
         """
+        # Local delivery (fast path)
         message = json.dumps({"type": "status_update", "payload": status})
         await self.send_personal_message(message, user_id, project_id)
+
+        # Cross-pod delivery via Redis Pub/Sub
+        try:
+            from ..services.pubsub import get_pubsub
+
+            pubsub = get_pubsub()
+            if pubsub:
+                await pubsub.publish_status_update(user_id, project_id, status)
+        except Exception as e:
+            logger.debug(f"[WS-STATUS] Redis Pub/Sub publish failed (non-blocking): {e}")
+
         logger.info(
             f"[WS-STATUS] Sent status update to user {user_id}, project {project_id}: {status.get('phase') or status.get('environment_status')}"
         )
@@ -1878,12 +1759,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
                 )
                 container = container_result.scalar_one_or_none()
                 if container:
-                    # Use directory as service name for shell ops (it's already sanitized)
-                    container_name = (
-                        container.directory
-                        if container.directory and container.directory != "."
-                        else None
-                    )
+                    container_name = _resolve_container_name(container)
                     if container.directory and container.directory != ".":
                         container_directory = container.directory
                     logger.info(

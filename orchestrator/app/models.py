@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -503,7 +504,15 @@ class Chat(Base):
     project_id = Column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
     )
+    title = Column(String(255), nullable=True)  # Optional session title
+    origin = Column(String(20), default="browser")  # browser, slack, api, cli
+    status = Column(String(20), default="active")  # active, running, waiting_approval, completed, archived
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_chats_user_project", "user_id", "project_id"),
+    )
 
     user = relationship("User", back_populates="chats")
     project = relationship("Project", back_populates="chats")
@@ -523,6 +532,26 @@ class Message(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     chat = relationship("Chat", back_populates="messages")
+    steps = relationship("AgentStep", back_populates="message", cascade="all, delete-orphan",
+                         order_by="AgentStep.step_index")
+
+
+class AgentStep(Base):
+    """Append-only log of individual agent execution steps.
+
+    Each step is INSERTed as the agent runs, so completed work survives
+    crashes. Avoids JSONB update write-amplification on the Message row.
+    """
+    __tablename__ = "agent_steps"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    chat_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # denormalized for fast queries
+    step_index = Column(SmallInteger, nullable=False)
+    step_data = Column(JSON, nullable=False)  # {iteration, thought, tool_calls, tool_results, response_text, timestamp}
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    message = relationship("Message", back_populates="steps")
 
 
 class AgentCommandLog(Base):
@@ -1617,3 +1646,23 @@ class AdminAction(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (Index("idx_admin_actions_target", "target_type", "target_id"),)
+
+
+class ExternalAPIKey(Base):
+    """API keys for external agent invocation (Slack, CLI, Discord, etc.)."""
+
+    __tablename__ = "external_api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    key_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash of the key
+    key_prefix = Column(String(12), nullable=False)  # "tsk_xxxx" visible prefix for identification
+    name = Column(String(100), nullable=False)  # User-given name for the key
+    scopes = Column(JSON, nullable=True)  # Allowed scopes: ["agent:invoke", "agent:status"]
+    project_ids = Column(JSON, nullable=True)  # Restrict to specific projects (null = all)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")

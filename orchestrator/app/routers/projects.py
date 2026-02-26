@@ -5631,7 +5631,7 @@ async def start_single_container(
     from ..services.task_manager import TaskStatus, get_task_manager
 
     task_manager = get_task_manager()
-    active_tasks = task_manager.get_user_tasks(current_user.id, active_only=True)
+    active_tasks = await task_manager.get_user_tasks_async(current_user.id, active_only=True)
 
     # Check if there's already a running task for this container
     for existing_task in active_tasks:

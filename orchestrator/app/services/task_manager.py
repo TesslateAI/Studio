@@ -1,9 +1,15 @@
 """
 Background Task Manager
 Tracks status of long-running operations to prevent blocking the event loop.
+
+Supports Redis-backed state for cross-pod visibility when horizontally scaled.
+Falls back to in-memory only when Redis is unavailable.
 """
 
 import asyncio
+import contextlib
+import json
+import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Callable
@@ -12,6 +18,13 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
+
+TASK_KEY_PREFIX = "tesslate:task:"
+USER_TASKS_KEY_PREFIX = "tesslate:user_tasks:"
+TASK_UPDATE_CHANNEL = "tesslate:task_updates"
+TASK_TTL = 86400  # 24 hours
 
 
 class TaskStatus(StrEnum):
@@ -91,9 +104,42 @@ class Task:
             "metadata": self.metadata,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "Task":
+        """Reconstruct a Task from a dict (e.g., loaded from Redis)."""
+        progress_data = data.get("progress", {})
+        return cls(
+            id=data["id"],
+            user_id=UUID(data["user_id"]),
+            type=data["type"],
+            status=TaskStatus(data["status"]),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            started_at=(
+                datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None
+            ),
+            completed_at=(
+                datetime.fromisoformat(data["completed_at"])
+                if data.get("completed_at")
+                else None
+            ),
+            progress=TaskProgress(
+                current=progress_data.get("current", 0),
+                total=progress_data.get("total", 100),
+                message=progress_data.get("message", ""),
+            ),
+            result=data.get("result"),
+            error=data.get("error"),
+            logs=data.get("logs", []),
+            metadata=data.get("metadata", {}),
+        )
+
 
 class TaskManager:
-    """Manages background tasks with status tracking"""
+    """Manages background tasks with status tracking.
+
+    Stores task state both locally (in-memory) and in Redis (when available)
+    for cross-pod visibility in horizontally scaled deployments.
+    """
 
     def __init__(self):
         self._tasks: dict[str, Task] = {}
@@ -101,6 +147,61 @@ class TaskManager:
         self._background_tasks: dict[str, asyncio.Task] = {}
         self._callbacks: dict[str, list[Callable]] = defaultdict(list)
         self._lock = asyncio.Lock()
+
+    async def _store_task_redis(self, task: Task):
+        """Store task state in Redis for cross-pod visibility."""
+        from .cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return
+
+        try:
+            task_key = f"{TASK_KEY_PREFIX}{task.id}"
+            user_key = f"{USER_TASKS_KEY_PREFIX}{task.user_id}"
+
+            # Store task data as JSON
+            await redis.setex(task_key, TASK_TTL, json.dumps(task.to_dict()))
+
+            # Add task ID to user's task set
+            await redis.sadd(user_key, task.id)
+            await redis.expire(user_key, TASK_TTL)
+        except Exception as e:
+            logger.debug(f"Failed to store task in Redis (non-blocking): {e}")
+
+    async def _publish_task_update(self, task: Task):
+        """Publish task update via Redis Pub/Sub for cross-pod WebSocket delivery."""
+        from .cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return
+
+        try:
+            await redis.publish(
+                TASK_UPDATE_CHANNEL,
+                json.dumps({"type": "task_update", "task": task.to_dict()}),
+            )
+        except Exception as e:
+            logger.debug(f"Failed to publish task update (non-blocking): {e}")
+
+    async def _load_task_redis(self, task_id: str) -> Task | None:
+        """Load task state from Redis (for cross-pod queries)."""
+        from .cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return None
+
+        try:
+            task_key = f"{TASK_KEY_PREFIX}{task_id}"
+            data = await redis.get(task_key)
+            if data:
+                return Task.from_dict(json.loads(data))
+        except Exception as e:
+            logger.debug(f"Failed to load task from Redis: {e}")
+
+        return None
 
     def create_task(
         self, user_id: UUID, task_type: str, metadata: dict[str, Any] | None = None
@@ -119,16 +220,72 @@ class TaskManager:
         self._tasks[task_id] = task
         self._user_tasks[user_id].append(task_id)
 
+        # Non-blocking Redis store
+        asyncio.create_task(self._store_task_redis(task))
+
         return task
 
     def get_task(self, task_id: str) -> Task | None:
-        """Get a task by ID"""
-        return self._tasks.get(task_id)
+        """Get a task by ID (local first, then Redis)"""
+        task = self._tasks.get(task_id)
+        if task:
+            return task
+
+        # Don't do async Redis lookup from sync method
+        # Redis lookup happens in get_task_async
+        return None
+
+    async def get_task_async(self, task_id: str) -> Task | None:
+        """Get a task by ID with Redis fallback for cross-pod visibility."""
+        # Check local first
+        task = self._tasks.get(task_id)
+        if task:
+            return task
+
+        # Try Redis (task may be on another pod)
+        task = await self._load_task_redis(task_id)
+        if task:
+            # Cache locally for future lookups
+            self._tasks[task_id] = task
+        return task
 
     def get_user_tasks(self, user_id: UUID, active_only: bool = False) -> list[Task]:
-        """Get all tasks for a user"""
+        """Get all tasks for a user (local only)"""
         task_ids = self._user_tasks.get(user_id, [])
         tasks = [self._tasks[tid] for tid in task_ids if tid in self._tasks]
+
+        if active_only:
+            tasks = [t for t in tasks if t.status in (TaskStatus.QUEUED, TaskStatus.RUNNING)]
+
+        return sorted(tasks, key=lambda t: t.created_at, reverse=True)
+
+    async def get_user_tasks_async(self, user_id: UUID, active_only: bool = False) -> list[Task]:
+        """Get all tasks for a user with Redis fallback for cross-pod visibility."""
+        from .cache_service import get_redis_client
+
+        # Start with local tasks
+        local_task_ids = set(self._user_tasks.get(user_id, []))
+
+        # Try to get task IDs from Redis (includes tasks from other pods)
+        redis = await get_redis_client()
+        if redis:
+            try:
+                user_key = f"{USER_TASKS_KEY_PREFIX}{user_id}"
+                redis_task_ids = await redis.smembers(user_key)
+                if redis_task_ids:
+                    # Merge Redis task IDs with local ones
+                    for tid in redis_task_ids:
+                        tid_str = tid if isinstance(tid, str) else tid.decode()
+                        local_task_ids.add(tid_str)
+            except Exception as e:
+                logger.debug(f"Failed to load user tasks from Redis: {e}")
+
+        # Load all tasks (local first, Redis fallback for missing ones)
+        tasks = []
+        for tid in local_task_ids:
+            task = await self.get_task_async(tid)
+            if task:
+                tasks.append(task)
 
         if active_only:
             tasks = [t for t in tasks if t.status in (TaskStatus.QUEUED, TaskStatus.RUNNING)]
@@ -156,12 +313,18 @@ class TaskManager:
                 if result is not None:
                     task.result = result
 
-            # Notify callbacks
+            # Sync to Redis
+            await self._store_task_redis(task)
+
+            # Publish update to all pods via Pub/Sub
+            await self._publish_task_update(task)
+
+            # Notify local callbacks
             await self._notify_callbacks(task_id, task)
 
     async def run_task(self, task_id: str, coro: Callable, *args, **kwargs):
         """Run a coroutine as a background task with status tracking"""
-        task = self.get_task(task_id)
+        task = await self.get_task_async(task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
 
@@ -185,9 +348,6 @@ class TaskManager:
 
     def start_background_task(self, task_id: str, coro: Callable, *args, **kwargs) -> asyncio.Task:
         """Start a task in the background and return immediately"""
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.info(
             f"[TASK-MANAGER] Creating background task {task_id} for coroutine {coro.__name__}"
         )
@@ -215,7 +375,7 @@ class TaskManager:
                 else:
                     callback(task)
             except Exception as e:
-                print(f"Error in task callback: {e}")
+                logger.warning(f"Error in task callback: {e}")
 
     async def cleanup_old_tasks(self, max_age_hours: int = 24):
         """Clean up old completed tasks"""
@@ -236,7 +396,9 @@ class TaskManager:
 
             for task_id in tasks_to_remove:
                 task = self._tasks.pop(task_id)
-                self._user_tasks[task.user_id].remove(task_id)
+                if task.user_id in self._user_tasks:
+                    with contextlib.suppress(ValueError):
+                        self._user_tasks[task.user_id].remove(task_id)
                 if task_id in self._background_tasks:
                     del self._background_tasks[task_id]
                 if task_id in self._callbacks:

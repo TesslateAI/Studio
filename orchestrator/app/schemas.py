@@ -428,17 +428,42 @@ class ChatBase(BaseModel):
 
 
 class ChatCreate(ChatBase):
-    pass
+    title: str | None = None
 
 
 class Chat(ChatBase):
     id: UUID
     user_id: UUID
+    title: str | None = None
+    origin: str = "browser"
+    status: str = "active"
     created_at: datetime
+    updated_at: datetime | None = None
     messages: list[Message] = []
 
     class Config:
         from_attributes = True
+
+
+class ChatListItem(BaseModel):
+    """Lightweight chat session for session list."""
+    id: UUID
+    title: str | None = None
+    origin: str = "browser"
+    status: str = "active"
+    created_at: datetime
+    updated_at: datetime | None = None
+    message_count: int = 0
+    last_message_preview: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChatUpdate(BaseModel):
+    """Update chat session."""
+    title: str | None = None
+    status: str | None = None
 
 
 # Agent Command Schemas
@@ -1073,3 +1098,84 @@ class RestoreSnapshotResponse(BaseModel):
     message: str
     snapshot_id: UUID
     restored_from: str  # Snapshot name
+
+
+# =============================================================================
+# External Agent API Schemas
+# =============================================================================
+
+class ExternalAPIKeyCreate(BaseModel):
+    """Create an external API key."""
+    name: str
+    scopes: list[str] | None = None
+    project_ids: list[UUID] | None = None
+    expires_in_days: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Name cannot be empty")
+        if len(v) > 100:
+            raise ValueError("Name cannot exceed 100 characters")
+        return v.strip()
+
+
+class ExternalAPIKeyResponse(BaseModel):
+    """Response for API key (includes the raw key only on creation)."""
+    id: UUID
+    name: str
+    key_prefix: str
+    scopes: list[str] | None = None
+    project_ids: list[UUID] | None = None
+    is_active: bool
+    created_at: datetime
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    key: str | None = None  # Only set on creation
+
+    class Config:
+        from_attributes = True
+
+
+class ExternalAgentInvokeRequest(BaseModel):
+    """Invoke agent via external API."""
+    project_id: UUID
+    message: str
+    container_id: UUID | None = None
+    agent_id: UUID | None = None
+    webhook_callback_url: str | None = None
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Message cannot be empty")
+        return v.strip()
+
+
+class ExternalAgentInvokeResponse(BaseModel):
+    """Response from external agent invocation."""
+    task_id: str
+    chat_id: UUID
+    events_url: str
+    status: str = "queued"
+
+
+class ExternalAgentStatusResponse(BaseModel):
+    """Agent task status for polling."""
+    task_id: str
+    status: str
+    final_response: str | None = None
+    iterations: int | None = None
+    tool_calls_made: int | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class ActiveAgentTaskResponse(BaseModel):
+    """Response for active agent task check."""
+    task_id: str
+    chat_id: UUID
+    message: str | None = None
+    started_at: datetime | None = None

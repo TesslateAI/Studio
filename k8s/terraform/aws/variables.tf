@@ -556,6 +556,21 @@ variable "azure_api_version" {
 }
 
 # -----------------------------------------------------------------------------
+# Redis / ElastiCache Configuration
+# -----------------------------------------------------------------------------
+variable "create_elasticache" {
+  description = "Create ElastiCache Redis instance (false = use K8s-managed Redis)"
+  type        = bool
+  default     = false
+}
+
+variable "elasticache_node_type" {
+  description = "ElastiCache node type"
+  type        = string
+  default     = "cache.t4g.micro"
+}
+
+# -----------------------------------------------------------------------------
 # GitHub Actions CI/CD
 # -----------------------------------------------------------------------------
 variable "create_github_actions_user" {

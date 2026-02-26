@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 async def get_task_status(task_id: str, current_user: User = Depends(current_active_user)):
     """Get status of a specific task"""
     task_manager = get_task_manager()
-    task = task_manager.get_task(task_id)
+    task = await task_manager.get_task_async(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -36,7 +36,7 @@ async def get_task_status(task_id: str, current_user: User = Depends(current_act
 async def get_active_tasks(current_user: User = Depends(current_active_user)):
     """Get all active tasks for the current user"""
     task_manager = get_task_manager()
-    tasks = task_manager.get_user_tasks(current_user.id, active_only=True)
+    tasks = await task_manager.get_user_tasks_async(current_user.id, active_only=True)
     return [task.to_dict() for task in tasks]
 
 
@@ -44,7 +44,7 @@ async def get_active_tasks(current_user: User = Depends(current_active_user)):
 async def get_all_tasks(limit: int = 50, current_user: User = Depends(current_active_user)):
     """Get all tasks for the current user (most recent first)"""
     task_manager = get_task_manager()
-    tasks = task_manager.get_user_tasks(current_user.id, active_only=False)
+    tasks = await task_manager.get_user_tasks_async(current_user.id, active_only=False)
     return [task.to_dict() for task in tasks[:limit]]
 
 
@@ -52,7 +52,7 @@ async def get_all_tasks(limit: int = 50, current_user: User = Depends(current_ac
 async def cancel_task(task_id: str, current_user: User = Depends(current_active_user)):
     """Cancel a running task"""
     task_manager = get_task_manager()
-    task = task_manager.get_task(task_id)
+    task = await task_manager.get_task_async(task_id)
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -179,30 +179,78 @@ async def websocket_endpoint(websocket: WebSocket):
         task_manager = get_task_manager()
 
         async def task_callback(task: Task):
-            """Called when a task is updated"""
+            """Called when a task is updated (local callbacks)"""
             if task.user_id == user.id:
                 await manager.send_task_update(user.id, task)
 
         # Send current active tasks
-        active_tasks = task_manager.get_user_tasks(user.id, active_only=True)
+        active_tasks = await task_manager.get_user_tasks_async(user.id, active_only=True)
         for task in active_tasks:
             await manager.send_task_update(user.id, task)
-            # Subscribe to updates for each active task
+            # Subscribe to local updates for each active task
             task_manager.subscribe(task.id, task_callback)
 
+        # Start Redis Pub/Sub listener for cross-pod task updates
+        redis_listener_task = None
+        from ..services.cache_service import get_redis_client
+        from ..services.task_manager import TASK_UPDATE_CHANNEL
+
+        redis = await get_redis_client()
+        if redis:
+            async def _redis_task_listener():
+                """Listen for task updates from other pods via Redis Pub/Sub."""
+                try:
+                    # Create a dedicated subscriber connection
+                    listener_redis = await get_redis_client()
+                    if not listener_redis:
+                        return
+                    pubsub = listener_redis.pubsub()
+                    await pubsub.subscribe(TASK_UPDATE_CHANNEL)
+                    try:
+                        while True:
+                            msg = await pubsub.get_message(
+                                ignore_subscribe_messages=True, timeout=1.0
+                            )
+                            if msg and msg["type"] == "message":
+                                data = json.loads(msg["data"])
+                                task_data = data.get("task", {})
+                                task_user_id = task_data.get("user_id")
+                                if task_user_id == str(user.id):
+                                    await manager.send_task_update(
+                                        user.id,
+                                        Task.from_dict(task_data),
+                                    )
+                            else:
+                                await asyncio.sleep(0.05)
+                    finally:
+                        await pubsub.unsubscribe(TASK_UPDATE_CHANNEL)
+                        await pubsub.close()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.debug(f"Redis task listener error: {e}")
+
+            redis_listener_task = asyncio.create_task(_redis_task_listener())
+
         # Keep connection alive and handle incoming messages
-        while True:
-            try:
-                data = await websocket.receive_text()
-                # Handle ping/pong or other client messages
-                msg = json.loads(data)
-                if msg.get("type") == "ping":
-                    await websocket.send_text(json.dumps({"type": "pong"}))
-            except WebSocketDisconnect:
-                break
-            except Exception as e:
-                print(f"WebSocket error: {e}")
-                break
+        try:
+            while True:
+                try:
+                    data = await websocket.receive_text()
+                    # Handle ping/pong or other client messages
+                    msg = json.loads(data)
+                    if msg.get("type") == "ping":
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                except WebSocketDisconnect:
+                    break
+                except Exception as e:
+                    print(f"WebSocket error: {e}")
+                    break
+        finally:
+            if redis_listener_task:
+                redis_listener_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await redis_listener_task
 
     except TimeoutError:
         logger.warning("[TASK-WS] Authentication timeout - no token received in 10s")

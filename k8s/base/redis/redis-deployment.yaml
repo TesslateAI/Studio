@@ -1,0 +1,61 @@
+# Redis Deployment
+# Used for distributed caching, Pub/Sub, and task queue (ARQ)
+# Enables horizontal scaling of backend API pods
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: tesslate
+  labels:
+    app: redis
+    component: cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+      component: cache
+  template:
+    metadata:
+      labels:
+        app: redis
+        component: cache
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+        command:
+          - redis-server
+          - --maxmemory
+          - "256mb"
+          - --maxmemory-policy
+          - allkeys-lru
+          - --appendonly
+          - "yes"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+              - redis-cli
+              - ping
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+              - redis-cli
+              - ping
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3

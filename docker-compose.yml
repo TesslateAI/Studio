@@ -66,6 +66,23 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"  # Expose for debugging with pgAdmin/DBeaver
 
+  redis:
+    image: redis:7-alpine
+    container_name: tesslate-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - tesslate-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
   orchestrator:
     build: ./orchestrator
     container_name: tesslate-orchestrator
@@ -190,10 +207,13 @@ services:
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - SMTP_SENDER_EMAIL=${SMTP_SENDER_EMAIL:-}
       - TWO_FA_ENABLED=${TWO_FA_ENABLED:-false}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - PYTHONUNBUFFERED=1
       - WATCHFILES_FORCE_POLLING=true
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - tesslate-network
@@ -217,6 +237,44 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  worker:
+    build: ./orchestrator
+    container_name: tesslate-worker
+    restart: unless-stopped
+    command: ["arq", "app.worker.WorkerSettings"]
+    volumes:
+      - ./orchestrator/app:/app/app
+      - ./orchestrator/alembic:/app/alembic
+      - ./orchestrator/alembic.ini:/app/alembic.ini
+      - ./orchestrator/pyproject.toml:/app/pyproject.toml
+      - ./orchestrator/users:/app/users
+      - projects-data:/projects
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - DEPLOYMENT_MODE=docker
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - LITELLM_API_BASE=${LITELLM_API_BASE}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - LITELLM_DEFAULT_MODELS=${LITELLM_DEFAULT_MODELS}
+      - LITELLM_TEAM_ID=${LITELLM_TEAM_ID}
+      - LITELLM_EMAIL_DOMAIN=${LITELLM_EMAIL_DOMAIN}
+      - LITELLM_INITIAL_BUDGET=${LITELLM_INITIAL_BUDGET}
+      - AGENT_MAX_COST=${AGENT_MAX_COST:-20.0}
+      - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS:-0}
+      - AGENT_MAX_COST_PER_RUN=${AGENT_MAX_COST_PER_RUN:-5.0}
+      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tesslate-network
 
   app:
     build: ./app
@@ -281,3 +339,5 @@ volumes:
     name: tesslate-base-cache
   projects-data:
     name: tesslate-projects-data  # Shared volume for all project source code
+  redis-data:
+    name: tesslate-redis-data

@@ -1,0 +1,28 @@
+{
+  "name": "Create Button Component",
+  "description": "Agent creates a new React button component",
+  "model_name": "oracle/test",
+  "turns": [
+    {
+      "thought": "I need to create a new Button component file.",
+      "tool_calls": [
+        {
+          "name": "write_file",
+          "parameters": {
+            "file_path": "src/components/Button.tsx",
+            "content": "import React from 'react';\n\ninterface ButtonProps {\n  label: string;\n  onClick?: () => void;\n  variant?: 'primary' | 'secondary';\n}\n\nexport const Button: React.FC<ButtonProps> = ({ label, onClick, variant = 'primary' }) => {\n  return (\n    <button\n      className={`btn btn-${variant}`}\n      onClick={onClick}\n    >\n      {label}\n    </button>\n  );\n};\n"
+          }
+        }
+      ]
+    },
+    {
+      "response_text": "I've created a Button component at src/components/Button.tsx with primary and secondary variants."
+    }
+  ],
+  "assertions": {
+    "tool_sequence": ["write_file"],
+    "files_created": ["src/components/Button.tsx"],
+    "final_response_contains": "Button",
+    "max_iterations": 2
+  }
+}

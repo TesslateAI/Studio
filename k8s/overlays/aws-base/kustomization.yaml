@@ -12,3 +12,4 @@ resources:
 patches:
   - path: frontend-patch.yaml
   - path: backend-patch.yaml
+  - path: worker-patch.yaml

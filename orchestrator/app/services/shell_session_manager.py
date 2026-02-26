@@ -146,6 +146,15 @@ class ShellSessionManager:
         # 8. Track in memory
         self.active_sessions[pty_session.session_id] = pty_session
 
+        # Register session ownership in Redis for cross-pod visibility
+        try:
+            from .session_router import get_session_router
+
+            session_router = get_session_router()
+            await session_router.register_session(pty_session.session_id)
+        except Exception as e:
+            logger.debug(f"[SHELL] Session router registration failed (non-blocking): {e}")
+
         # Verify session is tracked in both manager and broker
         assert pty_session.session_id in self.active_sessions, "Session not in manager dict"
         assert pty_session.session_id in self.pty_broker.sessions, "Session not in broker dict"
@@ -299,6 +308,15 @@ class ShellSessionManager:
         # Remove from active sessions
         if session_id in self.active_sessions:
             del self.active_sessions[session_id]
+
+        # Unregister from session router (cross-pod cleanup)
+        try:
+            from .session_router import get_session_router
+
+            session_router = get_session_router()
+            await session_router.unregister_session(session_id)
+        except Exception as e:
+            logger.debug(f"[SHELL] Session router unregistration failed (non-blocking): {e}")
 
         logger.info(f"Closed shell session {session_id}")
 

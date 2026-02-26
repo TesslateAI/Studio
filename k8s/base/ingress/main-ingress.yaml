@@ -16,6 +16,11 @@ metadata:
     nginx.ingress.kubernetes.io/use-regex: "true"
     # SSL redirect disabled by default, enabled in production overlays
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Sticky sessions for PTY/WebSocket affinity across multiple API replicas
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "TESS_AFFINITY"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "7200"
+    nginx.ingress.kubernetes.io/session-cookie-path: "/"
 spec:
   ingressClassName: nginx
   rules:

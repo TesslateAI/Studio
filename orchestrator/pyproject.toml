@@ -49,6 +49,10 @@ dependencies = [
     "tenacity>=9.1.2",
     # AWS S3 for project storage
     "boto3>=1.34.0",
+    # Redis for distributed caching, Pub/Sub, and horizontal scaling
+    "redis[hiredis]>=5.0.0",
+    # ARQ - async Redis task queue for agent worker fleet
+    "arq>=0.26.0",
 ]
 
 [project.optional-dependencies]
@@ -123,6 +127,7 @@ markers = [
     "llm: Tests using real LLM (Llama-4-Maverick via LiteLLM)",
     "deterministic: Determinism verification tests",
     "oracle: Oracle tests (golden input/output verification)",
+    "oracle_agent: Agent oracle tests with scripted model responses",
     "security: Security-related tests",
 ]
 

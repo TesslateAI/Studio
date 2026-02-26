@@ -146,6 +146,11 @@ export function ChatContainer({
   // When docked, always show as expanded
   const effectiveIsExpanded = isDocked || isExpanded;
 
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [showSessionModal, setShowSessionModal] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -154,6 +159,7 @@ export function ChatContainer({
   const _previousMessageCountRef = useRef(0);
   const animatedMessagesRef = useRef<Set<string>>(new Set());
   const isMountedRef = useRef(true);
+  const agentTaskIdRef = useRef<string | null>(null);
 
   // Track mounted state to guard orphaned SSE callbacks after unmount
   useEffect(() => {
@@ -271,7 +277,88 @@ export function ChatContainer({
     };
 
     loadChatHistory();
+
+    // Check for active agent task and reconnect
+    const checkActiveTask = async () => {
+      try {
+        const activeTask = await chatApi.getActiveTask(projectId.toString());
+        if (activeTask) {
+          setReconnecting(true);
+          setAgentExecuting(true);
+          agentTaskIdRef.current = activeTask.task_id;
+
+          // Add a "thinking" message
+          const thinkingMsg: Message = {
+            id: `reconnect-${activeTask.task_id}`,
+            type: 'ai',
+            content: '',
+            agentData: {
+              steps: [],
+              iterations: 0,
+              tool_calls_made: 0,
+              completion_reason: 'in_progress',
+            },
+          };
+          setMessages(prev => [...prev, thinkingMsg]);
+
+          // Subscribe to events
+          const eventSource = chatApi.subscribeToTask(activeTask.task_id);
+          eventSource.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              // Handle events same as normal streaming
+              if (data.type === 'agent_step') {
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const lastMsg = updated[updated.length - 1];
+                  if (lastMsg && lastMsg.agentData?.completion_reason === 'in_progress') {
+                    const steps = lastMsg.agentData.steps || [];
+                    lastMsg.agentData = {
+                      ...lastMsg.agentData,
+                      steps: [...steps, data.data],
+                    };
+                  }
+                  return updated;
+                });
+              } else if (data.type === 'complete' || data.type === 'done') {
+                eventSource.close();
+                setAgentExecuting(false);
+                setReconnecting(false);
+                agentTaskIdRef.current = null;
+              }
+            } catch {
+              // ignore parse errors
+            }
+          };
+          eventSource.onerror = () => {
+            eventSource.close();
+            setAgentExecuting(false);
+            setReconnecting(false);
+          };
+        }
+      } catch {
+        // No active task, that's fine
+      }
+    };
+    checkActiveTask();
   }, [projectId, initialAgents]);
+
+  // Load chat sessions for multi-session support
+  useEffect(() => {
+    const loadSessions = async () => {
+      try {
+        const sessionList = await chatApi.getProjectSessions(projectId.toString());
+        setSessions(sessionList);
+        // Set current chat to the most recent session
+        if (sessionList.length > 0 && !currentChatId) {
+          setCurrentChatId(sessionList[0].id);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    loadSessions();
+  }, [projectId]);
 
   // Update agents when initialAgents prop changes
   useEffect(() => {
@@ -676,12 +763,21 @@ export function ChatContainer({
   const escPressCountRef = useRef(0);
   const escTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const stopAgentExecution = useCallback(() => {
+  const stopAgentExecution = useCallback(async () => {
     if (abortController) {
       abortController.abort();
       setAbortController(null);
-      setAgentExecuting(false);
     }
+    // Explicitly cancel on the server (page refresh no longer cancels)
+    const taskId = agentTaskIdRef.current;
+    if (taskId) {
+      try {
+        await chatApi.cancelAgentTask(taskId);
+      } catch {
+        // Best effort - task may already be done
+      }
+    }
+    setAgentExecuting(false);
   }, [abortController]);
 
   // ESC key handler for stopping execution
@@ -768,6 +864,11 @@ export function ChatContainer({
         (event) => {
           // Guard against state updates after unmount (orphaned SSE callbacks)
           if (!isMountedRef.current) return;
+
+          // Capture task ID from streaming events for cancellation/reconnection
+          if (event.data?.task_id) {
+            agentTaskIdRef.current = event.data.task_id as string;
+          }
 
           if (event.type === 'agent_step') {
             // Transform tool_results array to match HTTP format

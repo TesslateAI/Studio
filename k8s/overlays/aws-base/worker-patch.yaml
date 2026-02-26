@@ -1,0 +1,58 @@
+# AWS EKS Worker Deployment Patch (Shared)
+#
+# Mirrors backend-patch approach: envFrom auto-mounts secrets,
+# $patch: replace removes base env vars. Workers use the same image
+# as the backend with a different entrypoint (arq).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-worker
+  namespace: tesslate
+spec:
+  replicas: 2
+  template:
+    spec:
+      serviceAccountName: tesslate-backend-sa
+      containers:
+        - name: worker
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: tesslate-app-secrets
+            - secretRef:
+                name: postgres-secret
+            - secretRef:
+                name: s3-credentials
+          env:
+            - $patch: replace
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+            - name: KUBERNETES_NAMESPACE
+              value: "tesslate"
+            # Kubernetes settings
+            - name: K8S_NAMESPACE_PER_PROJECT
+              value: "true"
+            - name: K8S_ENABLE_NETWORK_POLICIES
+              value: "true"
+            - name: K8S_STORAGE_CLASS
+              value: "tesslate-block-storage"
+            - name: K8S_INGRESS_CLASS
+              value: "nginx"
+            - name: K8S_INGRESS_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: APP_DOMAIN
+            - name: K8S_IMAGE_PULL_SECRET
+              value: ""
+            - name: K8S_IMAGE_PULL_POLICY
+              value: "Always"
+            - name: K8S_WILDCARD_TLS_SECRET
+              value: "tesslate-wildcard-tls"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"

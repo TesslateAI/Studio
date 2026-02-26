@@ -68,7 +68,10 @@ async def graph_shell_open_executor(
             )
 
         command = params.get("command", "/bin/sh")
-        container_name = container.directory or container.name
+        # Resolve name using same logic as K8s orchestrator (handles directory=".")
+        dir_for_name = container.name if container.directory in (".", "", None) else container.directory
+        container_name = dir_for_name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
+        container_name = "".join(c for c in container_name if c.isalnum() or c == "-")
 
         # Create shell session
         session_manager = get_shell_session_manager()
@@ -165,7 +168,10 @@ async def graph_shell_exec_executor(
             )
 
         timeout = params.get("timeout", 120)
-        container_name = container.directory or container.name
+        # Resolve name using same logic as K8s orchestrator (handles directory=".")
+        dir_for_name = container.name if container.directory in (".", "", None) else container.directory
+        container_name = dir_for_name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
+        container_name = "".join(c for c in container_name if c.isalnum() or c == "-")
 
         # Use orchestrator to execute command
         orchestrator = get_orchestrator()

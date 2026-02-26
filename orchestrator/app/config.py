@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     database_url: str
     database_ssl: bool = False  # Set to True for RDS connections
 
+    # Redis - Distributed caching, Pub/Sub, and task queues
+    # Required for horizontal scaling (multiple API pod replicas)
+    # If empty, falls back to in-memory (single-pod mode)
+    redis_url: str = ""
+
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""
     litellm_master_key: str = ""

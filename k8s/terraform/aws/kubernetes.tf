@@ -176,6 +176,13 @@ resource "kubernetes_secret" "app_secrets" {
 
     # Database SSL (enabled when using RDS)
     DATABASE_SSL = tostring(var.create_rds)
+
+    # Redis (ElastiCache or K8s-managed)
+    REDIS_URL = var.create_elasticache ? (
+      "redis://${aws_elasticache_replication_group.redis[0].primary_endpoint_address}:6379/0"
+    ) : (
+      "redis://redis:6379/0"
+    )
   }
 
   type = "Opaque"
@@ -285,6 +292,11 @@ resource "kubectl_manifest" "tesslate_ingress" {
         "nginx.ingress.kubernetes.io/cors-allow-methods"    = "GET, PUT, POST, DELETE, PATCH, OPTIONS"
         "nginx.ingress.kubernetes.io/cors-allow-credentials" = "true"
         "nginx.ingress.kubernetes.io/proxy-hide-header"     = "X-Powered-By"
+        # Sticky sessions for PTY/WebSocket affinity across multiple API replicas
+        "nginx.ingress.kubernetes.io/affinity"              = "cookie"
+        "nginx.ingress.kubernetes.io/session-cookie-name"   = "TESS_AFFINITY"
+        "nginx.ingress.kubernetes.io/session-cookie-max-age" = "7200"
+        "nginx.ingress.kubernetes.io/session-cookie-path"   = "/"
       }
     }
     spec = {

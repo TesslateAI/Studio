@@ -306,7 +306,7 @@ class SnapshotManager:
                     and_(
                         ProjectSnapshot.project_id == project_id,
                         ProjectSnapshot.status == "ready",
-                        not ProjectSnapshot.is_soft_deleted,
+                        ProjectSnapshot.is_soft_deleted.is_(False),
                     )
                 )
                 .order_by(ProjectSnapshot.created_at.desc())
@@ -583,7 +583,7 @@ class SnapshotManager:
         result = await db.execute(
             update(ProjectSnapshot)
             .where(
-                and_(ProjectSnapshot.project_id == project_id, not ProjectSnapshot.is_soft_deleted)
+                and_(ProjectSnapshot.project_id == project_id, ProjectSnapshot.is_soft_deleted.is_(False))
             )
             .values(is_soft_deleted=True, soft_delete_expires_at=expiry_date)
         )
@@ -660,7 +660,7 @@ class SnapshotManager:
         """
         conditions = [ProjectSnapshot.project_id == project_id]
         if not include_soft_deleted:
-            conditions.append(not ProjectSnapshot.is_soft_deleted)
+            conditions.append(ProjectSnapshot.is_soft_deleted.is_(False))
 
         result = await db.execute(
             select(ProjectSnapshot)
@@ -684,7 +684,7 @@ class SnapshotManager:
         result = await db.execute(
             select(ProjectSnapshot)
             .where(
-                and_(ProjectSnapshot.project_id == project_id, not ProjectSnapshot.is_soft_deleted)
+                and_(ProjectSnapshot.project_id == project_id, ProjectSnapshot.is_soft_deleted.is_(False))
             )
             .order_by(ProjectSnapshot.created_at.asc())
         )
@@ -822,7 +822,7 @@ class SnapshotManager:
                 and_(
                     ProjectSnapshot.project_id == project_id,
                     ProjectSnapshot.status == "ready",
-                    not ProjectSnapshot.is_soft_deleted,
+                    ProjectSnapshot.is_soft_deleted.is_(False),
                 )
             )
             .limit(1)

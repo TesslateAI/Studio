@@ -1,0 +1,50 @@
+{
+  "name": "Multi-File Refactor",
+  "description": "Agent extracts a utility function to a separate file and updates imports",
+  "model_name": "oracle/test",
+  "turns": [
+    {
+      "thought": "Let me read the main file to find the utility function to extract.",
+      "tool_calls": [
+        {
+          "name": "read_file",
+          "parameters": {"file_path": "src/utils.ts"}
+        }
+      ]
+    },
+    {
+      "thought": "I'll create a new file for the format function and update the original.",
+      "tool_calls": [
+        {
+          "name": "write_file",
+          "parameters": {
+            "file_path": "src/formatters.ts",
+            "content": "export function formatDate(date: Date): string {\n  return date.toLocaleDateString();\n}\n\nexport function formatCurrency(amount: number): string {\n  return `$${amount.toFixed(2)}`;\n}\n"
+          }
+        }
+      ]
+    },
+    {
+      "thought": "Now update the original file to import from the new module.",
+      "tool_calls": [
+        {
+          "name": "write_file",
+          "parameters": {
+            "file_path": "src/utils.ts",
+            "content": "export { formatDate, formatCurrency } from './formatters';\n\nexport function generateId(): string {\n  return Math.random().toString(36).slice(2);\n}\n"
+          }
+        }
+      ]
+    },
+    {
+      "response_text": "I've extracted formatDate and formatCurrency into src/formatters.ts and updated src/utils.ts to re-export them."
+    }
+  ],
+  "assertions": {
+    "tool_sequence": ["read_file", "write_file", "write_file"],
+    "files_created": ["src/formatters.ts"],
+    "files_modified": ["src/utils.ts"],
+    "final_response_contains": "formatters",
+    "max_iterations": 4
+  }
+}
