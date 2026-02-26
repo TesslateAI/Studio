@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Check, Layers, Package, Download } from 'lucide-react';
+import { Settings, Monitor, Check, Layers, Package, Download, Lock } from 'lucide-react';
 import { ChatCentered } from '@phosphor-icons/react';
 import { projectsApi } from '../../lib/api';
+import { ToggleSwitch } from '../ui/ToggleSwitch';
 import { useChatPosition, type ChatPosition } from '../../contexts/ChatPositionContext';
 import { ExportTemplateModal } from '../modals/ExportTemplateModal';
 import toast from 'react-hot-toast';
@@ -20,6 +21,8 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
   const [savingChatPos, setSavingChatPos] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [downloadingTesslate, setDownloadingTesslate] = useState(false);
+  const [agentLockEnabled, setAgentLockEnabled] = useState(true);
+  const [savingAgentLock, setSavingAgentLock] = useState(false);
   const { chatPosition, setChatPosition } = useChatPosition();
 
   useEffect(() => {
@@ -32,6 +35,7 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
       const data = await projectsApi.getSettings(projectSlug);
       const settings = data.settings || {};
       setPreviewMode(settings.preview_mode || 'normal');
+      setAgentLockEnabled(settings.agent_lock_enabled !== false); // default true
     } catch (error) {
       console.error('Failed to load settings:', error);
     } finally {
@@ -76,6 +80,23 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
       }
     } finally {
       setDownloadingTesslate(false);
+    }
+  };
+
+  const handleAgentLockToggle = async (enabled: boolean) => {
+    const previous = agentLockEnabled;
+    setAgentLockEnabled(enabled); // optimistic
+    setSavingAgentLock(true);
+    try {
+      await projectsApi.updateSettings(projectSlug, { agent_lock_enabled: enabled });
+      toast.success(enabled ? 'Agent lock enabled' : 'Agent lock disabled');
+    } catch (error: unknown) {
+      console.error('Failed to update agent lock:', error);
+      setAgentLockEnabled(previous); // revert
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to update settings');
+    } finally {
+      setSavingAgentLock(false);
     }
   };
 
@@ -301,6 +322,40 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
                   <span className="text-xs font-medium text-[var(--text)]">Right</span>
                 </div>
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-[var(--text)]/10 my-6" />
+
+        {/* Agent Lock */}
+        <div className="space-y-4">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Lock size={18} className="text-[var(--text)]/60" />
+              <h3 className="text-sm font-medium text-[var(--text)]">Agent Lock</h3>
+            </div>
+            <p className="text-xs text-[var(--text)]/60 mb-4">
+              When enabled, only one agent can run on this project at a time
+            </p>
+
+            <div className="flex items-center justify-between p-4 rounded-lg border-2 border-[var(--text)]/15 bg-white/5">
+              <div className="flex-1">
+                <span className="text-sm font-medium text-[var(--text)]">
+                  {agentLockEnabled ? 'Enabled' : 'Disabled'}
+                </span>
+                <p className="text-xs text-[var(--text)]/40 mt-0.5">
+                  {agentLockEnabled
+                    ? 'Agents are serialized — one at a time'
+                    : 'Concurrent agents allowed'}
+                </p>
+              </div>
+              <ToggleSwitch
+                active={agentLockEnabled}
+                onChange={handleAgentLockToggle}
+                disabled={savingAgentLock}
+              />
             </div>
           </div>
         </div>

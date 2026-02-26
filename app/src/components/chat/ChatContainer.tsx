@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, FileCode, X } from 'lucide-react';
+import { Loader2, FileCode, X, List, Plus } from 'lucide-react';
 import { PencilSimple, Storefront } from '@phosphor-icons/react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { type EditMode } from './EditModeStatus';
 import { ApprovalRequestCard } from './ApprovalRequestCard';
+import { ChatSessionPopover } from './ChatSessionPopover';
 import { createWebSocket, chatApi, marketplaceApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
@@ -148,12 +149,14 @@ export function ChatContainer({
 
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<any[]>([]);
-  const [showSessionModal, setShowSessionModal] = useState(false);
+  const [showSessionPopover, setShowSessionPopover] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [sessionTransitioning, setSessionTransitioning] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const sessionsButtonRef = useRef<HTMLButtonElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isUserScrollingRef = useRef(false);
   const _previousMessageCountRef = useRef(0);
@@ -169,12 +172,15 @@ export function ChatContainer({
     };
   }, []);
 
-  // Load chat history from database
+  // Load chat history from database — reload when session changes
   useEffect(() => {
     const loadChatHistory = async () => {
       setIsLoadingHistory(true);
       try {
-        const dbMessages: DBMessage[] = await chatApi.getProjectMessages(projectId.toString());
+        const dbMessages: DBMessage[] = await chatApi.getSessionMessages(
+          projectId.toString(),
+          currentChatId || undefined,
+        );
 
         const expandedMessages: Message[] = [];
 
@@ -341,7 +347,8 @@ export function ChatContainer({
       }
     };
     checkActiveTask();
-  }, [projectId, initialAgents]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, initialAgents, currentChatId]);
 
   // Load chat sessions for multi-session support
   useEffect(() => {
@@ -752,6 +759,7 @@ export function ChatContainer({
         message,
         project_id: projectId,
         container_id: containerId, // Container ID for scoped file access
+        chat_id: currentChatId, // Target specific chat session
         agent_id: currentAgent.backendId, // Include agent_id
         edit_mode: editMode, // Include edit mode
         view_context: viewContext, // UI view context for scoped tools
@@ -855,6 +863,7 @@ export function ChatContainer({
         {
           project_id: projectId.toString(),
           container_id: containerId, // Container ID for scoped file access
+          chat_id: currentChatId || undefined, // Target specific chat session
           message,
           agent_id: currentAgent.backendId?.toString(),
           max_iterations: null,
@@ -1088,6 +1097,8 @@ export function ChatContainer({
     } finally {
       setAgentExecuting(false);
       setAbortController(null);
+      // Refresh sessions (fire-and-forget) to pick up new titles / status
+      refreshSessions();
     }
   };
 
@@ -1111,6 +1122,67 @@ export function ChatContainer({
       toast.error('Failed to clear chat history');
     }
   };
+
+  // Session management handlers
+  const refreshSessions = useCallback(async () => {
+    try {
+      const sessionList = await chatApi.getProjectSessions(projectId.toString());
+      setSessions(sessionList);
+    } catch {
+      // non-blocking
+    }
+  }, [projectId]);
+
+  const handleNewSession = useCallback(async () => {
+    try {
+      const newChat = await chatApi.create(projectId.toString());
+      setSessionTransitioning(true);
+      setMessages([]);
+      animatedMessagesRef.current.clear();
+      setCurrentChatId(newChat.id);
+      await refreshSessions();
+      // Brief transition effect
+      setTimeout(() => setSessionTransitioning(false), 200);
+    } catch (error) {
+      console.error('[CHAT] Failed to create session:', error);
+      toast.error('Failed to create new chat session');
+    }
+  }, [projectId, refreshSessions]);
+
+  const handleSelectSession = useCallback(
+    (sessionId: string) => {
+      if (sessionId === currentChatId) return;
+      setSessionTransitioning(true);
+      setMessages([]);
+      animatedMessagesRef.current.clear();
+      setCurrentChatId(sessionId);
+      // Brief transition effect
+      setTimeout(() => setSessionTransitioning(false), 200);
+    },
+    [currentChatId],
+  );
+
+  const handleRenameSession = useCallback(
+    async (sessionId: string, newTitle: string) => {
+      try {
+        await chatApi.updateChatSession(sessionId, { title: newTitle });
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s)),
+        );
+      } catch (error) {
+        console.error('[CHAT] Failed to rename session:', error);
+        toast.error('Failed to rename session');
+      }
+    },
+    [],
+  );
+
+  // Get current session title for header
+  const currentSessionTitle = useMemo(() => {
+    if (!currentChatId || sessions.length === 0) return 'Chat';
+    const session = sessions.find((s) => s.id === currentChatId);
+    return session?.title || 'Untitled';
+  }, [currentChatId, sessions]);
 
   const handleApprovalResponse = async (
     approvalId: string,
@@ -1364,6 +1436,48 @@ export function ChatContainer({
             >
               <X size={20} className="text-[var(--text)]/60 hover:text-[var(--primary)]" />
             </button>
+          </div>
+        )}
+
+        {/* Session header bar */}
+        {effectiveIsExpanded && (
+          <div className="relative flex items-center gap-2 px-3 py-2 bg-white/[0.03] border-b border-white/[0.06]">
+            <button
+              ref={sessionsButtonRef}
+              onClick={() => setShowSessionPopover((v) => !v)}
+              className="relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[var(--text)]/50 hover:text-[var(--text)] hover:bg-white/[0.06] transition-all"
+              aria-label="Chat sessions"
+            >
+              <List size={16} />
+              {sessions.length > 1 && (
+                <span className="text-[10px] font-semibold text-[var(--text)]/40">
+                  {sessions.length}
+                </span>
+              )}
+            </button>
+
+            <span className="flex-1 truncate text-sm text-[var(--text)]/50 hover:text-[var(--text)] transition-colors cursor-default">
+              {currentSessionTitle}
+            </span>
+
+            <button
+              onClick={handleNewSession}
+              className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-all"
+              aria-label="New chat session"
+            >
+              <Plus size={16} />
+            </button>
+
+            <ChatSessionPopover
+              isOpen={showSessionPopover}
+              onClose={() => setShowSessionPopover(false)}
+              sessions={sessions}
+              currentSessionId={currentChatId}
+              onSelectSession={handleSelectSession}
+              onNewSession={handleNewSession}
+              onRenameSession={handleRenameSession}
+              anchorRef={sessionsButtonRef}
+            />
           </div>
         )}
 

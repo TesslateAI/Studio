@@ -894,12 +894,35 @@ async def agent_chat_stream(
                     )
 
             # Get or create chat for message history persistence
-            chat_result = await db.execute(
-                select(Chat).where(
-                    Chat.user_id == current_user.id, Chat.project_id == request.project_id
+            if request.chat_id:
+                # Use specific chat session when chat_id is provided
+                chat_result = await db.execute(
+                    select(Chat).where(
+                        Chat.id == request.chat_id,
+                        Chat.user_id == current_user.id,
+                        Chat.project_id == request.project_id,
+                    )
                 )
-            )
-            chat = chat_result.scalar_one_or_none()
+                chat = chat_result.scalar_one_or_none()
+                if not chat:
+                    error_event = {
+                        "type": "error",
+                        "data": {"message": f"Chat session {request.chat_id} not found"},
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    return
+            else:
+                # Fallback: get most recent chat or create new one
+                chat_result = await db.execute(
+                    select(Chat)
+                    .where(
+                        Chat.user_id == current_user.id,
+                        Chat.project_id == request.project_id,
+                    )
+                    .order_by(Chat.updated_at.desc().nullslast(), Chat.created_at.desc())
+                    .limit(1)
+                )
+                chat = chat_result.scalar_one_or_none()
 
             if not chat:
                 chat = Chat(user_id=current_user.id, project_id=request.project_id)

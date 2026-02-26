@@ -552,6 +552,7 @@ class AgentChatRequest(BaseModel):
     message: str
     agent_id: UUID | None = None  # ID of the agent to use
     container_id: UUID | None = None  # If set, agent is scoped to this container (files at root)
+    chat_id: UUID | None = None  # Target a specific chat session
     max_iterations: int | None = None  # None = unlimited
     minimal_prompts: bool | None = False
     edit_mode: str | None = "ask"  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)

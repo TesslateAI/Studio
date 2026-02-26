@@ -39,9 +39,11 @@ export interface AgentChatRequest {
   message: string;
   agent_id?: string;  // ID of the agent to use
   container_id?: string;  // If set, agent is scoped to this container (files at root)
+  chat_id?: string;  // Target a specific chat session
   max_iterations?: number;
   minimal_prompts?: boolean;
   edit_mode?: 'allow' | 'ask' | 'plan';  // Edit control mode
+  view_context?: string;  // UI view context: 'graph', 'builder', 'terminal', 'kanban'
 }
 
 export interface AgentChatResponse {
