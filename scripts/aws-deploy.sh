@@ -15,6 +15,10 @@
 #   ./scripts/aws-deploy.sh reload production               # Apply manifests + restart all pods
 #   ./scripts/aws-deploy.sh reload production backend      # Restart only backend
 #   ./scripts/aws-deploy.sh reload production litellm      # Restart only litellm (+ sync config)
+#   ./scripts/aws-deploy.sh reload production worker       # Restart only worker
+#   ./scripts/aws-deploy.sh reload production redis        # Restart only redis
+#   ./scripts/aws-deploy.sh reload production pg           # Restart only postgres (alias: postgres)
+#   ./scripts/aws-deploy.sh reload production litellm-pg   # Restart only litellm-postgres
 #   ./scripts/aws-deploy.sh reload production backend litellm  # Restart multiple pods
 #   ./scripts/aws-deploy.sh build beta                       # Build, push, restart all images
 #   ./scripts/aws-deploy.sh build production backend         # Build only backend
@@ -124,12 +128,14 @@ restart_pods() {
 # Map short names to K8s deployment names
 resolve_deployment_name() {
     case "$1" in
-        backend)    echo "tesslate-backend" ;;
-        frontend)   echo "tesslate-frontend" ;;
-        litellm)    echo "litellm" ;;
-        postgres)   echo "postgres" ;;
-        litellm-postgres) echo "litellm-postgres" ;;
-        *)          echo "$1" ;;
+        backend)          echo "tesslate-backend" ;;
+        frontend)         echo "tesslate-frontend" ;;
+        worker)           echo "tesslate-worker" ;;
+        litellm)          echo "litellm" ;;
+        redis)            echo "redis" ;;
+        pg|postgres)      echo "postgres" ;;
+        litellm-pg|litellm-postgres) echo "litellm-postgres" ;;
+        *)                echo "$1" ;;
     esac
 }
 
@@ -355,6 +361,11 @@ case "$COMMAND" in
             [backend]="app=tesslate-backend"
             [frontend]="app=tesslate-frontend"
         )
+        # Additional deployments to restart when a given image is built
+        # (e.g., worker uses the same image as backend)
+        declare -A ALSO_RESTART=(
+            [backend]="tesslate-worker"
+        )
 
         # Validate image names
         for img in $IMAGES; do
@@ -466,25 +477,35 @@ case "$COMMAND" in
         echo
 
         info "Restarting pods..."
+        # Collect all deployments to restart (primary + additional)
+        RESTART_DEPLOYMENTS=()
+        RESTART_NAMES=()
         for img in $IMAGES; do
             LABEL="${K8S_LABELS[$img]:-}"
             if [ -n "$LABEL" ]; then
-                info "[$img] Rolling restart..."
-                kubectl rollout restart "deployment/tesslate-${img}" -n tesslate
+                RESTART_DEPLOYMENTS+=("tesslate-${img}")
+                RESTART_NAMES+=("$img")
             fi
+            EXTRA="${ALSO_RESTART[$img]:-}"
+            if [ -n "$EXTRA" ]; then
+                RESTART_DEPLOYMENTS+=("$EXTRA")
+                RESTART_NAMES+=("${EXTRA#tesslate-}")
+            fi
+        done
+
+        for i in "${!RESTART_DEPLOYMENTS[@]}"; do
+            info "[${RESTART_NAMES[$i]}] Rolling restart..."
+            kubectl rollout restart "deployment/${RESTART_DEPLOYMENTS[$i]}" -n tesslate
         done
 
         # Wait for rollouts in parallel
         ROLLOUT_PIDS=()
         ROLLOUT_IMGS=()
-        for img in $IMAGES; do
-            LABEL="${K8S_LABELS[$img]:-}"
-            if [ -n "$LABEL" ]; then
-                info "[$img] Waiting for rollout..."
-                kubectl rollout status "deployment/tesslate-${img}" -n tesslate --timeout=120s &
-                ROLLOUT_PIDS+=($!)
-                ROLLOUT_IMGS+=("$img")
-            fi
+        for i in "${!RESTART_DEPLOYMENTS[@]}"; do
+            info "[${RESTART_NAMES[$i]}] Waiting for rollout..."
+            kubectl rollout status "deployment/${RESTART_DEPLOYMENTS[$i]}" -n tesslate --timeout=120s &
+            ROLLOUT_PIDS+=($!)
+            ROLLOUT_IMGS+=("${RESTART_NAMES[$i]}")
         done
 
         FAILED=0
@@ -523,8 +544,8 @@ case "$COMMAND" in
         DEPLOYMENTS=()
         SYNC_LITELLM=false
         if [ -z "$TARGETS" ]; then
-            # No specific targets — reload all (apply manifests + restart backend/frontend)
-            DEPLOYMENTS=("tesslate-backend" "tesslate-frontend")
+            # No specific targets — reload all (apply manifests + restart backend/frontend/worker)
+            DEPLOYMENTS=("tesslate-backend" "tesslate-frontend" "tesslate-worker")
             APPLY_MANIFESTS=true
         else
             APPLY_MANIFESTS=false
