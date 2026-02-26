@@ -589,7 +589,7 @@ export default function Project() {
       const found = agents.find((a) => a.id === selectedAgentId);
       if (found) return found;
     }
-    return agents[0] ?? null;
+    return agents[agents.length - 1] ?? null;
   }, [agents, selectedAgentId]);
 
   const handleAgentSelect = useCallback(
