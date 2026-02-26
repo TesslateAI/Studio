@@ -31,16 +31,15 @@ from ..models import (
 )
 from ..schemas import AgentChatRequest, AgentChatResponse, AgentStepResponse
 from ..schemas import Chat as ChatSchema
-from ..schemas import Message as MessageSchema
+from ..services.agent_context import (
+    _build_architecture_context,
+    _build_git_context,
+    _build_tesslate_context,
+    _get_chat_history,
+    _resolve_container_name,
+)
 from ..users import current_active_user
 from ..utils.resource_naming import get_project_path
-from ..services.agent_context import (
-    _resolve_container_name,
-    _build_git_context,
-    _build_architecture_context,
-    _get_chat_history,
-    _build_tesslate_context,
-)
 
 settings = get_settings()
 router = APIRouter()
@@ -64,9 +63,10 @@ async def _get_arq_pool():
         return None
 
     try:
+        from urllib.parse import urlparse
+
         from arq import create_pool
         from arq.connections import RedisSettings
-        from urllib.parse import urlparse
 
         redis_url = settings.redis_url if hasattr(settings, "redis_url") else ""
         if not redis_url:
@@ -151,15 +151,17 @@ async def list_chat_sessions(
 
     sessions = []
     for chat, message_count in rows:
-        sessions.append({
-            "id": str(chat.id),
-            "title": chat.title,
-            "origin": chat.origin or "browser",
-            "status": chat.status or "active",
-            "created_at": chat.created_at.isoformat() if chat.created_at else None,
-            "updated_at": chat.updated_at.isoformat() if chat.updated_at else None,
-            "message_count": message_count,
-        })
+        sessions.append(
+            {
+                "id": str(chat.id),
+                "title": chat.title,
+                "origin": chat.origin or "browser",
+                "status": chat.status or "active",
+                "created_at": chat.created_at.isoformat() if chat.created_at else None,
+                "updated_at": chat.updated_at.isoformat() if chat.updated_at else None,
+                "message_count": message_count,
+            }
+        )
 
     return sessions
 
@@ -215,10 +217,13 @@ async def get_project_messages(
     else:
         # Legacy: get most recent chat for project
         result = await db.execute(
-            select(Chat).where(
+            select(Chat)
+            .where(
                 Chat.user_id == current_user.id,
                 Chat.project_id == project_id,
-            ).order_by(Chat.created_at.desc()).limit(1)
+            )
+            .order_by(Chat.created_at.desc())
+            .limit(1)
         )
     chat = result.scalar_one_or_none()
 
@@ -231,7 +236,20 @@ async def get_project_messages(
     )
     messages = messages_result.scalars().all()
 
-    # Enrich messages that use steps_table with AgentStep data
+    # Batch-load AgentStep data for all messages that use steps_table (avoids N+1 queries)
+    steps_message_ids = [
+        msg.id for msg in messages if (msg.message_metadata or {}).get("steps_table")
+    ]
+    steps_by_message: dict = {}
+    if steps_message_ids:
+        steps_result = await db.execute(
+            select(AgentStep)
+            .where(AgentStep.message_id.in_(steps_message_ids))
+            .order_by(AgentStep.message_id, AgentStep.step_index)
+        )
+        for step in steps_result.scalars().all():
+            steps_by_message.setdefault(step.message_id, []).append(step.step_data)
+
     enriched = []
     for msg in messages:
         msg_dict = {
@@ -243,16 +261,10 @@ async def get_project_messages(
             "created_at": msg.created_at.isoformat() if msg.created_at else None,
         }
         metadata = msg.message_metadata or {}
-        if metadata.get("steps_table"):
-            steps_result = await db.execute(
-                select(AgentStep)
-                .where(AgentStep.message_id == msg.id)
-                .order_by(AgentStep.step_index)
-            )
-            steps = steps_result.scalars().all()
+        if metadata.get("steps_table") and msg.id in steps_by_message:
             msg_dict["message_metadata"] = {
                 **metadata,
-                "steps": [s.step_data for s in steps],
+                "steps": steps_by_message[msg.id],
             }
         enriched.append(msg_dict)
 
@@ -1130,15 +1142,12 @@ async def agent_chat_stream(
                 )
 
                 # Enqueue the job
-                await arq_pool.enqueue_job(
-                    "execute_agent_task", payload.to_dict()
-                )
-                logger.info(
-                    f"[SSE-AGENT] Enqueued agent task {agent_task_id} to ARQ worker"
-                )
+                await arq_pool.enqueue_job("execute_agent_task", payload.to_dict())
+                logger.info(f"[SSE-AGENT] Enqueued agent task {agent_task_id} to ARQ worker")
 
                 # Register task with TaskManager for cross-pod visibility
-                from ..services.task_manager import get_task_manager, TaskStatus
+                from ..services.task_manager import TaskStatus, get_task_manager
+
                 task_manager = get_task_manager()
                 task = task_manager.create_task(
                     user_id=current_user.id,
@@ -1172,28 +1181,44 @@ async def agent_chat_stream(
                         )
                         return
 
-                logger.info(
-                    f"[SSE-AGENT] Worker-based streaming complete for task {agent_task_id}"
-                )
+                logger.info(f"[SSE-AGENT] Worker-based streaming complete for task {agent_task_id}")
 
             else:
                 # --- IN-PROCESS EXECUTION (fallback) ---
                 # No Redis/ARQ available. Run agent directly in this pod.
                 # This is the original code path for single-pod deployments.
+                # Uses progressive step persistence (same as worker) so completed
+                # steps survive crashes mid-run.
 
-                # Accumulate results for database persistence
-                collected_steps = []
                 final_response = ""
                 iterations = 0
                 tool_calls_made = 0
                 completion_reason = "task_complete"
                 session_id = None
 
+                # Create placeholder message before agent loop (crash-safe)
+                assistant_message = Message(
+                    chat_id=chat.id,
+                    role="assistant",
+                    content="",
+                    message_metadata={
+                        "agent_mode": True,
+                        "agent_type": agent_model.agent_type,
+                        "completion_reason": "in_progress",
+                        "executed_by": "in_process",
+                    },
+                )
+                db.add(assistant_message)
+                await db.commit()
+                await db.refresh(assistant_message)
+                message_id = assistant_message.id
+
                 logger.info(
                     f"[SSE-AGENT] Starting in-process agent.run() for project {request.project_id}"
                 )
 
                 event_count = 0
+                step_index = 0
                 async for event in agent_instance.run(request.message, context):
                     event_count += 1
                     event_type = event.get("type", "unknown")
@@ -1201,17 +1226,31 @@ async def agent_chat_stream(
 
                     if event["type"] == "agent_step":
                         step_data = event.get("data", {})
-                        collected_steps.append(step_data)
                         tool_calls = step_data.get("tool_calls", [])
                         logger.info(
                             f"[SSE-AGENT] Agent step - iteration={step_data.get('iteration')}, tools={[tc.get('name') for tc in tool_calls]}"
                         )
+                        # Progressive persistence: INSERT AgentStep row per step
+                        from ..worker import _build_step_dict
+
+                        normalized = _build_step_dict(step_data, _convert_uuids_to_strings)
+                        agent_step = AgentStep(
+                            message_id=message_id,
+                            chat_id=chat.id,
+                            step_index=step_index,
+                            step_data=normalized,
+                        )
+                        db.add(agent_step)
+                        await db.commit()
+                        step_index += 1
                     elif event["type"] == "complete":
                         complete_data = event.get("data", {})
                         final_response = complete_data.get("final_response", "")
                         iterations = complete_data.get("iterations", iterations)
                         tool_calls_made = complete_data.get("tool_calls_made", tool_calls_made)
-                        completion_reason = complete_data.get("completion_reason", completion_reason)
+                        completion_reason = complete_data.get(
+                            "completion_reason", completion_reason
+                        )
                         session_id = complete_data.get("session_id")
                         logger.info(
                             f"[SSE-AGENT] Agent complete - iterations={iterations}, tool_calls={tool_calls_made}, reason={completion_reason}"
@@ -1231,47 +1270,22 @@ async def agent_chat_stream(
                     agent_model.usage_count = (agent_model.usage_count or 0) + 1
                     db.add(agent_model)
 
-                # Save agent response with metadata
-                agent_metadata = {
+                # Finalize placeholder message with summary metadata
+                assistant_message.content = final_response or "Agent task completed."
+                assistant_message.message_metadata = {
                     "agent_mode": True,
                     "agent_type": agent_model.agent_type,
                     "iterations": iterations,
                     "tool_calls_made": tool_calls_made,
                     "completion_reason": completion_reason,
                     "session_id": session_id,
+                    "executed_by": "in_process",
                     "trajectory_path": f".tesslate/trajectories/trajectory_{session_id}.json"
                     if session_id
                     else None,
-                    "steps": [
-                        {
-                            "iteration": step.get("iteration"),
-                            "thought": step.get("thought"),
-                            "tool_calls": [
-                                {
-                                    "name": tc.get("name"),
-                                    "parameters": _convert_uuids_to_strings(tc.get("parameters", {})),
-                                    "result": _convert_uuids_to_strings(
-                                        step.get("tool_results", [])[idx]
-                                        if idx < len(step.get("tool_results", []))
-                                        else {}
-                                    ),
-                                }
-                                for idx, tc in enumerate(step.get("tool_calls", []))
-                            ],
-                            "response_text": step.get("response_text", ""),
-                            "is_complete": step.get("is_complete", False),
-                            "timestamp": step.get("timestamp", ""),
-                        }
-                        for step in collected_steps
-                    ],
+                    # Steps are now in agent_steps table
+                    "steps_table": True,
                 }
-
-                assistant_message = Message(
-                    chat_id=chat.id,
-                    role="assistant",
-                    content=final_response,
-                    message_metadata=agent_metadata,
-                )
                 db.add(assistant_message)
                 await db.commit()
 
@@ -1361,6 +1375,7 @@ async def subscribe_agent_events(
 ):
     """Subscribe to agent events via SSE. Supports reconnection with last_event_id."""
     from starlette.responses import StreamingResponse as StarletteStreamingResponse
+
     from ..services.pubsub import get_pubsub
 
     pubsub = get_pubsub()
