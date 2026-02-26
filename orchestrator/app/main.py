@@ -202,6 +202,53 @@ async def shell_session_cleanup_loop():
         await asyncio.sleep(300)
 
 
+async def agent_task_cleanup_loop():
+    """Background task to clean up expired agent Redis keys.
+
+    Prunes:
+    - Stale agent streams (tesslate:agent:stream:*) older than 2 hours
+    - Orphaned cancel keys (tesslate:agent:cancel:*) older than 10 minutes
+    - Expired project locks are auto-cleaned by Redis TTL
+    """
+    import asyncio
+
+    from .services.cache_service import get_redis_client
+
+    logger.info("Agent task cleanup loop started")
+
+    while True:
+        try:
+            await asyncio.sleep(600)  # Run every 10 minutes
+
+            redis = await get_redis_client()
+            if not redis:
+                continue
+
+            # Clean up agent streams with no TTL set (orphaned)
+            stream_keys = await redis.keys("tesslate:agent:stream:*")
+            cleaned = 0
+            for key in stream_keys:
+                ttl = await redis.ttl(key)
+                if ttl == -1:
+                    # No expiry set — stream was never finalized (crashed task)
+                    # Set a 2-hour expiry so it gets cleaned up
+                    await redis.expire(key, 7200)
+                    cleaned += 1
+            if cleaned:
+                logger.info(f"[CLEANUP] Set expiry on {cleaned} orphaned agent streams")
+
+            # Clean up stale cancel keys (should auto-expire but belt-and-suspenders)
+            cancel_keys = await redis.keys("tesslate:agent:cancel:*")
+            if len(cancel_keys) > 100:
+                logger.warning(f"[CLEANUP] {len(cancel_keys)} cancel keys found, possible leak")
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Agent task cleanup error: {e}", exc_info=True)
+            await asyncio.sleep(60)
+
+
 async def container_cleanup_loop():
     """
     Background task to clean up idle project containers.
@@ -418,29 +465,20 @@ async def startup():
         logger.info("Redis not available — running in single-pod mode (in-memory fallback)")
 
     # Start background cleanup tasks (with distributed locking for multi-pod)
+    from .services.daily_credit_reset import daily_credit_reset_loop
     from .services.distributed_lock import get_distributed_lock
     from .services.model_health import model_health_check_loop
-    from .services.daily_credit_reset import daily_credit_reset_loop
 
     dlock = get_distributed_lock()
 
     if redis:
         # Redis available: use distributed locks so only one pod runs each loop
-        asyncio.create_task(
-            dlock.run_with_lock("shell_cleanup", shell_session_cleanup_loop)
-        )
-        asyncio.create_task(
-            dlock.run_with_lock("container_cleanup", container_cleanup_loop)
-        )
-        asyncio.create_task(
-            dlock.run_with_lock("stats_flush", stats_flush_loop)
-        )
-        asyncio.create_task(
-            dlock.run_with_lock("model_health", model_health_check_loop)
-        )
-        asyncio.create_task(
-            dlock.run_with_lock("credit_reset", daily_credit_reset_loop)
-        )
+        asyncio.create_task(dlock.run_with_lock("shell_cleanup", shell_session_cleanup_loop))
+        asyncio.create_task(dlock.run_with_lock("container_cleanup", container_cleanup_loop))
+        asyncio.create_task(dlock.run_with_lock("stats_flush", stats_flush_loop))
+        asyncio.create_task(dlock.run_with_lock("model_health", model_health_check_loop))
+        asyncio.create_task(dlock.run_with_lock("credit_reset", daily_credit_reset_loop))
+        asyncio.create_task(dlock.run_with_lock("agent_task_cleanup", agent_task_cleanup_loop))
         logger.info("Background loops started with distributed locking")
     else:
         # No Redis: run all loops locally (single-pod fallback)
@@ -449,6 +487,7 @@ async def startup():
         asyncio.create_task(stats_flush_loop())
         asyncio.create_task(model_health_check_loop())
         asyncio.create_task(daily_credit_reset_loop())
+        # agent_task_cleanup_loop not needed without Redis
         logger.info("Background loops started without distributed locking (single-pod mode)")
 
     # Initialize base cache (Docker mode only - async - doesn't block startup)
@@ -462,10 +501,16 @@ async def startup():
         logger.info("Skipping base cache manager initialization (Kubernetes mode)")
 
 
-
 @app.on_event("shutdown")
 async def shutdown():
     from .services.cache_service import close_redis_client
+    from .services.pubsub import get_pubsub
+
+    # Stop Pub/Sub subscriber and forwarding tasks before closing Redis
+    pubsub = get_pubsub()
+    if pubsub:
+        await pubsub.stop()
+        logger.info("Redis Pub/Sub subscriber stopped")
 
     await close_redis_client()
     logger.info("Redis connection closed")

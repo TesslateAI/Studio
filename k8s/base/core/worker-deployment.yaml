@@ -24,6 +24,7 @@ spec:
         app: tesslate-worker
         component: worker
     spec:
+      terminationGracePeriodSeconds: 300  # 5 min grace for in-flight agent tasks
       serviceAccountName: tesslate-backend-sa  # Same SA for K8s API access (kubectl exec)
       containers:
       - name: worker
