@@ -360,10 +360,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 try:
                     arq_redis = ctx.get("redis")
                     if arq_redis:
-                        from arq import create_pool
-
-                        pool = await create_pool(_get_redis_settings())
-                        await pool.enqueue_job(
+                        await arq_redis.enqueue_job(
                             "send_webhook_callback",
                             payload.webhook_callback_url,
                             {
@@ -429,9 +426,14 @@ async def send_webhook_callback(ctx: dict, url: str, payload: dict):
 
     ARQ handles retries (max_tries=5, exponential backoff).
     """
+    from urllib.parse import urlparse
+
     import httpx
 
-    logger.info(f"[WEBHOOK] Sending callback to {url}")
+    parsed_url = urlparse(url)
+    logger.info(
+        f"[WEBHOOK] Sending callback to {parsed_url.scheme}://{parsed_url.hostname}{parsed_url.path}"
+    )
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(url, json=payload)
