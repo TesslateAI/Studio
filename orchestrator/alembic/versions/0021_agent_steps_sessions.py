@@ -1,6 +1,6 @@
 """Add agent_steps table, chat session fields, and external_api_keys table
 
-Revision ID: 0021_agent_steps_chat_sessions_ext_keys
+Revision ID: 0021_agent_steps_sessions
 Revises: 0020_admin_panel_schema
 Create Date: 2026-02-25
 
@@ -16,7 +16,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers
-revision = "0021_agent_steps_chat_sessions_ext_keys"
+revision = "0021_agent_steps_sessions"
 down_revision = "0020_admin_panel_schema"
 branch_labels = None
 depends_on = None
