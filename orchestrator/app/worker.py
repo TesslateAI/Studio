@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from datetime import UTC
 from uuid import UUID
 
 from arq.connections import RedisSettings
@@ -387,6 +388,11 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 except Exception as cleanup_err:
                     logger.warning(f"[WORKER] Failed to cleanup bash session: {cleanup_err}")
 
+            # Belt-and-suspenders: update task status in Redis directly
+            # so get_active_agent_task sees COMPLETED even if the SSE relay
+            # pod didn't call update_task_status.
+            await _update_task_status_redis(task_id, "completed")
+
             logger.info(f"[WORKER] Task {task_id} complete, saved to database")
 
         except Exception as e:
@@ -398,6 +404,9 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
             # Publish error event
             await _publish_error(pubsub, task_id, str(e))
+
+            # Update task status to FAILED in Redis
+            await _update_task_status_redis(task_id, "failed", error=str(e))
 
             # Mark chat as active (not running) on error
             try:
@@ -440,6 +449,40 @@ async def send_webhook_callback(ctx: dict, url: str, payload: dict):
         response.raise_for_status()
 
     logger.info(f"[WEBHOOK] Callback sent successfully: {response.status_code}")
+
+
+async def _update_task_status_redis(task_id: str, status: str, error: str | None = None):
+    """Directly update task status in Redis from the worker process.
+
+    The worker doesn't share TaskManager state with the API pod, so we write
+    the status key directly.  Belt-and-suspenders for when the SSE relay pod
+    doesn't mark the task as completed.
+    """
+    try:
+        from .services.cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return
+
+        import json
+        from datetime import datetime
+
+        task_key = f"tesslate:task:{task_id}"
+        raw = await redis.get(task_key)
+        if not raw:
+            return
+
+        data = json.loads(raw)
+        data["status"] = status
+        data["completed_at"] = datetime.now(UTC).isoformat()
+        if error:
+            data["error"] = error
+
+        await redis.setex(task_key, 86400, json.dumps(data))
+        logger.info(f"[WORKER] Updated task {task_id} status to {status} in Redis")
+    except Exception as e:
+        logger.debug(f"[WORKER] Failed to update task status in Redis (non-blocking): {e}")
 
 
 async def _publish_error(pubsub, task_id: str, message: str):

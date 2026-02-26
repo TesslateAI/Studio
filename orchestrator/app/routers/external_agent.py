@@ -11,11 +11,11 @@ import json
 import logging
 import secrets
 import uuid as _uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth_external import get_external_api_user
@@ -30,11 +30,11 @@ from ..schemas import (
     ExternalAPIKeyResponse,
 )
 from ..services.agent_context import (
-    _resolve_container_name,
-    _build_git_context,
     _build_architecture_context,
-    _get_chat_history,
+    _build_git_context,
     _build_tesslate_context,
+    _get_chat_history,
+    _resolve_container_name,
 )
 from ..users import current_active_user
 
@@ -60,9 +60,10 @@ async def _get_arq_pool():
         return None
 
     try:
+        from urllib.parse import urlparse
+
         from arq import create_pool
         from arq.connections import RedisSettings
-        from urllib.parse import urlparse
 
         redis_url = settings.redis_url if hasattr(settings, "redis_url") else ""
         if not redis_url:
@@ -145,9 +146,7 @@ async def invoke_agent(
             container_name = _resolve_container_name(container)
             if container.directory and container.directory != ".":
                 container_directory = container.directory
-            logger.info(
-                f"[EXT-AGENT] Using container: {container_name} (id: {container_id})"
-            )
+            logger.info(f"[EXT-AGENT] Using container: {container_name} (id: {container_id})")
 
     # Create a new chat session with origin="api"
     chat = Chat(
@@ -180,7 +179,9 @@ async def invoke_agent(
 
     # TESSLATE.md context
     tesslate_context = await _build_tesslate_context(
-        project, user.id, db,
+        project,
+        user.id,
+        db,
         container_name=container_name,
         container_directory=container_directory,
     )
@@ -223,10 +224,10 @@ async def invoke_agent(
     logger.info(f"[EXT-AGENT] Enqueued agent task {agent_task_id} to ARQ worker")
 
     # Register task with TaskManager for status tracking
-    from ..services.task_manager import get_task_manager, TaskStatus
+    from ..services.task_manager import TaskStatus, get_task_manager
 
     task_manager = get_task_manager()
-    task = task_manager.create_task(
+    task_manager.create_task(
         user_id=user.id,
         task_type="agent_execution",
         metadata={
@@ -235,10 +236,9 @@ async def invoke_agent(
             "message": request.message[:200],
             "origin": "api",
         },
+        task_id=agent_task_id,
     )
-    # Override with our agent_task_id for consistency
-    task.id = agent_task_id
-    await task_manager.update_task_status(task.id, TaskStatus.RUNNING)
+    await task_manager.update_task_status(agent_task_id, TaskStatus.RUNNING)
 
     # Publish cross-source visibility notification
     from ..services.pubsub import get_pubsub
@@ -291,6 +291,7 @@ async def subscribe_agent_events(
     Returns a streaming response with Content-Type: text/event-stream.
     """
     from starlette.responses import StreamingResponse as StarletteStreamingResponse
+
     from ..services.pubsub import get_pubsub
 
     pubsub = get_pubsub()
@@ -401,7 +402,7 @@ async def create_api_key(
     # Calculate expiration
     expires_at = None
     if request.expires_in_days:
-        expires_at = datetime.now(timezone.utc) + timedelta(days=request.expires_in_days)
+        expires_at = datetime.now(UTC) + timedelta(days=request.expires_in_days)
 
     api_key = ExternalAPIKey(
         user_id=user.id,

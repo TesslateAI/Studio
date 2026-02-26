@@ -148,10 +148,10 @@ export function ChatContainer({
   const effectiveIsExpanded = isDocked || isExpanded;
 
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<{ id: string; title: string; created_at: string }[]>([]);
   const [showSessionPopover, setShowSessionPopover] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
-  const [sessionTransitioning, setSessionTransitioning] = useState(false);
+  const [_reconnecting, setReconnecting] = useState(false);
+  const [_sessionTransitioning, setSessionTransitioning] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -172,14 +172,20 @@ export function ChatContainer({
     };
   }, []);
 
-  // Load chat history from database — reload when session changes
+  // Load chat history from database — reload when session changes.
+  // Awaits loadChatHistory BEFORE checking for an active task so that the
+  // history is already rendered and checkActiveTask won't overwrite it.
   useEffect(() => {
-    const loadChatHistory = async () => {
+    let cancelled = false;
+    let activeEventSource: EventSource | null = null;
+    let reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const loadChatHistory = async (): Promise<Message[]> => {
       setIsLoadingHistory(true);
       try {
         const dbMessages: DBMessage[] = await chatApi.getSessionMessages(
           projectId.toString(),
-          currentChatId || undefined,
+          currentChatId || undefined
         );
 
         const expandedMessages: Message[] = [];
@@ -270,32 +276,60 @@ export function ChatContainer({
               agentAvatarUrl,
               agentType,
             });
+          } else if (msg.message_metadata?.completion_reason === 'in_progress') {
+            // In-progress message with no steps yet — show thinking placeholder
+            // so the message isn't invisible while the agent is working.
+            expandedMessages.push({
+              id: `msg-${idx}-thinking`,
+              type: 'ai',
+              content: '',
+              agentData: {
+                steps: [],
+                iterations: 0,
+                tool_calls_made: 0,
+                completion_reason: 'in_progress',
+              },
+              agentIcon,
+              agentAvatarUrl,
+              agentType,
+            });
           }
         });
 
-        setMessages(expandedMessages);
+        if (!cancelled) {
+          setMessages(expandedMessages);
+        }
+        return expandedMessages;
       } catch (error) {
         console.error('[CHAT] Failed to load chat history:', error);
-        setMessages([]);
+        if (!cancelled) setMessages([]);
+        return [];
       } finally {
-        setIsLoadingHistory(false);
+        if (!cancelled) setIsLoadingHistory(false);
       }
     };
 
-    loadChatHistory();
-
-    // Check for active agent task and reconnect
-    const checkActiveTask = async () => {
+    // Check for active agent task and reconnect to SSE stream
+    const checkActiveTask = async (currentMessages: Message[]) => {
+      if (cancelled) return;
       try {
         const activeTask = await chatApi.getActiveTask(projectId.toString());
-        if (activeTask) {
-          setReconnecting(true);
-          setAgentExecuting(true);
-          agentTaskIdRef.current = activeTask.task_id;
+        if (!activeTask || cancelled) return;
 
-          // Add a "thinking" message
+        setReconnecting(true);
+        setAgentExecuting(true);
+        agentTaskIdRef.current = activeTask.task_id;
+
+        const thinkingId = `reconnect-${activeTask.task_id}`;
+
+        // Only add a thinking placeholder if loadChatHistory didn't already
+        // produce an in-progress message for this task.
+        const alreadyHasPlaceholder = currentMessages.some(
+          (m) => m.agentData?.completion_reason === 'in_progress'
+        );
+        if (!alreadyHasPlaceholder) {
           const thinkingMsg: Message = {
-            id: `reconnect-${activeTask.task_id}`,
+            id: thinkingId,
             type: 'ai',
             content: '',
             agentData: {
@@ -305,62 +339,83 @@ export function ChatContainer({
               completion_reason: 'in_progress',
             },
           };
-          setMessages(prev => [...prev, thinkingMsg]);
+          setMessages((prev) => [...prev, thinkingMsg]);
+        }
 
-          // Subscribe to events with safety timeout
-          const eventSource = chatApi.subscribeToTask(activeTask.task_id);
-          const thinkingId = `reconnect-${activeTask.task_id}`;
+        // Subscribe to events with safety timeout
+        const eventSource = chatApi.subscribeToTask(activeTask.task_id);
+        activeEventSource = eventSource;
 
-          const cleanupReconnect = () => {
-            clearTimeout(reconnectTimeout);
-            eventSource.close();
+        const cleanupReconnect = () => {
+          if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId);
+          eventSource.close();
+          activeEventSource = null;
+          if (!cancelled) {
             setAgentExecuting(false);
             setReconnecting(false);
             agentTaskIdRef.current = null;
-          };
+          }
+        };
 
-          // Safety timeout: if no events arrive within 10s, task is likely already done
-          const reconnectTimeout = setTimeout(() => {
-            cleanupReconnect();
-            setMessages(prev => prev.filter(m => m.id !== thinkingId));
-          }, 10000);
+        // Safety timeout: if no events arrive within 10s, task is likely already done
+        reconnectTimeoutId = setTimeout(() => {
+          cleanupReconnect();
+          if (!cancelled) {
+            setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+          }
+        }, 10000);
 
-          eventSource.onmessage = (event) => {
-            try {
-              const data = JSON.parse(event.data);
-              clearTimeout(reconnectTimeout); // Got data, cancel timeout
-              if (data.type === 'agent_step') {
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const lastMsg = updated[updated.length - 1];
-                  if (lastMsg && lastMsg.agentData?.completion_reason === 'in_progress') {
-                    const steps = lastMsg.agentData.steps || [];
-                    lastMsg.agentData = {
-                      ...lastMsg.agentData,
-                      steps: [...steps, data.data],
-                    };
-                  }
-                  return updated;
-                });
-              } else if (data.type === 'complete' || data.type === 'done') {
-                cleanupReconnect();
-              }
-            } catch {
-              // ignore parse errors
+        eventSource.onmessage = (event) => {
+          if (cancelled) return;
+          try {
+            const data = JSON.parse(event.data);
+            if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId); // Got data, cancel timeout
+            if (data.type === 'agent_step') {
+              setMessages((prev) => {
+                const updated = [...prev];
+                const lastMsg = updated[updated.length - 1];
+                if (lastMsg && lastMsg.agentData?.completion_reason === 'in_progress') {
+                  const steps = lastMsg.agentData.steps || [];
+                  lastMsg.agentData = {
+                    ...lastMsg.agentData,
+                    steps: [...steps, data.data],
+                  };
+                }
+                return updated;
+              });
+            } else if (data.type === 'complete' || data.type === 'done') {
+              cleanupReconnect();
             }
-          };
-          eventSource.onerror = () => {
-            cleanupReconnect();
-            // Remove stale thinking message on connection failure
-            setMessages(prev => prev.filter(m => m.id !== thinkingId));
-          };
-        }
+          } catch {
+            // ignore parse errors
+          }
+        };
+        eventSource.onerror = () => {
+          cleanupReconnect();
+          // Remove stale thinking message on connection failure
+          if (!cancelled) {
+            setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+          }
+        };
       } catch {
         // No active task, that's fine
       }
     };
-    checkActiveTask();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    // Sequential: load history first, then check for active task
+    loadChatHistory().then((msgs) => {
+      if (!cancelled) checkActiveTask(msgs);
+    });
+
+    // Cleanup on unmount or dependency change
+    return () => {
+      cancelled = true;
+      if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId);
+      if (activeEventSource) {
+        activeEventSource.close();
+        activeEventSource = null;
+      }
+    };
   }, [projectId, initialAgents, currentChatId]);
 
   // Load chat sessions for multi-session support
@@ -378,6 +433,7 @@ export function ChatContainer({
       }
     };
     loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // Update agents when initialAgents prop changes
@@ -1172,23 +1228,18 @@ export function ChatContainer({
       // Brief transition effect
       setTimeout(() => setSessionTransitioning(false), 200);
     },
-    [currentChatId],
+    [currentChatId]
   );
 
-  const handleRenameSession = useCallback(
-    async (sessionId: string, newTitle: string) => {
-      try {
-        await chatApi.updateChatSession(sessionId, { title: newTitle });
-        setSessions((prev) =>
-          prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s)),
-        );
-      } catch (error) {
-        console.error('[CHAT] Failed to rename session:', error);
-        toast.error('Failed to rename session');
-      }
-    },
-    [],
-  );
+  const handleRenameSession = useCallback(async (sessionId: string, newTitle: string) => {
+    try {
+      await chatApi.updateChatSession(sessionId, { title: newTitle });
+      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s)));
+    } catch (error) {
+      console.error('[CHAT] Failed to rename session:', error);
+      toast.error('Failed to rename session');
+    }
+  }, []);
 
   // Get current session title for header
   const currentSessionTitle = useMemo(() => {
@@ -1666,7 +1717,11 @@ export function ChatContainer({
           {/* Streaming message */}
           {isStreaming && currentStream && (
             <div className="mb-4 animate-[slideIn_0.3s_ease-out]">
-              <ChatMessage type="ai" content={renderMessageContent(currentStream, true)} agentAvatarUrl={currentAgent?.avatar_url} />
+              <ChatMessage
+                type="ai"
+                content={renderMessageContent(currentStream, true)}
+                agentAvatarUrl={currentAgent?.avatar_url}
+              />
             </div>
           )}
 

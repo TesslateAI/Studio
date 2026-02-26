@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from datetime import UTC
 from uuid import UUID
 
 import aiofiles
@@ -236,9 +237,14 @@ async def get_project_messages(
     )
     messages = messages_result.scalars().all()
 
-    # Batch-load AgentStep data for all messages that use steps_table (avoids N+1 queries)
+    # Batch-load AgentStep data for messages that use steps_table OR are still
+    # in-progress (worker/in_process). In-progress messages have AgentStep rows
+    # from progressive persistence but steps_table isn't set until finalization.
     steps_message_ids = [
-        msg.id for msg in messages if (msg.message_metadata or {}).get("steps_table")
+        msg.id
+        for msg in messages
+        if (msg.message_metadata or {}).get("steps_table")
+        or (msg.message_metadata or {}).get("executed_by")
     ]
     steps_by_message: dict = {}
     if steps_message_ids:
@@ -261,7 +267,9 @@ async def get_project_messages(
             "created_at": msg.created_at.isoformat() if msg.created_at else None,
         }
         metadata = msg.message_metadata or {}
-        if metadata.get("steps_table") and msg.id in steps_by_message:
+        if msg.id in steps_by_message and (
+            metadata.get("steps_table") or metadata.get("executed_by")
+        ):
             msg_dict["message_metadata"] = {
                 **metadata,
                 "steps": steps_by_message[msg.id],
@@ -1149,7 +1157,7 @@ async def agent_chat_stream(
                 from ..services.task_manager import TaskStatus, get_task_manager
 
                 task_manager = get_task_manager()
-                task = task_manager.create_task(
+                task_manager.create_task(
                     user_id=current_user.id,
                     task_type="agent_execution",
                     metadata={
@@ -1157,10 +1165,9 @@ async def agent_chat_stream(
                         "chat_id": str(chat.id),
                         "message": request.message[:200],
                     },
+                    task_id=agent_task_id,
                 )
-                # Override with our agent_task_id for consistency
-                task.id = agent_task_id
-                await task_manager.update_task_status(task.id, TaskStatus.RUNNING)
+                await task_manager.update_task_status(agent_task_id, TaskStatus.RUNNING)
 
                 # Subscribe to Redis Pub/Sub and relay events to SSE
                 pubsub = get_pubsub()
@@ -1181,6 +1188,9 @@ async def agent_chat_stream(
                         )
                         return
 
+                # Worker finished — mark task COMPLETED so get_active_agent_task
+                # returns null when the project is reopened.
+                await task_manager.update_task_status(agent_task_id, TaskStatus.COMPLETED)
                 logger.info(f"[SSE-AGENT] Worker-based streaming complete for task {agent_task_id}")
 
             else:
@@ -1345,18 +1355,40 @@ async def get_active_agent_task(
     project_id: str,
     current_user: User = Depends(current_active_user),
 ):
-    """Check if there's an active agent task for a project."""
-    from ..services.task_manager import get_task_manager
+    """Check if there's an active agent task for a project.
+
+    Includes a staleness safety net: if a task has been running/queued longer
+    than ``worker_job_timeout + 60s``, it's assumed the SSE relay pod crashed
+    and the task is marked FAILED so the UI doesn't show a perpetual spinner.
+    """
+    from datetime import timedelta
+
+    from ..services.task_manager import TaskStatus, get_task_manager
 
     task_manager = get_task_manager()
-    tasks = await task_manager.get_user_tasks_async(current_user.id)
+    tasks = await task_manager.get_user_tasks_async(current_user.id, active_only=True)
+    staleness_limit = timedelta(seconds=settings.worker_job_timeout + 60)
+
+    logger.debug(f"[AGENT-ACTIVE] Found {len(tasks)} active tasks for user {current_user.id}")
 
     for task in tasks:
-        if (
-            task.metadata
-            and task.metadata.get("project_id") == project_id
-            and task.status.value in ("running", "queued")
-        ):
+        if task.metadata and task.metadata.get("project_id") == project_id:
+            # Staleness check — mark as FAILED if exceeded timeout + buffer
+            started = task.started_at or task.created_at
+            from datetime import datetime
+
+            now = datetime.now(UTC)
+            # Normalize naive datetimes to UTC for comparison
+            started_aware = started.replace(tzinfo=UTC) if started.tzinfo is None else started
+            if (now - started_aware) > staleness_limit:
+                logger.warning(
+                    f"[AGENT-ACTIVE] Stale task {task.id} exceeded timeout, marking FAILED"
+                )
+                await task_manager.update_task_status(
+                    task.id, TaskStatus.FAILED, error="Task exceeded timeout (stale)"
+                )
+                continue
+
             return {
                 "task_id": task.id,
                 "chat_id": task.metadata.get("chat_id"),

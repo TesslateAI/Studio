@@ -118,9 +118,7 @@ class Task:
                 datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None
             ),
             completed_at=(
-                datetime.fromisoformat(data["completed_at"])
-                if data.get("completed_at")
-                else None
+                datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None
             ),
             progress=TaskProgress(
                 current=progress_data.get("current", 0),
@@ -204,10 +202,20 @@ class TaskManager:
         return None
 
     def create_task(
-        self, user_id: UUID, task_type: str, metadata: dict[str, Any] | None = None
+        self,
+        user_id: UUID,
+        task_type: str,
+        metadata: dict[str, Any] | None = None,
+        task_id: str | None = None,
     ) -> Task:
-        """Create a new task and return it"""
-        task_id = str(uuid.uuid4())
+        """Create a new task and return it.
+
+        Args:
+            task_id: Optional pre-generated ID. When provided the task is stored
+                     under this key so that later ``update_task_status(task_id)``
+                     can locate it without a dict-key mismatch.
+        """
+        task_id = task_id or str(uuid.uuid4())
         task = Task(
             id=task_id,
             user_id=user_id,
@@ -260,7 +268,12 @@ class TaskManager:
         return sorted(tasks, key=lambda t: t.created_at, reverse=True)
 
     async def get_user_tasks_async(self, user_id: UUID, active_only: bool = False) -> list[Task]:
-        """Get all tasks for a user with Redis fallback for cross-pod visibility."""
+        """Get all tasks for a user with Redis fallback for cross-pod visibility.
+
+        When ``active_only`` is True, uses a Redis pipeline to batch-load task
+        data and prunes completed/failed entries from the user set so it stays
+        small over time.
+        """
         from .cache_service import get_redis_client
 
         # Start with local tasks
@@ -273,33 +286,85 @@ class TaskManager:
                 user_key = f"{USER_TASKS_KEY_PREFIX}{user_id}"
                 redis_task_ids = await redis.smembers(user_key)
                 if redis_task_ids:
-                    # Merge Redis task IDs with local ones
                     for tid in redis_task_ids:
                         tid_str = tid if isinstance(tid, str) else tid.decode()
                         local_task_ids.add(tid_str)
             except Exception as e:
                 logger.debug(f"Failed to load user tasks from Redis: {e}")
 
-        # Load all tasks (local first, Redis fallback for missing ones)
-        tasks = []
-        for tid in local_task_ids:
-            task = await self.get_task_async(tid)
-            if task:
-                tasks.append(task)
+        if not local_task_ids:
+            return []
 
-        if active_only:
-            tasks = [t for t in tasks if t.status in (TaskStatus.QUEUED, TaskStatus.RUNNING)]
+        # Batch-load task data via Redis pipeline (avoids N+1 round-trips)
+        all_task_ids = list(local_task_ids)
+        tasks: list[Task] = []
+        ids_to_prune: list[str] = []
+
+        if redis:
+            try:
+                pipe = redis.pipeline(transaction=False)
+                for tid in all_task_ids:
+                    pipe.get(f"{TASK_KEY_PREFIX}{tid}")
+                results = await pipe.execute()
+
+                for tid, raw in zip(all_task_ids, results, strict=False):
+                    if not raw:
+                        ids_to_prune.append(tid)
+                        continue
+                    task = Task.from_dict(json.loads(raw))
+                    self._tasks[tid] = task  # cache locally
+                    if active_only and task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+                        ids_to_prune.append(tid)
+                        continue
+                    tasks.append(task)
+            except Exception as e:
+                logger.debug(f"Pipeline load failed, falling back to sequential: {e}")
+                # Fallback to sequential loading
+                for tid in all_task_ids:
+                    task = await self.get_task_async(tid)
+                    if task:
+                        if active_only and task.status not in (
+                            TaskStatus.QUEUED,
+                            TaskStatus.RUNNING,
+                        ):
+                            ids_to_prune.append(tid)
+                            continue
+                        tasks.append(task)
+        else:
+            # No Redis — local only
+            for tid in all_task_ids:
+                task = self._tasks.get(tid)
+                if task:
+                    if active_only and task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+                        continue
+                    tasks.append(task)
+
+        # Prune completed/expired task IDs from the user set to keep it small
+        if ids_to_prune and redis:
+            try:
+                user_key = f"{USER_TASKS_KEY_PREFIX}{user_id}"
+                await redis.srem(user_key, *ids_to_prune)
+                logger.debug(
+                    f"Pruned {len(ids_to_prune)} inactive task IDs from user set {user_id}"
+                )
+            except Exception:
+                pass  # non-blocking
 
         return sorted(tasks, key=lambda t: t.created_at, reverse=True)
 
     async def update_task_status(
         self, task_id: str, status: TaskStatus, error: str | None = None, result: Any | None = None
     ):
-        """Update task status"""
+        """Update task status (local first, Redis fallback for cross-pod)."""
         async with self._lock:
             task = self._tasks.get(task_id)
             if not task:
-                return
+                # Task may have been created on another pod — try Redis
+                task = await self._load_task_redis(task_id)
+                if not task:
+                    return
+                # Cache locally for future lookups
+                self._tasks[task_id] = task
 
             task.status = status
 
