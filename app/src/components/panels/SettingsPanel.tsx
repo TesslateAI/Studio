@@ -89,7 +89,7 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
     setSavingAgentLock(true);
     try {
       await projectsApi.updateSettings(projectSlug, { agent_lock_enabled: enabled });
-      toast.success(enabled ? 'Agent lock enabled' : 'Agent lock disabled');
+      toast.success(enabled ? 'Agent locking enabled' : 'Agent locking disabled');
     } catch (error: unknown) {
       console.error('Failed to update agent lock:', error);
       setAgentLockEnabled(previous); // revert
@@ -337,18 +337,18 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
               <h3 className="text-sm font-medium text-[var(--text)]">Agent Lock</h3>
             </div>
             <p className="text-xs text-[var(--text)]/60 mb-4">
-              When enabled, only one agent can run on this project at a time
+              Controls whether agents acquire a lock before modifying project files
             </p>
 
             <div className="flex items-center justify-between p-4 rounded-lg border-2 border-[var(--text)]/15 bg-white/5">
               <div className="flex-1">
                 <span className="text-sm font-medium text-[var(--text)]">
-                  {agentLockEnabled ? 'Enabled' : 'Disabled'}
+                  {agentLockEnabled ? 'Locking' : 'Non-locking'}
                 </span>
                 <p className="text-xs text-[var(--text)]/40 mt-0.5">
                   {agentLockEnabled
-                    ? 'Agents are serialized — one at a time'
-                    : 'Concurrent agents allowed'}
+                    ? 'Agents lock files before editing — prevents conflicts'
+                    : 'Agents edit freely — faster but may conflict'}
                 </p>
               </div>
               <ToggleSwitch

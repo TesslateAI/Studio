@@ -97,7 +97,7 @@ async def get_chats(
     return chats
 
 
-@router.post("/", response_model=ChatSchema)
+@router.post("/")
 async def create_chat(
     chat_data: dict,
     current_user: User = Depends(current_active_user),
@@ -115,7 +115,17 @@ async def create_chat(
     db.add(db_chat)
     await db.commit()
     await db.refresh(db_chat)
-    return db_chat
+
+    return {
+        "id": str(db_chat.id),
+        "user_id": str(db_chat.user_id),
+        "project_id": str(db_chat.project_id) if db_chat.project_id else None,
+        "title": db_chat.title,
+        "origin": db_chat.origin or "browser",
+        "status": db_chat.status or "active",
+        "created_at": db_chat.created_at.isoformat() if db_chat.created_at else None,
+        "updated_at": db_chat.updated_at.isoformat() if db_chat.updated_at else None,
+    }
 
 
 @router.get("/{project_id}/sessions")

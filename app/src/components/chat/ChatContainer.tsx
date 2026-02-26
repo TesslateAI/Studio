@@ -307,12 +307,28 @@ export function ChatContainer({
           };
           setMessages(prev => [...prev, thinkingMsg]);
 
-          // Subscribe to events
+          // Subscribe to events with safety timeout
           const eventSource = chatApi.subscribeToTask(activeTask.task_id);
+          const thinkingId = `reconnect-${activeTask.task_id}`;
+
+          const cleanupReconnect = () => {
+            clearTimeout(reconnectTimeout);
+            eventSource.close();
+            setAgentExecuting(false);
+            setReconnecting(false);
+            agentTaskIdRef.current = null;
+          };
+
+          // Safety timeout: if no events arrive within 10s, task is likely already done
+          const reconnectTimeout = setTimeout(() => {
+            cleanupReconnect();
+            setMessages(prev => prev.filter(m => m.id !== thinkingId));
+          }, 10000);
+
           eventSource.onmessage = (event) => {
             try {
               const data = JSON.parse(event.data);
-              // Handle events same as normal streaming
+              clearTimeout(reconnectTimeout); // Got data, cancel timeout
               if (data.type === 'agent_step') {
                 setMessages(prev => {
                   const updated = [...prev];
@@ -327,19 +343,16 @@ export function ChatContainer({
                   return updated;
                 });
               } else if (data.type === 'complete' || data.type === 'done') {
-                eventSource.close();
-                setAgentExecuting(false);
-                setReconnecting(false);
-                agentTaskIdRef.current = null;
+                cleanupReconnect();
               }
             } catch {
               // ignore parse errors
             }
           };
           eventSource.onerror = () => {
-            eventSource.close();
-            setAgentExecuting(false);
-            setReconnecting(false);
+            cleanupReconnect();
+            // Remove stale thinking message on connection failure
+            setMessages(prev => prev.filter(m => m.id !== thinkingId));
           };
         }
       } catch {
