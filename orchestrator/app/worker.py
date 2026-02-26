@@ -14,7 +14,7 @@ Usage:
 """
 
 import asyncio
-import json
+import contextlib
 import logging
 import os
 from uuid import UUID
@@ -48,16 +48,21 @@ def _build_step_dict(step_data: dict, _convert_uuids_to_strings) -> dict:
 
 
 async def _heartbeat_lock(pubsub, project_id: str, task_id: str):
-    """Extend the project lock every 10 seconds until cancelled."""
+    """Extend the project lock every 10 seconds until cancelled.
+
+    When the lock is lost (stolen or expired), signals cancellation
+    via Redis so the agent loop stops at the next iteration check.
+    """
     try:
         while True:
             await asyncio.sleep(10)
             extended = await pubsub.extend_project_lock(project_id, task_id)
             if not extended:
                 logger.warning(
-                    f"[WORKER] Failed to extend project lock for {project_id}, "
-                    f"task {task_id} — lock may have been stolen"
+                    f"[WORKER] Lost project lock for {project_id}, "
+                    f"task {task_id} — signalling cancellation"
                 )
+                await pubsub.request_cancellation(task_id)
                 break
     except asyncio.CancelledError:
         pass
@@ -77,6 +82,8 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     7. Enqueues webhook callback if configured
     8. Cleans up bash sessions and releases lock
     """
+    from sqlalchemy import select
+
     from .agent.factory import create_agent_from_db_model
     from .agent.iterative_agent import _convert_uuids_to_strings
     from .agent.models import create_model_adapter
@@ -86,8 +93,6 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     from .services.agent_task import AgentTaskPayload
     from .services.pubsub import get_pubsub
 
-    from sqlalchemy import select
-
     settings = get_settings()
     payload = AgentTaskPayload.from_dict(payload_dict)
     pubsub = get_pubsub()
@@ -96,16 +101,12 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     heartbeat_task = None
     lock_acquired = False
 
-    logger.info(
-        f"[WORKER] Starting agent task {task_id} for project {project_id}"
-    )
+    logger.info(f"[WORKER] Starting agent task {task_id} for project {project_id}")
 
     async with AsyncSessionLocal() as db:
         try:
             # 1. Load project
-            result = await db.execute(
-                select(Project).where(Project.id == UUID(project_id))
-            )
+            result = await db.execute(select(Project).where(Project.id == UUID(project_id)))
             project = result.scalar_one_or_none()
             if not project:
                 await _publish_error(pubsub, task_id, "Project not found")
@@ -120,14 +121,13 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 if not lock_acquired:
                     holding_task = await pubsub.get_project_lock(project_id)
                     await _publish_error(
-                        pubsub, task_id,
-                        f"Another agent is running on this project (task: {holding_task})"
+                        pubsub,
+                        task_id,
+                        f"Another agent is running on this project (task: {holding_task})",
                     )
                     return
                 # Start heartbeat to extend lock every 10s
-                heartbeat_task = asyncio.create_task(
-                    _heartbeat_lock(pubsub, project_id, task_id)
-                )
+                heartbeat_task = asyncio.create_task(_heartbeat_lock(pubsub, project_id, task_id))
 
             # 3. Load agent model
             agent_model = None
@@ -194,11 +194,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     tools_override = create_view_scoped_registry(
                         view_context=view_context,
                         project_id=UUID(project_id),
-                        container_id=(
-                            UUID(payload.container_id)
-                            if payload.container_id
-                            else None
-                        ),
+                        container_id=(UUID(payload.container_id) if payload.container_id else None),
                     )
 
             # 7. Create agent instance
@@ -219,9 +215,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "chat_history": payload.chat_history,
                 "project_context": payload.project_context,
                 "edit_mode": payload.edit_mode,
-                "container_id": (
-                    UUID(payload.container_id) if payload.container_id else None
-                ),
+                "container_id": (UUID(payload.container_id) if payload.container_id else None),
                 "container_name": payload.container_name,
                 "view_context": (
                     payload.view_context.get("view")
@@ -251,9 +245,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             message_id = assistant_message.id
 
             # Update chat status to running
-            chat_result = await db.execute(
-                select(Chat).where(Chat.id == UUID(payload.chat_id))
-            )
+            chat_result = await db.execute(select(Chat).where(Chat.id == UUID(payload.chat_id)))
             chat = chat_result.scalar_one_or_none()
             if chat:
                 chat.status = "running"
@@ -311,7 +303,9 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         final_response = complete_data.get("final_response", "")
                         iterations = complete_data.get("iterations", iterations)
                         tool_calls_made = complete_data.get("tool_calls_made", tool_calls_made)
-                        completion_reason = complete_data.get("completion_reason", completion_reason)
+                        completion_reason = complete_data.get(
+                            "completion_reason", completion_reason
+                        )
                         session_id = complete_data.get("session_id")
 
                     # Publish event to Redis Stream for API pod to forward to SSE
@@ -396,9 +390,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 except Exception as cleanup_err:
                     logger.warning(f"[WORKER] Failed to cleanup bash session: {cleanup_err}")
 
-            logger.info(
-                f"[WORKER] Task {task_id} complete, saved to database"
-            )
+            logger.info(f"[WORKER] Task {task_id} complete, saved to database")
 
         except Exception as e:
             import traceback
@@ -412,9 +404,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
             # Mark chat as active (not running) on error
             try:
-                chat_result = await db.execute(
-                    select(Chat).where(Chat.id == UUID(payload.chat_id))
-                )
+                chat_result = await db.execute(select(Chat).where(Chat.id == UUID(payload.chat_id)))
                 chat = chat_result.scalar_one_or_none()
                 if chat and chat.status == "running":
                     chat.status = "active"
@@ -426,10 +416,8 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             # Always release project lock and cancel heartbeat
             if heartbeat_task:
                 heartbeat_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
             if lock_acquired and pubsub:
                 await pubsub.release_project_lock(project_id, task_id)
                 logger.debug(f"[WORKER] Released project lock for {project_id}")

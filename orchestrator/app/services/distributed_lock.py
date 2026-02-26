@@ -30,6 +30,15 @@ else
 end
 """
 
+# Lua script for atomic check-and-renew (only extend TTL if we hold the lock)
+RENEW_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("expire", KEYS[1], ARGV[2])
+else
+    return 0
+end
+"""
+
 LOCK_PREFIX = "tesslate:lock:"
 
 
@@ -116,12 +125,8 @@ class DistributedLock:
 
         key = f"{LOCK_PREFIX}{lock_name}"
         try:
-            # Check if we own the lock before renewing
-            current_holder = await redis.get(key)
-            if current_holder == self._pod_id:
-                await redis.expire(key, ttl_seconds)
-                return True
-            return False
+            result = await redis.eval(RENEW_LOCK_SCRIPT, 1, key, self._pod_id, ttl_seconds)
+            return bool(result)
         except Exception as e:
             logger.warning(f"Failed to renew lock {lock_name}: {e}")
             return False
@@ -145,37 +150,27 @@ class DistributedLock:
             lock_ttl: Lock TTL in seconds (should be > renew_interval)
             renew_interval: How often to renew the lock
         """
-        logger.info(
-            f"[DLOCK] Attempting to acquire lock '{lock_name}' (pod={self._pod_id})"
-        )
+        logger.info(f"[DLOCK] Attempting to acquire lock '{lock_name}' (pod={self._pod_id})")
 
         while True:
             acquired = await self.acquire(lock_name, lock_ttl)
 
             if acquired:
-                logger.info(
-                    f"[DLOCK] Lock '{lock_name}' acquired by pod {self._pod_id}"
-                )
+                logger.info(f"[DLOCK] Lock '{lock_name}' acquired by pod {self._pod_id}")
 
                 # Run the loop with periodic lock renewal
                 try:
-                    await self._run_with_renewal(
-                        lock_name, loop_coro, lock_ttl, renew_interval
-                    )
+                    await self._run_with_renewal(lock_name, loop_coro, lock_ttl, renew_interval)
                 except asyncio.CancelledError:
                     logger.info(f"[DLOCK] Lock '{lock_name}' task cancelled")
                     await self.release(lock_name)
                     raise
                 except Exception as e:
-                    logger.error(
-                        f"[DLOCK] Loop '{lock_name}' crashed: {e}", exc_info=True
-                    )
+                    logger.error(f"[DLOCK] Loop '{lock_name}' crashed: {e}", exc_info=True)
                     await self.release(lock_name)
 
                 # If we get here, the loop exited — retry acquiring
-                logger.warning(
-                    f"[DLOCK] Lock '{lock_name}' released, will retry in 10s"
-                )
+                logger.warning(f"[DLOCK] Lock '{lock_name}' released, will retry in 10s")
                 await asyncio.sleep(10)
             else:
                 # Another pod holds the lock, wait and retry
@@ -203,9 +198,7 @@ class DistributedLock:
                 await asyncio.sleep(renew_interval)
                 renewed = await self.renew(lock_name, lock_ttl)
                 if not renewed:
-                    logger.warning(
-                        f"[DLOCK] Lost lock '{lock_name}', stopping loop"
-                    )
+                    logger.warning(f"[DLOCK] Lost lock '{lock_name}', stopping loop")
                     loop_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await loop_task
