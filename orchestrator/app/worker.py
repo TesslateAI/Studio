@@ -406,8 +406,8 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 if chat and chat.status == "running":
                     chat.status = "active"
                     await db.commit()
-            except Exception:
-                pass
+            except Exception as db_err:
+                logger.warning(f"[WORKER] Failed to reset chat status after error: {db_err}")
 
         finally:
             # Always release project lock and cancel heartbeat
@@ -486,14 +486,24 @@ def _get_redis_settings() -> RedisSettings:
     )
 
 
+def _get_worker_settings():
+    """Load worker tuning values from app config (env-overridable)."""
+    from .config import get_settings
+
+    s = get_settings()
+    return s.worker_max_jobs, s.worker_job_timeout, s.worker_max_tries
+
+
+_max_jobs, _job_timeout, _max_tries = _get_worker_settings()
+
+
 class WorkerSettings:
     """ARQ worker configuration."""
 
     functions = [execute_agent_task, send_webhook_callback]
     redis_settings = _get_redis_settings()
-    max_jobs = 10  # Max concurrent agent tasks per worker
-    job_timeout = 600  # 10 minute max per agent run
+    max_jobs = _max_jobs
+    job_timeout = _job_timeout
     on_startup = startup
     on_shutdown = shutdown
-    # Retry failed jobs once (in case of transient errors)
-    max_tries = 2
+    max_tries = _max_tries

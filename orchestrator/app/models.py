@@ -194,7 +194,9 @@ class Container(Base):
 
     # Docker configuration
     port = Column(Integer, nullable=True)  # Exposed/mapped port (host side in Docker)
-    internal_port = Column(Integer, nullable=True)  # Port the dev server listens on inside the container
+    internal_port = Column(
+        Integer, nullable=True
+    )  # Port the dev server listens on inside the container
     environment_vars = Column(JSON, nullable=True)  # Environment variables
     dockerfile_path = Column(String, nullable=True)  # Relative path to Dockerfile
     volume_name = Column(String, nullable=True)  # Docker volume name for container files
@@ -219,7 +221,9 @@ class Container(Base):
     )  # Link to stored credentials
 
     # External deployment target (Vercel, Netlify, Cloudflare)
-    deployment_provider = Column(String, nullable=True)  # 'vercel' | 'netlify' | 'cloudflare' | None
+    deployment_provider = Column(
+        String, nullable=True
+    )  # 'vercel' | 'netlify' | 'cloudflare' | None
 
     # React Flow position
     position_x = Column(Float, default=0)
@@ -358,7 +362,10 @@ class DeploymentTarget(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     # Provider configuration
@@ -506,13 +513,13 @@ class Chat(Base):
     )
     title = Column(String(255), nullable=True)  # Optional session title
     origin = Column(String(20), default="browser")  # browser, slack, api, cli
-    status = Column(String(20), default="active")  # active, running, waiting_approval, completed, archived
+    status = Column(
+        String(20), default="active"
+    )  # active, running, waiting_approval, completed, archived
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    __table_args__ = (
-        Index("ix_chats_user_project", "user_id", "project_id"),
-    )
+    __table_args__ = (Index("ix_chats_user_project", "user_id", "project_id"),)
 
     user = relationship("User", back_populates="chats")
     project = relationship("Project", back_populates="chats")
@@ -530,10 +537,15 @@ class Message(Base):
         JSON, nullable=True
     )  # Store agent execution data (steps, iterations, etc.)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     chat = relationship("Chat", back_populates="messages")
-    steps = relationship("AgentStep", back_populates="message", cascade="all, delete-orphan",
-                         order_by="AgentStep.step_index")
+    steps = relationship(
+        "AgentStep",
+        back_populates="message",
+        cascade="all, delete-orphan",
+        order_by="AgentStep.step_index",
+    )
 
 
 class AgentStep(Base):
@@ -542,13 +554,23 @@ class AgentStep(Base):
     Each step is INSERTed as the agent runs, so completed work survives
     crashes. Avoids JSONB update write-amplification on the Message row.
     """
+
     __tablename__ = "agent_steps"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
-    chat_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # denormalized for fast queries
+    message_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chat_id = Column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )  # denormalized for fast queries
     step_index = Column(SmallInteger, nullable=False)
-    step_data = Column(JSON, nullable=False)  # {iteration, thought, tool_calls, tool_results, response_text, timestamp}
+    step_data = Column(
+        JSON, nullable=False
+    )  # {iteration, thought, tool_calls, tool_results, response_text, timestamp}
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     message = relationship("Message", back_populates="steps")
@@ -825,7 +847,9 @@ class Deployment(Base):
     deployment_url = Column(String(500), nullable=True)  # Live deployment URL
 
     # Versioning for rollback support
-    version = Column(String(50), nullable=True)  # Semantic version or auto-generated (v1.0.0, v1.0.1)
+    version = Column(
+        String(50), nullable=True
+    )  # Semantic version or auto-generated (v1.0.0, v1.0.1)
 
     # Deployment status
     status = Column(
@@ -1654,7 +1678,9 @@ class ExternalAPIKey(Base):
     __tablename__ = "external_api_keys"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     key_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash of the key
     key_prefix = Column(String(12), nullable=False)  # "tsk_xxxx" visible prefix for identification
     name = Column(String(100), nullable=False)  # User-given name for the key

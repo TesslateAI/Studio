@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     # If empty, falls back to in-memory (single-pod mode)
     redis_url: str = ""
 
+    # ARQ Worker Settings
+    worker_max_jobs: int = 10  # Max concurrent agent tasks per worker pod
+    worker_job_timeout: int = 600  # Agent run timeout in seconds (10 min default)
+    worker_max_tries: int = 2  # Retry failed jobs once (transient errors)
+
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""
     litellm_master_key: str = ""
@@ -32,6 +37,7 @@ class Settings(BaseSettings):
     def default_models_list(self) -> list[str]:
         """Return all default models as a list."""
         return [m.strip() for m in self.litellm_default_models.split(",") if m.strip()]
+
     litellm_email_domain: str = "localhost"  # Domain for internal emails
     litellm_initial_budget: float = 10.0  # Initial budget per user in USD
 
