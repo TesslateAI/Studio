@@ -170,15 +170,20 @@ class ToolRegistry:
             # 'todo_write', 'save_plan', 'update_plan' excluded - safe planning operations
         }
 
+        # Tools allowed in plan mode (read-only shell for context gathering)
+        PLAN_MODE_ALLOWED = {
+            "bash_exec",  # Needed for ls, cat, grep, find, etc. during planning
+        }
+
         is_dangerous = tool_name in DANGEROUS_TOOLS
 
-        # Plan Mode: Block all dangerous operations
-        if edit_mode == "plan" and is_dangerous:
+        # Plan Mode: Block dangerous operations except plan-mode-allowed tools
+        if edit_mode == "plan" and is_dangerous and tool_name not in PLAN_MODE_ALLOWED:
             logger.warning(f"[PLAN MODE] Blocked tool execution: {tool_name}")
             return {
                 "success": False,
                 "tool": tool_name,
-                "error": f"Plan mode active - {tool_name} is disabled. You can only read files and gather information. Explain what changes you would make instead.",
+                "error": f"Plan mode active - {tool_name} is disabled. You can only read files, run shell commands, and gather information. Explain what changes you would make instead.",
             }
 
         # Ask Mode: Check if approval needed (unless explicitly skipped)

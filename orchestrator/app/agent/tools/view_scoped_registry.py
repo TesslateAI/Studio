@@ -233,11 +233,16 @@ class ViewScopedToolRegistry:
                         "graph_add_browser_preview",  # Grid modifications
                     }
 
+                    # View tools allowed in plan mode (shell for context gathering)
+                    VIEW_PLAN_MODE_ALLOWED = {
+                        "graph_shell_exec",  # Needed for exploring containers during planning
+                    }
+
                     edit_mode = context.get("edit_mode", "ask")
                     is_dangerous = tool_name in VIEW_DANGEROUS_TOOLS
 
-                    # Plan Mode: Block all dangerous operations
-                    if edit_mode == "plan" and is_dangerous:
+                    # Plan Mode: Block dangerous operations except plan-mode-allowed tools
+                    if edit_mode == "plan" and is_dangerous and tool_name not in VIEW_PLAN_MODE_ALLOWED:
                         logger.warning(f"[PLAN MODE] Blocked view tool execution: {tool_name}")
                         return {
                             "success": False,

@@ -194,8 +194,9 @@ def get_mode_instructions(mode: str) -> str:
     if mode == "plan":
         return """
 [PLAN MODE ACTIVE]
-You are in read-only planning mode. You MUST NOT execute any file modifications or shell commands.
-Instead, create a detailed markdown plan explaining what changes you would make.
+You are in planning mode. You MUST NOT execute any file modifications (write_file, patch_file, etc.).
+Shell commands (bash_exec) ARE allowed for context gathering — use them to explore files, check dependencies, run ls/grep/find, etc.
+Create a detailed markdown plan explaining what changes you would make.
 All read operations (read_file, get_project_info, etc.) are allowed and encouraged for gathering context.
 Format your plan clearly with headings, bullet points, and code examples where helpful.
 """
