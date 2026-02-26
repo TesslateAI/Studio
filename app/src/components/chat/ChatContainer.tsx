@@ -99,10 +99,14 @@ export function ChatContainer({
   const [messages, setMessages] = useState<Message[]>([]);
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
-  const [editMode, setEditMode] = useState<EditMode>('ask');
+  const [editMode, setEditMode] = useState<EditMode>(() => {
+    const stored = localStorage.getItem(`editMode:${projectId}`);
+    return stored === 'ask' || stored === 'allow' || stored === 'plan' ? stored : 'ask';
+  });
   const editModeRef = useRef<EditMode>(editMode);
   useEffect(() => {
     editModeRef.current = editMode;
+    localStorage.setItem(`editMode:${projectId}`, editMode);
 
     // Auto-approve any pending approval cards when switching to "Allow All Edits"
     if (editMode === 'allow') {
@@ -357,19 +361,29 @@ export function ChatContainer({
           }
         };
 
-        // Safety timeout: if no events arrive within 10s, task is likely already done
-        reconnectTimeoutId = setTimeout(() => {
-          cleanupReconnect();
-          if (!cancelled) {
-            setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
-          }
-        }, 10000);
+        // Safety timeout: if no events arrive within 30s, task is likely stale
+        const resetSafetyTimeout = () => {
+          if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId);
+          reconnectTimeoutId = setTimeout(() => {
+            cleanupReconnect();
+            if (!cancelled) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === thinkingId && m.agentData?.completion_reason === 'in_progress'
+                    ? { ...m, agentData: { ...m.agentData!, completion_reason: 'error' } }
+                    : m
+                )
+              );
+            }
+          }, 30000);
+        };
+        resetSafetyTimeout();
 
         eventSource.onmessage = (event) => {
           if (cancelled) return;
           try {
             const data = JSON.parse(event.data);
-            if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId); // Got data, cancel timeout
+            resetSafetyTimeout(); // Got data, reset the silence timeout
             if (data.type === 'agent_step') {
               setMessages((prev) => {
                 const updated = [...prev];
@@ -383,7 +397,57 @@ export function ChatContainer({
                 }
                 return updated;
               });
-            } else if (data.type === 'complete' || data.type === 'done') {
+            } else if (data.type === 'approval_required') {
+              const approvalData = data.data || data;
+              if (editModeRef.current === 'allow') {
+                chatApi
+                  .sendApprovalResponse(approvalData.approval_id, 'allow_all')
+                  .catch((err: unknown) => console.error('[APPROVAL] Auto-approve failed:', err));
+              } else {
+                const approvalMessage: Message = {
+                  id: `approval-${Date.now()}`,
+                  type: 'approval_request',
+                  content: '',
+                  approvalId: approvalData.approval_id,
+                  toolName: approvalData.tool_name,
+                  toolParameters: approvalData.tool_parameters,
+                  toolDescription: approvalData.tool_description,
+                };
+                setMessages((prev) => [...prev, approvalMessage]);
+              }
+            } else if (data.type === 'complete') {
+              const completeData = data.data || {};
+              const finalContent = completeData.final_response || '';
+              setMessages((prev) => {
+                const updated = [...prev];
+                const lastMsg = updated[updated.length - 1];
+                if (lastMsg && lastMsg.agentData?.completion_reason === 'in_progress') {
+                  lastMsg.content = finalContent;
+                  lastMsg.agentData = {
+                    ...lastMsg.agentData,
+                    completion_reason: completeData.completion_reason || 'complete',
+                    iterations: completeData.iterations ?? lastMsg.agentData.iterations,
+                    tool_calls_made:
+                      completeData.tool_calls_made ?? lastMsg.agentData.tool_calls_made,
+                  };
+                }
+                return updated;
+              });
+            } else if (data.type === 'error') {
+              const errorMsg = data.data?.message || data.content || 'Agent execution failed';
+              setMessages((prev) => {
+                const updated = [...prev];
+                const lastMsg = updated[updated.length - 1];
+                if (lastMsg && lastMsg.agentData?.completion_reason === 'in_progress') {
+                  lastMsg.content = errorMsg;
+                  lastMsg.agentData = {
+                    ...lastMsg.agentData,
+                    completion_reason: 'error',
+                  };
+                }
+                return updated;
+              });
+            } else if (data.type === 'done') {
               cleanupReconnect();
             }
           } catch {
@@ -1127,15 +1191,27 @@ export function ChatContainer({
       if (error instanceof Error && error.name === 'AbortError') {
         console.log('[AGENT] Execution aborted by user');
 
-        // Remove thinking message and add stopped message
+        // Remove thinking message and mark last agent message as cancelled
         setMessages((prev) => {
           const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
+          const lastIdx = withoutThinking.length - 1;
+          if (lastIdx >= 0 && withoutThinking[lastIdx].agentData) {
+            withoutThinking[lastIdx] = {
+              ...withoutThinking[lastIdx],
+              content: withoutThinking[lastIdx].content || '_Execution stopped by user_',
+              agentData: {
+                ...withoutThinking[lastIdx].agentData!,
+                completion_reason: 'cancelled',
+              },
+            };
+            return withoutThinking;
+          }
           return [
             ...withoutThinking,
             {
               id: `msg-${Date.now()}-stopped`,
-              type: 'ai',
-              content: '_[Execution stopped by user]_',
+              type: 'ai' as const,
+              content: '_Execution stopped by user_',
             },
           ];
         });
