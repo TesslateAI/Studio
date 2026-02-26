@@ -1747,7 +1747,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 )
 
             # Use tar streaming to write file (echo|base64 breaks for files >100KB)
-            data = content.encode("latin-1")
+            data = content.encode("utf-8")
             await asyncio.to_thread(
                 self.k8s_client._write_bytes_to_pod,
                 pod_name,
@@ -1762,7 +1762,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         except Exception as e:
             logger.error(f"[K8S] Error writing file: {e}")
-            return False
+            raise
 
     async def write_binary_to_container(
         self,
