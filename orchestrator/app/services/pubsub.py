@@ -138,7 +138,7 @@ class RedisPubSub:
         Subscribe to agent execution events for a specific task.
 
         Uses XREAD BLOCK to consume from the stream in real-time.
-        Starts from latest ($) for new subscriptions.
+        Starts from beginning (0) to catch events published before subscribe.
 
         Args:
             task_id: Unique agent task ID
@@ -153,7 +153,7 @@ class RedisPubSub:
             return
 
         stream_key = f"{AGENT_STREAM_PREFIX}{task_id}"
-        last_id = "$"
+        last_id = "0"
 
         try:
             logger.debug(f"Subscribed to agent stream: {stream_key}")
@@ -171,11 +171,11 @@ class RedisPubSub:
                     for entry_id, fields in entries:
                         last_id = entry_id
                         try:
-                            event = json.loads(fields[b"data"])
+                            event = json.loads(fields.get("data") or fields.get(b"data"))
                             yield event
                             if event.get("type") in ("complete", "error", "done"):
                                 return
-                        except (json.JSONDecodeError, KeyError):
+                        except (json.JSONDecodeError, KeyError, TypeError):
                             logger.warning(
                                 f"Invalid data in agent stream entry: {entry_id}"
                             )
@@ -218,16 +218,17 @@ class RedisPubSub:
 
             for entry_id, fields in replay_entries:
                 # Skip the entry matching last_id (already seen)
-                last_id_bytes = last_id.encode() if isinstance(last_id, str) else last_id
-                if entry_id == last_id_bytes:
+                # With decode_responses=True, entry_id is a string
+                comparable_last_id = last_id if isinstance(entry_id, str) else last_id.encode()
+                if entry_id == comparable_last_id:
                     continue
                 current_last_id = entry_id
                 try:
-                    event = json.loads(fields[b"data"])
+                    event = json.loads(fields.get("data") or fields.get(b"data"))
                     yield event
                     if event.get("type") in ("complete", "error", "done"):
                         return
-                except (json.JSONDecodeError, KeyError):
+                except (json.JSONDecodeError, KeyError, TypeError):
                     logger.warning(
                         f"Invalid data in agent stream replay entry: {entry_id}"
                     )
@@ -245,11 +246,11 @@ class RedisPubSub:
                     for entry_id, fields in entries:
                         current_last_id = entry_id
                         try:
-                            event = json.loads(fields[b"data"])
+                            event = json.loads(fields.get("data") or fields.get(b"data"))
                             yield event
                             if event.get("type") in ("complete", "error", "done"):
                                 return
-                        except (json.JSONDecodeError, KeyError):
+                        except (json.JSONDecodeError, KeyError, TypeError):
                             logger.warning(
                                 f"Invalid data in agent stream entry: {entry_id}"
                             )
