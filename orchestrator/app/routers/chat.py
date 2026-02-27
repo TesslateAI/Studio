@@ -237,6 +237,60 @@ async def get_project_messages(
     )
     messages = messages_result.scalars().all()
 
+    # Heal stale in_progress messages: if the task is no longer running
+    # (completed/failed/cancelled in Redis, or no task data at all), mark the
+    # message so the frontend doesn't render thinking dots from history.
+    # But respect the project lock — if the worker still holds it, the task
+    # is genuinely running (the SSE relay may have written COMPLETED on
+    # client disconnect, but the worker hasn't finished yet).
+    stale_in_progress = [
+        msg
+        for msg in messages
+        if (msg.message_metadata or {}).get("completion_reason") == "in_progress"
+    ]
+    if stale_in_progress:
+        from ..services.cache_service import get_redis_client
+        from ..services.pubsub import get_pubsub
+
+        redis = await get_redis_client()
+        pubsub = get_pubsub()
+
+        # If the project lock is held, the worker is genuinely running —
+        # don't heal any messages for this project.
+        lock_holder = await pubsub.get_project_lock(project_id) if pubsub else None
+
+        healed_any = False
+        for msg in stale_in_progress:
+            task_id = (msg.message_metadata or {}).get("task_id")
+
+            # Skip healing if this task's project lock is still held
+            if lock_holder and task_id and lock_holder == task_id:
+                continue
+
+            is_stale = False
+            if task_id and redis:
+                raw = await redis.get(f"tesslate:task:{task_id}")
+                if not raw or json.loads(raw).get("status") in (
+                    "completed",
+                    "failed",
+                    "cancelled",
+                ):
+                    is_stale = True
+            elif not task_id:
+                is_stale = True  # no task_id means old format, definitely stale
+            if is_stale:
+                msg.message_metadata = {
+                    **(msg.message_metadata or {}),
+                    "completion_reason": "error",
+                }
+                if not msg.content or not str(msg.content).strip():
+                    msg.content = "Agent task did not complete."
+                db.add(msg)
+                healed_any = True
+        if healed_any:
+            with contextlib.suppress(Exception):
+                await db.commit()
+
     # Batch-load AgentStep data for messages that use steps_table OR are still
     # in-progress (worker/in_process). In-progress messages have AgentStep rows
     # from progressive persistence but steps_table isn't set until finalization.
@@ -1120,6 +1174,7 @@ async def agent_chat_stream(
             # Dispatch: ARQ Worker (if Redis available) or In-Process
             # ================================================================
             arq_pool = await _get_arq_pool()
+            assistant_message = None  # initialized here so except block can reference it
 
             if arq_pool:
                 # --- QUEUE-BASED EXECUTION ---
@@ -1172,6 +1227,9 @@ async def agent_chat_stream(
                 # Subscribe to Redis Pub/Sub and relay events to SSE
                 pubsub = get_pubsub()
                 if pubsub:
+                    # Emit task_started so the client knows the task_id for cancellation
+                    yield f"data: {json.dumps({'type': 'task_started', 'data': {'task_id': agent_task_id}})}\n\n"
+
                     try:
                         async for event in pubsub.subscribe_agent_events(agent_task_id):
                             event_type = event.get("type", "unknown")
@@ -1180,12 +1238,19 @@ async def agent_chat_stream(
                                 break
                             yield f"data: {json.dumps(event)}\n\n"
                     except (asyncio.CancelledError, GeneratorExit):
-                        # Client disconnected — agent keeps running in worker
-                        # User can reconnect via GET /agent/events/{task_id}
+                        # Client disconnected (page refresh or cancel).
+                        # Mark COMPLETED so the local TaskManager cache is clean.
+                        # If the worker is still genuinely running,
+                        # get_active_agent_task has a project-lock fallback
+                        # that detects the worker is alive and returns the task.
                         logger.info(
                             f"[SSE-AGENT] Client disconnected from task {agent_task_id} "
                             f"— agent continues running in worker"
                         )
+                        with contextlib.suppress(Exception):
+                            await task_manager.update_task_status(
+                                agent_task_id, TaskStatus.COMPLETED
+                            )
                         return
 
                 # Worker finished — mark task COMPLETED so get_active_agent_task
@@ -1320,6 +1385,23 @@ async def agent_chat_stream(
             logger.error(f"[SSE-AGENT] Exception during agent streaming: {e}")
             logger.error(f"[SSE-AGENT] Full traceback:\n{error_traceback}")
 
+            # Finalize stale in_progress placeholder message if it exists
+            # (only set in the in-process path, not the ARQ path)
+            try:
+                if assistant_message is not None:
+                    meta = assistant_message.message_metadata or {}
+                    if meta.get("completion_reason") == "in_progress":
+                        assistant_message.content = f"Agent task failed: {str(e)[:200]}"
+                        assistant_message.message_metadata = {
+                            **meta,
+                            "completion_reason": "error",
+                            "error": str(e)[:500],
+                        }
+                        db.add(assistant_message)
+                        await db.commit()
+            except Exception as finalize_err:
+                logger.warning(f"[SSE-AGENT] Failed to finalize stale message: {finalize_err}")
+
             error_event = {"type": "error", "data": {"message": str(e)}}
             yield f"data: {json.dumps(error_event)}\n\n"
 
@@ -1395,6 +1477,32 @@ async def get_active_agent_task(
                 "message": task.metadata.get("message"),
                 "started_at": task.started_at.isoformat() if task.started_at else None,
             }
+
+    # Fallback: TaskManager may show COMPLETED (SSE relay disconnect marked it)
+    # but the worker is still running.  The project lock is the ground truth —
+    # the worker holds it for the entire execution and only releases in finally.
+    try:
+        from ..services.pubsub import get_pubsub
+
+        pubsub = get_pubsub()
+        if pubsub:
+            holding_task_id = await pubsub.get_project_lock(project_id)
+            if holding_task_id:
+                # Lock is held — but skip if the user already cancelled it
+                is_cancelled = await pubsub.is_cancelled(holding_task_id)
+                if not is_cancelled:
+                    logger.info(
+                        f"[AGENT-ACTIVE] Project lock held by {holding_task_id}, "
+                        f"worker still running (TaskManager cache was stale)"
+                    )
+                    return {
+                        "task_id": holding_task_id,
+                        "chat_id": None,
+                        "message": None,
+                        "started_at": None,
+                    }
+    except Exception as e:
+        logger.debug(f"[AGENT-ACTIVE] Project lock check failed (non-blocking): {e}")
 
     return None
 

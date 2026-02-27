@@ -347,11 +347,26 @@ class TaskManager:
                     if not raw:
                         ids_to_prune.append(tid)
                         continue
-                    # Prefer local task (fresher state + sync callback intact)
+                    redis_data = json.loads(raw)
                     if tid in self._tasks:
                         task = self._tasks[tid]
+                        # Reconcile: trust Redis for terminal status (worker is authority)
+                        redis_status = TaskStatus(redis_data["status"])
+                        if redis_status in (
+                            TaskStatus.COMPLETED,
+                            TaskStatus.FAILED,
+                            TaskStatus.CANCELLED,
+                        ) and task.status in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+                            task.status = redis_status
+                            task.completed_at = (
+                                datetime.fromisoformat(redis_data["completed_at"])
+                                if redis_data.get("completed_at")
+                                else datetime.utcnow()
+                            )
+                            if redis_data.get("error"):
+                                task.error = redis_data["error"]
                     else:
-                        task = Task.from_dict(json.loads(raw))
+                        task = Task.from_dict(redis_data)
                         self._tasks[tid] = task  # cache locally
                     if active_only and task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
                         ids_to_prune.append(tid)

@@ -101,6 +101,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     project_id = payload.project_id
     heartbeat_task = None
     lock_acquired = False
+    message_id = None
 
     logger.info(f"[WORKER] Starting agent task {task_id} for project {project_id}")
 
@@ -120,13 +121,28 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             if agent_lock_enabled and pubsub:
                 lock_acquired = await pubsub.acquire_project_lock(project_id, task_id)
                 if not lock_acquired:
+                    # If the holding task has been cancelled, wait briefly
+                    # for it to release the lock (e.g. user cancelled then
+                    # immediately sent a new message).
                     holding_task = await pubsub.get_project_lock(project_id)
-                    await _publish_error(
-                        pubsub,
-                        task_id,
-                        f"Another agent is running on this project (task: {holding_task})",
-                    )
-                    return
+                    if holding_task and await pubsub.is_cancelled(holding_task):
+                        for _retry in range(10):
+                            await asyncio.sleep(0.5)
+                            lock_acquired = await pubsub.acquire_project_lock(project_id, task_id)
+                            if lock_acquired:
+                                logger.info(
+                                    f"[WORKER] Acquired lock after cancelled task "
+                                    f"{holding_task} released"
+                                )
+                                break
+                    if not lock_acquired:
+                        holding_task = await pubsub.get_project_lock(project_id)
+                        await _publish_error(
+                            pubsub,
+                            task_id,
+                            f"Another agent is running on this project (task: {holding_task})",
+                        )
+                        return
                 # Start heartbeat to extend lock every 10s
                 heartbeat_task = asyncio.create_task(_heartbeat_lock(pubsub, project_id, task_id))
 
@@ -408,15 +424,36 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             # Update task status to FAILED in Redis
             await _update_task_status_redis(task_id, "failed", error=str(e))
 
-            # Mark chat as active (not running) on error
+            # Finalize stale in_progress placeholder message and reset chat status
             try:
+                # Finalize the placeholder Message so it doesn't show thinking dots
+                if message_id is not None:
+                    msg_result = await db.execute(select(Message).where(Message.id == message_id))
+                    stale_msg = msg_result.scalar_one_or_none()
+                    if (
+                        stale_msg
+                        and (stale_msg.message_metadata or {}).get("completion_reason")
+                        == "in_progress"
+                    ):
+                        stale_msg.content = f"Agent task failed: {str(e)[:200]}"
+                        stale_msg.message_metadata = {
+                            **(stale_msg.message_metadata or {}),
+                            "completion_reason": "error",
+                            "error": str(e)[:500],
+                        }
+                        db.add(stale_msg)
+
+                # Mark chat as active (not running) on error
                 chat_result = await db.execute(select(Chat).where(Chat.id == UUID(payload.chat_id)))
                 chat = chat_result.scalar_one_or_none()
                 if chat and chat.status == "running":
                     chat.status = "active"
-                    await db.commit()
+
+                await db.commit()
             except Exception as db_err:
-                logger.warning(f"[WORKER] Failed to reset chat status after error: {db_err}")
+                logger.warning(
+                    f"[WORKER] Failed to finalize stale message / reset chat status: {db_err}"
+                )
 
         finally:
             # Always release project lock and cancel heartbeat

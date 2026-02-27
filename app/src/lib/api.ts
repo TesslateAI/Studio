@@ -111,7 +111,13 @@ api.interceptors.response.use(
       // - Preferences API (optional, fails silently for unauthenticated)
       // - Git Providers API (401 means provider not connected, handled by UI)
       // - Password reset pages (public, no auth required)
-      if (!isTasksApi && !isMarketplacePage && !isPreferencesApi && !isGitProvidersApi && !isPasswordResetPage) {
+      if (
+        !isTasksApi &&
+        !isMarketplacePage &&
+        !isPreferencesApi &&
+        !isGitProvidersApi &&
+        !isPasswordResetPage
+      ) {
         localStorage.removeItem('token');
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
@@ -481,9 +487,12 @@ export const projectsApi = {
     }
   },
   assignDeploymentTarget: async (slug: string, containerId: string, provider: string | null) => {
-    const response = await api.patch(`/api/projects/${slug}/containers/${containerId}/deployment-target`, {
-      provider
-    });
+    const response = await api.patch(
+      `/api/projects/${slug}/containers/${containerId}/deployment-target`,
+      {
+        provider,
+      }
+    );
     return response.data;
   },
 };
@@ -557,12 +566,17 @@ export const chatApi = {
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const jsonStr = line.slice(6); // Remove "data: " prefix
+            let event;
             try {
-              const event = JSON.parse(jsonStr);
-              onEvent(event);
+              event = JSON.parse(jsonStr);
             } catch (e) {
               console.error('Failed to parse SSE event:', e, jsonStr);
+              continue;
             }
+            // Call onEvent outside the try/catch so errors thrown by the
+            // callback (e.g. agent error events) propagate to the caller
+            // instead of being swallowed as JSON parse errors.
+            onEvent(event);
           }
         }
       }
@@ -623,7 +637,12 @@ export const chatApi = {
 
 export const externalApi = {
   // API key management
-  createKey: async (data: { name: string; scopes?: string[]; project_ids?: string[]; expires_in_days?: number }) => {
+  createKey: async (data: {
+    name: string;
+    scopes?: string[];
+    project_ids?: string[];
+    expires_in_days?: number;
+  }) => {
     const response = await api.post('/api/external/keys', data);
     return response.data;
   },
@@ -1841,7 +1860,9 @@ export const deploymentsApi = {
   },
 
   // Deploy all containers with deployment targets
-  deployAll: async (projectSlug: string): Promise<{
+  deployAll: async (
+    projectSlug: string
+  ): Promise<{
     total: number;
     deployed: number;
     failed: number;
@@ -1861,7 +1882,10 @@ export const deploymentsApi = {
   },
 
   // Deploy a single container to its assigned provider
-  deployContainer: async (projectSlug: string, containerId: string): Promise<{
+  deployContainer: async (
+    projectSlug: string,
+    containerId: string
+  ): Promise<{
     id: string;
     project_id: string;
     user_id: string;
@@ -1875,7 +1899,9 @@ export const deploymentsApi = {
     updated_at: string;
     completed_at: string | null;
   }> => {
-    const response = await api.post(`/api/deployments/${projectSlug}/containers/${containerId}/deploy`);
+    const response = await api.post(
+      `/api/deployments/${projectSlug}/containers/${containerId}/deploy`
+    );
     return response.data;
   },
 
@@ -2056,13 +2082,21 @@ export const deploymentTargetsApi = {
       position_y?: number;
     }
   ): Promise<DeploymentTarget> => {
-    const response = await api.patch(`/api/projects/${projectSlug}/deployment-targets/${targetId}`, data);
+    const response = await api.patch(
+      `/api/projects/${projectSlug}/deployment-targets/${targetId}`,
+      data
+    );
     return response.data;
   },
 
   // Delete a deployment target
-  delete: async (projectSlug: string, targetId: string): Promise<{ status: string; id: string }> => {
-    const response = await api.delete(`/api/projects/${projectSlug}/deployment-targets/${targetId}`);
+  delete: async (
+    projectSlug: string,
+    targetId: string
+  ): Promise<{ status: string; id: string }> => {
+    const response = await api.delete(
+      `/api/projects/${projectSlug}/deployment-targets/${targetId}`
+    );
     return response.data;
   },
 
@@ -2188,7 +2222,9 @@ export const deploymentTargetsApi = {
     // Map provider to OAuth endpoint (only Vercel and Netlify support OAuth)
     const oauthProviders = ['vercel', 'netlify'];
     if (!oauthProviders.includes(provider)) {
-      return { error: `${provider} does not support OAuth. Please configure credentials manually.` };
+      return {
+        error: `${provider} does not support OAuth. Please configure credentials manually.`,
+      };
     }
 
     // Call the existing OAuth authorize endpoint

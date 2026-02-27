@@ -184,6 +184,10 @@ export function ChatContainer({
     let activeEventSource: EventSource | null = null;
     let reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
+    // Reset agent state when project/session changes
+    setAgentExecuting(false);
+    agentTaskIdRef.current = null;
+
     const loadChatHistory = async (): Promise<Message[]> => {
       setIsLoadingHistory(true);
       try {
@@ -281,22 +285,9 @@ export function ChatContainer({
               agentType,
             });
           } else if (msg.message_metadata?.completion_reason === 'in_progress') {
-            // In-progress message with no steps yet — show thinking placeholder
-            // so the message isn't invisible while the agent is working.
-            expandedMessages.push({
-              id: `msg-${idx}-thinking`,
-              type: 'ai',
-              content: '',
-              agentData: {
-                steps: [],
-                iterations: 0,
-                tool_calls_made: 0,
-                completion_reason: 'in_progress',
-              },
-              agentIcon,
-              agentAvatarUrl,
-              agentType,
-            });
+            // Skip — checkActiveTask handles live thinking state.
+            // Stale in_progress messages from disconnects/crashes
+            // should not render thinking dots from history.
           }
         });
 
@@ -478,6 +469,11 @@ export function ChatContainer({
       if (activeEventSource) {
         activeEventSource.close();
         activeEventSource = null;
+      }
+      // Abort any in-flight agent streaming from the previous project
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
     };
   }, [projectId, initialAgents, currentChatId]);
@@ -900,14 +896,15 @@ export function ChatContainer({
     );
   };
 
-  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const escPressCountRef = useRef(0);
   const escTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const stopAgentExecution = useCallback(async () => {
-    if (abortController) {
-      abortController.abort();
-      setAbortController(null);
+    const controller = abortControllerRef.current;
+    if (controller) {
+      controller.abort();
+      abortControllerRef.current = null;
     }
     // Explicitly cancel on the server (page refresh no longer cancels)
     const taskId = agentTaskIdRef.current;
@@ -917,9 +914,10 @@ export function ChatContainer({
       } catch {
         // Best effort - task may already be done
       }
+      agentTaskIdRef.current = null;
     }
     setAgentExecuting(false);
-  }, [abortController]);
+  }, []);
 
   // ESC key handler for stopping execution
   useEffect(() => {
@@ -971,7 +969,7 @@ export function ChatContainer({
 
     // Create abort controller
     const controller = new AbortController();
-    setAbortController(controller);
+    abortControllerRef.current = controller;
 
     // Create initial "thinking" message
     const thinkingMessageId = `msg-${Date.now()}-thinking`;
@@ -1241,7 +1239,10 @@ export function ChatContainer({
       });
     } finally {
       setAgentExecuting(false);
-      setAbortController(null);
+      abortControllerRef.current = null;
+      // Safety net: remove any leftover thinking message if the stream
+      // ended without a terminal event (complete/error/abort).
+      setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
       // Refresh sessions (fire-and-forget) to pick up new titles / status
       refreshSessions();
     }
