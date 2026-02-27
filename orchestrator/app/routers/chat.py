@@ -1435,9 +1435,13 @@ async def cancel_agent_task(
 @router.get("/agent/active")
 async def get_active_agent_task(
     project_id: str,
+    chat_id: str | None = None,
     current_user: User = Depends(current_active_user),
 ):
-    """Check if there's an active agent task for a project.
+    """Check if there's an active agent task for a project (optionally scoped to a chat session).
+
+    When ``chat_id`` is provided, only returns tasks belonging to that specific
+    chat session — preventing cross-session message bleeding.
 
     Includes a staleness safety net: if a task has been running/queued longer
     than ``worker_job_timeout + 60s``, it's assumed the SSE relay pod crashed
@@ -1455,6 +1459,10 @@ async def get_active_agent_task(
 
     for task in tasks:
         if task.metadata and task.metadata.get("project_id") == project_id:
+            # When chat_id is provided, only match tasks for this session
+            if chat_id and task.metadata.get("chat_id") != chat_id:
+                continue
+
             # Staleness check — mark as FAILED if exceeded timeout + buffer
             started = task.started_at or task.created_at
             from datetime import datetime
@@ -1479,30 +1487,35 @@ async def get_active_agent_task(
             }
 
     # Fallback: TaskManager may show COMPLETED (SSE relay disconnect marked it)
-    # but the worker is still running.  The project lock is the ground truth —
+    # but the worker is still running.  The chat lock is the ground truth —
     # the worker holds it for the entire execution and only releases in finally.
     try:
         from ..services.pubsub import get_pubsub
 
         pubsub = get_pubsub()
         if pubsub:
-            holding_task_id = await pubsub.get_project_lock(project_id)
+            if chat_id:
+                # Per-session lock check
+                holding_task_id = await pubsub.get_chat_lock(chat_id)
+            else:
+                # Legacy fallback: project-level lock check
+                holding_task_id = await pubsub.get_project_lock(project_id)
             if holding_task_id:
                 # Lock is held — but skip if the user already cancelled it
                 is_cancelled = await pubsub.is_cancelled(holding_task_id)
                 if not is_cancelled:
                     logger.info(
-                        f"[AGENT-ACTIVE] Project lock held by {holding_task_id}, "
+                        f"[AGENT-ACTIVE] Lock held by {holding_task_id}, "
                         f"worker still running (TaskManager cache was stale)"
                     )
                     return {
                         "task_id": holding_task_id,
-                        "chat_id": None,
+                        "chat_id": chat_id,
                         "message": None,
                         "started_at": None,
                     }
     except Exception as e:
-        logger.debug(f"[AGENT-ACTIVE] Project lock check failed (non-blocking): {e}")
+        logger.debug(f"[AGENT-ACTIVE] Lock check failed (non-blocking): {e}")
 
     return None
 
@@ -1741,14 +1754,23 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     agent_id = data.get("agent_id")  # Get agent_id from request
     container_id = data.get("container_id")  # Get container_id for container-scoped agents
     edit_mode = data.get("edit_mode", "ask")  # Get edit_mode from request, default to ask
+    chat_id_from_client = data.get("chat_id")  # Specific chat session from frontend
 
     logger.info(
         f"[WebSocket] Received message - project_id: {project_id}, container_id: {container_id}, agent_id: {agent_id}"
     )
 
     try:
-        # Get or create chat for this user and project
-        if project_id:
+        # Resolve chat session: prefer explicit chat_id from client (multi-session)
+        chat = None
+        if chat_id_from_client:
+            result = await db.execute(
+                select(Chat).where(Chat.id == chat_id_from_client, Chat.user_id == user.id)
+            )
+            chat = result.scalar_one_or_none()
+
+        if not chat and project_id:
+            # Fallback: find or create chat by project
             result = await db.execute(
                 select(Chat).where(Chat.user_id == user.id, Chat.project_id == project_id)
             )
@@ -1761,10 +1783,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
                 await db.commit()
                 await db.refresh(chat)
 
-            chat_id = chat.id
-        else:
-            # Fallback to chat_id from frontend (for backwards compatibility)
-            chat_id = data.get("chat_id", 1)
+        chat_id = chat.id if chat else data.get("chat_id", 1)
 
         # Fetch chat history BEFORE saving current message to avoid duplication
         chat_history = await _get_chat_history(chat_id, db, limit=10)

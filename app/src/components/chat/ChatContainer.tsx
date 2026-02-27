@@ -167,6 +167,10 @@ export function ChatContainer({
   const animatedMessagesRef = useRef<Set<string>>(new Set());
   const isMountedRef = useRef(true);
   const agentTaskIdRef = useRef<string | null>(null);
+  const currentChatIdRef = useRef<string | null>(currentChatId);
+  useEffect(() => {
+    currentChatIdRef.current = currentChatId;
+  }, [currentChatId]);
 
   // Track mounted state to guard orphaned SSE callbacks after unmount
   useEffect(() => {
@@ -308,7 +312,10 @@ export function ChatContainer({
     const checkActiveTask = async (currentMessages: Message[]) => {
       if (cancelled) return;
       try {
-        const activeTask = await chatApi.getActiveTask(projectId.toString());
+        const activeTask = await chatApi.getActiveTask(
+          projectId.toString(),
+          currentChatId || undefined
+        );
         if (!activeTask || cancelled) return;
 
         setReconnecting(true);
@@ -660,6 +667,12 @@ export function ChatContainer({
                 toolDescription: data.data.tool_description,
               };
               setMessages((prev) => [...prev, approvalMessage]);
+            }
+          } else if (data.type === 'agent_event') {
+            // Cross-pod agent event forwarded via Pub/Sub bridge.
+            // Filter by chat_id to prevent bleeding from other sessions.
+            if (data.chat_id && data.chat_id !== currentChatIdRef.current) {
+              return;
             }
           } else if (data.type === 'status_update') {
             // Handle hibernation status updates

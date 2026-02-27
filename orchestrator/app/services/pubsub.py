@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 CHANNEL_PREFIX = "tesslate:ws:"
 AGENT_STREAM_PREFIX = "tesslate:agent:stream:"
 PROJECT_LOCK_PREFIX = "tesslate:project:lock:"
+CHAT_LOCK_PREFIX = "tesslate:chat:lock:"
 CANCEL_KEY_PREFIX = "tesslate:agent:cancel:"
 
 # Lua script: extend lock only if we hold it
@@ -65,9 +66,7 @@ class RedisPubSub:
     # WebSocket Status Updates (Pub/Sub - unchanged)
     # =========================================================================
 
-    async def publish_status_update(
-        self, user_id: UUID, project_id: UUID, status: dict
-    ):
+    async def publish_status_update(self, user_id: UUID, project_id: UUID, status: dict):
         """
         Publish a status update to Redis for cross-pod delivery.
 
@@ -159,9 +158,7 @@ class RedisPubSub:
             logger.debug(f"Subscribed to agent stream: {stream_key}")
 
             while True:
-                results = await redis.xread(
-                    {stream_key: last_id}, block=1000, count=100
-                )
+                results = await redis.xread({stream_key: last_id}, block=1000, count=100)
                 if not results:
                     # BLOCK timeout, yield control and retry
                     await asyncio.sleep(0.01)
@@ -176,9 +173,7 @@ class RedisPubSub:
                             if event.get("type") in ("complete", "error", "done"):
                                 return
                         except (json.JSONDecodeError, KeyError, TypeError):
-                            logger.warning(
-                                f"Invalid data in agent stream entry: {entry_id}"
-                            )
+                            logger.warning(f"Invalid data in agent stream entry: {entry_id}")
 
         except asyncio.CancelledError:
             logger.debug(f"Agent stream subscription cancelled: {stream_key}")
@@ -229,15 +224,11 @@ class RedisPubSub:
                     if event.get("type") in ("complete", "error", "done"):
                         return
                 except (json.JSONDecodeError, KeyError, TypeError):
-                    logger.warning(
-                        f"Invalid data in agent stream replay entry: {entry_id}"
-                    )
+                    logger.warning(f"Invalid data in agent stream replay entry: {entry_id}")
 
             # Phase 2: Live tail via XREAD BLOCK
             while True:
-                results = await redis.xread(
-                    {stream_key: current_last_id}, block=1000, count=100
-                )
+                results = await redis.xread({stream_key: current_last_id}, block=1000, count=100)
                 if not results:
                     await asyncio.sleep(0.01)
                     continue
@@ -251,14 +242,10 @@ class RedisPubSub:
                             if event.get("type") in ("complete", "error", "done"):
                                 return
                         except (json.JSONDecodeError, KeyError, TypeError):
-                            logger.warning(
-                                f"Invalid data in agent stream entry: {entry_id}"
-                            )
+                            logger.warning(f"Invalid data in agent stream entry: {entry_id}")
 
         except asyncio.CancelledError:
-            logger.debug(
-                f"Agent stream subscription (from {last_id}) cancelled: {stream_key}"
-            )
+            logger.debug(f"Agent stream subscription (from {last_id}) cancelled: {stream_key}")
         except Exception as e:
             logger.warning(f"Agent stream subscription (from {last_id}) error: {e}")
 
@@ -381,6 +368,118 @@ class RedisPubSub:
             return None
 
     # =========================================================================
+    # Chat Locks (per-session, heartbeat-based)
+    # =========================================================================
+
+    async def acquire_chat_lock(self, chat_id: str, task_id: str) -> bool:
+        """
+        Acquire a per-chat lock using SET NX EX 30.
+
+        Allows concurrent agent execution across different chat sessions
+        within the same project.
+
+        Args:
+            chat_id: Chat session to lock
+            task_id: Task claiming the lock
+
+        Returns:
+            True if lock was acquired, False if already held by another task.
+        """
+        from .cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return False
+
+        key = f"{CHAT_LOCK_PREFIX}{chat_id}"
+        try:
+            result = await redis.set(key, task_id, nx=True, ex=30)
+            if result:
+                logger.debug(f"Chat lock acquired: {chat_id} by {task_id}")
+            return bool(result)
+        except Exception as e:
+            logger.warning(f"Failed to acquire chat lock: {e}")
+            return False
+
+    async def extend_chat_lock(self, chat_id: str, task_id: str) -> bool:
+        """
+        Extend a chat lock TTL if we still hold it.
+
+        Args:
+            chat_id: Chat session whose lock to extend
+            task_id: Task that should be holding the lock
+
+        Returns:
+            True if lock was extended, False if we no longer hold it.
+        """
+        from .cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return False
+
+        key = f"{CHAT_LOCK_PREFIX}{chat_id}"
+        try:
+            result = await redis.eval(_EXTEND_LOCK_SCRIPT, 1, key, task_id)
+            return bool(result)
+        except Exception as e:
+            logger.warning(f"Failed to extend chat lock: {e}")
+            return False
+
+    async def release_chat_lock(self, chat_id: str, task_id: str) -> bool:
+        """
+        Release a chat lock if we hold it.
+
+        Args:
+            chat_id: Chat session whose lock to release
+            task_id: Task that should be holding the lock
+
+        Returns:
+            True if lock was released, False if we didn't hold it.
+        """
+        from .cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return False
+
+        key = f"{CHAT_LOCK_PREFIX}{chat_id}"
+        try:
+            result = await redis.eval(_RELEASE_LOCK_SCRIPT, 1, key, task_id)
+            if result:
+                logger.debug(f"Chat lock released: {chat_id} by {task_id}")
+            return bool(result)
+        except Exception as e:
+            logger.warning(f"Failed to release chat lock: {e}")
+            return False
+
+    async def get_chat_lock(self, chat_id: str) -> str | None:
+        """
+        Get the task_id currently holding the chat lock.
+
+        Args:
+            chat_id: Chat session to check
+
+        Returns:
+            The task_id holding the lock, or None if unlocked.
+        """
+        from .cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return None
+
+        key = f"{CHAT_LOCK_PREFIX}{chat_id}"
+        try:
+            value = await redis.get(key)
+            if value is not None:
+                return value.decode() if isinstance(value, bytes) else value
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get chat lock: {e}")
+            return None
+
+    # =========================================================================
     # Cross-Source Visibility Bridge
     # =========================================================================
 
@@ -424,7 +523,7 @@ class RedisPubSub:
             logger.warning(f"Failed to publish agent task notification: {e}")
 
     async def _forward_agent_events_to_ws(
-        self, user_id: UUID, project_id: UUID, task_id: str
+        self, user_id: UUID, project_id: UUID, task_id: str, chat_id: str | None = None
     ):
         """
         Subscribe to an agent's Redis Stream and forward events to local WebSocket.
@@ -437,6 +536,7 @@ class RedisPubSub:
             user_id: Target user
             project_id: Target project
             task_id: Agent task ID whose stream to follow
+            chat_id: Chat session ID (for frontend filtering)
         """
         from ..routers.chat import manager
 
@@ -451,17 +551,14 @@ class RedisPubSub:
                     )
                     break
 
-                ws_message = json.dumps(
-                    {"type": "agent_event", "task_id": task_id, "payload": event}
-                )
+                msg = {"type": "agent_event", "task_id": task_id, "payload": event}
+                if chat_id:
+                    msg["chat_id"] = chat_id
+                ws_message = json.dumps(msg)
                 try:
-                    await manager.active_connections[connection_key].send_text(
-                        ws_message
-                    )
+                    await manager.active_connections[connection_key].send_text(ws_message)
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to forward agent event to WebSocket: {e}"
-                    )
+                    logger.warning(f"Failed to forward agent event to WebSocket: {e}")
                     manager.disconnect(user_id, project_id)
                     break
         except Exception as e:
@@ -539,9 +636,7 @@ class RedisPubSub:
             logger.info("Redis Pub/Sub subscriber started (pattern: tesslate:ws:*)")
 
             while self._running:
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=1.0
-                )
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 if message and message["type"] == "pmessage":
                     await self._handle_pubsub_message(message)
                 else:
@@ -574,14 +669,15 @@ class RedisPubSub:
             # Handle agent_task_started: bridge the agent stream to local WS
             if msg_type == "agent_task_started":
                 task_id = payload.get("task_id")
+                chat_id = payload.get("chat_id")
                 if task_id and task_id not in self._forward_tasks:
                     task = asyncio.create_task(
-                        self._forward_agent_events_to_ws(user_id, project_id, task_id)
+                        self._forward_agent_events_to_ws(
+                            user_id, project_id, task_id, chat_id=chat_id
+                        )
                     )
                     self._forward_tasks[task_id] = task
-                    logger.debug(
-                        f"Spawned agent event forwarder for task {task_id}"
-                    )
+                    logger.debug(f"Spawned agent event forwarder for task {task_id}")
                 return
 
             # Default: forward status_update to local WebSocket
@@ -591,12 +687,8 @@ class RedisPubSub:
             if connection_key in manager.active_connections:
                 ws_message = json.dumps({"type": "status_update", "payload": payload})
                 try:
-                    await manager.active_connections[connection_key].send_text(
-                        ws_message
-                    )
-                    logger.debug(
-                        f"Forwarded Pub/Sub message to local WebSocket: user={user_id}"
-                    )
+                    await manager.active_connections[connection_key].send_text(ws_message)
+                    logger.debug(f"Forwarded Pub/Sub message to local WebSocket: user={user_id}")
                 except Exception as e:
                     logger.warning(f"Failed to forward to WebSocket: {e}")
                     # Clean up dead connection
@@ -610,7 +702,7 @@ class RedisPubSub:
         self._running = False
 
         # Cancel all active forwarding tasks
-        for task_id, task in list(self._forward_tasks.items()):
+        for _task_id, task in list(self._forward_tasks.items()):
             if not task.done():
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

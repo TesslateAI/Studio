@@ -600,11 +600,11 @@ export const chatApi = {
     return response.data;
   },
 
-  // Check for active agent task on a project
-  getActiveTask: async (projectId: string) => {
-    const response = await api.get('/api/chat/agent/active', {
-      params: { project_id: projectId },
-    });
+  // Check for active agent task on a project (optionally scoped to a chat session)
+  getActiveTask: async (projectId: string, chatId?: string) => {
+    const params: Record<string, string> = { project_id: projectId };
+    if (chatId) params.chat_id = chatId;
+    const response = await api.get('/api/chat/agent/active', { params });
     return response.data;
   },
 

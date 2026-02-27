@@ -48,8 +48,8 @@ def _build_step_dict(step_data: dict, _convert_uuids_to_strings) -> dict:
     }
 
 
-async def _heartbeat_lock(pubsub, project_id: str, task_id: str):
-    """Extend the project lock every 10 seconds until cancelled.
+async def _heartbeat_lock(pubsub, chat_id: str, task_id: str):
+    """Extend the chat lock every 10 seconds until cancelled.
 
     When the lock is lost (stolen or expired), signals cancellation
     via Redis so the agent loop stops at the next iteration check.
@@ -57,10 +57,10 @@ async def _heartbeat_lock(pubsub, project_id: str, task_id: str):
     try:
         while True:
             await asyncio.sleep(10)
-            extended = await pubsub.extend_project_lock(project_id, task_id)
+            extended = await pubsub.extend_chat_lock(chat_id, task_id)
             if not extended:
                 logger.warning(
-                    f"[WORKER] Lost project lock for {project_id}, "
+                    f"[WORKER] Lost chat lock for {chat_id}, "
                     f"task {task_id} — signalling cancellation"
                 )
                 await pubsub.request_cancellation(task_id)
@@ -114,21 +114,22 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 await _publish_error(pubsub, task_id, "Project not found")
                 return
 
-            # 2. Acquire per-project lock (if enabled in project settings)
+            # 2. Acquire per-chat lock (allows concurrent agents across sessions)
             project_settings = project.settings or {}
             agent_lock_enabled = project_settings.get("agent_lock_enabled", True)
+            chat_id = payload.chat_id
 
             if agent_lock_enabled and pubsub:
-                lock_acquired = await pubsub.acquire_project_lock(project_id, task_id)
+                lock_acquired = await pubsub.acquire_chat_lock(chat_id, task_id)
                 if not lock_acquired:
                     # If the holding task has been cancelled, wait briefly
                     # for it to release the lock (e.g. user cancelled then
                     # immediately sent a new message).
-                    holding_task = await pubsub.get_project_lock(project_id)
+                    holding_task = await pubsub.get_chat_lock(chat_id)
                     if holding_task and await pubsub.is_cancelled(holding_task):
                         for _retry in range(10):
                             await asyncio.sleep(0.5)
-                            lock_acquired = await pubsub.acquire_project_lock(project_id, task_id)
+                            lock_acquired = await pubsub.acquire_chat_lock(chat_id, task_id)
                             if lock_acquired:
                                 logger.info(
                                     f"[WORKER] Acquired lock after cancelled task "
@@ -136,15 +137,15 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 )
                                 break
                     if not lock_acquired:
-                        holding_task = await pubsub.get_project_lock(project_id)
+                        holding_task = await pubsub.get_chat_lock(chat_id)
                         await _publish_error(
                             pubsub,
                             task_id,
-                            f"Another agent is running on this project (task: {holding_task})",
+                            f"Another agent is running in this session (task: {holding_task})",
                         )
                         return
                 # Start heartbeat to extend lock every 10s
-                heartbeat_task = asyncio.create_task(_heartbeat_lock(pubsub, project_id, task_id))
+                heartbeat_task = asyncio.create_task(_heartbeat_lock(pubsub, chat_id, task_id))
 
             # 3. Load agent model
             agent_model = None
@@ -456,14 +457,14 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 )
 
         finally:
-            # Always release project lock and cancel heartbeat
+            # Always release chat lock and cancel heartbeat
             if heartbeat_task:
                 heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat_task
             if lock_acquired and pubsub:
-                await pubsub.release_project_lock(project_id, task_id)
-                logger.debug(f"[WORKER] Released project lock for {project_id}")
+                await pubsub.release_chat_lock(payload.chat_id, task_id)
+                logger.debug(f"[WORKER] Released chat lock for {payload.chat_id}")
 
 
 async def send_webhook_callback(ctx: dict, url: str, payload: dict):
