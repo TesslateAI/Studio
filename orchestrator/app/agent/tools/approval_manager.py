@@ -78,9 +78,7 @@ class ApprovalManager:
 
             try:
                 while True:
-                    msg = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                     if msg and msg["type"] == "message":
                         try:
                             data = json.loads(msg["data"])
@@ -260,6 +258,40 @@ async def publish_approval_response(approval_id: str, response: str):
         logger.info(f"[ApprovalManager] Published approval {approval_id} to Redis")
     except Exception as e:
         logger.error(f"[ApprovalManager] Failed to publish approval to Redis: {e}")
+
+
+async def wait_for_approval_or_cancel(
+    request: ApprovalRequest,
+    task_id: str | None = None,
+    timeout_seconds: float = 300.0,
+    poll_interval: float = 1.0,
+) -> str | None:
+    """
+    Wait for approval response, checking for cancellation every poll_interval.
+
+    Returns the response string ('allow_once', 'allow_all', 'stop'),
+    or None on timeout, or 'cancel' if the task was cancelled.
+    """
+    pubsub = None
+    if task_id:
+        from ...services.pubsub import get_pubsub
+
+        pubsub = get_pubsub()
+
+    elapsed = 0.0
+    while elapsed < timeout_seconds:
+        try:
+            await asyncio.wait_for(request.event.wait(), timeout=poll_interval)
+            return request.response
+        except TimeoutError:
+            elapsed += poll_interval
+
+        if pubsub and task_id and await pubsub.is_cancelled(task_id):
+            logger.info(f"[ApprovalManager] Wait cancelled for {request.approval_id}")
+            return "cancel"
+
+    logger.warning(f"[ApprovalManager] Approval timeout for {request.approval_id}")
+    return None
 
 
 # Global instance

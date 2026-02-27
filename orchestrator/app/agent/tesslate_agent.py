@@ -912,15 +912,23 @@ class TesslateAgent(AbstractAgent):
 
         Must be called AFTER the approval_required event has been yielded
         to the SSE stream.
+
+        Polls cancellation every second so the user can stop the agent
+        while it is blocked waiting for approval.
         """
         fn = tool_call.get("function", {})
         tool_name = fn.get("name", "")
         parameters = _safe_json_loads(fn.get("arguments", "{}"))
 
         logger.info(f"[TesslateAgent] Waiting for approval {approval_id}")
-        try:
-            await asyncio.wait_for(request.event.wait(), timeout=timeout_seconds)
-        except TimeoutError:
+
+        from .tools.approval_manager import wait_for_approval_or_cancel
+
+        response = await wait_for_approval_or_cancel(
+            request, task_id=context.get("task_id"), timeout_seconds=timeout_seconds
+        )
+
+        if response is None:
             logger.warning(f"[TesslateAgent] Approval timeout for {approval_id}")
             return {
                 "type": "complete",
@@ -929,6 +937,17 @@ class TesslateAgent(AbstractAgent):
                     "iterations": 0,
                     "tool_calls_made": 0,
                     "completion_reason": "approval_timeout",
+                },
+            }
+
+        if response == "cancel":
+            return {
+                "type": "complete",
+                "data": {
+                    "final_response": "Request was cancelled.",
+                    "iterations": 0,
+                    "tool_calls_made": 0,
+                    "completion_reason": "cancelled",
                 },
             }
 

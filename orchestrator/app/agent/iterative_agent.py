@@ -378,15 +378,20 @@ class IterativeAgent(AbstractAgent):
 
                                 logger.info(f"[IterativeAgent] Waiting for approval {approval_id}")
 
-                                # Wait for user response
-                                await request.event.wait()
+                                # Wait for user response (with cancellation support)
+                                from .tools.approval_manager import wait_for_approval_or_cancel
+
+                                approval_response = await wait_for_approval_or_cancel(
+                                    request, task_id=context.get("task_id")
+                                )
+                                request.response = approval_response
 
                                 logger.info(
                                     f"[IterativeAgent] Received response: {request.response}"
                                 )
 
                                 # Handle response
-                                if request.response == "stop":
+                                if request.response in ("stop", "cancel", None):
                                     # User cancelled - terminate agent execution completely
                                     logger.info(
                                         f"[IterativeAgent] User stopped execution at {result['tool']}"

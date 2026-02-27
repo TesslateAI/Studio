@@ -1733,7 +1733,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
 
     # Handle approval response (Ask Before Edit mode)
     if data.get("type") == "approval_response":
-        from ..agent.tools.approval_manager import get_approval_manager
+        from ..agent.tools.approval_manager import get_approval_manager, publish_approval_response
 
         approval_mgr = get_approval_manager()
 
@@ -1744,6 +1744,8 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
 
         if approval_id and response:
             approval_mgr.respond_to_approval(approval_id, response)
+            # Also publish to Redis so ARQ workers on other pods receive the approval
+            await publish_approval_response(approval_id, response)
         else:
             logger.warning("[WebSocket] Invalid approval response: missing approval_id or response")
 

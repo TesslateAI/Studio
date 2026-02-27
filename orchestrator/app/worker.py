@@ -229,6 +229,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "project_slug": payload.project_slug,
                 "container_directory": payload.container_directory,
                 "chat_id": UUID(payload.chat_id),
+                "task_id": task_id,
                 "db": db,
                 "chat_history": payload.chat_history,
                 "project_context": payload.project_context,
