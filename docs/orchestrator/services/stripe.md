@@ -236,7 +236,7 @@ The `handle_webhook` method processes Stripe events with three-tier error handli
 | `customer.subscription.created` | `_handle_subscription_created` | Logged |
 | `customer.subscription.updated` | `_handle_subscription_updated` | Logged |
 | `customer.subscription.deleted` | `_handle_subscription_deleted` | Downgrades user to free or deactivates agent subscription |
-| `invoice.payment_succeeded` | `_handle_invoice_payment_succeeded` | Marks usage logs as paid |
+| `invoice.payment_succeeded` | `_handle_invoice_payment_succeeded` | Resets bundled credits on subscription cycle + marks usage logs as paid |
 | `invoice.payment_failed` | `_handle_invoice_payment_failed` | Logged (TODO: user notification) |
 | `payment_intent.succeeded` | `_handle_payment_intent_succeeded` | Logged |
 
@@ -260,6 +260,25 @@ When `customer.subscription.deleted` fires:
    - Purchased credits are NOT affected (they never expire)
 2. Check if it is an **agent subscription** by looking up `UserPurchasedAgent.stripe_subscription_id`
    - Deactivate agent access (`is_active = False`)
+
+## Monthly Bundled Credit Reset
+
+Bundled credits reset via a **dual-trigger** system:
+
+### Primary: Stripe Webhook (`invoice.payment_succeeded`)
+
+When Stripe processes a subscription renewal payment (`billing_reason == "subscription_cycle"`), the `_handle_invoice_payment_succeeded` handler immediately:
+1. Looks up user by `stripe_subscription_id`
+2. Resets `bundled_credits` to the tier's allowance
+3. Sets `credits_reset_date` to 30 days from now
+
+### Safety Net: Background Loop (`daily_credit_reset.py`)
+
+An hourly sweep in `_reset_bundled_credits()` catches any users whose `credits_reset_date` has passed but were missed by the webhook (e.g., webhook delivery failure, downtime).
+
+## LiteLLM Budget Sync
+
+Both `fulfill_credit_purchase()` and `fulfill_subscription()` call `litellm_service.ensure_budget_headroom()` after successful DB commit. This ensures LiteLLM's per-key `max_budget` stays ahead of actual spend so it doesn't block users who still have Tesslate credits. The call is fire-and-forget — failure is logged at WARNING but doesn't block the fulfillment.
 
 ## Usage Invoicing
 

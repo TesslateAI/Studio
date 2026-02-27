@@ -266,6 +266,7 @@ class TesslateAgent(AbstractAgent):
         )
         tool_calls_count = 0
         iteration = 0
+        deduction_failures = 0
 
         # Trajectory recording
         from .trajectory import TrajectoryRecorder
@@ -397,6 +398,7 @@ class TesslateAgent(AbstractAgent):
                                 project_id=project_id,
                             )
                             yield {"type": "credits_used", "data": credit_result}
+                            deduction_failures = 0  # Reset on success
 
                             if (
                                 not credit_result.get("is_byok")
@@ -418,7 +420,27 @@ class TesslateAgent(AbstractAgent):
                                 )
                                 return
                 except Exception as e:
-                    logger.warning(f"[TesslateAgent] Credit deduction failed (non-blocking): {e}")
+                    deduction_failures += 1
+                    logger.error(
+                        f"[TesslateAgent] Credit deduction failed "
+                        f"({deduction_failures}/3, non-blocking): {e}"
+                    )
+                    if deduction_failures >= 3:
+                        yield {
+                            "type": "error",
+                            "content": "Credit system temporarily unavailable. Please try again later.",
+                        }
+                        yield self._complete_event(
+                            False,
+                            iteration,
+                            content or "",
+                            "credit_deduction_failed",
+                            tool_calls_count,
+                            "credit_deduction_failed",
+                            limits.get_stats(run_id),
+                            session_id=session_id,
+                        )
+                        return
 
                 # No tool calls = done
                 if not tool_calls:

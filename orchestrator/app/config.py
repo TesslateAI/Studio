@@ -39,7 +39,9 @@ class Settings(BaseSettings):
         return [m.strip() for m in self.litellm_default_models.split(",") if m.strip()]
 
     litellm_email_domain: str = "localhost"  # Domain for internal emails
-    litellm_initial_budget: float = 10.0  # Initial budget per user in USD
+    litellm_initial_budget: float = (
+        10000.0  # Safety ceiling per user in USD (Tesslate credit system is the real gate)
+    )
 
     # JWT Configuration
     algorithm: str = "HS256"

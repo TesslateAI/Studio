@@ -247,6 +247,63 @@ class LiteLLMService:
                 logger.error(f"Error adding user budget: {e}")
                 return False
 
+    async def ensure_budget_headroom(self, api_key: str, headroom: float = 10000.0) -> bool:
+        """
+        Ensure a user's LiteLLM key has at least `headroom` dollars of budget remaining.
+        Only ever increases max_budget — never decreases.
+
+        Called after credit purchases and subscription upgrades so LiteLLM's
+        hard cap doesn't block users who still have Tesslate credits.
+
+        Args:
+            api_key: User's LiteLLM API key
+            headroom: Minimum gap between current spend and max_budget (default $10,000)
+
+        Returns:
+            True if headroom is sufficient or was successfully increased, False on error
+        """
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(
+                    f"{self.management_base_url}/key/info",
+                    headers=self.headers,
+                    params={"key": api_key},
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(
+                            f"Failed to get key info for budget headroom check: {await resp.text()}"
+                        )
+                        return False
+                    key_data = await resp.json()
+
+                info = key_data.get("info", key_data)
+                spend = info.get("spend", 0.0) or 0.0
+                max_budget = info.get("max_budget") or 0.0
+
+                remaining = max_budget - spend
+                if remaining >= headroom:
+                    return True
+
+                new_budget = spend + headroom
+                update_data = {"key": api_key, "max_budget": new_budget}
+                async with session.post(
+                    f"{self.management_base_url}/key/update",
+                    headers=self.headers,
+                    json=update_data,
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info(
+                            f"Bumped LiteLLM budget: spend={spend:.2f}, "
+                            f"old_max={max_budget:.2f}, new_max={new_budget:.2f}"
+                        )
+                        return True
+                    else:
+                        logger.warning(f"Failed to update LiteLLM budget: {await resp.text()}")
+                        return False
+            except Exception as e:
+                logger.warning(f"ensure_budget_headroom failed (non-blocking): {e}")
+                return False
+
     async def get_user_usage(self, api_key: str, start_date: datetime = None) -> dict[str, Any]:
         """
         Get usage statistics for a user.

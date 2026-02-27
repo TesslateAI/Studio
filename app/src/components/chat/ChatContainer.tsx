@@ -23,6 +23,8 @@ function formatAgentError(raw: string): string {
   if (raw.includes('401') || raw.includes('authentication') || raw.includes('api_key'))
     return 'Authentication error. Check your API key configuration.';
   if (raw.includes('Resource limit')) return 'Resource limit exceeded for this session.';
+  if (raw.includes('budget') || raw.includes('Budget'))
+    return 'Usage limit reached. Please try again or purchase more credits.';
   return raw.length > 120 ? raw.slice(0, 120) + '...' : raw;
 }
 

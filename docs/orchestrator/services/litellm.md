@@ -25,7 +25,7 @@ LiteLLMService.create_user_key()
 LiteLLM Proxy API (:4000/v1)
     ├─ Creates virtual key (sk-...)
     ├─ Assigns to team ("internal")
-    └─ Sets budget ($10)
+    └─ Sets budget ($10,000 safety ceiling)
     ↓
 Client uses virtual key
     ↓
@@ -44,7 +44,7 @@ LITELLM_API_BASE=http://localhost:4000/v1
 LITELLM_MASTER_KEY=sk-1234...  # Admin key for management API
 LITELLM_TEAM_ID=internal  # Default access group
 LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6
-LITELLM_INITIAL_BUDGET=10.00  # $10 initial credits
+LITELLM_INITIAL_BUDGET=10000.0  # $10,000 safety ceiling (Tesslate credit system is the real gate)
 LITELLM_EMAIL_DOMAIN=tesslate.com
 ```
 
@@ -80,6 +80,24 @@ success = await litellm_service.add_user_budget(
     amount=25.00  # Add $25
 )
 ```
+
+### Ensure Budget Headroom
+
+Ensures a user's LiteLLM key has at least `headroom` dollars of budget remaining. Only ever increases `max_budget` — never decreases. Called automatically after credit purchases and subscription upgrades by `stripe_service.py`.
+
+```python
+success = await litellm_service.ensure_budget_headroom(
+    api_key=user.litellm_api_key,
+    headroom=10000.0  # Default: $10,000
+)
+# Steps:
+# 1. GET /key/info → read current spend and max_budget
+# 2. If max_budget - spend < headroom:
+#    POST /key/update with max_budget = spend + headroom
+# 3. Returns True if ok, False on error (non-blocking)
+```
+
+**Design**: The Tesslate credit system (pre-request `check_credits` + post-request `deduct_credits`) is the real usage gate. LiteLLM's `max_budget` is a catastrophic runaway ceiling that should never be the binding constraint for active users.
 
 ### Track Usage
 
@@ -264,10 +282,11 @@ success = await litellm_service.revoke_user_key(
 - Verify LiteLLM proxy is running on port 4000
 - Test: `curl http://localhost:4000/health`
 
-**Problem**: User exceeds budget
-- Check usage: `get_user_usage()`
-- Add more budget: `add_user_budget()`
-- Or upgrade team tier
+**Problem**: User hits "Budget has been exceeded" error
+- LiteLLM's per-key budget is a safety ceiling ($10,000), not the real gate
+- Run the one-time bump script: `scripts/seed/bump_litellm_budgets.py`
+- Or manually call: `await litellm_service.ensure_budget_headroom(user.litellm_api_key)`
+- Check actual Tesslate credit balance — that's the real usage gate
 
 **Problem**: Model not available
 - Check `get_available_models()`

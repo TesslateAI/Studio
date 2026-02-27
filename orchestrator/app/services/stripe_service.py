@@ -533,6 +533,15 @@ class StripeService:
             )
             return {"credits_added": credits_amount, "already_fulfilled": True}
 
+        # Non-blocking LiteLLM budget sync
+        try:
+            from .litellm_service import litellm_service
+
+            if user.litellm_api_key:
+                await litellm_service.ensure_budget_headroom(user.litellm_api_key)
+        except Exception as e:
+            logger.warning(f"LiteLLM budget sync after credit purchase failed (non-blocking): {e}")
+
         logger.info(
             f"Credit purchase fulfilled: user {user_id}, "
             f"{credits_amount} credits for ${amount_cents / 100:.2f}"
@@ -578,6 +587,17 @@ class StripeService:
         user.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
 
         await db.commit()
+
+        # Non-blocking LiteLLM budget sync
+        try:
+            from .litellm_service import litellm_service
+
+            if user.litellm_api_key:
+                await litellm_service.ensure_budget_headroom(user.litellm_api_key)
+        except Exception as e:
+            logger.warning(
+                f"LiteLLM budget sync after subscription upgrade failed (non-blocking): {e}"
+            )
 
         logger.info(
             f"Subscription fulfilled: user {user_id} upgraded to {tier} "
@@ -1050,12 +1070,33 @@ class StripeService:
             logger.info(f"Agent subscription cancelled: {subscription_id}")
 
     async def _handle_invoice_payment_succeeded(self, invoice: dict[str, Any], db: AsyncSession):
-        """Handle successful invoice payment."""
+        """Handle successful invoice payment (usage invoices + subscription renewals)."""
+        from datetime import timedelta
+
         logger.info(f"Invoice payment succeeded: {invoice['id']}")
 
+        # --- Subscription renewal: reset bundled credits on billing cycle ---
+        billing_reason = invoice.get("billing_reason")
+        subscription_id = invoice.get("subscription")
+
+        if billing_reason == "subscription_cycle" and subscription_id:
+            user_result = await db.execute(
+                select(User).where(User.stripe_subscription_id == subscription_id)
+            )
+            user = user_result.scalar_one_or_none()
+            if user:
+                tier_credits = settings.get_tier_bundled_credits(user.subscription_tier)
+                user.bundled_credits = tier_credits
+                user.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
+                await db.commit()
+                logger.info(
+                    f"Subscription renewal: reset {user.id} bundled credits "
+                    f"to {tier_credits} ({user.subscription_tier} tier)"
+                )
+
+        # --- Usage invoice fulfillment ---
         metadata = invoice.get("metadata", {})
         if metadata.get("type") == "usage_invoice":
-            # Mark usage logs as paid
             user_id = UUID(metadata["user_id"])
             usage_result = await db.execute(
                 select(UsageLog).where(

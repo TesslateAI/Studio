@@ -5,7 +5,7 @@ and expiring signup bonuses.
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 
@@ -32,6 +32,7 @@ async def daily_credit_reset_loop():
         try:
             await _reset_daily_credits()
             await _expire_signup_bonuses()
+            await _reset_bundled_credits()
         except Exception as e:
             logger.error(f"Error in daily credit reset loop: {e}", exc_info=True)
 
@@ -88,3 +89,33 @@ async def _expire_signup_bonuses():
         if result.rowcount > 0:
             await session.commit()
             logger.info(f"Expired signup bonuses for {result.rowcount} users")
+
+
+async def _reset_bundled_credits():
+    """Reset bundled credits for paid-tier users whose credits_reset_date has passed.
+
+    This is a safety-net sweep — the primary trigger is Stripe's
+    invoice.payment_succeeded webhook (see stripe_service.py).
+    """
+    now = datetime.now(UTC)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User).where(
+                User.subscription_tier != "free",
+                User.credits_reset_date.isnot(None),
+                User.credits_reset_date <= now,
+            )
+        )
+        users = result.scalars().all()
+
+        if not users:
+            return
+
+        for user in users:
+            tier_credits = settings.get_tier_bundled_credits(user.subscription_tier)
+            user.bundled_credits = tier_credits
+            user.credits_reset_date = now + timedelta(days=30)
+
+        await session.commit()
+        logger.info(f"Reset bundled credits for {len(users)} paid-tier users")

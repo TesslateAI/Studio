@@ -111,7 +111,7 @@ resource "kubernetes_secret" "app_secrets" {
     LITELLM_DEFAULT_MODELS = var.litellm_default_models
     LITELLM_TEAM_ID        = "default"
     LITELLM_EMAIL_DOMAIN   = var.domain_name
-    LITELLM_INITIAL_BUDGET = "10.0"
+    LITELLM_INITIAL_BUDGET = "10000.0"
 
     # CORS & Domain
     CORS_ORIGINS        = "https://${var.domain_name},https://*.${var.domain_name}"

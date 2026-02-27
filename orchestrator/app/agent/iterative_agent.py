@@ -192,6 +192,7 @@ class IterativeAgent(AbstractAgent):
 
         # Main agent loop
         iteration = 0
+        deduction_failures = 0
         try:
             while True:
                 iteration += 1
@@ -280,6 +281,7 @@ class IterativeAgent(AbstractAgent):
                                     project_id=project_id,
                                 )
                                 yield {"type": "credits_used", "data": credit_result}
+                                deduction_failures = 0  # Reset on success
 
                                 if (
                                     not credit_result.get("is_byok")
@@ -302,9 +304,28 @@ class IterativeAgent(AbstractAgent):
                                     }
                                     return
                     except Exception as e:
-                        logger.warning(
-                            f"[IterativeAgent] Credit deduction failed (non-blocking): {e}"
+                        deduction_failures += 1
+                        logger.error(
+                            f"[IterativeAgent] Credit deduction failed "
+                            f"({deduction_failures}/3, non-blocking): {e}"
                         )
+                        if deduction_failures >= 3:
+                            yield {
+                                "type": "error",
+                                "content": "Credit system temporarily unavailable. Please try again later.",
+                            }
+                            yield {
+                                "type": "complete",
+                                "data": {
+                                    "success": False,
+                                    "iterations": iteration,
+                                    "final_response": response,
+                                    "error": "credit_deduction_failed",
+                                    "tool_calls_made": self.tool_calls_count,
+                                    "completion_reason": "credit_deduction_failed",
+                                },
+                            }
+                            return
 
                     # Step 2: Parse response
                     tool_calls = self.parser.parse(response)

@@ -181,7 +181,7 @@ class StreamAgent(AbstractAgent):
                         )
                         yield {"type": "credits_used", "data": credit_result}
             except Exception as e:
-                logger.warning(f"[StreamAgent] Credit deduction failed (non-blocking): {e}")
+                logger.error(f"[StreamAgent] Credit deduction failed (non-blocking): {e}")
 
             # Process all code blocks and save files
             if project_id:

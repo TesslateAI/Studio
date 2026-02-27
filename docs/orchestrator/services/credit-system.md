@@ -87,10 +87,34 @@ Credit service calls `calculate_cost_cents(model, tokens_in, tokens_out)` to det
 Both create `UsageLog` entries. The credit service creates entries during real-time deduction; the usage service provides aggregation and reporting.
 
 ### With `daily_credit_reset.py`
-Background loop resets `daily_credits` for free-tier users at UTC midnight (hourly check). Also expires signup bonuses past their expiry date.
+Background loop (hourly) handles three resets:
+1. **Daily credits**: Resets `daily_credits` for free-tier users at UTC midnight
+2. **Signup bonus expiration**: Zeros out expired signup bonuses
+3. **Bundled credit reset**: Resets `bundled_credits` for paid-tier users whose `credits_reset_date` has passed (safety net for the Stripe webhook primary trigger)
+
+### With LiteLLM Budget System
+
+The credit system is the **real usage gate**. LiteLLM's per-key `max_budget` is set to $10,000 as a catastrophic runaway ceiling only. The two systems are kept in sync:
+
+- **At signup**: New keys get `$10,000` initial budget (via `config.litellm_initial_budget`)
+- **At credit purchase / subscription upgrade**: `ensure_budget_headroom()` bumps LiteLLM's `max_budget` if remaining headroom drops below $10,000
+- **Design**: Only ever increases, never decreases. Fire-and-forget — failure doesn't block the credit operation
+
+See [litellm.md](./litellm.md) for the `ensure_budget_headroom()` API.
+
+## Agent Deduction Failure Escalation
+
+Credit deduction in agent loops (`tesslate_agent.py`, `iterative_agent.py`) is non-blocking — a single failure doesn't stop the agent. However, **3 consecutive failures** trigger agent termination:
+
+1. On each failed `deduct_credits()` call: increment `deduction_failures` counter, log at ERROR level
+2. On success: reset counter to 0
+3. At `>= 3` consecutive failures: yield error event ("Credit system temporarily unavailable"), yield complete event with `completion_reason: "credit_deduction_failed"`, return
+
+`stream_agent.py` runs a single LLM call (not iterative), so it only escalates the log level to ERROR without a counter.
 
 ## Related
 
 - [model-pricing.md](./model-pricing.md) — LiteLLM pricing cache and cost calculation
+- [litellm.md](./litellm.md) — LiteLLM budget management and `ensure_budget_headroom()`
 - [stripe.md](./stripe.md) — Stripe checkout for credit purchases and subscriptions
 - [../routers/billing.md](../routers/billing.md) — Billing API endpoints
