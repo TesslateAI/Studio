@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { MagnifyingGlass, Plus, ChatCircleDots, PencilSimple } from '@phosphor-icons/react';
+import { MagnifyingGlass, Plus, ChatCircleDots, PencilSimple, Trash } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 interface ChatSession {
@@ -20,6 +20,8 @@ interface ChatSessionPopoverProps {
   onSelectSession: (sessionId: string) => void;
   onNewSession: () => void;
   onRenameSession: (sessionId: string, newTitle: string) => void;
+  onDeleteSession?: (sessionId: string) => void;
+  sessionCount?: number;
   anchorRef: React.RefObject<HTMLButtonElement | null>;
 }
 
@@ -52,6 +54,8 @@ export function ChatSessionPopover({
   onSelectSession,
   onNewSession,
   onRenameSession,
+  onDeleteSession,
+  sessionCount,
   anchorRef,
 }: ChatSessionPopoverProps) {
   const [search, setSearch] = useState('');
@@ -79,7 +83,7 @@ export function ChatSessionPopover({
         onClose();
       }
     },
-    [onClose, anchorRef],
+    [onClose, anchorRef]
   );
 
   useEffect(() => {
@@ -103,14 +107,11 @@ export function ChatSessionPopover({
     }
   }, [renamingId]);
 
-  const startRename = useCallback(
-    (e: React.MouseEvent, session: ChatSession) => {
-      e.stopPropagation();
-      setRenamingId(session.id);
-      setRenameValue(session.title || '');
-    },
-    [],
-  );
+  const startRename = useCallback((e: React.MouseEvent, session: ChatSession) => {
+    e.stopPropagation();
+    setRenamingId(session.id);
+    setRenameValue(session.title || '');
+  }, []);
 
   const commitRename = useCallback(() => {
     if (renamingId && renameValue.trim()) {
@@ -133,7 +134,7 @@ export function ChatSessionPopover({
         cancelRename();
       }
     },
-    [commitRename, cancelRename],
+    [commitRename, cancelRename]
   );
 
   return (
@@ -249,20 +250,31 @@ export function ChatSessionPopover({
                           {session.message_count} message{session.message_count !== 1 ? 's' : ''}
                         </span>
                         <span>·</span>
-                        <span>
-                          {formatRelativeTime(session.updated_at || session.created_at)}
-                        </span>
+                        <span>{formatRelativeTime(session.updated_at || session.created_at)}</span>
                       </div>
                     </div>
 
-                    {/* Rename pencil */}
+                    {/* Actions: rename + delete */}
                     {!isRenaming && (
-                      <button
-                        onClick={(e) => startRename(e, session)}
-                        className="mt-0.5 shrink-0 rounded p-1 opacity-0 transition-opacity duration-150 hover:bg-white/10 group-hover:opacity-100"
-                      >
-                        <PencilSimple size={14} className="text-white/50" />
-                      </button>
+                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                        <button
+                          onClick={(e) => startRename(e, session)}
+                          className="mt-0.5 rounded p-1 hover:bg-white/10"
+                        >
+                          <PencilSimple size={14} className="text-white/50" />
+                        </button>
+                        {onDeleteSession && (sessionCount ?? sessions.length) > 1 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteSession(session.id);
+                            }}
+                            className="mt-0.5 rounded p-1 hover:bg-red-500/20"
+                          >
+                            <Trash size={14} className="text-white/30 hover:text-red-400" />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 );

@@ -162,6 +162,8 @@ export function ChatContainer({
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<{ id: string; title: string; created_at: string }[]>([]);
   const [showSessionPopover, setShowSessionPopover] = useState(false);
+  const [isRenamingTitle, setIsRenamingTitle] = useState(false);
+  const [renameTitleValue, setRenameTitleValue] = useState('');
   const [_reconnecting, setReconnecting] = useState(false);
   const [_sessionTransitioning, setSessionTransitioning] = useState(false);
 
@@ -1339,6 +1341,30 @@ export function ChatContainer({
     }
   }, []);
 
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await chatApi.deleteChat(sessionId);
+        // If we deleted the current chat, switch to the first remaining one
+        if (sessionId === currentChatId) {
+          const remaining = sessions.filter((s) => s.id !== sessionId);
+          if (remaining.length > 0) {
+            setSessionTransitioning(true);
+            setMessages([]);
+            animatedMessagesRef.current.clear();
+            setCurrentChatId(remaining[0].id);
+            setTimeout(() => setSessionTransitioning(false), 200);
+          }
+        }
+        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      } catch (error) {
+        console.error('[CHAT] Failed to delete session:', error);
+        toast.error('Failed to delete chat session');
+      }
+    },
+    [currentChatId, sessions]
+  );
+
   // Get current session title for header
   const currentSessionTitle = useMemo(() => {
     if (!currentChatId || sessions.length === 0) return 'Chat';
@@ -1618,9 +1644,43 @@ export function ChatContainer({
               )}
             </button>
 
-            <span className="flex-1 truncate text-sm text-[var(--text)]/50 hover:text-[var(--text)] transition-colors cursor-default">
-              {currentSessionTitle}
-            </span>
+            {isRenamingTitle ? (
+              <input
+                type="text"
+                value={renameTitleValue}
+                onChange={(e) => setRenameTitleValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    // Blur the input — onBlur handles the commit
+                    e.currentTarget.blur();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    // Cancel: clear value so onBlur skips the API call
+                    setRenameTitleValue('');
+                    e.currentTarget.blur();
+                  }
+                }}
+                onBlur={() => {
+                  if (currentChatId && renameTitleValue.trim()) {
+                    handleRenameSession(currentChatId, renameTitleValue.trim());
+                  }
+                  setIsRenamingTitle(false);
+                }}
+                className="flex-1 min-w-0 border-b-2 border-[var(--primary)] bg-transparent text-sm text-[var(--text)] outline-none"
+                autoFocus
+              />
+            ) : (
+              <span
+                onClick={() => {
+                  setRenameTitleValue(currentSessionTitle);
+                  setIsRenamingTitle(true);
+                }}
+                className="flex-1 truncate text-sm text-[var(--text)]/50 hover:text-[var(--text)] transition-colors cursor-text"
+              >
+                {currentSessionTitle}
+              </span>
+            )}
 
             <button
               onClick={handleNewSession}
@@ -1638,6 +1698,8 @@ export function ChatContainer({
               onSelectSession={handleSelectSession}
               onNewSession={handleNewSession}
               onRenameSession={handleRenameSession}
+              onDeleteSession={handleDeleteSession}
+              sessionCount={sessions.length}
               anchorRef={sessionsButtonRef}
             />
           </div>

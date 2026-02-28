@@ -192,6 +192,37 @@ async def update_chat_session(
     return {"id": str(chat.id), "title": chat.title, "status": chat.status}
 
 
+@router.delete("/{chat_id}")
+async def delete_chat_session(
+    chat_id: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a chat session and all its messages/steps (cascade)."""
+    from sqlalchemy import func as sa_func
+
+    result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == current_user.id)
+    )
+    chat = result.scalar_one_or_none()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    # Prevent deleting the last chat in a project
+    count_result = await db.execute(
+        select(sa_func.count(Chat.id)).where(
+            Chat.user_id == current_user.id,
+            Chat.project_id == chat.project_id,
+        )
+    )
+    if count_result.scalar() <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the last chat session")
+
+    await db.delete(chat)
+    await db.commit()
+    return {"success": True}
+
+
 @router.get("/{project_id}/messages")
 async def get_project_messages(
     project_id: str,

@@ -633,6 +633,11 @@ export const chatApi = {
     const response = await api.get(`/api/chat/${projectId}/messages`, { params });
     return response.data;
   },
+
+  deleteChat: async (chatId: string) => {
+    const response = await api.delete(`/api/chat/${chatId}`);
+    return response.data;
+  },
 };
 
 export const externalApi = {
