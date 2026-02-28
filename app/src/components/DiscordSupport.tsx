@@ -2,21 +2,24 @@ import { DiscordLogo } from '@phosphor-icons/react';
 
 interface DiscordSupportProps {
   chatPosition?: 'left' | 'center' | 'right';
+  mobileChatOpen?: boolean;
 }
 
 export function DiscordSupport({
   chatPosition = 'center',
+  mobileChatOpen = false,
 }: DiscordSupportProps) {
   // Mobile: always bottom-right (chat is floating, not docked)
   // Desktop with right-docked chat: anchor just left of the chat panel (~30% wide)
-  const positionClasses =
-    chatPosition === 'right'
-      ? 'right-[31%]'
-      : 'right-4';
+  const positionClasses = chatPosition === 'right' ? 'right-[31%]' : 'right-4';
+
+  // On mobile when chat is open, sit above the chat input bar (~100px from bottom)
+  // Otherwise, normal bottom positioning
+  const bottomClasses = mobileChatOpen ? 'bottom-[100px] md:bottom-8' : 'bottom-4 md:bottom-8';
 
   return (
     <div
-      className={`fixed bottom-4 md:bottom-8 z-40 group ${positionClasses}`}
+      className={`fixed ${bottomClasses} z-50 group transition-all duration-300 ${positionClasses}`}
       data-tour="discord-support"
     >
       <a

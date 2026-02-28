@@ -88,6 +88,7 @@ export default function Project() {
   const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
+  const [chatExpanded, setChatExpanded] = useState(false);
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
@@ -1583,6 +1584,7 @@ export default function Project() {
             isPointerOverPreviewRef={isPointerOverPreviewRef}
             prefillMessage={prefillChatMessage}
             onPrefillConsumed={() => setPrefillChatMessage(null)}
+            onExpandedChange={setChatExpanded}
           />
         </div>
       )}
@@ -1623,7 +1625,7 @@ export default function Project() {
       )}
 
       {/* Discord Support - position adjusts when chat is right-docked */}
-      <DiscordSupport chatPosition={chatPosition} />
+      <DiscordSupport chatPosition={chatPosition} mobileChatOpen={chatExpanded} />
 
       {/* Deployment Modal */}
       {showDeployModal && (

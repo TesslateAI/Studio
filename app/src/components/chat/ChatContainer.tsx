@@ -77,6 +77,7 @@ interface ChatContainerProps {
   isPointerOverPreviewRef?: React.RefObject<boolean>; // Tracks if mouse is over preview iframe
   prefillMessage?: string | null;
   onPrefillConsumed?: () => void;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 export function ChatContainer({
@@ -95,9 +96,13 @@ export function ChatContainer({
   isPointerOverPreviewRef,
   prefillMessage,
   onPrefillConsumed,
+  onExpandedChange,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
+  useEffect(() => {
+    onExpandedChange?.(isExpanded);
+  }, [isExpanded, onExpandedChange]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
