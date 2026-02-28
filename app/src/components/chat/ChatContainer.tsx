@@ -101,6 +101,7 @@ export function ChatContainer({
   const [messages, setMessages] = useState<Message[]>([]);
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
+  const [toolCallsCollapsed, setToolCallsCollapsed] = useState(false);
   const [editMode, setEditMode] = useState<EditMode>(() => {
     const stored = localStorage.getItem(`editMode:${projectId}`);
     return stored === 'ask' || stored === 'allow' || stored === 'plan' ? stored : 'ask';
@@ -1783,6 +1784,7 @@ export function ChatContainer({
                     finalResponse={message.content}
                     agentIcon={message.agentIcon}
                     agentAvatarUrl={message.agentAvatarUrl}
+                    toolCallsCollapsed={toolCallsCollapsed}
                   />
                 </div>
               );
@@ -1841,6 +1843,8 @@ export function ChatContainer({
             isDocked={isDocked}
             prefillMessage={prefillMessage}
             onPrefillConsumed={onPrefillConsumed}
+            toolCallsCollapsed={toolCallsCollapsed}
+            onToggleToolCallsCollapsed={() => setToolCallsCollapsed((prev) => !prev)}
           />
         </div>
       </div>

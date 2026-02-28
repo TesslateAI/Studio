@@ -8,12 +8,14 @@ interface AgentMessageProps {
   finalResponse: string;
   agentIcon?: string;
   agentAvatarUrl?: string;
+  toolCallsCollapsed?: boolean;
 }
 
 export default function AgentMessage({
   agentData,
   finalResponse,
   agentAvatarUrl,
+  toolCallsCollapsed,
 }: AgentMessageProps) {
   // In development, show all steps (to display debug panels)
   // In production, only show steps with meaningful content
@@ -52,7 +54,14 @@ export default function AgentMessage({
         {stepsToDisplay && stepsToDisplay.length > 0 && (
           <div className="space-y-2">
             {stepsToDisplay.map((step, index) => (
-              <AgentStep key={index} step={step} totalSteps={agentData.iterations} />
+              <AgentStep
+                key={index}
+                step={step}
+                totalSteps={agentData.iterations}
+                toolCallsCollapsed={
+                  agentData.completion_reason !== 'in_progress' ? toolCallsCollapsed : false
+                }
+              />
             ))}
           </div>
         )}

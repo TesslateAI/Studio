@@ -2,18 +2,27 @@ import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 
 import { AgentSelector } from './AgentSelector';
 
 import { EditModeStatus, type EditMode } from './EditModeStatus';
-import { Gear } from '@phosphor-icons/react';
+import {
+  Gear,
+  DotsThreeVertical,
+  ArrowsInSimple,
+  ArrowsOutSimple,
+  DownloadSimple,
+  Trash,
+} from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
 import { type ChatAgent } from '../../types/chat';
 import { modKey } from '../../lib/keyboard-registry';
 
 // Width thresholds for responsive collapse
-// Below VERY_COMPACT: Only essential icons (agent icon, send button)
-// Below COMPACT: Agent name hidden, edit mode icon only
-// Above COMPACT: Full labels shown
+// Below VERY_COMPACT: Only essential icons (agent icon, menu, send button)
+// Below COMPACT: Agent name hidden, 3 buttons merge into menu
+// Below EDIT_MODE_COMPACT: Edit mode label hidden, icon only
+// Above EDIT_MODE_COMPACT: Full labels shown
 const VERY_COMPACT_WIDTH_THRESHOLD = 300;
 const COMPACT_WIDTH_THRESHOLD = 380;
+const EDIT_MODE_COMPACT_THRESHOLD = 480;
 
 interface ProjectFile {
   file_path: string;
@@ -40,6 +49,8 @@ interface ChatInputProps {
   isDocked?: boolean; // When true, removes rounded corners at bottom
   prefillMessage?: string | null;
   onPrefillConsumed?: () => void;
+  toolCallsCollapsed?: boolean;
+  onToggleToolCallsCollapsed?: () => void;
 }
 
 export function ChatInput({
@@ -63,6 +74,8 @@ export function ChatInput({
   isDocked = false,
   prefillMessage,
   onPrefillConsumed,
+  toolCallsCollapsed = false,
+  onToggleToolCallsCollapsed,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -73,6 +86,7 @@ export function ChatInput({
   const [messageHistory, setMessageHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [compactLevel, setCompactLevel] = useState<'normal' | 'compact' | 'veryCompact'>('normal');
+  const [containerWidth, setContainerWidth] = useState(Infinity);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLFormElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -82,19 +96,19 @@ export function ChatInput({
 
   // Derived compact states
   const isCompact = compactLevel === 'compact' || compactLevel === 'veryCompact';
-  const isVeryCompact = compactLevel === 'veryCompact';
+  const isEditModeCompact = isCompact || containerWidth < EDIT_MODE_COMPACT_THRESHOLD;
 
-  // Use ResizeObserver to track width changes - ONLY when docked (floating chat has fixed width)
+  // Use ResizeObserver to track width changes for responsive layout
   useEffect(() => {
-    // Skip ResizeObserver for floating chat - it has fixed width and doesn't need responsive collapse
-    if (!isDocked) return;
-
     const container = containerRef.current;
     if (!container) return;
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const updateCompactLevel = (width: number) => {
+      setContainerWidth(width);
+      // Compact-level breakpoints only apply when docked (floating chat has fixed width)
+      if (!isDocked) return;
       if (width < VERY_COMPACT_WIDTH_THRESHOLD) {
         setCompactLevel('veryCompact');
       } else if (width < COMPACT_WIDTH_THRESHOLD) {
@@ -127,10 +141,20 @@ export function ChatInput({
 
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (showSettings && settingsRef.current && !settingsRef.current.contains(target) && (!settingsButtonRef.current || !settingsButtonRef.current.contains(target))) {
+      if (
+        showSettings &&
+        settingsRef.current &&
+        !settingsRef.current.contains(target) &&
+        (!settingsButtonRef.current || !settingsButtonRef.current.contains(target))
+      ) {
         setShowSettings(false);
       }
-      if (showCommands && commandsRef.current && !commandsRef.current.contains(target) && (!commandsButtonRef.current || !commandsButtonRef.current.contains(target))) {
+      if (
+        showCommands &&
+        commandsRef.current &&
+        !commandsRef.current.contains(target) &&
+        (!commandsButtonRef.current || !commandsButtonRef.current.contains(target))
+      ) {
         setShowCommands(false);
       }
     };
@@ -307,33 +331,6 @@ export function ChatInput({
     }
   };
 
-  const tools = [
-    {
-      icon: (
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-          <path d="M224,152v56a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V152a8,8,0,0,1,16,0v56H208V152a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,132.69V40a8,8,0,0,0-16,0v92.69L93.66,106.34a8,8,0,0,0-11.32,11.32Z" />
-        </svg>
-      ),
-      label: 'Download Project',
-      onClick: downloadProject,
-      category: 'tools' as const,
-    },
-    ...(onClearHistory
-      ? [
-          {
-            icon: (
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
-              </svg>
-            ),
-            label: 'Clear Chat History',
-            onClick: clearChatHistory,
-            category: 'tools' as const,
-          },
-        ]
-      : []),
-  ];
-
   return (
     <form
       ref={containerRef}
@@ -364,24 +361,86 @@ export function ChatInput({
         </div>
       )}
 
-      {/* Settings dropdown */}
+      {/* Settings / menu dropdown */}
       {showSettings && (
         <div ref={settingsRef} className="absolute bottom-full right-0 mb-2 mr-3">
           <div className="bg-[var(--surface)] border-2 border-[var(--border-color)] rounded-xl p-2 shadow-lg min-w-[200px]">
-            {tools.map((tool, idx) => (
+            {/* Compact-only items: collapse toggle + commands */}
+            {isCompact && (
+              <>
+                {onToggleToolCallsCollapsed && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggleToolCallsCollapsed();
+                      setShowSettings(false);
+                    }}
+                    className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--text)]/5 cursor-pointer transition-colors w-full text-left"
+                  >
+                    <span
+                      className={
+                        toolCallsCollapsed ? 'text-[var(--primary)]' : 'text-[var(--text)]/60'
+                      }
+                    >
+                      {toolCallsCollapsed ? (
+                        <ArrowsOutSimple size={16} weight="bold" />
+                      ) : (
+                        <ArrowsInSimple size={16} weight="bold" />
+                      )}
+                    </span>
+                    <span className="text-[var(--text)] text-sm">
+                      {toolCallsCollapsed ? 'Expand Tool Calls' : 'Collapse Tool Calls'}
+                    </span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMessage('/');
+                    setShowSettings(false);
+                    setShowCommands(true);
+                    textareaRef.current?.focus();
+                  }}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--text)]/5 cursor-pointer transition-colors w-full text-left"
+                >
+                  <span className="text-[var(--text)]/60 w-4 text-center font-mono font-bold text-base leading-none">
+                    /
+                  </span>
+                  <span className="text-[var(--text)] text-sm">Commands</span>
+                </button>
+                <div className="my-1 border-t border-[var(--border-color)]" />
+              </>
+            )}
+
+            {/* Always-visible items: download + clear */}
+            <button
+              type="button"
+              onClick={() => {
+                downloadProject();
+                setShowSettings(false);
+              }}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--text)]/5 cursor-pointer transition-colors w-full text-left"
+            >
+              <span className="text-[var(--text)]/60">
+                <DownloadSimple size={16} weight="bold" />
+              </span>
+              <span className="text-[var(--text)] text-sm">Download Project</span>
+            </button>
+            {onClearHistory && (
               <button
-                key={idx}
                 type="button"
                 onClick={() => {
-                  tool.onClick();
+                  clearChatHistory();
                   setShowSettings(false);
                 }}
                 className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--text)]/5 cursor-pointer transition-colors w-full text-left"
               >
-                <span className="text-[var(--text)]/60">{tool.icon}</span>
-                <span className="text-[var(--text)] text-sm">{tool.label}</span>
+                <span className="text-[var(--text)]/60">
+                  <Trash size={16} weight="bold" />
+                </span>
+                <span className="text-[var(--text)] text-sm">Clear Chat History</span>
               </button>
-            ))}
+            )}
           </div>
         </div>
       )}
@@ -428,20 +487,87 @@ export function ChatInput({
           {/* Spacer */}
           <div className="flex-1 min-w-0" />
 
-          {/* Edit Mode Status - hidden when very compact */}
-          {onModeChange && !isVeryCompact && (
+          {/* Edit Mode Status - icon-only when narrow */}
+          {onModeChange && (
             <div className="flex-shrink-0">
               <EditModeStatus
                 mode={editMode}
                 onModeChange={onModeChange}
                 className="scale-90"
-                compact={isCompact}
+                compact={isEditModeCompact}
               />
             </div>
           )}
 
-          {/* Settings button - hidden when very compact */}
-          {!isVeryCompact && (
+          {/* Desktop: 3 individual buttons */}
+          {!isCompact && (
+            <>
+              {/* Collapse tool calls */}
+              {onToggleToolCallsCollapsed && (
+                <button
+                  type="button"
+                  onClick={onToggleToolCallsCollapsed}
+                  className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0 ${
+                    toolCallsCollapsed
+                      ? 'text-[var(--primary)] bg-[var(--primary)]/10'
+                      : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
+                  }`}
+                  title={toolCallsCollapsed ? 'Expand tool calls' : 'Collapse tool calls'}
+                >
+                  {toolCallsCollapsed ? (
+                    <ArrowsOutSimple size={14} weight="bold" />
+                  ) : (
+                    <ArrowsInSimple size={14} weight="bold" />
+                  )}
+                </button>
+              )}
+
+              {/* Settings gear */}
+              <button
+                ref={settingsButtonRef}
+                type="button"
+                onClick={() => {
+                  setShowSettings(!showSettings);
+                  setShowCommands(false);
+                }}
+                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0 ${
+                  showSettings
+                    ? 'text-[var(--primary)] bg-[var(--primary)]/10'
+                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
+                }`}
+                title="Settings"
+              >
+                <Gear size={14} weight="bold" />
+              </button>
+
+              {/* Slash commands */}
+              <button
+                ref={commandsButtonRef}
+                type="button"
+                onClick={() => {
+                  if (showCommands) {
+                    setShowCommands(false);
+                    setMessage('');
+                  } else {
+                    setMessage('/');
+                    setShowCommands(true);
+                    setShowSettings(false);
+                  }
+                }}
+                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0 font-mono font-bold text-sm ${
+                  showCommands
+                    ? 'text-[var(--primary)] bg-[var(--primary)]/10'
+                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
+                }`}
+                title="Commands"
+              >
+                /
+              </button>
+            </>
+          )}
+
+          {/* Compact/very compact: single menu button combining all 3 */}
+          {isCompact && (
             <button
               ref={settingsButtonRef}
               type="button"
@@ -454,35 +580,9 @@ export function ChatInput({
                   ? 'text-[var(--primary)] bg-[var(--primary)]/10'
                   : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
               }`}
-              title="Settings"
+              title="Menu"
             >
-              <Gear size={14} weight="bold" />
-            </button>
-          )}
-
-          {/* Slash command button - hidden when very compact */}
-          {!isVeryCompact && (
-            <button
-              ref={commandsButtonRef}
-              type="button"
-              onClick={() => {
-                if (showCommands) {
-                  setShowCommands(false);
-                  setMessage('');
-                } else {
-                  setMessage('/');
-                  setShowCommands(true);
-                  setShowSettings(false);
-                }
-              }}
-              className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0 font-mono font-bold text-sm ${
-                showCommands
-                  ? 'text-[var(--primary)] bg-[var(--primary)]/10'
-                  : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
-              }`}
-              title="Commands"
-            >
-              /
+              <DotsThreeVertical size={16} weight="bold" />
             </button>
           )}
 
