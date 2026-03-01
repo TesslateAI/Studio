@@ -2,20 +2,143 @@
 Custom authentication routes for Tesslate Studio.
 
 Note: Register, login, and token management are handled by fastapi-users in main.py
-This file only contains custom endpoints like pod access verification.
+This file only contains custom endpoints like pod access verification and token refresh.
 """
 
 import logging
+from datetime import UTC, datetime, timedelta
+from typing import Literal, cast
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from jose import JWTError
+from jose import jwt as jose_jwt
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..database import get_db
 from ..models import PodAccessLog, User
-from ..users import current_active_user
+from ..users import current_active_user, get_jwt_strategy
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+settings = get_settings()
+
+
+@router.post("/refresh")
+async def refresh_token(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    tesslate_auth: str | None = Cookie(default=None),
+):
+    """
+    Refresh an existing JWT token.
+
+    Accepts the current token via:
+    1. Authorization: Bearer <token> header
+    2. tesslate_auth httpOnly cookie
+
+    Issues a fresh token if the current one is valid (with a 30-minute grace
+    window past expiry to handle edge cases like tab backgrounding).
+
+    Returns:
+    - For bearer auth: {"access_token": "...", "token_type": "bearer"}
+    - For cookie auth: sets the tesslate_auth cookie on the response
+    """
+    # Extract token from header or cookie
+    token = None
+    auth_via_cookie = False
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    elif tesslate_auth:
+        token = tesslate_auth
+        auth_via_cookie = True
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No token provided",
+        )
+
+    # Decode the JWT — allow up to 30 minutes past expiry
+    secret = settings.secret_key
+    algorithm = settings.algorithm
+    try:
+        payload = jose_jwt.decode(
+            token,
+            secret,
+            algorithms=[algorithm],
+            options={
+                "verify_exp": False,  # We check expiry manually with grace window
+                "verify_aud": False,  # Token includes fastapi-users audience; skip here
+            },
+        )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        ) from None
+
+    # Check expiry with 30-minute grace window
+    exp = payload.get("exp")
+    if exp is not None:
+        exp_dt = datetime.fromtimestamp(exp, tz=UTC)
+        grace_deadline = exp_dt + timedelta(minutes=30)
+        if datetime.now(UTC) > grace_deadline:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token expired beyond grace window",
+            )
+
+    # Verify user still exists and is active
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        ) from None
+
+    result = await db.execute(select(User).where(User.id == user_uuid))
+    user = result.scalar_one_or_none()
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User inactive or not found",
+        )
+
+    # Issue a fresh token
+    jwt_strategy = get_jwt_strategy()
+    new_token = await jwt_strategy.write_token(user)
+
+    if auth_via_cookie:
+        # Re-set the httpOnly cookie
+        response.set_cookie(
+            key="tesslate_auth",
+            value=new_token,
+            max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+            httponly=True,
+            secure=settings.cookie_secure,
+            samesite=cast(Literal["lax", "strict", "none"], settings.cookie_samesite),
+            domain=settings.cookie_domain if settings.cookie_domain else None,
+            path="/",
+        )
+        return {"access_token": new_token, "token_type": "bearer"}
+
+    return {"access_token": new_token, "token_type": "bearer"}
 
 
 @router.get("/verify-access")

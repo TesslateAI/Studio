@@ -31,9 +31,13 @@ import {
   AuthenticationError,
   shouldLogoutOnError,
 } from './auth/types';
+import { authApi } from '../lib/api';
 import { config } from '../config';
 
 const API_URL = config.API_URL;
+
+const SILENT_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+const REFRESH_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes — minimum gap between refreshes
 
 // =============================================================================
 // Initial State
@@ -131,6 +135,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const checkInProgressRef = useRef(false);
   const mountedRef = useRef(true);
+  const lastRefreshRef = useRef(0);
 
   // ==========================================================================
   // Core Auth Check
@@ -342,6 +347,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [state.status]);
 
   // ==========================================================================
+  // Token Refresh
+  // ==========================================================================
+
+  const refreshToken = useCallback(async () => {
+    try {
+      await authApi.refreshToken();
+    } catch {
+      // Silent failure — the 401 interceptor handles actual session loss
+    }
+  }, []);
+
+  // ==========================================================================
   // Clear Error
   // ==========================================================================
 
@@ -395,6 +412,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, [checkAuth]);
 
+  // Proactive silent token refresh (every 30 min + on tab visibility change)
+  useEffect(() => {
+    if (state.status !== 'authenticated') return;
+
+    const doRefresh = () => {
+      lastRefreshRef.current = Date.now();
+      refreshToken();
+    };
+
+    // Periodic refresh
+    const intervalId = setInterval(doRefresh, SILENT_REFRESH_INTERVAL_MS);
+
+    // Refresh when tab becomes visible (user returning after being away)
+    // Skips if a refresh happened within the cooldown window
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (Date.now() - lastRefreshRef.current > REFRESH_COOLDOWN_MS) {
+          doRefresh();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [state.status, refreshToken]);
+
   // ==========================================================================
   // Context Value
   // ==========================================================================
@@ -408,10 +455,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       logout,
       checkAuth,
       refreshUser,
+      refreshToken,
       clearError,
       hasRole,
     }),
-    [state, login, logout, checkAuth, refreshUser, clearError, hasRole]
+    [state, login, logout, checkAuth, refreshUser, refreshToken, clearError, hasRole]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

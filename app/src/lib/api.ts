@@ -91,47 +91,137 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// =============================================================================
+// Token Refresh Queue (single-flight pattern)
+// =============================================================================
+
+let isRefreshing = false;
+let refreshSubscribers: Array<{
+  resolve: (token: string | null) => void;
+  reject: (error: unknown) => void;
+}> = [];
+
+function onRefreshComplete(token: string | null) {
+  refreshSubscribers.forEach((sub) => sub.resolve(token));
+  refreshSubscribers = [];
+}
+
+function onRefreshError(error: unknown) {
+  refreshSubscribers.forEach((sub) => sub.reject(error));
+  refreshSubscribers = [];
+}
+
+/**
+ * Attempt to refresh the auth token.
+ * Uses raw axios to avoid triggering the 401 interceptor recursively.
+ */
+async function refreshAuthToken(): Promise<string | null> {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await axios.post(
+    `${API_URL}/api/auth/refresh`,
+    {},
+    { headers, withCredentials: true }
+  );
+
+  const newToken: string | null = response.data?.access_token ?? null;
+  if (newToken && token) {
+    // Bearer auth — update localStorage
+    // NOTE: localStorage.setItem automatically fires 'storage' events in OTHER tabs.
+    // We do NOT dispatchEvent here to avoid triggering AuthContext's handleStorageChange
+    // on the same tab (which would cause an unnecessary /api/users/me call).
+    localStorage.setItem('token', newToken);
+  }
+  // Cookie auth — the server already set the cookie on the response
+  return newToken;
+}
+
+// =============================================================================
+// Response Interceptor — refresh-then-retry on 401
+// =============================================================================
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    // If error is 401, redirect to login
-    // BUT: Don't redirect for certain cases where 401 is expected
-    if (error.response?.status === 401) {
-      const isTasksApi = error.config?.url?.includes('/api/tasks/');
+    const originalRequest = error.config;
+
+    // Handle 401 — attempt token refresh before logging out
+    if (error.response?.status === 401 && originalRequest) {
+      // Never retry the refresh endpoint itself (prevent recursion)
+      if (originalRequest.url?.includes('/api/auth/refresh')) {
+        return Promise.reject(error);
+      }
+
+      // Never retry a request that already retried (prevent infinite loop)
+      if (originalRequest._authRetry) {
+        return Promise.reject(error);
+      }
+
+      // Skip refresh for endpoints where 401 is expected/normal
       const isMarketplacePage = window.location.pathname.startsWith('/marketplace');
-      const isPreferencesApi = error.config?.url?.includes('/api/users/preferences');
-      const isGitProvidersApi = error.config?.url?.includes('/api/git-providers/');
+      const isPreferencesApi = originalRequest.url?.includes('/api/users/preferences');
+      const isGitProvidersApi = originalRequest.url?.includes('/api/git-providers/');
       const isPasswordResetPage =
         window.location.pathname === '/forgot-password' ||
         window.location.pathname === '/reset-password';
 
-      // Skip redirect for:
-      // - Tasks API (transient errors during background operations)
-      // - Marketplace pages (public access, 401 is expected for unauthenticated)
-      // - Preferences API (optional, fails silently for unauthenticated)
-      // - Git Providers API (401 means provider not connected, handled by UI)
-      // - Password reset pages (public, no auth required)
-      if (
-        !isTasksApi &&
-        !isMarketplacePage &&
-        !isPreferencesApi &&
-        !isGitProvidersApi &&
-        !isPasswordResetPage
-      ) {
+      if (isMarketplacePage || isPreferencesApi || isGitProvidersApi || isPasswordResetPage) {
+        return Promise.reject(error);
+      }
+
+      // If a refresh is already in progress, queue this request
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          refreshSubscribers.push({
+            resolve: (token) => {
+              originalRequest._authRetry = true;
+              if (token) {
+                originalRequest.headers['Authorization'] = `Bearer ${token}`;
+              }
+              resolve(api.request(originalRequest));
+            },
+            reject,
+          });
+        });
+      }
+
+      // Start a single refresh
+      isRefreshing = true;
+
+      try {
+        const newToken = await refreshAuthToken();
+        isRefreshing = false;
+        onRefreshComplete(newToken);
+
+        // Retry the original request with the new token
+        originalRequest._authRetry = true;
+        if (newToken) {
+          originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+        }
+        return api.request(originalRequest);
+      } catch (refreshError) {
+        isRefreshing = false;
+        onRefreshError(refreshError);
+
+        // Refresh failed — actually log the user out
         localStorage.removeItem('token');
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
         }
+        return Promise.reject(refreshError);
       }
-      // For skipped cases, just reject the error without logging out/redirecting
     }
 
     // If error is 403 and mentions CSRF, refetch token and retry
     if (error.response?.status === 403 && error.response?.data?.detail?.includes('CSRF')) {
       await fetchCsrfToken();
       // Retry the request once with new CSRF token
-      if (error.config && !error.config._retry) {
-        error.config._retry = true;
+      if (error.config && !error.config._csrfRetry) {
+        error.config._csrfRetry = true;
         return api.request(error.config);
       }
     }
@@ -227,6 +317,14 @@ export const authApi = {
   resetPassword: async (token: string, password: string) => {
     const response = await api.post('/api/auth/reset-password', { token, password });
     return response.data;
+  },
+
+  /**
+   * Silently refresh the auth token.
+   * Delegates to the module-level refreshAuthToken (shared with the 401 interceptor).
+   */
+  refreshToken: async (): Promise<void> => {
+    await refreshAuthToken();
   },
 };
 

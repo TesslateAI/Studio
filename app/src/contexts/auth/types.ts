@@ -180,6 +180,7 @@ export interface AuthContextValue extends AuthState {
   logout: () => Promise<void>;
   checkAuth: (options?: { force?: boolean }) => Promise<boolean>;
   refreshUser: () => Promise<void>;
+  refreshToken: () => Promise<void>;
   clearError: () => void;
 
   // Role checking
