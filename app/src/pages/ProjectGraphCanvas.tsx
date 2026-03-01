@@ -418,6 +418,7 @@ const ProjectGraphCanvasInner = () => {
           id: preview.id,
           type: 'browserPreview',
           position: { x: preview.position_x, y: preview.position_y },
+          dragHandle: '.browser-drag-handle',
           data: {
             connectedContainerId: preview.connected_container_id,
             connectedContainerName: connectedContainer?.name,
@@ -1049,6 +1050,7 @@ const ProjectGraphCanvasInner = () => {
             id: browserPreview.id,
             type: 'browserPreview',
             position: dropPosition,
+            dragHandle: '.browser-drag-handle',
             data: {
               onDelete: handleDeleteBrowser,
             },

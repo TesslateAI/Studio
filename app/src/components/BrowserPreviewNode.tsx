@@ -8,7 +8,7 @@ import {
   Globe,
   Link as LinkIcon,
   ArrowsOut,
-  ArrowsIn
+  ArrowsIn,
 } from '@phosphor-icons/react';
 
 interface BrowserPreviewNodeData extends Record<string, unknown> {
@@ -70,27 +70,33 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
   } | null>(null);
 
   // Build the full URL based on connected container
-  const getFullUrl = useCallback((path: string) => {
-    if (!data.baseUrl) return '';
-    const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    return `${data.baseUrl}${cleanPath}`;
-  }, [data.baseUrl]);
+  const getFullUrl = useCallback(
+    (path: string) => {
+      if (!data.baseUrl) return '';
+      const cleanPath = path.startsWith('/') ? path : `/${path}`;
+      return `${data.baseUrl}${cleanPath}`;
+    },
+    [data.baseUrl]
+  );
 
   // Update input when path changes
   useEffect(() => {
     setInputUrl(currentPath);
   }, [currentPath]);
 
-  const navigateTo = useCallback((path: string) => {
-    const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    setCurrentPath(cleanPath);
-    setIsLoading(true);
+  const navigateTo = useCallback(
+    (path: string) => {
+      const cleanPath = path.startsWith('/') ? path : `/${path}`;
+      setCurrentPath(cleanPath);
+      setIsLoading(true);
 
-    // Add to history
-    const newHistory = [...history.slice(0, historyIndex + 1), cleanPath];
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
-  }, [history, historyIndex]);
+      // Add to history
+      const newHistory = [...history.slice(0, historyIndex + 1), cleanPath];
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+    },
+    [history, historyIndex]
+  );
 
   const goBack = useCallback(() => {
     if (historyIndex > 0) {
@@ -119,32 +125,40 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
     if (iframeRef.current) {
       // Force refresh by reloading with timestamp
       const currentSrc = iframeRef.current.src;
-      iframeRef.current.src = currentSrc.includes('?') ? currentSrc : `${currentSrc}?t=${Date.now()}`;
+      iframeRef.current.src = currentSrc.includes('?')
+        ? currentSrc
+        : `${currentSrc}?t=${Date.now()}`;
     }
   }, []);
 
-  const handleUrlSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    navigateTo(inputUrl);
-  }, [inputUrl, navigateTo]);
+  const handleUrlSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      navigateTo(inputUrl);
+    },
+    [inputUrl, navigateTo]
+  );
 
   const handleIframeLoad = useCallback(() => {
     setIsLoading(false);
   }, []);
 
   // Resize handlers
-  const handleResizeStart = useCallback((e: React.MouseEvent, handle: ResizeHandle) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    resizeRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      startWidth: size.width,
-      startHeight: size.height,
-      handle,
-    };
-  }, [size]);
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent, handle: ResizeHandle) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsResizing(true);
+      resizeRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        startWidth: size.width,
+        startHeight: size.height,
+        handle,
+      };
+    },
+    [size]
+  );
 
   useEffect(() => {
     if (!isResizing) return;
@@ -193,10 +207,7 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
   const isConnected = !!data.connectedContainerId && !!data.baseUrl;
 
   return (
-    <div
-      className="relative group"
-      style={{ contain: 'layout style' }}
-    >
+    <div className="relative group" style={{ contain: 'layout style' }}>
       {/* Connection handle - connects FROM containers TO this browser */}
       <Handle
         type="target"
@@ -213,43 +224,43 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
         {/* Resize handles */}
         {/* Edge handles */}
         <div
-          className="absolute top-0 left-2 right-2 h-1 cursor-n-resize hover:bg-blue-500/30 z-10"
+          className="nodrag nopan absolute top-0 left-2 right-2 h-2 cursor-n-resize hover:bg-blue-500/30 z-10"
           onMouseDown={(e) => handleResizeStart(e, 'n')}
         />
         <div
-          className="absolute bottom-0 left-2 right-2 h-1 cursor-s-resize hover:bg-blue-500/30 z-10"
+          className="nodrag nopan absolute bottom-0 left-2 right-2 h-2 cursor-s-resize hover:bg-blue-500/30 z-10"
           onMouseDown={(e) => handleResizeStart(e, 's')}
         />
         <div
-          className="absolute left-0 top-2 bottom-2 w-1 cursor-w-resize hover:bg-blue-500/30 z-10"
+          className="nodrag nopan absolute left-0 top-2 bottom-2 w-2 cursor-w-resize hover:bg-blue-500/30 z-10"
           onMouseDown={(e) => handleResizeStart(e, 'w')}
         />
         <div
-          className="absolute right-0 top-2 bottom-2 w-1 cursor-e-resize hover:bg-blue-500/30 z-10"
+          className="nodrag nopan absolute right-0 top-2 bottom-2 w-2 cursor-e-resize hover:bg-blue-500/30 z-10"
           onMouseDown={(e) => handleResizeStart(e, 'e')}
         />
         {/* Corner handles */}
         <div
-          className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize hover:bg-blue-500/30 z-20"
+          className="nodrag nopan absolute top-0 left-0 w-3 h-3 cursor-nw-resize hover:bg-blue-500/30 z-20"
           onMouseDown={(e) => handleResizeStart(e, 'nw')}
         />
         <div
-          className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize hover:bg-blue-500/30 z-20"
+          className="nodrag nopan absolute top-0 right-0 w-3 h-3 cursor-ne-resize hover:bg-blue-500/30 z-20"
           onMouseDown={(e) => handleResizeStart(e, 'ne')}
         />
         <div
-          className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize hover:bg-blue-500/30 z-20"
+          className="nodrag nopan absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize hover:bg-blue-500/30 z-20"
           onMouseDown={(e) => handleResizeStart(e, 'sw')}
         />
         <div
-          className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize hover:bg-blue-500/30 z-20"
+          className="nodrag nopan absolute bottom-0 right-0 w-3 h-3 cursor-se-resize hover:bg-blue-500/30 z-20"
           onMouseDown={(e) => handleResizeStart(e, 'se')}
         />
         {/* Browser chrome / toolbar */}
         <div className="bg-[#252525] border-b border-[#333] px-2 py-1.5">
-          {/* Window controls and title */}
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-1.5">
+          {/* Window controls and title — drag handle */}
+          <div className="browser-drag-handle flex items-center justify-between mb-1.5 cursor-grab active:cursor-grabbing">
+            <div className="nodrag nopan flex items-center gap-1.5">
               <button
                 onClick={() => data.onDelete?.(id)}
                 className="w-3 h-3 rounded-full bg-red-500 hover:bg-red-400 transition-colors"
@@ -275,7 +286,7 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
           </div>
 
           {/* Navigation bar */}
-          <div className="flex items-center gap-1">
+          <div className="nodrag nopan flex items-center gap-1">
             <button
               onClick={goBack}
               disabled={historyIndex <= 0}
@@ -298,7 +309,10 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
               className="p-1 rounded hover:bg-[#333] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               title="Refresh"
             >
-              <ArrowClockwise size={12} className={`text-gray-400 ${isLoading ? 'animate-spin' : ''}`} />
+              <ArrowClockwise
+                size={12}
+                className={`text-gray-400 ${isLoading ? 'animate-spin' : ''}`}
+              />
             </button>
             <button
               onClick={goHome}
@@ -330,9 +344,11 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
 
             {/* Expand/collapse */}
             <button
-              onClick={() => setSize(prev =>
-                prev.width >= 600 ? { width: 320, height: 240 } : { width: 800, height: 600 }
-              )}
+              onClick={() =>
+                setSize((prev) =>
+                  prev.width >= 600 ? { width: 320, height: 240 } : { width: 800, height: 600 }
+                )
+              }
               className="p-1 rounded hover:bg-[#333] transition-colors"
               title={size.width >= 600 ? 'Minimize' : 'Expand'}
             >
@@ -346,7 +362,7 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
         </div>
 
         {/* Browser viewport */}
-        <div className="relative bg-white" style={{ height: 'calc(100% - 52px)' }}>
+        <div className="nodrag nopan relative bg-white" style={{ height: 'calc(100% - 52px)' }}>
           {isConnected ? (
             <>
               {isLoading && (
@@ -377,6 +393,9 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
           )}
         </div>
       </div>
+
+      {/* Interaction overlay during resize — prevents iframe from swallowing mouse events */}
+      {isResizing && <div className="fixed inset-0 z-[9999]" />}
     </div>
   );
 };
