@@ -329,7 +329,10 @@ def create_container_deployment(
         # EACCES errors for uid 1000. Instead, mkdir -p + cd in the command itself
         # so the directory is created by the running user (node/1000).
         args=[
-            f"mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"
+            f"mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && "
+            f"tmux new-session -d -s main '{startup_command}' && "
+            f"tmux pipe-pane -o -t main 'cat > /proc/1/fd/1' 2>/dev/null; "
+            f"exec tail -f /dev/null"
         ],
         ports=[client.V1ContainerPort(container_port=port, name="http")],
         volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],

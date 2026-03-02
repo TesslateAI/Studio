@@ -2017,13 +2017,31 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             ):
                 k8s_container_name = pod.spec.containers[0].name
 
+            # Ensure tmux pipe-pane routes dev server output to container stdout.
+            # New containers get this in the startup command (helpers.py), but
+            # existing containers started before the fix need it enabled on-demand.
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(
+                    self.k8s_client._exec_in_pod,
+                    pod_name,
+                    namespace,
+                    k8s_container_name,
+                    [
+                        "sh",
+                        "-c",
+                        "tmux pipe-pane -o -t main 'cat > /proc/1/fd/1' 2>/dev/null || true",
+                    ],
+                    10,
+                )
+
             # Stream logs using queue bridge (K8s stream is synchronous)
             stop_event = asyncio.Event()
             queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=1000)
 
             def _read_k8s_logs():
+                resp = None
                 try:
-                    log_stream = core_v1.read_namespaced_pod_log(
+                    resp = core_v1.read_namespaced_pod_log(
                         name=pod_name,
                         namespace=namespace,
                         container=k8s_container_name,
@@ -2031,20 +2049,36 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                         tail_lines=tail_lines,
                         _preload_content=False,
                     )
-                    for line in log_stream:
+                    # resp is a RESTResponse wrapping urllib3.HTTPResponse.
+                    # Iterating directly blocks forever with follow=True —
+                    # must use .stream() on the underlying urllib3 response.
+                    raw = getattr(resp, "urllib3_response", resp)
+                    buffer = b""
+                    for chunk in raw.stream(amt=4096, decode_content=True):
                         if stop_event.is_set():
                             break
-                        if isinstance(line, bytes):
-                            line = line.decode("utf-8", errors="replace")
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line_bytes, buffer = buffer.split(b"\n", 1)
+                            line_str = line_bytes.decode("utf-8", errors="replace")
+                            with contextlib.suppress(asyncio.QueueFull):
+                                queue.put_nowait(line_str)
+                    # Flush remaining partial line
+                    if buffer and not stop_event.is_set():
                         with contextlib.suppress(asyncio.QueueFull):
-                            queue.put_nowait(line)
+                            queue.put_nowait(buffer.decode("utf-8", errors="replace"))
                 except Exception as e:
                     if not stop_event.is_set():
                         logger.error(f"[K8S] Log stream error: {e}")
                 finally:
-                    queue.put_nowait(None)
+                    if resp is not None:
+                        with contextlib.suppress(Exception):
+                            raw = getattr(resp, "urllib3_response", resp)
+                            raw.close()
+                    with contextlib.suppress(asyncio.QueueFull):
+                        queue.put_nowait(None)
 
-            asyncio.get_event_loop().run_in_executor(None, _read_k8s_logs)
+            asyncio.get_running_loop().run_in_executor(None, _read_k8s_logs)
 
             try:
                 while True:

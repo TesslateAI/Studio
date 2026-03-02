@@ -1259,7 +1259,7 @@ class DockerOrchestrator(BaseOrchestrator):
                 finally:
                     queue.put_nowait(None)
 
-            asyncio.get_event_loop().run_in_executor(None, _read_logs)
+            asyncio.get_running_loop().run_in_executor(None, _read_logs)
 
             try:
                 while True:

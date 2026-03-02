@@ -3899,11 +3899,12 @@ async def stream_container_logs(
                 if msg_type == "ping":
                     await websocket.send_json({"type": "pong"})
                 elif msg_type == "switch_container":
-                    # Cancel current stream
+                    # Cancel current stream before starting new one
                     cancel_event.set()
-                    if stream_task:
-                        with contextlib.suppress(builtins.BaseException):
-                            await asyncio.shield(stream_task)
+                    if stream_task and not stream_task.done():
+                        stream_task.cancel()
+                        with contextlib.suppress(Exception, asyncio.CancelledError):
+                            await stream_task
 
                     # Start new stream for requested container
                     cancel_event = asyncio.Event()
