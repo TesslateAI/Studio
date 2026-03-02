@@ -567,29 +567,26 @@ export default function Dashboard() {
               </div>
             </button>
 
-            {/* Import from Repository Card */}
+            {/* Import from Repository Card — temporarily disabled */}
             <button
-              onClick={() => setShowImportDialog(true)}
-              disabled={isCreating}
+              disabled
+              title="Git import is temporarily unavailable"
               className={`
                   group bg-white/[0.01] rounded-2xl p-6
                   border-2 border-dashed border-emerald-500/30
-                  hover:border-emerald-500/60
-                  transition-all duration-300
-                  hover:transform hover:-translate-y-1
                   flex flex-col items-center justify-center gap-3
+                  opacity-50 cursor-not-allowed
                   ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
-                  ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
             >
-              <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
+              <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center">
                 <GitBranch className="w-8 h-8 text-emerald-500" weight="fill" />
               </div>
               <div className="text-center">
                 <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
                   Import from Repository
                 </h3>
-                <p className="text-sm text-gray-500">GitHub, GitLab, or Bitbucket</p>
+                <p className="text-sm text-gray-500">Connect a repo from the project page</p>
               </div>
             </button>
 
