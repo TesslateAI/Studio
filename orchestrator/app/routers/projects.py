@@ -1438,6 +1438,7 @@ async def get_project_files(
                             ".turbo",
                             "coverage",
                             ".nyc_output",
+                            "lost+found",
                         ]:
                             continue
                         # Recursively read directory contents

@@ -102,10 +102,11 @@ EXCLUDED_DIRS = {
     ".turbo",
     "coverage",
     ".nyc_output",
+    "lost+found",
 }
 
 # Files to exclude from listings
-EXCLUDED_FILES = {".DS_Store", "Thumbs.db", ".env.local"}
+EXCLUDED_FILES = {".DS_Store", "Thumbs.db", ".env.local", ".ash_history"}
 
 
 class DockerOrchestrator(BaseOrchestrator):

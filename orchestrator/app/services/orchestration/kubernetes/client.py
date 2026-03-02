@@ -95,9 +95,7 @@ class KubernetesClient:
                     # Namespace fully deleted — caller will need to recreate it
                     return
                 raise
-        raise RuntimeError(
-            f"Namespace {namespace} stuck in Terminating state after {max_wait}s"
-        )
+        raise RuntimeError(f"Namespace {namespace} stuck in Terminating state after {max_wait}s")
 
     @staticmethod
     def _is_namespace_terminating_error(e: ApiException) -> bool:
@@ -106,6 +104,7 @@ class KubernetesClient:
             return False
         try:
             import json
+
             body = json.loads(e.body) if isinstance(e.body, str) else e.body
             causes = body.get("details", {}).get("causes", [])
             return any(c.get("reason") == "NamespaceTerminating" for c in causes)
@@ -407,7 +406,9 @@ class KubernetesClient:
                 await asyncio.to_thread(
                     self.apps_v1.create_namespaced_deployment, namespace=namespace, body=deployment
                 )
-                logger.info(f"[K8S] ✅ Created deployment (after namespace wait): {deployment_name}")
+                logger.info(
+                    f"[K8S] ✅ Created deployment (after namespace wait): {deployment_name}"
+                )
             else:
                 raise
 
@@ -778,8 +779,11 @@ class KubernetesClient:
             # Ensure directory exists
             pod_dir = os.path.dirname(pod_path)
             self._exec_in_pod(
-                pod_name, namespace, container_name,
-                ["mkdir", "-p", pod_dir], timeout=10,
+                pod_name,
+                namespace,
+                container_name,
+                ["mkdir", "-p", pod_dir],
+                timeout=10,
             )
 
             # Stream tar data to pod via stdin
@@ -1147,8 +1151,12 @@ class KubernetesClient:
             data = content.encode("utf-8")
             await asyncio.to_thread(
                 self._write_bytes_to_pod,
-                pod_name, namespace, k8s_container,
-                data, full_path, timeout=60,
+                pod_name,
+                namespace,
+                k8s_container,
+                data,
+                full_path,
+                timeout=60,
             )
 
             logger.info(f"[K8S] Wrote {file_path} ({len(content)} bytes)")
@@ -1255,7 +1263,7 @@ class KubernetesClient:
                 size = int(parts[4]) if parts[4].isdigit() else 0
 
                 # Skip hidden files and node_modules
-                if name.startswith(".") or name == "node_modules":
+                if name.startswith(".") or name in ("node_modules", "lost+found"):
                     continue
 
                 files.append(
