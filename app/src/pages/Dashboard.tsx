@@ -19,6 +19,8 @@ import {
   GitBranch,
   ChatCircleDots,
   Article,
+  Trash,
+  X,
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -44,6 +46,8 @@ export default function Dashboard() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const autoCreateTriggered = useRef(false);
   const [createBaseId, setCreateBaseId] = useState<string | undefined>();
@@ -94,7 +98,11 @@ export default function Dashboard() {
     }
   };
 
-  const handleCreateProject = async (projectName: string, baseId?: string, baseVersion?: string) => {
+  const handleCreateProject = async (
+    projectName: string,
+    baseId?: string,
+    baseVersion?: string
+  ) => {
     if (isCreating) return;
 
     setIsCreating(true);
@@ -154,6 +162,120 @@ export default function Dashboard() {
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to create project';
       toast.error(errorMessage, { id: creatingToast });
       setIsCreating(false);
+    }
+  };
+
+  // Show all projects (no filtering)
+  const filteredProjects = projects;
+
+  // Prune selection when projects reload (remove IDs for projects that no longer exist)
+  useEffect(() => {
+    setSelectedProjectIds((prev) => {
+      const projectIdSet = new Set(projects.map((p) => p.id));
+      const pruned = new Set([...prev].filter((id) => projectIdSet.has(id)));
+      return pruned.size !== prev.size ? pruned : prev;
+    });
+  }, [projects]);
+
+  // Escape key clears selection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedProjectIds.size > 0) {
+        setSelectedProjectIds(new Set());
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedProjectIds.size]);
+
+  const toggleProjectSelection = (id: string) => {
+    setSelectedProjectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedProjectIds(new Set());
+
+  const selectAllProjects = () => {
+    setSelectedProjectIds(new Set(filteredProjects.map((p) => p.id)));
+  };
+
+  const confirmBulkDelete = async () => {
+    const toDelete = projects.filter((p) => selectedProjectIds.has(p.id));
+    if (toDelete.length === 0) return;
+
+    setShowBulkDeleteDialog(false);
+
+    // Mark all as deleting
+    setDeletingProjectIds((prev) => {
+      const next = new Set(prev);
+      for (const p of toDelete) next.add(p.id);
+      return next;
+    });
+
+    // Clear selection so floating bar disappears
+    setSelectedProjectIds(new Set());
+
+    const deletingToast = toast.loading(
+      `Deleting ${toDelete.length} project${toDelete.length > 1 ? 's' : ''}...`
+    );
+
+    const results = await Promise.allSettled(
+      toDelete.map(async (project) => {
+        const response = await projectsApi.delete(project.slug);
+        const taskId = response.task_id;
+        if (taskId) {
+          await tasksApi.pollUntilComplete(taskId);
+        }
+        return project.id;
+      })
+    );
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        successCount++;
+        const projectId = result.value;
+        setProjects((prev) => prev.filter((p) => p.id !== projectId));
+        setDeletingProjectIds((prev) => {
+          const next = new Set(prev);
+          next.delete(projectId);
+          return next;
+        });
+      } else {
+        failCount++;
+      }
+    }
+
+    // Clear remaining deleting states for failures
+    if (failCount > 0) {
+      setDeletingProjectIds((prev) => {
+        const next = new Set(prev);
+        for (const p of toDelete) next.delete(p.id);
+        return next;
+      });
+      await loadProjects();
+    }
+
+    // Summary toast
+    if (failCount === 0) {
+      toast.success(`Deleted ${successCount} project${successCount > 1 ? 's' : ''}`, {
+        id: deletingToast,
+      });
+    } else if (successCount === 0) {
+      toast.error(`Failed to delete ${failCount} project${failCount > 1 ? 's' : ''}`, {
+        id: deletingToast,
+      });
+    } else {
+      toast.success(`Deleted ${successCount}, failed ${failCount}`, { id: deletingToast });
     }
   };
 
@@ -266,9 +388,6 @@ export default function Dashboard() {
     localStorage.removeItem('token');
     navigate('/login');
   };
-
-  // Show all projects (no filtering)
-  const filteredProjects = projects;
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Never';
@@ -494,6 +613,8 @@ export default function Dashboard() {
                 onStatusChange={(status) => updateProjectStatus(project.id, status)}
                 onFork={() => handleForkProject(project.id)}
                 isDeleting={deletingProjectIds.has(project.id)}
+                isSelected={selectedProjectIds.has(project.id)}
+                onSelectionToggle={() => toggleProjectSelection(project.id)}
               />
             ))}
           </div>
@@ -509,6 +630,48 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Floating Bulk Action Bar */}
+      {selectedProjectIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+          <div className="flex items-center gap-3 bg-[var(--surface)] border border-white/10 rounded-2xl px-5 py-3 shadow-2xl shadow-black/40 backdrop-blur-xl">
+            <span className="text-sm font-medium text-[var(--text)] whitespace-nowrap">
+              {selectedProjectIds.size} project{selectedProjectIds.size > 1 ? 's' : ''} selected
+            </span>
+
+            <div className="w-px h-5 bg-white/10" />
+
+            <button
+              onClick={
+                selectedProjectIds.size === filteredProjects.length
+                  ? clearSelection
+                  : selectAllProjects
+              }
+              className="text-xs text-[var(--primary)] hover:text-[var(--primary-hover)] font-medium transition-colors whitespace-nowrap"
+            >
+              {selectedProjectIds.size === filteredProjects.length ? 'Deselect all' : 'Select all'}
+            </button>
+
+            <div className="w-px h-5 bg-white/10" />
+
+            <button
+              onClick={() => setShowBulkDeleteDialog(true)}
+              className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold px-4 py-1.5 rounded-xl transition-colors"
+            >
+              <Trash className="w-4 h-4" weight="bold" />
+              Delete selected
+            </button>
+
+            <button
+              onClick={clearSelection}
+              className="p-1.5 text-gray-400 hover:text-white transition-colors rounded-lg hover:bg-white/10"
+              aria-label="Clear selection"
+            >
+              <X className="w-4 h-4" weight="bold" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         isOpen={showDeleteDialog}
@@ -520,6 +683,37 @@ export default function Dashboard() {
         title="Delete Project"
         message={`Are you sure you want to delete "${projectToDelete?.name}"? This action cannot be undone.`}
         confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showBulkDeleteDialog}
+        onClose={() => setShowBulkDeleteDialog(false)}
+        onConfirm={confirmBulkDelete}
+        title={`Delete ${selectedProjectIds.size} Project${selectedProjectIds.size > 1 ? 's' : ''}`}
+        message={
+          <div>
+            <p className="mb-3">
+              Are you sure you want to delete{' '}
+              {selectedProjectIds.size === 1
+                ? 'this project'
+                : `these ${selectedProjectIds.size} projects`}
+              ? This action cannot be undone.
+            </p>
+            <div className="max-h-40 overflow-y-auto space-y-1 bg-white/5 rounded-xl p-3 border border-white/10">
+              {projects
+                .filter((p) => selectedProjectIds.has(p.id))
+                .map((p) => (
+                  <div key={p.id} className="text-sm text-gray-300 truncate">
+                    {p.name}
+                  </div>
+                ))}
+            </div>
+          </div>
+        }
+        confirmText={`Delete ${selectedProjectIds.size} Project${selectedProjectIds.size > 1 ? 's' : ''}`}
         cancelText="Cancel"
         variant="danger"
       />
@@ -580,7 +774,8 @@ export default function Dashboard() {
                 }
               } catch (taskError) {
                 console.error('Project import task failed:', taskError);
-                const taskErrMsg = taskError instanceof Error ? taskError.message : 'Import setup failed';
+                const taskErrMsg =
+                  taskError instanceof Error ? taskError.message : 'Import setup failed';
                 toast.error(taskErrMsg, { id: creatingToast });
                 setIsCreating(false);
                 navigate(`/project/${project.slug}`);

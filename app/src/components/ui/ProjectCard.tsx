@@ -2,7 +2,17 @@ import React, { type ReactNode } from 'react';
 import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
 
-export type EnvironmentStatus = 'active' | 'hibernated' | 'hibernating' | 'corrupted' | 'creating' | 'starting' | 'stopping' | 'stopped' | 'waking' | 'restoring';
+export type EnvironmentStatus =
+  | 'active'
+  | 'hibernated'
+  | 'hibernating'
+  | 'corrupted'
+  | 'creating'
+  | 'starting'
+  | 'stopping'
+  | 'stopped'
+  | 'waking'
+  | 'restoring';
 
 interface Project {
   id: string;
@@ -28,6 +38,8 @@ interface ProjectCardProps {
   onStatusChange: (status: Status) => void;
   onAddAgent?: () => void;
   isDeleting?: boolean;
+  isSelected?: boolean;
+  onSelectionToggle?: () => void;
 }
 
 export function ProjectCard({
@@ -37,76 +49,84 @@ export function ProjectCard({
   onFork,
   onStatusChange: _onStatusChange,
   onAddAgent,
-  isDeleting = false
+  isDeleting = false,
+  isSelected = false,
+  onSelectionToggle,
 }: ProjectCardProps) {
   // Status badge configuration (read-only, no dropdown)
   const _statusConfig = {
     idea: {
       label: 'Idea',
-      className: 'bg-[rgba(var(--status-purple-rgb),0.1)] text-[var(--status-purple)] border border-[rgba(var(--status-purple-rgb),0.2)]'
+      className:
+        'bg-[rgba(var(--status-purple-rgb),0.1)] text-[var(--status-purple)] border border-[rgba(var(--status-purple-rgb),0.2)]',
     },
     build: {
       label: 'Build',
-      className: 'bg-[rgba(var(--status-yellow-rgb),0.1)] text-[var(--status-yellow)] border border-[rgba(var(--status-yellow-rgb),0.2)]'
+      className:
+        'bg-[rgba(var(--status-yellow-rgb),0.1)] text-[var(--status-yellow)] border border-[rgba(var(--status-yellow-rgb),0.2)]',
     },
     launch: {
       label: 'Launch',
-      className: 'bg-[rgba(var(--status-green-rgb),0.1)] text-[var(--status-green)] border border-[rgba(var(--status-green-rgb),0.2)]'
-    }
+      className:
+        'bg-[rgba(var(--status-green-rgb),0.1)] text-[var(--status-green)] border border-[rgba(var(--status-green-rgb),0.2)]',
+    },
   };
 
   // Environment status badge configuration
-  const envStatusConfig: Record<EnvironmentStatus, { label: string; icon: string; className: string }> = {
+  const envStatusConfig: Record<
+    EnvironmentStatus,
+    { label: string; icon: string; className: string }
+  > = {
     active: {
       label: 'Active',
       icon: '🟢',
-      className: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+      className: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
     },
     hibernated: {
       label: 'Hibernated',
       icon: '💤',
-      className: 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+      className: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
     },
     hibernating: {
       label: 'Saving...',
       icon: '⏳',
-      className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+      className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
     },
     corrupted: {
       label: 'Corrupted',
       icon: '❌',
-      className: 'bg-red-500/10 text-red-400 border border-red-500/20'
+      className: 'bg-red-500/10 text-red-400 border border-red-500/20',
     },
     creating: {
       label: 'Creating...',
       icon: '⏳',
-      className: 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+      className: 'bg-purple-500/10 text-purple-400 border border-purple-500/20',
     },
     starting: {
       label: 'Starting...',
       icon: '🚀',
-      className: 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
+      className: 'bg-orange-500/10 text-orange-400 border border-orange-500/20',
     },
     stopping: {
       label: 'Stopping...',
       icon: '⏳',
-      className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+      className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
     },
     stopped: {
       label: 'Stopped',
       icon: '⏹️',
-      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20',
     },
     waking: {
       label: 'Waking up...',
       icon: '☀️',
-      className: 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
+      className: 'bg-orange-500/10 text-orange-400 border border-orange-500/20',
     },
     restoring: {
       label: 'Restoring...',
       icon: '🔄',
-      className: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-    }
+      className: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20',
+    },
   };
 
   // Fallback for unknown statuses
@@ -119,23 +139,59 @@ export function ProjectCard({
     return {
       label: status.charAt(0).toUpperCase() + status.slice(1),
       icon: '⚙️',
-      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20',
     };
   };
 
   return (
     <div
-      className="
+      className={`
         project-card relative group
         bg-[var(--surface)] rounded-2xl
-        border border-white/8
-        transition-all duration-300 ease-[var(--ease)]
+        border transition-all duration-300 ease-[var(--ease)]
         hover:transform hover:-translate-y-1
         hover:shadow-[0_12px_40px_rgba(0,0,0,0.2)]
-        hover:border-[rgba(var(--primary-rgb),0.3)]
-      "
+        ${isSelected ? 'border-[var(--primary)]' : 'border-white/8 hover:border-[rgba(var(--primary-rgb),0.3)]'}
+      `}
       style={{ overflow: isDeleting ? 'hidden' : 'visible' }}
     >
+      {/* Selection Checkbox */}
+      {onSelectionToggle && (
+        <button
+          role="checkbox"
+          aria-checked={isSelected}
+          aria-label={`Select ${project.name}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectionToggle();
+          }}
+          disabled={isDeleting}
+          className={`
+            absolute top-3 right-3 z-20
+            w-6 h-6 rounded-md border-2 flex items-center justify-center
+            transition-all duration-200
+            ${isDeleting ? 'pointer-events-none opacity-0' : ''}
+            ${
+              isSelected
+                ? 'bg-[var(--primary)] border-[var(--primary)] opacity-100'
+                : 'border-white/30 bg-black/30 backdrop-blur-sm opacity-0 md:opacity-0 md:group-hover:opacity-100 max-md:opacity-100 hover:border-white/60'
+            }
+          `}
+        >
+          {isSelected && (
+            <svg
+              className="w-3.5 h-3.5 text-white"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={3}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </button>
+      )}
+
       {/* Deleting Overlay */}
       {isDeleting && (
         <div className="absolute inset-0 bg-black/70 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center z-10 overflow-hidden">
@@ -143,7 +199,7 @@ export function ProjectCard({
             className="w-12 h-12 mb-3"
             viewBox="0 0 50 50"
             style={{
-              animation: 'spin 1s linear infinite'
+              animation: 'spin 1s linear infinite',
             }}
           >
             <circle
@@ -170,7 +226,9 @@ export function ProjectCard({
         </div>
       )}
 
-      <div className={`p-4 sm:p-6 flex flex-col h-full ${isDeleting ? 'pointer-events-none opacity-50' : ''}`}>
+      <div
+        className={`p-4 sm:p-6 flex flex-col h-full ${isDeleting ? 'pointer-events-none opacity-50' : ''}`}
+      >
         {/* Header with Status Badge */}
         <div className="flex items-start justify-between mb-3 sm:mb-4">
           <div className="flex-1 min-w-0">
@@ -201,10 +259,15 @@ export function ProjectCard({
                     <path d="M208.31,75.68A59.78,59.78,0,0,0,202.93,28,8,8,0,0,0,196,24a59.75,59.75,0,0,0-48,24H124A59.75,59.75,0,0,0,76,24a8,8,0,0,0-6.93,4,59.78,59.78,0,0,0-5.38,47.68A58.14,58.14,0,0,0,56,104v8a56.06,56.06,0,0,0,48.44,55.47A39.8,39.8,0,0,0,96,192v8H72a24,24,0,0,1-24-24A40,40,0,0,0,8,136a8,8,0,0,0,0,16,24,24,0,0,1,24,24,40,40,0,0,0,40,40H96v16a8,8,0,0,0,16,0V192a24,24,0,0,1,48,0v40a8,8,0,0,0,16,0V192a39.8,39.8,0,0,0-8.44-24.53A56.06,56.06,0,0,0,216,112v-8A58.14,58.14,0,0,0,208.31,75.68Z" />
                   </svg>
                   <span className="font-medium text-[10px]">
-                    {project.gitSyncStatus === 'synced' ? '✓' :
-                     project.gitSyncStatus === 'ahead' ? '↑' :
-                     project.gitSyncStatus === 'behind' ? '↓' :
-                     project.gitSyncStatus === 'diverged' ? '⚠' : '⚠'}
+                    {project.gitSyncStatus === 'synced'
+                      ? '✓'
+                      : project.gitSyncStatus === 'ahead'
+                        ? '↑'
+                        : project.gitSyncStatus === 'behind'
+                          ? '↓'
+                          : project.gitSyncStatus === 'diverged'
+                            ? '⚠'
+                            : '⚠'}
                   </span>
                 </div>
               )}
@@ -221,11 +284,7 @@ export function ProjectCard({
         {project.agents.length > 0 && (
           <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-3 sm:mb-4">
             {project.agents.map((agent, idx) => (
-              <AgentTag
-                key={idx}
-                icon={agent.icon}
-                name={agent.name}
-              />
+              <AgentTag key={idx} icon={agent.icon} name={agent.name} />
             ))}
             {onAddAgent && (
               <AgentTag

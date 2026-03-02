@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Warning, X, CheckCircle, Trash } from '@phosphor-icons/react';
 
@@ -6,7 +7,7 @@ interface ConfirmDialogProps {
   onClose: () => void;
   onConfirm: () => void;
   title: string;
-  message: string;
+  message: string | ReactNode;
   confirmText?: string;
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'info';
@@ -87,7 +88,7 @@ export function ConfirmDialog({
             </div>
             <div className="flex-1">
               <h2 className="font-heading text-xl font-bold text-[var(--text)] mb-2">{title}</h2>
-              <p className="text-sm text-gray-400 leading-relaxed">{message}</p>
+              <div className="text-sm text-gray-400 leading-relaxed">{message}</div>
             </div>
           </div>
           {!isLoading && (
