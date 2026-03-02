@@ -41,6 +41,23 @@ interface ContainerPropertiesPanelProps {
   containerType?: 'base' | 'service';
 }
 
+const PANEL_MIN_WIDTH = 280;
+const PANEL_MAX_WIDTH = 640;
+const PANEL_STORAGE_KEY = 'containerPanelWidth';
+
+function getStoredWidth(): number {
+  try {
+    const v = localStorage.getItem(PANEL_STORAGE_KEY);
+    if (v) {
+      const n = Number(v);
+      if (n >= PANEL_MIN_WIDTH && n <= PANEL_MAX_WIDTH) return n;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 320;
+}
+
 export const ContainerPropertiesPanel = ({
   containerId,
   containerName,
@@ -51,6 +68,57 @@ export const ContainerPropertiesPanel = ({
   onNameChange,
   port,
 }: ContainerPropertiesPanelProps) => {
+  const [panelWidth, setPanelWidth] = useState(getStoredWidth);
+  const isResizingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      // Dragging left edge: moving mouse left = wider panel
+      const delta = startXRef.current - e.clientX;
+      const newWidth = Math.min(
+        PANEL_MAX_WIDTH,
+        Math.max(PANEL_MIN_WIDTH, startWidthRef.current + delta)
+      );
+      setPanelWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      if (!isResizingRef.current) return;
+      isResizingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // persist
+      setPanelWidth((w) => {
+        try {
+          localStorage.setItem(PANEL_STORAGE_KEY, String(w));
+        } catch {
+          /* ignore */
+        }
+        return w;
+      });
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  const onResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      isResizingRef.current = true;
+      startXRef.current = e.clientX;
+      startWidthRef.current = panelWidth;
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+    },
+    [panelWidth]
+  );
+
   const [savedEnvVars, setSavedEnvVars] = useState<SavedEnvVar[]>([]);
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
@@ -300,7 +368,7 @@ export const ContainerPropertiesPanel = ({
       setSavedEnvVars((prev) => [...prev, { key, isEditing: false, pendingValue: '' }]);
       setNewEnvKey('');
       setNewEnvValue('');
-      toast.success(`Added ${key}`);
+      toast.success(`Added ${key} — restart container to apply`);
     } catch (error) {
       console.error('Failed to add env var:', error);
       toast.error('Failed to add variable');
@@ -316,7 +384,7 @@ export const ContainerPropertiesPanel = ({
         env_vars_to_delete: [key],
       });
       setSavedEnvVars((prev) => prev.filter((e) => e.key !== key));
-      toast.success(`Deleted ${key}`);
+      toast.success(`Deleted ${key} — restart container to apply`);
     } catch (error) {
       console.error('Failed to delete env var:', error);
       toast.error('Failed to delete variable');
@@ -356,7 +424,7 @@ export const ContainerPropertiesPanel = ({
       setSavedEnvVars((prev) =>
         prev.map((e) => (e.key === key ? { ...e, isEditing: false, pendingValue: '' } : e))
       );
-      toast.success(`Updated ${key}`);
+      toast.success(`Updated ${key} — restart container to apply`);
     } catch (error) {
       console.error('Failed to update env var:', error);
       toast.error('Failed to update variable');
@@ -456,7 +524,16 @@ export const ContainerPropertiesPanel = ({
       <div className="md:hidden fixed inset-0 bg-black/50 z-40" onClick={onClose} />
 
       {/* Panel */}
-      <div className="fixed md:absolute inset-y-4 md:inset-y-auto md:top-4 md:bottom-4 right-4 w-[calc(100%-2rem)] max-w-sm md:w-80 bg-[#1a1a1a] rounded-xl border border-[#2a2a2a] flex flex-col overflow-hidden z-50 shadow-2xl">
+      <div
+        className="fixed md:absolute inset-y-4 md:inset-y-auto md:top-4 md:bottom-4 right-4 w-[calc(100%-2rem)] max-w-sm md:w-[var(--panel-w)] md:max-w-none bg-[#1a1a1a] rounded-xl border border-[#2a2a2a] flex flex-col overflow-hidden z-50 shadow-2xl"
+        style={{ '--panel-w': `${panelWidth}px` } as React.CSSProperties}
+      >
+        {/* Left resize handle */}
+        <div
+          onMouseDown={onResizeStart}
+          className="hidden md:block absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-[var(--primary)]/30 active:bg-[var(--primary)]/50 transition-colors"
+        />
+
         {/* Header */}
         <div className="px-4 py-3 border-b border-[#2a2a2a] flex items-center justify-between flex-shrink-0">
           <div className="min-w-0 flex-1">
