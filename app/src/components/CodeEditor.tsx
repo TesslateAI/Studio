@@ -29,12 +29,16 @@ interface CodeEditorProps {
   projectId: number;
   files: FileData[];
   onFileUpdate: (filePath: string, content: string) => void;
+  isFilesSyncing?: boolean;
+  startupOverlay?: React.ReactNode;
 }
 
 export default function CodeEditor({
   projectId: _projectId,
   files,
   onFileUpdate,
+  isFilesSyncing,
+  startupOverlay,
 }: CodeEditorProps) {
   const { theme } = useTheme();
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
@@ -247,6 +251,14 @@ export default function CodeEditor({
         <div className="flex-1 p-2 overflow-y-auto" key={files.length}>
           {fileTree.length > 0 ? (
             renderFileTree(fileTree)
+          ) : isFilesSyncing ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-[var(--text)]/60 text-sm p-6 text-center rounded-xl bg-[var(--surface)]/50">
+                <div className="w-8 h-8 mx-auto mb-3 border-2 border-[var(--text)]/20 border-t-orange-500 rounded-full animate-spin" />
+                <p className="font-medium mb-1 text-[var(--text)]">Syncing files...</p>
+                <p className="text-xs text-[var(--text)]/40">Waiting for container to be ready</p>
+              </div>
+            </div>
           ) : (
             <div className="text-[var(--text)]/60 text-sm p-6 text-center rounded-xl bg-[var(--surface)]/50">
               <Code size={32} className="mx-auto mb-3 opacity-50" />
@@ -324,6 +336,18 @@ export default function CodeEditor({
               />
             </div>
           </>
+        ) : startupOverlay ? (
+          startupOverlay
+        ) : isFilesSyncing && files.length === 0 ? (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center p-8">
+              <div className="w-12 h-12 mx-auto mb-4 border-3 border-[var(--text)]/20 border-t-orange-500 rounded-full animate-spin" />
+              <h3 className="text-lg font-semibold mb-2 text-[var(--text)]">Syncing files...</h3>
+              <p className="text-sm text-[var(--text)]/50 max-w-sm">
+                Waiting for container to be ready
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="h-full flex items-center justify-center text-[var(--text)]/60">
             <div className="text-center p-8">

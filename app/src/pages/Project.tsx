@@ -90,6 +90,11 @@ export default function Project() {
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
   const [chatExpanded, setChatExpanded] = useState(false);
 
+  const [filesInitiallyLoaded, setFilesInitiallyLoaded] = useState(false);
+  const fileRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileRetryCountRef = useRef(0);
+  const fileRetryCancelledRef = useRef(false);
+
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const isPointerOverPreviewRef = useRef(false);
@@ -110,6 +115,11 @@ export default function Project() {
         setCurrentPreviewUrl(url);
         setNeedsContainerStart(false);
         toast.success('Development server ready!', { id: 'container-start', duration: 2000 });
+        // Container just became ready - load files with retry (pod may still be warming up)
+        fileRetryCancelledRef.current = true;
+        if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
+        fileRetryCountRef.current = 0;
+        loadFilesWithRetry();
       },
       onError: (error) => {
         setNeedsContainerStart(false);
@@ -240,6 +250,12 @@ export default function Project() {
 
   useEffect(() => {
     if (slug) {
+      // Reset file sync state for the new project
+      setFilesInitiallyLoaded(false);
+      fileRetryCancelledRef.current = true;
+      if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
+      fileRetryCountRef.current = 0;
+
       loadProject();
       loadDevServerUrl();
       loadSettings();
@@ -267,7 +283,12 @@ export default function Project() {
   // Reload files when container changes (to apply filtering)
   useEffect(() => {
     if (container) {
-      loadFiles();
+      // Cancel any in-flight retry sequence before starting a new one
+      fileRetryCancelledRef.current = true;
+      if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
+      fileRetryCountRef.current = 0;
+      setFilesInitiallyLoaded(false);
+      loadFilesWithRetry();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [container]);
@@ -292,6 +313,10 @@ export default function Project() {
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
+      if (fileRetryRef.current) {
+        clearTimeout(fileRetryRef.current);
+      }
+      fileRetryCancelledRef.current = true;
     };
   }, []);
 
@@ -438,40 +463,91 @@ export default function Project() {
     }
   };
 
+  // Filter files to the active container's directory, stripping the prefix for display.
+  // In K8s mode files are already container-scoped so the prefix filter returns nothing;
+  // fall back to the raw data in that case.
+  const filterFilesForContainer = (filesData: Array<Record<string, unknown>>) => {
+    if (containerId && container && container.directory) {
+      const containerDir = container.directory as string;
+      const filteredFiles = filesData
+        .filter((file: Record<string, unknown>) =>
+          (file.file_path as string).startsWith(containerDir + '/')
+        )
+        .map((file: Record<string, unknown>) => ({
+          ...file,
+          file_path: (file.file_path as string).slice(containerDir.length + 1),
+        }));
+
+      // In K8s mode, files are already container-scoped (no prefix).
+      // If filtering by prefix returns nothing but we have data, use the data directly.
+      if (filteredFiles.length === 0 && filesData.length > 0) {
+        return filesData;
+      }
+      return filteredFiles;
+    }
+    return filesData;
+  };
+
   const loadFiles = async () => {
     if (!slug) return;
     try {
       const filesData = await projectsApi.getFiles(slug);
-
-      // If viewing a specific container, filter files to that container's directory
-      // Each container has its own directory (e.g., next-js-15/, vite-react-fastapi/)
-      // Strip the container directory prefix so paths are relative to container root
-      if (containerId && container && container.directory) {
-        const containerDir = container.directory as string;
-        const filteredFiles = filesData
-          .filter((file: Record<string, unknown>) =>
-            (file.file_path as string).startsWith(containerDir + '/')
-          )
-          .map((file: Record<string, unknown>) => ({
-            ...file,
-            // Strip container directory prefix for display (e.g., "next-js-15/app/page.tsx" -> "app/page.tsx")
-            file_path: (file.file_path as string).slice(containerDir.length + 1),
-          }));
-
-        // In K8s mode, files are already container-scoped (no prefix)
-        // If filtering by prefix returns no files but we have data, use the data directly
-        if (filteredFiles.length === 0 && filesData.length > 0) {
-          // Files don't have container directory prefix - they're already scoped to this container
-          setFiles(filesData);
-        } else {
-          setFiles(filteredFiles);
-        }
-      } else {
-        // No container selected - show all files
-        setFiles(filesData);
-      }
+      setFiles(filterFilesForContainer(filesData));
     } catch (error) {
       console.error('Failed to load files:', error);
+    }
+  };
+
+  const FILE_RETRY_MAX = 8;
+
+  const loadFilesWithRetry = async () => {
+    if (!slug) return;
+
+    // Mark this retry sequence as active
+    fileRetryCancelledRef.current = false;
+
+    try {
+      const filesData = await projectsApi.getFiles(slug);
+
+      // Bail if this sequence was cancelled while the request was in-flight
+      if (fileRetryCancelledRef.current) return;
+
+      const resultFiles = filterFilesForContainer(filesData);
+
+      if (resultFiles.length > 0) {
+        setFiles(resultFiles);
+        setFilesInitiallyLoaded(true);
+        fileRetryCountRef.current = 0;
+        return;
+      }
+
+      // Empty result - retry with backoff
+      if (fileRetryCountRef.current < FILE_RETRY_MAX) {
+        const delay = Math.min((fileRetryCountRef.current + 1) * 1000, 5000);
+        fileRetryCountRef.current += 1;
+        fileRetryRef.current = setTimeout(() => {
+          loadFilesWithRetry();
+        }, delay);
+      } else {
+        // Exhausted retries - accept empty
+        setFiles(resultFiles);
+        setFilesInitiallyLoaded(true);
+        fileRetryCountRef.current = 0;
+      }
+    } catch (error) {
+      if (fileRetryCancelledRef.current) return;
+      console.error('Failed to load files (retry):', error);
+
+      if (fileRetryCountRef.current < FILE_RETRY_MAX) {
+        const delay = Math.min((fileRetryCountRef.current + 1) * 1000, 5000);
+        fileRetryCountRef.current += 1;
+        fileRetryRef.current = setTimeout(() => {
+          loadFilesWithRetry();
+        }, delay);
+      } else {
+        setFilesInitiallyLoaded(true);
+        fileRetryCountRef.current = 0;
+      }
     }
   };
 
@@ -497,20 +573,26 @@ export default function Project() {
         // Check if container is already running before starting
         try {
           const status = await projectsApi.getContainersStatus(slug);
-          // Match the backend's _sanitize_service_name(container.name) which is used
-          // as the key in docker compose status. directory="." means root project dir,
-          // not a valid service name — so fall through to container name.
+
+          // Match backend's _sanitize_status_key: replace non-[a-z0-9-] with dash,
+          // collapse runs, trim leading/trailing dashes.
+          const sanitizeKey = (s: string) =>
+            s
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/g, '-')
+              .replace(/-+/g, '-')
+              .replace(/^-|-$/g, '');
+
           const rawDir = foundContainer.directory;
-          const serviceKey = (rawDir && rawDir !== '.' ? rawDir : foundContainer.name)
-            ?.toLowerCase()
-            .replace(/[\s_.]/g, '-')
-            .replace(/[^a-z0-9-]/g, '')
-            .replace(/-+/g, '-')
-            .replace(/^-|-$/g, '');
-          const containerStatus = status?.containers?.[serviceKey];
+          const dirKey = rawDir && rawDir !== '.' ? sanitizeKey(rawDir) : null;
+          const nameKey = foundContainer.name ? sanitizeKey(foundContainer.name as string) : null;
+
+          // Try directory key first, then name key (backend adds aliases for both)
+          const containerStatus =
+            status?.containers?.[dirKey!] ?? status?.containers?.[nameKey!] ?? null;
 
           console.log('[loadContainer] status response:', JSON.stringify(status));
-          console.log('[loadContainer] rawDir:', rawDir, 'serviceKey:', serviceKey);
+          console.log('[loadContainer] dirKey:', dirKey, 'nameKey:', nameKey);
           console.log('[loadContainer] containerStatus:', JSON.stringify(containerStatus));
 
           // Check for hibernation - only explicit hibernated status, not just stopped
@@ -528,14 +610,43 @@ export default function Project() {
           if (containerStatus?.running && containerStatus?.url) {
             // Container already running - just set the URL without starting
             console.log('[loadContainer] FAST PATH: container running at', containerStatus.url);
-            // Reset any in-flight startup state from a previously loading container
             containerStartup.reset();
             setNeedsContainerStart(false);
             setDevServerUrl(containerStatus.url);
             setDevServerUrlWithAuth(containerStatus.url);
             setCurrentPreviewUrl(containerStatus.url);
+            fileRetryCancelledRef.current = true;
+            if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
+            fileRetryCountRef.current = 0;
+            loadFilesWithRetry();
             return;
           }
+
+          // If per-container lookup missed but overall environment is running,
+          // try to find any running container entry with a URL as a fallback
+          if (status?.status === 'running' || status?.status === 'partial') {
+            const containers = status?.containers ?? {};
+            const fallback = Object.values(containers).find(
+              (c: Record<string, unknown>) => c.running && c.url
+            ) as Record<string, unknown> | undefined;
+            if (fallback) {
+              console.log(
+                '[loadContainer] FAST PATH (fallback): found running container at',
+                fallback.url
+              );
+              containerStartup.reset();
+              setNeedsContainerStart(false);
+              setDevServerUrl(fallback.url as string);
+              setDevServerUrlWithAuth(fallback.url as string);
+              setCurrentPreviewUrl(fallback.url as string);
+              fileRetryCancelledRef.current = true;
+              if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
+              fileRetryCountRef.current = 0;
+              loadFilesWithRetry();
+              return;
+            }
+          }
+
           console.log('[loadContainer] SLOW PATH: container not detected as running');
         } catch (statusError) {
           // Status check failed, proceed with start anyway
@@ -1295,6 +1406,21 @@ export default function Project() {
                       projectId={project?.id}
                       files={files}
                       onFileUpdate={handleFileUpdate}
+                      isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
+                      startupOverlay={
+                        containerStartup.isLoading || containerStartup.status === 'error' ? (
+                          <ContainerLoadingOverlay
+                            phase={containerStartup.phase}
+                            progress={containerStartup.progress}
+                            message={containerStartup.message}
+                            logs={containerStartup.logs}
+                            error={containerStartup.error || undefined}
+                            onRetry={containerStartup.retry}
+                            onAskAgent={handleAskAgent}
+                            containerPort={(container?.internal_port as number) || 3000}
+                          />
+                        ) : undefined
+                      }
                     />
                   </div>
 
@@ -1454,6 +1580,21 @@ export default function Project() {
                     projectId={project?.id}
                     files={files}
                     onFileUpdate={handleFileUpdate}
+                    isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
+                    startupOverlay={
+                      containerStartup.isLoading || containerStartup.status === 'error' ? (
+                        <ContainerLoadingOverlay
+                          phase={containerStartup.phase}
+                          progress={containerStartup.progress}
+                          message={containerStartup.message}
+                          logs={containerStartup.logs}
+                          error={containerStartup.error || undefined}
+                          onRetry={containerStartup.retry}
+                          onAskAgent={handleAskAgent}
+                          containerPort={(container?.internal_port as number) || 3000}
+                        />
+                      ) : undefined
+                    }
                   />
                 </div>
 
@@ -1511,7 +1652,26 @@ export default function Project() {
             <div
               className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
             >
-              <CodeEditor projectId={project?.id} files={files} onFileUpdate={handleFileUpdate} />
+              <CodeEditor
+                projectId={project?.id}
+                files={files}
+                onFileUpdate={handleFileUpdate}
+                isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
+                startupOverlay={
+                  containerStartup.isLoading || containerStartup.status === 'error' ? (
+                    <ContainerLoadingOverlay
+                      phase={containerStartup.phase}
+                      progress={containerStartup.progress}
+                      message={containerStartup.message}
+                      logs={containerStartup.logs}
+                      error={containerStartup.error || undefined}
+                      onRetry={containerStartup.retry}
+                      onAskAgent={handleAskAgent}
+                      containerPort={(container?.internal_port as number) || 3000}
+                    />
+                  ) : undefined
+                }
+              />
             </div>
 
             {/* Kanban View */}
