@@ -167,6 +167,18 @@ export default function CodeEditor({
       });
     });
 
+    // Sort: folders first (alphabetically), then files (alphabetically)
+    const sortNodes = (nodes: FileNode[]) => {
+      nodes.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+      nodes.forEach((n) => {
+        if (n.children) sortNodes(n.children);
+      });
+    };
+    sortNodes(tree);
+
     setFileTree(tree);
 
     // Auto-select the first actual file if none selected (skip directory placeholders)
