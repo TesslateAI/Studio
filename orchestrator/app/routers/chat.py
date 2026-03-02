@@ -1489,6 +1489,8 @@ async def get_active_agent_task(
     logger.debug(f"[AGENT-ACTIVE] Found {len(tasks)} active tasks for user {current_user.id}")
 
     for task in tasks:
+        if task.type != "agent_execution":
+            continue
         if task.metadata and task.metadata.get("project_id") == project_id:
             # When chat_id is provided, only match tasks for this session
             if chat_id and task.metadata.get("chat_id") != chat_id:
