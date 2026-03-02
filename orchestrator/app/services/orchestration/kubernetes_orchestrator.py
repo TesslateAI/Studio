@@ -2121,8 +2121,33 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         hibernated = []
         cutoff_time = datetime.now(UTC) - timedelta(minutes=idle_timeout_minutes)
 
+        # Also recover projects stuck in 'hibernating' (cronjob killed mid-hibernation,
+        # OOM, deadline exceeded, etc.). If a project has been 'hibernating' for over
+        # 10 minutes, something went wrong — reset it to 'active' so we can retry.
+        stuck_cutoff = datetime.now(UTC) - timedelta(minutes=10)
+
         try:
             async with AsyncSessionLocal() as db:
+                # Reset stuck 'hibernating' projects back to 'active'
+                stuck_result = await db.execute(
+                    select(Project).where(
+                        Project.environment_status == "hibernating",
+                        Project.hibernated_at.is_(None),
+                        or_(Project.updated_at < stuck_cutoff, Project.updated_at.is_(None)),
+                    )
+                )
+                stuck_projects = stuck_result.scalars().all()
+                for proj in stuck_projects:
+                    logger.warning(
+                        f"[K8S:CLEANUP] Resetting stuck project {proj.slug} from 'hibernating' to 'active'"
+                    )
+                    proj.environment_status = "active"
+                if stuck_projects:
+                    await db.commit()
+                    logger.info(
+                        f"[K8S:CLEANUP] Reset {len(stuck_projects)} stuck hibernating projects"
+                    )
+
                 # Find projects with running K8s environments that are idle
                 # environment_status='active' means K8s resources exist
                 # Include projects where last_activity is NULL (never tracked) or older than cutoff
