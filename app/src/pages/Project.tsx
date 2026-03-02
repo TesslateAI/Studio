@@ -671,7 +671,7 @@ export default function Project() {
       // Load agents from user's library (enabled agents only)
       const libraryData = await marketplaceApi.getMyAgents();
       const enabledAgents = libraryData.agents.filter(
-        (agent: Record<string, unknown>) => agent.is_enabled
+        (agent: Record<string, unknown>) => agent.is_enabled && !agent.is_admin_disabled
       );
 
       // Convert backend agents to UI format

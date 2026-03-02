@@ -542,6 +542,15 @@ async def get_agent_details(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    # Hide admin-disabled agents from non-creators
+    if not agent.is_active:
+        is_creator = current_user and (
+            current_user.id == agent.created_by_user_id
+            or current_user.id == agent.forked_by_user_id
+        )
+        if not is_creator:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
     # Check if user has purchased this agent (only if authenticated)
     is_purchased = False
     if current_user:
@@ -1228,6 +1237,7 @@ async def create_custom_agent(
     """
     if not model:
         from ..config import get_settings
+
         model = get_settings().default_model
 
     # Generate slug from name
@@ -1505,6 +1515,7 @@ async def get_user_agents(
                 "forked_by_user_id": str(agent.forked_by_user_id)
                 if agent.forked_by_user_id
                 else None,
+                "is_admin_disabled": not agent.is_active,
             }
         )
 
@@ -1587,7 +1598,7 @@ async def list_subagents(
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
         .where(
             UserPurchasedAgent.user_id == current_user.id,
-            UserPurchasedAgent.is_active == True,  # noqa: E712
+            UserPurchasedAgent.is_active.is_(True),
             MarketplaceAgent.item_type == "subagent",
             MarketplaceAgent.parent_agent_id == agent_uuid,
         )
@@ -2110,6 +2121,15 @@ async def add_agent_to_project(
     if not purchase:
         raise HTTPException(status_code=403, detail="You don't own this agent")
 
+    # Check if agent has been admin-disabled
+    agent_result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
+    marketplace_agent = agent_result.scalar_one_or_none()
+    if not marketplace_agent or not marketplace_agent.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="This agent has been disabled by an administrator",
+        )
+
     # Check if agent is already in project
     existing_result = await db.execute(
         select(ProjectAgent).where(
@@ -2197,7 +2217,11 @@ async def get_project_agents(
     result = await db.execute(
         select(MarketplaceAgent, ProjectAgent)
         .join(ProjectAgent, ProjectAgent.agent_id == MarketplaceAgent.id)
-        .where(ProjectAgent.project_id == project_id, ProjectAgent.enabled)
+        .where(
+            ProjectAgent.project_id == project_id,
+            ProjectAgent.enabled,
+            MarketplaceAgent.is_active.is_(True),
+        )
         .order_by(ProjectAgent.added_at.desc())
     )
 
@@ -2493,7 +2517,9 @@ async def get_marketplace_bases(
         is_community = base.created_by_user_id is not None
         creator_user = creator_info.get(base.created_by_user_id) if is_community else None
         creator_name = (
-            _resolve_display_name(creator_user) if creator_user else ("Tesslate" if not is_community else "Community")
+            _resolve_display_name(creator_user)
+            if creator_user
+            else ("Tesslate" if not is_community else "Community")
         )
         creator_username = creator_user.username if creator_user else None
         creator_avatar_url = creator_user.avatar_url if creator_user else None
@@ -2594,13 +2620,13 @@ async def get_base_details(
     is_community = base.created_by_user_id is not None
     creator_user = None
     if is_community:
-        creator_result = await db.execute(
-            select(User).where(User.id == base.created_by_user_id)
-        )
+        creator_result = await db.execute(select(User).where(User.id == base.created_by_user_id))
         creator_user = creator_result.scalar_one_or_none()
 
     creator_name = (
-        _resolve_display_name(creator_user) if creator_user else ("Tesslate" if not is_community else "Community")
+        _resolve_display_name(creator_user)
+        if creator_user
+        else ("Tesslate" if not is_community else "Community")
     )
     creator_username = creator_user.username if creator_user else None
     creator_avatar_url = creator_user.avatar_url if creator_user else None
@@ -2699,11 +2725,15 @@ async def get_base_versions(
                 headers={"Accept": "application/vnd.github.v3+json"},
             )
             if tags_resp.status_code != 200:
-                logger.warning(f"GitHub tags API returned {tags_resp.status_code} for {owner}/{repo}")
+                logger.warning(
+                    f"GitHub tags API returned {tags_resp.status_code} for {owner}/{repo}"
+                )
             else:
                 tags = tags_resp.json()
                 # Fetch commit dates in parallel
-                commit_urls = [tag["commit"]["url"] for tag in tags if tag.get("commit", {}).get("url")]
+                commit_urls = [
+                    tag["commit"]["url"] for tag in tags if tag.get("commit", {}).get("url")
+                ]
                 commit_tasks = [
                     client.get(url, headers={"Accept": "application/vnd.github.v3+json"})
                     for url in commit_urls
@@ -2720,12 +2750,14 @@ async def get_base_versions(
                                 commit_data.get("commit", {}).get("committer", {}).get("date")
                             )
 
-                    versions.append({
-                        "tag": tag["name"],
-                        "sha": tag["commit"]["sha"][:7],
-                        "date": commit_date,
-                        "url": f"https://github.com/{owner}/{repo}/releases/tag/{tag['name']}",
-                    })
+                    versions.append(
+                        {
+                            "tag": tag["name"],
+                            "sha": tag["commit"]["sha"][:7],
+                            "date": commit_date,
+                            "url": f"https://github.com/{owner}/{repo}/releases/tag/{tag['name']}",
+                        }
+                    )
     except Exception:
         logger.exception(f"Failed to fetch versions for base {slug}")
 
@@ -3367,7 +3399,9 @@ async def get_user_marketplace_items(
     for service in services:
         service_data = service_to_dict(service)
         # Deployment targets should have type "deployment" for proper frontend categorization
-        item_type = "deployment" if service_data["service_type"] == "deployment_target" else "service"
+        item_type = (
+            "deployment" if service_data["service_type"] == "deployment_target" else "service"
+        )
         items.append(
             {
                 "id": f"service-{service.slug}",  # Unique ID for services
@@ -3639,13 +3673,13 @@ async def browse_themes(
     db: AsyncSession = Depends(get_db),
 ):
     """Browse marketplace themes with filtering, search, and pagination."""
-    query = select(Theme).where(Theme.is_active == True)  # noqa: E712
+    query = select(Theme).where(Theme.is_active.is_(True))
 
     # Only show official themes + published community themes
     query = query.where(
         or_(
-            Theme.created_by_user_id == None,  # noqa: E711
-            Theme.is_published == True,  # noqa: E712
+            Theme.created_by_user_id.is_(None),
+            Theme.is_published.is_(True),
         )
     )
 
@@ -3700,7 +3734,7 @@ async def browse_themes(
         lib_result = await db.execute(
             select(UserLibraryTheme.theme_id).where(
                 UserLibraryTheme.user_id == current_user.id,
-                UserLibraryTheme.is_active == True,  # noqa: E712
+                UserLibraryTheme.is_active.is_(True),
             )
         )
         user_theme_ids = {row[0] for row in lib_result.fetchall()}
@@ -3755,7 +3789,7 @@ async def get_theme_detail(
             select(UserLibraryTheme).where(
                 UserLibraryTheme.user_id == current_user.id,
                 UserLibraryTheme.theme_id == theme.id,
-                UserLibraryTheme.is_active == True,  # noqa: E712
+                UserLibraryTheme.is_active.is_(True),
             )
         )
         is_in_library = lib_result.scalar_one_or_none() is not None

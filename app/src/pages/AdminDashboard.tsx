@@ -15,8 +15,6 @@ import {
   ArrowDown,
   Calendar,
   RefreshCw,
-  Heart,
-  FileText
 } from 'lucide-react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
@@ -86,8 +84,20 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     // Skip loading metrics for tabs that handle their own data fetching
-    const selfLoadingTabs = ['user-management', 'system-health', 'token-analytics', 'audit-logs', 'projects-admin', 'billing', 'deployments'];
-    if (activeTab !== 'overview' && activeTab !== 'agents' && !selfLoadingTabs.includes(activeTab)) {
+    const selfLoadingTabs = [
+      'user-management',
+      'system-health',
+      'token-analytics',
+      'audit-logs',
+      'projects-admin',
+      'billing',
+      'deployments',
+    ];
+    if (
+      activeTab !== 'overview' &&
+      activeTab !== 'agents' &&
+      !selfLoadingTabs.includes(activeTab)
+    ) {
       loadDetailedMetrics(activeTab);
     }
   }, [activeTab, selectedPeriod]);
@@ -98,7 +108,7 @@ export default function AdminDashboard() {
 
       const response = await fetch('/api/admin/metrics/summary', {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -124,7 +134,7 @@ export default function AdminDashboard() {
     try {
       const response = await fetch(`/api/admin/metrics/${metric}?days=${selectedPeriod}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -132,9 +142,9 @@ export default function AdminDashboard() {
       }
 
       const data = await response.json();
-      setDetailedMetrics(prev => ({
+      setDetailedMetrics((prev) => ({
         ...prev,
-        [metric]: data
+        [metric]: data,
       }));
     } catch (error) {
       console.error(`Failed to load ${metric} metrics:`, error);
@@ -161,7 +171,13 @@ export default function AdminDashboard() {
     return num.toString();
   };
 
-  const renderMetricCard = (title: string, value: number | string, change?: number, icon?: React.ReactNode, suffix?: string) => {
+  const renderMetricCard = (
+    title: string,
+    value: number | string,
+    change?: number,
+    icon?: React.ReactNode,
+    suffix?: string
+  ) => {
     return (
       <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
         <div className="flex items-center justify-between mb-2">
@@ -170,10 +186,13 @@ export default function AdminDashboard() {
         </div>
         <div className="flex items-baseline justify-between">
           <h3 className="text-2xl font-bold text-white">
-            {formatNumber(value)}{suffix}
+            {formatNumber(value)}
+            {suffix}
           </h3>
           {change !== undefined && (
-            <div className={`flex items-center text-sm ${change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+            <div
+              className={`flex items-center text-sm ${change >= 0 ? 'text-green-500' : 'text-red-500'}`}
+            >
               {change >= 0 ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
               <span className="ml-1">{Math.abs(change)}%</span>
             </div>
@@ -186,8 +205,11 @@ export default function AdminDashboard() {
   const renderUserChart = () => {
     if (!detailedMetrics.users?.daily_new_users) return null;
 
-    const dailyUsers = detailedMetrics.users.daily_new_users as Array<{ date: string; count: number }>;
-    const maxCount = Math.max(...dailyUsers.map(d => d.count));
+    const dailyUsers = detailedMetrics.users.daily_new_users as Array<{
+      date: string;
+      count: number;
+    }>;
+    const maxCount = Math.max(...dailyUsers.map((d) => d.count));
 
     return (
       <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
@@ -199,7 +221,7 @@ export default function AdminDashboard() {
                 className="w-full bg-green-500 rounded-t"
                 style={{
                   height: `${maxCount > 0 ? (d.count / maxCount) * 100 : 0}%`,
-                  minHeight: '2px'
+                  minHeight: '2px',
                 }}
               />
               <span className="text-xs text-gray-400 mt-2 rotate-45 origin-left">
@@ -216,7 +238,7 @@ export default function AdminDashboard() {
     if (!detailedMetrics.tokens?.tokens_by_model) return null;
 
     const models = Object.keys(detailedMetrics.tokens.tokens_by_model);
-    const tokens = models.map(m => detailedMetrics.tokens.tokens_by_model[m].tokens);
+    const tokens = models.map((m) => detailedMetrics.tokens.tokens_by_model[m].tokens);
     const totalTokens = tokens.reduce((a, b) => a + b, 0);
 
     const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
@@ -226,19 +248,21 @@ export default function AdminDashboard() {
         <h3 className="text-lg font-semibold text-white mb-4">Token Usage by Model</h3>
         <div className="space-y-3">
           {models.map((model, idx) => {
-            const percentage = totalTokens > 0 ? (tokens[idx] / totalTokens * 100).toFixed(1) : 0;
+            const percentage = totalTokens > 0 ? ((tokens[idx] / totalTokens) * 100).toFixed(1) : 0;
             return (
               <div key={model} className="space-y-1">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-300">{model}</span>
-                  <span className="text-gray-400">{formatNumber(tokens[idx])} ({percentage}%)</span>
+                  <span className="text-gray-400">
+                    {formatNumber(tokens[idx])} ({percentage}%)
+                  </span>
                 </div>
                 <div className="w-full bg-gray-700 rounded-full h-2">
                   <div
                     className="h-full rounded-full"
                     style={{
                       width: `${percentage}%`,
-                      backgroundColor: colors[idx % colors.length]
+                      backgroundColor: colors[idx % colors.length],
                     }}
                   />
                 </div>
@@ -315,8 +339,8 @@ export default function AdminDashboard() {
               { id: 'sessions', label: 'Sessions' },
               { id: 'tokens', label: 'Token Metrics' },
               { id: 'marketplace', label: 'Marketplace' },
-              { id: 'agents', label: 'Agents' }
-            ].map(tab => (
+              { id: 'agents', label: 'Agents' },
+            ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -349,24 +373,76 @@ export default function AdminDashboard() {
           <>
             {/* Key Metrics Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              {renderMetricCard('Total Users', summary.users.total, summary.users.growth_rate, <Users size={20} />)}
+              {renderMetricCard(
+                'Total Users',
+                summary.users.total,
+                summary.users.growth_rate,
+                <Users size={20} />
+              )}
               {renderMetricCard('DAU', summary.users.dau, undefined, <Activity size={20} />)}
               {renderMetricCard('MAU', summary.users.mau, undefined, <Calendar size={20} />)}
-              {renderMetricCard('Total Projects', summary.projects.total, undefined, <Package size={20} />)}
+              {renderMetricCard(
+                'Total Projects',
+                summary.projects.total,
+                undefined,
+                <Package size={20} />
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              {renderMetricCard('Sessions/User', summary.sessions.avg_per_user.toFixed(1), undefined, <Timer size={20} />)}
-              {renderMetricCard('Avg Duration', summary.sessions.avg_duration.toFixed(0), undefined, <Timer size={20} />, ' min')}
-              {renderMetricCard('Tokens Used', summary.tokens.total_this_week, undefined, <Zap size={20} />)}
-              {renderMetricCard('Token Cost', summary.tokens.total_cost.toFixed(2), undefined, <Coins size={20} />, ' $')}
+              {renderMetricCard(
+                'Sessions/User',
+                summary.sessions.avg_per_user.toFixed(1),
+                undefined,
+                <Timer size={20} />
+              )}
+              {renderMetricCard(
+                'Avg Duration',
+                summary.sessions.avg_duration.toFixed(0),
+                undefined,
+                <Timer size={20} />,
+                ' min'
+              )}
+              {renderMetricCard(
+                'Tokens Used',
+                summary.tokens.total_this_week,
+                undefined,
+                <Zap size={20} />
+              )}
+              {renderMetricCard(
+                'Token Cost',
+                summary.tokens.total_cost.toFixed(2),
+                undefined,
+                <Coins size={20} />,
+                ' $'
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {renderMetricCard('Marketplace Items', summary.marketplace.total_items, undefined, <ShoppingCart size={20} />)}
-              {renderMetricCard('Agents', summary.marketplace.total_agents, undefined, <Users size={20} />)}
-              {renderMetricCard('Bases', summary.marketplace.total_bases, undefined, <Database size={20} />)}
-              {renderMetricCard('Recent Purchases', summary.marketplace.recent_purchases, undefined, <TrendingUp size={20} />)}
+              {renderMetricCard(
+                'Marketplace Items',
+                summary.marketplace.total_items,
+                undefined,
+                <ShoppingCart size={20} />
+              )}
+              {renderMetricCard(
+                'Agents',
+                summary.marketplace.total_agents,
+                undefined,
+                <Users size={20} />
+              )}
+              {renderMetricCard(
+                'Bases',
+                summary.marketplace.total_bases,
+                undefined,
+                <Database size={20} />
+              )}
+              {renderMetricCard(
+                'Recent Purchases',
+                summary.marketplace.recent_purchases,
+                undefined,
+                <TrendingUp size={20} />
+              )}
             </div>
           </>
         )}
@@ -376,8 +452,20 @@ export default function AdminDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {renderMetricCard('Total Users', detailedMetrics.users.total_users)}
               {renderMetricCard('New Users', detailedMetrics.users.new_users)}
-              {renderMetricCard('Growth Rate', detailedMetrics.users.growth_rate, undefined, undefined, '%')}
-              {renderMetricCard('Retention', detailedMetrics.users.retention_rate, undefined, undefined, '%')}
+              {renderMetricCard(
+                'Growth Rate',
+                detailedMetrics.users.growth_rate,
+                undefined,
+                undefined,
+                '%'
+              )}
+              {renderMetricCard(
+                'Retention',
+                detailedMetrics.users.retention_rate,
+                undefined,
+                undefined,
+                '%'
+              )}
             </div>
             {renderUserChart()}
           </div>
@@ -388,21 +476,31 @@ export default function AdminDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {renderMetricCard('Total Projects', detailedMetrics.projects.total_projects)}
               {renderMetricCard('New Projects', detailedMetrics.projects.new_projects)}
-              {renderMetricCard('Avg per User', detailedMetrics.projects.avg_projects_per_user.toFixed(1))}
+              {renderMetricCard(
+                'Avg per User',
+                detailedMetrics.projects.avg_projects_per_user.toFixed(1)
+              )}
               {renderMetricCard('Git Enabled', detailedMetrics.projects.git_enabled_projects)}
             </div>
             <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
               <h3 className="text-lg font-semibold text-white mb-4">Project Creation Over Time</h3>
               <div className="h-64 flex items-end space-x-1">
-                {(detailedMetrics.projects.daily_projects as Array<{ date: string; count: number }>)?.map((d, idx: number) => {
-                  const maxCount = Math.max(...(detailedMetrics.projects.daily_projects as Array<{ count: number }>).map(d => d.count), 1);
+                {(
+                  detailedMetrics.projects.daily_projects as Array<{ date: string; count: number }>
+                )?.map((d, idx: number) => {
+                  const maxCount = Math.max(
+                    ...(detailedMetrics.projects.daily_projects as Array<{ count: number }>).map(
+                      (d) => d.count
+                    ),
+                    1
+                  );
                   return (
                     <div key={idx} className="flex-1 flex flex-col items-center group">
                       <div
                         className="w-full bg-blue-500 rounded-t transition-opacity hover:opacity-80"
                         style={{
                           height: `${(d.count / maxCount) * 100}%`,
-                          minHeight: d.count > 0 ? '4px' : '2px'
+                          minHeight: d.count > 0 ? '4px' : '2px',
                         }}
                         title={`${new Date(d.date).toLocaleDateString()}: ${d.count} projects`}
                       />
@@ -419,22 +517,41 @@ export default function AdminDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {renderMetricCard('Total Sessions', detailedMetrics.sessions.total_sessions)}
               {renderMetricCard('Unique Users', detailedMetrics.sessions.unique_users)}
-              {renderMetricCard('Avg per User', detailedMetrics.sessions.avg_sessions_per_user.toFixed(1))}
-              {renderMetricCard('Avg Duration', detailedMetrics.sessions.avg_session_duration.toFixed(0), undefined, undefined, ' min')}
+              {renderMetricCard(
+                'Avg per User',
+                detailedMetrics.sessions.avg_sessions_per_user.toFixed(1)
+              )}
+              {renderMetricCard(
+                'Avg Duration',
+                detailedMetrics.sessions.avg_session_duration.toFixed(0),
+                undefined,
+                undefined,
+                ' min'
+              )}
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
                 <h3 className="text-lg font-semibold text-white mb-4">Sessions Over Time</h3>
                 <div className="h-64 flex items-end space-x-1">
-                  {(detailedMetrics.sessions.daily_sessions as Array<{ date: string; count: number }>)?.map((d, idx: number) => {
-                    const maxCount = Math.max(...(detailedMetrics.sessions.daily_sessions as Array<{ count: number }>).map(d => d.count), 1);
+                  {(
+                    detailedMetrics.sessions.daily_sessions as Array<{
+                      date: string;
+                      count: number;
+                    }>
+                  )?.map((d, idx: number) => {
+                    const maxCount = Math.max(
+                      ...(detailedMetrics.sessions.daily_sessions as Array<{ count: number }>).map(
+                        (d) => d.count
+                      ),
+                      1
+                    );
                     return (
                       <div key={idx} className="flex-1 flex flex-col items-center">
                         <div
                           className="w-full bg-purple-500 rounded-t"
                           style={{
                             height: `${(d.count / maxCount) * 100}%`,
-                            minHeight: d.count > 0 ? '4px' : '2px'
+                            minHeight: d.count > 0 ? '4px' : '2px',
                           }}
                           title={`${new Date(d.date).toLocaleDateString()}: ${d.count} sessions`}
                         />
@@ -449,19 +566,25 @@ export default function AdminDashboard() {
                   <div>
                     <div className="flex justify-between mb-1">
                       <span className="text-gray-400">Avg Messages per Session</span>
-                      <span className="text-white font-medium">{detailedMetrics.sessions.avg_messages_per_session?.toFixed(1) || 0}</span>
+                      <span className="text-white font-medium">
+                        {detailedMetrics.sessions.avg_messages_per_session?.toFixed(1) || 0}
+                      </span>
                     </div>
                   </div>
                   <div>
                     <div className="flex justify-between mb-1">
                       <span className="text-gray-400">Avg Session Duration</span>
-                      <span className="text-white font-medium">{detailedMetrics.sessions.avg_session_duration?.toFixed(0) || 0} min</span>
+                      <span className="text-white font-medium">
+                        {detailedMetrics.sessions.avg_session_duration?.toFixed(0) || 0} min
+                      </span>
                     </div>
                   </div>
                   <div>
                     <div className="flex justify-between mb-1">
                       <span className="text-gray-400">Total Sessions</span>
-                      <span className="text-white font-medium">{detailedMetrics.sessions.total_sessions}</span>
+                      <span className="text-white font-medium">
+                        {detailedMetrics.sessions.total_sessions}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -474,7 +597,13 @@ export default function AdminDashboard() {
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {renderMetricCard('Total Tokens', detailedMetrics.tokens.total_tokens)}
-              {renderMetricCard('Total Cost', detailedMetrics.tokens.total_cost.toFixed(2), undefined, undefined, '$')}
+              {renderMetricCard(
+                'Total Cost',
+                detailedMetrics.tokens.total_cost.toFixed(2),
+                undefined,
+                undefined,
+                '$'
+              )}
               {renderMetricCard('Active Users', detailedMetrics.tokens.active_users)}
               {renderMetricCard('Avg/User', detailedMetrics.tokens.avg_tokens_per_user)}
             </div>
@@ -483,15 +612,25 @@ export default function AdminDashboard() {
               <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
                 <h3 className="text-lg font-semibold text-white mb-4">Top Users by Token Usage</h3>
                 <div className="space-y-2">
-                  {(detailedMetrics.tokens.top_users as Array<{ user_id: string; total_tokens: number; total_cost: number }>)?.slice(0, 5).map((user, idx: number) => (
-                    <div key={idx} className="flex items-center justify-between">
-                      <span className="text-gray-300">{user.user_id}</span>
-                      <div className="text-right">
-                        <div className="text-white font-medium">{formatNumber(user.total_tokens)}</div>
-                        <div className="text-gray-500 text-sm">${user.total_cost.toFixed(2)}</div>
+                  {(
+                    detailedMetrics.tokens.top_users as Array<{
+                      user_id: string;
+                      total_tokens: number;
+                      total_cost: number;
+                    }>
+                  )
+                    ?.slice(0, 5)
+                    .map((user, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between">
+                        <span className="text-gray-300">{user.user_id}</span>
+                        <div className="text-right">
+                          <div className="text-white font-medium">
+                            {formatNumber(user.total_tokens)}
+                          </div>
+                          <div className="text-gray-500 text-sm">${user.total_cost.toFixed(2)}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </div>
             </div>
@@ -504,7 +643,13 @@ export default function AdminDashboard() {
               {renderMetricCard('Total Items', detailedMetrics.marketplace.total_items)}
               {renderMetricCard('Total Purchases', detailedMetrics.marketplace.total_purchases)}
               {renderMetricCard('Recent Purchases', detailedMetrics.marketplace.recent_purchases)}
-              {renderMetricCard('Total Revenue', detailedMetrics.marketplace.total_revenue.toFixed(2), undefined, undefined, '$')}
+              {renderMetricCard(
+                'Total Revenue',
+                detailedMetrics.marketplace.total_revenue.toFixed(2),
+                undefined,
+                undefined,
+                '$'
+              )}
             </div>
 
             {/* Agents Section */}
@@ -513,28 +658,48 @@ export default function AdminDashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <div>
                   <div className="text-gray-400 text-sm">Total Agents</div>
-                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.agents?.total || 0}</div>
+                  <div className="text-white text-2xl font-bold">
+                    {detailedMetrics.marketplace.agents?.total || 0}
+                  </div>
                 </div>
                 <div>
                   <div className="text-gray-400 text-sm">Agent Purchases</div>
-                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.agents?.total_purchases || 0}</div>
+                  <div className="text-white text-2xl font-bold">
+                    {detailedMetrics.marketplace.agents?.total_purchases || 0}
+                  </div>
                 </div>
                 <div>
                   <div className="text-gray-400 text-sm">Adoption Rate</div>
-                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.agents?.adoption_rate?.toFixed(1) || 0}%</div>
+                  <div className="text-white text-2xl font-bold">
+                    {detailedMetrics.marketplace.agents?.adoption_rate?.toFixed(1) || 0}%
+                  </div>
                 </div>
                 <div>
                   <div className="text-gray-400 text-sm">Recent Purchases</div>
-                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.agents?.recent_purchases || 0}</div>
+                  <div className="text-white text-2xl font-bold">
+                    {detailedMetrics.marketplace.agents?.recent_purchases || 0}
+                  </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div>
-                  <h4 className="text-md font-semibold text-white mb-3">Popular Agents (by purchases)</h4>
+                  <h4 className="text-md font-semibold text-white mb-3">
+                    Popular Agents (by purchases)
+                  </h4>
                   <div className="space-y-2">
-                    {(detailedMetrics.marketplace.agents?.popular as Array<{ name: string; slug: string; purchases: number; usage_count: number }>)?.map((agent, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                    {(
+                      detailedMetrics.marketplace.agents?.popular as Array<{
+                        name: string;
+                        slug: string;
+                        purchases: number;
+                        usage_count: number;
+                      }>
+                    )?.map((agent, idx: number) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between bg-gray-700/50 rounded p-3"
+                      >
                         <div>
                           <div className="text-white font-medium">{agent.name}</div>
                           <div className="text-gray-400 text-sm">/{agent.slug}</div>
@@ -550,9 +715,19 @@ export default function AdminDashboard() {
                 <div>
                   <h4 className="text-md font-semibold text-white mb-3">Most Used Agents</h4>
                   <div className="space-y-2">
-                    {detailedMetrics.marketplace.agents?.most_used && detailedMetrics.marketplace.agents.most_used.length > 0 ? (
-                      (detailedMetrics.marketplace.agents.most_used as Array<{ name: string; slug: string; usage_count: number }>).map((agent, idx: number) => (
-                        <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                    {detailedMetrics.marketplace.agents?.most_used &&
+                    detailedMetrics.marketplace.agents.most_used.length > 0 ? (
+                      (
+                        detailedMetrics.marketplace.agents.most_used as Array<{
+                          name: string;
+                          slug: string;
+                          usage_count: number;
+                        }>
+                      ).map((agent, idx: number) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between bg-gray-700/50 rounded p-3"
+                        >
                           <div>
                             <div className="text-white font-medium">{agent.name}</div>
                             <div className="text-gray-400 text-sm">/{agent.slug}</div>
@@ -574,23 +749,39 @@ export default function AdminDashboard() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div>
                   <div className="text-gray-400 text-sm">Total Bases</div>
-                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.bases?.total || 0}</div>
+                  <div className="text-white text-2xl font-bold">
+                    {detailedMetrics.marketplace.bases?.total || 0}
+                  </div>
                 </div>
                 <div>
                   <div className="text-gray-400 text-sm">Base Purchases</div>
-                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.bases?.total_purchases || 0}</div>
+                  <div className="text-white text-2xl font-bold">
+                    {detailedMetrics.marketplace.bases?.total_purchases || 0}
+                  </div>
                 </div>
                 <div>
                   <div className="text-gray-400 text-sm">Recent Purchases</div>
-                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.bases?.recent_purchases || 0}</div>
+                  <div className="text-white text-2xl font-bold">
+                    {detailedMetrics.marketplace.bases?.recent_purchases || 0}
+                  </div>
                 </div>
               </div>
 
               <div>
                 <h4 className="text-md font-semibold text-white mb-3">Popular Bases</h4>
                 <div className="space-y-2">
-                  {(detailedMetrics.marketplace.bases?.popular as Array<{ name: string; slug: string; purchases: number; downloads: number }>)?.map((base, idx: number) => (
-                    <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                  {(
+                    detailedMetrics.marketplace.bases?.popular as Array<{
+                      name: string;
+                      slug: string;
+                      purchases: number;
+                      downloads: number;
+                    }>
+                  )?.map((base, idx: number) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between bg-gray-700/50 rounded p-3"
+                    >
                       <div>
                         <div className="text-white font-medium">{base.name}</div>
                         <div className="text-gray-400 text-sm">/{base.slug}</div>
@@ -607,9 +798,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {activeTab === 'agents' && (
-          <AgentManagement />
-        )}
+        {activeTab === 'agents' && <AgentManagement />}
       </div>
     </div>
   );
@@ -666,7 +855,7 @@ function AgentManagement() {
   const [filter, setFilter] = useState({
     source_type: '',
     pricing_type: '',
-    is_active: ''
+    is_active: '',
   });
 
   useEffect(() => {
@@ -686,7 +875,7 @@ function AgentManagement() {
 
       const response = await fetch(`/api/admin/agents?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load agents');
@@ -705,7 +894,7 @@ function AgentManagement() {
     try {
       const response = await fetch('/api/admin/models', {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load models');
@@ -721,7 +910,7 @@ function AgentManagement() {
     try {
       const response = await fetch(`/api/admin/agents/${agentId}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load agent details');
@@ -749,7 +938,7 @@ function AgentManagement() {
       const response = await fetch(`/api/admin/agents/${agent.id}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -766,6 +955,28 @@ function AgentManagement() {
     }
   };
 
+  const handleRestoreToMarketplace = async (agent: Agent) => {
+    if (!confirm(`Restore "${agent.name}" to the marketplace?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/agents/${agent.id}/restore-to-marketplace`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
+
+      if (!response.ok) throw new Error('Failed to restore agent');
+
+      toast.success('Agent restored to marketplace');
+      loadAgents();
+    } catch (error) {
+      console.error('Failed to restore agent:', error);
+      toast.error('Failed to restore agent');
+    }
+  };
+
   const handleRemoveFromMarketplace = async (agent: Agent) => {
     if (!confirm(`Remove "${agent.name}" from the marketplace?`)) {
       return;
@@ -775,7 +986,7 @@ function AgentManagement() {
       const response = await fetch(`/api/admin/agents/${agent.id}/remove-from-marketplace`, {
         method: 'PATCH',
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to remove agent');
@@ -790,11 +1001,14 @@ function AgentManagement() {
 
   const handleToggleFeatured = async (agent: Agent) => {
     try {
-      const response = await fetch(`/api/admin/agents/${agent.id}/feature?is_featured=${!agent.is_featured}`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        credentials: 'include'
-      });
+      const response = await fetch(
+        `/api/admin/agents/${agent.id}/feature?is_featured=${!agent.is_featured}`,
+        {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          credentials: 'include',
+        }
+      );
 
       if (!response.ok) throw new Error('Failed to toggle featured');
 
@@ -832,7 +1046,7 @@ function AgentManagement() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <select
             value={filter.source_type}
-            onChange={(e) => setFilter({...filter, source_type: e.target.value})}
+            onChange={(e) => setFilter({ ...filter, source_type: e.target.value })}
             className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-[var(--text)]/20 [&>option]:bg-gray-700 [&>option]:text-white"
           >
             <option value="">All Source Types</option>
@@ -842,7 +1056,7 @@ function AgentManagement() {
 
           <select
             value={filter.pricing_type}
-            onChange={(e) => setFilter({...filter, pricing_type: e.target.value})}
+            onChange={(e) => setFilter({ ...filter, pricing_type: e.target.value })}
             className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-[var(--text)]/20 [&>option]:bg-gray-700 [&>option]:text-white"
           >
             <option value="">All Pricing Types</option>
@@ -854,7 +1068,7 @@ function AgentManagement() {
 
           <select
             value={filter.is_active}
-            onChange={(e) => setFilter({...filter, is_active: e.target.value})}
+            onChange={(e) => setFilter({ ...filter, is_active: e.target.value })}
             className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-[var(--text)]/20 [&>option]:bg-gray-700 [&>option]:text-white"
           >
             <option value="">All Status</option>
@@ -890,7 +1104,11 @@ function AgentManagement() {
                       <div className="text-gray-400 text-sm">/{agent.slug}</div>
                       {!agent.can_edit && (
                         <div className="text-yellow-500 text-xs mt-1">
-                          {agent.created_by_username ? `By ${agent.created_by_username}` : agent.forked_by_username ? `Forked by ${agent.forked_by_username}` : 'User-created'}
+                          {agent.created_by_username
+                            ? `By ${agent.created_by_username}`
+                            : agent.forked_by_username
+                              ? `Forked by ${agent.forked_by_username}`
+                              : 'User-created'}
                         </div>
                       )}
                     </div>
@@ -906,7 +1124,9 @@ function AgentManagement() {
                   <div>
                     <span className="text-gray-300 capitalize">{agent.pricing_type}</span>
                     {agent.pricing_type === 'monthly' && (
-                      <div className="text-gray-400 text-sm">${(agent.price / 100).toFixed(2)}/mo</div>
+                      <div className="text-gray-400 text-sm">
+                        ${(agent.price / 100).toFixed(2)}/mo
+                      </div>
                     )}
                     {agent.pricing_type === 'api' && (
                       <div className="text-gray-400 text-xs">
@@ -917,7 +1137,9 @@ function AgentManagement() {
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <span className={`px-2 py-1 rounded text-xs ${agent.source_type === 'open' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                  <span
+                    className={`px-2 py-1 rounded text-xs ${agent.source_type === 'open' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}
+                  >
                     {agent.source_type}
                   </span>
                 </td>
@@ -926,7 +1148,9 @@ function AgentManagement() {
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex flex-col space-y-1">
-                    <span className={`px-2 py-1 rounded text-xs w-fit ${agent.is_active ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                    <span
+                      className={`px-2 py-1 rounded text-xs w-fit ${agent.is_active ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}
+                    >
                       {agent.is_active ? 'Active' : 'Inactive'}
                     </span>
                     {agent.is_featured && (
@@ -941,24 +1165,32 @@ function AgentManagement() {
                     <button
                       onClick={() => loadAgentDetails(agent.id)}
                       className="text-blue-400 hover:text-blue-300 text-sm"
-                      title={agent.can_edit ? "Edit agent" : "View agent"}
+                      title={agent.can_edit ? 'Edit agent' : 'View agent'}
                     >
                       {agent.can_edit ? 'Edit' : 'View'}
                     </button>
                     <button
                       onClick={() => handleToggleFeatured(agent)}
                       className="text-yellow-400 hover:text-yellow-300 text-sm"
-                      title={agent.is_featured ? "Unfeature" : "Feature"}
+                      title={agent.is_featured ? 'Unfeature' : 'Feature'}
                     >
                       {agent.is_featured ? '★' : '☆'}
                     </button>
-                    {agent.is_active && (
+                    {agent.is_active ? (
                       <button
                         onClick={() => handleRemoveFromMarketplace(agent)}
                         className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-sm"
                         title="Remove from marketplace"
                       >
                         Hide
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleRestoreToMarketplace(agent)}
+                        className="text-green-400 hover:text-green-300 text-sm"
+                        title="Restore to marketplace"
+                      >
+                        Show
                       </button>
                     )}
                     {agent.can_edit && (
@@ -978,9 +1210,7 @@ function AgentManagement() {
         </table>
 
         {agents.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
-            No agents found
-          </div>
+          <div className="text-center py-12 text-gray-400">No agents found</div>
         )}
       </div>
 
@@ -1032,8 +1262,8 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
 
   // Agent type to mode mapping
   const agentTypeToMode: Record<string, string> = {
-    'StreamAgent': 'stream',
-    'IterativeAgent': 'agent'
+    StreamAgent: 'stream',
+    IterativeAgent: 'agent',
   };
 
   const [formData, setFormData] = useState({
@@ -1043,10 +1273,10 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
     category: agent?.category || 'builder',
     system_prompt: agent?.system_prompt || '',
     agent_type: agent?.agent_type || 'StreamAgent',
-    model: agent?.model || (availableModels[0] || ''),
+    model: agent?.model || availableModels[0] || '',
     icon: agent?.icon || '🤖',
     pricing_type: agent?.pricing_type || 'free',
-    price: agent?.price ? (agent.price / 100) : 0,
+    price: agent?.price ? agent.price / 100 : 0,
     api_pricing_input: agent?.api_pricing_input || 0,
     api_pricing_output: agent?.api_pricing_output || 0,
     source_type: agent?.source_type || 'closed',
@@ -1055,7 +1285,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
     features: agent?.features?.join(', ') || '',
     tags: agent?.tags?.join(', ') || '',
     is_featured: agent?.is_featured || false,
-    is_active: agent?.is_active !== undefined ? agent.is_active : true
+    is_active: agent?.is_active !== undefined ? agent.is_active : true,
   });
 
   const [saving, setSaving] = useState(false);
@@ -1075,12 +1305,23 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
       const payload = {
         ...formData,
         mode: agentTypeToMode[formData.agent_type] || 'stream', // Infer mode from agent type
-        price: formData.pricing_type === 'monthly' || formData.pricing_type === 'one_time' ? Math.round(formData.price * 100) : 0,
-        api_pricing_input: formData.pricing_type === 'api' ? parseFloat(formData.api_pricing_input.toString()) : 0,
-        api_pricing_output: formData.pricing_type === 'api' ? parseFloat(formData.api_pricing_output.toString()) : 0,
-        features: formData.features.split(',').map(f => f.trim()).filter(f => f),
+        price:
+          formData.pricing_type === 'monthly' || formData.pricing_type === 'one_time'
+            ? Math.round(formData.price * 100)
+            : 0,
+        api_pricing_input:
+          formData.pricing_type === 'api' ? parseFloat(formData.api_pricing_input.toString()) : 0,
+        api_pricing_output:
+          formData.pricing_type === 'api' ? parseFloat(formData.api_pricing_output.toString()) : 0,
+        features: formData.features
+          .split(',')
+          .map((f) => f.trim())
+          .filter((f) => f),
         required_models: [], // Empty array - not used
-        tags: formData.tags.split(',').map(t => t.trim()).filter(t => t)
+        tags: formData.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t),
       };
 
       const url = isEdit ? `/api/admin/agents/${agent.id}` : '/api/admin/agents';
@@ -1090,7 +1331,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
         method,
         headers: getAuthHeaders(),
         credentials: 'include',
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -1133,7 +1374,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 required
                 disabled={!canEdit}
                 value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               />
             </div>
@@ -1143,7 +1384,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 type="text"
                 disabled={!canEdit}
                 value={formData.icon}
-                onChange={(e) => setFormData({...formData, icon: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
                 className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                 placeholder="🤖"
               />
@@ -1157,19 +1398,21 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               required
               disabled={!canEdit}
               value={formData.description}
-              onChange={(e) => setFormData({...formData, description: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               maxLength={500}
             />
           </div>
 
           <div>
-            <label className="block text-gray-300 text-sm font-medium mb-2">Long Description *</label>
+            <label className="block text-gray-300 text-sm font-medium mb-2">
+              Long Description *
+            </label>
             <textarea
               required
               disabled={!canEdit}
               value={formData.long_description}
-              onChange={(e) => setFormData({...formData, long_description: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, long_description: e.target.value })}
               className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               rows={3}
             />
@@ -1181,7 +1424,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               required
               disabled={!canEdit}
               value={formData.system_prompt}
-              onChange={(e) => setFormData({...formData, system_prompt: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, system_prompt: e.target.value })}
               className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 font-mono text-sm disabled:opacity-50"
               rows={6}
             />
@@ -1192,14 +1435,16 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
             <div>
               <label className="block text-gray-300 text-sm font-medium mb-2">
                 Category *
-                <span className="text-gray-500 font-normal text-xs ml-2">(e.g., builder, fullstack, data)</span>
+                <span className="text-gray-500 font-normal text-xs ml-2">
+                  (e.g., builder, fullstack, data)
+                </span>
               </label>
               <input
                 type="text"
                 required
                 disabled={!canEdit}
                 value={formData.category}
-                onChange={(e) => setFormData({...formData, category: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                 className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                 placeholder="builder"
               />
@@ -1207,13 +1452,15 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
             <div>
               <label className="block text-gray-300 text-sm font-medium mb-2">
                 Agent Type *
-                <span className="text-gray-500 font-normal text-xs ml-2">(determines mode automatically)</span>
+                <span className="text-gray-500 font-normal text-xs ml-2">
+                  (determines mode automatically)
+                </span>
               </label>
               <select
                 required
                 disabled={!canEdit}
                 value={formData.agent_type}
-                onChange={(e) => setFormData({...formData, agent_type: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, agent_type: e.target.value })}
                 className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50 [&>option]:bg-gray-700 [&>option]:text-white"
               >
                 <option value="StreamAgent">StreamAgent (streaming mode)</option>
@@ -1226,17 +1473,21 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
             <div>
               <label className="block text-gray-300 text-sm font-medium mb-2">
                 Model *
-                <span className="text-gray-500 font-normal text-xs ml-2">(LiteLLM model - fixed for closed source, suggestion for open source)</span>
+                <span className="text-gray-500 font-normal text-xs ml-2">
+                  (LiteLLM model - fixed for closed source, suggestion for open source)
+                </span>
               </label>
               <select
                 required
                 disabled={!canEdit}
                 value={formData.model}
-                onChange={(e) => setFormData({...formData, model: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, model: e.target.value })}
                 className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50 [&>option]:bg-gray-700 [&>option]:text-white"
               >
-                {availableModels.map(model => (
-                  <option key={model} value={model}>{model}</option>
+                {availableModels.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1246,7 +1497,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 required
                 disabled={!canEdit}
                 value={formData.source_type}
-                onChange={(e) => setFormData({...formData, source_type: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, source_type: e.target.value })}
                 className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50 [&>option]:bg-gray-700 [&>option]:text-white"
               >
                 <option value="closed">Closed Source</option>
@@ -1262,7 +1513,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               required
               disabled={!canEdit}
               value={formData.pricing_type}
-              onChange={(e) => setFormData({...formData, pricing_type: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, pricing_type: e.target.value })}
               className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50 [&>option]:bg-gray-700 [&>option]:text-white"
             >
               <option value="free">Free</option>
@@ -1282,7 +1533,9 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 step="0.01"
                 disabled={!canEdit}
                 value={formData.price}
-                onChange={(e) => setFormData({...formData, price: parseFloat(e.target.value) || 0})}
+                onChange={(e) =>
+                  setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })
+                }
                 className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                 min="0"
                 placeholder="e.g., 9.99"
@@ -1301,7 +1554,9 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                   step="0.01"
                   disabled={!canEdit}
                   value={formData.api_pricing_input}
-                  onChange={(e) => setFormData({...formData, api_pricing_input: parseFloat(e.target.value) || 0})}
+                  onChange={(e) =>
+                    setFormData({ ...formData, api_pricing_input: parseFloat(e.target.value) || 0 })
+                  }
                   className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                   min="0"
                   placeholder="e.g., 0.50"
@@ -1316,7 +1571,12 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                   step="0.01"
                   disabled={!canEdit}
                   value={formData.api_pricing_output}
-                  onChange={(e) => setFormData({...formData, api_pricing_output: parseFloat(e.target.value) || 0})}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      api_pricing_output: parseFloat(e.target.value) || 0,
+                    })
+                  }
                   className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                   min="0"
                   placeholder="e.g., 1.50"
@@ -1334,7 +1594,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               type="text"
               disabled={!canEdit}
               value={formData.features}
-              onChange={(e) => setFormData({...formData, features: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, features: e.target.value })}
               className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               placeholder="Real-time streaming, Code generation"
             />
@@ -1348,7 +1608,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               type="text"
               disabled={!canEdit}
               value={formData.tags}
-              onChange={(e) => setFormData({...formData, tags: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
               className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               placeholder="react, typescript, streaming"
             />
@@ -1361,7 +1621,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 type="checkbox"
                 disabled={!canEdit}
                 checked={formData.is_forkable}
-                onChange={(e) => setFormData({...formData, is_forkable: e.target.checked})}
+                onChange={(e) => setFormData({ ...formData, is_forkable: e.target.checked })}
                 className="w-5 h-5 rounded border-[var(--text)]/20 bg-gray-700 text-blue-600 disabled:opacity-50"
               />
               <span className="text-gray-300">Is Forkable (open source only)</span>
@@ -1372,12 +1632,14 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 type="checkbox"
                 disabled={!canEdit}
                 checked={formData.requires_user_keys}
-                onChange={(e) => setFormData({...formData, requires_user_keys: e.target.checked})}
+                onChange={(e) => setFormData({ ...formData, requires_user_keys: e.target.checked })}
                 className="w-5 h-5 rounded border-[var(--text)]/20 bg-gray-700 text-blue-600 disabled:opacity-50"
               />
               <span className="text-gray-300">
                 Requires User Keys
-                <span className="text-gray-500 font-normal text-xs ml-2">(user must provide their own API keys)</span>
+                <span className="text-gray-500 font-normal text-xs ml-2">
+                  (user must provide their own API keys)
+                </span>
               </span>
             </label>
 
@@ -1386,7 +1648,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 type="checkbox"
                 disabled={!canEdit}
                 checked={formData.is_featured}
-                onChange={(e) => setFormData({...formData, is_featured: e.target.checked})}
+                onChange={(e) => setFormData({ ...formData, is_featured: e.target.checked })}
                 className="w-5 h-5 rounded border-[var(--text)]/20 bg-gray-700 text-blue-600 disabled:opacity-50"
               />
               <span className="text-gray-300">Featured</span>
@@ -1397,7 +1659,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 type="checkbox"
                 disabled={!canEdit}
                 checked={formData.is_active}
-                onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
+                onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
                 className="w-5 h-5 rounded border-[var(--text)]/20 bg-gray-700 text-blue-600 disabled:opacity-50"
               />
               <span className="text-gray-300">Active</span>
