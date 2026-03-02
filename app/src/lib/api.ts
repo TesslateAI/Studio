@@ -2470,4 +2470,20 @@ export const createTerminalWebSocket = (projectId: string): WebSocket => {
   return new WebSocket(`${wsUrl}/api/projects/${projectId}/terminal`);
 };
 
+/**
+ * Create a WebSocket connection for streaming container logs
+ * @param projectSlug - The project slug
+ * @returns WebSocket instance connected to the log stream endpoint
+ */
+export const createLogStreamWebSocket = (projectSlug: string): WebSocket => {
+  let wsUrl: string;
+  if (API_URL) {
+    wsUrl = API_URL.replace('http', 'ws');
+  } else {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl = `${protocol}//${window.location.host}`;
+  }
+  return new WebSocket(`${wsUrl}/api/projects/${projectSlug}/logs/stream`);
+};
+
 export default api;

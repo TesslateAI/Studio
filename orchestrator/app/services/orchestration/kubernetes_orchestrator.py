@@ -30,8 +30,10 @@ Key Concepts:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
+from collections.abc import AsyncIterator
 from datetime import UTC
 from pathlib import PurePosixPath
 from typing import Any
@@ -1967,6 +1969,98 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             "[K8S] track_activity() called but is a no-op. "
             "Use activity_tracker.track_project_activity() instead."
         )
+
+    # =========================================================================
+    # LOG STREAMING
+    # =========================================================================
+
+    async def stream_logs(
+        self,
+        project_id: UUID,
+        user_id: UUID,
+        container_id: UUID | None = None,
+        tail_lines: int = 100,
+    ) -> AsyncIterator[str]:
+        namespace = self._get_namespace(str(project_id))
+
+        try:
+            core_v1 = self.k8s_client.core_v1
+
+            # Find the target pod
+            if container_id:
+                pods = await asyncio.to_thread(
+                    core_v1.list_namespaced_pod,
+                    namespace,
+                    label_selector=f"tesslate.io/container-id={container_id}",
+                )
+            else:
+                pods = await asyncio.to_thread(
+                    core_v1.list_namespaced_pod,
+                    namespace,
+                    label_selector="tesslate.io/component=dev-container",
+                )
+
+            if not pods.items:
+                logger.warning(f"[K8S] No pods found for log streaming in {namespace}")
+                return
+
+            pod = pods.items[0]
+            pod_name = pod.metadata.name
+
+            # Determine container name within pod
+            k8s_container_name = "dev-server"
+            if (
+                container_id
+                and pod.metadata.labels.get("tesslate.io/component") == "service-container"
+                and pod.spec.containers
+            ):
+                k8s_container_name = pod.spec.containers[0].name
+
+            # Stream logs using queue bridge (K8s stream is synchronous)
+            stop_event = asyncio.Event()
+            queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=1000)
+
+            def _read_k8s_logs():
+                try:
+                    log_stream = core_v1.read_namespaced_pod_log(
+                        name=pod_name,
+                        namespace=namespace,
+                        container=k8s_container_name,
+                        follow=True,
+                        tail_lines=tail_lines,
+                        _preload_content=False,
+                    )
+                    for line in log_stream:
+                        if stop_event.is_set():
+                            break
+                        if isinstance(line, bytes):
+                            line = line.decode("utf-8", errors="replace")
+                        with contextlib.suppress(asyncio.QueueFull):
+                            queue.put_nowait(line)
+                except Exception as e:
+                    if not stop_event.is_set():
+                        logger.error(f"[K8S] Log stream error: {e}")
+                finally:
+                    queue.put_nowait(None)
+
+            asyncio.get_event_loop().run_in_executor(None, _read_k8s_logs)
+
+            try:
+                while True:
+                    line = await queue.get()
+                    if line is None:
+                        break
+                    yield line
+            finally:
+                stop_event.set()
+
+        except ApiException as e:
+            if e.status == 404:
+                logger.warning(f"[K8S] Namespace or pod not found: {namespace}")
+            else:
+                logger.error(f"[K8S] API error streaming logs: {e}")
+        except Exception as e:
+            logger.error(f"[K8S] Error streaming logs: {e}")
 
     async def cleanup_idle_environments(self, idle_timeout_minutes: int = None) -> list[str]:
         """

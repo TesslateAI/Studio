@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X,
   Play,
@@ -10,8 +10,12 @@ import {
   Check,
   Lock,
   Key,
+  CaretDown,
+  CaretRight,
+  Pause,
+  ArrowLineDown,
 } from '@phosphor-icons/react';
-import api from '../lib/api';
+import api, { createLogStreamWebSocket } from '../lib/api';
 import { toast } from 'react-hot-toast';
 import { connectionEvents } from '../utils/connectionEvents';
 import {
@@ -65,6 +69,141 @@ export const ContainerPropertiesPanel = ({
   );
 
   const isExternalService = deploymentMode === 'external' && !!serviceSlug;
+
+  // --- Container Logs ---
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [isLogsPaused, setIsLogsPaused] = useState(false);
+  const [isLogsAutoScroll, setIsLogsAutoScroll] = useState(true);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const pauseBufferRef = useRef<string[]>([]);
+  const isPausedRef = useRef(false);
+  const isAutoScrollRef = useRef(true);
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const MAX_LOG_LINES = 500;
+
+  useEffect(() => {
+    isPausedRef.current = isLogsPaused;
+  }, [isLogsPaused]);
+  useEffect(() => {
+    isAutoScrollRef.current = isLogsAutoScroll;
+  }, [isLogsAutoScroll]);
+
+  // Auto-scroll log container
+  useEffect(() => {
+    if (isLogsAutoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [logLines, isLogsAutoScroll]);
+
+  const cleanupWs = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
+    if (wsRef.current) {
+      // Null out handlers BEFORE closing to prevent the onclose handler from
+      // firing a zombie reconnect with a stale connectLogs closure (wrong containerId)
+      wsRef.current.onclose = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onerror = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    reconnectAttemptsRef.current = 0;
+  }, []);
+
+  const connectLogs = useCallback(() => {
+    cleanupWs();
+
+    try {
+      const ws = createLogStreamWebSocket(projectSlug);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        reconnectAttemptsRef.current = 0;
+        // Send switch_container to target this specific container
+        ws.send(JSON.stringify({ type: 'switch_container', container_id: containerId }));
+        pingIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'log') {
+            const line = data.data ?? '';
+            if (isPausedRef.current) {
+              pauseBufferRef.current.push(line);
+            } else {
+              setLogLines((prev) => {
+                const next = [...prev, line];
+                return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
+              });
+            }
+          } else if (data.type === 'error') {
+            setLogLines((prev) => [...prev, `[ERROR] ${data.message ?? 'Unknown error'}`]);
+          }
+        } catch {
+          /* ignore parse errors */
+        }
+      };
+
+      ws.onerror = () => {};
+      ws.onclose = () => {
+        wsRef.current = null;
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
+        if (reconnectAttemptsRef.current < 5) {
+          reconnectAttemptsRef.current++;
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current - 1), 15000);
+          reconnectTimerRef.current = setTimeout(connectLogs, delay);
+        }
+      };
+    } catch {
+      /* ignore */
+    }
+  }, [projectSlug, containerId, cleanupWs]);
+
+  // Connect/disconnect when logs section is opened/closed or container changes
+  useEffect(() => {
+    const streamable = containerStatus === 'running' || containerStatus === 'starting';
+    if (isLogsOpen && streamable) {
+      setLogLines([]);
+      pauseBufferRef.current = [];
+      connectLogs();
+    } else if (!streamable) {
+      cleanupWs();
+    }
+    return cleanupWs;
+  }, [isLogsOpen, containerId, containerStatus, connectLogs, cleanupWs]);
+
+  const toggleLogsPause = useCallback(() => {
+    setIsLogsPaused((prev) => {
+      if (prev) {
+        // Flush buffer on resume
+        const buffer = pauseBufferRef.current;
+        pauseBufferRef.current = [];
+        if (buffer.length > 0) {
+          setLogLines((lines) => {
+            const next = [...lines, ...buffer];
+            return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
+          });
+        }
+      }
+      return !prev;
+    });
+  }, []);
 
   const fetchContainerDetailsCallback = useCallback(async () => {
     try {
@@ -578,6 +717,98 @@ export const ContainerPropertiesPanel = ({
               </div>
             </div>
           )}
+
+          {/* Container Logs */}
+          <div className="pt-3 mt-3 border-t border-[var(--border-color)]">
+            <button
+              onClick={() => setIsLogsOpen((prev) => !prev)}
+              className="flex items-center gap-1.5 w-full text-left mb-2"
+            >
+              {isLogsOpen ? (
+                <CaretDown size={12} className="text-[var(--text)]/60" />
+              ) : (
+                <CaretRight size={12} className="text-[var(--text)]/60" />
+              )}
+              <span className="text-xs font-medium text-[var(--text)]">Container Logs</span>
+              {isLogsOpen && (containerStatus === 'running' || containerStatus === 'starting') && (
+                <span className="ml-auto flex items-center gap-1">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full animate-pulse ${containerStatus === 'running' ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  />
+                  <span
+                    className={`text-[10px] ${containerStatus === 'running' ? 'text-green-400' : 'text-yellow-400'}`}
+                  >
+                    {containerStatus === 'running' ? 'live' : 'starting'}
+                  </span>
+                </span>
+              )}
+            </button>
+
+            {isLogsOpen && (
+              <div>
+                {containerStatus !== 'running' &&
+                containerStatus !== 'starting' &&
+                containerStatus !== 'failed' ? (
+                  <p className="text-xs text-[var(--text)]/40 py-4 text-center">
+                    Start the container to view logs
+                  </p>
+                ) : (
+                  <>
+                    {/* Log controls */}
+                    <div className="flex items-center gap-1 mb-1.5">
+                      <button
+                        onClick={toggleLogsPause}
+                        className="p-1 rounded text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--sidebar-hover)] transition-colors"
+                        title={isLogsPaused ? 'Resume' : 'Pause'}
+                      >
+                        {isLogsPaused ? <Play size={12} /> : <Pause size={12} />}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setLogLines([]);
+                          pauseBufferRef.current = [];
+                        }}
+                        className="p-1 rounded text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--sidebar-hover)] transition-colors"
+                        title="Clear"
+                      >
+                        <Trash size={12} />
+                      </button>
+                      <button
+                        onClick={() => setIsLogsAutoScroll((prev) => !prev)}
+                        className={`p-1 rounded transition-colors ${
+                          isLogsAutoScroll
+                            ? 'text-green-400 hover:bg-green-500/10'
+                            : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--sidebar-hover)]'
+                        }`}
+                        title={isLogsAutoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
+                      >
+                        <ArrowLineDown size={12} />
+                      </button>
+                      {isLogsPaused && (
+                        <span className="text-[10px] text-yellow-400 ml-auto">paused</span>
+                      )}
+                    </div>
+
+                    {/* Log output */}
+                    <div
+                      ref={logContainerRef}
+                      className="h-48 overflow-y-auto overflow-x-auto bg-[#0a0a0a] rounded border border-[var(--border-color)] p-1.5 font-mono text-[10px] leading-relaxed text-[#d4d4d4] select-text"
+                    >
+                      {logLines.length === 0 ? (
+                        <span className="text-[var(--text)]/30">Waiting for logs...</span>
+                      ) : (
+                        logLines.map((line, i) => (
+                          <div key={i} className="whitespace-pre">
+                            {line}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

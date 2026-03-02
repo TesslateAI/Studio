@@ -12,6 +12,7 @@ File Operations Architecture:
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ import re
 import shutil
 import socket
 import subprocess
+from collections.abc import AsyncIterator
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -1192,6 +1194,87 @@ class DockerOrchestrator(BaseOrchestrator):
                 logger.debug(f"[DOCKER] Activity tracked for project {project_id}")
         except Exception as e:
             logger.warning(f"[DOCKER] Failed to track activity: {e}")
+
+    # =========================================================================
+    # LOG STREAMING
+    # =========================================================================
+
+    async def stream_logs(
+        self,
+        project_id: UUID,
+        user_id: UUID,
+        container_id: UUID | None = None,
+        tail_lines: int = 100,
+    ) -> AsyncIterator[str]:
+        import docker as docker_lib
+
+        # Resolve container name
+        if container_id:
+            from sqlalchemy import select
+            from sqlalchemy.orm import selectinload
+
+            from ...database import AsyncSessionLocal
+            from ...models import Container
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(Container)
+                    .options(selectinload(Container.project))
+                    .where(Container.id == container_id)
+                )
+                container_model = result.scalar_one_or_none()
+                if not container_model:
+                    logger.warning(f"[DOCKER] Container {container_id} not found in DB")
+                    return
+                # Compute the actual Docker container name the same way compose config does
+                project_slug = container_model.project.slug
+                service_name = self._sanitize_service_name(container_model.name)
+                docker_container_name = f"{project_slug}-{service_name}"
+        else:
+            from ...utils.resource_naming import get_container_name
+
+            docker_container_name = get_container_name(str(user_id), str(project_id))
+
+        docker_client = docker_lib.from_env()
+        stop_event = asyncio.Event()
+        try:
+            container = docker_client.containers.get(docker_container_name)
+            log_stream = container.logs(
+                stream=True, follow=True, stdout=True, stderr=True, tail=tail_lines
+            )
+
+            queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=1000)
+
+            def _read_logs():
+                try:
+                    for line in log_stream:
+                        if stop_event.is_set():
+                            break
+                        with contextlib.suppress(asyncio.QueueFull):
+                            queue.put_nowait(line.decode("utf-8", errors="replace"))
+                except Exception as e:
+                    if not stop_event.is_set():
+                        logger.error(f"[DOCKER] Log stream error: {e}")
+                finally:
+                    queue.put_nowait(None)
+
+            asyncio.get_event_loop().run_in_executor(None, _read_logs)
+
+            try:
+                while True:
+                    line = await queue.get()
+                    if line is None:
+                        break
+                    yield line
+            finally:
+                stop_event.set()
+        except docker_lib.errors.NotFound:
+            logger.warning(
+                f"[DOCKER] Container {docker_container_name} not found for log streaming"
+            )
+        finally:
+            stop_event.set()
+            docker_client.close()
 
     # =========================================================================
     # CLEANUP (Database-based, actually stops containers)

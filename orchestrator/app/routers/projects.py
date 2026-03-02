@@ -3646,18 +3646,28 @@ async def stream_container_logs(
 ):
     """
     WebSocket endpoint to stream container logs in real-time.
-    Streams stdout/stderr from the project's dev container.
-    """
-    import asyncio
 
-    import docker
+    Protocol:
+        Server -> Client: {"type": "containers", "data": [{id, name, status, type}]}
+        Server -> Client: {"type": "log", "data": "<line>", "container_id": "<uuid>"}
+        Server -> Client: {"type": "error", "message": "<msg>"}
+        Server -> Client: {"type": "pong"}
+        Client -> Server: {"type": "switch_container", "container_id": "<uuid>"}
+        Client -> Server: {"type": "ping"}
+    """
     from fastapi import WebSocketDisconnect
+
+    from ..services.orchestration import get_orchestrator
 
     await websocket.accept()
 
     try:
-        # Get project
-        result = await db.execute(select(Project).where(Project.slug == project_slug))
+        # Get project with containers
+        result = await db.execute(
+            select(Project)
+            .options(selectinload(Project.containers))
+            .where(Project.slug == project_slug)
+        )
         project = result.scalar_one_or_none()
 
         if not project:
@@ -3665,60 +3675,61 @@ async def stream_container_logs(
             await websocket.close()
             return
 
-        # Get container name
-        from ..utils.resource_naming import get_container_name
+        # Send container list to client
+        containers_data = [
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "status": c.status or "unknown",
+                "type": c.container_type or "dev",
+            }
+            for c in project.containers
+        ]
+        await websocket.send_json({"type": "containers", "data": containers_data})
 
-        container_name = get_container_name(str(project.user_id), str(project.id))
+        # Streaming with cancel support — wait for client to pick container
+        cancel_event = asyncio.Event()
+        stream_task = None
 
-        await websocket.send_json(
-            {"type": "status", "message": f"Connecting to container: {container_name}"}
-        )
+        async def _stream_logs(container_id: UUID, cancel_ev: asyncio.Event):
+            try:
+                orchestrator = get_orchestrator()
+                async for line in orchestrator.stream_logs(
+                    project.id, project.owner_id, container_id
+                ):
+                    if cancel_ev.is_set():
+                        break
+                    await websocket.send_json(
+                        {"type": "log", "data": line, "container_id": str(container_id)}
+                    )
+            except Exception as e:
+                logger.error(f"Error in log stream for container {container_id}: {e}")
+                with contextlib.suppress(builtins.BaseException):
+                    await websocket.send_json(
+                        {"type": "error", "message": f"Log stream error: {str(e)}"}
+                    )
 
-        # Connect to Docker
-        docker_client = docker.from_env()
-
+        # Message receive loop — stream starts when client sends switch_container
         try:
-            container = docker_client.containers.get(container_name)
+            while True:
+                data = await websocket.receive_json()
+                msg_type = data.get("type")
 
-            await websocket.send_json(
-                {"type": "status", "message": "Container found. Streaming logs..."}
-            )
+                if msg_type == "ping":
+                    await websocket.send_json({"type": "pong"})
+                elif msg_type == "switch_container":
+                    # Cancel current stream
+                    cancel_event.set()
+                    if stream_task:
+                        with contextlib.suppress(builtins.BaseException):
+                            await asyncio.shield(stream_task)
 
-            # Stream logs (follow=True for real-time)
-            log_stream = container.logs(
-                stream=True, follow=True, stdout=True, stderr=True, tail=100
-            )
-
-            # Stream logs to WebSocket
-            for log_line in log_stream:
-                try:
-                    # Decode and send log line
-                    log_text = log_line.decode("utf-8", errors="replace")
-                    await websocket.send_json({"type": "log", "data": log_text})
-
-                    # Check for disconnect
-                    try:
-                        message = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
-                        if message == "ping":
-                            await websocket.send_text("pong")
-                    except TimeoutError:
-                        pass  # No message, continue streaming
-
-                except WebSocketDisconnect:
-                    break
-                except Exception as e:
-                    logger.error(f"Error streaming log line: {e}")
-                    break
-
-        except docker.errors.NotFound:
-            await websocket.send_json(
-                {"type": "error", "message": "Container not found. Start the dev server first."}
-            )
-        except Exception as e:
-            logger.error(f"Error accessing container: {e}")
-            await websocket.send_json({"type": "error", "message": f"Container error: {str(e)}"})
-        finally:
-            docker_client.close()
+                    # Start new stream for requested container
+                    cancel_event = asyncio.Event()
+                    new_container_id = UUID(data["container_id"])
+                    stream_task = asyncio.create_task(_stream_logs(new_container_id, cancel_event))
+        except WebSocketDisconnect:
+            cancel_event.set()
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for project {project_slug}")
@@ -3727,6 +3738,10 @@ async def stream_container_logs(
         with contextlib.suppress(builtins.BaseException):
             await websocket.send_json({"type": "error", "message": str(e)})
     finally:
+        if "cancel_event" in locals():
+            cancel_event.set()
+        if "stream_task" in locals() and stream_task:
+            stream_task.cancel()
         with contextlib.suppress(builtins.BaseException):
             await websocket.close()
 

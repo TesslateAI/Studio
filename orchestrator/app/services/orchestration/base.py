@@ -6,6 +6,7 @@ This ensures feature parity between Docker and Kubernetes deployments.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
@@ -338,6 +339,33 @@ class BaseOrchestrator(ABC):
             container_name: Container name (optional)
         """
         pass
+
+    # =========================================================================
+    # LOG STREAMING
+    # =========================================================================
+
+    @abstractmethod
+    async def stream_logs(
+        self,
+        project_id: UUID,
+        user_id: UUID,
+        container_id: UUID | None = None,
+        tail_lines: int = 100,
+    ) -> AsyncIterator[str]:
+        """
+        Stream container logs as an async iterator.
+
+        Args:
+            project_id: Project ID
+            user_id: User ID
+            container_id: Specific container ID (None = default/first running container)
+            tail_lines: Number of historical lines to include
+
+        Yields:
+            Log lines as strings
+        """
+        yield ""  # abstract — implemented by subclasses
+        raise NotImplementedError
 
     # =========================================================================
     # CLEANUP
