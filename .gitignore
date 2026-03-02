@@ -178,6 +178,9 @@ k8s/terraform/**/override.tf.json
 k8s/terraform/**/*_override.tf
 k8s/terraform/**/*_override.tf.json
 
+# Terraform-generated kustomize patches
+k8s/overlays/*/generated-*.yaml
+
 # Claude AI
 .claude/settings.local.json
 

@@ -183,6 +183,7 @@ resource "kubernetes_secret" "app_secrets" {
     ) : (
       "redis://redis:6379/0"
     )
+
   }
 
   type = "Opaque"
@@ -490,10 +491,19 @@ resource "aws_db_instance" "tesslate" {
 }
 
 # -----------------------------------------------------------------------------
-# Scale down K8s-managed PostgreSQL when using RDS
-# When create_rds=true, postgres deployment is scaled to 0 (RDS handles the database)
-# When create_rds=false, this resource doesn't exist and postgres runs at default replicas
+# Generated Kustomize Replica Patch
+# Terraform generates a kustomize-compatible patch with replica counts
+# so that kustomize overlays don't hardcode replica values.
 # -----------------------------------------------------------------------------
+resource "local_file" "replicas_patch" {
+  content  = templatefile("${path.module}/templates/replicas-patch.yaml.tpl", {
+    backend_replicas  = var.backend_replicas
+    frontend_replicas = var.frontend_replicas
+    worker_replicas   = var.worker_replicas
+  })
+  filename = "${path.module}/../../overlays/aws-${var.environment}/generated-replicas-patch.yaml"
+}
+
 # Scale down K8s postgres if it exists (no-op if deployment doesn't exist)
 resource "null_resource" "postgres_scale_down" {
   count = var.create_rds ? 1 : 0

@@ -6,6 +6,9 @@ kind: Kustomization
 resources:
   - ../aws-base
 
+patches:
+  - path: generated-replicas-patch.yaml
+
 images:
   - name: tesslate-backend
     newName: <ECR_REGISTRY>/tesslate-backend

@@ -30,7 +30,7 @@ module "eks" {
       configuration_values = jsonencode({
         computeType = "Fargate"
         # Reduce replicas for cost optimization
-        replicaCount = 2
+        replicaCount = var.coredns_replicas
       })
     }
     kube-proxy = {

@@ -10,7 +10,6 @@ metadata:
   name: tesslate-backend
   namespace: tesslate
 spec:
-  replicas: 2  # Horizontally scalable — Redis backplane handles state
   template:
     spec:
       serviceAccountName: tesslate-backend-sa

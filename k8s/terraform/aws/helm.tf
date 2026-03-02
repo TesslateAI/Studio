@@ -23,7 +23,7 @@ resource "helm_release" "nginx_ingress" {
   values = [
     yamlencode({
       controller = {
-        replicaCount = 2
+        replicaCount = var.nginx_ingress_replicas
 
         # Use NLB for better performance with WebSockets
         service = {

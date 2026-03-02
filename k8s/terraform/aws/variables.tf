@@ -579,6 +579,39 @@ variable "create_github_actions_user" {
   default     = false
 }
 
+# -----------------------------------------------------------------------------
+# Replica & Scaling Configuration
+# -----------------------------------------------------------------------------
+variable "backend_replicas" {
+  description = "Number of backend pod replicas"
+  type        = number
+  default     = 2
+}
+
+variable "frontend_replicas" {
+  description = "Number of frontend pod replicas"
+  type        = number
+  default     = 2
+}
+
+variable "worker_replicas" {
+  description = "Number of ARQ worker pod replicas"
+  type        = number
+  default     = 2
+}
+
+variable "nginx_ingress_replicas" {
+  description = "Number of NGINX ingress controller replicas"
+  type        = number
+  default     = 2
+}
+
+variable "coredns_replicas" {
+  description = "Number of CoreDNS replicas"
+  type        = number
+  default     = 2
+}
+
 variable "additional_node_groups" {
   description = "Additional node groups for specific workloads"
   type = map(object({

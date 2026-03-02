@@ -9,7 +9,6 @@ metadata:
   name: tesslate-worker
   namespace: tesslate
 spec:
-  replicas: 2
   template:
     spec:
       serviceAccountName: tesslate-backend-sa
