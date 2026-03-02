@@ -18,6 +18,7 @@ import {
 import api, { createLogStreamWebSocket } from '../lib/api';
 import { toast } from 'react-hot-toast';
 import { connectionEvents } from '../utils/connectionEvents';
+import { AnsiLine } from '../lib/ansi';
 import {
   ExternalServiceCredentialModal,
   type ExternalServiceItem,
@@ -876,7 +877,7 @@ export const ContainerPropertiesPanel = ({
                       ) : (
                         logLines.map((line, i) => (
                           <div key={i} className="whitespace-pre">
-                            {line}
+                            <AnsiLine text={line} />
                           </div>
                         ))
                       )}

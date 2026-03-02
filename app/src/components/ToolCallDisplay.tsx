@@ -9,9 +9,10 @@ import {
   XCircle,
   Search,
   Edit3,
-  FolderOpen
+  FolderOpen,
 } from 'lucide-react';
 import { type ToolCallDetail } from '../types/agent';
+import { AnsiLine } from '../lib/ansi';
 
 interface ToolCallDisplayProps {
   toolCall: ToolCallDetail;
@@ -39,7 +40,7 @@ const getToolLabel = (toolName: string): string => {
   // Convert snake_case to Title Case
   return toolName
     .split('_')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 };
 
@@ -83,7 +84,8 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   const success = result?.success ?? false;
 
   // Extract the main parameter to display (command, file_path, etc.)
-  const mainParam = parameters.command || parameters.file_path || parameters.path || parameters.query || '';
+  const mainParam =
+    parameters.command || parameters.file_path || parameters.path || parameters.query || '';
 
   // Get primary output and additional details
   let output = '';
@@ -123,16 +125,18 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
       } else if (result.result.files) {
         // Directory listing - handle both string arrays and object arrays
         if (Array.isArray(result.result.files)) {
-          additionalOutput = result.result.files.map((file: unknown) => {
-            if (typeof file === 'object' && file !== null) {
-              const fileObj = file as Record<string, unknown>;
-              const name = fileObj.name || fileObj.file_path || 'unknown';
-              const type = fileObj.type ? `[${fileObj.type}]` : '';
-              const size = fileObj.size ? ` (${fileObj.size} bytes)` : '';
-              return `${type} ${name}${size}`.trim();
-            }
-            return String(file);
-          }).join('\n');
+          additionalOutput = result.result.files
+            .map((file: unknown) => {
+              if (typeof file === 'object' && file !== null) {
+                const fileObj = file as Record<string, unknown>;
+                const name = fileObj.name || fileObj.file_path || 'unknown';
+                const type = fileObj.type ? `[${fileObj.type}]` : '';
+                const size = fileObj.size ? ` (${fileObj.size} bytes)` : '';
+                return `${type} ${name}${size}`.trim();
+              }
+              return String(file);
+            })
+            .join('\n');
         } else {
           additionalOutput = String(result.result.files);
         }
@@ -159,9 +163,8 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   additionalOutput = additionalOutput.replace(/TASK_COMPLETE[^\n]*/gi, '').trim();
 
   const shouldTruncate = shouldTruncateOutput(additionalOutput);
-  const displayAdditionalOutput = shouldTruncate && !showFullOutput
-    ? additionalOutput.slice(0, 500) + '...'
-    : additionalOutput;
+  const displayAdditionalOutput =
+    shouldTruncate && !showFullOutput ? additionalOutput.slice(0, 500) + '...' : additionalOutput;
 
   const outputLines = displayAdditionalOutput.split('\n').length;
   const totalLines = additionalOutput.split('\n').length;
@@ -172,13 +175,12 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
       <div className="flex items-center gap-2 px-3 py-2 bg-[var(--text)]/5">
         {getToolIcon(name)}
         <span className="text-xs font-semibold flex-1">{getToolLabel(name)}</span>
-        {hasResult && (
-          success ? (
+        {hasResult &&
+          (success ? (
             <CheckCircle size={14} className="text-green-500" />
           ) : (
             <XCircle size={14} className="text-red-500" />
-          )
-        )}
+          ))}
       </div>
 
       {/* Main Parameter */}
@@ -211,7 +213,9 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
       {output && (
         <div className="border-t border-current/10">
           <div className="px-3 py-2 bg-[var(--text)]/5">
-            <div className={`text-sm ${success ? 'opacity-90' : 'text-red-600 dark:text-red-400 font-medium'}`}>
+            <div
+              className={`text-sm ${success ? 'opacity-90' : 'text-red-600 dark:text-red-400 font-medium'}`}
+            >
               {output}
             </div>
           </div>
@@ -251,9 +255,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
             <div className="text-xs font-medium text-yellow-700 dark:text-yellow-400 mb-1">
               💡 Suggestion
             </div>
-            <div className="text-xs text-yellow-800 dark:text-yellow-300">
-              {suggestion}
-            </div>
+            <div className="text-xs text-yellow-800 dark:text-yellow-300">{suggestion}</div>
           </div>
         </div>
       )}
@@ -285,8 +287,14 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
                 </button>
               )}
             </div>
-            <pre className={`text-xs font-mono overflow-x-auto ${success ? 'opacity-80' : 'text-red-600 dark:text-red-400'} ${shouldTruncate && !showFullOutput ? 'max-h-48' : 'max-h-96'} overflow-y-auto`}>
-              {displayAdditionalOutput}
+            <pre
+              className={`text-xs font-mono overflow-x-auto ${success ? 'opacity-80' : 'text-red-600 dark:text-red-400'} ${shouldTruncate && !showFullOutput ? 'max-h-48' : 'max-h-96'} overflow-y-auto`}
+            >
+              {displayAdditionalOutput.split('\n').map((line, i) => (
+                <div key={i}>
+                  <AnsiLine text={line} />
+                </div>
+              ))}
             </pre>
             {shouldTruncate && !showFullOutput && (
               <div className="text-xs opacity-50 mt-1">

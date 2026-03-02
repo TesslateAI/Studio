@@ -8,11 +8,12 @@ import {
   Spinner,
   ArrowSquareOut,
   Trash,
-  Plus
+  Plus,
 } from '@phosphor-icons/react';
 import { deploymentsApi, deploymentCredentialsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import { DeploymentModal } from '../modals/DeploymentModal';
+import { AnsiLine } from '../../lib/ansi';
 
 interface DeploymentsPanelProps {
   projectSlug: string;
@@ -172,16 +173,18 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-[var(--text)]">Deployments</h2>
-                <p className="text-xs text-[var(--text)]/60">
-                  Manage your project deployments
-                </p>
+                <p className="text-xs text-[var(--text)]/60">Manage your project deployments</p>
               </div>
             </div>
             <button
               onClick={() => setShowDeployModal(true)}
               disabled={credentials.length === 0}
               className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold transition-all text-sm"
-              title={credentials.length === 0 ? 'Connect a deployment provider first in Account Settings' : 'Deploy project'}
+              title={
+                credentials.length === 0
+                  ? 'Connect a deployment provider first in Account Settings'
+                  : 'Deploy project'
+              }
             >
               <Plus size={16} weight="bold" />
               New Deployment
@@ -191,7 +194,8 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
           {credentials.length === 0 && (
             <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
               <p className="text-xs text-yellow-400">
-                You haven't connected any deployment providers yet. Go to Account Settings to connect a deployment provider like Netlify.
+                You haven't connected any deployment providers yet. Go to Account Settings to
+                connect a deployment provider like Netlify.
               </p>
             </div>
           )}
@@ -204,9 +208,7 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
               <div className="p-4 bg-purple-500/10 rounded-full mb-4">
                 <CloudArrowUp size={40} className="text-purple-400" />
               </div>
-              <h3 className="text-lg font-semibold text-[var(--text)] mb-2">
-                No deployments yet
-              </h3>
+              <h3 className="text-lg font-semibold text-[var(--text)] mb-2">No deployments yet</h3>
               <p className="text-sm text-[var(--text)]/60 mb-4">
                 Deploy your project to make it live on the web
               </p>
@@ -230,10 +232,14 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className={`px-3 py-1 rounded-lg text-xs font-semibold ${getProviderColor(deployment.provider)}`}>
+                      <div
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold ${getProviderColor(deployment.provider)}`}
+                      >
                         {deployment.provider.charAt(0).toUpperCase() + deployment.provider.slice(1)}
                       </div>
-                      <div className={`flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-semibold ${getStatusColor(deployment.status)}`}>
+                      <div
+                        className={`flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-semibold ${getStatusColor(deployment.status)}`}
+                      >
                         {getStatusIcon(deployment.status)}
                         {deployment.status.charAt(0).toUpperCase() + deployment.status.slice(1)}
                       </div>
@@ -260,9 +266,7 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
 
                   {deployment.error && (
                     <div className="mb-2">
-                      <p className="text-xs text-red-400 truncate">
-                        Error: {deployment.error}
-                      </p>
+                      <p className="text-xs text-red-400 truncate">Error: {deployment.error}</p>
                     </div>
                   )}
 
@@ -315,12 +319,18 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-3 mb-2">
-                      <div className={`px-3 py-1 rounded-lg text-xs font-semibold ${getProviderColor(selectedDeployment.provider)}`}>
-                        {selectedDeployment.provider.charAt(0).toUpperCase() + selectedDeployment.provider.slice(1)}
+                      <div
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold ${getProviderColor(selectedDeployment.provider)}`}
+                      >
+                        {selectedDeployment.provider.charAt(0).toUpperCase() +
+                          selectedDeployment.provider.slice(1)}
                       </div>
-                      <div className={`flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-semibold ${getStatusColor(selectedDeployment.status)}`}>
+                      <div
+                        className={`flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-semibold ${getStatusColor(selectedDeployment.status)}`}
+                      >
                         {getStatusIcon(selectedDeployment.status)}
-                        {selectedDeployment.status.charAt(0).toUpperCase() + selectedDeployment.status.slice(1)}
+                        {selectedDeployment.status.charAt(0).toUpperCase() +
+                          selectedDeployment.status.slice(1)}
                       </div>
                     </div>
                     <h2 className="text-xl font-bold text-[var(--text)]">Deployment Details</h2>
@@ -341,7 +351,9 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
                 {selectedDeployment.deployment_url && (
                   <div>
-                    <h3 className="text-sm font-semibold text-[var(--text)] mb-2">Deployment URL</h3>
+                    <h3 className="text-sm font-semibold text-[var(--text)] mb-2">
+                      Deployment URL
+                    </h3>
                     <a
                       href={selectedDeployment.deployment_url}
                       target="_blank"
@@ -365,11 +377,16 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
 
                 {selectedDeployment.logs && selectedDeployment.logs.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-semibold text-[var(--text)] mb-2">Deployment Logs</h3>
+                    <h3 className="text-sm font-semibold text-[var(--text)] mb-2">
+                      Deployment Logs
+                    </h3>
                     <div className="bg-black/50 rounded-lg p-4 font-mono text-xs max-h-96 overflow-y-auto">
                       {selectedDeployment.logs.map((log, index) => (
-                        <div key={index} className="text-[var(--text)]/80 whitespace-pre-wrap break-words">
-                          {log}
+                        <div
+                          key={index}
+                          className="text-[var(--text)]/80 whitespace-pre-wrap break-words"
+                        >
+                          <AnsiLine text={log} />
                         </div>
                       ))}
                     </div>
