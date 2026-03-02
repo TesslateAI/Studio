@@ -1447,7 +1447,7 @@ class KubernetesClient:
             if command and command[0] in ["/bin/sh", "/bin/bash"]:
                 full_command = command
             else:
-                full_command = ["/bin/sh", "-c", f"cd /app && {' '.join(command)}"]
+                full_command = ["/bin/sh", "-c", f"cd /app && {shlex.join(command)}"]
 
             logger.info(f"[K8S] Running command in pod {pod_name}")
 

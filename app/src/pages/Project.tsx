@@ -768,6 +768,69 @@ export default function Project() {
     [slug, containerId, container]
   );
 
+  const handleFileCreate = useCallback(
+    async (filePath: string) => {
+      if (!slug) return;
+      const saveFilePath =
+        containerId && container?.directory ? `${container.directory}/${filePath}` : filePath;
+      try {
+        await projectsApi.saveFile(slug, saveFilePath, '');
+        fileEvents.emit('file-created', filePath);
+      } catch (error) {
+        console.error('Failed to create file:', error);
+        toast.error(`Failed to create ${filePath}`);
+      }
+    },
+    [slug, containerId, container]
+  );
+
+  const handleFileDelete = useCallback(
+    async (filePath: string, isDirectory: boolean) => {
+      if (!slug) return;
+      const saveFilePath =
+        containerId && container?.directory ? `${container.directory}/${filePath}` : filePath;
+      try {
+        await projectsApi.deleteFile(slug, saveFilePath, isDirectory);
+        fileEvents.emit('file-deleted', filePath);
+      } catch (error) {
+        console.error('Failed to delete:', error);
+        toast.error(`Failed to delete ${filePath}`);
+      }
+    },
+    [slug, containerId, container]
+  );
+
+  const handleFileRename = useCallback(
+    async (oldPath: string, newPath: string) => {
+      if (!slug) return;
+      const prefix = containerId && container?.directory ? `${container.directory}/` : '';
+      try {
+        await projectsApi.renameFile(slug, prefix + oldPath, prefix + newPath);
+        fileEvents.emit('files-changed');
+      } catch (error) {
+        console.error('Failed to rename:', error);
+        toast.error(`Failed to rename ${oldPath}`);
+      }
+    },
+    [slug, containerId, container]
+  );
+
+  const handleDirectoryCreate = useCallback(
+    async (dirPath: string) => {
+      if (!slug) return;
+      const saveDir =
+        containerId && container?.directory ? `${container.directory}/${dirPath}` : dirPath;
+      try {
+        await projectsApi.createDirectory(slug, saveDir);
+        fileEvents.emit('file-created', dirPath);
+      } catch (error) {
+        console.error('Failed to create directory:', error);
+        toast.error(`Failed to create folder ${dirPath}`);
+      }
+    },
+    [slug, containerId, container]
+  );
+
   const loadDevServerUrl = async () => {
     if (!slug) return;
     try {
@@ -1406,6 +1469,10 @@ export default function Project() {
                       projectId={project?.id}
                       files={files}
                       onFileUpdate={handleFileUpdate}
+                      onFileCreate={handleFileCreate}
+                      onFileDelete={handleFileDelete}
+                      onFileRename={handleFileRename}
+                      onDirectoryCreate={handleDirectoryCreate}
                       isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
                       startupOverlay={
                         containerStartup.isLoading || containerStartup.status === 'error' ? (
@@ -1580,6 +1647,10 @@ export default function Project() {
                     projectId={project?.id}
                     files={files}
                     onFileUpdate={handleFileUpdate}
+                    onFileCreate={handleFileCreate}
+                    onFileDelete={handleFileDelete}
+                    onFileRename={handleFileRename}
+                    onDirectoryCreate={handleDirectoryCreate}
                     isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
                     startupOverlay={
                       containerStartup.isLoading || containerStartup.status === 'error' ? (
@@ -1656,6 +1727,10 @@ export default function Project() {
                 projectId={project?.id}
                 files={files}
                 onFileUpdate={handleFileUpdate}
+                onFileCreate={handleFileCreate}
+                onFileDelete={handleFileDelete}
+                onFileRename={handleFileRename}
+                onDirectoryCreate={handleDirectoryCreate}
                 isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
                 startupOverlay={
                   containerStartup.isLoading || containerStartup.status === 'error' ? (

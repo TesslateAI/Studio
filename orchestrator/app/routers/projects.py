@@ -25,7 +25,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -56,6 +56,9 @@ from ..schemas import (
     ContainerRename,
     ContainerUpdate,
     DeploymentTargetAssignment,
+    DirectoryCreateRequest,
+    FileDeleteRequest,
+    FileRenameRequest,
     ProjectCreate,
     TemplateExportRequest,
 )
@@ -1754,6 +1757,183 @@ async def save_project_file(
     except Exception as e:
         logger.error(f"[ERROR] Failed to save file {file_path}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}") from e
+
+
+def _validate_file_path(path: str) -> str:
+    """Validate and sanitise a file path. Raises HTTPException on invalid input."""
+    if not path or not path.strip():
+        raise HTTPException(status_code=400, detail="Path cannot be empty")
+    path = path.strip()
+    if "\x00" in path:
+        raise HTTPException(status_code=400, detail="Path contains invalid characters")
+    for segment in path.replace("\\", "/").split("/"):
+        if segment == "..":
+            raise HTTPException(status_code=400, detail="Path traversal is not allowed")
+    return path.lstrip("/")
+
+
+@router.delete("/{project_slug}/files")
+async def delete_project_file(
+    project_slug: str,
+    body: FileDeleteRequest,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a file or directory from the user's dev container."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    file_path = _validate_file_path(body.file_path)
+
+    try:
+        from ..services.orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+
+        if body.is_directory:
+            await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                command=["rm", "-rf", "--", f"/app/{file_path}"],
+            )
+        else:
+            await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                command=["rm", "-f", "--", f"/app/{file_path}"],
+            )
+
+        # Remove matching ProjectFile DB records
+        if body.is_directory:
+            result = await db.execute(
+                select(ProjectFile).where(
+                    ProjectFile.project_id == project.id,
+                    or_(
+                        ProjectFile.file_path == file_path,
+                        ProjectFile.file_path.like(
+                            file_path.replace("%", r"\%").replace("_", r"\_") + "/%",
+                            escape="\\",
+                        ),
+                    ),
+                )
+            )
+        else:
+            result = await db.execute(
+                select(ProjectFile).where(
+                    ProjectFile.project_id == project.id,
+                    ProjectFile.file_path == file_path,
+                )
+            )
+        for pf in result.scalars().all():
+            await db.delete(pf)
+
+        await db.commit()
+
+        logger.info(f"[FILE] Deleted {'directory' if body.is_directory else 'file'} {file_path}")
+        return {"message": "Deleted successfully", "file_path": file_path}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to delete {file_path}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to delete file") from e
+
+
+@router.post("/{project_slug}/files/rename")
+async def rename_project_file(
+    project_slug: str,
+    body: FileRenameRequest,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rename / move a file or directory inside the user's dev container."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    old_path = _validate_file_path(body.old_path)
+    new_path = _validate_file_path(body.new_path)
+
+    if old_path == new_path:
+        raise HTTPException(status_code=400, detail="Old and new paths are the same")
+
+    try:
+        from ..services.orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+
+        new_parent = "/app/" + "/".join(new_path.split("/")[:-1]) if "/" in new_path else "/app"
+        await orchestrator.execute_command(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            command=["mkdir", "-p", "--", new_parent],
+        )
+
+        await orchestrator.execute_command(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            command=["mv", "--", f"/app/{old_path}", f"/app/{new_path}"],
+        )
+
+        # Update matching ProjectFile DB records
+        escaped_old = old_path.replace("%", r"\%").replace("_", r"\_")
+        result = await db.execute(
+            select(ProjectFile).where(
+                ProjectFile.project_id == project.id,
+                or_(
+                    ProjectFile.file_path == old_path,
+                    ProjectFile.file_path.like(escaped_old + "/%", escape="\\"),
+                ),
+            )
+        )
+        for pf in result.scalars().all():
+            if pf.file_path == old_path:
+                pf.file_path = new_path
+            elif pf.file_path.startswith(old_path + "/"):
+                pf.file_path = new_path + pf.file_path[len(old_path) :]
+
+        await db.commit()
+
+        logger.info(f"[FILE] Renamed {old_path} → {new_path}")
+        return {"message": "Renamed successfully", "old_path": old_path, "new_path": new_path}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to rename {old_path}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to rename file") from e
+
+
+@router.post("/{project_slug}/files/mkdir")
+async def create_project_directory(
+    project_slug: str,
+    body: DirectoryCreateRequest,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a directory inside the user's dev container."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    dir_path = _validate_file_path(body.dir_path)
+
+    try:
+        from ..services.orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+
+        await orchestrator.execute_command(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            command=["mkdir", "-p", "--", f"/app/{dir_path}"],
+        )
+
+        logger.info(f"[FILE] Created directory {dir_path}")
+        return {"message": "Directory created", "dir_path": dir_path}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to create directory {dir_path}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create directory") from e
 
 
 @router.get("/{project_slug}/container-info")

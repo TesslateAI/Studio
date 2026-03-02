@@ -33,6 +33,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import shlex
 from collections.abc import AsyncIterator
 from datetime import UTC
 from pathlib import PurePosixPath
@@ -1899,7 +1900,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             full_command = [
                 "sh",
                 "-c",
-                f"cd {self._build_pod_path(working_dir)} && {' '.join(command)}",
+                f"cd {shlex.quote(self._build_pod_path(working_dir))} && {shlex.join(command)}",
             ]
         else:
             full_command = command

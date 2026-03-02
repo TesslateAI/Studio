@@ -214,6 +214,7 @@ class InjectedEnvVar(BaseModel):
 
 class DeploymentTargetAssignment(BaseModel):
     """Schema for assigning a deployment target to a container."""
+
     provider: str | None = None  # 'vercel' | 'netlify' | 'cloudflare' | None (None to remove)
 
 
@@ -385,6 +386,20 @@ class WorkflowTemplateResponse(BaseModel):
         from_attributes = True
 
 
+class FileDeleteRequest(BaseModel):
+    file_path: str
+    is_directory: bool = False
+
+
+class FileRenameRequest(BaseModel):
+    old_path: str
+    new_path: str
+
+
+class DirectoryCreateRequest(BaseModel):
+    dir_path: str
+
+
 class ProjectFileBase(BaseModel):
     file_path: str
     content: str
@@ -447,6 +462,7 @@ class Chat(ChatBase):
 
 class ChatListItem(BaseModel):
     """Lightweight chat session for session list."""
+
     id: UUID
     title: str | None = None
     origin: str = "browser"
@@ -462,6 +478,7 @@ class ChatListItem(BaseModel):
 
 class ChatUpdate(BaseModel):
     """Update chat session."""
+
     title: str | None = None
     status: str | None = None
 
@@ -1105,8 +1122,10 @@ class RestoreSnapshotResponse(BaseModel):
 # External Agent API Schemas
 # =============================================================================
 
+
 class ExternalAPIKeyCreate(BaseModel):
     """Create an external API key."""
+
     name: str
     scopes: list[str] | None = None
     project_ids: list[UUID] | None = None
@@ -1124,6 +1143,7 @@ class ExternalAPIKeyCreate(BaseModel):
 
 class ExternalAPIKeyResponse(BaseModel):
     """Response for API key (includes the raw key only on creation)."""
+
     id: UUID
     name: str
     key_prefix: str
@@ -1141,6 +1161,7 @@ class ExternalAPIKeyResponse(BaseModel):
 
 class ExternalAgentInvokeRequest(BaseModel):
     """Invoke agent via external API."""
+
     project_id: UUID
     message: str
     container_id: UUID | None = None
@@ -1157,6 +1178,7 @@ class ExternalAgentInvokeRequest(BaseModel):
 
 class ExternalAgentInvokeResponse(BaseModel):
     """Response from external agent invocation."""
+
     task_id: str
     chat_id: UUID
     events_url: str
@@ -1165,6 +1187,7 @@ class ExternalAgentInvokeResponse(BaseModel):
 
 class ExternalAgentStatusResponse(BaseModel):
     """Agent task status for polling."""
+
     task_id: str
     status: str
     final_response: str | None = None
@@ -1176,6 +1199,7 @@ class ExternalAgentStatusResponse(BaseModel):
 
 class ActiveAgentTaskResponse(BaseModel):
     """Response for active agent task check."""
+
     task_id: str
     chat_id: UUID
     message: str | None = None

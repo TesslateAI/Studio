@@ -472,9 +472,22 @@ export const projectsApi = {
     });
     return response.data;
   },
-  deleteFile: async (slug: string, filePath: string) => {
+  deleteFile: async (slug: string, filePath: string, isDirectory = false) => {
     const response = await api.delete(`/api/projects/${slug}/files`, {
-      data: { file_path: filePath },
+      data: { file_path: filePath, is_directory: isDirectory },
+    });
+    return response.data;
+  },
+  renameFile: async (slug: string, oldPath: string, newPath: string) => {
+    const response = await api.post(`/api/projects/${slug}/files/rename`, {
+      old_path: oldPath,
+      new_path: newPath,
+    });
+    return response.data;
+  },
+  createDirectory: async (slug: string, dirPath: string) => {
+    const response = await api.post(`/api/projects/${slug}/files/mkdir`, {
+      dir_path: dirPath,
     });
     return response.data;
   },
