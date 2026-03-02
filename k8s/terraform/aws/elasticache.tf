@@ -99,23 +99,12 @@ resource "aws_elasticache_replication_group" "redis" {
 # Scale down K8s-managed Redis when using ElastiCache
 # When create_elasticache=true, K8s Redis deployment is scaled to 0
 # =============================================================================
-resource "kubectl_manifest" "redis_scale_down" {
+resource "null_resource" "redis_scale_down" {
   count = var.create_elasticache ? 1 : 0
 
-  server_side_apply = true
-  force_conflicts   = true
-
-  yaml_body = yamlencode({
-    apiVersion = "apps/v1"
-    kind       = "Deployment"
-    metadata = {
-      name      = "redis"
-      namespace = "tesslate"
-    }
-    spec = {
-      replicas = 0
-    }
-  })
+  provisioner "local-exec" {
+    command = "kubectl scale deployment/redis -n tesslate --replicas=0 --timeout=60s 2>/dev/null || true"
+  }
 
   depends_on = [kubernetes_namespace.tesslate]
 }
