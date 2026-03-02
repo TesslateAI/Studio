@@ -5,6 +5,7 @@ Includes:
 - User management (search, view, suspend, delete, credits)
 - System health monitoring
 - Agent management
+- Base management
 """
 
 import asyncio
@@ -1154,6 +1155,458 @@ async def toggle_featured(
         raise
     except Exception as e:
         logger.error(f"Error toggling featured status for agent {agent_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to toggle featured status") from e
+
+
+# ============================================================================
+# Base Management
+# ============================================================================
+
+
+class BaseCreate(BaseModel):
+    """Schema for creating a new base."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(..., min_length=1, max_length=500)
+    long_description: str | None = None
+    git_repo_url: str | None = None
+    default_branch: str = Field(default="main")
+    source_type: str = Field(default="git", pattern="^(git|archive)$")
+    category: str = Field(..., min_length=1)
+    icon: str = Field(default="📦")
+    preview_image: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
+    tech_stack: list[str] = Field(default_factory=list)
+    pricing_type: str = Field(..., pattern="^(free|one_time|monthly)$")
+    price: int = Field(default=0, ge=0)  # In cents
+    visibility: str = Field(default="public", pattern="^(public|private)$")
+    is_featured: bool = Field(default=False)
+    is_active: bool = Field(default=True)
+
+
+class BaseUpdate(BaseModel):
+    """Schema for updating an existing base."""
+
+    name: str | None = Field(None, min_length=1, max_length=100)
+    description: str | None = Field(None, min_length=1, max_length=500)
+    long_description: str | None = None
+    git_repo_url: str | None = None
+    default_branch: str | None = None
+    source_type: str | None = Field(None, pattern="^(git|archive)$")
+    category: str | None = None
+    icon: str | None = None
+    preview_image: str | None = None
+    tags: list[str] | None = None
+    features: list[str] | None = None
+    tech_stack: list[str] | None = None
+    pricing_type: str | None = Field(None, pattern="^(free|one_time|monthly)$")
+    price: int | None = Field(None, ge=0)
+    visibility: str | None = Field(None, pattern="^(public|private)$")
+    is_featured: bool | None = None
+    is_active: bool | None = None
+
+
+def can_edit_base(base: MarketplaceBase) -> bool:
+    """Check if admin can edit this base (only Tesslate-created bases)."""
+    return base.created_by_user_id is None
+
+
+@router.get("/bases")
+async def list_bases(
+    category: str | None = None,
+    pricing_type: str | None = None,
+    is_active: bool | None = None,
+    source_type: str | None = None,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    List all bases with optional filters.
+    Admins can see all bases including user-created ones.
+    """
+    try:
+        query = select(MarketplaceBase).options(
+            selectinload(MarketplaceBase.created_by_user),
+        )
+
+        # Apply filters
+        if category:
+            query = query.where(MarketplaceBase.category == category)
+        if pricing_type:
+            query = query.where(MarketplaceBase.pricing_type == pricing_type)
+        if is_active is not None:
+            query = query.where(MarketplaceBase.is_active == is_active)
+        if source_type:
+            query = query.where(MarketplaceBase.source_type == source_type)
+
+        # Order by creation date (newest first)
+        query = query.order_by(MarketplaceBase.created_at.desc())
+
+        result = await db.execute(query)
+        bases = result.scalars().all()
+
+        return {
+            "bases": [
+                {
+                    "id": base.id,
+                    "name": base.name,
+                    "slug": base.slug,
+                    "description": base.description,
+                    "category": base.category,
+                    "icon": base.icon,
+                    "source_type": base.source_type,
+                    "pricing_type": base.pricing_type,
+                    "price": base.price,
+                    "downloads": base.downloads,
+                    "is_featured": base.is_featured,
+                    "is_active": base.is_active,
+                    "created_at": base.created_at.isoformat(),
+                    "created_by_tesslate": base.created_by_user_id is None,
+                    "created_by_username": base.created_by_user.username
+                    if base.created_by_user
+                    else None,
+                    "can_edit": can_edit_base(base),
+                }
+                for base in bases
+            ],
+            "total": len(bases),
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing bases: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list bases") from e
+
+
+@router.get("/bases/{base_id}")
+async def get_base(
+    base_id: str, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get detailed information about a specific base."""
+    try:
+        result = await db.execute(
+            select(MarketplaceBase)
+            .options(
+                selectinload(MarketplaceBase.created_by_user),
+            )
+            .where(MarketplaceBase.id == base_id)
+        )
+        base = result.scalar_one_or_none()
+
+        if not base:
+            raise HTTPException(status_code=404, detail="Base not found")
+
+        return {
+            "id": base.id,
+            "name": base.name,
+            "slug": base.slug,
+            "description": base.description,
+            "long_description": base.long_description,
+            "git_repo_url": base.git_repo_url,
+            "default_branch": base.default_branch,
+            "source_type": base.source_type,
+            "category": base.category,
+            "icon": base.icon,
+            "preview_image": base.preview_image,
+            "tags": base.tags,
+            "features": base.features,
+            "tech_stack": base.tech_stack,
+            "pricing_type": base.pricing_type,
+            "price": base.price,
+            "downloads": base.downloads,
+            "rating": base.rating,
+            "reviews_count": base.reviews_count,
+            "visibility": base.visibility,
+            "is_featured": base.is_featured,
+            "is_active": base.is_active,
+            "created_at": base.created_at.isoformat(),
+            "updated_at": base.updated_at.isoformat() if base.updated_at else None,
+            "created_by_tesslate": base.created_by_user_id is None,
+            "created_by_username": base.created_by_user.username if base.created_by_user else None,
+            "can_edit": can_edit_base(base),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting base {base_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get base") from e
+
+
+@router.post("/bases")
+async def create_base(
+    base_data: BaseCreate,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Create a new base.
+    All bases created via admin panel are marked as Tesslate-created (created_by_user_id = NULL).
+    """
+    try:
+        # Generate slug from name
+        slug = generate_slug(base_data.name)
+
+        # Check if slug already exists
+        existing = await db.execute(select(MarketplaceBase).where(MarketplaceBase.slug == slug))
+        if existing.scalar_one_or_none():
+            # Add a number suffix if slug exists
+            counter = 1
+            while True:
+                new_slug = f"{slug}-{counter}"
+                existing = await db.execute(
+                    select(MarketplaceBase).where(MarketplaceBase.slug == new_slug)
+                )
+                if not existing.scalar_one_or_none():
+                    slug = new_slug
+                    break
+                counter += 1
+
+        # Create base (created_by_user_id = NULL means Tesslate-created)
+        base = MarketplaceBase(
+            name=base_data.name,
+            slug=slug,
+            description=base_data.description,
+            long_description=base_data.long_description,
+            git_repo_url=base_data.git_repo_url,
+            default_branch=base_data.default_branch,
+            source_type=base_data.source_type,
+            category=base_data.category,
+            icon=base_data.icon,
+            preview_image=base_data.preview_image,
+            tags=base_data.tags,
+            features=base_data.features,
+            tech_stack=base_data.tech_stack,
+            pricing_type=base_data.pricing_type,
+            price=base_data.price,
+            visibility=base_data.visibility,
+            is_featured=base_data.is_featured,
+            is_active=base_data.is_active,
+            created_by_user_id=None,  # NULL = Tesslate-created
+        )
+
+        db.add(base)
+        await db.commit()
+        await db.refresh(base)
+
+        logger.info(f"Admin {admin.username} created base: {base.name} (ID: {base.id})")
+
+        return {
+            "id": base.id,
+            "name": base.name,
+            "slug": base.slug,
+            "message": "Base created successfully",
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating base: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create base") from e
+
+
+@router.put("/bases/{base_id}")
+async def update_base(
+    base_id: str,
+    base_data: BaseUpdate,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Update an existing base.
+    Only Tesslate-created bases can be edited. User-created bases cannot be edited.
+    """
+    try:
+        result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+        base = result.scalar_one_or_none()
+
+        if not base:
+            raise HTTPException(status_code=404, detail="Base not found")
+
+        # Check if admin can edit this base
+        if not can_edit_base(base):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot edit user-created bases. Only Tesslate-created bases can be edited.",
+            )
+
+        # Update fields that were provided
+        update_data = base_data.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(base, field, value)
+
+        base.updated_at = datetime.utcnow()
+
+        await db.commit()
+        await db.refresh(base)
+
+        logger.info(f"Admin {admin.username} updated base: {base.name} (ID: {base.id})")
+
+        return {
+            "id": base.id,
+            "name": base.name,
+            "slug": base.slug,
+            "message": "Base updated successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating base {base_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update base") from e
+
+
+@router.delete("/bases/{base_id}")
+async def delete_base(
+    base_id: str, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """
+    Delete a base.
+    Only Tesslate-created bases can be deleted. User-created bases can only be removed from marketplace.
+    """
+    try:
+        result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+        base = result.scalar_one_or_none()
+
+        if not base:
+            raise HTTPException(status_code=404, detail="Base not found")
+
+        # Check if admin can delete this base
+        if not can_edit_base(base):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot delete user-created bases. Use remove-from-marketplace instead.",
+            )
+
+        base_name = base.name
+        await db.delete(base)
+        await db.commit()
+
+        logger.info(f"Admin {admin.username} deleted base: {base_name} (ID: {base_id})")
+
+        return {"message": f"Base '{base_name}' deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting base {base_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete base") from e
+
+
+@router.patch("/bases/{base_id}/remove-from-marketplace")
+async def remove_base_from_marketplace(
+    base_id: str, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """
+    Remove a base from the public marketplace (set is_active = false).
+    This can be used on ANY base, including user-created ones.
+    """
+    try:
+        result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+        base = result.scalar_one_or_none()
+
+        if not base:
+            raise HTTPException(status_code=404, detail="Base not found")
+
+        base.is_active = False
+        base.updated_at = datetime.utcnow()
+
+        await db.commit()
+
+        logger.info(
+            f"Admin {admin.username} removed base from marketplace: {base.name} (ID: {base_id})"
+        )
+
+        return {
+            "id": base.id,
+            "name": base.name,
+            "message": "Base removed from marketplace successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing base {base_id} from marketplace: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to remove base from marketplace") from e
+
+
+@router.patch("/bases/{base_id}/restore-to-marketplace")
+async def restore_base_to_marketplace(
+    base_id: str, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """
+    Restore a base to the public marketplace (set is_active = true).
+    This can be used on ANY base, including user-created ones.
+    """
+    try:
+        result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+        base = result.scalar_one_or_none()
+
+        if not base:
+            raise HTTPException(status_code=404, detail="Base not found")
+
+        base.is_active = True
+        base.updated_at = datetime.utcnow()
+
+        await db.commit()
+
+        logger.info(
+            f"Admin {admin.username} restored base to marketplace: {base.name} (ID: {base_id})"
+        )
+
+        return {
+            "id": base.id,
+            "name": base.name,
+            "message": "Base restored to marketplace successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error restoring base {base_id} to marketplace: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to restore base to marketplace") from e
+
+
+@router.patch("/bases/{base_id}/feature")
+async def toggle_base_featured(
+    base_id: str,
+    is_featured: bool,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Toggle the featured status of a base.
+    """
+    try:
+        result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+        base = result.scalar_one_or_none()
+
+        if not base:
+            raise HTTPException(status_code=404, detail="Base not found")
+
+        base.is_featured = is_featured
+        base.updated_at = datetime.utcnow()
+
+        await db.commit()
+
+        status = "featured" if is_featured else "unfeatured"
+        logger.info(f"Admin {admin.username} {status} base: {base.name} (ID: {base_id})")
+
+        return {
+            "id": base.id,
+            "name": base.name,
+            "is_featured": base.is_featured,
+            "message": f"Base {status} successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling featured status for base {base_id}: {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to toggle featured status") from e
 

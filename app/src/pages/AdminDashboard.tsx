@@ -27,6 +27,7 @@ import AuditLogViewer from '../components/admin/AuditLogViewer';
 import ProjectAdmin from '../components/admin/ProjectAdmin';
 import BillingAdmin from '../components/admin/BillingAdmin';
 import DeploymentMonitor from '../components/admin/DeploymentMonitor';
+import BaseManagement from '../components/admin/BaseManagement';
 // Using simple chart placeholders for now
 // Will integrate charts later
 
@@ -92,6 +93,7 @@ export default function AdminDashboard() {
       'projects-admin',
       'billing',
       'deployments',
+      'bases',
     ];
     if (
       activeTab !== 'overview' &&
@@ -340,6 +342,7 @@ export default function AdminDashboard() {
               { id: 'tokens', label: 'Token Metrics' },
               { id: 'marketplace', label: 'Marketplace' },
               { id: 'agents', label: 'Agents' },
+              { id: 'bases', label: 'Bases' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -799,6 +802,7 @@ export default function AdminDashboard() {
         )}
 
         {activeTab === 'agents' && <AgentManagement />}
+        {activeTab === 'bases' && <BaseManagement />}
       </div>
     </div>
   );
