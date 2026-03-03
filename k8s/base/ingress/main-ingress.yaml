@@ -14,6 +14,7 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
     # SSL redirect disabled by default, enabled in production overlays
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     # Sticky sessions for PTY/WebSocket affinity across multiple API replicas

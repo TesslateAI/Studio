@@ -37,13 +37,13 @@ export interface AgentStep {
 export interface AgentChatRequest {
   project_id: string;
   message: string;
-  agent_id?: string;  // ID of the agent to use
-  container_id?: string;  // If set, agent is scoped to this container (files at root)
-  chat_id?: string;  // Target a specific chat session
+  agent_id?: string; // ID of the agent to use
+  container_id?: string; // If set, agent is scoped to this container (files at root)
+  chat_id?: string; // Target a specific chat session
   max_iterations?: number;
   minimal_prompts?: boolean;
-  edit_mode?: 'allow' | 'ask' | 'plan';  // Edit control mode
-  view_context?: string;  // UI view context: 'graph', 'builder', 'terminal', 'kanban'
+  edit_mode?: 'allow' | 'ask' | 'plan'; // Edit control mode
+  view_context?: string; // UI view context: 'graph', 'builder', 'terminal', 'kanban'
 }
 
 export interface AgentChatResponse {
@@ -61,6 +61,7 @@ export interface AgentMessageData {
   iterations: number;
   tool_calls_made: number;
   completion_reason: string;
+  currentThinking?: string;
 }
 
 export interface DBMessage {
@@ -103,7 +104,7 @@ export interface Agent {
   system_prompt?: string;
   icon: string;
   mode: 'stream' | 'agent';
-  agent_type?: string;  // StreamAgent, IterativeAgent, etc.
+  agent_type?: string; // StreamAgent, IterativeAgent, etc.
   category?: string;
   features?: string[];
   is_active?: boolean;

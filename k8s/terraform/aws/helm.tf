@@ -43,6 +43,7 @@ resource "helm_release" "nginx_ingress" {
           "use-forwarded-headers"  = "true"
           "compute-full-forwarded-for" = "true"
           "proxy-body-size"        = "50m"
+          "proxy-buffering"        = "off"
           "proxy-read-timeout"     = "3600"
           "proxy-send-timeout"     = "3600"
           # WebSocket support

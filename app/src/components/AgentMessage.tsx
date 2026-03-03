@@ -22,8 +22,6 @@ export default function AgentMessage({
   const isDevelopment = import.meta.env.DEV;
 
   const stepsToDisplay = agentData.steps.filter((step) => {
-    if (step.is_complete) return false;
-
     // In dev mode, show steps that have debug data even if no tool calls/thoughts
     if (isDevelopment && step._debug) return true;
 
@@ -68,13 +66,22 @@ export default function AgentMessage({
 
         {/* In Progress Indicator - animated dots while agent is still working */}
         {agentData.completion_reason === 'in_progress' && (
-          <div
-            className={`inline-flex gap-1 px-3 py-2 bg-white/5 rounded-2xl ${stepsToDisplay.length > 0 ? 'mt-2' : ''}`}
-          >
-            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing"></div>
-            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-200"></div>
-            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-400"></div>
-          </div>
+          <>
+            {agentData.currentThinking && (
+              <div
+                className={`px-3 py-2 text-xs text-[var(--text)]/50 italic max-h-20 overflow-hidden ${stepsToDisplay.length > 0 ? 'mt-2' : ''}`}
+              >
+                {agentData.currentThinking.slice(-200)}
+              </div>
+            )}
+            <div
+              className={`inline-flex gap-1 px-3 py-2 bg-white/5 rounded-2xl ${stepsToDisplay.length > 0 || agentData.currentThinking ? 'mt-1' : ''}`}
+            >
+              <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing"></div>
+              <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-200"></div>
+              <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-400"></div>
+            </div>
+          </>
         )}
 
         {/* Final Response - Only shown when task is complete */}

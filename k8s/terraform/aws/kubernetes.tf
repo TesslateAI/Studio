@@ -287,6 +287,7 @@ resource "kubectl_manifest" "tesslate_ingress" {
         "nginx.ingress.kubernetes.io/proxy-send-timeout"    = "3600"
         "nginx.ingress.kubernetes.io/proxy-connect-timeout" = "3600"
         "nginx.ingress.kubernetes.io/proxy-body-size"       = "100m"
+        "nginx.ingress.kubernetes.io/proxy-buffering"        = "off"
         "nginx.ingress.kubernetes.io/use-regex"             = "true"
         "nginx.ingress.kubernetes.io/enable-cors"           = "true"
         "nginx.ingress.kubernetes.io/cors-allow-origin"     = "https://${var.domain_name}, https://*.${var.domain_name}"
