@@ -87,11 +87,11 @@ spec:
               value: "lax"
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
+              memory: "1Gi"
+              cpu: "500m"
             limits:
-              memory: "2Gi"
-              cpu: "2000m"
+              memory: "4Gi"
+              cpu: "4000m"
           livenessProbe:
             httpGet:
               path: /health
