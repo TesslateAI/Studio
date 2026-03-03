@@ -30,6 +30,7 @@ else:
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
+import app.models  # noqa: F401 — register all models so relationships resolve
 from app.models_auth import User
 from app.services.litellm_service import litellm_service
 
