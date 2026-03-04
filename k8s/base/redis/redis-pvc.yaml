@@ -1,0 +1,17 @@
+# Redis Persistent Volume Claim
+# Ensures AOF data survives pod restarts
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: tesslate
+  labels:
+    app: redis
+    component: cache
+spec:
+  storageClassName: tesslate-block-storage
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

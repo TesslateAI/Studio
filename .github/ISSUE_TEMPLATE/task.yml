@@ -1,0 +1,47 @@
+name: Task
+description: Refactoring, infrastructure work, tech debt, or other chores
+labels: ["task"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs to be done and why?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of the system does this touch?
+      multiple: true
+      options:
+        - Frontend
+        - Backend
+        - Agent
+        - Infrastructure
+        - Database
+        - Model
+        - Other
+    validations:
+      required: false
+
+  - type: input
+    id: area_other
+    attributes:
+      label: Other affected area
+      description: If you selected "Other" above, specify here
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How do we know this is done?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: false

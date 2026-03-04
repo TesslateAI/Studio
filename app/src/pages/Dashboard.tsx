@@ -1,0 +1,802 @@
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { projectsApi, tasksApi } from '../lib/api';
+import { useTheme } from '../theme/ThemeContext';
+import { MobileMenu, ProjectCard, UserDropdown } from '../components/ui';
+import type { Status, EnvironmentStatus } from '../components/ui';
+import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
+import { LoadingSpinner } from '../components/PulsingGridSpinner';
+import toast from 'react-hot-toast';
+import {
+  Folder,
+  Storefront,
+  Gear,
+  Sun,
+  Moon,
+  FilePlus,
+  Books,
+  SignOut,
+  GitBranch,
+  ChatCircleDots,
+  Article,
+  Trash,
+  X,
+} from '@phosphor-icons/react';
+
+interface Project {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  status?: Status;
+  agents?: Array<{ icon: string; name: string }>;
+  environment_status?: EnvironmentStatus;
+}
+
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
+  const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoCreateTriggered = useRef(false);
+  const [createBaseId, setCreateBaseId] = useState<string | undefined>();
+  const [createBaseVersion, setCreateBaseVersion] = useState<string | undefined>();
+
+  useEffect(() => {
+    loadProjects();
+  }, []);
+
+  // Open create modal with pre-selected base from search params (e.g., from marketplace "Use This Version")
+  useEffect(() => {
+    if (autoCreateTriggered.current) return;
+    const shouldCreate = searchParams.get('create');
+    const baseId = searchParams.get('base_id');
+    const baseVersion = searchParams.get('base_version');
+    if (shouldCreate === 'true' && baseId) {
+      autoCreateTriggered.current = true;
+      setSearchParams({}, { replace: true });
+      setCreateBaseId(baseId);
+      setCreateBaseVersion(baseVersion || undefined);
+      setShowCreateDialog(true);
+    }
+  }, [searchParams]);
+
+  // Poll for project status updates every 60 seconds
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      loadProjects();
+    }, 60000);
+
+    return () => clearInterval(pollInterval);
+  }, []);
+
+  const loadProjects = async () => {
+    try {
+      const data = await projectsApi.getAll();
+      // Add mock status and agents to existing projects
+      const projectsWithMeta = data.map((p: Project) => ({
+        ...p,
+        status: (p.status || 'build') as Status,
+        agents: p.agents || [],
+      }));
+      setProjects(projectsWithMeta);
+    } catch {
+      toast.error('Failed to load projects');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateProject = async (
+    projectName: string,
+    baseId?: string,
+    baseVersion?: string
+  ) => {
+    if (isCreating) return;
+
+    setIsCreating(true);
+    const creatingToast = toast.loading('Creating project...');
+
+    try {
+      // Create project with base (creates container automatically)
+      // baseId is required - CreateProjectModal auto-selects a base
+      const response = await projectsApi.create(
+        projectName,
+        '',
+        'base', // Always use 'base' source type
+        undefined,
+        'main',
+        baseId,
+        baseVersion || undefined
+      );
+
+      const project = response.project;
+      const taskId = response.task_id;
+
+      // Poll for task completion to get container_id
+      if (taskId) {
+        toast.loading('Setting up project...', { id: creatingToast });
+        try {
+          const result = await tasksApi.pollUntilComplete(taskId);
+          toast.success('Project created!', { id: creatingToast, duration: 2000 });
+          setShowCreateDialog(false);
+          setIsCreating(false);
+
+          // Navigate to builder with container if available
+          const taskResult = result?.result as { container_id?: string } | undefined;
+          if (taskResult?.container_id) {
+            navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
+          } else {
+            // Fallback to builder without container param
+            navigate(`/project/${project.slug}/builder`);
+          }
+        } catch (taskError) {
+          console.error('Project setup task failed:', taskError);
+          const taskErrMsg = taskError instanceof Error ? taskError.message : 'Setup failed';
+          toast.error(taskErrMsg, { id: creatingToast });
+          setIsCreating(false);
+          // Navigate to graph canvas as fallback
+          navigate(`/project/${project.slug}`);
+        }
+      } else {
+        toast.success('Project created!', { id: creatingToast, duration: 2000 });
+        setShowCreateDialog(false);
+        setIsCreating(false);
+        // Navigate to builder without container
+        navigate(`/project/${project.slug}/builder`);
+      }
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      const detail = err?.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : 'Failed to create project';
+      toast.error(errorMessage, { id: creatingToast });
+      setIsCreating(false);
+    }
+  };
+
+  // Show all projects (no filtering)
+  const filteredProjects = projects;
+
+  // Prune selection when projects reload (remove IDs for projects that no longer exist)
+  useEffect(() => {
+    setSelectedProjectIds((prev) => {
+      const projectIdSet = new Set(projects.map((p) => p.id));
+      const pruned = new Set([...prev].filter((id) => projectIdSet.has(id)));
+      return pruned.size !== prev.size ? pruned : prev;
+    });
+  }, [projects]);
+
+  // Escape key clears selection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedProjectIds.size > 0) {
+        setSelectedProjectIds(new Set());
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedProjectIds.size]);
+
+  const toggleProjectSelection = (id: string) => {
+    setSelectedProjectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedProjectIds(new Set());
+
+  const selectAllProjects = () => {
+    setSelectedProjectIds(new Set(filteredProjects.map((p) => p.id)));
+  };
+
+  const confirmBulkDelete = async () => {
+    const toDelete = projects.filter((p) => selectedProjectIds.has(p.id));
+    if (toDelete.length === 0) return;
+
+    setShowBulkDeleteDialog(false);
+
+    // Mark all as deleting
+    setDeletingProjectIds((prev) => {
+      const next = new Set(prev);
+      for (const p of toDelete) next.add(p.id);
+      return next;
+    });
+
+    // Clear selection so floating bar disappears
+    setSelectedProjectIds(new Set());
+
+    const deletingToast = toast.loading(
+      `Deleting ${toDelete.length} project${toDelete.length > 1 ? 's' : ''}...`
+    );
+
+    const results = await Promise.allSettled(
+      toDelete.map(async (project) => {
+        const response = await projectsApi.delete(project.slug);
+        const taskId = response.task_id;
+        if (taskId) {
+          await tasksApi.pollUntilComplete(taskId);
+        }
+        return project.id;
+      })
+    );
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        successCount++;
+        const projectId = result.value;
+        setProjects((prev) => prev.filter((p) => p.id !== projectId));
+        setDeletingProjectIds((prev) => {
+          const next = new Set(prev);
+          next.delete(projectId);
+          return next;
+        });
+      } else {
+        failCount++;
+      }
+    }
+
+    // Clear remaining deleting states for failures
+    if (failCount > 0) {
+      setDeletingProjectIds((prev) => {
+        const next = new Set(prev);
+        for (const p of toDelete) next.delete(p.id);
+        return next;
+      });
+      await loadProjects();
+    }
+
+    // Summary toast
+    if (failCount === 0) {
+      toast.success(`Deleted ${successCount} project${successCount > 1 ? 's' : ''}`, {
+        id: deletingToast,
+      });
+    } else if (successCount === 0) {
+      toast.error(`Failed to delete ${failCount} project${failCount > 1 ? 's' : ''}`, {
+        id: deletingToast,
+      });
+    } else {
+      toast.success(`Deleted ${successCount}, failed ${failCount}`, { id: deletingToast });
+    }
+  };
+
+  const deleteProject = (id: string) => {
+    const project = projects.find((p) => p.id === id);
+    if (project) {
+      setProjectToDelete(project);
+      setShowDeleteDialog(true);
+    }
+  };
+
+  const confirmDeleteProject = async () => {
+    if (!projectToDelete) return;
+
+    const projectId = projectToDelete.id;
+    const projectSlug = projectToDelete.slug;
+    setShowDeleteDialog(false);
+    setDeletingProjectIds((prev) => new Set(prev).add(projectId));
+    const deletingToast = toast.loading('Deleting project...');
+
+    try {
+      const response = await projectsApi.delete(projectSlug); // Use slug for API call
+      // Response now includes { task_id, status_endpoint }
+      const taskId = response.task_id;
+
+      toast.loading('Deleting project...', { id: deletingToast });
+
+      // Wait for deletion task to complete
+      if (taskId) {
+        try {
+          await tasksApi.pollUntilComplete(taskId);
+
+          // Task completed successfully - remove project from UI
+          toast.success('Project deleted successfully', { id: deletingToast });
+
+          // Remove project from state
+          setProjects((prev) => prev.filter((p) => p.id !== projectId));
+
+          setDeletingProjectIds((prev) => {
+            const updated = new Set(prev);
+            updated.delete(projectId);
+            return updated;
+          });
+        } catch (taskError) {
+          // Task failed - show error and reload to get accurate state
+          console.error('Project deletion task failed:', taskError);
+          toast.error('Project deletion failed', { id: deletingToast });
+
+          setDeletingProjectIds((prev) => {
+            const updated = new Set(prev);
+            updated.delete(projectId);
+            return updated;
+          });
+
+          // Reload to ensure UI matches backend state
+          await loadProjects();
+        }
+      } else {
+        // No task ID returned - reload to verify state
+        toast.success('Project deleted', { id: deletingToast });
+        await loadProjects();
+        setDeletingProjectIds((prev) => {
+          const updated = new Set(prev);
+          updated.delete(projectId);
+          return updated;
+        });
+      }
+    } catch {
+      toast.error('Failed to delete project', { id: deletingToast });
+      // Remove from deleting state on error
+      setDeletingProjectIds((prev) => {
+        const updated = new Set(prev);
+        updated.delete(projectId);
+        return updated;
+      });
+    } finally {
+      setProjectToDelete(null);
+    }
+  };
+
+  const updateProjectStatus = async (id: string, status: Status) => {
+    try {
+      // Update local state immediately for better UX
+      setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)));
+      toast.success(`Project moved to ${status}`);
+      // TODO: Add API call to persist status
+    } catch {
+      toast.error('Failed to update status');
+    }
+  };
+
+  const handleForkProject = async (id: string) => {
+    const forkingToast = toast.loading('Forking project...');
+    try {
+      const forkedProject = await projectsApi.forkProject(id);
+      toast.success('Project forked successfully!', { id: forkingToast });
+      await loadProjects(); // Refresh project list
+      // Navigate to the forked project after a brief delay
+      setTimeout(() => {
+        navigate(`/project/${forkedProject.id}`);
+      }, 500);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      const errorMessage = err?.response?.data?.detail || 'Failed to fork project';
+      toast.error(errorMessage, { id: forkingToast });
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    navigate('/login');
+  };
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Never';
+
+    try {
+      // Handle ISO 8601 format with or without timezone
+      // If the date string doesn't have timezone info, assume UTC
+      const dateStr =
+        dateString.includes('Z') ||
+        dateString.includes('+') ||
+        (dateString.includes('T') && dateString.match(/[+-]\d{2}:\d{2}$/))
+          ? dateString
+          : dateString.replace(' ', 'T') + 'Z';
+
+      const date = new Date(dateStr);
+
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return 'Invalid date';
+      }
+
+      const now = new Date();
+      const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+
+      // Handle negative differences (future dates)
+      if (diffInMinutes < 0) {
+        return 'Just now';
+      }
+
+      if (diffInMinutes < 1) return 'Just now';
+      if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+      if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+      if (diffInMinutes < 10080) return `${Math.floor(diffInMinutes / 1440)}d ago`;
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch (error) {
+      console.error('Error formatting date:', dateString, error);
+      return 'Invalid date';
+    }
+  };
+
+  // Sidebar items for mobile menu - matches NavigationSidebar desktop items
+  const mobileMenuItems = {
+    left: [
+      {
+        icon: <Folder className="w-5 h-5" weight="fill" />,
+        title: 'Projects',
+        onClick: () => {},
+        active: true,
+      },
+      {
+        icon: <Storefront className="w-5 h-5" weight="fill" />,
+        title: 'Marketplace',
+        onClick: () => navigate('/marketplace'),
+      },
+      {
+        icon: <Books className="w-5 h-5" weight="fill" />,
+        title: 'Library',
+        onClick: () => navigate('/library'),
+      },
+      {
+        icon: <ChatCircleDots className="w-5 h-5" weight="fill" />,
+        title: 'Feedback',
+        onClick: () => navigate('/feedback'),
+      },
+      {
+        icon: <Article className="w-5 h-5" weight="fill" />,
+        title: 'Documentation',
+        onClick: () => window.open('https://docs.tesslate.com', '_blank'),
+      },
+    ],
+    right: [
+      {
+        icon:
+          theme === 'dark' ? (
+            <Sun className="w-5 h-5" weight="fill" />
+          ) : (
+            <Moon className="w-5 h-5" weight="fill" />
+          ),
+        title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
+        onClick: toggleTheme,
+      },
+      {
+        icon: <Gear className="w-5 h-5" weight="fill" />,
+        title: 'Settings',
+        onClick: () => navigate('/settings'),
+      },
+      {
+        icon: <SignOut className="w-5 h-5" weight="fill" />,
+        title: 'Logout',
+        onClick: logout,
+      },
+    ],
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingSpinner message="Loading projects..." size={80} />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Mobile Menu - Shows on mobile only */}
+      <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
+
+      {/* Top Bar */}
+      <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
+        <div className="flex items-center gap-4 md:gap-6">
+          <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Projects</h1>
+        </div>
+
+        {/* Right side - User Profile */}
+        <div className="flex items-center gap-3">
+          {/* User Dropdown */}
+          <UserDropdown />
+
+          {/* Mobile hamburger menu */}
+          <button
+            onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+            className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+          >
+            <svg
+              className="w-6 h-6 text-[var(--text)]"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Tab Filters - Mobile */}
+
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-auto bg-[var(--bg)]">
+        <div className="p-4 md:p-6">
+          {/* Projects Grid */}
+          <div
+            className={
+              filteredProjects.length === 0
+                ? 'flex flex-wrap justify-center gap-4'
+                : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+            }
+          >
+            {/* Create New Project Card */}
+            <button
+              onClick={() => setShowCreateDialog(true)}
+              disabled={isCreating}
+              className={`
+                  group bg-white/[0.01] rounded-2xl p-6
+                  border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
+                  hover:border-[rgba(var(--primary-rgb),0.6)]
+                  transition-all duration-300
+                  hover:transform hover:-translate-y-1
+                  flex flex-col items-center justify-center gap-3
+                  ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
+                  ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+            >
+              <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
+                <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
+                  Create New Project
+                </h3>
+                <p className="text-sm text-gray-500">Start building something amazing</p>
+              </div>
+            </button>
+
+            {/* Import from Repository Card — temporarily disabled */}
+            <button
+              disabled
+              title="Git import is temporarily unavailable"
+              className={`
+                  group bg-white/[0.01] rounded-2xl p-6
+                  border-2 border-dashed border-emerald-500/30
+                  flex flex-col items-center justify-center gap-3
+                  opacity-50 cursor-not-allowed
+                  ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
+                `}
+            >
+              <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center">
+                <GitBranch className="w-8 h-8 text-emerald-500" weight="fill" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
+                  Import from Repository
+                </h3>
+                <p className="text-sm text-gray-500">Connect a repo from the project page</p>
+              </div>
+            </button>
+
+            {/* Project Cards */}
+            {filteredProjects.map((project) => (
+              <ProjectCard
+                key={project.id}
+                project={{
+                  id: project.id,
+                  name: project.name,
+                  description: project.description || 'No description',
+                  status: project.status || 'build',
+                  agents: project.agents || [],
+                  lastUpdated: formatDate(project.updated_at),
+                  isLive: project.status === 'launch',
+                  slug: project.slug,
+                  environmentStatus: project.environment_status,
+                }}
+                onOpen={() => navigate(`/project/${project.slug}/builder`)}
+                onDelete={() => deleteProject(project.id)}
+                onStatusChange={(status) => updateProjectStatus(project.id, status)}
+                onFork={() => handleForkProject(project.id)}
+                isDeleting={deletingProjectIds.has(project.id)}
+                isSelected={selectedProjectIds.has(project.id)}
+                onSelectionToggle={() => toggleProjectSelection(project.id)}
+              />
+            ))}
+          </div>
+
+          {/* Empty State */}
+          {filteredProjects.length === 0 && (
+            <div className="text-center py-16">
+              <p className="text-[var(--text)]/40 text-sm">
+                No projects found. Create one to get started!
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Floating Bulk Action Bar */}
+      {selectedProjectIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
+          <div className="flex items-center gap-3 bg-[var(--surface)] border border-white/10 rounded-2xl px-5 py-3 shadow-2xl shadow-black/40 backdrop-blur-xl">
+            <span className="text-sm font-medium text-[var(--text)] whitespace-nowrap">
+              {selectedProjectIds.size} project{selectedProjectIds.size > 1 ? 's' : ''} selected
+            </span>
+
+            <div className="w-px h-5 bg-white/10" />
+
+            <button
+              onClick={
+                selectedProjectIds.size === filteredProjects.length
+                  ? clearSelection
+                  : selectAllProjects
+              }
+              className="text-xs text-[var(--primary)] hover:text-[var(--primary-hover)] font-medium transition-colors whitespace-nowrap"
+            >
+              {selectedProjectIds.size === filteredProjects.length ? 'Deselect all' : 'Select all'}
+            </button>
+
+            <div className="w-px h-5 bg-white/10" />
+
+            <button
+              onClick={() => setShowBulkDeleteDialog(true)}
+              className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold px-4 py-1.5 rounded-xl transition-colors"
+            >
+              <Trash className="w-4 h-4" weight="bold" />
+              Delete selected
+            </button>
+
+            <button
+              onClick={clearSelection}
+              className="p-1.5 text-gray-400 hover:text-white transition-colors rounded-lg hover:bg-white/10"
+              aria-label="Clear selection"
+            >
+              <X className="w-4 h-4" weight="bold" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteDialog}
+        onClose={() => {
+          setShowDeleteDialog(false);
+          setProjectToDelete(null);
+        }}
+        onConfirm={confirmDeleteProject}
+        title="Delete Project"
+        message={`Are you sure you want to delete "${projectToDelete?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showBulkDeleteDialog}
+        onClose={() => setShowBulkDeleteDialog(false)}
+        onConfirm={confirmBulkDelete}
+        title={`Delete ${selectedProjectIds.size} Project${selectedProjectIds.size > 1 ? 's' : ''}`}
+        message={
+          <div>
+            <p className="mb-3">
+              Are you sure you want to delete{' '}
+              {selectedProjectIds.size === 1
+                ? 'this project'
+                : `these ${selectedProjectIds.size} projects`}
+              ? This action cannot be undone.
+            </p>
+            <div className="max-h-40 overflow-y-auto space-y-1 bg-white/5 rounded-xl p-3 border border-white/10">
+              {projects
+                .filter((p) => selectedProjectIds.has(p.id))
+                .map((p) => (
+                  <div key={p.id} className="text-sm text-gray-300 truncate">
+                    {p.name}
+                  </div>
+                ))}
+            </div>
+          </div>
+        }
+        confirmText={`Delete ${selectedProjectIds.size} Project${selectedProjectIds.size > 1 ? 's' : ''}`}
+        cancelText="Cancel"
+        variant="danger"
+      />
+
+      {/* Create Project Modal */}
+      <CreateProjectModal
+        isOpen={showCreateDialog}
+        onClose={() => {
+          setShowCreateDialog(false);
+          setCreateBaseId(undefined);
+          setCreateBaseVersion(undefined);
+        }}
+        onConfirm={handleCreateProject}
+        isLoading={isCreating}
+        initialBaseId={createBaseId}
+        baseVersion={createBaseVersion}
+      />
+
+      {/* Import from Repository Modal */}
+      <RepoImportModal
+        isOpen={showImportDialog}
+        onClose={() => setShowImportDialog(false)}
+        onCreateProject={async (provider, repoUrl, branch, projectName) => {
+          setIsCreating(true);
+          const creatingToast = toast.loading(`Importing from ${provider}...`);
+
+          try {
+            const response = await projectsApi.create(
+              projectName,
+              '',
+              provider, // 'github', 'gitlab', or 'bitbucket'
+              repoUrl,
+              branch,
+              undefined
+            );
+
+            const project = response.project;
+            const taskId = response.task_id;
+
+            // Poll for task completion to get container_id (same pattern as base imports)
+            if (taskId) {
+              toast.loading('Setting up project...', { id: creatingToast });
+              try {
+                const result = await tasksApi.pollUntilComplete(taskId);
+                toast.success('Project imported successfully!', {
+                  id: creatingToast,
+                  duration: 2000,
+                });
+                setShowImportDialog(false);
+                setIsCreating(false);
+
+                // Navigate to builder with container if available
+                const taskResult = result?.result as { container_id?: string } | undefined;
+                if (taskResult?.container_id) {
+                  navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
+                } else {
+                  navigate(`/project/${project.slug}/builder`);
+                }
+              } catch (taskError) {
+                console.error('Project import task failed:', taskError);
+                const taskErrMsg =
+                  taskError instanceof Error ? taskError.message : 'Import setup failed';
+                toast.error(taskErrMsg, { id: creatingToast });
+                setIsCreating(false);
+                navigate(`/project/${project.slug}`);
+              }
+            } else {
+              toast.success('Project imported successfully!', {
+                id: creatingToast,
+                duration: 2000,
+              });
+              setShowImportDialog(false);
+              setIsCreating(false);
+              navigate(`/project/${project.slug}/builder`);
+            }
+          } catch (error: unknown) {
+            const err = error as { response?: { data?: { detail?: string } } };
+            const detail = err?.response?.data?.detail;
+            const errorMessage = typeof detail === 'string' ? detail : 'Failed to import project';
+            toast.error(errorMessage, { id: creatingToast });
+            throw error; // Re-throw so the modal knows it failed
+          } finally {
+            setIsCreating(false);
+          }
+        }}
+      />
+    </>
+  );
+}

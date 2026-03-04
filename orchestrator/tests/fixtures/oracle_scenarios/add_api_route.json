@@ -1,0 +1,38 @@
+{
+  "name": "Add API Route",
+  "description": "Agent adds a new API endpoint to a FastAPI backend",
+  "model_name": "oracle/test",
+  "turns": [
+    {
+      "thought": "I need to read the existing routes file first.",
+      "tool_calls": [
+        {
+          "name": "read_file",
+          "parameters": {"file_path": "backend/routes.py"}
+        }
+      ]
+    },
+    {
+      "thought": "I'll add a new /health endpoint to the routes.",
+      "tool_calls": [
+        {
+          "name": "edit_file",
+          "parameters": {
+            "file_path": "backend/routes.py",
+            "old_content": "# Routes",
+            "new_content": "# Routes\n\n@app.get('/health')\nasync def health_check():\n    return {'status': 'healthy'}\n"
+          }
+        }
+      ]
+    },
+    {
+      "response_text": "I've added a /health endpoint to backend/routes.py that returns a status check."
+    }
+  ],
+  "assertions": {
+    "tool_sequence": ["read_file", "edit_file"],
+    "files_modified": ["backend/routes.py"],
+    "final_response_contains": "health",
+    "max_iterations": 3
+  }
+}

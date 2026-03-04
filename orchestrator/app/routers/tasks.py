@@ -1,0 +1,290 @@
+"""
+Task Status API
+Endpoints for tracking background operation status and real-time updates.
+"""
+
+import asyncio
+import contextlib
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+
+from ..models import User
+from ..services.task_manager import Task, TaskStatus, get_task_manager
+from ..users import current_active_user
+
+router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+@router.get("/{task_id}/status")
+async def get_task_status(task_id: str, current_user: User = Depends(current_active_user)):
+    """Get status of a specific task"""
+    task_manager = get_task_manager()
+    task = await task_manager.get_task_async(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Verify user owns this task
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return task.to_dict()
+
+
+@router.get("/user/active")
+async def get_active_tasks(current_user: User = Depends(current_active_user)):
+    """Get all active tasks for the current user"""
+    task_manager = get_task_manager()
+    tasks = await task_manager.get_user_tasks_async(current_user.id, active_only=True)
+    return [task.to_dict() for task in tasks]
+
+
+@router.get("/user/all")
+async def get_all_tasks(limit: int = 50, current_user: User = Depends(current_active_user)):
+    """Get all tasks for the current user (most recent first)"""
+    task_manager = get_task_manager()
+    tasks = await task_manager.get_user_tasks_async(current_user.id, active_only=False)
+    return [task.to_dict() for task in tasks[:limit]]
+
+
+@router.delete("/{task_id}")
+async def cancel_task(task_id: str, current_user: User = Depends(current_active_user)):
+    """Cancel a running task"""
+    task_manager = get_task_manager()
+    task = await task_manager.get_task_async(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+        raise HTTPException(status_code=400, detail="Task cannot be cancelled")
+
+    # Cancel the background task
+    background_task = task_manager._background_tasks.get(task_id)
+    if background_task:
+        background_task.cancel()
+
+    await task_manager.update_task_status(task_id, TaskStatus.CANCELLED)
+
+    return {"message": "Task cancelled", "task_id": task_id}
+
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[int, list[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: int):
+        # Note: websocket.accept() is called by the endpoint before authentication
+        # Do NOT call accept() here - it would cause double-accept and disconnect
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+
+    def disconnect(self, websocket: WebSocket, user_id: int):
+        if user_id in self.active_connections:
+            self.active_connections[user_id].remove(websocket)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+
+    async def send_task_update(self, user_id: int, task: Task):
+        """Send task update to all user's connections"""
+        if user_id not in self.active_connections:
+            return
+
+        message = json.dumps({"type": "task_update", "task": task.to_dict()})
+
+        # Send to all connections for this user
+        dead_connections = []
+        for connection in self.active_connections[user_id]:
+            try:
+                await connection.send_text(message)
+            except Exception:
+                dead_connections.append(connection)
+
+        # Clean up dead connections
+        for dead in dead_connections:
+            self.disconnect(dead, user_id)
+
+    async def send_notification(self, user_id: int, notification: dict):
+        """Send a notification to user"""
+        if user_id not in self.active_connections:
+            return
+
+        message = json.dumps({"type": "notification", "notification": notification})
+
+        for connection in self.active_connections[user_id]:
+            with contextlib.suppress(Exception):
+                await connection.send_text(message)
+
+
+# Global connection manager
+manager = ConnectionManager()
+
+
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time task updates
+
+    Client should send authentication token in first message:
+    {"token": "bearer_token"}
+
+    Server sends updates in format:
+    {"type": "task_update", "task": {...}}
+    {"type": "notification", "notification": {...}}
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    await websocket.accept()
+    logger.info("[TASK-WS] WebSocket accepted, waiting for auth...")
+
+    try:
+        # Wait for authentication
+        auth_data = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        auth_json = json.loads(auth_data)
+        token = auth_json.get("token", "").replace("Bearer ", "")
+        logger.info(f"[TASK-WS] Received auth token (length={len(token)})")
+
+        # Authenticate user
+        from ..auth import verify_token_for_user
+        from ..database import get_db
+
+        # Get database session
+        db_gen = get_db()
+        db = await db_gen.__anext__()
+
+        try:
+            user = await verify_token_for_user(token, db)
+            logger.info(f"[TASK-WS] Token verification result: user={user.id if user else None}")
+        finally:
+            await db_gen.aclose()
+
+        if not user:
+            logger.warning("[TASK-WS] Authentication failed - invalid token")
+            await websocket.close(code=1008, reason="Authentication failed")
+            return
+
+        # Register connection
+        logger.info(f"[TASK-WS] Registering connection for user {user.id}")
+        await manager.connect(websocket, user.id)
+
+        # Subscribe to task updates
+        task_manager = get_task_manager()
+
+        async def task_callback(task: Task):
+            """Called when a task is updated (local callbacks)"""
+            if task.user_id == user.id:
+                await manager.send_task_update(user.id, task)
+
+        # Send current active tasks
+        active_tasks = await task_manager.get_user_tasks_async(user.id, active_only=True)
+        for task in active_tasks:
+            await manager.send_task_update(user.id, task)
+            # Subscribe to local updates for each active task
+            task_manager.subscribe(task.id, task_callback)
+
+        # Start Redis Pub/Sub listener for cross-pod task updates
+        redis_listener_task = None
+        from ..services.cache_service import get_redis_client
+        from ..services.task_manager import TASK_UPDATE_CHANNEL
+
+        redis = await get_redis_client()
+        if redis:
+            async def _redis_task_listener():
+                """Listen for task updates from other pods via Redis Pub/Sub."""
+                try:
+                    # Create a dedicated subscriber connection
+                    listener_redis = await get_redis_client()
+                    if not listener_redis:
+                        return
+                    pubsub = listener_redis.pubsub()
+                    await pubsub.subscribe(TASK_UPDATE_CHANNEL)
+                    try:
+                        while True:
+                            msg = await pubsub.get_message(
+                                ignore_subscribe_messages=True, timeout=1.0
+                            )
+                            if msg and msg["type"] == "message":
+                                data = json.loads(msg["data"])
+                                task_data = data.get("task", {})
+                                task_user_id = task_data.get("user_id")
+                                if task_user_id == str(user.id):
+                                    await manager.send_task_update(
+                                        user.id,
+                                        Task.from_dict(task_data),
+                                    )
+                            else:
+                                await asyncio.sleep(0.05)
+                    finally:
+                        await pubsub.unsubscribe(TASK_UPDATE_CHANNEL)
+                        await pubsub.close()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.debug(f"Redis task listener error: {e}")
+
+            redis_listener_task = asyncio.create_task(_redis_task_listener())
+
+        # Keep connection alive and handle incoming messages
+        try:
+            while True:
+                try:
+                    data = await websocket.receive_text()
+                    # Handle ping/pong or other client messages
+                    msg = json.loads(data)
+                    if msg.get("type") == "ping":
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                except WebSocketDisconnect:
+                    break
+                except Exception as e:
+                    print(f"WebSocket error: {e}")
+                    break
+        finally:
+            if redis_listener_task:
+                redis_listener_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await redis_listener_task
+
+    except TimeoutError:
+        logger.warning("[TASK-WS] Authentication timeout - no token received in 10s")
+        await websocket.close(code=1008, reason="Authentication timeout")
+    except WebSocketDisconnect:
+        logger.info("[TASK-WS] Client disconnected during auth")
+    except Exception as e:
+        logger.error(f"[TASK-WS] WebSocket connection error: {e}", exc_info=True)
+    finally:
+        if "user" in locals() and user is not None:
+            logger.info(f"[TASK-WS] Cleaning up connection for user {user.id}")
+            manager.disconnect(websocket, user.id)
+
+
+# Helper function to send notifications through WebSocket
+async def send_notification_to_user(user_id: int, title: str, message: str, type: str = "info"):
+    """
+    Send a notification to a user via WebSocket
+
+    Args:
+        user_id: User ID
+        title: Notification title
+        message: Notification message
+        type: Notification type (info, success, warning, error)
+    """
+    notification = {
+        "title": title,
+        "message": message,
+        "type": type,
+        "timestamp": asyncio.get_event_loop().time(),
+    }
+    await manager.send_notification(user_id, notification)
+
+
+# Expose manager for use in other modules
+def get_connection_manager() -> ConnectionManager:
+    return manager

@@ -1,0 +1,238 @@
+{
+  "description": "Golden test cases for tool execution - expected outputs for given inputs",
+  "read_file": [
+    {
+      "id": "read_file_success",
+      "description": "Successfully read an existing file",
+      "input": {"file_path": "test.txt"},
+      "mock_file_content": "Hello World\nLine 2\nLine 3",
+      "expected": {
+        "success": true,
+        "message_contains": "Read",
+        "content": "Hello World\nLine 2\nLine 3",
+        "details": {
+          "lines": 3,
+          "exists": true
+        }
+      }
+    },
+    {
+      "id": "read_file_not_found",
+      "description": "File does not exist",
+      "input": {"file_path": "missing.txt"},
+      "mock_file_content": null,
+      "expected": {
+        "success": false,
+        "message_contains": "does not exist",
+        "details": {
+          "exists": false
+        }
+      }
+    },
+    {
+      "id": "read_file_empty",
+      "description": "Read an empty file",
+      "input": {"file_path": "empty.txt"},
+      "mock_file_content": "",
+      "expected": {
+        "success": true,
+        "content": "",
+        "details": {
+          "lines": 0,
+          "exists": true
+        }
+      }
+    }
+  ],
+  "write_file": [
+    {
+      "id": "write_file_success",
+      "description": "Successfully write a file",
+      "input": {"file_path": "new.txt", "content": "Line 1\nLine 2\nLine 3"},
+      "expected": {
+        "success": true,
+        "message_contains": "3 lines",
+        "details": {
+          "line_count": 3
+        }
+      }
+    },
+    {
+      "id": "write_file_create_directory",
+      "description": "Write file in new directory",
+      "input": {"file_path": "new/dir/file.txt", "content": "Hello"},
+      "expected": {
+        "success": true,
+        "message_contains": "1 line"
+      }
+    },
+    {
+      "id": "write_file_overwrite",
+      "description": "Overwrite existing file",
+      "input": {"file_path": "existing.txt", "content": "New content"},
+      "mock_existing_content": "Old content",
+      "expected": {
+        "success": true,
+        "details": {
+          "line_count": 1
+        }
+      }
+    }
+  ],
+  "patch_file": [
+    {
+      "id": "patch_file_exact_match",
+      "description": "Patch with exact match",
+      "input": {
+        "file_path": "app.js",
+        "search": "old code",
+        "replace": "new code"
+      },
+      "mock_file_content": "prefix\nold code\nsuffix",
+      "expected": {
+        "success": true,
+        "message_contains": "Successfully patched",
+        "details": {
+          "match_method": "exact"
+        }
+      }
+    },
+    {
+      "id": "patch_file_fuzzy_match",
+      "description": "Patch with fuzzy match",
+      "input": {
+        "file_path": "app.js",
+        "search": "old code",
+        "replace": "new code"
+      },
+      "mock_file_content": "prefix\n  old code  \nsuffix",
+      "expected": {
+        "success": true,
+        "details": {
+          "match_method_contains": "trimmed"
+        }
+      }
+    },
+    {
+      "id": "patch_file_not_found",
+      "description": "Patch non-existent file",
+      "input": {
+        "file_path": "missing.js",
+        "search": "old",
+        "replace": "new"
+      },
+      "mock_file_content": null,
+      "expected": {
+        "success": false,
+        "message_contains": "does not exist"
+      }
+    },
+    {
+      "id": "patch_file_search_not_found",
+      "description": "Search block not in file",
+      "input": {
+        "file_path": "app.js",
+        "search": "nonexistent block",
+        "replace": "replacement"
+      },
+      "mock_file_content": "some other content",
+      "expected": {
+        "success": false,
+        "message_contains": "Could not find"
+      }
+    }
+  ],
+  "bash_exec": [
+    {
+      "id": "bash_exec_success",
+      "description": "Successful command execution",
+      "input": {"command": "echo 'hello'"},
+      "expected": {
+        "success": true,
+        "output_contains": "hello",
+        "details": {
+          "exit_code": 0
+        }
+      }
+    },
+    {
+      "id": "bash_exec_with_timeout",
+      "description": "Command with custom timeout",
+      "input": {"command": "sleep 1 && echo done", "wait_seconds": 2.0},
+      "expected": {
+        "success": true,
+        "output_contains": "done"
+      }
+    },
+    {
+      "id": "bash_exec_command_not_found",
+      "description": "Non-existent command",
+      "input": {"command": "nonexistentcommand"},
+      "expected": {
+        "success": true,
+        "details": {
+          "exit_code_not": 0
+        }
+      }
+    }
+  ],
+  "shell_session": [
+    {
+      "id": "shell_open_success",
+      "description": "Successfully open shell session",
+      "input": {},
+      "expected": {
+        "success": true,
+        "session_id_format": "uuid"
+      }
+    },
+    {
+      "id": "shell_exec_success",
+      "description": "Execute command in open session",
+      "input": {"session_id": "test-session-id", "command": "pwd"},
+      "expected": {
+        "success": true,
+        "output_contains": "/"
+      }
+    },
+    {
+      "id": "shell_close_success",
+      "description": "Close open session",
+      "input": {"session_id": "test-session-id"},
+      "expected": {
+        "success": true,
+        "message_contains": "closed"
+      }
+    }
+  ],
+  "todo_operations": [
+    {
+      "id": "todo_write_success",
+      "description": "Write todo list",
+      "input": {
+        "todos": [
+          {"content": "Task 1", "status": "pending"},
+          {"content": "Task 2", "status": "in_progress"}
+        ]
+      },
+      "expected": {
+        "success": true,
+        "details": {
+          "total": 2,
+          "pending": 1,
+          "in_progress": 1,
+          "completed": 0
+        }
+      }
+    },
+    {
+      "id": "todo_read_success",
+      "description": "Read todo list",
+      "input": {},
+      "expected": {
+        "success": true,
+        "todos_is_array": true
+      }
+    }
+  ]
+}

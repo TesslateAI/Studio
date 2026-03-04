@@ -1,0 +1,131 @@
+# Network Policies for Tesslate Platform
+# Controls network traffic between platform components
+
+---
+# Default deny all ingress in tesslate namespace
+# Explicit rules below allow specific traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: tesslate
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+# Allow ingress from NGINX Ingress Controller
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  namespace: tesslate
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+
+---
+# Allow backend to receive traffic from frontend (same namespace)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-from-frontend
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: tesslate-backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: tesslate-frontend
+    ports:
+    - protocol: TCP
+      port: 8000
+
+---
+# Allow backend to access postgres
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-backend
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: tesslate-backend
+    ports:
+    - protocol: TCP
+      port: 5432
+
+---
+# Allow egress to DNS (kube-dns) for all pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: tesslate
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+# Allow backend egress to project namespaces and external services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-egress
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: tesslate-backend
+  policyTypes:
+  - Egress
+  egress:
+  # Allow to any namespace (for managing user project namespaces)
+  - to:
+    - namespaceSelector: {}
+  # Allow to external (MinIO/S3, LiteLLM, OAuth providers)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8     # Exclude internal ranges for safety
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 9000  # MinIO

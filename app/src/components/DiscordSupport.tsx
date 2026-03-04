@@ -1,0 +1,64 @@
+import { DiscordLogo } from '@phosphor-icons/react';
+
+interface DiscordSupportProps {
+  chatPosition?: 'left' | 'center' | 'right';
+  mobileChatOpen?: boolean;
+}
+
+export function DiscordSupport({
+  chatPosition = 'center',
+  mobileChatOpen = false,
+}: DiscordSupportProps) {
+  // Mobile: always bottom-right (chat is floating, not docked)
+  // Desktop with right-docked chat: anchor just left of the chat panel (~30% wide)
+  const positionClasses = chatPosition === 'right' ? 'right-[31%]' : 'right-4';
+
+  // On mobile when chat is open, sit above the chat input bar (~100px from bottom)
+  // Otherwise, normal bottom positioning
+  const bottomClasses = mobileChatOpen ? 'bottom-[100px] md:bottom-8' : 'bottom-4 md:bottom-8';
+
+  return (
+    <div
+      className={`fixed ${bottomClasses} z-50 group transition-all duration-300 ${positionClasses}`}
+      data-tour="discord-support"
+    >
+      <a
+        href="https://discord.gg/WgXabcN2r2"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex flex-col items-center gap-2"
+      >
+        <div
+          className="
+          w-12 h-12 md:w-16 md:h-16 bg-[#5865F2] rounded-full
+          flex items-center justify-center
+          shadow-lg hover:shadow-xl
+          transition-all duration-300
+          hover:scale-110
+          relative
+        "
+        >
+          <DiscordLogo className="w-6 h-6 md:w-8 md:h-8 text-white" weight="fill" />
+
+          {/* Hover tooltip */}
+          <div
+            className="
+            absolute bottom-full mb-2 right-0
+            bg-gray-900 text-white text-sm
+            px-3 py-2 rounded-lg
+            whitespace-nowrap
+            opacity-0 group-hover:opacity-100
+            transition-opacity duration-200
+            pointer-events-none
+          "
+          >
+            Join our Discord for support
+          </div>
+        </div>
+        <span className="text-xs md:text-sm font-medium text-[var(--text)] hidden sm:block">
+          Support
+        </span>
+      </a>
+    </div>
+  );
+}

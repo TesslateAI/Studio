@@ -1,0 +1,343 @@
+# LOCAL DEVELOPMENT ONLY - Traefik for *.localhost routing
+# Production uses NGINX Ingress Controller in Kubernetes
+# See k8s/manifests/app/08-ingress.yaml for production routing
+
+services:
+  traefik:
+    image: traefik:v3.6
+    container_name: tesslate-traefik
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:80"
+      - "${APP_SECURE_PORT:-443}:443"
+      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/etc/traefik
+    networks:
+      - tesslate-network
+    labels:
+      - "com.tesslate.routable=true"
+      - "traefik.enable=true"
+      # Traefik dashboard at /traefik
+      - "traefik.http.routers.traefik.rule=Host(`${APP_DOMAIN:-localhost}`) && PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik.entrypoints=web,websecure"
+      - "traefik.http.routers.traefik.priority=200"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.middlewares=traefik-stripprefix,traefik-auth"
+      - "traefik.http.middlewares.traefik-stripprefix.stripprefix.prefixes=/traefik"
+      # Optional: Add basic auth for security (remove if not needed)
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_BASIC_AUTH:-admin:$$2y$$10$$EIHbchqg0sjZLr9iZINqA.6Za7wPjGAVdTER2ob5whDLtHkkZSGbC}"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=tesslate-network"
+      - "--providers.docker.constraints=Label(`com.tesslate.routable`,`true`)"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=dev@localhost"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme.json"
+      - "--log.level=INFO"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: tesslate-postgres-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-tesslate_dev}
+      - POSTGRES_USER=${POSTGRES_USER:-tesslate_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev_password_change_me}
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    networks:
+      - tesslate-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tesslate_user} -d ${POSTGRES_DB:-tesslate_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"  # Expose for debugging with pgAdmin/DBeaver
+
+  redis:
+    image: redis:7-alpine
+    container_name: tesslate-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - tesslate-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru --appendonly yes
+
+  orchestrator:
+    build: ./orchestrator
+    container_name: tesslate-orchestrator
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./orchestrator/app:/app/app
+      - ./orchestrator/alembic:/app/alembic
+      - ./orchestrator/alembic.ini:/app/alembic.ini
+      - ./orchestrator/pyproject.toml:/app/pyproject.toml
+      - ./orchestrator/Dockerfile.devserver:/app/Dockerfile.devserver
+      - ./orchestrator/users:/app/users
+      - base-cache:/app/base-cache  # Named Docker volume for pre-installed marketplace bases
+      - projects-data:/projects  # Shared volume for all project source code (orchestrator has direct r/w access)
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - DEPLOYMENT_MODE=docker
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LITELLM_API_BASE=${LITELLM_API_BASE}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - LITELLM_DEFAULT_MODELS=${LITELLM_DEFAULT_MODELS}
+      - LITELLM_TEAM_ID=${LITELLM_TEAM_ID}
+      - LITELLM_EMAIL_DOMAIN=${LITELLM_EMAIL_DOMAIN}
+      - LITELLM_INITIAL_BUDGET=${LITELLM_INITIAL_BUDGET}
+      # Agent Resource Limits
+      - AGENT_MAX_COST=${AGENT_MAX_COST:-20.0}
+      - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS:-0}
+      - AGENT_MAX_COST_PER_RUN=${AGENT_MAX_COST_PER_RUN:-5.0}
+      # Container Cleanup Configuration
+      - CONTAINER_CLEANUP_INTERVAL_MINUTES=${CONTAINER_CLEANUP_INTERVAL_MINUTES:-2}
+      - CONTAINER_CLEANUP_TIER1_IDLE_MINUTES=${CONTAINER_CLEANUP_TIER1_IDLE_MINUTES:-15}
+      - CONTAINER_CLEANUP_TIER2_PAUSED_HOURS=${CONTAINER_CLEANUP_TIER2_PAUSED_HOURS:-24}
+      - APP_PROTOCOL=${APP_PROTOCOL:-http}
+      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - CORS_ORIGINS=${CORS_ORIGINS:-${APP_PROTOCOL:-http}://${APP_DOMAIN:-localhost}}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-localhost}}
+      - DEV_SERVER_BASE_URL=${DEV_SERVER_BASE_URL:-}
+      # OAuth Configuration (optional)
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_OAUTH_REDIRECT_URI=${GITHUB_OAUTH_REDIRECT_URI:-}
+      # Deployment Provider OAuth (optional)
+      - VERCEL_CLIENT_ID=${VERCEL_CLIENT_ID:-}
+      - VERCEL_CLIENT_SECRET=${VERCEL_CLIENT_SECRET:-}
+      - VERCEL_OAUTH_REDIRECT_URI=${VERCEL_OAUTH_REDIRECT_URI:-}
+      - NETLIFY_CLIENT_ID=${NETLIFY_CLIENT_ID:-}
+      - NETLIFY_CLIENT_SECRET=${NETLIFY_CLIENT_SECRET:-}
+      - NETLIFY_OAUTH_REDIRECT_URI=${NETLIFY_OAUTH_REDIRECT_URI:-}
+      # CSRF and Cookie Security
+      - CSRF_SECRET_KEY=${CSRF_SECRET_KEY:-}
+      - CSRF_TOKEN_MAX_AGE=${CSRF_TOKEN_MAX_AGE:-86400}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+      # Deployment Configuration
+      - DEPLOYMENT_ENCRYPTION_KEY=${DEPLOYMENT_ENCRYPTION_KEY:-}
+      - DEPLOYMENT_TIMEOUT=${DEPLOYMENT_TIMEOUT:-600}
+      - DEPLOYMENT_BUILD_DIR=${DEPLOYMENT_BUILD_DIR:-dist}
+      - CLOUDFLARE_API_BASE=${CLOUDFLARE_API_BASE:-https://api.cloudflare.com/client/v4}
+      - VERCEL_API_BASE=${VERCEL_API_BASE:-https://api.vercel.com}
+      - NETLIFY_API_BASE=${NETLIFY_API_BASE:-https://api.netlify.com/api/v1}
+      # Stripe Payment Integration
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_CONNECT_CLIENT_ID=${STRIPE_CONNECT_CLIENT_ID:-}
+      # Per-tier Stripe Price IDs (monthly)
+      - STRIPE_BASIC_PRICE_ID=${STRIPE_BASIC_PRICE_ID:-}
+      - STRIPE_PRO_PRICE_ID=${STRIPE_PRO_PRICE_ID:-}
+      - STRIPE_ULTRA_PRICE_ID=${STRIPE_ULTRA_PRICE_ID:-}
+      # Per-tier Stripe Price IDs (annual)
+      - STRIPE_BASIC_ANNUAL_PRICE_ID=${STRIPE_BASIC_ANNUAL_PRICE_ID:-}
+      - STRIPE_PRO_ANNUAL_PRICE_ID=${STRIPE_PRO_ANNUAL_PRICE_ID:-}
+      - STRIPE_ULTRA_ANNUAL_PRICE_ID=${STRIPE_ULTRA_ANNUAL_PRICE_ID:-}
+      # Pricing
+      - TIER_PRICE_BASIC=${TIER_PRICE_BASIC:-2000}
+      - TIER_PRICE_PRO=${TIER_PRICE_PRO:-4900}
+      - TIER_PRICE_ULTRA=${TIER_PRICE_ULTRA:-14900}
+      - CREDIT_PACKAGE_SMALL=${CREDIT_PACKAGE_SMALL:-500}
+      - CREDIT_PACKAGE_MEDIUM=${CREDIT_PACKAGE_MEDIUM:-2500}
+      - CREDIT_PACKAGE_LARGE=${CREDIT_PACKAGE_LARGE:-10000}
+      - CREDIT_PACKAGE_TEAM=${CREDIT_PACKAGE_TEAM:-50000}
+      - ADDITIONAL_DEPLOY_PRICE=${ADDITIONAL_DEPLOY_PRICE:-1000}
+      - FREE_MAX_PROJECTS=${FREE_MAX_PROJECTS:-3}
+      - BASIC_MAX_PROJECTS=${BASIC_MAX_PROJECTS:-7}
+      - PRO_MAX_PROJECTS=${PRO_MAX_PROJECTS:-15}
+      - ULTRA_MAX_PROJECTS=${ULTRA_MAX_PROJECTS:-40}
+      - SIGNUP_BONUS_CREDITS=${SIGNUP_BONUS_CREDITS:-15000}
+      - SIGNUP_BONUS_EXPIRY_DAYS=${SIGNUP_BONUS_EXPIRY_DAYS:-60}
+      - CREATOR_REVENUE_SHARE=${CREATOR_REVENUE_SHARE:-0.90}
+      - PLATFORM_REVENUE_SHARE=${PLATFORM_REVENUE_SHARE:-0.10}
+      # Kubernetes Multi-Container Architecture (only used when DEPLOYMENT_MODE=kubernetes)
+      - K8S_RWX_STORAGE_CLASS=${K8S_RWX_STORAGE_CLASS:-nfs-client}
+      - K8S_INGRESS_CLASS=${K8S_INGRESS_CLASS:-nginx}
+      - K8S_NAMESPACE_PER_PROJECT=${K8S_NAMESPACE_PER_PROJECT:-true}
+      - K8S_ENABLE_NETWORK_POLICIES=${K8S_ENABLE_NETWORK_POLICIES:-true}
+      # S3/Object Storage for Kubernetes Ephemeral Architecture (Hibernation)
+      - K8S_USE_S3_STORAGE=${K8S_USE_S3_STORAGE:-false}
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-tesslate-projects}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_PROJECTS_PREFIX=${S3_PROJECTS_PREFIX:-projects}
+      - K8S_HIBERNATION_IDLE_MINUTES=${K8S_HIBERNATION_IDLE_MINUTES:-30}
+      - K8S_HYDRATION_TIMEOUT_SECONDS=${K8S_HYDRATION_TIMEOUT_SECONDS:-300}
+      - K8S_DEHYDRATION_TIMEOUT_SECONDS=${K8S_DEHYDRATION_TIMEOUT_SECONDS:-120}
+      - K8S_PVC_STORAGE_CLASS=${K8S_PVC_STORAGE_CLASS:-do-block-storage}
+      - K8S_PVC_SIZE=${K8S_PVC_SIZE:-5Gi}
+      - K8S_PVC_ACCESS_MODE=${K8S_PVC_ACCESS_MODE:-ReadWriteOnce}
+      # SMTP Configuration (for 2FA email codes)
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - SMTP_SENDER_EMAIL=${SMTP_SENDER_EMAIL:-}
+      - TWO_FA_ENABLED=${TWO_FA_ENABLED:-false}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PYTHONUNBUFFERED=1
+      - WATCHFILES_FORCE_POLLING=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tesslate-network
+    labels:
+      - "com.tesslate.routable=true"
+      - "traefik.enable=true"
+      # API routes - handle both /api and websocket paths
+      # TRAEFIK_ADDITIONAL_HOST_RULE: Add extra host rules (e.g., for Google OAuth localhost)
+      # Set in .env - should be empty in production
+      - "traefik.http.routers.orchestrator.rule=(Host(`${APP_DOMAIN:-localhost}`)${TRAEFIK_ADDITIONAL_HOST_RULE:-}) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
+      - "traefik.http.routers.orchestrator.entrypoints=web"
+      - "traefik.http.routers.orchestrator.priority=100"
+      - "traefik.http.routers.orchestrator.service=orchestrator"
+      - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
+      # Enable websocket support
+      - "traefik.http.middlewares.orchestrator-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
+      - "traefik.http.routers.orchestrator.middlewares=orchestrator-headers"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  worker:
+    build: ./orchestrator
+    container_name: tesslate-worker
+    restart: unless-stopped
+    command: ["arq", "app.worker.WorkerSettings"]
+    volumes:
+      - ./orchestrator/app:/app/app
+      - ./orchestrator/alembic:/app/alembic
+      - ./orchestrator/alembic.ini:/app/alembic.ini
+      - ./orchestrator/pyproject.toml:/app/pyproject.toml
+      - ./orchestrator/users:/app/users
+      - projects-data:/projects
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - DEPLOYMENT_MODE=docker
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - LITELLM_API_BASE=${LITELLM_API_BASE}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - LITELLM_DEFAULT_MODELS=${LITELLM_DEFAULT_MODELS}
+      - LITELLM_TEAM_ID=${LITELLM_TEAM_ID}
+      - LITELLM_EMAIL_DOMAIN=${LITELLM_EMAIL_DOMAIN}
+      - LITELLM_INITIAL_BUDGET=${LITELLM_INITIAL_BUDGET}
+      - AGENT_MAX_COST=${AGENT_MAX_COST:-20.0}
+      - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS:-0}
+      - AGENT_MAX_COST_PER_RUN=${AGENT_MAX_COST_PER_RUN:-5.0}
+      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tesslate-network
+
+  app:
+    build: ./app
+    container_name: tesslate-app
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./app/src:/app/src
+      - ./app/public:/app/public
+      - ./app/index.html:/app/index.html
+      - ./app/vite.config.ts:/app/vite.config.ts
+      - ./app/tsconfig.json:/app/tsconfig.json
+      - ./app/tsconfig.app.json:/app/tsconfig.app.json
+      - ./app/tsconfig.node.json:/app/tsconfig.node.json
+      - ./app/tailwind.config.ts:/app/tailwind.config.ts
+      - ./app/package.json:/app/package.json
+    environment:
+      # Frontend Runtime Config (used by Vite dev server)
+      # In dev mode, config.ts reads from import.meta.env.VITE_*
+      # In production (Docker/K8s), config.ts reads from window._env_
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY:-}
+      - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-https://app.posthog.com}
+      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - FRONTEND_PORT=${FRONTEND_PORT:-5173}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-docker}
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    networks:
+      - tesslate-network
+    labels:
+      - "com.tesslate.routable=true"
+      - "traefik.enable=true"
+      # Frontend routes - everything except /api, /ws, and /preview
+      # TRAEFIK_ADDITIONAL_HOST_RULE: Add extra host rules (e.g., for Google OAuth localhost)
+      # Set in .env - should be empty in production
+      - "traefik.http.routers.app.rule=(Host(`${APP_DOMAIN:-localhost}`)${TRAEFIK_ADDITIONAL_HOST_RULE:-}) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
+      - "traefik.http.routers.app.entrypoints=web"
+      - "traefik.http.routers.app.priority=10"
+      - "traefik.http.routers.app.service=app"
+      - "traefik.http.services.app.loadbalancer.server.port=5173"
+      # Handle websocket upgrade for HMR
+      - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
+      - "traefik.http.routers.app.middlewares=app-headers"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5173/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  tesslate-network:
+    name: tesslate-network
+    driver: bridge
+
+volumes:
+  postgres-dev-data:
+    name: tesslate-postgres-dev-data
+  base-cache:
+    name: tesslate-base-cache
+  projects-data:
+    name: tesslate-projects-data  # Shared volume for all project source code
+  redis-data:
+    name: tesslate-redis-data

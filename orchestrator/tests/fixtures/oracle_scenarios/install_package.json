@@ -1,0 +1,27 @@
+{
+  "name": "Install NPM Package",
+  "description": "Agent runs npm install for a package",
+  "model_name": "oracle/test",
+  "turns": [
+    {
+      "thought": "I need to install the axios package. Let me run npm install.",
+      "tool_calls": [
+        {
+          "name": "execute_command",
+          "parameters": {
+            "command": "npm install axios",
+            "working_dir": "."
+          }
+        }
+      ]
+    },
+    {
+      "response_text": "I've installed the axios package. You can now import it with `import axios from 'axios'`."
+    }
+  ],
+  "assertions": {
+    "tool_sequence": ["execute_command"],
+    "final_response_contains": "axios",
+    "max_iterations": 2
+  }
+}

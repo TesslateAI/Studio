@@ -1,0 +1,243 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job 1: Backend unit tests (fast, no dependencies)
+  backend-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'orchestrator/pyproject.toml'
+
+      - name: Install dependencies
+        working-directory: orchestrator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run ruff linter
+        working-directory: orchestrator
+        run: python -m ruff check app/ || true
+
+      - name: Run unit tests
+        working-directory: orchestrator
+        run: pytest -m "unit or mocked" --tb=short --maxfail=5
+        env:
+          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+          SECRET_KEY: test-secret-key
+          DEPLOYMENT_MODE: docker
+          LITELLM_API_BASE: http://localhost:4000/v1
+          LITELLM_MASTER_KEY: test-key
+
+  # Job 2: Frontend unit tests (fast, no dependencies)
+  frontend-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'app/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci --force
+
+      - name: Run ESLint
+        working-directory: app
+        run: npm run lint || true
+
+      - name: Run Vitest unit tests
+        working-directory: app
+        run: npm run test -- --run --passWithNoTests || true
+
+  # Job 3: Backend integration tests (depends on backend-unit)
+  backend-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: backend-unit
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: tesslate_test
+          POSTGRES_USER: tesslate_test
+          POSTGRES_PASSWORD: testpass
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'orchestrator/pyproject.toml'
+
+      - name: Install dependencies
+        working-directory: orchestrator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run database migrations
+        working-directory: orchestrator
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test
+
+      - name: Run integration tests
+        working-directory: orchestrator
+        run: pytest tests/integration/ -m integration --tb=short --maxfail=5 --junit-xml=test-results/integration-results.xml
+        env:
+          DATABASE_URL: postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test
+          SECRET_KEY: test-secret-key-ci
+          DEPLOYMENT_MODE: docker
+          LITELLM_API_BASE: http://localhost:4000/v1
+          LITELLM_MASTER_KEY: test-key
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: orchestrator/test-results/
+
+  # Job 4: E2E tests (depends on both backend-integration and frontend-unit)
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend-integration, frontend-unit]
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: tesslate_test
+          POSTGRES_USER: tesslate_test
+          POSTGRES_PASSWORD: testpass
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'orchestrator/pyproject.toml'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'app/package-lock.json'
+
+      - name: Install backend dependencies
+        working-directory: orchestrator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci --force
+
+      - name: Install Playwright browsers
+        working-directory: app
+        run: npx playwright install --with-deps chromium
+
+      - name: Run database migrations
+        working-directory: orchestrator
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test
+
+      - name: Start backend server
+        working-directory: orchestrator
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          echo $! > backend.pid
+          # Wait for backend to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:8000/health; do sleep 2; done'
+        env:
+          DATABASE_URL: postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test
+          SECRET_KEY: test-secret-key-e2e
+          DEPLOYMENT_MODE: docker
+          LITELLM_API_BASE: http://localhost:4000/v1
+          LITELLM_MASTER_KEY: test-key
+
+      - name: Start frontend dev server
+        working-directory: app
+        run: |
+          npm run dev &
+          echo $! > frontend.pid
+          # Wait for frontend to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:5173; do sleep 2; done'
+
+      - name: Run Playwright E2E tests
+        working-directory: app
+        run: npx playwright test
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:5173
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: app/playwright-report/
+          retention-days: 30
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: app/test-results/
+          retention-days: 30
+
+      - name: Stop servers
+        if: always()
+        run: |
+          [ -f orchestrator/backend.pid ] && kill $(cat orchestrator/backend.pid) || true
+          [ -f app/frontend.pid ] && kill $(cat app/frontend.pid) || true

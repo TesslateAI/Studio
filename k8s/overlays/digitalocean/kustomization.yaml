@@ -1,0 +1,41 @@
+# =============================================================================
+# DigitalOcean Kubernetes (DOKS) Overlay
+# =============================================================================
+# This overlay customizes the base manifests for DigitalOcean Kubernetes:
+# - do-block-storage StorageClass for PVCs
+# - DigitalOcean container registry authentication
+# - Production TLS with Let's Encrypt
+# - DigitalOcean Spaces for S3 (optional, can use DO Spaces or external S3)
+# =============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tesslate
+
+resources:
+  - ../../base
+  - storage-class.yaml
+  - secrets/registry-credentials.yaml
+  # Production secrets should be managed via External Secrets or sealed-secrets
+  # - secrets/app-secrets.yaml  # DON'T commit real secrets
+
+patches:
+  - path: backend-patch.yaml
+  - path: ingress-patch.yaml
+
+images:
+  - name: tesslate-backend
+    newName: registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-backend
+    newTag: latest
+  - name: tesslate-frontend
+    newName: registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-frontend
+    newTag: latest
+  - name: tesslate-devserver
+    newName: registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver
+    newTag: latest
+
+# Common labels for all resources
+commonLabels:
+  cloud-provider: digitalocean
+  environment: production

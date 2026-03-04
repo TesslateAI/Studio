@@ -1,0 +1,37 @@
+{
+  "name": "Turn Background Orange",
+  "description": "Agent writes CSS to change background color to orange",
+  "model_name": "oracle/test",
+  "turns": [
+    {
+      "thought": "The user wants to change the background color to orange. I'll update the CSS file.",
+      "tool_calls": [
+        {
+          "name": "read_file",
+          "parameters": {"file_path": "src/App.css"}
+        }
+      ]
+    },
+    {
+      "thought": "I see the current CSS. I'll update the body background color to orange.",
+      "tool_calls": [
+        {
+          "name": "write_file",
+          "parameters": {
+            "file_path": "src/App.css",
+            "content": "body {\n  background-color: orange;\n  margin: 0;\n  padding: 0;\n}\n"
+          }
+        }
+      ]
+    },
+    {
+      "response_text": "I've updated the background color to orange in src/App.css."
+    }
+  ],
+  "assertions": {
+    "tool_sequence": ["read_file", "write_file"],
+    "files_modified": ["src/App.css"],
+    "final_response_contains": "orange",
+    "max_iterations": 3
+  }
+}

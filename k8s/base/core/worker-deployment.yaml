@@ -1,0 +1,117 @@
+# Tesslate Worker Deployment
+# ARQ worker that executes agent tasks from the Redis queue
+# Uses the SAME image as the backend — just a different entrypoint
+#
+# Workers are independently scalable from API pods
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-worker
+  namespace: tesslate
+  labels:
+    app: tesslate-worker
+    component: worker
+spec:
+  replicas: 2  # Scale based on agent queue depth
+  selector:
+    matchLabels:
+      app: tesslate-worker
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: tesslate-worker
+        component: worker
+    spec:
+      terminationGracePeriodSeconds: 300  # 5 min grace for in-flight agent tasks
+      serviceAccountName: tesslate-backend-sa  # Same SA for K8s API access (kubectl exec)
+      containers:
+      - name: worker
+        image: tesslate-backend:latest  # Same image as API pod
+        imagePullPolicy: IfNotPresent
+        command: ["arq", "app.worker.WorkerSettings"]
+        env:
+        # Core settings
+        - name: DEPLOYMENT_MODE
+          value: "kubernetes"
+        - name: KUBERNETES_NAMESPACE
+          value: "tesslate"
+
+        # Redis (required for worker)
+        - name: REDIS_URL
+          value: "redis://redis:6379/0"
+
+        # Database
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: DATABASE_URL
+
+        # Security
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: SECRET_KEY
+
+        # LiteLLM Configuration (workers call LLM APIs)
+        - name: LITELLM_API_BASE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_API_BASE
+        - name: LITELLM_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_MASTER_KEY
+        - name: LITELLM_DEFAULT_MODELS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_DEFAULT_MODELS
+        - name: LITELLM_TEAM_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_TEAM_ID
+              optional: true
+        - name: LITELLM_EMAIL_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_EMAIL_DOMAIN
+              optional: true
+
+        # Kubernetes settings (workers create shell sessions to user containers)
+        - name: K8S_NAMESPACE_PER_PROJECT
+          value: "true"
+        - name: K8S_DEVSERVER_IMAGE
+          value: "tesslate-devserver:latest"
+        - name: K8S_IMAGE_PULL_SECRET
+          value: ""
+        - name: K8S_INGRESS_CLASS
+          value: "nginx"
+        - name: K8S_STORAGE_CLASS
+          value: "tesslate-block-storage"
+
+        # Domain (for any URL generation in tools)
+        - name: APP_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: APP_DOMAIN
+              optional: true
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+        # Workers don't serve HTTP, so no liveness/readiness probes needed
+        # ARQ handles health via Redis heartbeats

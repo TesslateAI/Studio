@@ -1,0 +1,236 @@
+{
+  "description": "Golden test cases for AgentResponseParser - expected input/output pairs",
+  "single_tool_calls": [
+    {
+      "id": "json_read_file",
+      "description": "Single JSON tool call for reading a file",
+      "input": "THOUGHT: I need to read the file to understand its structure.\n\n{\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"src/App.jsx\"}}",
+      "expected": {
+        "tool_calls": [
+          {"name": "read_file", "parameters": {"file_path": "src/App.jsx"}}
+        ],
+        "is_complete": false,
+        "thought_contains": "read the file"
+      }
+    },
+    {
+      "id": "json_write_file",
+      "description": "Single JSON tool call for writing a file",
+      "input": "{\"tool_name\": \"write_file\", \"parameters\": {\"file_path\": \"src/Button.jsx\", \"content\": \"import React from 'react';\\nexport default function Button() { return <button>Click</button>; }\"}}",
+      "expected": {
+        "tool_calls": [
+          {
+            "name": "write_file",
+            "parameters": {
+              "file_path": "src/Button.jsx",
+              "content": "import React from 'react';\nexport default function Button() { return <button>Click</button>; }"
+            }
+          }
+        ],
+        "is_complete": false
+      }
+    },
+    {
+      "id": "json_bash_exec",
+      "description": "Single JSON tool call for bash command",
+      "input": "{\"tool_name\": \"bash_exec\", \"parameters\": {\"command\": \"npm install react-router-dom\"}}",
+      "expected": {
+        "tool_calls": [
+          {"name": "bash_exec", "parameters": {"command": "npm install react-router-dom"}}
+        ],
+        "is_complete": false
+      }
+    }
+  ],
+  "multi_tool_calls": [
+    {
+      "id": "json_array_two_tools",
+      "description": "JSON array with two tool calls",
+      "input": "[\n  {\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"a.js\"}},\n  {\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"b.js\"}}\n]",
+      "expected": {
+        "tool_calls": [
+          {"name": "read_file", "parameters": {"file_path": "a.js"}},
+          {"name": "read_file", "parameters": {"file_path": "b.js"}}
+        ],
+        "is_complete": false
+      }
+    },
+    {
+      "id": "json_array_mixed_tools",
+      "description": "JSON array with different tool types",
+      "input": "[\n  {\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"package.json\"}},\n  {\"tool_name\": \"bash_exec\", \"parameters\": {\"command\": \"npm install\"}}\n]",
+      "expected": {
+        "tool_calls": [
+          {"name": "read_file", "parameters": {"file_path": "package.json"}},
+          {"name": "bash_exec", "parameters": {"command": "npm install"}}
+        ],
+        "is_complete": false
+      }
+    }
+  ],
+  "completion_signals": [
+    {
+      "id": "task_complete_simple",
+      "description": "Simple TASK_COMPLETE signal",
+      "input": "I have completed the task.\n\nTASK_COMPLETE",
+      "expected": {
+        "tool_calls": [],
+        "is_complete": true
+      }
+    },
+    {
+      "id": "task_complete_with_summary",
+      "description": "TASK_COMPLETE with summary text",
+      "input": "THOUGHT: The task is now complete. I have:\n1. Created the Button component\n2. Updated App.jsx to use it\n3. Verified the build passes\n\nTASK_COMPLETE",
+      "expected": {
+        "tool_calls": [],
+        "is_complete": true
+      }
+    },
+    {
+      "id": "task_complete_uppercase",
+      "description": "TASK_COMPLETE in uppercase only",
+      "input": "TASK_COMPLETE",
+      "expected": {
+        "tool_calls": [],
+        "is_complete": true
+      }
+    }
+  ],
+  "escaped_content": [
+    {
+      "id": "escaped_quotes_in_content",
+      "description": "File content with escaped quotes",
+      "input": "{\"tool_name\": \"write_file\", \"parameters\": {\"file_path\": \"test.js\", \"content\": \"const x = \\\"hello world\\\";\"}}",
+      "expected": {
+        "tool_calls": [
+          {
+            "name": "write_file",
+            "parameters": {
+              "file_path": "test.js",
+              "content": "const x = \"hello world\";"
+            }
+          }
+        ],
+        "is_complete": false
+      }
+    },
+    {
+      "id": "nested_json_in_content",
+      "description": "JSON content inside file content",
+      "input": "{\"tool_name\": \"write_file\", \"parameters\": {\"file_path\": \"config.json\", \"content\": \"{\\\"key\\\": \\\"value\\\", \\\"nested\\\": {\\\"a\\\": 1}}\"}}",
+      "expected": {
+        "tool_calls": [
+          {
+            "name": "write_file",
+            "parameters": {
+              "file_path": "config.json",
+              "content": "{\"key\": \"value\", \"nested\": {\"a\": 1}}"
+            }
+          }
+        ],
+        "is_complete": false
+      }
+    },
+    {
+      "id": "multiline_content_with_newlines",
+      "description": "Multi-line file content with newlines",
+      "input": "{\"tool_name\": \"write_file\", \"parameters\": {\"file_path\": \"app.js\", \"content\": \"line1\\nline2\\nline3\"}}",
+      "expected": {
+        "tool_calls": [
+          {
+            "name": "write_file",
+            "parameters": {
+              "file_path": "app.js",
+              "content": "line1\nline2\nline3"
+            }
+          }
+        ],
+        "is_complete": false
+      }
+    }
+  ],
+  "malformed_inputs": [
+    {
+      "id": "invalid_json",
+      "description": "Invalid JSON syntax",
+      "input": "{\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"test.js\"",
+      "expected": {
+        "tool_calls": [],
+        "is_complete": false,
+        "should_error": false
+      }
+    },
+    {
+      "id": "missing_tool_name",
+      "description": "JSON object without tool_name",
+      "input": "{\"parameters\": {\"file_path\": \"test.js\"}}",
+      "expected": {
+        "tool_calls": [],
+        "is_complete": false
+      }
+    },
+    {
+      "id": "empty_response",
+      "description": "Empty response text",
+      "input": "",
+      "expected": {
+        "tool_calls": [],
+        "is_complete": false
+      }
+    },
+    {
+      "id": "plain_text_no_tools",
+      "description": "Plain text response with no tool calls",
+      "input": "I understand your request. Let me help you with that.",
+      "expected": {
+        "tool_calls": [],
+        "is_complete": false
+      }
+    }
+  ],
+  "edge_cases": [
+    {
+      "id": "tool_call_after_completion",
+      "description": "Tool call mentioned after TASK_COMPLETE - parser still extracts it but is_complete is true",
+      "input": "TASK_COMPLETE\n\n{\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"test.js\"}}",
+      "expected": {
+        "tool_calls": [
+          {"name": "read_file", "parameters": {"file_path": "test.js"}}
+        ],
+        "is_complete": true
+      }
+    },
+    {
+      "id": "multiple_json_objects_inline",
+      "description": "Multiple JSON objects not in array format",
+      "input": "{\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"a.js\"}}\n{\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"b.js\"}}",
+      "expected": {
+        "tool_calls_count_min": 1,
+        "is_complete": false
+      }
+    },
+    {
+      "id": "special_characters_in_path",
+      "description": "File path with special characters",
+      "input": "{\"tool_name\": \"read_file\", \"parameters\": {\"file_path\": \"src/components/MyComponent.test.tsx\"}}",
+      "expected": {
+        "tool_calls": [
+          {"name": "read_file", "parameters": {"file_path": "src/components/MyComponent.test.tsx"}}
+        ],
+        "is_complete": false
+      }
+    },
+    {
+      "id": "unicode_in_content",
+      "description": "Unicode characters in file content",
+      "input": "{\"tool_name\": \"write_file\", \"parameters\": {\"file_path\": \"hello.txt\", \"content\": \"Hello 世界! 🎉\"}}",
+      "expected": {
+        "tool_calls": [
+          {"name": "write_file", "parameters": {"file_path": "hello.txt", "content": "Hello 世界! 🎉"}}
+        ],
+        "is_complete": false
+      }
+    }
+  ]
+}

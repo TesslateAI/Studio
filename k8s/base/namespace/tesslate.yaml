@@ -1,0 +1,11 @@
+# Main Tesslate namespace for core platform components
+# Backend, Frontend, Database run here
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tesslate
+  labels:
+    name: tesslate
+    app.kubernetes.io/name: tesslate-studio
+    app.kubernetes.io/component: platform

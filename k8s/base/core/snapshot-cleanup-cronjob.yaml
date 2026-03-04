@@ -1,0 +1,114 @@
+# Snapshot Cleanup CronJob
+# Runs daily to delete expired soft-deleted snapshots (30+ days old)
+# This ensures snapshots are properly cleaned up after project deletion
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: snapshot-cleanup
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: snapshot-cleanup
+spec:
+  # Run daily at 3 AM UTC to clean up expired snapshots
+  schedule: "0 3 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Replace
+  startingDeadlineSeconds: 3600  # Allow up to 1 hour late start
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600  # Kill job after 10 minutes
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: tesslate-snapshot-cleanup
+        spec:
+          serviceAccountName: tesslate-backend-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: tesslate-backend:latest  # Overridden by kustomization images
+            imagePullPolicy: Always
+            command: ["python", "-c"]
+            args:
+              - |
+                import asyncio
+                import sys
+                sys.path.append('/app')
+
+                from app.services.snapshot_manager import get_snapshot_manager
+                from app.database import AsyncSessionLocal
+                from app.config import get_settings
+                import logging
+
+                logging.basicConfig(level=logging.INFO)
+                logger = logging.getLogger(__name__)
+
+                async def cleanup_expired_snapshots():
+                    """Delete expired soft-deleted snapshots from K8s and database."""
+                    try:
+                        settings = get_settings()
+                        logger.info("Starting expired snapshot cleanup...")
+                        logger.info(f"Retention period: {settings.k8s_snapshot_retention_days} days")
+
+                        snapshot_manager = get_snapshot_manager()
+
+                        async with AsyncSessionLocal() as db:
+                            deleted_count = await snapshot_manager.cleanup_expired_snapshots(db)
+                            logger.info(f"Cleanup completed. Deleted {deleted_count} expired snapshots")
+
+                    except Exception as e:
+                        logger.error(f"Snapshot cleanup error: {e}", exc_info=True)
+                        sys.exit(1)
+
+                # Run the cleanup
+                asyncio.run(cleanup_expired_snapshots())
+            env:
+              - name: KUBERNETES_NAMESPACE
+                value: tesslate
+              - name: DEPLOYMENT_MODE
+                value: "kubernetes"
+              - name: DATABASE_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: DATABASE_URL
+              - name: SECRET_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: SECRET_KEY
+              - name: POSTGRES_HOST
+                value: "postgres"
+              - name: POSTGRES_PORT
+                value: "5432"
+              - name: POSTGRES_DB
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_DB
+              - name: POSTGRES_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_USER
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_PASSWORD
+              # Snapshot configuration
+              - name: K8S_SNAPSHOT_CLASS
+                value: "tesslate-ebs-snapshots"
+              - name: K8S_SNAPSHOT_RETENTION_DAYS
+                value: "30"
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "50m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"

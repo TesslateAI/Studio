@@ -1,0 +1,53 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "feat: [component] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: "**Title format:** `feat: [component] description` — components: `frontend`, `backend`, `agent`, `infra`, `db`"
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What do you want and why?
+      placeholder: |
+        **What:**
+
+        **Why:**
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of the system does this touch?
+      multiple: true
+      options:
+        - Frontend
+        - Backend
+        - Agent
+        - Infrastructure
+        - Database
+        - Model
+        - Other
+    validations:
+      required: false
+
+  - type: input
+    id: area_other
+    attributes:
+      label: Other affected area
+      description: If you selected "Other" above, specify here
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you thought about
+    validations:
+      required: false

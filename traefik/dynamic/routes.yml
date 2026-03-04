@@ -1,0 +1,28 @@
+# Note: This file is used for production deployments.
+# The domain should be configured via Docker labels in docker-compose.prod.yml
+# This file is kept for reference but the actual routing is handled via Docker provider
+http:
+  routers:
+    # Routes are now configured via Docker labels in docker-compose.prod.yml
+    # This ensures consistency and allows environment variable substitution
+
+    # Preview containers routing - handled by Docker provider auto-discovery
+    # Individual preview containers register themselves with labels
+    # Priority 100 ensures preview routes take precedence
+    # Format: /preview/user{N}-project{M}/
+
+    # Preview containers routing - handled by Docker provider auto-discovery
+    # Individual preview containers register themselves with labels
+    # Priority 100 ensures preview routes take precedence
+    # Format: /preview/user{N}-project{M}/
+
+  services:
+    frontend:
+      loadBalancer:
+        servers:
+          - url: "http://tesslate-app:80"
+
+    backend:
+      loadBalancer:
+        servers:
+          - url: "http://tesslate-orchestrator:8000"

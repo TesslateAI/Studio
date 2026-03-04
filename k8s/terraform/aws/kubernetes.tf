@@ -1,0 +1,517 @@
+# =============================================================================
+# Kubernetes Resources for Tesslate Studio
+# =============================================================================
+# Creates Kubernetes namespaces, secrets, and configmaps needed for
+# the Tesslate application deployment.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Tesslate Namespace
+# -----------------------------------------------------------------------------
+resource "kubernetes_namespace" "tesslate" {
+  metadata {
+    name = "tesslate"
+
+    labels = {
+      "app.kubernetes.io/name"       = "tesslate"
+      "app.kubernetes.io/managed-by" = "terraform"
+      "environment"                  = var.environment
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [metadata[0].labels]
+  }
+
+  depends_on = [module.eks]
+}
+
+# -----------------------------------------------------------------------------
+# Service Account for Tesslate Backend (with IRSA)
+# -----------------------------------------------------------------------------
+resource "kubernetes_service_account" "tesslate_backend" {
+  metadata {
+    name      = "tesslate-backend-sa"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+
+    annotations = {
+      "eks.amazonaws.com/role-arn" = module.tesslate_backend_irsa.iam_role_arn
+    }
+
+    labels = {
+      "app.kubernetes.io/name"      = "tesslate-backend"
+      "app.kubernetes.io/component" = "backend"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [metadata[0].labels]
+  }
+}
+
+# -----------------------------------------------------------------------------
+# PostgreSQL Secret
+# -----------------------------------------------------------------------------
+resource "kubernetes_secret" "postgres" {
+  metadata {
+    name      = "postgres-secret"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  data = {
+    POSTGRES_DB       = var.create_rds ? var.rds_database_name : "tesslate"
+    POSTGRES_USER     = var.create_rds ? var.rds_username : "tesslate_user"
+    POSTGRES_PASSWORD = var.postgres_password
+  }
+
+  type = "Opaque"
+}
+
+# -----------------------------------------------------------------------------
+# S3 Credentials Secret
+# Note: With IRSA, we don't need actual keys, but the app still expects the secret
+# -----------------------------------------------------------------------------
+resource "kubernetes_secret" "s3_credentials" {
+  metadata {
+    name      = "s3-credentials"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  data = {
+    S3_ACCESS_KEY_ID     = ""  # Not needed with IRSA
+    S3_SECRET_ACCESS_KEY = ""  # Not needed with IRSA
+    S3_BUCKET_NAME       = aws_s3_bucket.tesslate_projects.id
+    S3_ENDPOINT_URL      = ""  # Empty = use native AWS S3
+    S3_REGION            = var.aws_region
+  }
+
+  type = "Opaque"
+}
+
+# -----------------------------------------------------------------------------
+# Application Secrets
+# -----------------------------------------------------------------------------
+resource "kubernetes_secret" "app_secrets" {
+  metadata {
+    name      = "tesslate-app-secrets"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  data = {
+    SECRET_KEY = var.app_secret_key
+    DATABASE_URL = var.create_rds ? (
+      "postgresql+asyncpg://${var.rds_username}:${var.postgres_password}@${aws_db_instance.tesslate[0].endpoint}/${var.rds_database_name}"
+    ) : (
+      "postgresql+asyncpg://tesslate_user:${var.postgres_password}@postgres:5432/tesslate"
+    )
+
+    # LiteLLM
+    LITELLM_API_BASE       = "http://litellm-service.tesslate.svc.cluster.local:4000/v1"
+    LITELLM_MASTER_KEY     = var.litellm_master_key
+    LITELLM_DEFAULT_MODELS = var.litellm_default_models
+    LITELLM_TEAM_ID        = "default"
+    LITELLM_EMAIL_DOMAIN   = var.domain_name
+    LITELLM_INITIAL_BUDGET = "10000.0"
+
+    # CORS & Domain
+    CORS_ORIGINS        = "https://${var.domain_name},https://*.${var.domain_name}"
+    ALLOWED_HOSTS       = "${var.domain_name},*.${var.domain_name}"
+    APP_DOMAIN          = var.domain_name
+    APP_BASE_URL        = "https://${var.domain_name}"
+    DEV_SERVER_BASE_URL = "https://*.${var.domain_name}"
+    COOKIE_DOMAIN       = ".${var.domain_name}"
+
+    # K8s config (in secrets to avoid kustomize configMapGenerator hash conflicts)
+    K8S_DEVSERVER_IMAGE = "${local.ecr_devserver_url}:${local.image_tag}"
+    K8S_REGISTRY_URL    = local.ecr_registry_url
+
+    # OAuth - Google
+    GOOGLE_CLIENT_ID           = var.google_client_id
+    GOOGLE_CLIENT_SECRET       = var.google_client_secret
+    GOOGLE_OAUTH_REDIRECT_URI  = "https://${var.domain_name}/api/auth/google/callback"
+    GOOGLE_OAUTH_ENABLED       = tostring(var.google_oauth_enabled)
+
+    # OAuth - GitHub
+    GITHUB_CLIENT_ID           = var.github_client_id
+    GITHUB_CLIENT_SECRET       = var.github_client_secret
+    GITHUB_OAUTH_REDIRECT_URI  = "https://${var.domain_name}/api/auth/github/callback"
+    GITHUB_OAUTH_ENABLED       = tostring(var.github_oauth_enabled)
+
+    # Stripe
+    STRIPE_SECRET_KEY             = var.stripe_secret_key
+    STRIPE_PUBLISHABLE_KEY        = var.stripe_publishable_key
+    STRIPE_WEBHOOK_SECRET         = var.stripe_webhook_secret
+    STRIPE_CONNECT_CLIENT_ID      = var.stripe_connect_client_id
+    STRIPE_BASIC_PRICE_ID         = var.stripe_basic_price_id
+    STRIPE_PRO_PRICE_ID           = var.stripe_pro_price_id
+    STRIPE_ULTRA_PRICE_ID         = var.stripe_ultra_price_id
+    STRIPE_BASIC_ANNUAL_PRICE_ID  = var.stripe_basic_annual_price_id
+    STRIPE_PRO_ANNUAL_PRICE_ID    = var.stripe_pro_annual_price_id
+    STRIPE_ULTRA_ANNUAL_PRICE_ID  = var.stripe_ultra_annual_price_id
+
+    # Deployment Providers - Vercel
+    VERCEL_CLIENT_ID          = var.vercel_client_id
+    VERCEL_CLIENT_SECRET      = var.vercel_client_secret
+    VERCEL_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/vercel/callback"
+
+    # Deployment Providers - Netlify
+    NETLIFY_CLIENT_ID          = var.netlify_client_id
+    NETLIFY_CLIENT_SECRET      = var.netlify_client_secret
+    NETLIFY_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/netlify/callback"
+
+    # Deployment credential encryption
+    DEPLOYMENT_ENCRYPTION_KEY = var.deployment_encryption_key
+
+    # SMTP (Email / 2FA)
+    SMTP_HOST         = var.smtp_host
+    SMTP_PORT         = tostring(var.smtp_port)
+    SMTP_USERNAME     = var.smtp_username
+    SMTP_PASSWORD     = var.smtp_password
+    SMTP_USE_TLS      = tostring(var.smtp_use_tls)
+    SMTP_SENDER_EMAIL = var.smtp_sender_email
+    TWO_FA_ENABLED    = tostring(var.two_fa_enabled)
+
+    # PostHog (for frontend via secret)
+    POSTHOG_KEY = var.posthog_key
+
+    # Database SSL (enabled when using RDS)
+    DATABASE_SSL = tostring(var.create_rds)
+
+    # Redis (ElastiCache or K8s-managed)
+    REDIS_URL = var.create_elasticache ? (
+      "redis://${aws_elasticache_replication_group.redis[0].primary_endpoint_address}:6379/0"
+    ) : (
+      "redis://redis:6379/0"
+    )
+
+  }
+
+  type = "Opaque"
+}
+
+# -----------------------------------------------------------------------------
+# Tesslate ConfigMap
+# -----------------------------------------------------------------------------
+resource "kubernetes_config_map" "tesslate_config" {
+  metadata {
+    name      = "tesslate-config"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  data = {
+    DEPLOYMENT_MODE              = "kubernetes"
+    K8S_NAMESPACE_PER_PROJECT    = "true"
+    K8S_ENABLE_NETWORK_POLICIES  = "true"
+    K8S_INGRESS_DOMAIN           = var.domain_name
+    K8S_STORAGE_CLASS            = "tesslate-block-storage"
+    K8S_INGRESS_CLASS            = "nginx"
+    devserver_image              = "${local.ecr_devserver_url}:${local.image_tag}"
+    registry_url                 = local.ecr_registry_url
+    aws_region                   = var.aws_region
+    s3_bucket_name               = aws_s3_bucket.tesslate_projects.id
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Frontend ConfigMap (Runtime Configuration)
+# -----------------------------------------------------------------------------
+resource "kubernetes_config_map" "frontend_config" {
+  metadata {
+    name      = "frontend-config"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  data = {
+    # API URL derived from domain variable
+    api-url = "https://${var.domain_name}"
+
+    # PostHog analytics configuration
+    posthog-host = var.posthog_host
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Wildcard TLS Certificate
+# -----------------------------------------------------------------------------
+resource "kubectl_manifest" "wildcard_certificate" {
+  count = var.enable_cert_manager ? 1 : 0
+
+  yaml_body = yamlencode({
+    apiVersion = "cert-manager.io/v1"
+    kind       = "Certificate"
+    metadata = {
+      name      = "tesslate-wildcard-tls"
+      namespace = "tesslate"
+    }
+    spec = {
+      secretName = "tesslate-wildcard-tls"
+      issuerRef = {
+        name = "letsencrypt-prod"
+        kind = "ClusterIssuer"
+      }
+      commonName = var.domain_name
+      dnsNames = [
+        var.domain_name,
+        "*.${var.domain_name}"
+      ]
+    }
+  })
+
+  depends_on = [
+    kubernetes_namespace.tesslate,
+    kubectl_manifest.letsencrypt_issuer
+  ]
+}
+
+# -----------------------------------------------------------------------------
+# Main Application Ingress
+# -----------------------------------------------------------------------------
+# Creates the main ingress for the Tesslate application using the domain
+# from tfvars. This replaces per-environment ingress-patch.yaml files.
+# User project ingresses are still created dynamically by the backend.
+# -----------------------------------------------------------------------------
+resource "kubectl_manifest" "tesslate_ingress" {
+  yaml_body = yamlencode({
+    apiVersion = "networking.k8s.io/v1"
+    kind       = "Ingress"
+    metadata = {
+      name      = "tesslate-ingress"
+      namespace = "tesslate"
+      annotations = {
+        "kubernetes.io/ingress.class"                       = "nginx"
+        "cert-manager.io/cluster-issuer"                    = "letsencrypt-prod"
+        "nginx.ingress.kubernetes.io/ssl-redirect"          = "true"
+        "nginx.ingress.kubernetes.io/force-ssl-redirect"    = "true"
+        "nginx.ingress.kubernetes.io/proxy-http-version"    = "1.1"
+        "nginx.ingress.kubernetes.io/proxy-read-timeout"    = "3600"
+        "nginx.ingress.kubernetes.io/proxy-send-timeout"    = "3600"
+        "nginx.ingress.kubernetes.io/proxy-connect-timeout" = "3600"
+        "nginx.ingress.kubernetes.io/proxy-body-size"       = "100m"
+        "nginx.ingress.kubernetes.io/proxy-buffering"        = "off"
+        "nginx.ingress.kubernetes.io/use-regex"             = "true"
+        "nginx.ingress.kubernetes.io/enable-cors"           = "true"
+        "nginx.ingress.kubernetes.io/cors-allow-origin"     = "https://${var.domain_name}, https://*.${var.domain_name}"
+        "nginx.ingress.kubernetes.io/cors-allow-methods"    = "GET, PUT, POST, DELETE, PATCH, OPTIONS"
+        "nginx.ingress.kubernetes.io/cors-allow-credentials" = "true"
+        "nginx.ingress.kubernetes.io/proxy-hide-header"     = "X-Powered-By"
+        # Sticky sessions for PTY/WebSocket affinity across multiple API replicas
+        "nginx.ingress.kubernetes.io/affinity"              = "cookie"
+        "nginx.ingress.kubernetes.io/session-cookie-name"   = "TESS_AFFINITY"
+        "nginx.ingress.kubernetes.io/session-cookie-max-age" = "7200"
+        "nginx.ingress.kubernetes.io/session-cookie-path"   = "/"
+      }
+    }
+    spec = {
+      ingressClassName = "nginx"
+      tls = [{
+        hosts = [
+          var.domain_name,
+          "*.${var.domain_name}"
+        ]
+        secretName = "tesslate-wildcard-tls"
+      }]
+      rules = [{
+        host = var.domain_name
+        http = {
+          paths = [
+            {
+              path     = "/api"
+              pathType = "Prefix"
+              backend = {
+                service = {
+                  name = "tesslate-backend-service"
+                  port = { number = 8000 }
+                }
+              }
+            },
+            {
+              path     = "/ws"
+              pathType = "Prefix"
+              backend = {
+                service = {
+                  name = "tesslate-backend-service"
+                  port = { number = 8000 }
+                }
+              }
+            },
+            {
+              path     = "/health"
+              pathType = "Prefix"
+              backend = {
+                service = {
+                  name = "tesslate-backend-service"
+                  port = { number = 8000 }
+                }
+              }
+            },
+            {
+              path     = "/"
+              pathType = "Prefix"
+              backend = {
+                service = {
+                  name = "tesslate-frontend-service"
+                  port = { number = 80 }
+                }
+              }
+            }
+          ]
+        }
+      }]
+    }
+  })
+
+  depends_on = [
+    kubernetes_namespace.tesslate,
+    kubectl_manifest.wildcard_certificate
+  ]
+}
+
+# -----------------------------------------------------------------------------
+# Network Policy for Project Namespaces (template)
+# This is applied dynamically by the backend when creating project namespaces
+# -----------------------------------------------------------------------------
+resource "kubernetes_network_policy" "tesslate_default" {
+  metadata {
+    name      = "tesslate-default-policy"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  spec {
+    pod_selector {}
+    policy_types = ["Ingress", "Egress"]
+
+    # Allow ingress from ingress-nginx namespace
+    ingress {
+      from {
+        namespace_selector {
+          match_labels = {
+            "kubernetes.io/metadata.name" = "ingress-nginx"
+          }
+        }
+      }
+    }
+
+    # Allow internal communication within namespace
+    ingress {
+      from {
+        pod_selector {}
+      }
+    }
+
+    # Allow all egress (for external APIs, npm, etc.)
+    egress {
+      to {
+        ip_block {
+          cidr = "0.0.0.0/0"
+        }
+      }
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Optional: RDS PostgreSQL (if not using K8s-managed postgres)
+# -----------------------------------------------------------------------------
+resource "aws_db_subnet_group" "tesslate" {
+  count = var.create_rds ? 1 : 0
+
+  name       = "${var.project_name}-${var.environment}-db-subnet"
+  subnet_ids = module.vpc.private_subnets
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-db-subnet"
+  })
+}
+
+resource "aws_security_group" "rds" {
+  count = var.create_rds ? 1 : 0
+
+  name_prefix = "${var.project_name}-${var.environment}-rds-"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [module.eks.node_security_group_id]
+    description     = "PostgreSQL from EKS nodes"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-rds-sg"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_db_instance" "tesslate" {
+  count = var.create_rds ? 1 : 0
+
+  identifier = "${var.project_name}-${var.environment}-postgres"
+
+  engine         = "postgres"
+  engine_version = "15"
+  instance_class = var.rds_instance_class
+
+  allocated_storage     = var.rds_allocated_storage
+  max_allocated_storage = var.rds_allocated_storage * 2
+  storage_type          = "gp3"
+  storage_encrypted     = true
+
+  db_name  = var.rds_database_name
+  username = var.rds_username
+  password = var.postgres_password
+
+  db_subnet_group_name   = aws_db_subnet_group.tesslate[0].name
+  vpc_security_group_ids = [aws_security_group.rds[0].id]
+
+  multi_az               = var.environment == "production"
+  publicly_accessible    = false
+  deletion_protection    = var.environment == "production"
+  skip_final_snapshot    = var.environment != "production"
+  final_snapshot_identifier = var.environment == "production" ? "${var.project_name}-${var.environment}-final-snapshot" : null
+
+  backup_retention_period = var.environment == "production" ? 7 : 1
+  backup_window           = "03:00-04:00"
+  maintenance_window      = "Mon:04:00-Mon:05:00"
+
+  performance_insights_enabled = var.environment == "production"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-postgres"
+  })
+}
+
+# -----------------------------------------------------------------------------
+# Generated Kustomize Replica Patch
+# Terraform generates a kustomize-compatible patch with replica counts
+# so that kustomize overlays don't hardcode replica values.
+# -----------------------------------------------------------------------------
+resource "local_file" "replicas_patch" {
+  content  = templatefile("${path.module}/templates/replicas-patch.yaml.tpl", {
+    backend_replicas  = var.backend_replicas
+    frontend_replicas = var.frontend_replicas
+    worker_replicas   = var.worker_replicas
+  })
+  filename = "${path.module}/../../overlays/aws-${var.environment}/generated-replicas-patch.yaml"
+}
+
+# Scale down K8s postgres if it exists (no-op if deployment doesn't exist)
+resource "null_resource" "postgres_scale_down" {
+  count = var.create_rds ? 1 : 0
+
+  provisioner "local-exec" {
+    command = "kubectl scale deployment/postgres -n tesslate --replicas=0 2>/dev/null || true"
+  }
+
+  depends_on = [kubernetes_namespace.tesslate]
+}
