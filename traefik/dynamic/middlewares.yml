@@ -1,0 +1,23 @@
+http:
+  middlewares:
+    # Strip /api prefix when routing to orchestrator
+    api-strip-prefix:
+      stripPrefix:
+        prefixes:
+          - "/api"
+
+    # Forward authentication middleware
+    # Protects devcontainer access by verifying user identity
+    devcontainer-auth:
+      forwardAuth:
+        address: "http://tesslate-orchestrator:8000/api/auth/verify-access"
+        # Pass authentication headers to verify endpoint
+        authRequestHeaders:
+          - "Authorization"
+          - "Cookie"
+        # Headers to copy from auth response back to client
+        authResponseHeaders:
+          - "X-User-ID"
+          - "X-User-Email"
+        # Trust forward headers from Traefik
+        trustForwardHeader: true

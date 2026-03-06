@@ -1,0 +1,163 @@
+graph TB
+    subgraph "Client Layer"
+        Browser[Web Browser]
+    end
+
+    subgraph "Frontend - React 19 + Vite + TypeScript"
+        UI[User Interface]
+        Monaco[Monaco Editor]
+        ChatUI[Chat UI]
+        XYFlow[XYFlow Graph]
+        APIClient[API Client]
+    end
+
+    subgraph "Backend - FastAPI + Python 3.11"
+        subgraph "API Routers"
+            AuthRouter[Auth Router]
+            ProjectRouter[Project Router]
+            ChatRouter[Chat Router]
+            DeployRouter[Deployment Router]
+            BillingRouter[Billing Router]
+        end
+
+        subgraph "Services Layer"
+            DockerOrch[Docker Compose<br/>Orchestrator]
+            K8sOrch[Kubernetes<br/>Orchestrator]
+            S3Manager[S3 Manager]
+            LiteLLMService[LiteLLM Service]
+            DeployService[Deployment Service]
+        end
+
+        subgraph "Agent System"
+            AgentFactory[Agent Factory]
+            StreamAgent[Stream Agent]
+            AgentTools[Agent Tools:<br/>Read/Write, Edit,<br/>Bash, Session,<br/>Fetch, Todos]
+        end
+
+        Middleware[Middleware:<br/>Auth, CORS,<br/>Error Handling]
+    end
+
+    subgraph "Data Layer"
+        PostgreSQL[(PostgreSQL<br/>Database)]
+        S3[S3/MinIO<br/>Object Storage]
+    end
+
+    subgraph "External Services"
+        LiteLLM[LiteLLM Router]
+        OpenAI[OpenAI]
+        Anthropic[Anthropic]
+        Qwen[Qwen]
+        Stripe[Stripe<br/>Payments]
+        OAuth[OAuth Providers:<br/>GitHub, Google]
+        ExtDeploy[External Platforms:<br/>Vercel, Netlify,<br/>Cloudflare]
+    end
+
+    subgraph "Container Orchestration"
+        subgraph "Development Mode"
+            Traefik[Traefik<br/>*.localhost]
+            DockerContainers[User Project<br/>Docker Containers]
+        end
+
+        subgraph "Production Mode - Kubernetes"
+            Ingress[NGINX Ingress<br/>*.saipriya.org]
+
+            subgraph "User Project Namespace 1"
+                NS1[proj-uuid-1]
+                PVC1[Persistent Volume]
+                FileManager1[File Manager Pod]
+                DevPod1[Dev Container Pod]
+            end
+
+            subgraph "User Project Namespace 2"
+                NS2[proj-uuid-2]
+                PVC2[Persistent Volume]
+                FileManager2[File Manager Pod]
+                DevPod2[Dev Container Pod]
+            end
+
+            subgraph "User Project Namespace N"
+                NSN[proj-uuid-n]
+                PVCN[Persistent Volume]
+                FileManagerN[File Manager Pod]
+                DevPodN[Dev Container Pod]
+            end
+        end
+    end
+
+    %% Client connections
+    Browser --> UI
+    UI --> Monaco
+    UI --> ChatUI
+    UI --> XYFlow
+    UI --> APIClient
+
+    %% Frontend to Backend
+    APIClient -->|HTTP/WebSocket| Middleware
+    Middleware --> AuthRouter
+    Middleware --> ProjectRouter
+    Middleware --> ChatRouter
+    Middleware --> DeployRouter
+    Middleware --> BillingRouter
+
+    %% Router to Services
+    ProjectRouter --> DockerOrch
+    ProjectRouter --> K8sOrch
+    ProjectRouter --> S3Manager
+    ChatRouter --> AgentFactory
+    DeployRouter --> DeployService
+    BillingRouter --> Stripe
+
+    %% Agent System
+    AgentFactory --> StreamAgent
+    StreamAgent --> LiteLLMService
+    StreamAgent --> AgentTools
+    AgentTools --> S3Manager
+
+    %% Services to Data
+    AuthRouter --> PostgreSQL
+    ProjectRouter --> PostgreSQL
+    ChatRouter --> PostgreSQL
+    DeployRouter --> PostgreSQL
+    BillingRouter --> PostgreSQL
+    S3Manager --> S3
+
+    %% LiteLLM to AI providers
+    LiteLLMService --> LiteLLM
+    LiteLLM --> OpenAI
+    LiteLLM --> Anthropic
+    LiteLLM --> Qwen
+
+    %% OAuth
+    AuthRouter --> OAuth
+
+    %% External Deployment
+    DeployService --> ExtDeploy
+
+    %% Orchestration
+    DockerOrch --> Traefik
+    Traefik --> DockerContainers
+    K8sOrch --> Ingress
+    K8sOrch --> NS1
+    K8sOrch --> NS2
+    K8sOrch --> NSN
+    Ingress --> DevPod1
+    Ingress --> DevPod2
+    Ingress --> DevPodN
+
+    %% S3 connections
+    DevPod1 -.->|Hydrate/Dehydrate| S3
+    DevPod2 -.->|Hydrate/Dehydrate| S3
+    DevPodN -.->|Hydrate/Dehydrate| S3
+
+    %% Styling
+    classDef frontend fill:#61dafb,stroke:#333,stroke-width:2px,color:#000
+    classDef backend fill:#009688,stroke:#333,stroke-width:2px,color:#fff
+    classDef data fill:#336791,stroke:#333,stroke-width:2px,color:#fff
+    classDef external fill:#ff9800,stroke:#333,stroke-width:2px,color:#000
+    classDef container fill:#326ce5,stroke:#333,stroke-width:2px,color:#fff
+
+    class UI,Monaco,ChatUI,XYFlow,APIClient frontend
+    class AuthRouter,ProjectRouter,ChatRouter,DeployRouter,BillingRouter,DockerOrch,K8sOrch,S3Manager,LiteLLMService,AgentFactory,StreamAgent,AgentTools backend
+    class PostgreSQL,S3 data
+    class LiteLLM,OpenAI,Anthropic,Qwen,Stripe,OAuth,ExtDeploy external
+    class Traefik,Ingress,DockerContainers,NS1,NS2,NSN,DevPod1,DevPod2,DevPodN container

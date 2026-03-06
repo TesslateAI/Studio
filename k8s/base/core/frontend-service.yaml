@@ -1,0 +1,21 @@
+# Tesslate Frontend Service
+# Exposes the React frontend within the cluster
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: tesslate-frontend-service
+  namespace: tesslate
+  labels:
+    app: tesslate-frontend
+    component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: tesslate-frontend
+    component: frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http

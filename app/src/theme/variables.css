@@ -1,0 +1,151 @@
+:root {
+  /* Brand Colors */
+  --primary: #f89521;
+  --primary-hover: #fa9f35;
+  --primary-rgb: 248, 149, 33;
+  --accent: #00d9ff;
+
+  /* Backgrounds */
+  --bg-dark: #111113;
+  --surface: #0a0a0a;
+  --text: #ffffff;
+  --border-color: hsl(var(--hue2), 12%, 20%);
+
+  /* Status Colors */
+  --status-purple: #a855f7;
+  --status-purple-rgb: 168, 85, 247;
+  --status-yellow: #f89521;
+  --status-yellow-rgb: 248, 149, 33;
+  --status-green: #22c55e;
+  --status-green-rgb: 34, 197, 94;
+  --status-blue: #3b82f6;
+  --status-blue-rgb: 59, 130, 246;
+  --status-red: #ef4444;
+  --status-red-rgb: 239, 68, 68;
+  --status-gray: #6b7280;
+  --status-gray-rgb: 107, 114, 128;
+
+  /* Spacing & Effects */
+  --hue1: 25;
+  --hue2: 240;
+  --radius: 22px;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  margin: 0;
+  overflow-x: hidden; /* Prevent horizontal scroll */
+  overflow-y: auto; /* Allow vertical scroll */
+}
+
+/*
+ * NOTE: body.light-mode and body.dark-mode CSS variable overrides were removed.
+ * All theme variables (--text, --surface, --bg-dark, etc.) are set dynamically
+ * by applyThemePreset() in themePresets.ts via :root inline styles.
+ * Hardcoding them here on body would override :root values and break theme switching.
+ */
+
+.font-heading {
+  font-family: 'DM Sans', sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Animation utilities */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Utility classes */
+.animate-slide-in {
+  animation: slideIn 0.4s var(--ease);
+}
+
+.animate-typing {
+  animation: typing 1.4s infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s infinite;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s infinite;
+}
+
+.animate-modal-in {
+  animation: modalIn 0.3s var(--ease);
+}

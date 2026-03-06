@@ -1,0 +1,97 @@
+sequenceDiagram
+    participant User
+    participant Browser
+    participant React as React Frontend
+    participant APIClient as API Client
+    participant Middleware
+    participant Router as FastAPI Router
+    participant Service
+    participant Database as PostgreSQL
+    participant Agent as Agent System
+
+    Note over User,Agent: Standard HTTP Request Flow
+
+    User->>Browser: Click / Type
+    Browser->>React: User Action
+    React->>APIClient: Call API Method
+    APIClient->>Middleware: HTTP Request<br/>(GET/POST/PUT/DELETE)<br/>+ Auth Header/Cookie
+
+    alt Authentication Check
+        Middleware->>Middleware: Verify JWT Token<br/>or Session Cookie
+        Middleware-->>APIClient: 401 Unauthorized
+        APIClient-->>React: Redirect to Login
+    else Authenticated
+        Middleware->>Router: Forward Request
+        Router->>Service: Process Business Logic
+        Service->>Database: Query/Update Data
+        Database-->>Service: Return Results
+        Service-->>Router: Service Response
+        Router-->>Middleware: HTTP Response
+        Middleware-->>APIClient: JSON Response
+        APIClient-->>React: Update State
+        React-->>Browser: Re-render UI
+        Browser-->>User: Display Result
+    end
+
+    Note over User,Agent: WebSocket Streaming Flow (Agent Chat)
+
+    User->>Browser: Send Chat Message
+    Browser->>React: Chat Input Submit
+    React->>APIClient: streamChatMessage()
+    APIClient->>Middleware: WebSocket Upgrade Request<br/>ws://api/chat/stream
+    Middleware->>Middleware: Verify Auth
+    Middleware->>Router: Establish WebSocket
+    Router->>Agent: create_agent_from_db_model()
+    Agent->>Agent: Load System Prompt<br/>+ Tools Configuration
+
+    loop Agent Execution Loop
+        Agent->>Agent: Call LLM with streaming
+        Agent-->>Router: Stream Event:<br/>thinking/tool_call/result
+        Router-->>APIClient: WebSocket Message
+        APIClient-->>React: Update Chat UI
+        React-->>Browser: Display Message
+
+        opt Tool Execution
+            Agent->>Service: Execute Tool<br/>(read_file, bash, etc.)
+            Service-->>Agent: Tool Result
+            Agent-->>Router: Stream Tool Result
+            Router-->>APIClient: WebSocket Message
+            APIClient-->>React: Update Chat UI
+        end
+    end
+
+    Agent-->>Router: Stream Final Response
+    Router-->>APIClient: WebSocket Message:<br/>done event
+    APIClient->>APIClient: Close WebSocket
+    React-->>Browser: Show Completion
+    Browser-->>User: Chat Complete
+
+    Note over User,Agent: Server-Sent Events Flow (Task Updates)
+
+    User->>Browser: Start Project Container
+    Browser->>React: Click "Start" Button
+    React->>APIClient: startProject(projectId)
+    APIClient->>Middleware: POST /api/projects/{id}/start
+    Middleware->>Router: Forward Request
+    Router->>Service: Background Task:<br/>start_project_containers()
+    Router-->>APIClient: 202 Accepted<br/>+ Task ID
+
+    par Background Execution
+        Service->>Service: Create K8s Resources
+        Service->>Database: Update Project Status
+    and SSE Streaming
+        APIClient->>Middleware: GET /api/tasks/{task_id}/stream<br/>Accept: text/event-stream
+        Middleware->>Router: SSE Connection
+        loop Task Progress
+            Service-->>Router: Task Update Event
+            Router-->>APIClient: SSE Message:<br/>data: {status, progress}
+            APIClient-->>React: Update Progress Bar
+            React-->>Browser: Show Progress
+        end
+        Service-->>Router: Task Complete Event
+        Router-->>APIClient: SSE: {status: "complete"}
+        APIClient->>APIClient: Close SSE Connection
+    end
+
+    React-->>Browser: Show Success
+    Browser-->>User: Container Running

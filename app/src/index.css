@@ -1,0 +1,597 @@
+@import 'tailwindcss';
+
+@layer base {
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes typing {
+    0%,
+    60%,
+    100% {
+      transform: translateY(0);
+      opacity: 0.5;
+    }
+    30% {
+      transform: translateY(-10px);
+      opacity: 1;
+    }
+  }
+}
+
+:root {
+  /* === BRAND COLORS === */
+  --primary: #f89521;
+  --primary-hover: #fa9f35;
+  --primary-rgb: 248, 149, 33;
+  --accent: #00d9ff;
+
+  /* === BACKGROUNDS === */
+  --bg: #111113;
+  --bg-dark: #111113; /* Legacy alias */
+  --surface: #1a1a1c;
+  --surface-hover: #252527;
+
+  /* === TEXT === */
+  --text: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.6);
+  --text-subtle: rgba(255, 255, 255, 0.4);
+
+  /* === BORDERS === */
+  --border: rgba(255, 255, 255, 0.1);
+  --border-hover: rgba(255, 255, 255, 0.2);
+  --border-color: rgba(255, 255, 255, 0.1); /* Legacy alias */
+
+  /* === SIDEBAR === */
+  --sidebar-bg: #0a0a0a;
+  --sidebar-text: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active: rgba(255, 255, 255, 0.1);
+
+  /* === INPUT === */
+  --input-bg: #1a1a1c;
+  --input-border: rgba(255, 255, 255, 0.1);
+  --input-border-focus: #f89521;
+  --input-text: #ffffff;
+  --input-placeholder: rgba(255, 255, 255, 0.4);
+
+  /* === SCROLLBAR === */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  --scrollbar-track: transparent;
+
+  /* === CODE === */
+  --code-inline-bg: rgba(248, 149, 33, 0.15);
+  --code-inline-text: #fbbf68;
+  --code-block-bg: rgba(0, 0, 0, 0.4);
+  --code-block-border: rgba(255, 255, 255, 0.1);
+  --code-block-text: #e2e2e2;
+
+  /* === STATUS COLORS === */
+  --status-error: #ef4444;
+  --status-error-rgb: 239, 68, 68;
+  --status-success: #22c55e;
+  --status-success-rgb: 34, 197, 94;
+  --status-warning: #f59e0b;
+  --status-warning-rgb: 245, 158, 11;
+  --status-info: #3b82f6;
+  --status-info-rgb: 59, 130, 246;
+
+  /* Legacy status variable names */
+  --status-red: #ef4444;
+  --status-red-rgb: 239, 68, 68;
+  --status-green: #22c55e;
+  --status-green-rgb: 34, 197, 94;
+  --status-yellow: #f59e0b;
+  --status-yellow-rgb: 245, 158, 11;
+  --status-blue: #3b82f6;
+  --status-blue-rgb: 59, 130, 246;
+  --status-purple: #a855f7;
+  --status-purple-rgb: 168, 85, 247;
+  --status-gray: #6b7280;
+  --status-gray-rgb: 107, 114, 128;
+
+  /* === SHADOWS === */
+  --shadow-small: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-medium: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --shadow-large: 0 10px 15px rgba(0, 0, 0, 0.3);
+
+  /* === TYPOGRAPHY === */
+  --font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-mono: JetBrains Mono, Menlo, Monaco, 'Courier New', monospace;
+  --font-size-base: 14px;
+  --line-height: 1.5;
+
+  /* === SPACING / RADIUS === */
+  --radius-small: 4px;
+  --radius-medium: 6px;
+  --radius-large: 8px;
+  --radius-xl: 12px;
+  --radius: 12px; /* Default radius */
+
+  /* === ANIMATION === */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --easing: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Legacy utility variables */
+  --hue1: 25;
+  --hue2: 240;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark Mode (default) - CSS variables are set dynamically by applyThemePreset() */
+body.dark-mode {
+  background-color: var(--bg);
+  color: var(--text);
+  color-scheme: dark;
+}
+
+/* Light Mode - CSS variables are set dynamically by applyThemePreset() */
+body.light-mode {
+  background-color: var(--bg);
+  color: var(--text);
+  color-scheme: light;
+}
+
+/* Hide dark-mode-only elements in light mode */
+body.light-mode .dark-mode-only {
+  display: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Native <select>/<option> elements don't inherit CSS variables well.
+   Force dark backgrounds + light text so dropdowns aren't white-on-white. */
+select option {
+  background-color: var(--surface, #1a1a1c);
+  color: var(--text, #ffffff);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom utilities */
+.bg-gradient-radial {
+  background-image: radial-gradient(var(--tw-gradient-stops));
+}
+
+.pause-animations * {
+  animation-play-state: paused !important;
+}
+
+/* Custom scrollbar - Uses theme CSS variables */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track, transparent);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, rgba(255, 255, 255, 0.2));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, rgba(255, 255, 255, 0.3));
+}
+
+/* Firefox scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.2))
+    var(--scrollbar-track, transparent);
+}
+
+/* Custom scrollbar utilities */
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thumb-orange-200\/50::-webkit-scrollbar-thumb {
+  background-color: rgba(254, 215, 170, 0.5);
+  border-radius: 3px;
+}
+
+.scrollbar-track-transparent::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/* Enhanced animations for smooth UI */
+/* Ensure Tailwind's animate-spin works */
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
+/* Typing indicator animation */
+.animate-typing {
+  animation: typing 1.4s ease-in-out infinite;
+}
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-top {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-bottom {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-left {
+  from {
+    transform: translateX(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-right {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-in {
+  animation-fill-mode: both;
+}
+
+.fade-in {
+  animation-name: fade-in;
+}
+
+.slide-in-from-top {
+  animation-name: slide-in-from-top;
+}
+
+.slide-in-from-bottom {
+  animation-name: slide-in-from-bottom;
+}
+
+.slide-in-from-left {
+  animation-name: slide-in-from-left;
+}
+
+.slide-in-from-right {
+  animation-name: slide-in-from-right;
+}
+
+.scale-in {
+  animation-name: scale-in;
+}
+
+.duration-300 {
+  animation-duration: 300ms;
+}
+
+.duration-500 {
+  animation-duration: 500ms;
+}
+
+.duration-700 {
+  animation-duration: 700ms;
+}
+
+/* Smooth transitions for interactive elements */
+button,
+a,
+input,
+select,
+textarea {
+  transition-property:
+    color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow,
+    transform, filter, backdrop-filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Mermaid Diagram Styles */
+.mermaid-container {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.mermaid-container svg {
+  height: auto !important;
+  max-width: none !important;
+  display: block;
+}
+
+/* Mermaid diagram scrollbar - more visible */
+.diagram-scroll-container {
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary) transparent;
+}
+
+.diagram-scroll-container::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.diagram-scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.diagram-scroll-container::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 6px;
+  border: 2px solid var(--surface);
+}
+
+.diagram-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: #fa9f35;
+}
+
+.diagram-scroll-container::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.mermaid-container svg .node rect,
+.mermaid-container svg .node circle,
+.mermaid-container svg .node ellipse,
+.mermaid-container svg .node polygon {
+  stroke: var(--primary) !important;
+  fill: var(--surface) !important;
+}
+
+.mermaid-container svg .node text {
+  fill: var(--text) !important;
+}
+
+.mermaid-container svg .edgeLabel {
+  background-color: var(--surface) !important;
+  color: var(--text) !important;
+}
+
+.mermaid-container svg .edgeLabel rect {
+  fill: var(--surface) !important;
+}
+
+.mermaid-container svg .edgeLabel text {
+  fill: var(--text) !important;
+}
+
+.mermaid-container svg .edgePath .path {
+  stroke: var(--primary) !important;
+}
+
+.mermaid-container svg {
+  background-color: transparent !important;
+}
+
+/* Tiptap Editor Styles
+   editorProps.attributes.class puts both .tiptap-editor and .ProseMirror on
+   the SAME element, so selectors use .tiptap-editor.ProseMirror (no space). */
+.tiptap-editor {
+  color: var(--text);
+}
+
+.tiptap-editor.ProseMirror {
+  outline: none;
+  min-height: 400px;
+  padding: 1rem;
+}
+
+.tiptap-editor.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  height: 0;
+}
+
+.tiptap-editor.ProseMirror h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor.ProseMirror h2 {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor.ProseMirror h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor.ProseMirror p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.75;
+}
+
+.tiptap-editor.ProseMirror ul,
+.tiptap-editor.ProseMirror ol {
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tiptap-editor.ProseMirror ul {
+  list-style-type: disc;
+}
+
+.tiptap-editor.ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.tiptap-editor.ProseMirror li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.tiptap-editor.ProseMirror code {
+  background-color: var(--code-inline-bg, rgba(248, 149, 33, 0.1));
+  color: var(--code-inline-text, #f89521);
+  padding: 0.2em 0.4em;
+  border-radius: var(--radius-small, 4px);
+  font-family: var(--font-family-mono, 'JetBrains Mono', 'Fira Code', 'Consolas', monospace);
+  font-size: 0.9em;
+}
+
+.tiptap-editor.ProseMirror pre {
+  background-color: var(--code-block-bg, rgba(0, 0, 0, 0.4));
+  border: 1px solid var(--code-block-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-medium, 8px);
+  padding: 1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  overflow-x: auto;
+}
+
+.tiptap-editor.ProseMirror pre code {
+  background-color: transparent;
+  color: var(--code-block-text, #e2e2e2);
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.875em;
+  line-height: 1.7;
+}
+
+.tiptap-editor.ProseMirror blockquote {
+  border-left: 4px solid var(--primary);
+  padding-left: 1rem;
+  margin-left: 0;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-style: italic;
+}
+
+.tiptap-editor.ProseMirror strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tiptap-editor.ProseMirror em {
+  font-style: italic;
+}
+
+.tiptap-editor.ProseMirror a {
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.tiptap-editor.ProseMirror a:hover {
+  color: #fa9f35;
+}
+
+/* Prevent mobile zoom on input focus while maintaining accessibility */
+/* Mobile browsers zoom if font-size < 16px, so we ensure inputs are at least 16px on mobile */
+@media screen and (max-width: 768px) {
+  input[type='text'],
+  input[type='email'],
+  input[type='password'],
+  input[type='tel'],
+  input[type='search'],
+  input[type='url'],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}

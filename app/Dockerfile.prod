@@ -1,0 +1,50 @@
+# Build stage
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm install --force
+
+# Copy source and build (no build args needed - config is runtime!)
+COPY . .
+RUN npx vite build
+
+# Production stage
+FROM nginx:alpine
+
+# Copy built assets
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy runtime config template (will be processed at container startup)
+COPY --from=builder /app/public/config.js.template /etc/nginx/templates/config.js.template
+
+# Copy custom entrypoint that generates config.js before starting nginx
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+# Copy nginx config for SPA routing
+RUN echo 'server { \
+    listen 80; \
+    server_name _; \
+    root /usr/share/nginx/html; \
+    index index.html; \
+    location / { \
+        try_files $uri $uri/ /index.html; \
+    } \
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ { \
+        expires 1y; \
+        add_header Cache-Control "public, immutable"; \
+    } \
+}' > /etc/nginx/conf.d/default.conf
+
+# Set default values for runtime config (can be overridden at container startup)
+ENV VITE_API_URL=""
+ENV VITE_PUBLIC_POSTHOG_KEY=""
+ENV VITE_PUBLIC_POSTHOG_HOST="https://app.posthog.com"
+
+EXPOSE 80
+
+# Use custom entrypoint that generates config.js from env vars, then starts nginx
+ENTRYPOINT ["/docker-entrypoint.sh"]

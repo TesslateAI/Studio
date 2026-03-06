@@ -1,0 +1,143 @@
+{
+  "description": "Golden test cases for code patching - expected input/output pairs for search/replace operations",
+  "exact_matches": [
+    {
+      "id": "simple_string_replacement",
+      "description": "Simple string replacement with exact match",
+      "original": "const color = 'blue';\nconst size = 10;",
+      "search": "const color = 'blue';",
+      "replace": "const color = 'green';",
+      "expected": {
+        "success": true,
+        "content": "const color = 'green';\nconst size = 10;",
+        "match_method": "exact"
+      }
+    },
+    {
+      "id": "function_replacement",
+      "description": "Replace entire function",
+      "original": "function greet(name) {\n  return 'Hello, ' + name;\n}\n\nfunction farewell() {\n  return 'Goodbye!';\n}",
+      "search": "function greet(name) {\n  return 'Hello, ' + name;\n}",
+      "replace": "function greet(name) {\n  return `Hello, ${name}!`;\n}",
+      "expected": {
+        "success": true,
+        "content": "function greet(name) {\n  return `Hello, ${name}!`;\n}\n\nfunction farewell() {\n  return 'Goodbye!';\n}",
+        "match_method": "exact"
+      }
+    },
+    {
+      "id": "jsx_component_replacement",
+      "description": "Replace JSX component",
+      "original": "<Button onClick={handleClick}>\n  Click me\n</Button>",
+      "search": "<Button onClick={handleClick}>\n  Click me\n</Button>",
+      "replace": "<Button onClick={handleClick} variant=\"primary\">\n  Click me\n</Button>",
+      "expected": {
+        "success": true,
+        "match_method": "exact"
+      }
+    }
+  ],
+  "fuzzy_matches": [
+    {
+      "id": "trailing_whitespace_difference",
+      "description": "Match despite trailing whitespace differences",
+      "original": "function foo() {  \n  return 1;  \n}",
+      "search": "function foo() {\n  return 1;\n}",
+      "replace": "function foo() {\n  return 2;\n}",
+      "expected": {
+        "success": true,
+        "match_method_contains": "trimmed"
+      }
+    },
+    {
+      "id": "indentation_difference",
+      "description": "Match with different indentation",
+      "original": "    const x = 1;\n    const y = 2;",
+      "search": "const x = 1;\nconst y = 2;",
+      "replace": "const x = 10;\nconst y = 20;",
+      "expected": {
+        "success": true,
+        "match_method_contains": "normalized"
+      }
+    }
+  ],
+  "no_match_cases": [
+    {
+      "id": "completely_different_content",
+      "description": "Search block not in file at all",
+      "original": "function calculateTotal(items) {\n  return items.reduce((sum, item) => sum + item.price, 0);\n}",
+      "search": "class UserAuthentication {\n  constructor() { this.token = null; }\n}",
+      "replace": "class UserAuth {\n  constructor() { this.jwt = null; }\n}",
+      "expected": {
+        "success": false,
+        "error_contains": "Could not find"
+      }
+    },
+    {
+      "id": "partial_match_not_enough",
+      "description": "Partial match that doesn't meet threshold",
+      "original": "function processData(input) {\n  return input.trim();\n}",
+      "search": "function handleData(value) {\n  return value.strip();\n}",
+      "replace": "function handleData(value) {\n  return value.clean();\n}",
+      "expected": {
+        "success": false,
+        "error_contains": "Could not find"
+      }
+    }
+  ],
+  "multi_edit_cases": [
+    {
+      "id": "sequential_edits",
+      "description": "Multiple edits applied sequentially",
+      "original": "A\nB\nC",
+      "edits": [
+        {"search": "A", "replace": "X"},
+        {"search": "X", "replace": "Y"}
+      ],
+      "expected": {
+        "success": true,
+        "content": "Y\nB\nC",
+        "edit_count": 2
+      }
+    },
+    {
+      "id": "independent_edits",
+      "description": "Multiple independent edits",
+      "original": "const a = 1;\nconst b = 2;\nconst c = 3;",
+      "edits": [
+        {"search": "const a = 1;", "replace": "const a = 10;"},
+        {"search": "const c = 3;", "replace": "const c = 30;"}
+      ],
+      "expected": {
+        "success": true,
+        "content": "const a = 10;\nconst b = 2;\nconst c = 30;",
+        "edit_count": 2
+      }
+    }
+  ],
+  "special_characters": [
+    {
+      "id": "regex_special_chars",
+      "description": "Content with regex special characters",
+      "original": "const pattern = /[a-z]+/gi;",
+      "search": "const pattern = /[a-z]+/gi;",
+      "replace": "const pattern = /[a-zA-Z0-9]+/gi;",
+      "expected": {
+        "success": true,
+        "content": "const pattern = /[a-zA-Z0-9]+/gi;",
+        "match_method": "exact"
+      }
+    },
+    {
+      "id": "quotes_and_escapes",
+      "description": "Content with various quotes and escapes",
+      "original": "const str = \"Hello \\\"World\\\"\";\nconst str2 = 'It\\'s working';",
+      "search": "const str = \"Hello \\\"World\\\"\";",
+      "replace": "const str = \"Hello 'World'\";",
+      "expected": {
+        "success": true,
+        "match_method": "exact"
+      }
+    }
+  ]
+}

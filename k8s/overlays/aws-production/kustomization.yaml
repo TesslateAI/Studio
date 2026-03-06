@@ -1,0 +1,26 @@
+# AWS EKS Production Overlay
+# Deploy with: kubectl apply -k k8s/overlays/aws-production
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../aws-base
+
+patches:
+  - path: generated-replicas-patch.yaml
+
+images:
+  - name: tesslate-backend
+    newName: <ECR_REGISTRY>/tesslate-backend
+    newTag: production
+  - name: tesslate-frontend
+    newName: <ECR_REGISTRY>/tesslate-frontend
+    newTag: production
+  - name: tesslate-devserver
+    newName: <ECR_REGISTRY>/tesslate-devserver
+    newTag: production
+
+labels:
+  - pairs:
+      environment: production
+    includeSelectors: false

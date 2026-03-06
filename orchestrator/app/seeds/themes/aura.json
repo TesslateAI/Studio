@@ -1,0 +1,89 @@
+{
+  "id": "aura",
+  "name": "Aura Theme",
+  "mode": "dark",
+  "author": "Dalton Menezes",
+  "version": "1.0.0",
+  "description": "Beautiful dark theme with soft purple glow and warm peach accents",
+  "colors": {
+    "primary": "#a277ff",
+    "primaryHover": "#b899ff",
+    "primaryRgb": "162, 119, 255",
+    "accent": "#ffca85",
+    "background": "#15141b",
+    "surface": "#1c1b22",
+    "surfaceHover": "#26252e",
+    "text": "#ffffff",
+    "textMuted": "rgba(255, 255, 255, 0.6)",
+    "textSubtle": "rgba(255, 255, 255, 0.4)",
+    "border": "rgba(255, 255, 255, 0.08)",
+    "borderHover": "rgba(255, 255, 255, 0.15)",
+    "sidebar": {
+      "background": "#0f0e14",
+      "text": "#ffffff",
+      "border": "rgba(255, 255, 255, 0.06)",
+      "hover": "rgba(162, 119, 255, 0.08)",
+      "active": "rgba(162, 119, 255, 0.15)"
+    },
+    "input": {
+      "background": "#1c1b22",
+      "border": "rgba(255, 255, 255, 0.1)",
+      "borderFocus": "#a277ff",
+      "text": "#ffffff",
+      "placeholder": "rgba(255, 255, 255, 0.4)"
+    },
+    "scrollbar": {
+      "thumb": "rgba(162, 119, 255, 0.3)",
+      "thumbHover": "rgba(162, 119, 255, 0.5)",
+      "track": "transparent"
+    },
+    "code": {
+      "inlineBackground": "rgba(162, 119, 255, 0.15)",
+      "inlineText": "#c0a0ff",
+      "blockBackground": "rgba(0, 0, 0, 0.4)",
+      "blockBorder": "rgba(162, 119, 255, 0.2)",
+      "blockText": "#e2e2e2"
+    },
+    "status": {
+      "error": "#f87171",
+      "errorRgb": "248, 113, 113",
+      "success": "#4ade80",
+      "successRgb": "74, 222, 128",
+      "warning": "#fbbf24",
+      "warningRgb": "251, 191, 36",
+      "info": "#60a5fa",
+      "infoRgb": "96, 165, 250"
+    },
+    "shadow": {
+      "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+      "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+      "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+    }
+  },
+  "typography": {
+    "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+    "fontSizeBase": "14px",
+    "lineHeight": "1.5"
+  },
+  "spacing": {
+    "radiusSmall": "4px",
+    "radiusMedium": "6px",
+    "radiusLarge": "8px",
+    "radiusXl": "12px"
+  },
+  "animation": {
+    "durationFast": "150ms",
+    "durationNormal": "200ms",
+    "durationSlow": "300ms",
+    "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+  },
+  "category": "vibrant",
+  "tags": [
+    "dark",
+    "purple",
+    "peach",
+    "aura"
+  ],
+  "icon": "shooting-star"
+}

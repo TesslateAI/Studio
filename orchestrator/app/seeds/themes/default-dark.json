@@ -1,0 +1,97 @@
+{
+  "id": "default-dark",
+  "name": "Default Dark",
+  "mode": "dark",
+  "author": "Tesslate",
+  "version": "1.0.0",
+  "description": "The default Tesslate dark theme with orange accents",
+  "category": "general",
+  "tags": ["dark", "default", "neutral"],
+  "icon": "moon",
+
+  "colors": {
+    "primary": "#F89521",
+    "primaryHover": "#fa9f35",
+    "primaryRgb": "248, 149, 33",
+    "accent": "#00D9FF",
+
+    "background": "#111113",
+    "surface": "#0a0a0a",
+    "surfaceHover": "#1a1a1a",
+
+    "text": "#ffffff",
+    "textMuted": "rgba(255, 255, 255, 0.6)",
+    "textSubtle": "rgba(255, 255, 255, 0.4)",
+
+    "border": "rgba(255, 255, 255, 0.1)",
+    "borderHover": "rgba(255, 255, 255, 0.2)",
+
+    "sidebar": {
+      "background": "#0a0a0a",
+      "text": "#ffffff",
+      "border": "rgba(255, 255, 255, 0.06)",
+      "hover": "rgba(255, 255, 255, 0.05)",
+      "active": "rgba(248, 149, 33, 0.15)"
+    },
+
+    "input": {
+      "background": "#1a1a1a",
+      "border": "rgba(255, 255, 255, 0.1)",
+      "borderFocus": "#F89521",
+      "text": "#ffffff",
+      "placeholder": "rgba(255, 255, 255, 0.4)"
+    },
+
+    "scrollbar": {
+      "thumb": "rgba(255, 255, 255, 0.2)",
+      "thumbHover": "rgba(255, 255, 255, 0.3)",
+      "track": "transparent"
+    },
+
+    "code": {
+      "inlineBackground": "rgba(248, 149, 33, 0.1)",
+      "inlineText": "#F89521",
+      "blockBackground": "rgba(0, 0, 0, 0.4)",
+      "blockBorder": "rgba(255, 255, 255, 0.1)",
+      "blockText": "#e2e2e2"
+    },
+
+    "status": {
+      "error": "#ef4444",
+      "errorRgb": "239, 68, 68",
+      "success": "#22c55e",
+      "successRgb": "34, 197, 94",
+      "warning": "#f59e0b",
+      "warningRgb": "245, 158, 11",
+      "info": "#3b82f6",
+      "infoRgb": "59, 130, 246"
+    },
+
+    "shadow": {
+      "small": "0 1px 2px rgba(0, 0, 0, 0.3)",
+      "medium": "0 4px 6px rgba(0, 0, 0, 0.3)",
+      "large": "0 10px 15px rgba(0, 0, 0, 0.3)"
+    }
+  },
+
+  "typography": {
+    "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+    "fontSizeBase": "14px",
+    "lineHeight": "1.5"
+  },
+
+  "spacing": {
+    "radiusSmall": "4px",
+    "radiusMedium": "6px",
+    "radiusLarge": "8px",
+    "radiusXl": "12px"
+  },
+
+  "animation": {
+    "durationFast": "150ms",
+    "durationNormal": "200ms",
+    "durationSlow": "300ms",
+    "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+  }
+}

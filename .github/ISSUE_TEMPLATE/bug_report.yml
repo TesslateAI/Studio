@@ -1,0 +1,98 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "bug: [component] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "**Title format:** `bug: [component] description` — components: `frontend`, `backend`, `agent`, `infra`, `db`"
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened vs. what you expected to happen
+      placeholder: |
+        **What happened:**
+
+        **What I expected:**
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the issue
+      placeholder: |
+        1. Go to ...
+        2. Click on ...
+        3. See error ...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: Where did you encounter this?
+      multiple: true
+      options:
+        - Docker Compose
+        - Minikube
+        - AWS EKS
+        - Beta
+        - Production
+        - Other
+    validations:
+      required: false
+
+  - type: input
+    id: environment_other
+    attributes:
+      label: Other environment
+      description: If you selected "Other" above, specify here
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of the system is affected?
+      multiple: true
+      options:
+        - Frontend
+        - Backend
+        - Agent
+        - Infrastructure
+        - Database
+        - Other
+    validations:
+      required: false
+
+  - type: input
+    id: area_other
+    attributes:
+      label: Other affected area
+      description: If you selected "Other" above, specify here
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste relevant logs or error messages
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Attach screenshots or screen recordings that show the issue
+      placeholder: Drag and drop images here
+    validations:
+      required: false

@@ -1,0 +1,12 @@
+{
+  "include": ["app"],
+  "exclude": ["**/node_modules", "**/__pycache__", "alembic", "users", "template"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnusedImport": true,
+  "reportUnusedVariable": true,
+  "reportPrivateUsage": false,
+  "reportGeneralTypeIssues": true
+}

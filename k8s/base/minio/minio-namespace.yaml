@@ -1,0 +1,11 @@
+# MinIO Namespace
+# Isolated namespace for MinIO storage service
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio-system
+  labels:
+    name: minio-system
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: storage

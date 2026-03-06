@@ -1,0 +1,90 @@
+flowchart TD
+    Start([User sends message]) --> ReceiveMessage[Receive message via WebSocket]
+    ReceiveMessage --> LoadAgent[Load agent from database<br/>AgentFactory.create_agent_from_db_model]
+
+    LoadAgent --> CheckAgentType{Agent Type?}
+
+    CheckAgentType -->|marketplace_agent_id| LoadMarketplace[Load MarketplaceAgent model<br/>from database]
+    CheckAgentType -->|No agent_id| LoadDefault[Use default StreamAgent]
+
+    LoadMarketplace --> ConfigureAgent[Configure Agent:<br/>- System prompt<br/>- Temperature<br/>- Max tokens<br/>- Model name]
+    LoadDefault --> ConfigureAgent
+
+    ConfigureAgent --> LoadTools[Load Agent Tools:<br/>- read_write_tool<br/>- edit_tool<br/>- bash_tool<br/>- session_tool<br/>- fetch_tool<br/>- todos_tool<br/>- metadata_tool]
+
+    LoadTools --> CheckStrategy{Agent Strategy?}
+
+    CheckStrategy -->|stream| StreamPath[StreamAgent Path]
+    CheckStrategy -->|iterative| IterativePath[IterativeAgent Path]
+    CheckStrategy -->|react| ReActPath[ReActAgent Path]
+
+    StreamPath --> BuildPrompt[Build Prompt:<br/>- System prompt<br/>- Chat history<br/>- User message<br/>- Tool definitions]
+    IterativePath --> BuildPrompt
+    ReActPath --> BuildPrompt
+
+    BuildPrompt --> CallLLM[Call LiteLLM with streaming<br/>litellm.completion stream=True]
+
+    CallLLM --> StreamChunk{Receive<br/>stream chunk}
+
+    StreamChunk -->|Text delta| EmitThinking[Emit 'thinking' event<br/>with text delta]
+    EmitThinking --> StreamChunk
+
+    StreamChunk -->|Tool call| ExtractTool[Extract tool call:<br/>- tool name<br/>- tool arguments]
+
+    ExtractTool --> CheckDangerous{Is tool<br/>dangerous?}
+
+    CheckDangerous -->|Yes - Bash/Session| CheckApproval{Approval<br/>required?}
+    CheckDangerous -->|No - Read/Write/Edit| ExecuteTool
+
+    CheckApproval -->|Auto-approve ON| ExecuteTool[Execute Tool]
+    CheckApproval -->|Auto-approve OFF| RequestApproval[Emit 'approval_required' event<br/>Wait for user response]
+
+    RequestApproval --> UserResponse{User<br/>approves?}
+    UserResponse -->|Yes| ExecuteTool
+    UserResponse -->|No| SkipTool[Skip tool execution<br/>Return error to LLM]
+
+    ExecuteTool --> EmitToolCall[Emit 'tool_call' event<br/>with tool name + args]
+    EmitToolCall --> RunTool[Run tool function]
+
+    RunTool --> CheckToolError{Tool<br/>error?}
+
+    CheckToolError -->|Error| EmitToolError[Emit 'tool_result' event<br/>with error message]
+    CheckToolError -->|Success| EmitToolSuccess[Emit 'tool_result' event<br/>with success data]
+
+    EmitToolError --> AddToContext[Add tool result to context]
+    EmitToolSuccess --> AddToContext
+    SkipTool --> AddToContext
+
+    AddToContext --> CheckIterative{More iterations<br/>needed?}
+
+    CheckIterative -->|Yes - StreamAgent| CallLLM
+    CheckIterative -->|Yes - IterativeAgent| CheckMaxIterations{Max iterations<br/>reached?}
+    CheckIterative -->|Yes - ReActAgent| CheckReActDone{Task<br/>complete?}
+
+    CheckMaxIterations -->|No| CallLLM
+    CheckMaxIterations -->|Yes| EmitMaxIterations[Emit 'error' event:<br/>Max iterations reached]
+
+    CheckReActDone -->|No| CallLLM
+    CheckReActDone -->|Yes| FinalResponse
+
+    StreamChunk -->|End of stream| FinalResponse[Emit 'response' event<br/>with final text]
+
+    FinalResponse --> SaveToDatabase[Save message to database:<br/>- User message<br/>- Agent response<br/>- Tool calls<br/>- Tokens used]
+
+    SaveToDatabase --> EmitDone[Emit 'done' event]
+    EmitDone --> End([Complete])
+
+    EmitMaxIterations --> End
+
+    %% Styling
+    classDef startEnd fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    classDef process fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    classDef decision fill:#ff9800,stroke:#333,stroke-width:2px,color:#000
+    classDef error fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
+    classDef emit fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+
+    class Start,End startEnd
+    class ReceiveMessage,LoadAgent,LoadMarketplace,LoadDefault,ConfigureAgent,LoadTools,BuildPrompt,CallLLM,ExtractTool,ExecuteTool,RunTool,AddToContext,SaveToDatabase process
+    class CheckAgentType,CheckStrategy,StreamChunk,CheckDangerous,CheckApproval,UserResponse,CheckToolError,CheckIterative,CheckMaxIterations,CheckReActDone decision
+    class EmitMaxIterations error
+    class EmitThinking,EmitToolCall,EmitToolSuccess,EmitToolError,RequestApproval,FinalResponse,EmitDone emit

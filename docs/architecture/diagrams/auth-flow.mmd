@@ -1,0 +1,156 @@
+flowchart TD
+    Start([User visits Tesslate Studio]) --> CheckAuth{Authenticated?}
+
+    CheckAuth -->|No| LoginPage[Show Login Page]
+    CheckAuth -->|Yes| Dashboard[Show Dashboard]
+
+    LoginPage --> ChooseMethod{Auth Method?}
+
+    %% Email/Password + 2FA Flow
+    ChooseMethod -->|Email/Password| EmailLogin[Enter credentials]
+    EmailLogin --> SubmitLogin[POST /api/auth/login]
+    SubmitLogin --> ValidateCreds{Credentials<br/>valid?}
+
+    ValidateCreds -->|No| LoginError[Show error message]
+    LoginError --> LoginPage
+
+    ValidateCreds -->|Yes| Generate2FA[Generate 6-digit code<br/>Hash with argon2<br/>Store in EmailVerificationCode]
+    Generate2FA --> SendEmail[Send code via email<br/>async, non-blocking]
+    SendEmail --> ReturnTempToken[Return:<br/>- requires_2fa: true<br/>- temp_token signed<br/>- method: email]
+    ReturnTempToken --> Show2FAInput[Show 2FA code input<br/>6 digit boxes]
+
+    Show2FAInput --> UserEntersCode[User enters 6-digit code]
+    UserEntersCode --> Submit2FA[POST /api/auth/2fa/verify<br/>temp_token + code]
+    Submit2FA --> ValidateToken{Temp token<br/>valid?}
+
+    ValidateToken -->|No - Expired/Invalid| TokenError[Show error:<br/>Token expired]
+    TokenError --> LoginPage
+
+    ValidateToken -->|Yes| VerifyCode{Code<br/>correct?}
+
+    VerifyCode -->|No| CheckAttempts{Attempts<br/>&lt; 5?}
+    CheckAttempts -->|Yes| CodeError[Show error:<br/>Wrong code]
+    CodeError --> Show2FAInput
+    CheckAttempts -->|No| MaxAttempts[Code invalidated<br/>Must resend]
+    MaxAttempts --> Show2FAInput
+
+    VerifyCode -->|Yes| MarkUsed[Mark code as used]
+    MarkUsed --> GenerateJWT[Generate JWT token:<br/>- user_id<br/>- email<br/>- exp: 7 days]
+    GenerateJWT --> ReturnToken[Return access_token]
+    ReturnToken --> StoreToken[Store token in localStorage]
+    StoreToken --> ForceCheckAuth[checkAuth force: true<br/>Update AuthContext]
+    ForceCheckAuth --> Dashboard
+
+    %% Resend Code
+    Show2FAInput --> ResendCode{Resend code?<br/>60s cooldown}
+    ResendCode -->|Yes| ResendRequest[POST /api/auth/2fa/resend<br/>temp_token]
+    ResendRequest --> Generate2FA
+
+    %% OAuth Flow (bypasses 2FA)
+    ChooseMethod -->|OAuth - GitHub| GitHubOAuth[Redirect to GitHub OAuth]
+    ChooseMethod -->|OAuth - Google| GoogleOAuth[Redirect to Google OAuth]
+
+    GitHubOAuth --> OAuthProvider[OAuth Provider Login Page]
+    GoogleOAuth --> OAuthProvider
+
+    OAuthProvider --> UserAuthorize{User<br/>authorizes?}
+
+    UserAuthorize -->|No| OAuthCancel[Redirect to login<br/>with error]
+    OAuthCancel --> LoginPage
+
+    UserAuthorize -->|Yes| OAuthCallback[Redirect to callback:<br/>/api/auth/oauth/callback]
+
+    OAuthCallback --> ExchangeCode[Exchange auth code<br/>for access token]
+    ExchangeCode --> GetUserInfo[Fetch user profile<br/>from provider API]
+    GetUserInfo --> CheckUserExists{User exists<br/>in DB?}
+
+    CheckUserExists -->|No| CreateUser[Create User record:<br/>- email<br/>- oauth_provider<br/>- oauth_id]
+    CheckUserExists -->|Yes| UpdateUser[Update last_login]
+
+    CreateUser --> GenerateSessionJWT
+    UpdateUser --> GenerateSessionJWT
+
+    GenerateSessionJWT[Generate JWT token] --> SetCookie[Set HTTP-only cookie:<br/>- Name: tesslate_session<br/>- Domain: .saipriya.org<br/>- Secure: true<br/>- SameSite: Lax<br/>- Max-Age: 7 days]
+
+    SetCookie --> StoreOAuthToken[Store OAuth credentials<br/>in DeploymentCredential table]
+    StoreOAuthToken --> RedirectDashboard[Redirect to dashboard]
+    RedirectDashboard --> Dashboard
+
+    %% Password Reset Flow
+    LoginPage --> ForgotPwd{Forgot<br/>password?}
+    ForgotPwd -->|Yes| ForgotPage[/forgot-password page]
+    ForgotPage --> SubmitForgot[POST /api/auth/forgot-password<br/>email]
+    SubmitForgot --> GenerateResetToken[Generate signed reset token<br/>1 hour expiry]
+    GenerateResetToken --> SendResetEmail[Send reset URL via email<br/>async, non-blocking]
+    SendResetEmail --> ShowSuccess[Always show success<br/>prevents email enumeration]
+
+    ShowSuccess --> UserClicksLink[User clicks email link]
+    UserClicksLink --> ResetPage[/reset-password?token=...]
+    ResetPage --> SubmitReset[POST /api/auth/reset-password<br/>token + new password]
+    SubmitReset --> ValidateResetToken{Token<br/>valid?}
+
+    ValidateResetToken -->|No| ResetError[Show error:<br/>Invalid/expired token]
+    ValidateResetToken -->|Yes| UpdatePassword[Update user.hashed_password]
+    UpdatePassword --> ResetSuccess[Show success message]
+    ResetSuccess --> LoginPage
+
+    %% Authenticated Requests
+    Dashboard --> MakeRequest[User makes API request]
+    MakeRequest --> CheckAuthType{Auth Type?}
+
+    CheckAuthType -->|Bearer Token| AddAuthHeader[Add header:<br/>Authorization: Bearer token]
+    CheckAuthType -->|Session Cookie| SendCookie[Cookie sent automatically]
+
+    AddAuthHeader --> APIMiddleware[FastAPI Middleware:<br/>Verify JWT]
+    SendCookie --> APIMiddleware
+
+    APIMiddleware --> VerifyJWT{JWT valid?}
+
+    VerifyJWT -->|No - Expired| Return401[Return 401 Unauthorized]
+    VerifyJWT -->|No - Invalid| Return401
+    VerifyJWT -->|Yes| ExtractUser[Extract user from JWT]
+
+    Return401 --> ClearAuth[Clear auth state]
+    ClearAuth --> LoginPage
+
+    ExtractUser --> AttachToRequest[Attach user to request.state]
+    AttachToRequest --> RouteHandler[Route handler executes]
+    RouteHandler --> CheckPermissions{User has<br/>permission?}
+
+    CheckPermissions -->|No| Return403[Return 403 Forbidden]
+    CheckPermissions -->|Yes| ProcessRequest[Process request]
+
+    ProcessRequest --> ReturnResponse[Return response]
+    Return403 --> Dashboard
+    ReturnResponse --> Dashboard
+
+    %% CSRF Protection
+    Dashboard --> CSRFCheck{POST/PUT/DELETE<br/>request?}
+    CSRFCheck -->|Yes| GenerateCSRF[Generate CSRF token:<br/>Include in form/header]
+    CSRFCheck -->|No| MakeRequest
+
+    GenerateCSRF --> MakeRequest
+    APIMiddleware --> ValidateCSRF{CSRF token<br/>valid?}
+    ValidateCSRF -->|No| Return403
+    ValidateCSRF -->|Yes| VerifyJWT
+
+    %% Logout
+    Dashboard --> LogoutAction{User clicks<br/>logout?}
+    LogoutAction -->|Yes| ClearTokens[Clear localStorage token<br/>Clear session cookie]
+    ClearTokens --> LoginPage
+
+    %% Styling
+    classDef startEnd fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    classDef process fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    classDef decision fill:#ff9800,stroke:#333,stroke-width:2px,color:#000
+    classDef error fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
+    classDef success fill:#8bc34a,stroke:#333,stroke-width:2px,color:#000
+    classDef external fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    classDef twofa fill:#00bcd4,stroke:#333,stroke-width:2px,color:#fff
+
+    class Start,Dashboard startEnd
+    class EmailLogin,SubmitLogin,Generate2FA,SendEmail,ReturnTempToken,Show2FAInput,UserEntersCode,Submit2FA,MarkUsed,GenerateJWT,ReturnToken,StoreToken,ForceCheckAuth,ResendRequest,OAuthCallback,ExchangeCode,GetUserInfo,CreateUser,UpdateUser,GenerateSessionJWT,SetCookie,StoreOAuthToken,SessionAuth,ExtractUserId,LoadUserSession,MakeRequest,AddAuthHeader,SendCookie,APIMiddleware,ExtractUser,AttachToRequest,RouteHandler,ProcessRequest,GenerateNewJWT,ReturnNewToken,RefreshToken,GenerateCSRF,ClearTokens,ForgotPage,SubmitForgot,GenerateResetToken,SendResetEmail,ShowSuccess,UserClicksLink,ResetPage,SubmitReset,UpdatePassword,ResetSuccess process
+    class CheckAuth,ChooseMethod,ValidateCreds,ValidateToken,VerifyCode,CheckAttempts,UserAuthorize,CheckUserExists,CheckAuthType,VerifyJWT,CheckPermissions,CSRFCheck,ValidateCSRF,LogoutAction,ForgotPwd,ValidateResetToken,ResendCode decision
+    class LoginError,TokenError,CodeError,MaxAttempts,OAuthCancel,CookieError,Return401,Return403,ClearAuth,ResetError error
+    class RedirectDashboard,ReturnResponse success
+    class GitHubOAuth,GoogleOAuth,OAuthProvider external

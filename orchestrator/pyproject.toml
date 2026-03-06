@@ -1,0 +1,147 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["users*", "k8s*", "template*"]
+
+[project]
+name = "tesslate-studio-orchestrator"
+version = "0.1.0"
+description = "Tesslate Studio - Open source full stack software builder - Backend Orchestrator"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.6",
+    "sqlalchemy>=2.0.25",
+    "alembic>=1.13.1",
+    "aiofiles>=23.2.1",
+    "websockets>=12.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.5.3",
+    "pydantic-settings>=2.1.0",
+    "httpx>=0.26.0",
+    "jinja2>=3.1.3",
+    "asyncpg>=0.29.0",
+    "email-validator>=2.2.0",
+    "aiohttp>=3.9.0",
+    "kubernetes>=28.1.0",
+    "docker>=7.0.0",
+    "nanoid>=2.0.0",
+    # Authentication
+    "fastapi-users[sqlalchemy]>=13.0.0",
+    "httpx-oauth>=0.14.1",
+    "itsdangerous>=2.1.2",
+    "aiosmtplib>=3.0.0",
+    # Rate limiting
+    "slowapi>=0.1.9",
+    # Encryption
+    "cryptography>=41.0.0",
+    # Payment processing
+    "stripe>=7.0.0",
+    "tenacity>=9.1.2",
+    # AWS S3 for project storage
+    "boto3>=1.34.0",
+    # Redis for distributed caching, Pub/Sub, and horizontal scaling
+    "redis[hiredis]>=5.0.0",
+    # ARQ - async Redis task queue for agent worker fleet
+    "arq>=0.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "aiosqlite>=0.21.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=6.0.0",
+    "freezegun>=1.2.0",
+    "pytest-timeout>=2.2.0",
+    "ruff>=0.8.4",
+    "pyright>=1.1.391",
+]
+
+# ============================================================================
+# Ruff Configuration (Linting & Formatting)
+# ============================================================================
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults (FastAPI Depends)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ============================================================================
+# Pytest Configuration
+# ============================================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
+# Ignore broken test files referencing moved/deleted modules
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+ignore = [
+    "tests/agent/tools/test_patch_file_tool.py",
+    "tests/containers/test_container_system.py",
+    "tests/containers/test_multi_user_containers.py",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests",
+    "slow: Slow running tests",
+    "docker: Tests requiring Docker",
+    "kubernetes: Tests requiring Kubernetes",
+    "minikube: Tests requiring minikube cluster",
+    "mocked: Fully mocked tests (no containers required)",
+    "llm: Tests using real LLM (Llama-4-Maverick via LiteLLM)",
+    "deterministic: Determinism verification tests",
+    "oracle: Oracle tests (golden input/output verification)",
+    "oracle_agent: Agent oracle tests with scripted model responses",
+    "security: Security-related tests",
+]
+
+# ============================================================================
+# Coverage Configuration
+# ============================================================================
+[tool.coverage.run]
+source = ["app"]
+omit = ["*/tests/*", "*/__pycache__/*", "*/alembic/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

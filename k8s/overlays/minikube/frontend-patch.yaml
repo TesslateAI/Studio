@@ -1,0 +1,34 @@
+# Frontend Patches for Minikube
+# Uses local image with NGINX (from Dockerfile.prod)
+# Injects runtime config from ConfigMap and Secret
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-frontend
+  namespace: tesslate
+spec:
+  replicas: 1
+  template:
+    spec:
+      imagePullSecrets: []
+      containers:
+      - name: frontend
+        imagePullPolicy: Never
+        env:
+        - name: VITE_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: frontend-config
+              key: api-url
+        - name: VITE_PUBLIC_POSTHOG_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: POSTHOG_KEY
+              optional: true
+        - name: VITE_PUBLIC_POSTHOG_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: frontend-config
+              key: posthog-host

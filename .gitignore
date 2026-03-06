@@ -1,0 +1,199 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+*.cover
+.hypothesis/
+*.log
+.pytype/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+doc_collector.py
+
+# Node.js / Frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm
+.yarn-integrity
+*.tsbuildinfo
+.eslintcache
+repomix-output.xml
+.repomixignore
+# Build outputs
+dist/
+dist-ssr/
+build/
+*.local
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+.DS_Store
+Thumbs.db
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+.env.prod
+.env.minikube
+.tfvars
+
+# Docker
+*.pid
+docker-compose.override.yml
+.dockerignore.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+builder.db*
+orchestrator.db*
+
+# User-generated content
+users/
+orchestrator/users/
+orchestrator/backend/users/
+orchestrator/template/node_modules/
+orchestrator/backend/template/node_modules/
+
+# Base cache (pre-installed marketplace bases)
+base-cache/
+
+# Traefik
+traefik/acme.json
+traefik/dynamic/*
+!traefik/dynamic/routes.yml
+traefik/logs/
+
+# Test artifacts
+test-workspace/node_modules/
+test-workspace/dist/
+test-workspace/build/
+test-workspace/*.log
+coverage/
+*.lcov
+
+# Playwright E2E
+app/tests/e2e/.auth/
+app/playwright-report/
+app/test-results/
+
+# Service-specific paths to ignore
+# Orchestrator backend nested structure (temporary until cleaned up)
+orchestrator/backend/.venv/
+orchestrator/backend/.env
+orchestrator/backend/*.db
+
+# Note: ai-service has been removed - AI functionality is now built into orchestrator
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+~*
+_nul
+
+# Kubernetes deployment artifacts
+*.tar
+registry.conf
+registry.key
+registry.crt
+**/docr-secret.yaml
+k8s/manifests/**/secrets.yaml
+k8s/manifests/security/app-secrets.yaml
+k8s/manifests/security/s3-credentials.yaml
+k8s/manifests/secrets/s3-credentials.yaml
+k8s/manifests/database/postgres-secret.yaml
+k8s/.env
+k8s/.env.*
+!k8s/.env.example
+
+# Terraform
+# Ignore all .tfvars files (contain secrets)
+k8s/terraform/**/*.tfvars
+# Except template files (safe to commit)
+!k8s/terraform/**/*.tfvars.example
+!k8s/terraform/**/*.tfvars.template
+# Backend config files (.hcl) are safe to commit (no secrets)
+# Ignore state files
+k8s/terraform/**/*.tfstate
+k8s/terraform/**/*.tfstate.*
+k8s/terraform/**/tfplan
+k8s/terraform/**/.terraform/
+k8s/terraform/**/.terraform.lock.hcl
+k8s/terraform/**/crash.log
+k8s/terraform/**/override.tf
+k8s/terraform/**/override.tf.json
+k8s/terraform/**/*_override.tf
+k8s/terraform/**/*_override.tf.json
+
+# Terraform-generated kustomize patches
+k8s/overlays/*/generated-*.yaml
+
+# Claude AI
+.claude/settings.local.json
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Package manager locks (DO NOT IGNORE - needed for reproducible builds)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+# uv.lockbackups/
+nul
+
+# Code Analysis Output
+analysis-output/

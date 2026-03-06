@@ -1,0 +1,110 @@
+# AWS EKS Backend Deployment Patch (Shared)
+#
+# Secret-based env vars use envFrom to auto-mount ALL keys from each secret.
+# This eliminates manual sync — adding a key in terraform automatically
+# makes it available in the pod. Only static values and alias mappings
+# need explicit env entries.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+  namespace: tesslate
+spec:
+  template:
+    spec:
+      serviceAccountName: tesslate-backend-sa
+      containers:
+        - name: backend
+          imagePullPolicy: Always
+          # Mount ALL keys from secrets as env vars automatically.
+          # No manual sync needed — terraform adds a key, pod gets it.
+          envFrom:
+            - secretRef:
+                name: tesslate-app-secrets
+            - secretRef:
+                name: postgres-secret
+            - secretRef:
+                name: s3-credentials
+          env:
+            # Replace base env array entirely — envFrom handles all secrets,
+            # so we only need static values and alias mappings here.
+            - $patch: replace
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+            - name: KUBERNETES_NAMESPACE
+              value: "tesslate"
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            # JWT
+            - name: ALGORITHM
+              value: "HS256"
+            - name: ACCESS_TOKEN_EXPIRE_MINUTES
+              value: "30"
+            # Kubernetes settings
+            - name: K8S_NAMESPACE_PER_PROJECT
+              value: "true"
+            - name: K8S_ENABLE_NETWORK_POLICIES
+              value: "true"
+            - name: K8S_STORAGE_CLASS
+              value: "tesslate-block-storage"
+            - name: K8S_PVC_SIZE
+              value: "5Gi"
+            - name: K8S_INGRESS_CLASS
+              value: "nginx"
+            # Alias: K8S_INGRESS_DOMAIN reads APP_DOMAIN from secret
+            - name: K8S_INGRESS_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: APP_DOMAIN
+            - name: K8S_IMAGE_PULL_SECRET
+              value: ""
+            - name: K8S_IMAGE_PULL_POLICY
+              value: "Always"
+            - name: K8S_WILDCARD_TLS_SECRET
+              value: "tesslate-wildcard-tls"
+            # S3 - AWS native (IRSA handles auth, endpoint empty)
+            - name: S3_ENDPOINT_URL
+              value: ""
+            # Pod Affinity
+            - name: K8S_ENABLE_POD_AFFINITY
+              value: "true"
+            - name: K8S_AFFINITY_TOPOLOGY_KEY
+              value: "topology.kubernetes.io/zone"
+            # Hibernation
+            - name: K8S_HIBERNATION_IDLE_MINUTES
+              value: "30"
+            - name: K8S_HIBERNATION_GRACE_SECONDS
+              value: "120"
+            - name: K8S_DEHYDRATION_EXCLUDE_PATTERNS
+              value: "node_modules,.git,__pycache__,venv,.venv"
+            # Cookies
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: COOKIE_SAMESITE
+              value: "lax"
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "4000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3

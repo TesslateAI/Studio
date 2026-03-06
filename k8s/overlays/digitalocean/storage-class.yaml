@@ -1,0 +1,25 @@
+# =============================================================================
+# DigitalOcean Block Storage StorageClass
+# =============================================================================
+# Maps the abstract 'tesslate-block-storage' class to DO's block storage.
+# DO block storage is:
+# - ReadWriteOnce (RWO) only
+# - SSD-backed
+# - Automatically provisioned
+# - Min 1GB, charged per GB/month
+# =============================================================================
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: tesslate-block-storage
+  labels:
+    app.kubernetes.io/name: tesslate
+    app.kubernetes.io/component: storage
+provisioner: dobs.csi.digitalocean.com
+parameters:
+  # Use SSD-backed storage
+  fsType: ext4
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

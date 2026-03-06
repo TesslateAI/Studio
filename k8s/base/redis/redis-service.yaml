@@ -1,0 +1,20 @@
+# Redis Service
+# ClusterIP service for internal access from backend and worker pods
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: tesslate
+  labels:
+    app: redis
+    component: cache
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+  selector:
+    app: redis
+    component: cache
