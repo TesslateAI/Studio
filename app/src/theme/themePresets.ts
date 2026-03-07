@@ -133,7 +133,7 @@ export async function loadThemes(): Promise<void> {
         themesCache.set(theme.id, theme);
       }
       themesLoaded = true;
-      console.debug(`Loaded ${themes.length} themes from API`);
+
     } catch (error) {
       console.warn('Failed to load themes from API, using fallback:', error);
       // Add fallback theme so app still works
