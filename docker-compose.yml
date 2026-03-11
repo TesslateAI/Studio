@@ -327,6 +327,14 @@ services:
       retries: 3
       start_period: 30s
 
+  devserver:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile.devserver
+    image: tesslate-devserver:latest
+    entrypoint: ["true"]
+    restart: "no"
+
 networks:
   tesslate-network:
     name: tesslate-network
