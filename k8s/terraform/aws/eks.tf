@@ -154,10 +154,25 @@ module "eks" {
   # on which IAM identity runs terraform
   enable_cluster_creator_admin_permissions = false
 
-  # Explicit access entries — ensures both the terraform user and CI user
-  # always have cluster access regardless of who runs terraform
+  # Access entries:
+  #   - eks_deployer role: primary access path (users assume this role)
+  #   - <AWS_IAM_USER>: direct access for terraform providers (bootstrap)
+  #   - github_actions: CI/CD direct access (if enabled)
   access_entries = merge(
     {
+      eks_deployer_role = {
+        principal_arn = aws_iam_role.eks_deployer.arn
+        policy_associations = {
+          admin = {
+            policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = {
+              type = "cluster"
+            }
+          }
+        }
+      }
+      # Direct access for terraform providers — remove after migrating
+      # providers to assume_role
       terraform_user = {
         principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/<AWS_IAM_USER>"
         policy_associations = {

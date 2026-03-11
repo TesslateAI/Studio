@@ -38,6 +38,11 @@ output "cluster_endpoint" {
   value       = module.eks.cluster_endpoint
 }
 
+output "eks_deployer_role_arn" {
+  description = "IAM role ARN for EKS cluster access — assume this role for kubectl"
+  value       = aws_iam_role.eks_deployer.arn
+}
+
 output "cluster_certificate_authority_data" {
   description = "Base64 encoded certificate data for cluster authentication"
   value       = module.eks.cluster_certificate_authority_data

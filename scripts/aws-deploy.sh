@@ -63,17 +63,17 @@ info() {
 
 ensure_kubectl_context() {
     CLUSTER_NAME="tesslate-${ENVIRONMENT}-eks"
-    CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null || echo "")
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
+    ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER_NAME}-eks-deployer"
 
-    if [[ "$CURRENT_CONTEXT" != *"$CLUSTER_NAME"* ]]; then
-        info "Switching kubectl context to $CLUSTER_NAME..."
-        aws eks update-kubeconfig --region us-east-1 --name "$CLUSTER_NAME" --alias "$CLUSTER_NAME" >/dev/null 2>&1 \
-            || error "Failed to switch kubectl context. Does cluster '$CLUSTER_NAME' exist?"
-        success "✓ kubectl context set to $CLUSTER_NAME"
-    fi
+    info "Configuring kubectl for $CLUSTER_NAME (via role: ${CLUSTER_NAME}-eks-deployer)..."
+    aws eks update-kubeconfig --region us-east-1 --name "$CLUSTER_NAME" --alias "$CLUSTER_NAME" \
+        --role-arn "$ROLE_ARN" >/dev/null 2>&1 \
+        || error "Failed to configure kubectl. Does cluster '$CLUSTER_NAME' exist? Can you assume role '$ROLE_ARN'?"
+    success "✓ kubectl context set to $CLUSTER_NAME"
 
     if ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
-        error "Cannot reach cluster $CLUSTER_NAME. Check AWS credentials and VPN."
+        error "Cannot reach cluster $CLUSTER_NAME. Check AWS credentials and role permissions."
     fi
 }
 

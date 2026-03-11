@@ -579,6 +579,12 @@ variable "create_github_actions_user" {
   default     = false
 }
 
+variable "eks_admin_iam_arns" {
+  description = "IAM user/role ARNs allowed to assume the EKS deployer role for cluster access"
+  type        = list(string)
+  default     = []
+}
+
 # -----------------------------------------------------------------------------
 # Replica & Scaling Configuration
 # -----------------------------------------------------------------------------

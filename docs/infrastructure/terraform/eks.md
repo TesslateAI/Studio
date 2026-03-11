@@ -125,6 +125,18 @@ Managed by EKS module, allows:
 - Control plane → nodes (443, 10250)
 - Nodes → control plane (443)
 
+## Cluster Access (eks-deployer Role)
+
+EKS cluster access is managed via a dedicated `eks-deployer` IAM role rather than direct IAM user access entries. Users listed in `eks_admin_iam_arns` (in each environment's tfvars) can assume this role to get cluster admin access.
+
+**Role**: `tesslate-{env}-eks-eks-deployer`
+**Access Policy**: `AmazonEKSClusterAdminPolicy` (full cluster admin)
+**Trust Policy**: Allows `sts:AssumeRole` from ARNs in `var.eks_admin_iam_arns`
+
+The `aws-deploy.sh` script automatically assumes this role for all cluster operations (`deploy-k8s`, `build`, `reload`).
+
+**Full guide**: [EKS Cluster Access Guide](../../guides/eks-cluster-access.md)
+
 ## IRSA Roles
 
 ### VPC CNI Role

@@ -172,6 +172,38 @@ module "lb_controller_irsa" {
 }
 
 # =============================================================================
+# EKS Deployer Role — role-based cluster access
+# =============================================================================
+# Scoped role for EKS operations. Users in var.eks_admin_iam_arns can assume
+# this role to get cluster access via EKS access entries.
+#
+# Migration path:
+#   1. Apply with <AWS_IAM_USER> (has direct access entry) to create role
+#   2. Future: switch providers to assume_role, remove direct user entries
+# =============================================================================
+
+resource "aws_iam_role" "eks_deployer" {
+  name = "${local.cluster_name}-eks-deployer"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = var.eks_admin_iam_arns
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${local.cluster_name}-eks-deployer"
+  })
+}
+
+# =============================================================================
 # GitHub Actions CI/CD IAM User
 # =============================================================================
 # Creates an IAM user with access keys for GitHub Actions deploy workflows.
