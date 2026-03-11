@@ -359,6 +359,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 image=self.settings.k8s_devserver_image,
                 image_pull_policy=self.settings.k8s_image_pull_policy,
                 image_pull_secret=self.settings.k8s_image_pull_secret or None,
+                enable_pod_affinity=self.settings.k8s_enable_pod_affinity,
+                affinity_topology_key=self.settings.k8s_affinity_topology_key,
             )
             await self.k8s_client.create_deployment(file_manager, namespace)
 

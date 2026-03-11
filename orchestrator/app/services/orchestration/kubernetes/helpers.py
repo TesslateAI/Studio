@@ -161,6 +161,8 @@ def create_file_manager_deployment(
     image: str,
     image_pull_policy: str = "IfNotPresent",
     image_pull_secret: str = None,
+    enable_pod_affinity: bool = True,
+    affinity_topology_key: str = "kubernetes.io/hostname",
 ) -> client.V1Deployment:
     """
     Create file-manager deployment manifest.
@@ -221,6 +223,12 @@ def create_file_manager_deployment(
             run_as_non_root=True, run_as_user=1000, fs_group=1000
         ),
     )
+
+    # Add pod affinity if enabled (for shared RWO PVC - all pods must be on same node)
+    if enable_pod_affinity:
+        pod_spec.affinity = create_pod_affinity_spec(
+            project_id=str(project_id), topology_key=affinity_topology_key
+        )
 
     # Add image pull secret if provided
     if image_pull_secret:
