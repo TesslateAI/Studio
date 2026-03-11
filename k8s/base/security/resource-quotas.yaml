@@ -11,11 +11,11 @@ spec:
     # Pod limits
     pods: "20"
 
-    # Compute limits
-    requests.cpu: "8"
-    requests.memory: "16Gi"
-    limits.cpu: "16"
-    limits.memory: "32Gi"
+    # Compute limits (sized for rolling updates with maxSurge pods)
+    requests.cpu: "12"
+    requests.memory: "24Gi"
+    limits.cpu: "24"
+    limits.memory: "48Gi"
 
     # Storage limits
     persistentvolumeclaims: "10"
