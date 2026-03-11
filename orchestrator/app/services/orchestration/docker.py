@@ -1094,7 +1094,7 @@ class DockerOrchestrator(BaseOrchestrator):
         self,
         user_id: UUID,
         project_id: UUID,
-        container_name: str,
+        container_name: str | None,
         command: list[str],
         timeout: int = 120,
         working_dir: str | None = None,
@@ -1103,6 +1103,7 @@ class DockerOrchestrator(BaseOrchestrator):
         # Get container name from project
         # Docker Compose naming: {project_slug}-{service_name}-1
         from ...database import AsyncSessionLocal
+        from ...models import Container as ContainerModel
         from ...models import Project
 
         async with AsyncSessionLocal() as db:
@@ -1111,8 +1112,21 @@ class DockerOrchestrator(BaseOrchestrator):
             result = await db.execute(select(Project).where(Project.id == project_id))
             project = result.scalar_one_or_none()
 
+            # Resolve container_name when not provided
+            if not container_name:
+                result = await db.execute(
+                    select(ContainerModel.name)
+                    .where(ContainerModel.project_id == project_id)
+                    .order_by(ContainerModel.created_at)
+                    .limit(1)
+                )
+                container_name = result.scalar_one_or_none()
+
         if not project:
             raise RuntimeError(f"Project {project_id} not found")
+
+        if not container_name:
+            raise RuntimeError(f"No containers found for project {project_id}")
 
         service_name = self._sanitize_service_name(container_name)
         docker_container = f"{project.slug}-{service_name}"

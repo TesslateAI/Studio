@@ -210,13 +210,19 @@ class TestDeleteFile:
         client, _ = authenticated_client
         slug = _create_project(client, default_base_id)
 
-        # Use unauthenticated client
-        resp = api_client.request(
-            "DELETE",
-            f"/api/projects/{slug}/files",
-            json={"file_path": "file.txt"},
-        )
-        assert resp.status_code == 401
+        # Clear auth header to simulate unauthenticated request
+        # (api_client and authenticated_client share the same session)
+        saved_auth = api_client.headers.pop("Authorization", None)
+        try:
+            resp = api_client.request(
+                "DELETE",
+                f"/api/projects/{slug}/files",
+                json={"file_path": "file.txt"},
+            )
+            assert resp.status_code == 401
+        finally:
+            if saved_auth:
+                api_client.headers["Authorization"] = saved_auth
 
     def test_delete_default_is_directory_false(
         self, authenticated_client, default_base_id, mock_orchestrator
@@ -383,11 +389,17 @@ class TestRenameFile:
         client, _ = authenticated_client
         slug = _create_project(client, default_base_id)
 
-        resp = api_client.post(
-            f"/api/projects/{slug}/files/rename",
-            json={"old_path": "a.ts", "new_path": "b.ts"},
-        )
-        assert resp.status_code == 401
+        # Clear auth header to simulate unauthenticated request
+        saved_auth = api_client.headers.pop("Authorization", None)
+        try:
+            resp = api_client.post(
+                f"/api/projects/{slug}/files/rename",
+                json={"old_path": "a.ts", "new_path": "b.ts"},
+            )
+            assert resp.status_code == 401
+        finally:
+            if saved_auth:
+                api_client.headers["Authorization"] = saved_auth
 
     def test_rename_root_file_no_parent(
         self, authenticated_client, default_base_id, mock_orchestrator
@@ -505,11 +517,17 @@ class TestMkdir:
         client, _ = authenticated_client
         slug = _create_project(client, default_base_id)
 
-        resp = api_client.post(
-            f"/api/projects/{slug}/files/mkdir",
-            json={"dir_path": "src/new"},
-        )
-        assert resp.status_code == 401
+        # Clear auth header to simulate unauthenticated request
+        saved_auth = api_client.headers.pop("Authorization", None)
+        try:
+            resp = api_client.post(
+                f"/api/projects/{slug}/files/mkdir",
+                json={"dir_path": "src/new"},
+            )
+            assert resp.status_code == 401
+        finally:
+            if saved_auth:
+                api_client.headers["Authorization"] = saved_auth
 
     def test_mkdir_strips_leading_slash(
         self, authenticated_client, default_base_id, mock_orchestrator

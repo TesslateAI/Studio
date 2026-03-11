@@ -153,7 +153,7 @@ def mock_orchestrator():
     Only applies to tests that explicitly request this fixture.
     """
     with (
-        patch("app.services.orchestration.factory.get_orchestrator") as mock_get_orch,
+        patch("app.services.orchestration.get_orchestrator") as mock_get_orch,
         patch("app.routers.projects.makedirs_async") as mock_makedirs,
         patch("app.routers.projects.walk_directory_async") as mock_walk,
         patch("app.routers.projects.read_file_async") as mock_read,
