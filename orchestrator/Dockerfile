@@ -19,8 +19,7 @@ RUN apt-get update && apt-get install -y \
 COPY pyproject.toml ./
 COPY app ./app
 
-RUN pip install --no-cache-dir uv && \
-    uv pip install --system -e .
+RUN pip install --no-cache-dir -e .
 
 # Copy rest of application
 COPY . .

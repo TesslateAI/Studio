@@ -346,6 +346,11 @@ case "$COMMAND" in
         ECR_ACCOUNT="<AWS_ACCOUNT_ID>"
         ECR_REGISTRY="${ECR_ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com"
 
+        # Always build for linux/amd64 — EKS nodes are amd64.
+        # Without this, builds on Apple Silicon produce arm64 images that
+        # fail with "no match for platform in manifest" on EKS.
+        BUILD_PLATFORM="--platform linux/amd64"
+
         # Image definitions
         declare -A DOCKERFILES=(
             [backend]="orchestrator/Dockerfile"
@@ -382,6 +387,7 @@ case "$COMMAND" in
         info "Images:      $IMAGES"
         info "Registry:    $ECR_REGISTRY"
         info "Tag:         $ENVIRONMENT"
+        info "Platform:    linux/amd64"
         if [ "$USE_CACHE" = true ]; then
             info "Cache:       enabled"
         else
@@ -420,9 +426,8 @@ case "$COMMAND" in
 
                 info "[$img] Starting build ${FULL_TAG}..."
                 (
-                    docker build $CACHE_FLAG -t "$FULL_TAG" \
-                        -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" >>"$LOG_FILE" 2>&1 \
-                    && docker push "$FULL_TAG" >>"$LOG_FILE" 2>&1
+                    docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" \
+                        -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" --push >>"$LOG_FILE" 2>&1
                 ) &
                 BUILD_PIDS+=($!)
                 BUILD_IMGS+=("$img")
@@ -462,12 +467,9 @@ case "$COMMAND" in
                 fi
 
                 info "[$img] Building ${FULL_TAG}..."
-                docker build $CACHE_FLAG -t "$FULL_TAG" -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT"
-                success "[$img] ✓ Build complete"
-
-                info "[$img] Pushing..."
-                docker push "$FULL_TAG"
-                success "[$img] ✓ Push complete"
+                docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" \
+                    -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" --push
+                success "[$img] ✓ Build & push complete"
                 echo
             done
         fi

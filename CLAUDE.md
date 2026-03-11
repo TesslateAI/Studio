@@ -742,6 +742,7 @@ kubectl get pods -n tesslate
 ### Build & Deploy Images (Recommended)
 
 Use `aws-deploy.sh build` to build, push to ECR, and restart pods in one command.
+Images are **always built for `linux/amd64`** since EKS nodes are amd64.
 
 ```bash
 # Build all images (backend, frontend, devserver)
@@ -752,8 +753,12 @@ Use `aws-deploy.sh build` to build, push to ECR, and restart pods in one command
 ./scripts/aws-deploy.sh build production backend
 ./scripts/aws-deploy.sh build beta frontend backend
 
-# What it does: ECR login → docker build --no-cache → push → delete pod → wait for rollout → verify
+# What it does: ECR login → docker buildx build --platform linux/amd64 --no-cache → push → restart pods → verify
 ```
+
+**CRITICAL: Never build AWS images without `--platform linux/amd64`.**
+Builds on Apple Silicon without this flag produce arm64 images that fail with
+`no match for platform in manifest: not found` on amd64 EKS nodes.
 
 ### Deploy / Restart Pods
 

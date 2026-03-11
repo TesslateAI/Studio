@@ -116,13 +116,12 @@ Common Tasks:
 # Configure kubectl
 aws eks update-kubeconfig --region us-east-1 --name <EKS_CLUSTER_NAME>
 
-# Login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+# Build & deploy (recommended — handles ECR login, platform, push, pod restart)
+./scripts/aws-deploy.sh build production backend
 
-# Build, tag, push (ALWAYS use --no-cache)
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
-docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
+# Manual build (ALWAYS use --platform linux/amd64 — EKS nodes are amd64)
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+docker buildx build --platform linux/amd64 --no-cache -t <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:production -f orchestrator/Dockerfile orchestrator/ --push
 
 # Force pod restart (imagePullPolicy: Always pulls new image)
 kubectl delete pod -n tesslate -l app=tesslate-backend
@@ -265,12 +264,17 @@ tesslate-devserver:latest
 
 **Pull Policy**: `Always` (always check for new image)
 
-**Workflow**:
+**Workflow** (recommended — use `aws-deploy.sh build`):
+```bash
+./scripts/aws-deploy.sh build production backend frontend devserver
+```
+
+**Manual workflow**:
 1. Login: `aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin {registry}`
-2. Build: `docker build --no-cache -t {image}:latest -f {dockerfile} {context}`
-3. Tag: `docker tag {image}:latest {registry}/{image}:latest`
-4. Push: `docker push {registry}/{image}:latest`
-5. Force pod restart: `kubectl delete pod -n tesslate -l app={image}`
+2. Build + push: `docker buildx build --platform linux/amd64 --no-cache -t {registry}/{image}:{env} -f {dockerfile} {context} --push`
+3. Force pod restart: `kubectl delete pod -n tesslate -l app={image}`
+
+**CRITICAL: Always use `--platform linux/amd64`** — EKS nodes are amd64. Builds on Apple Silicon without this flag produce arm64 images that fail with `no match for platform in manifest`.
 
 **Why delete pod?**: Forces Kubernetes to pull new image (even with same :latest tag).
 
