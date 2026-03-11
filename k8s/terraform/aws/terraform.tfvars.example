@@ -1,8 +1,11 @@
 # =============================================================================
 # Tesslate Studio - AWS EKS Terraform Variables
 # =============================================================================
-# Copy this file to terraform.tfvars and fill in your values.
-# DO NOT commit terraform.tfvars to version control!
+# Copy this file to terraform.{environment}.tfvars and fill in your values.
+# DO NOT commit terraform.*.tfvars to version control!
+#
+# Download existing tfvars from AWS Secrets Manager:
+#   ./scripts/terraform/secrets.sh download production
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -11,14 +14,17 @@
 project_name = "tesslate"
 environment  = "production"
 aws_region   = "us-east-1"
+image_tag    = ""  # ECR image tag (defaults to environment name if empty)
 
 # -----------------------------------------------------------------------------
 # Domain Configuration (REQUIRED)
 # -----------------------------------------------------------------------------
 # Your primary domain (main website will be at this domain)
-domain_name = "your-domain.com"
+domain_name = "example.com"
 
-# User projects will be at: <container>.<project-slug>.your-domain.com
+# User projects will be at: <container>.<project-slug>.example.com
+# Optional: explicit wildcard domain (auto-derived from domain_name if empty)
+# wildcard_domain = ""
 
 # -----------------------------------------------------------------------------
 # Cloudflare Configuration (REQUIRED)
@@ -31,6 +37,9 @@ cloudflare_api_token = "your-cloudflare-api-token"
 
 # Optional: Specific zone ID (if you have multiple domains)
 cloudflare_zone_id = ""
+
+# Optional: Zone name for cert-manager DNS01 challenge (must match actual Cloudflare zone)
+# cloudflare_zone_name = ""
 
 # -----------------------------------------------------------------------------
 # VPC Configuration
@@ -48,6 +57,9 @@ eks_node_desired_size   = 2
 eks_node_min_size       = 1
 eks_node_max_size       = 5
 eks_node_disk_size      = 50
+eks_node_azs            = []   # Pin to specific AZs (e.g. ["us-east-1b"] for single-node beta)
+eks_spot_desired_size   = 1    # Set 0 to disable spot node group
+eks_spot_max_size       = 10
 
 # -----------------------------------------------------------------------------
 # S3 Configuration
@@ -60,7 +72,7 @@ s3_force_destroy = false  # Set true only for testing
 # -----------------------------------------------------------------------------
 # Set to true to use AWS RDS PostgreSQL instead of K8s-managed postgres
 create_rds            = false
-rds_instance_class    = "db.t3.small"
+rds_instance_class    = "db.t4g.small"
 rds_allocated_storage = 20
 rds_database_name     = "tesslate"
 rds_username          = "tesslate_admin"
@@ -81,32 +93,42 @@ app_secret_key = "your-app-secret-key"
 # -----------------------------------------------------------------------------
 # Master key for LiteLLM admin API access
 # Generate with: openssl rand -hex 32
-litellm_master_key         = "your-litellm-master-key"
-litellm_default_models     = "claude-sonnet-4.6,claude-opus-4.6"
+litellm_master_key             = "your-litellm-master-key"
+litellm_default_models         = "claude-sonnet-4.6,claude-opus-4.6"
 
 # LiteLLM database: true = RDS (production), false = K8s-managed PostgreSQL (dev/beta)
-litellm_create_rds         = false
-litellm_rds_instance_class = "db.t4g.micro"  # Only used when litellm_create_rds = true
+litellm_create_rds             = false
+litellm_rds_instance_class     = "db.t4g.micro"  # Only used when litellm_create_rds = true
+litellm_rds_allocated_storage  = 20               # Only used when litellm_create_rds = true
 # Generate with: openssl rand -hex 32
-litellm_db_password        = "your-litellm-db-password"
+litellm_db_password            = "your-litellm-db-password"
+
+# LiteLLM Docker image tag (pin for production stability)
+litellm_image_tag              = "main-v1.81.9-stable"
 
 # Set true to expose LiteLLM at litellm.{domain} (useful for testing/admin)
-litellm_public_access      = false
+litellm_public_access          = false
 
+# -----------------------------------------------------------------------------
+# AI Provider Keys
+# -----------------------------------------------------------------------------
 # AWS Bedrock API key for LiteLLM AI model access
 # Model config is in k8s/litellm/config.yaml (committed in repo)
-bedrock_api_key            = "your-bedrock-api-key"
-bedrock_aws_region         = "us-east-1"
+bedrock_api_key    = "your-bedrock-api-key"
+bedrock_aws_region = "us-east-1"
 
 # GCP Vertex AI (optional)
-vertex_project             = ""
-vertex_location            = "us-central1"
-vertex_credentials         = ""  # Base64-encoded service account JSON: cat sa-key.json | base64 -w0
+vertex_project     = ""
+vertex_location    = "us-central1"
+vertex_credentials = ""  # Base64-encoded service account JSON: cat sa-key.json | base64 -w0
+
+# NanoGPT (optional, OpenAI-compatible gateway)
+nanogpt_api_key    = ""
 
 # Azure OpenAI (optional)
-azure_api_key              = ""
-azure_api_base             = ""  # https://your-resource.openai.azure.com
-azure_api_version          = "2024-12-01-preview"
+azure_api_key      = ""
+azure_api_base     = ""  # https://your-resource.openai.azure.com
+azure_api_version  = "2024-12-01-preview"
 
 # -----------------------------------------------------------------------------
 # OAuth Configuration (Optional)
@@ -114,10 +136,27 @@ azure_api_version          = "2024-12-01-preview"
 # Google OAuth (https://console.cloud.google.com/apis/credentials)
 google_client_id     = ""
 google_client_secret = ""
+google_oauth_enabled = false
 
 # GitHub OAuth (https://github.com/settings/developers)
 github_client_id     = ""
 github_client_secret = ""
+github_oauth_enabled = false
+
+# -----------------------------------------------------------------------------
+# Deployment Provider OAuth (Optional - Vercel, Netlify)
+# -----------------------------------------------------------------------------
+# Vercel: Create OAuth app at https://vercel.com/account/oauth-apps
+vercel_client_id     = ""
+vercel_client_secret = ""
+
+# Netlify: Create OAuth app at https://app.netlify.com/user/applications
+netlify_client_id     = ""
+netlify_client_secret = ""
+
+# Fernet key for encrypting deployment credentials (optional, falls back to app_secret_key)
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+deployment_encryption_key = ""
 
 # -----------------------------------------------------------------------------
 # Stripe Configuration (Optional)
@@ -134,6 +173,23 @@ stripe_pro_annual_price_id   = ""
 stripe_ultra_annual_price_id = ""
 
 # -----------------------------------------------------------------------------
+# SMTP Configuration (Optional - Email / 2FA)
+# -----------------------------------------------------------------------------
+smtp_host         = ""
+smtp_port         = 587
+smtp_username     = ""
+smtp_password     = ""
+smtp_use_tls      = true
+smtp_sender_email = ""
+two_fa_enabled    = false
+
+# -----------------------------------------------------------------------------
+# Frontend Configuration (Optional - Analytics)
+# -----------------------------------------------------------------------------
+# posthog_host = "https://app.posthog.com"
+# posthog_key  = ""
+
+# -----------------------------------------------------------------------------
 # Feature Flags
 # -----------------------------------------------------------------------------
 enable_cluster_autoscaler = true
@@ -148,6 +204,23 @@ create_elasticache    = false
 elasticache_node_type = "cache.t4g.micro"
 
 # -----------------------------------------------------------------------------
+# Replica & Scaling Configuration
+# -----------------------------------------------------------------------------
+backend_replicas       = 2
+frontend_replicas      = 2
+worker_replicas        = 2
+nginx_ingress_replicas = 2
+coredns_replicas       = 2
+
+# -----------------------------------------------------------------------------
+# Backend Resource Limits
+# -----------------------------------------------------------------------------
+backend_cpu_request    = "500m"
+backend_memory_request = "1Gi"
+backend_cpu_limit      = "2000m"   # Beta: 2000m, Production: 4000m
+backend_memory_limit   = "2Gi"     # Beta: 2Gi, Production: 4Gi
+
+# -----------------------------------------------------------------------------
 # GitHub Actions CI/CD (Optional)
 # -----------------------------------------------------------------------------
 # Set true to create an IAM user with access keys for GitHub Actions.
@@ -156,3 +229,8 @@ elasticache_node_type = "cache.t4g.micro"
 #   terraform output -raw github_actions_secret_access_key
 # Then add as GitHub repo secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 # create_github_actions_user = true
+
+# IAM principals allowed to assume the EKS deployer role for cluster access
+# eks_admin_iam_arns = [
+#   "arn:aws:iam::123456789012:user/your-user"
+# ]
