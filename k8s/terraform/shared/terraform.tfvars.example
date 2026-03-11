@@ -1,8 +1,41 @@
 # =============================================================================
-# Shared Resources - Terraform Variables
+# Tesslate Shared Infrastructure - Terraform Variables
 # =============================================================================
-# These are NOT sensitive (no secrets). Safe to commit.
+# Copy this to terraform.shared.tfvars and fill in values.
+#
+# After populating, upload to AWS Secrets Manager:
+#   ./scripts/terraform/secrets.sh upload shared
 # =============================================================================
 
+# General
 project_name = "tesslate"
 aws_region   = "us-east-1"
+
+# VPC (isolated — does NOT share with production/beta)
+vpc_cidr = "10.1.0.0/16"
+
+# Domain
+domain_name = "tesslate.com"
+
+# Cloudflare
+cloudflare_api_token = ""
+cloudflare_zone_id   = ""
+cloudflare_zone_name = "tesslate.com"
+
+# EKS
+eks_cluster_version     = "1.35"
+eks_node_instance_types = ["t3.medium"]
+eks_node_desired_size   = 1
+eks_node_min_size       = 1
+eks_node_max_size       = 2
+eks_node_disk_size      = 30
+
+# EKS Access — IAM ARNs allowed to assume the eks-deployer role for kubectl access
+eks_admin_iam_arns = [
+  "arn:aws:iam::123:user/<AWS_IAM_USER>",
+]
+
+# Headscale
+headscale_image_tag = "0.28.0"
+headscale_subdomain = "headscale"
+headscale_base_domain   = "vpn.tesslate.com"

@@ -589,6 +589,11 @@ variable "eks_admin_iam_arns" {
   description = "IAM user/role ARNs allowed to assume the EKS deployer role for cluster access"
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = length(var.eks_admin_iam_arns) > 0
+    error_message = "eks_admin_iam_arns must contain at least one IAM ARN. The eks-deployer role trust policy cannot be empty."
+  }
 }
 
 # -----------------------------------------------------------------------------

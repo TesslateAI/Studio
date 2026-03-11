@@ -83,11 +83,14 @@ esac
 
 # Set paths and names based on environment
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ "$ENVIRONMENT" = "shared" ]; then
-  TFVARS_FILE="$SCRIPT_DIR/../../k8s/terraform/shared/terraform.shared.tfvars"
-else
-  TFVARS_FILE="$SCRIPT_DIR/../../k8s/terraform/aws/terraform.${ENVIRONMENT}.tfvars"
-fi
+case "$ENVIRONMENT" in
+  shared)
+    TFVARS_FILE="$SCRIPT_DIR/../../k8s/terraform/shared/terraform.shared.tfvars"
+    ;;
+  *)
+    TFVARS_FILE="$SCRIPT_DIR/../../k8s/terraform/aws/terraform.${ENVIRONMENT}.tfvars"
+    ;;
+esac
 SECRET_NAME="tesslate/terraform/${ENVIRONMENT}"
 
 # Check dependencies
@@ -144,8 +147,9 @@ cmd_download() {
   info "  Location: $TFVARS_FILE"
   info "  Variables: $VAR_COUNT"
   echo
+  TF_DIR_HINT=$(dirname "$TFVARS_FILE" | sed "s|.*/k8s/|k8s/|")
   info "Ready to use with:"
-  info "  cd k8s/terraform/aws"
+  info "  cd $TF_DIR_HINT"
   info "  terraform plan -var-file=\"terraform.${ENVIRONMENT}.tfvars\""
   echo
 }

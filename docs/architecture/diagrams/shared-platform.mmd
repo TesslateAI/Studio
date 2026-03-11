@@ -1,0 +1,120 @@
+graph TB
+    subgraph "Cloudflare DNS"
+        CF[Cloudflare<br/>tesslate.com zone]
+    end
+
+    subgraph "AWS - Shared Platform Stack"
+        subgraph "VPC (10.1.0.0/16) — Isolated from Production/Beta"
+            subgraph "Public Subnets"
+                NAT[NAT Gateway<br/>Single AZ]
+                NLB[Network Load Balancer<br/>internet-facing]
+            end
+
+            subgraph "Private Subnets"
+                subgraph "EKS Platform Cluster"
+                    subgraph "ingress-nginx namespace"
+                        NGX[NGINX Ingress<br/>Controller]
+                    end
+
+                    subgraph "cert-manager namespace"
+                        CM[cert-manager]
+                        CMSecret[Cloudflare API<br/>Token Secret]
+                        Issuer[ClusterIssuer<br/>letsencrypt-prod]
+                    end
+
+                    subgraph "headscale namespace"
+                        subgraph "Headscale Pod"
+                            Init[Init Container<br/>litestream restore]
+                            HS[Headscale<br/>VPN Control Server]
+                            LS[Sidecar<br/>litestream replicate]
+                        end
+                        PVC[PVC 5Gi gp3<br/>/var/lib/headscale]
+                        ConfigMap[ConfigMap<br/>litestream.yml]
+                        SA[ServiceAccount<br/>IRSA annotated]
+                        TLS[TLS Secret<br/>headscale-tls]
+                        Ingress[Ingress<br/>headscale.tesslate.com]
+                    end
+
+                    Node[EKS Node<br/>t3.medium ON_DEMAND]
+                end
+            end
+        end
+
+        subgraph "S3"
+            LitestreamBucket[S3 Bucket<br/>tesslate-platform-litestream]
+        end
+
+        subgraph "ECR (Shared)"
+            ECRBackend[tesslate-backend]
+            ECRFrontend[tesslate-frontend]
+            ECRDevserver[tesslate-devserver]
+        end
+
+        subgraph "IAM"
+            IRSA[IRSA Role<br/>headscale]
+            Policy[IAM Policy<br/>S3 Get/Put/Delete/List]
+        end
+    end
+
+    subgraph "External"
+        LE[Let's Encrypt<br/>ACME]
+        DERP[Tailscale DERP<br/>Relay Network]
+        Clients[Tailscale Clients<br/>Developer Machines]
+    end
+
+    %% DNS flow
+    CF -->|CNAME| NLB
+    NLB --> NGX
+
+    %% Ingress routing
+    NGX --> Ingress
+    Ingress -->|TLS termination| HS
+
+    %% TLS certificates
+    CM --> LE
+    CM -.->|DNS01 validation| CF
+    CMSecret -.-> CM
+    Issuer -.-> CM
+    CM -.->|issues| TLS
+
+    %% Headscale pod lifecycle
+    Init -->|restore DB from S3<br/>on first boot| HS
+    HS -->|reads/writes| PVC
+    LS -->|continuous WAL<br/>replication| LitestreamBucket
+    Init -.->|restore from| LitestreamBucket
+    ConfigMap -.-> Init
+    ConfigMap -.-> LS
+
+    %% IRSA chain
+    SA -.->|assumes| IRSA
+    IRSA -.-> Policy
+    Policy -.->|scoped to| LitestreamBucket
+
+    %% Headscale external
+    HS -.->|DERP relay map| DERP
+    Clients -->|Tailscale protocol| HS
+
+    %% ECR (used by production/beta, not platform)
+    ECRBackend -.->|shared across envs| ECRFrontend
+    ECRFrontend -.-> ECRDevserver
+
+    %% Node placement
+    Node --> HS
+
+    %% NAT for outbound
+    Node -.->|outbound traffic| NAT
+
+    %% Styling
+    classDef networking fill:#4CAF50,stroke:#333,stroke-width:2px,color:#fff
+    classDef kubernetes fill:#326ce5,stroke:#333,stroke-width:2px,color:#fff
+    classDef storage fill:#336791,stroke:#333,stroke-width:2px,color:#fff
+    classDef security fill:#ff9800,stroke:#333,stroke-width:2px,color:#000
+    classDef external fill:#9C27B0,stroke:#333,stroke-width:2px,color:#fff
+    classDef headscale fill:#009688,stroke:#333,stroke-width:2px,color:#fff
+
+    class CF,NLB,NAT,NGX,Ingress networking
+    class Node,CM,CMSecret,Issuer,PVC,ConfigMap,SA,TLS kubernetes
+    class LitestreamBucket,ECRBackend,ECRFrontend,ECRDevserver storage
+    class IRSA,Policy security
+    class LE,DERP,Clients external
+    class Init,HS,LS headscale

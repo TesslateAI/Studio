@@ -62,7 +62,11 @@ info() {
 # =============================================================================
 
 ensure_kubectl_context() {
-    CLUSTER_NAME="tesslate-${ENVIRONMENT}-eks"
+    if [ "$ENVIRONMENT" = "shared" ]; then
+        CLUSTER_NAME="tesslate-platform-eks"
+    else
+        CLUSTER_NAME="tesslate-${ENVIRONMENT}-eks"
+    fi
     ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
     ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER_NAME}-eks-deployer"
 
@@ -186,15 +190,18 @@ case "$ENVIRONMENT" in
 esac
 
 # Set directory and files based on environment
-if [ "$ENVIRONMENT" = "shared" ]; then
-    TF_DIR="$PROJECT_ROOT/k8s/terraform/shared"
-    BACKEND_CONFIG="backend.hcl"
-    TFVARS_FILE="terraform.shared.tfvars"
-else
-    TF_DIR="$PROJECT_ROOT/k8s/terraform/aws"
-    BACKEND_CONFIG="backend-${ENVIRONMENT}.hcl"
-    TFVARS_FILE="terraform.${ENVIRONMENT}.tfvars"
-fi
+case "$ENVIRONMENT" in
+    shared)
+        TF_DIR="$PROJECT_ROOT/k8s/terraform/shared"
+        BACKEND_CONFIG="backend.hcl"
+        TFVARS_FILE="terraform.shared.tfvars"
+        ;;
+    *)
+        TF_DIR="$PROJECT_ROOT/k8s/terraform/aws"
+        BACKEND_CONFIG="backend-${ENVIRONMENT}.hcl"
+        TFVARS_FILE="terraform.${ENVIRONMENT}.tfvars"
+        ;;
+esac
 
 # Only cd to terraform dir for terraform commands
 if [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
@@ -314,7 +321,7 @@ case "$COMMAND" in
 
     deploy-k8s)
         if [ "$ENVIRONMENT" = "shared" ]; then
-            error "deploy-k8s is not available for shared environment"
+            error "deploy-k8s is not available for $ENVIRONMENT environment (Helm-managed only)"
         fi
 
         ensure_kubectl_context
@@ -324,9 +331,9 @@ case "$COMMAND" in
         ;;
 
     build)
-        # Build is only for production/beta (shared only manages ECR repos)
+        # Build is only for production/beta
         if [ "$ENVIRONMENT" = "shared" ]; then
-            error "Build is not available for shared environment (shared only manages ECR repos)"
+            error "Build is not available for $ENVIRONMENT environment"
         fi
 
         # Parse optional image arguments and flags
@@ -530,7 +537,7 @@ case "$COMMAND" in
 
     reload)
         if [ "$ENVIRONMENT" = "shared" ]; then
-            error "Reload is not available for shared environment"
+            error "Reload is not available for $ENVIRONMENT environment"
         fi
 
         # Parse target pods from remaining args

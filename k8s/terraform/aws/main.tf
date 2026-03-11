@@ -86,8 +86,7 @@ data "aws_eks_cluster_auth" "cluster" {
 }
 
 # -----------------------------------------------------------------------------
-# Kubernetes Provider (configured after EKS cluster creation)
-# Uses exec-based authentication for better reliability
+# Kubernetes Provider (exec-based EKS auth via eks-deployer role)
 # -----------------------------------------------------------------------------
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
@@ -96,13 +95,12 @@ provider "kubernetes" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", data.aws_region.current.name]
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", data.aws_region.current.name, "--role-arn", aws_iam_role.eks_deployer.arn]
   }
 }
 
 # -----------------------------------------------------------------------------
-# Helm Provider
-# Uses exec-based authentication for better reliability
+# Helm Provider (exec-based EKS auth via eks-deployer role)
 # -----------------------------------------------------------------------------
 provider "helm" {
   kubernetes {
@@ -112,14 +110,13 @@ provider "helm" {
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", data.aws_region.current.name]
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", data.aws_region.current.name, "--role-arn", aws_iam_role.eks_deployer.arn]
     }
   }
 }
 
 # -----------------------------------------------------------------------------
-# Kubectl Provider
-# Uses exec-based authentication for better reliability
+# Kubectl Provider (exec-based EKS auth via eks-deployer role)
 # -----------------------------------------------------------------------------
 provider "kubectl" {
   host                   = module.eks.cluster_endpoint
@@ -129,7 +126,7 @@ provider "kubectl" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", data.aws_region.current.name]
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", data.aws_region.current.name, "--role-arn", aws_iam_role.eks_deployer.arn]
   }
 }
 
