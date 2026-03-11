@@ -204,6 +204,21 @@ class DockerOrchestrator(BaseOrchestrator):
         service_name = re.sub(r"-+", "-", service_name).strip("-")
         return service_name
 
+    def _resolve_service_name(self, container_name: str, project_slug: str) -> str:
+        """Extract the Docker Compose service name from a container name.
+
+        Handles both formats:
+        - Full container name with slug prefix (Container.container_name):
+          e.g. "my-proj-abc-next-js-16" → "next-js-16"
+        - Display/service name (Container.name):
+          e.g. "Next.js 16" → "next-js-16"
+        """
+        sanitized = self._sanitize_service_name(container_name)
+        prefix = f"{project_slug}-"
+        if sanitized.startswith(prefix):
+            return sanitized[len(prefix):]
+        return sanitized
+
     # =========================================================================
     # PROJECT LIFECYCLE
     # =========================================================================
@@ -401,9 +416,9 @@ class DockerOrchestrator(BaseOrchestrator):
         """
         import docker
 
-        sanitized_name = self._sanitize_service_name(container_name)
+        service_name = self._resolve_service_name(container_name, project_slug)
         # Docker compose names containers as: {project}-{service}-1
-        expected_container_name = f"{project_slug}-{sanitized_name}-1"
+        expected_container_name = f"{project_slug}-{service_name}-1"
 
         try:
             client = docker.from_env()
@@ -429,16 +444,15 @@ class DockerOrchestrator(BaseOrchestrator):
         db: AsyncSession,
     ) -> dict[str, Any]:
         """Start a single container in a project."""
+        # Always regenerate compose file so env var changes and other
+        # config updates are picked up on container restart.
+        env_overrides = None
+        if db:
+            env_overrides = await build_env_overrides(db, project.id, all_containers)
+        await self._write_compose_file(
+            project, all_containers, connections, user_id, env_overrides
+        )
         compose_file_path = self._get_compose_file_path(project.slug)
-
-        if not os.path.exists(compose_file_path):
-            # Generate compose file if it doesn't exist
-            env_overrides = None
-            if db:
-                env_overrides = await build_env_overrides(db, project.id, all_containers)
-            await self._write_compose_file(
-                project, all_containers, connections, user_id, env_overrides
-            )
 
         service_name = self._sanitize_service_name(container.name)
 
@@ -483,7 +497,7 @@ class DockerOrchestrator(BaseOrchestrator):
         if not os.path.exists(compose_file_path):
             raise FileNotFoundError(f"Compose file not found for {project_slug}")
 
-        service_name = self._sanitize_service_name(container_name)
+        service_name = self._resolve_service_name(container_name, project_slug)
 
         logger.info(f"[DOCKER] Stopping container {container_name} (service: {service_name})...")
 
@@ -517,7 +531,7 @@ class DockerOrchestrator(BaseOrchestrator):
         if project_status["status"] == "not_found":
             return {"status": "not_found"}
 
-        service_name = self._sanitize_service_name(container_name)
+        service_name = self._resolve_service_name(container_name, project_slug)
         container_info = project_status.get("containers", {}).get(service_name)
 
         if container_info:
@@ -1128,7 +1142,7 @@ class DockerOrchestrator(BaseOrchestrator):
         if not container_name:
             raise RuntimeError(f"No containers found for project {project_id}")
 
-        service_name = self._sanitize_service_name(container_name)
+        service_name = self._resolve_service_name(container_name, project.slug)
         docker_container = f"{project.slug}-{service_name}"
 
         # Build command

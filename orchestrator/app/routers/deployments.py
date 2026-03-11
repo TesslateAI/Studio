@@ -112,11 +112,28 @@ def resolve_container_directory(container) -> str:
     """
     Resolve the actual on-disk directory for a container.
 
-    When container.directory is ".", "", or None, the K8s orchestrator stores
-    files under the sanitized container.name instead. This must match exactly
-    what kubernetes_orchestrator._sanitize_name + start_container does.
+    Docker vs K8s path conventions differ:
+    - K8s: PVC mounted at /app, each container's files live in /app/{sanitized_name}/
+      so when container.directory is ".", we use container.name as the subdirectory.
+    - Docker: Volume subpathed per-project at /app, files are at /app/ directly
+      when container.directory is ".", so we return "." to keep work_dir as /app.
+
+    For explicit directories (e.g. "frontend"), both modes agree: /app/frontend/.
     """
-    raw = container.name if container.directory in (".", "", None) else container.directory
+    from ..config import get_settings
+
+    settings = get_settings()
+
+    # Explicit subdirectory — both platforms agree
+    if container.directory not in (".", "", None):
+        raw = container.directory
+    elif settings.is_docker_mode:
+        # Docker: volume is already subpathed to the project, files at /app/
+        return "."
+    else:
+        # K8s: PVC shared, use container name as subdirectory
+        raw = container.name
+
     # Replicate _sanitize_name from KubernetesOrchestrator
     safe = raw.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
     safe = "".join(c for c in safe if c.isalnum() or c == "-")
