@@ -4167,7 +4167,11 @@ async def get_project_containers(
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
-    result = await db.execute(select(Container).where(Container.project_id == project.id))
+    result = await db.execute(
+        select(Container)
+        .where(Container.project_id == project.id)
+        .options(selectinload(Container.base))
+    )
     containers = result.scalars().all()
 
     return [_container_response(c) for c in containers]
@@ -4399,6 +4403,12 @@ async def add_container_to_project(
         db.add(new_container)
         await db.commit()
         await db.refresh(new_container)
+        hydrated_container_result = await db.execute(
+            select(Container)
+            .where(Container.id == new_container.id)
+            .options(selectinload(Container.base))
+        )
+        new_container = hydrated_container_result.scalar_one()
 
         logger.info(
             f"[CONTAINER] Created {container_data.container_type} container {new_container.id} for project {project.id}"
@@ -4952,9 +4962,14 @@ def _container_response(container, injected_env_vars: list | None = None) -> dic
     data["env_var_keys"] = container.env_var_keys
     data["env_vars_count"] = container.env_vars_count
     data["injected_env_vars"] = injected_env_vars
-    # Attach service outputs if this is a service container
     service_def = get_service(container.service_slug) if container.service_slug else None
     data["service_outputs"] = service_def.outputs if service_def and service_def.outputs else None
+    data["service_type"] = service_def.service_type.value if service_def else None
+    data["icon"] = service_def.icon if service_def else getattr(container.base, "icon", None)
+    data["tech_stack"] = (
+        [service_def.docker_image] if service_def and service_def.docker_image else None
+    ) or getattr(container.base, "tech_stack", None)
+    data["base_name"] = getattr(container.base, "name", None)
     return data
 
 
@@ -5018,7 +5033,12 @@ async def update_container(
             flag_modified(container, "environment_vars")
 
         await db.commit()
-        await db.refresh(container)
+        refreshed_container = await db.execute(
+            select(Container)
+            .where(Container.id == container.id)
+            .options(selectinload(Container.base))
+        )
+        container = refreshed_container.scalar_one()
 
         return _container_response(container)
 
@@ -6289,14 +6309,15 @@ async def admin_force_hibernate(
             logger.debug(f"[ADMIN:HIBERNATE] Could not send WebSocket notification: {ws_err}")
 
         # Perform hibernation
-        success = await orchestrator.hibernate_project(project.id, project.owner_id)
+        success = await orchestrator.hibernate_project(project.id, project.owner_id, db=db)
 
         if not success:
             project.environment_status = "active"
+            project.hibernated_at = None
             await db.commit()
             raise HTTPException(
                 status_code=500,
-                detail="Hibernation failed - S3 save returned false. Check logs for details.",
+                detail="Hibernation failed - snapshot save returned false. Check logs for details.",
             )
 
         # Mark as hibernated
@@ -6333,6 +6354,7 @@ async def admin_force_hibernate(
     except Exception as e:
         logger.error(f"[ADMIN:HIBERNATE] Failed to hibernate project: {e}", exc_info=True)
         project.environment_status = "active"
+        project.hibernated_at = None
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Hibernation failed: {str(e)}") from e
 

@@ -6,6 +6,7 @@ import re
 import sqlalchemy as sa
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi import status as http_status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from httpx_oauth.integrations.fastapi import OAuth2AuthorizeCallback
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -58,6 +59,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Application Builder API")
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log request validation failures with enough detail to debug 422s in production."""
+    with contextlib.suppress(Exception):
+        raw_body = await request.body()
+        body_preview = raw_body.decode("utf-8", errors="replace")[:2000]
+    if "body_preview" not in locals():
+        body_preview = "<unavailable>"
+
+    logger.warning(
+        "[VALIDATION] %s %s failed validation: errors=%s body=%s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+        body_preview,
+    )
+
+    return JSONResponse(
+        status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()},
+    )
 
 
 # Dynamic CORS middleware that supports wildcard subdomain patterns

@@ -39,6 +39,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["deployment-targets"])
 
 
+async def _get_live_deployment_credential(
+    db: AsyncSession, user_id: UUID, project_id: UUID, provider: str
+) -> DeploymentCredential | None:
+    """Resolve credentials with the same precedence as the deployments router."""
+    from .deployments import get_credential_for_deployment
+
+    try:
+        return await get_credential_for_deployment(db, user_id, project_id, provider)
+    except HTTPException:
+        return None
+
+
 # ============================================================================
 # Request/Response Models
 # ============================================================================
@@ -253,15 +265,7 @@ async def create_deployment_target(
         )
 
     # Check if user has credentials for this provider
-    credential_result = await db.execute(
-        select(DeploymentCredential).where(
-            and_(
-                DeploymentCredential.user_id == user.id,
-                DeploymentCredential.provider == request.provider,
-            )
-        )
-    )
-    credential = credential_result.scalar_one_or_none()
+    credential = await _get_live_deployment_credential(db, user.id, project.id, request.provider)
     is_connected = credential is not None
 
     # Create target
@@ -298,11 +302,17 @@ async def list_deployment_targets(
 
     # Fetch user's connected providers upfront so we can reflect live credential status
     credentials_result = await db.execute(
-        select(DeploymentCredential.provider, DeploymentCredential.id).where(
-            DeploymentCredential.user_id == user.id
-        )
+        select(
+            DeploymentCredential.provider,
+            DeploymentCredential.id,
+            DeploymentCredential.project_id,
+        ).where(DeploymentCredential.user_id == user.id)
     )
-    connected_providers = {row[0]: row[1] for row in credentials_result.all()}
+    connected_providers: dict[str, UUID] = {}
+    for provider, credential_id, credential_project_id in credentials_result.all():
+        if credential_project_id not in (None, project.id):
+            continue
+        connected_providers[provider] = credential_id
 
     # Fetch targets with connected containers
     result = await db.execute(
@@ -443,15 +453,7 @@ async def get_deployment_target(
     target = await get_deployment_target_or_404(target_id, project.id, db)
 
     # Dynamically check if user has credentials for this provider
-    credential_result = await db.execute(
-        select(DeploymentCredential).where(
-            and_(
-                DeploymentCredential.user_id == user.id,
-                DeploymentCredential.provider == target.provider,
-            )
-        )
-    )
-    credential = credential_result.scalar_one_or_none()
+    credential = await _get_live_deployment_credential(db, user.id, project.id, target.provider)
     live_is_connected = credential is not None
 
     # Sync stale DB value if it diverged
@@ -748,7 +750,8 @@ async def deploy_target(
         request = DeployRequest()
 
     # Check if connected
-    if not target.is_connected:
+    credential = await _get_live_deployment_credential(db, user.id, project.id, target.provider)
+    if not credential:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Please connect your {target.provider} account first",
@@ -769,21 +772,6 @@ async def deploy_target(
         )
 
     # Get credentials
-    credential_result = await db.execute(
-        select(DeploymentCredential).where(
-            and_(
-                DeploymentCredential.user_id == user.id,
-                DeploymentCredential.provider == target.provider,
-            )
-        )
-    )
-    credential = credential_result.scalar_one_or_none()
-    if not credential:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No credentials found for {target.provider}. Please connect your account.",
-        )
-
     # Decrypt credentials
     encryption_service = get_deployment_encryption_service()
     try:

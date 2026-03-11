@@ -1491,7 +1491,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         self, project_id: UUID, user_id: UUID, namespace: str, db: AsyncSession
     ) -> bool:
         """
-        Create a VolumeSnapshot of the project PVC (for hibernation).
+        Create VolumeSnapshots of the project PVC and any service PVCs (for hibernation).
 
         This operation is nearly instant (< 5 seconds total).
         EBS snapshots use copy-on-write - only changed blocks are stored.
@@ -1511,11 +1511,14 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         logger.info(f"[K8S:HIBERNATE] Creating VolumeSnapshot for project {project_id}")
 
         try:
+            pvc_names = await self._get_hibernation_pvc_names(namespace)
+            service_pvc_names = [name for name in pvc_names if name != "project-storage"]
+
             # IMPORTANT: Check if project is initialized before creating snapshot
             # This prevents creating empty snapshots for projects that haven't
             # been populated with files yet (e.g., newly created but not yet cloned)
             is_initialized = await self._is_project_initialized(namespace)
-            if not is_initialized:
+            if not is_initialized and not service_pvc_names:
                 logger.warning(
                     f"[K8S:HIBERNATE] ⚠️ Skipping snapshot for {project_id} - project not initialized (no files). "
                     "This is normal for newly created projects that haven't been populated yet."
@@ -1525,30 +1528,39 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 return True
 
             snapshot_manager = get_snapshot_manager()
+            snapshot_pvcs = service_pvc_names.copy()
+            if is_initialized and "project-storage" in pvc_names:
+                snapshot_pvcs.insert(0, "project-storage")
 
-            # Create the snapshot record and K8s VolumeSnapshot
-            snapshot, error = await snapshot_manager.create_snapshot(
-                project_id=project_id,
-                user_id=user_id,
-                db=db,
-                snapshot_type="hibernation",
-                pvc_name="project-storage",
-            )
+            for pvc_name in snapshot_pvcs:
+                snapshot, error = await snapshot_manager.create_snapshot(
+                    project_id=project_id,
+                    user_id=user_id,
+                    db=db,
+                    snapshot_type="hibernation",
+                    pvc_name=pvc_name,
+                )
 
-            if error:
-                logger.error(f"[K8S:HIBERNATE] ❌ Failed to create snapshot: {error}")
-                return False
+                if error or snapshot is None:
+                    logger.error(
+                        f"[K8S:HIBERNATE] ❌ Failed to create snapshot for PVC {pvc_name}: {error}"
+                    )
+                    return False
 
-            # CRITICAL: Wait for snapshot to become ready before allowing PVC deletion
-            success, wait_error = await snapshot_manager.wait_for_snapshot_ready(
-                snapshot=snapshot, db=db
-            )
+                success, wait_error = await snapshot_manager.wait_for_snapshot_ready(
+                    snapshot=snapshot, db=db
+                )
 
-            if not success:
-                logger.error(f"[K8S:HIBERNATE] ❌ Snapshot did not become ready: {wait_error}")
-                return False
+                if not success:
+                    logger.error(
+                        f"[K8S:HIBERNATE] ❌ Snapshot for PVC {pvc_name} did not become ready: {wait_error}"
+                    )
+                    return False
 
-            logger.info(f"[K8S:HIBERNATE] ✅ VolumeSnapshot ready: {snapshot.snapshot_name}")
+                logger.info(
+                    f"[K8S:HIBERNATE] ✅ VolumeSnapshot ready for PVC {pvc_name}: {snapshot.snapshot_name}"
+                )
+
             return True
 
         except Exception as e:
@@ -1581,27 +1593,73 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         try:
             snapshot_manager = get_snapshot_manager()
 
-            # Check if project has a snapshot to restore from
-            has_snapshot = await snapshot_manager.has_existing_snapshot(project_id, db)
-            if not has_snapshot:
-                logger.warning(f"[K8S:RESTORE] No snapshot found for project {project_id}")
-                return False
+            restored_project_storage = False
 
-            # Create PVC from snapshot
-            success, error = await snapshot_manager.restore_from_snapshot(
-                project_id=project_id, user_id=user_id, db=db, pvc_name="project-storage"
+            if await snapshot_manager.has_existing_snapshot(
+                project_id, db, pvc_name="project-storage", snapshot_type="hibernation"
+            ):
+                restored_project_storage, error = await snapshot_manager.restore_from_snapshot(
+                    project_id=project_id,
+                    user_id=user_id,
+                    db=db,
+                    pvc_name="project-storage",
+                )
+                if not restored_project_storage:
+                    logger.error(
+                        f"[K8S:RESTORE] ❌ Failed to restore project-storage from snapshot: {error}"
+                    )
+            else:
+                logger.warning(f"[K8S:RESTORE] No project-storage snapshot found for {project_id}")
+
+            service_snapshots = await snapshot_manager.get_latest_ready_snapshots_by_pvc(
+                project_id=project_id,
+                db=db,
+                snapshot_type="hibernation",
             )
 
-            if not success:
-                logger.error(f"[K8S:RESTORE] ❌ Failed to restore from snapshot: {error}")
-                return False
+            for pvc_name, snapshot in service_snapshots.items():
+                if pvc_name == "project-storage":
+                    continue
+                success, error = await snapshot_manager.restore_from_snapshot(
+                    project_id=project_id,
+                    user_id=user_id,
+                    db=db,
+                    snapshot_id=snapshot.id,
+                    pvc_name=pvc_name,
+                )
+                if not success:
+                    logger.error(
+                        f"[K8S:RESTORE] ❌ Failed to restore service PVC {pvc_name}: {error}"
+                    )
+                    return restored_project_storage
 
-            logger.info("[K8S:RESTORE] ✅ PVC created from snapshot (lazy loading active)")
-            return True
+                logger.info(
+                    f"[K8S:RESTORE] ✅ Restored service PVC {pvc_name} from snapshot {snapshot.snapshot_name}"
+                )
+
+            if restored_project_storage:
+                logger.info("[K8S:RESTORE] ✅ PVCs restored from snapshot (lazy loading active)")
+            return restored_project_storage
 
         except Exception as e:
             logger.error(f"[K8S:RESTORE] Error restoring from snapshot: {e}", exc_info=True)
             return False
+
+    async def _get_hibernation_pvc_names(self, namespace: str) -> list[str]:
+        """List PVCs that should be included in project hibernation snapshots."""
+        pvcs = await asyncio.to_thread(
+            self.k8s_client.core_v1.list_namespaced_persistent_volume_claim,
+            namespace=namespace,
+        )
+
+        snapshot_pvcs = {"project-storage"}
+        for pvc in pvcs.items:
+            name = pvc.metadata.name
+            labels = pvc.metadata.labels or {}
+            if labels.get("tesslate.io/component") == "service-storage" or name.startswith("svc-"):
+                snapshot_pvcs.add(name)
+
+        return sorted(snapshot_pvcs)
 
     async def hibernate_project(
         self, project_id: UUID, user_id: UUID, db: AsyncSession | None = None

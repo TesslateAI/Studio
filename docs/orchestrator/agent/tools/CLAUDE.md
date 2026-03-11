@@ -35,6 +35,7 @@ This context provides information about Tesslate Studio's agent tool system, inc
 
 - `orchestrator/app/agent/tools/planning_ops/` - Task planning
   - `todos.py` - todo_read, todo_write
+  - **Redis persistence**: Todos and plans are persisted to Redis for cross-pod visibility via `_persist_todos`/`_load_todos` (in `todos.py`) and `PlanManager._persist_plan`/`_load_plan`. In-memory storage remains the primary cache; Redis serves as a backing store with a 24-hour TTL.
 
 - `orchestrator/app/agent/tools/web_ops/` - Web operations
   - `fetch.py` - web_fetch

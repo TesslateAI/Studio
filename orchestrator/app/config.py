@@ -356,7 +356,7 @@ class Settings(BaseSettings):
 
     # Snapshot timeouts
     k8s_snapshot_ready_timeout_seconds: int = (
-        90  # Max time to wait for snapshot to become ready (EBS takes ~67s)
+        300  # EBS/CSI snapshot readiness can exceed 90s under load; keep hibernation reliable
     )
     k8s_hibernation_idle_minutes: int = 10  # Hibernate pods after X minutes of inactivity
 

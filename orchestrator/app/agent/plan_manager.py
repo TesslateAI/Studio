@@ -10,6 +10,7 @@ requests from corrupting shared state.
 """
 
 import asyncio
+import json
 import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -120,6 +121,7 @@ class Plan:
 # In-memory storage keyed by "user_{id}_project_{id}"
 _plan_storage: dict[str, Plan] = {}
 _plan_lock = asyncio.Lock()
+_PLAN_TTL_SECONDS = 60 * 60 * 24
 
 
 def _storage_key(context: dict) -> str:
@@ -172,13 +174,18 @@ class PlanManager:
         key = _storage_key(context)
         async with _plan_lock:
             _plan_storage[key] = plan
+        await PlanManager._persist_plan(key, plan)
         return plan
 
     @staticmethod
     async def get_plan(context: dict) -> Plan | None:
         """Get the active plan for this context."""
+        key = _storage_key(context)
         async with _plan_lock:
-            return _plan_storage.get(_storage_key(context))
+            cached = _plan_storage.get(key)
+        if cached:
+            return cached
+        return await PlanManager._load_plan(key, context)
 
     @staticmethod
     def get_plan_sync(context: dict) -> Plan | None:
@@ -188,6 +195,8 @@ class PlanManager:
         dict.get() is atomic in CPython and we only need a consistent
         reference, not a transaction.
         """
+        if context.get("_active_plan"):
+            return context["_active_plan"]
         return _plan_storage.get(_storage_key(context))
 
     @staticmethod
@@ -210,6 +219,7 @@ class PlanManager:
             plan = _plan_storage.get(_storage_key(context))
             if plan and 0 <= step_index < len(plan.steps):
                 plan.steps[step_index].status = new_status
+                await PlanManager._persist_plan(_storage_key(context), plan)
             return plan
 
     @staticmethod
@@ -235,6 +245,7 @@ class PlanManager:
                     PlanStep(title=s.get("step", ""), status=s.get("status", "pending"))
                     for s in steps
                 ]
+                await PlanManager._persist_plan(_storage_key(context), plan)
             return plan
 
     @staticmethod
@@ -274,3 +285,46 @@ class PlanManager:
         key = _storage_key(context)
         async with _plan_lock:
             _plan_storage.pop(key, None)
+        await PlanManager._delete_plan(key)
+
+    @staticmethod
+    async def _persist_plan(key: str, plan: Plan) -> None:
+        """Persist plan to Redis for cross-pod visibility; local cache is the fallback."""
+        from ..services.cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return
+        await redis.setex(f"tesslate:plan:{key}", _PLAN_TTL_SECONDS, json.dumps(plan.to_dict()))
+
+    @staticmethod
+    async def _load_plan(key: str, context: dict) -> Plan | None:
+        """Load a plan from Redis into the local mirror."""
+        from ..services.cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return None
+        raw = await redis.get(f"tesslate:plan:{key}")
+        if not raw:
+            return None
+        data = json.loads(raw)
+        plan = Plan(
+            name=data["name"],
+            task=data["task"],
+            steps=[PlanStep(title=s["step"], status=s["status"]) for s in data.get("steps", [])],
+            critical_files=data.get("critical_files", []),
+            created_at=data.get("created_at", ""),
+        )
+        async with _plan_lock:
+            _plan_storage[key] = plan
+        context["_active_plan"] = plan
+        return plan
+
+    @staticmethod
+    async def _delete_plan(key: str) -> None:
+        from ..services.cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if redis:
+            await redis.delete(f"tesslate:plan:{key}")

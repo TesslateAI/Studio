@@ -84,11 +84,18 @@ interface Container {
   id: string;
   name: string;
   base_id: string | null;
+  base_name?: string | null;
   position_x: number;
   position_y: number;
   status: 'stopped' | 'starting' | 'running' | 'failed';
   port?: number;
   container_type?: 'base' | 'service';
+  service_slug?: string | null;
+  service_type?: 'container' | 'external' | 'hybrid' | null;
+  icon?: string | null;
+  tech_stack?: string[] | null;
+  deployment_mode?: string;
+  deployment_provider?: string | null;
 }
 
 interface ContainerConnection {
@@ -384,9 +391,11 @@ const ProjectGraphCanvasInner = () => {
           name: container.name,
           status: container.status,
           port: container.port,
-          baseIcon: '📦', // TODO: Get from base info
-          techStack: [], // TODO: Get from base info
+          baseIcon: container.icon || '📦',
+          techStack: container.tech_stack || [],
           containerType: container.container_type || 'base',
+          serviceType: container.service_type || undefined,
+          deploymentProvider: container.deployment_provider || undefined,
           onDelete: handleDeleteContainer,
           onClick: handleContainerClick,
           onDoubleClick: handleOpenBuilder,
@@ -1226,7 +1235,7 @@ const ProjectGraphCanvasInner = () => {
           }
 
           // Create connection in backend
-          await api.post(`/api/projects/${slug}/connections`, {
+          await api.post(`/api/projects/${slug}/containers/connections`, {
             project_id: project.id,
             source_container_id: sourceId,
             target_container_id: targetId,

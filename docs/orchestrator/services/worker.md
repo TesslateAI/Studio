@@ -2,7 +2,9 @@
 
 **File**: `orchestrator/app/worker.py` (509 lines)
 
-Decoupled async task execution with durable state persistence and real-time streaming. Uses ARQ (Redis-based task queue) to process agent tasks dispatched from the API layer. Each task runs a full agent lifecycle: acquire lock, execute agent iterations with progressive step persistence, publish events to Redis Streams, finalize the message, and optionally call a webhook.
+Decoupled async task execution with durable state persistence and real-time streaming. Uses ARQ (Redis-based task queue) to process agent tasks dispatched from the API layer. Each task runs a full agent lifecycle: acquire lock, build agent context from the database, execute agent iterations with progressive step persistence, publish events to Redis Streams, finalize the message, and optionally call a webhook.
+
+The worker owns all context building -- chat history, project context (TESSLATE.md, git status, architecture), container resolution, and plan warming are all performed server-side in the worker rather than being pre-built in the API pod. The API pod dispatches a lightweight payload containing only IDs and the user message.
 
 ## When to Load This Context
 
@@ -20,7 +22,7 @@ Load this context when:
 |------|---------|
 | `orchestrator/app/worker.py` | Worker implementation and ARQ job functions |
 | `orchestrator/app/services/agent_task.py` | AgentTaskPayload definition |
-| `orchestrator/app/services/agent_context.py` | Context builder (runs before dispatch) |
+| `orchestrator/app/services/agent_context.py` | Context builder (runs in worker, not API pod) |
 | `orchestrator/app/services/pubsub.py` | Event publishing (Redis Streams + Pub/Sub) |
 | `orchestrator/app/services/distributed_lock.py` | Project lock for concurrency control |
 | `orchestrator/app/agent/stream_agent.py` | Agent execution engine |
@@ -32,7 +34,7 @@ Load this context when:
 
 - **[pubsub.md](./pubsub.md)**: Redis Streams and Pub/Sub event publishing
 - **[agent-task.md](./agent-task.md)**: Payload serialization and dispatch
-- **[agent-context.md](./agent-context.md)**: Pre-built execution context
+- **[agent-context.md](./agent-context.md)**: Context building functions (called by worker)
 - **[distributed-lock.md](./distributed-lock.md)**: Project-level lock coordination
 - **[../agent/CLAUDE.md](../agent/CLAUDE.md)**: Agent execution engine
 
@@ -46,18 +48,25 @@ Load this context when:
 │  ┌─────────────────┐             ┌─────────────────────────────┐   │
 │  │ Chat Router      │             │ execute_agent_task()         │   │
 │  │                  │  Enqueue    │                             │   │
-│  │ Build context    │───────────►│ 1. Acquire project lock     │   │
-│  │ Create payload   │  (ARQ      │ 2. Start heartbeat task     │   │
-│  │ Enqueue job      │   Redis)   │ 3. Create agent instance    │   │
-│  └─────────────────┘             │ 4. Run agent iterations     │   │
+│  │ Create lightweight│──────────►│ 1. Acquire project lock     │   │
+│  │ payload (IDs +   │  (ARQ      │ 2. Start heartbeat task     │   │
+│  │ user message)    │   Redis)   │ 3. Build agent context      │   │
+│  │ Enqueue job      │            │    ├─ Chat history (DB)     │   │
+│  └─────────────────┘             │    ├─ TESSLATE.md context   │   │
+│                                  │    ├─ Git context           │   │
+│                                  │    ├─ Architecture context  │   │
+│                                  │    ├─ Container resolution  │   │
+│                                  │    └─ Warm plan (Redis)     │   │
+│                                  │ 4. Create agent instance    │   │
+│                                  │ 5. Run agent iterations     │   │
 │                                  │    ├─ LLM call              │   │
 │                                  │    ├─ Tool execution        │   │
 │                                  │    ├─ Save AgentStep row    │   │
 │                                  │    └─ Publish event         │   │
-│                                  │ 5. Finalize Message         │   │
-│                                  │ 6. Release project lock     │   │
-│                                  │ 7. Publish "done" event     │   │
-│                                  │ 8. Webhook callback         │   │
+│                                  │ 6. Finalize Message         │   │
+│                                  │ 7. Release project lock     │   │
+│                                  │ 8. Publish "done" event     │   │
+│                                  │ 9. Webhook callback         │   │
 │                                  └─────────────────────────────┘   │
 │                                           │                         │
 │                                           │ Events                  │
@@ -88,12 +97,17 @@ async def execute_agent_task(ctx, payload_dict: dict):
     Full agent lifecycle:
     1. Acquire project lock (prevent concurrent agent runs)
     2. Start heartbeat background task (extend lock every 10s)
-    3. Create agent instance from config
-    4. Run agent with streaming iterations
-    5. Persist each step to AgentStep table
-    6. Publish each event to Redis Stream
-    7. Finalize: update Message with result metadata
-    8. Release lock, publish "done", call webhook
+    3. Build agent context server-side:
+       - Resolve container name/directory from DB if not in payload
+       - Build chat_history via _get_chat_history() if not in payload
+       - Build project_context with tesslate_context, git_context, architecture_context
+       - Warm active plan from Redis via PlanManager.get_plan()
+    4. Create agent instance from config
+    5. Run agent with streaming iterations
+    6. Persist each step to AgentStep table
+    7. Publish each event to Redis Stream
+    8. Finalize: update Message with result metadata
+    9. Release lock, publish "done", call webhook
     """
 ```
 
@@ -148,6 +162,32 @@ async def _publish_error(task_id: str, error_message: str):
         "status": "error"
     })
 ```
+
+## Server-Side Context Building
+
+The worker builds the full agent execution context from the database and Redis, rather than receiving pre-built context from the API pod. This keeps the dispatch payload lightweight (just IDs and the user message) and ensures context is always fresh.
+
+### What Gets Built
+
+| Context | Source | Fallback |
+|---------|--------|----------|
+| `chat_history` | `_get_chat_history()` from DB (last 10 messages) | Uses payload value if provided |
+| `project_context` | Project name/description from DB | Uses payload value if provided |
+| `tesslate_context` | `_build_tesslate_context()` — parses TESSLATE.md | Omitted if not found |
+| `git_context` | `_build_git_context()` — current branch, recent commits | Omitted if not found |
+| `architecture_context` | `_build_architecture_context()` — project structure | Omitted if not found |
+| `container_name` / `container_directory` | Container record from DB via `_resolve_container_name()` | Uses payload values if provided |
+| `_active_plan` | `PlanManager.get_plan()` from Redis | `None` if no active plan |
+
+### The `_active_plan` Key
+
+The execution context includes an `_active_plan` key containing the pre-warmed plan data fetched from Redis via `PlanManager.get_plan()`. This avoids a redundant Redis round-trip when the agent builds its system prompt. The value is `None` if no plan exists for the project.
+
+### Why Context Building Moved to the Worker
+
+1. **Freshness**: Context is built at execution time, not at dispatch time (which may be minutes earlier if the queue is backed up)
+2. **Lightweight payloads**: Smaller ARQ payloads reduce Redis memory pressure
+3. **Single responsibility**: The API pod only validates and enqueues; the worker owns the full execution lifecycle
 
 ## Progressive Step Persistence
 

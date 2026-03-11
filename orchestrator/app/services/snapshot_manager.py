@@ -141,12 +141,17 @@ class SnapshotManager:
             logger.info(f"[SNAPSHOT] ✅ VolumeSnapshot created: {snapshot_name}")
 
             # Rotate old snapshots if we exceed the limit
-            await self._rotate_snapshots(project_id, db)
+            await self._rotate_snapshots(project_id, db, pvc_name=pvc_name)
 
-            # Mark all existing snapshots as not latest
+            # Mark existing snapshots for this PVC as not latest
             await db.execute(
                 update(ProjectSnapshot)
-                .where(ProjectSnapshot.project_id == project_id)
+                .where(
+                    and_(
+                        ProjectSnapshot.project_id == project_id,
+                        ProjectSnapshot.pvc_name == pvc_name,
+                    )
+                )
                 .values(is_latest=False)
             )
 
@@ -161,6 +166,7 @@ class SnapshotManager:
                 snapshot_type=snapshot_type,
                 status="pending",
                 label=label or ("Auto-save" if snapshot_type == "hibernation" else "Manual save"),
+                is_latest=True,
                 is_soft_deleted=False,
             )
             db.add(snapshot_record)
@@ -203,11 +209,27 @@ class SnapshotManager:
         )
 
         start_time = datetime.now(UTC)
+        last_status: dict[str, Any] = {}
 
         while True:
             elapsed = (datetime.now(UTC) - start_time).total_seconds()
             if elapsed >= timeout_seconds:
-                error_msg = f"Snapshot {snapshot.snapshot_name} did not become ready within {timeout_seconds} seconds"
+                status_bits = []
+                if "readyToUse" in last_status:
+                    status_bits.append(f"readyToUse={last_status.get('readyToUse')}")
+                if last_status.get("error"):
+                    status_bits.append(f"error={last_status.get('error')}")
+                if last_status.get("boundVolumeSnapshotContentName"):
+                    status_bits.append(
+                        "content="
+                        f"{last_status.get('boundVolumeSnapshotContentName')}"
+                    )
+                error_msg = (
+                    f"Snapshot {snapshot.snapshot_name} did not become ready within "
+                    f"{timeout_seconds} seconds"
+                )
+                if status_bits:
+                    error_msg = f"{error_msg} (last_status: {', '.join(status_bits)})"
                 logger.error(f"[SNAPSHOT] ❌ {error_msg}")
 
                 # Update status to error
@@ -228,6 +250,7 @@ class SnapshotManager:
                 )
 
                 status = k8s_snapshot.get("status", {})
+                last_status = status
                 ready_to_use = status.get("readyToUse", False)
 
                 if ready_to_use:
@@ -250,8 +273,13 @@ class SnapshotManager:
 
                 # Log progress
                 if int(elapsed) % 5 == 0:
-                    logger.debug(
-                        f"[SNAPSHOT] Waiting for {snapshot.snapshot_name}... ({elapsed:.0f}s)"
+                    logger.info(
+                        "[SNAPSHOT] Waiting for %s... (%ss, ready=%s, error=%s, content=%s)",
+                        snapshot.snapshot_name,
+                        int(elapsed),
+                        status.get("readyToUse"),
+                        status.get("error"),
+                        status.get("boundVolumeSnapshotContentName"),
                     )
 
             except ApiException as e:
@@ -299,23 +327,13 @@ class SnapshotManager:
             if not snapshot:
                 return False, f"Snapshot {snapshot_id} not found"
         else:
-            # Get latest ready snapshot for project
-            result = await db.execute(
-                select(ProjectSnapshot)
-                .where(
-                    and_(
-                        ProjectSnapshot.project_id == project_id,
-                        ProjectSnapshot.status == "ready",
-                        ProjectSnapshot.is_soft_deleted.is_(False),
-                    )
-                )
-                .order_by(ProjectSnapshot.created_at.desc())
-                .limit(1)
+            snapshot = await self.get_latest_ready_snapshot(
+                project_id=project_id,
+                db=db,
+                pvc_name=pvc_name,
             )
-            snapshot = result.scalar_one_or_none()
-
             if not snapshot:
-                return False, f"No ready snapshot found for project {project_id}"
+                return False, f"No ready snapshot found for project {project_id} PVC {pvc_name}"
 
         logger.info(
             f"[SNAPSHOT] Restoring from snapshot {snapshot.snapshot_name} to PVC {pvc_name}"
@@ -669,7 +687,61 @@ class SnapshotManager:
         )
         return list(result.scalars().all())
 
-    async def _rotate_snapshots(self, project_id: UUID, db: AsyncSession) -> None:
+    async def get_latest_ready_snapshot(
+        self,
+        project_id: UUID,
+        db: AsyncSession,
+        pvc_name: str,
+        snapshot_type: str | None = None,
+    ) -> ProjectSnapshot | None:
+        """Get the latest ready snapshot for a specific PVC."""
+        conditions = [
+            ProjectSnapshot.project_id == project_id,
+            ProjectSnapshot.pvc_name == pvc_name,
+            ProjectSnapshot.status == "ready",
+            ProjectSnapshot.is_soft_deleted.is_(False),
+        ]
+        if snapshot_type:
+            conditions.append(ProjectSnapshot.snapshot_type == snapshot_type)
+
+        result = await db.execute(
+            select(ProjectSnapshot)
+            .where(and_(*conditions))
+            .order_by(ProjectSnapshot.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_latest_ready_snapshots_by_pvc(
+        self,
+        project_id: UUID,
+        db: AsyncSession,
+        snapshot_type: str | None = None,
+    ) -> dict[str, ProjectSnapshot]:
+        """Get the latest ready snapshot for each PVC in a project."""
+        conditions = [
+            ProjectSnapshot.project_id == project_id,
+            ProjectSnapshot.status == "ready",
+            ProjectSnapshot.is_soft_deleted.is_(False),
+        ]
+        if snapshot_type:
+            conditions.append(ProjectSnapshot.snapshot_type == snapshot_type)
+
+        result = await db.execute(
+            select(ProjectSnapshot)
+            .where(and_(*conditions))
+            .order_by(ProjectSnapshot.created_at.desc())
+        )
+
+        latest_by_pvc: dict[str, ProjectSnapshot] = {}
+        for snapshot in result.scalars().all():
+            if snapshot.pvc_name and snapshot.pvc_name not in latest_by_pvc:
+                latest_by_pvc[snapshot.pvc_name] = snapshot
+        return latest_by_pvc
+
+    async def _rotate_snapshots(
+        self, project_id: UUID, db: AsyncSession, pvc_name: str | None = None
+    ) -> None:
         """
         Delete oldest snapshots when we exceed the max limit.
 
@@ -681,12 +753,15 @@ class SnapshotManager:
         max_snapshots = self.settings.k8s_max_snapshots_per_project
 
         # Get current snapshot count
+        conditions = [
+            ProjectSnapshot.project_id == project_id,
+            ProjectSnapshot.is_soft_deleted.is_(False),
+        ]
+        if pvc_name:
+            conditions.append(ProjectSnapshot.pvc_name == pvc_name)
+
         result = await db.execute(
-            select(ProjectSnapshot)
-            .where(
-                and_(ProjectSnapshot.project_id == project_id, ProjectSnapshot.is_soft_deleted.is_(False))
-            )
-            .order_by(ProjectSnapshot.created_at.asc())
+            select(ProjectSnapshot).where(and_(*conditions)).order_by(ProjectSnapshot.created_at.asc())
         )
         snapshots = list(result.scalars().all())
 
@@ -814,19 +889,25 @@ class SnapshotManager:
                 return int(float(size_str[: -len(suffix)]) * multiplier)
         return int(size_str)
 
-    async def has_existing_snapshot(self, project_id: UUID, db: AsyncSession) -> bool:
+    async def has_existing_snapshot(
+        self,
+        project_id: UUID,
+        db: AsyncSession,
+        pvc_name: str | None = None,
+        snapshot_type: str | None = None,
+    ) -> bool:
         """Check if a project has any ready snapshots (for restore eligibility)."""
-        result = await db.execute(
-            select(ProjectSnapshot)
-            .where(
-                and_(
-                    ProjectSnapshot.project_id == project_id,
-                    ProjectSnapshot.status == "ready",
-                    ProjectSnapshot.is_soft_deleted.is_(False),
-                )
-            )
-            .limit(1)
-        )
+        conditions = [
+            ProjectSnapshot.project_id == project_id,
+            ProjectSnapshot.status == "ready",
+            ProjectSnapshot.is_soft_deleted.is_(False),
+        ]
+        if pvc_name:
+            conditions.append(ProjectSnapshot.pvc_name == pvc_name)
+        if snapshot_type:
+            conditions.append(ProjectSnapshot.snapshot_type == snapshot_type)
+
+        result = await db.execute(select(ProjectSnapshot).where(and_(*conditions)).limit(1))
         return result.scalar_one_or_none() is not None
 
 

@@ -28,7 +28,7 @@ This context provides information about Tesslate Studio's AI agent system, inclu
 - `orchestrator/app/agent/subagent_manager.py` - Subagent lifecycle and execution management
 - `orchestrator/app/agent/apply_patch.py` - Apply patch tool for surgical file edits
 - `orchestrator/app/agent/compaction.py` - Context compaction for long conversations
-- `orchestrator/app/agent/plan_manager.py` - Planning mode state management
+- `orchestrator/app/agent/plan_manager.py` - Planning mode state management. Plans are persisted to Redis (24-hour TTL) for cross-pod visibility via `_persist_plan`/`_load_plan`. `get_plan_sync()` checks `context["_active_plan"]` first for pre-warmed plans injected by the worker, falling back to Redis and then in-memory cache.
 - `orchestrator/app/agent/trajectory.py` - Trajectory recording for agent steps
 - `orchestrator/app/agent/trajectory_writer.py` - Persistent trajectory storage
 - `orchestrator/app/agent/features.py` - Feature flags for agent capabilities

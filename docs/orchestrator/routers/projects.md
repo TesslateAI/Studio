@@ -259,7 +259,7 @@ GET /api/projects/{project_slug}/containers
 
 Returns all containers in the project.
 
-**Response**: Array of Container objects
+**Response**: Array of Container objects with eager-loaded base info
 ```json
 [
   {
@@ -269,7 +269,12 @@ Returns all containers in the project.
     "port": 3000,
     "environment_variables": {"NODE_ENV": "development"},
     "status": "running|stopped|starting|error",
-    "dev_url": "http://frontend.my-app-k3x8n2.localhost"
+    "dev_url": "http://frontend.my-app-k3x8n2.localhost",
+    "base_name": "Next.js 16",
+    "icon": "nextjs-icon",
+    "tech_stack": ["node:20-alpine"],
+    "service_type": "container",
+    "deployment_provider": null
   }
 ]
 ```
@@ -489,6 +494,8 @@ Returns all container-to-container connections.
 ```
 POST /api/projects/{project_slug}/containers/connections
 ```
+
+**Note**: The frontend `ProjectGraphCanvas.tsx` was updated to use this correct endpoint path (`/containers/connections`) instead of the previously incorrect `/connections`.
 
 Creates a connection between two containers.
 
@@ -921,11 +928,12 @@ POST /api/projects/{project_slug}/admin/hibernate
 
 **(Superuser only)**
 
-Puts a project into hibernation mode:
-- Stops all containers
-- Scales deployments to 0 replicas (K8s)
-- Preserves data in PVC
-- Marks project as hibernated
+Puts a project into hibernation mode (Kubernetes only):
+- Creates EBS VolumeSnapshots of all project PVCs (project-storage + service PVCs)
+- Waits for snapshot readiness before proceeding
+- Deletes the project namespace (cascades to all resources)
+- Marks project as hibernated in the database
+- On failure, rolls back environment_status to "active" and clears hibernated_at
 
 **Response**:
 ```json

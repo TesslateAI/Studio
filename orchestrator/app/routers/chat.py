@@ -1231,8 +1231,6 @@ async def agent_chat_stream(
                     container_id=str(container_id) if container_id else None,
                     container_name=container_name,
                     container_directory=container_directory,
-                    chat_history=chat_history,
-                    project_context=project_context,
                 )
 
                 # Enqueue the job

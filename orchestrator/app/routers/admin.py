@@ -45,6 +45,7 @@ from ..models import (
     UserPurchasedBase,
 )
 from ..services.litellm_service import litellm_service
+from ..services.orchestration.kubernetes_orchestrator import get_kubernetes_orchestrator
 from ..users import current_superuser
 
 logger = logging.getLogger(__name__)
@@ -3557,10 +3558,25 @@ async def force_hibernate_project(
         if project.environment_status == "hibernated":
             raise HTTPException(status_code=400, detail="Project is already hibernated")
 
-        # Update project status
+        settings = get_settings()
+        if settings.deployment_mode != "kubernetes":
+            raise HTTPException(
+                status_code=400, detail="Hibernation is only available in Kubernetes mode"
+            )
+
+        orchestrator = get_kubernetes_orchestrator()
+        project.environment_status = "hibernating"
+        project.hibernated_at = None
+        await db.commit()
+
+        success = await orchestrator.hibernate_project(project.id, project.owner_id, db=db)
+        if not success:
+            project.environment_status = "active"
+            await db.commit()
+            raise HTTPException(status_code=500, detail="Hibernation failed")
+
         project.environment_status = "hibernated"
         project.hibernated_at = datetime.utcnow()
-
         await db.commit()
 
         # Log admin action
@@ -3583,6 +3599,12 @@ async def force_hibernate_project(
     except Exception as e:
         logger.error(f"Error hibernating project {project_id}: {e}")
         await db.rollback()
+        if "project" in locals() and project is not None:
+            with contextlib.suppress(Exception):
+                project.environment_status = "active"
+                project.hibernated_at = None
+                db.add(project)
+                await db.commit()
         raise HTTPException(status_code=500, detail="Failed to hibernate project") from e
 
 

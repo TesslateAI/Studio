@@ -5,6 +5,7 @@ Tools for managing agent task lists and planning.
 Stores todos in-memory per conversation session.
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 # In-memory storage for todos (keyed by conversation_id or session_id)
 # In production, you might want to persist this to database
 _todo_storage: dict[str, list[dict[str, Any]]] = {}
+_TODO_TTL_SECONDS = 60 * 60 * 24
 
 
 def _get_session_key(context: dict[str, Any]) -> str:
@@ -40,7 +42,7 @@ async def todo_read_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
         Dict with list of todos
     """
     session_key = _get_session_key(context)
-    todos = _todo_storage.get(session_key, [])
+    todos = await _load_todos(session_key)
 
     # Count by status
     pending = sum(1 for t in todos if t["status"] == "pending")
@@ -140,6 +142,7 @@ async def todo_write_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     # Store todos
     session_key = _get_session_key(context)
     _todo_storage[session_key] = todos
+    await _persist_todos(session_key, todos)
 
     # Count by status
     pending = sum(1 for t in todos if t["status"] == "pending")
@@ -212,3 +215,32 @@ def register_planning_tools(registry):
     )
 
     logger.info("Registered 2 todo planning tools")
+
+
+async def _load_todos(session_key: str) -> list[dict[str, Any]]:
+    """Load todos from Redis, falling back to the in-process cache."""
+    if session_key in _todo_storage:
+        return _todo_storage[session_key]
+
+    from ....services.cache_service import get_redis_client
+
+    redis = await get_redis_client()
+    if not redis:
+        return []
+
+    raw = await redis.get(f"tesslate:todos:{session_key}")
+    if not raw:
+        return []
+
+    todos = json.loads(raw)
+    _todo_storage[session_key] = todos
+    return todos
+
+
+async def _persist_todos(session_key: str, todos: list[dict[str, Any]]) -> None:
+    """Persist todos to Redis so they survive replica changes."""
+    from ....services.cache_service import get_redis_client
+
+    redis = await get_redis_client()
+    if redis:
+        await redis.setex(f"tesslate:todos:{session_key}", _TODO_TTL_SECONDS, json.dumps(todos))

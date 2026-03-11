@@ -92,10 +92,11 @@ CONTAINER LIFECYCLE:
   4. User clicks "Stop" → delete Deployment (files persist)
 
 SNAPSHOT LIFECYCLE (Hibernation):
-  1. User leaves or idle timeout → create VolumeSnapshot from PVC (< 5 seconds)
-  2. Wait for snapshot.status.readyToUse: true
-  3. Delete namespace (including PVC)
-  4. User returns → create namespace + PVC with dataSource pointing to snapshot
+  1. User leaves or idle timeout → discover all PVCs via _get_hibernation_pvc_names()
+     (project-storage + service PVCs labeled tesslate.io/component=service-storage or prefixed svc-)
+  2. Create VolumeSnapshot for each PVC, wait for readyToUse on each (timeout: 300s)
+  3. Delete namespace (including all PVCs)
+  4. User returns → restore project-storage PVC first, then iterate service PVC snapshots
   5. EBS lazy-loads data on first access (near-instant restore)
 ```
 
@@ -193,17 +194,25 @@ The EBS VolumeSnapshot pattern hibernates idle projects to save resources:
 **Key Implementation Details**:
 
 ```python
-# Hibernation (via SnapshotManager)
-1. Backend: Create VolumeSnapshot from PVC
-2. Backend: Poll until snapshot.status.readyToUse: true (typically < 60s)
-3. Backend: Delete namespace (cascades to PVC, pods, services, ingresses)
-4. Database: Create ProjectSnapshot record, update project status
+# PVC Discovery (_get_hibernation_pvc_names)
+# Lists all PVCs in namespace, returns project-storage + any service PVCs
+# (labeled tesslate.io/component=service-storage or prefixed svc-)
 
-# Restoration (via SnapshotManager)
-1. Backend: Create PVC with dataSource pointing to VolumeSnapshot
-2. EBS provisioner creates new volume from snapshot (lazy-load)
-3. Backend: Create namespace, file-manager pod mounts restored PVC
-4. Database: Update project status to 'active'
+# Hibernation (_save_to_snapshot, via SnapshotManager)
+1. Backend: Discover all PVCs via _get_hibernation_pvc_names(namespace)
+2. Backend: Skip snapshot ONLY if project is NOT initialized AND there are no service PVCs
+   (previously skipped whenever project was not initialized)
+3. Backend: For each PVC, create VolumeSnapshot and wait for readyToUse (timeout: 300s)
+4. Backend: Delete namespace (cascades to all PVCs, pods, services, ingresses)
+5. Database: Create ProjectSnapshot record per PVC, update project status
+
+# Restoration (_restore_from_snapshot, via SnapshotManager)
+1. Backend: Restore project-storage PVC first (if snapshot exists)
+2. Backend: Query get_latest_ready_snapshots_by_pvc() for service PVC snapshots
+3. Backend: Iterate and restore each service PVC from its snapshot
+4. EBS provisioner creates new volumes from snapshots (lazy-load)
+5. Backend: Create namespace, file-manager pod mounts restored PVCs
+6. Database: Update project status to 'active'
 ```
 
 **Why VolumeSnapshots are superior**:
@@ -344,18 +353,22 @@ await orchestrator.stop_container(
 ### Leaving Project (Hibernate)
 
 ```python
-success = await orchestrator.hibernate_project(project_id, user_id)
+success = await orchestrator.hibernate_project(project_id, user_id, db=db)
 ```
 
 **Steps**:
-1. **Create VolumeSnapshot** (via `SnapshotManager`):
-   - Create VolumeSnapshot pointing to project-storage PVC
-   - Wait for `status.readyToUse: true` (typically < 60 seconds)
-   - Create ProjectSnapshot database record
-2. **Delete namespace**: Cascades to all resources (PVC, pods, services, ingresses)
-3. **Update database**: `Project.environment_status = 'hibernated'`, `hibernated_at = now()`
+1. **Discover PVCs** via `_get_hibernation_pvc_names(namespace)`:
+   - Always includes `project-storage`
+   - Includes service PVCs labeled `tesslate.io/component=service-storage` or prefixed `svc-`
+2. **Skip check**: Only skips snapshot if the project is NOT initialized AND there are no service PVCs. If there are service PVCs, snapshots are created even for uninitialized projects.
+3. **Create VolumeSnapshots** (via `SnapshotManager`):
+   - For each PVC, create VolumeSnapshot and wait for `status.readyToUse: true` (timeout: 300s)
+   - Create ProjectSnapshot database record per PVC
+   - If any snapshot fails, hibernation is aborted
+4. **Delete namespace**: Cascades to all resources (PVCs, pods, services, ingresses)
+5. **Update database**: `Project.environment_status = 'hibernated'`, `hibernated_at = now()`
 
-**Safety**: If snapshot creation fails, namespace is NOT deleted (preserves data). Error is raised to user.
+**Safety**: If any snapshot creation fails, namespace is NOT deleted (preserves data). Error is raised to user.
 
 ### Returning to Hibernated Project (Restore)
 
@@ -365,14 +378,18 @@ namespace = await orchestrator.restore_project(project_id, user_id)
 
 **Steps**:
 1. **Create namespace**
-2. **Restore from VolumeSnapshot** (via `SnapshotManager`):
-   - Get latest ProjectSnapshot from database
+2. **Restore project-storage PVC** (via `SnapshotManager`):
+   - Check for existing `project-storage` hibernation snapshot
    - Create PVC with `dataSource` pointing to VolumeSnapshot
    - EBS provisioner creates new volume from snapshot (lazy-load)
-3. **Create file-manager pod** (mounts restored PVC)
-4. **Update database**: `Project.environment_status = 'active'`, `hibernated_at = NULL`
+3. **Restore service PVCs** (via `SnapshotManager`):
+   - Query `get_latest_ready_snapshots_by_pvc()` for all service PVC snapshots
+   - Iterate and restore each service PVC from its corresponding snapshot
+   - If any service PVC restore fails, returns partial success (project-storage may still be restored)
+4. **Create file-manager pod** (mounts restored PVCs)
+5. **Update database**: `Project.environment_status = 'active'`, `hibernated_at = NULL`
 
-**Key benefit**: node_modules and all dependencies are preserved in the snapshot. No npm install needed - the project is ready in seconds!
+**Key benefit**: node_modules, all dependencies, and service data (databases, caches) are preserved in snapshots. No npm install needed - the project is ready in seconds!
 
 ### Deleting Project (Permanent)
 
@@ -617,7 +634,7 @@ async def cleanup_idle_environments(self, idle_timeout_minutes=30):
 
     for project in idle_projects:
         # Hibernate project (create VolumeSnapshot + delete namespace)
-        await self.hibernate_project(project.id, project.owner_id)
+        await self.hibernate_project(project.id, project.owner_id, db=db)
 
         # Update status
         project.environment_status = 'hibernated'
@@ -658,7 +675,7 @@ K8S_PVC_ACCESS_MODE=ReadWriteOnce
 K8S_SNAPSHOT_CLASS=tesslate-ebs-snapshots
 K8S_SNAPSHOT_RETENTION_DAYS=30
 K8S_MAX_SNAPSHOTS_PER_PROJECT=5
-K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=90
+K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=300
 
 # Namespace configuration
 K8S_NAMESPACE_PER_PROJECT=true

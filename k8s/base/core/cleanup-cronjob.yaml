@@ -73,41 +73,16 @@ spec:
 
                 # Run the cleanup
                 asyncio.run(cleanup_idle_environments())
+            envFrom:
+              - secretRef:
+                  name: tesslate-app-secrets
+              - secretRef:
+                  name: postgres-secret
             env:
               - name: KUBERNETES_NAMESPACE
                 value: tesslate
               - name: DEPLOYMENT_MODE
                 value: "kubernetes"
-              - name: DATABASE_URL
-                valueFrom:
-                  secretKeyRef:
-                    name: tesslate-app-secrets
-                    key: DATABASE_URL
-              - name: SECRET_KEY
-                valueFrom:
-                  secretKeyRef:
-                    name: tesslate-app-secrets
-                    key: SECRET_KEY
-              - name: POSTGRES_HOST
-                value: "postgres"
-              - name: POSTGRES_PORT
-                value: "5432"
-              - name: POSTGRES_DB
-                valueFrom:
-                  secretKeyRef:
-                    name: postgres-secret
-                    key: POSTGRES_DB
-              - name: POSTGRES_USER
-                valueFrom:
-                  secretKeyRef:
-                    name: postgres-secret
-                    key: POSTGRES_USER
-              - name: POSTGRES_PASSWORD
-                valueFrom:
-                  secretKeyRef:
-                    name: postgres-secret
-                    key: POSTGRES_PASSWORD
-              # Kubernetes configuration
               - name: K8S_NAMESPACE_PER_PROJECT
                 value: "true"
               - name: K8S_STORAGE_CLASS

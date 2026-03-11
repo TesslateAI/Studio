@@ -27,6 +27,8 @@ The `SnapshotManager` service handles EBS VolumeSnapshot operations for project 
 │  restore_from_snapshot │  Creates PVC from VolumeSnapshot   │
 │  wait_for_snapshot_ready │  Polls until readyToUse: true   │
 │  get_project_snapshots │  Lists snapshots for Timeline UI   │
+│  get_latest_ready_snapshot │  Latest ready snapshot per PVC │
+│  get_latest_ready_snapshots_by_pvc │  Dict of PVC→snapshot  │
 │  soft_delete_project_snapshots │  Marks for 30-day retention│
 │  cleanup_expired_snapshots │  Deletes old soft-deleted     │
 └─────────────────────────────────────────────────────────────┘
@@ -37,6 +39,8 @@ The `SnapshotManager` service handles EBS VolumeSnapshot operations for project 
 ### create_snapshot()
 
 Creates an EBS VolumeSnapshot from a project's PVC.
+
+Before inserting the new record, marks all existing snapshots for the same PVC as `is_latest=False`, then sets `is_latest=True` on the new record. Snapshot rotation (`_rotate_snapshots`) is also scoped to the same PVC.
 
 ```python
 async def create_snapshot(
@@ -67,7 +71,7 @@ Waits for a snapshot to become ready (for hibernation workflow only).
 async def wait_for_snapshot_ready(
     snapshot: ProjectSnapshot,
     db: AsyncSession,
-    timeout_seconds: int = 90
+    timeout_seconds: int | None = None  # Default from config (300s)
 ) -> Tuple[bool, Optional[str]]:
     """
     Poll until VolumeSnapshot status.readyToUse is true.
@@ -80,27 +84,65 @@ async def wait_for_snapshot_ready(
     """
 ```
 
+Progress logging uses `logger.info` (not `logger.debug`) and includes `readyToUse`, `error`, and `boundVolumeSnapshotContentName` fields every 5 seconds.
+
+On timeout, the error message includes enhanced diagnostics: the last observed `readyToUse` value, any `error` from the VolumeSnapshot status, and the `boundVolumeSnapshotContentName` if present.
+
 ### restore_from_snapshot()
 
-Creates a PVC from a VolumeSnapshot for project restoration.
+Creates a PVC from a VolumeSnapshot for project restoration. Internally delegates to `get_latest_ready_snapshot()` when no specific `snapshot_id` is provided.
 
 ```python
 async def restore_from_snapshot(
     project_id: UUID,
     user_id: UUID,
-    namespace: str,
     db: AsyncSession,
-    snapshot_id: Optional[UUID] = None  # Uses latest if None
+    snapshot_id: Optional[UUID] = None,  # Uses latest if None
+    pvc_name: str = "project-storage"
 ) -> Tuple[bool, Optional[str]]:
     """
     Create PVC with dataSource pointing to VolumeSnapshot.
 
     EBS lazy-loads data on first read - near-instant startup.
-    EBS lazy-loads data - fast startup!
 
     Returns:
         (True, None) on success
-        (False, error_message) on failure
+        (False, error_message) on failure (includes PVC name in message)
+    """
+```
+
+### get_latest_ready_snapshot()
+
+Returns the single latest ready snapshot for a specific PVC in a project.
+
+```python
+async def get_latest_ready_snapshot(
+    project_id: UUID,
+    db: AsyncSession,
+    pvc_name: str,
+    snapshot_type: Optional[str] = None
+) -> Optional[ProjectSnapshot]:
+    """
+    Get the latest ready snapshot for a specific PVC.
+    Filters by status="ready" and is_soft_deleted=False.
+    Optional snapshot_type filter ("hibernation" or "manual").
+    """
+```
+
+### get_latest_ready_snapshots_by_pvc()
+
+Returns a dict mapping PVC names to their latest ready snapshot for a project.
+
+```python
+async def get_latest_ready_snapshots_by_pvc(
+    project_id: UUID,
+    db: AsyncSession,
+    snapshot_type: Optional[str] = None
+) -> dict[str, ProjectSnapshot]:
+    """
+    Get the latest ready snapshot for each PVC in a project.
+    Returns {pvc_name: ProjectSnapshot} mapping.
+    Optional snapshot_type filter.
     """
 ```
 
@@ -151,6 +193,23 @@ async def cleanup_expired_snapshots(
     Called by snapshot-cleanup-cronjob.yaml daily at 3 AM UTC.
 
     Returns: Number of snapshots deleted
+    """
+```
+
+### has_existing_snapshot()
+
+Checks if a project has any ready snapshots (for restore eligibility).
+
+```python
+async def has_existing_snapshot(
+    project_id: UUID,
+    db: AsyncSession,
+    pvc_name: Optional[str] = None,
+    snapshot_type: Optional[str] = None
+) -> bool:
+    """
+    Check if a project has any ready, non-soft-deleted snapshots.
+    Optional pvc_name and snapshot_type filters to narrow the check.
     """
 ```
 
@@ -218,7 +277,7 @@ Settings in `config.py`:
 k8s_snapshot_class: str = "tesslate-ebs-snapshots"  # VolumeSnapshotClass name
 k8s_snapshot_retention_days: int = 30               # Soft-delete retention
 k8s_max_snapshots_per_project: int = 5              # Timeline limit
-k8s_snapshot_ready_timeout_seconds: int = 90        # Wait timeout
+k8s_snapshot_ready_timeout_seconds: int = 300       # Wait timeout (increased for EBS/CSI under load)
 ```
 
 ## Database Model

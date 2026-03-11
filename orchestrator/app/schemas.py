@@ -222,6 +222,7 @@ class Container(ContainerBase):
     id: UUID
     project_id: UUID
     base_id: UUID | None = None
+    base_name: str | None = None
     container_name: str
     directory: str
     port: int | None = None
@@ -231,12 +232,15 @@ class Container(ContainerBase):
     env_vars_count: int | None = None
     container_type: str = "base"
     service_slug: str | None = None
+    service_type: str | None = None
     deployment_mode: str = "container"
     external_endpoint: str | None = None
     credentials_id: UUID | None = None
     injected_env_vars: list[InjectedEnvVar] | None = None
     service_outputs: dict[str, str] | None = None
     deployment_provider: str | None = None  # 'vercel' | 'netlify' | 'cloudflare' | None
+    icon: str | None = None
+    tech_stack: list[str] | None = None
     position_x: float
     position_y: float
     status: str

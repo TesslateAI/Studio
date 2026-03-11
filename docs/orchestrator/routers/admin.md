@@ -722,7 +722,13 @@ Returns paginated list of all projects with admin details.
 POST /api/admin/projects/{project_id}/hibernate
 ```
 
-Hibernates a project (stops containers, preserves data).
+Hibernates a project by creating a VolumeSnapshot of the project's persistent storage and then deleting the project namespace in Kubernetes. This performs real hibernation through `KubernetesOrchestrator.hibernate_project()`, not just a DB status change.
+
+**Behavior**:
+- Validates that `deployment_mode` is `"kubernetes"`. Returns **400** if the platform is not running in Kubernetes mode.
+- Creates an EBS VolumeSnapshot to preserve project data before tearing down the namespace.
+- On success, sets `environment_status` to `"hibernated"` in the database.
+- On failure, rolls back `environment_status` to `"active"` so the project is not left in an inconsistent state.
 
 **Request Body**:
 ```json

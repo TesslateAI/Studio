@@ -90,7 +90,22 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     from .agent.models import create_model_adapter
     from .config import get_settings
     from .database import AsyncSessionLocal
-    from .models import AgentStep, Chat, MarketplaceAgent, Message, Project, UserPurchasedAgent
+    from .models import (
+        AgentStep,
+        Chat,
+        Container,
+        MarketplaceAgent,
+        Message,
+        Project,
+        UserPurchasedAgent,
+    )
+    from .services.agent_context import (
+        _build_architecture_context,
+        _build_git_context,
+        _build_tesslate_context,
+        _get_chat_history,
+        _resolve_container_name,
+    )
     from .services.agent_task import AgentTaskPayload
     from .services.pubsub import get_pubsub
 
@@ -222,20 +237,68 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 tools_override=tools_override,
             )
 
+            container_id = UUID(payload.container_id) if payload.container_id else None
+            container_name = payload.container_name
+            container_directory = payload.container_directory
+
+            if container_id and (not container_name or container_directory is None):
+                container_result = await db.execute(
+                    select(Container).where(
+                        Container.id == container_id,
+                        Container.project_id == UUID(project_id),
+                    )
+                )
+                container = container_result.scalar_one_or_none()
+                if container:
+                    container_name = _resolve_container_name(container)
+                    if container.directory and container.directory != ".":
+                        container_directory = container.directory
+
+            chat_history = payload.chat_history or await _get_chat_history(UUID(payload.chat_id), db, limit=10)
+
+            project_context = payload.project_context or {
+                "project_name": project.name,
+                "project_description": project.description,
+            }
+            tesslate_context = await _build_tesslate_context(
+                project,
+                UUID(payload.user_id),
+                db,
+                container_name=container_name,
+                container_directory=container_directory,
+            )
+            if tesslate_context:
+                project_context["tesslate_context"] = tesslate_context
+            git_context = await _build_git_context(project, UUID(payload.user_id), db)
+            if git_context:
+                project_context["git_context"] = git_context
+            architecture_context = await _build_architecture_context(project, db)
+            if architecture_context:
+                project_context["architecture_context"] = architecture_context
+
+            # Warm the local plan mirror from Redis before the agent builds its prompt.
+            from .agent.plan_manager import PlanManager
+
+            payload_context = {
+                "user_id": UUID(payload.user_id),
+                "project_id": UUID(project_id),
+            }
+            active_plan = await PlanManager.get_plan(payload_context)
+
             # 8. Build execution context (same structure as chat.py)
             context = {
                 "user_id": UUID(payload.user_id),
                 "project_id": UUID(project_id),
                 "project_slug": payload.project_slug,
-                "container_directory": payload.container_directory,
+                "container_directory": container_directory,
                 "chat_id": UUID(payload.chat_id),
                 "task_id": task_id,
                 "db": db,
-                "chat_history": payload.chat_history,
-                "project_context": payload.project_context,
+                "chat_history": chat_history,
+                "project_context": project_context,
                 "edit_mode": payload.edit_mode,
-                "container_id": (UUID(payload.container_id) if payload.container_id else None),
-                "container_name": payload.container_name,
+                "container_id": container_id,
+                "container_name": container_name,
                 "view_context": (
                     payload.view_context.get("view")
                     if isinstance(payload.view_context, dict)
@@ -243,6 +306,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 ),
                 "model_name": model_name,
                 "agent_id": agent_model.id,
+                "_active_plan": active_plan,
             }
 
             # 9. Create placeholder Message before agent loop (crash-safe)
