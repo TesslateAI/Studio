@@ -162,6 +162,13 @@ locals {
     : trimsuffix(trimsuffix(var.domain_name, local.cloudflare_zone_name), ".")
   )
 
+  # Subnets for EKS node groups — filtered by eks_node_azs if set
+  node_subnet_ids = (
+    length(var.eks_node_azs) > 0
+    ? [for i, az in local.azs : module.vpc.private_subnets[i] if contains(var.eks_node_azs, az)]
+    : module.vpc.private_subnets
+  )
+
   common_tags = {
     Project     = var.project_name
     Environment = var.environment

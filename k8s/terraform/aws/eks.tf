@@ -60,6 +60,7 @@ module "eks" {
       name            = "tess-${var.environment}-primary"
       use_name_prefix = false
 
+      subnet_ids     = local.node_subnet_ids
       instance_types = var.eks_node_instance_types
       capacity_type  = "ON_DEMAND"
 
@@ -104,6 +105,7 @@ module "eks" {
       name            = "tess-${var.environment}-spot"
       use_name_prefix = false
 
+      subnet_ids     = local.node_subnet_ids
       instance_types = ["t3.large", "t3.xlarge", "t3a.large", "t3a.xlarge"]
       capacity_type  = "SPOT"
 

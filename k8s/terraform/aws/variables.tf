@@ -127,6 +127,12 @@ variable "eks_node_disk_size" {
   default     = 50
 }
 
+variable "eks_node_azs" {
+  description = "Availability zones for EKS node groups. Empty = use all VPC AZs. Set to pin nodes to specific AZs (e.g. [\"us-east-1b\"] for single-node beta)."
+  type        = list(string)
+  default     = []
+}
+
 variable "eks_spot_desired_size" {
   description = "Desired number of spot nodes (set 0 to disable spot node group)"
   type        = number
