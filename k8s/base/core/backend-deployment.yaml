@@ -12,6 +12,7 @@ metadata:
     app: tesslate-backend
     component: backend
 spec:
+  revisionHistoryLimit: 3
   replicas: 1  # Overridden by overlays for production
   strategy:
     type: RollingUpdate

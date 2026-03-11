@@ -13,6 +13,7 @@ metadata:
     app: tesslate-worker
     component: worker
 spec:
+  revisionHistoryLimit: 3
   replicas: 2  # Scale based on agent queue depth
   selector:
     matchLabels:

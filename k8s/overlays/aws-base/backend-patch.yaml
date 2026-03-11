@@ -85,13 +85,6 @@ spec:
               value: "true"
             - name: COOKIE_SAMESITE
               value: "lax"
-          resources:
-            requests:
-              memory: "1Gi"
-              cpu: "500m"
-            limits:
-              memory: "4Gi"
-              cpu: "4000m"
           livenessProbe:
             httpGet:
               path: /health

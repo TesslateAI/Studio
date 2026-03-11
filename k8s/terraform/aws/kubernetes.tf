@@ -498,9 +498,13 @@ resource "aws_db_instance" "tesslate" {
 # -----------------------------------------------------------------------------
 resource "local_file" "replicas_patch" {
   content  = templatefile("${path.module}/templates/replicas-patch.yaml.tpl", {
-    backend_replicas  = var.backend_replicas
-    frontend_replicas = var.frontend_replicas
-    worker_replicas   = var.worker_replicas
+    backend_replicas       = var.backend_replicas
+    frontend_replicas      = var.frontend_replicas
+    worker_replicas        = var.worker_replicas
+    backend_cpu_request    = var.backend_cpu_request
+    backend_memory_request = var.backend_memory_request
+    backend_cpu_limit      = var.backend_cpu_limit
+    backend_memory_limit   = var.backend_memory_limit
   })
   filename = "${path.module}/../../overlays/aws-${var.environment}/generated-replicas-patch.yaml"
 }

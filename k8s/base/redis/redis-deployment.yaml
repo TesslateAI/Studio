@@ -11,6 +11,7 @@ metadata:
     app: redis
     component: cache
 spec:
+  revisionHistoryLimit: 3
   replicas: 1
   selector:
     matchLabels:

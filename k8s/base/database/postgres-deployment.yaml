@@ -10,6 +10,7 @@ metadata:
     app: postgres
     component: database
 spec:
+  revisionHistoryLimit: 3
   replicas: 1
   selector:
     matchLabels:

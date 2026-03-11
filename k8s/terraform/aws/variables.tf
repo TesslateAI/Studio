@@ -612,6 +612,30 @@ variable "worker_replicas" {
   default     = 2
 }
 
+variable "backend_cpu_request" {
+  description = "CPU request for backend pods"
+  type        = string
+  default     = "500m"
+}
+
+variable "backend_memory_request" {
+  description = "Memory request for backend pods"
+  type        = string
+  default     = "1Gi"
+}
+
+variable "backend_cpu_limit" {
+  description = "CPU limit for backend pods"
+  type        = string
+  default     = "2000m"
+}
+
+variable "backend_memory_limit" {
+  description = "Memory limit for backend pods"
+  type        = string
+  default     = "2Gi"
+}
+
 variable "nginx_ingress_replicas" {
   description = "Number of NGINX ingress controller replicas"
   type        = number
