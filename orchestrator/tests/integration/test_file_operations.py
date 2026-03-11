@@ -219,7 +219,7 @@ class TestDeleteFile:
                 f"/api/projects/{slug}/files",
                 json={"file_path": "file.txt"},
             )
-            assert resp.status_code == 401
+            assert resp.status_code == 403
         finally:
             if saved_auth:
                 api_client.headers["Authorization"] = saved_auth
@@ -396,7 +396,7 @@ class TestRenameFile:
                 f"/api/projects/{slug}/files/rename",
                 json={"old_path": "a.ts", "new_path": "b.ts"},
             )
-            assert resp.status_code == 401
+            assert resp.status_code == 403
         finally:
             if saved_auth:
                 api_client.headers["Authorization"] = saved_auth
@@ -524,7 +524,7 @@ class TestMkdir:
                 f"/api/projects/{slug}/files/mkdir",
                 json={"dir_path": "src/new"},
             )
-            assert resp.status_code == 401
+            assert resp.status_code == 403
         finally:
             if saved_auth:
                 api_client.headers["Authorization"] = saved_auth
