@@ -2749,7 +2749,7 @@ Return ONLY valid JSON, no markdown code blocks, no explanation."""
         import litellm
 
         response = await litellm.acompletion(
-            model="glm-4-flash-250414",
+            model="glm-5",
             messages=[
                 {"role": "system", "content": "You are a project analyzer. Return only valid JSON."},
                 {"role": "user", "content": prompt},
