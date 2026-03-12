@@ -304,21 +304,6 @@ export const assetsApi = {
 };
 ```
 
-## Diagram API (diagramApi)
-
-Generates architecture diagrams for projects:
-
-```typescript
-export const diagramApi = {
-  generateDiagram: async (slug: string, diagramType: 'mermaid' | 'c4_plantuml' = 'mermaid') => {
-    const response = await api.post(`/api/projects/${slug}/generate-architecture-diagram`, null, {
-      params: { diagram_type: diagramType }
-    });
-    return response.data;
-  },
-};
-```
-
 ## Usage Examples
 
 ### Creating a Project from GitHub

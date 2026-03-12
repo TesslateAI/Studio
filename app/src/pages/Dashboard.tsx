@@ -133,12 +133,14 @@ export default function Dashboard() {
           setShowCreateDialog(false);
           setIsCreating(false);
 
-          // Navigate to builder with container if available
+          // Navigate based on setup result
           const taskResult = result?.result as { container_id?: string } | undefined;
-          if (taskResult?.container_id) {
+          if (taskResult?.container_id === 'needs_setup') {
+            // Project needs setup - redirect to setup screen
+            navigate(`/project/${project.slug}/setup`);
+          } else if (taskResult?.container_id) {
             navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
           } else {
-            // Fallback to builder without container param
             navigate(`/project/${project.slug}/builder`);
           }
         } catch (taskError) {
@@ -567,15 +569,18 @@ export default function Dashboard() {
               </div>
             </button>
 
-            {/* Import from Repository Card — temporarily disabled */}
+            {/* Import from Repository Card */}
             <button
-              disabled
-              title="Git import is temporarily unavailable"
+              onClick={() => setShowImportDialog(true)}
+              disabled={isCreating}
               className={`
                   group bg-white/[0.01] rounded-2xl p-6
                   border-2 border-dashed border-emerald-500/30
+                  hover:border-emerald-500/60
+                  transition-all duration-300
+                  hover:transform hover:-translate-y-1
                   flex flex-col items-center justify-center gap-3
-                  opacity-50 cursor-not-allowed
+                  ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                   ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
                 `}
             >
@@ -586,7 +591,7 @@ export default function Dashboard() {
                 <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
                   Import from Repository
                 </h3>
-                <p className="text-sm text-gray-500">Connect a repo from the project page</p>
+                <p className="text-sm text-gray-500">Import from GitHub, GitLab, or Bitbucket</p>
               </div>
             </button>
 
@@ -762,9 +767,11 @@ export default function Dashboard() {
                 setShowImportDialog(false);
                 setIsCreating(false);
 
-                // Navigate to builder with container if available
+                // Navigate based on setup result
                 const taskResult = result?.result as { container_id?: string } | undefined;
-                if (taskResult?.container_id) {
+                if (taskResult?.container_id === 'needs_setup') {
+                  navigate(`/project/${project.slug}/setup`);
+                } else if (taskResult?.container_id) {
                   navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
                 } else {
                   navigate(`/project/${project.slug}/builder`);

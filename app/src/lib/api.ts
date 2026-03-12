@@ -16,6 +16,7 @@ import type {
   CustomerPortalResponse,
   StripeConnectResponse,
 } from '../types/billing';
+import type { TesslateConfig, TesslateConfigResponse, SetupConfigSyncResponse } from '../types/tesslateConfig';
 import { config } from '../config';
 
 const API_URL = config.API_URL;
@@ -1590,13 +1591,19 @@ export const themesApi = {
   },
 };
 
-// Add diagram generation to projectsApi
-export const diagramApi = {
-  // Generate architecture diagram for a project
-  generateDiagram: async (slug: string, diagramType: 'mermaid' | 'c4_plantuml' = 'mermaid') => {
-    const response = await api.post(`/api/projects/${slug}/generate-architecture-diagram`, null, {
-      params: { diagram_type: diagramType },
-    });
+export const setupApi = {
+  getConfig: async (slug: string): Promise<TesslateConfigResponse> => {
+    const response = await api.get(`/api/projects/${slug}/setup-config`);
+    return response.data;
+  },
+
+  saveConfig: async (slug: string, config: TesslateConfig): Promise<SetupConfigSyncResponse> => {
+    const response = await api.post(`/api/projects/${slug}/setup-config`, config);
+    return response.data;
+  },
+
+  analyzeProject: async (slug: string): Promise<TesslateConfigResponse> => {
+    const response = await api.post(`/api/projects/${slug}/analyze`);
     return response.data;
   },
 };

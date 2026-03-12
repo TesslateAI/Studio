@@ -16,6 +16,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import Project from './pages/Project';
+import ProjectSetup from './pages/ProjectSetup';
 import { ProjectGraphCanvas } from './pages/ProjectGraphCanvas';
 import Marketplace from './pages/Marketplace';
 import MarketplaceDetail from './pages/MarketplaceDetail';
@@ -373,6 +374,14 @@ function AppContent() {
           element={
             <PrivateRoute>
               <Project />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/project/:slug/setup"
+          element={
+            <PrivateRoute>
+              <ProjectSetup />
             </PrivateRoute>
           }
         />

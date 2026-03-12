@@ -28,7 +28,11 @@ else:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "orchestrator"))
 
 from app.database import AsyncSessionLocal
-from app.seeds.marketplace_agents import seed_marketplace_agents, auto_add_tesslate_agent_to_users
+from app.seeds.marketplace_agents import (
+    seed_marketplace_agents,
+    auto_add_tesslate_agent_to_users,
+    auto_add_librarian_agent_to_users,
+)
 
 
 async def main():
@@ -38,6 +42,9 @@ async def main():
 
         added = await auto_add_tesslate_agent_to_users(db)
         print(f"Added Tesslate Agent to {added} users.")
+
+        added = await auto_add_librarian_agent_to_users(db)
+        print(f"Added Librarian agent to {added} users.")
 
 
 if __name__ == "__main__":

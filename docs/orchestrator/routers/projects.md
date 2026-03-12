@@ -1094,31 +1094,6 @@ Returns container configuration and status for display in the frontend.
 }
 ```
 
-## Architecture Diagram
-
-```
-POST /api/projects/{project_slug}/generate-architecture-diagram
-```
-
-Generates a visual architecture diagram of the project's containers and their connections.
-
-**Response**:
-```json
-{
-  "diagram": {
-    "nodes": [
-      {"id": "frontend", "type": "web", "label": "Frontend"},
-      {"id": "backend", "type": "api", "label": "Backend"}
-    ],
-    "edges": [
-      {"source": "frontend", "target": "backend", "type": "api"}
-    ]
-  }
-}
-```
-
-The frontend renders this using a graph visualization library.
-
 ## Key Functions
 
 ### get_project_by_slug()

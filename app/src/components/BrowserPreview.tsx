@@ -9,6 +9,7 @@ import {
   Monitor,
 } from '@phosphor-icons/react';
 import { ContainerLoadingOverlay } from './ContainerLoadingOverlay';
+import { PreviewPortPicker, type PreviewableContainer } from './PreviewPortPicker';
 import type { ContainerStartupStatus } from '../hooks/useContainerStartup';
 
 interface Tab {
@@ -33,6 +34,10 @@ interface BrowserPreviewProps {
   startupLogs?: string[];
   startupError?: string;
   onRetryStart?: () => void;
+  // Preview port picker props
+  previewableContainers?: PreviewableContainer[];
+  selectedPreviewContainerId?: string | null;
+  onPreviewContainerSwitch?: (container: PreviewableContainer) => void;
 }
 
 export function BrowserPreview({
@@ -50,6 +55,9 @@ export function BrowserPreview({
   startupLogs = [],
   startupError,
   onRetryStart,
+  previewableContainers = [],
+  selectedPreviewContainerId = null,
+  onPreviewContainerSwitch,
 }: BrowserPreviewProps) {
   // Determine if we should show the loading overlay
   const showLoadingOverlay =
@@ -186,6 +194,13 @@ export function BrowserPreview({
             </span>
           </div>
         </div>
+        {onPreviewContainerSwitch && (
+          <PreviewPortPicker
+            containers={previewableContainers}
+            selectedContainerId={selectedPreviewContainerId}
+            onSelect={onPreviewContainerSwitch}
+          />
+        )}
         <button
           onClick={onRefresh}
           className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"

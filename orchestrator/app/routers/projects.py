@@ -61,6 +61,11 @@ from ..schemas import (
     FileRenameRequest,
     ProjectCreate,
     TemplateExportRequest,
+    TesslateConfigCreate,
+    TesslateConfigResponse,
+    SetupConfigSyncResponse,
+    AppConfigSchema,
+    InfraConfigSchema,
 )
 from ..schemas import Container as ContainerSchema
 from ..schemas import ContainerConnection as ContainerConnectionSchema
@@ -128,6 +133,86 @@ async def _validate_git_repo_accessible(
             f"Repository check timed out after {timeout}s for {repo_url}. "
             f"The remote server may be unreachable."
         ) from None
+
+
+async def _check_repo_size_limit(
+    *,
+    provider_type,
+    provider_class,
+    owner: str,
+    repo: str,
+    access_token: str | None,
+    max_size_kb: int,
+) -> None:
+    """
+    Best-effort check that a repository does not exceed the size limit before cloning.
+
+    Uses the git provider API to query the repository size.  If the provider
+    doesn't report size reliably (e.g. GitLab returns 0) or the API call fails,
+    the check is silently skipped so the clone can proceed normally.
+
+    Args:
+        provider_type: GitProviderType enum value.
+        provider_class: The provider class (e.g. GitHubProvider).
+        owner: Repository owner / namespace.
+        repo: Repository name.
+        access_token: OAuth token (may be None for public repos).
+        max_size_kb: Maximum allowed size in kilobytes.
+
+    Raises:
+        HTTPException (400): If the repo size exceeds the limit.
+    """
+    from ..services.git_providers.base import GitProviderType
+
+    try:
+        repo_size_kb = 0
+
+        if access_token:
+            # Use the existing provider infrastructure for authenticated requests
+            provider_instance = provider_class(access_token)
+            repo_data = await provider_instance.get_repository(owner, repo)
+            repo_size_kb = repo_data.size
+        else:
+            # Unauthenticated fallback for public repos (GitHub only)
+            if provider_type == GitProviderType.GITHUB:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(
+                        f"https://api.github.com/repos/{owner}/{repo}",
+                        headers={"Accept": "application/vnd.github.v3+json"},
+                    )
+                    if resp.status_code == 200:
+                        repo_size_kb = resp.json().get("size", 0)
+
+        # Skip enforcement when the provider doesn't report size (e.g. GitLab returns 0)
+        if repo_size_kb <= 0:
+            return
+
+        max_size_mb = max_size_kb / 1024
+        repo_size_mb = repo_size_kb / 1024
+
+        if repo_size_kb > max_size_kb:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Repository exceeds {max_size_mb / 1024:.0f} GB size limit. "
+                    f"The repository is approximately {repo_size_mb:.0f} MB. "
+                    f"Please use a smaller repository or remove large files with git history rewriting."
+                ),
+            )
+
+        logger.info(
+            f"[CREATE] Repository size check passed: {owner}/{repo} is ~{repo_size_mb:.0f} MB "
+            f"(limit: {max_size_mb:.0f} MB)"
+        )
+
+    except HTTPException:
+        # Re-raise size limit errors
+        raise
+    except Exception as e:
+        # Best-effort: log and continue if the size check fails for any reason
+        logger.warning(f"[CREATE] Could not check repository size for {owner}/{repo}: {e}")
 
 
 async def get_project_by_slug(db: AsyncSession, project_slug: str, user_id: UUID) -> Project:
@@ -292,7 +377,6 @@ async def _setup_git_provider_project(
     Returns:
         Container ID string if container was created, None otherwise.
     """
-    from ..services.framework_detector import FrameworkDetector
     from ..services.git_providers import (
         GitProviderType,
         get_git_provider_manager,
@@ -346,6 +430,17 @@ async def _setup_git_provider_project(
     task.update_progress(15, 100, "Validating repository access...")
     await _validate_git_repo_accessible(authenticated_url, auth_token=access_token)
     logger.info(f"[CREATE] Repository validated: {repo_url}")
+
+    # Check repository size before cloning (best-effort, non-blocking on failure)
+    MAX_REPO_SIZE_KB = 1_000_000  # 1 GB in KB
+    await _check_repo_size_limit(
+        provider_type=provider_type,
+        provider_class=provider_class,
+        owner=repo_info["owner"],
+        repo=repo_info["repo"],
+        access_token=access_token,
+        max_size_kb=MAX_REPO_SIZE_KB,
+    )
 
     # Framework detection defaults (updated after clone based on package.json)
     framework_name = "unknown"
@@ -414,25 +509,6 @@ async def _setup_git_provider_project(
         # TODO: Run patcher inside pod if needed - for now skip since basic Next.js should work
         logger.info("[CREATE] Skipping auto-patch in K8s mode (TODO: implement in-pod patching)")
 
-        # Detect framework from package.json in PVC
-        try:
-            pkg_content = await asyncio.to_thread(
-                orchestrator.k8s_client._exec_in_pod,
-                pod_name,
-                namespace,
-                "file-manager",
-                ["/bin/sh", "-c", "cat /app/package.json"],
-                timeout=10,
-            )
-            if pkg_content and pkg_content.strip():
-                framework_name, fw_config = FrameworkDetector.detect_from_package_json(pkg_content)
-                framework_port = fw_config.port
-                logger.info(
-                    f"[CREATE] K8s: Detected framework '{framework_name}' (port {framework_port})"
-                )
-        except Exception as e:
-            logger.warning(f"[CREATE] Could not detect framework in K8s: {e}")
-
         task.update_progress(90, 100, "Project files ready")
 
     # ==========================================================================
@@ -470,19 +546,6 @@ async def _setup_git_provider_project(
         except Exception as patch_error:
             logger.warning(f"[CREATE] Auto-patch error: {patch_error}")
 
-        # Detect framework from package.json on filesystem
-        try:
-            pkg_path = os.path.join(project_path, "package.json")
-            if os.path.exists(pkg_path):
-                pkg_content = await read_file_async(pkg_path)
-                framework_name, fw_config = FrameworkDetector.detect_from_package_json(pkg_content)
-                framework_port = fw_config.port
-                logger.info(
-                    f"[CREATE] Docker: Detected framework '{framework_name}' (port {framework_port})"
-                )
-        except Exception as e:
-            logger.warning(f"[CREATE] Could not detect framework: {e}")
-
         task.update_progress(90, 100, "Project setup complete")
 
     # Update project with Git info
@@ -503,30 +566,80 @@ async def _setup_git_provider_project(
     db.add(git_repo)
     await db.commit()
 
-    # Create Container record so the project is usable immediately
-    task.update_progress(95, 100, "Creating container from imported repository")
+    # Check for .tesslate/config.json in the cloned repo
+    task.update_progress(90, 100, "Checking for project configuration...")
 
-    repo_name_slug = repo_info["repo"].lower().replace(" ", "-")
-    container = Container(
-        project_id=db_project.id,
-        base_id=None,  # No marketplace base for git imports
-        name=repo_name_slug,
-        directory=".",
-        container_name=f"{db_project.slug}-{repo_name_slug}",
-        internal_port=framework_port,
-        container_type="base",
-        status="stopped",
-        position_x=200,
-        position_y=200,
-    )
-    db.add(container)
-    await db.commit()
-    await db.refresh(container)
-    logger.info(
-        f"[CREATE] Created container {container.id} for git import '{repo_name_slug}' ({framework_name}, port {framework_port})"
-    )
+    from ..services.base_config_parser import read_tesslate_config
 
-    return str(container.id)
+    config = None
+    if settings.deployment_mode == "docker":
+        config = read_tesslate_config(project_path)
+    else:
+        # K8s: try reading from PVC
+        try:
+            from ..services.orchestration import get_orchestrator as _get_orch
+            orch = _get_orch()
+            config_content = await orch.read_file(
+                user_id=user_id,
+                project_id=db_project.id,
+                container_name=None,
+                file_path=".tesslate/config.json",
+                project_slug=db_project.slug,
+            )
+            if config_content:
+                from ..services.base_config_parser import parse_tesslate_config
+                config = parse_tesslate_config(config_content)
+        except Exception as e:
+            logger.debug(f"[CREATE] Could not read .tesslate/config.json from PVC: {e}")
+
+    if config and config.apps:
+        # Config exists - create containers from it
+        task.update_progress(95, 100, "Creating containers from config")
+        primary_container_id = None
+
+        for app_name, app_config in config.apps.items():
+            container = Container(
+                project_id=db_project.id,
+                base_id=None,
+                name=app_name,
+                directory=app_config.directory,
+                container_name=f"{db_project.slug}-{app_name}",
+                internal_port=app_config.port or 3000,
+                environment_vars=app_config.env or {},
+                container_type="base",
+                status="stopped",
+                position_x=app_config.x or 200,
+                position_y=app_config.y or 200,
+            )
+            db.add(container)
+            await db.flush()
+            await db.refresh(container)
+            logger.info(f"[CREATE] Created container {container.id} for app '{app_name}'")
+            if app_name == config.primaryApp:
+                primary_container_id = str(container.id)
+
+        for infra_name, infra_config in config.infrastructure.items():
+            container = Container(
+                project_id=db_project.id,
+                name=infra_name,
+                directory=".",
+                container_name=f"{db_project.slug}-{infra_name}",
+                internal_port=infra_config.port,
+                container_type="service",
+                service_slug=infra_name,
+                status="stopped",
+                position_x=infra_config.x or 400,
+                position_y=infra_config.y or 400,
+            )
+            db.add(container)
+
+        await db.commit()
+        return primary_container_id or str(container.id)
+    else:
+        # No config found - mark as needs_setup, DON'T create container
+        task.update_progress(95, 100, "Project imported - setup needed")
+        logger.info(f"[CREATE] No .tesslate/config.json found, project needs setup")
+        return "needs_setup"
 
 
 async def _setup_github_project(
@@ -1102,7 +1215,53 @@ async def _setup_base_project(
         # Create container linked to the base
         task.update_progress(95, 100, "Creating container from base")
 
-        # Parse TESSLATE.md from cloned base to get port (uses existing parser)
+        # Priority 1: Check for .tesslate/config.json
+        from ..services.base_config_parser import read_tesslate_config as _read_config
+
+        tesslate_config = _read_config(cached_base_path)
+        if tesslate_config and tesslate_config.apps:
+            # Config-driven setup - create containers from config
+            primary_container_id = None
+            for app_name, app_config in tesslate_config.apps.items():
+                container = Container(
+                    project_id=db_project.id,
+                    base_id=base_repo.id,
+                    name=app_name,
+                    directory=app_config.directory,
+                    container_name=f"{db_project.slug}-{app_name}",
+                    internal_port=app_config.port or 3000,
+                    environment_vars=app_config.env or {},
+                    container_type="base",
+                    status="stopped",
+                    position_x=app_config.x or 200,
+                    position_y=app_config.y or 200,
+                )
+                db.add(container)
+                await db.flush()
+                await db.refresh(container)
+                if app_name == tesslate_config.primaryApp:
+                    primary_container_id = str(container.id)
+
+            for infra_name, infra_config in tesslate_config.infrastructure.items():
+                container = Container(
+                    project_id=db_project.id,
+                    name=infra_name,
+                    directory=".",
+                    container_name=f"{db_project.slug}-{infra_name}",
+                    internal_port=infra_config.port,
+                    container_type="service",
+                    service_slug=infra_name,
+                    status="stopped",
+                    position_x=infra_config.x or 400,
+                    position_y=infra_config.y or 400,
+                )
+                db.add(container)
+
+            await db.commit()
+            logger.info(f"[CREATE] Created {len(tesslate_config.apps)} containers from .tesslate/config.json")
+            return primary_container_id or str(container.id)
+
+        # Priority 2: Parse TESSLATE.md from cloned base to get port (legacy fallback)
         from ..services.base_config_parser import parse_tesslate_md
 
         tesslate_path = os.path.join(cached_base_path, "TESSLATE.md")
@@ -2179,245 +2338,496 @@ async def delete_project(
     }
 
 
-@router.post("/{project_slug}/generate-architecture-diagram")
-async def generate_architecture_diagram(
+@router.get("/{project_slug}/setup-config", response_model=TesslateConfigResponse)
+async def get_setup_config(
     project_slug: str,
-    diagram_type: str = "mermaid",  # "mermaid" or "c4_plantuml"
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Generate an architecture diagram for the project using the user's selected model.
-
-    This endpoint analyzes the project files and generates either a Mermaid diagram
-    or a C4 PlantUML diagram showing the architecture, component relationships, and data flow.
-
-    Args:
-        diagram_type: Type of diagram to generate ("mermaid" or "c4_plantuml")
+    Read .tesslate/config.json from the project filesystem/PVC.
+    Falls back to parsing TESSLATE.md if config.json doesn't exist.
     """
-    # Get project and verify ownership
     project = await get_project_by_slug(db, project_slug, current_user.id)
-    project_id = project.id  # For internal operations
+    settings = get_settings()
 
-    # Check if user has selected a diagram model
-    if not current_user.diagram_model:
-        raise HTTPException(
-            status_code=400,
-            detail="No diagram generation model selected. Please select a model in your Library settings.",
-        )
+    from ..services.base_config_parser import (
+        read_tesslate_config,
+        parse_tesslate_md,
+    )
 
-    try:
-        logger.info(
-            f"[DIAGRAM] Generating {diagram_type} architecture diagram for project {project_id} using model {current_user.diagram_model}"
-        )
+    config_data = None
 
-        # Get project files from database
-        files_result = await db.execute(
-            select(ProjectFile).where(ProjectFile.project_id == project_id)
-        )
-        project_files = files_result.scalars().all()
+    if settings.deployment_mode == "docker":
+        # Docker: read from filesystem
+        project_path = f"/projects/{project.slug}"
+        config_data = read_tesslate_config(project_path)
 
-        if not project_files:
-            raise HTTPException(status_code=400, detail="Project has no files to analyze")
-
-        # Build a summary of the project structure
-        file_structure = {}
-        for file in project_files:
-            # Skip large files and binary files
-            if len(file.content) > 50000:
-                continue
-            if file.file_path.endswith(
-                (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf")
-            ):
-                continue
-
-            file_structure[file.file_path] = file.content[
-                :5000
-            ]  # Limit content to first 5000 chars
-
-        # Create prompt for diagram generation based on type
-        if diagram_type == "c4_plantuml":
-            prompt = f"""Analyze this project and generate a C4 PlantUML diagram showing the architecture.
-
-Project Name: {project.name}
-Project Description: {project.description or "No description"}
-
-Files in the project:
-{chr(10).join(file_structure.keys())}
-
-Key file contents (truncated):
-{chr(10).join([f"--- {path} ---{chr(10)}{content[:500]}" for path, content in list(file_structure.items())[:10]])}
-
-Please generate a C4 PlantUML diagram that shows:
-1. System Context or Container level view (choose appropriately based on project size)
-2. The main components/containers of the application
-3. How they interact with each other
-4. External dependencies or services if any
-
-Use C4-PlantUML syntax with proper directives. Return ONLY the PlantUML code starting with '@startuml', no explanations or markdown code blocks.
-
-Example format:
-@startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
-
-Person(user, "User", "End user of the application")
-System_Boundary(c1, "Application") {{
-    Container(frontend, "Frontend", "React", "User interface")
-    Container(backend, "Backend", "FastAPI", "Business logic and API")
-    ContainerDb(database, "Database", "PostgreSQL", "Stores data")
-}}
-
-Rel(user, frontend, "Uses", "HTTPS")
-Rel(frontend, backend, "Calls", "REST API")
-Rel(backend, database, "Reads/Writes", "SQL")
-@enduml"""
-        else:  # mermaid (default)
-            prompt = f"""Analyze this project and generate a Mermaid diagram showing the architecture.
-
-Project Name: {project.name}
-Project Description: {project.description or "No description"}
-
-Files in the project:
-{chr(10).join(file_structure.keys())}
-
-Key file contents (truncated):
-{chr(10).join([f"--- {path} ---{chr(10)}{content[:500]}" for path, content in list(file_structure.items())[:10]])}
-
-Please generate a Mermaid diagram that shows:
-1. The main components/modules of the application
-2. How they interact with each other
-3. Data flow between components
-4. External dependencies or services if any
-
-Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no explanations or markdown code blocks."""
-
-        # Call LiteLLM to generate the diagram
-        import httpx
-
-        from ..config import get_settings
-
-        settings = get_settings()
-
-        # Use the user's LiteLLM API key and selected model
-        if not current_user.litellm_api_key:
-            raise HTTPException(
-                status_code=400, detail="LiteLLM API key not configured for your account"
+        if not config_data:
+            # Try TESSLATE.md fallback
+            tesslate_path = os.path.join(project_path, "TESSLATE.md")
+            if os.path.exists(tesslate_path):
+                try:
+                    content = await read_file_async(tesslate_path)
+                    base_config = parse_tesslate_md(content)
+                    if base_config and base_config.start_command:
+                        return {
+                            "exists": False,
+                            "apps": {
+                                "app": {
+                                    "directory": ".",
+                                    "port": base_config.port or 3000,
+                                    "start": base_config.start_command,
+                                    "env": {},
+                                }
+                            },
+                            "infrastructure": {},
+                            "primaryApp": "app",
+                        }
+                except Exception as e:
+                    logger.warning(f"[SETUP-CONFIG] Could not parse TESSLATE.md: {e}")
+    else:
+        # K8s: read from PVC via file-manager pod
+        from ..services.orchestration import get_orchestrator
+        orchestrator = get_orchestrator()
+        try:
+            config_json = await orchestrator.read_file(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                file_path=".tesslate/config.json",
+                project_slug=project.slug,
             )
+            if config_json:
+                from ..services.base_config_parser import parse_tesslate_config
+                config_data = parse_tesslate_config(config_json)
+        except Exception as e:
+            logger.debug(f"[SETUP-CONFIG] Could not read config from K8s: {e}")
 
-        # Use litellm_api_base from settings (same as all other LLM calls)
-        litellm_url = settings.litellm_api_base
+        if not config_data:
+            # Try TESSLATE.md fallback (same as Docker path)
+            try:
+                tesslate_content = await orchestrator.read_file(
+                    user_id=current_user.id,
+                    project_id=project.id,
+                    container_name=None,
+                    file_path="TESSLATE.md",
+                    project_slug=project.slug,
+                )
+                if tesslate_content:
+                    base_config = parse_tesslate_md(tesslate_content)
+                    if base_config and base_config.start_command:
+                        return {
+                            "exists": False,
+                            "apps": {
+                                "app": {
+                                    "directory": ".",
+                                    "port": base_config.port or 3000,
+                                    "start": base_config.start_command,
+                                    "env": {},
+                                }
+                            },
+                            "infrastructure": {},
+                            "primaryApp": "app",
+                        }
+            except Exception as e:
+                logger.warning(f"[SETUP-CONFIG] Could not parse TESSLATE.md from K8s: {e}")
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{litellm_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {current_user.litellm_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": current_user.diagram_model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": f"You are an expert software architect. Generate clear, accurate {'C4 PlantUML' if diagram_type == 'c4_plantuml' else 'Mermaid'} diagrams.",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    "max_tokens": 2000,
-                    "temperature": 0.3,
-                },
-            )
-
-        if response.status_code != 200:
-            logger.error(f"[DIAGRAM] LiteLLM API error: {response.status_code} - {response.text}")
-            raise HTTPException(
-                status_code=500, detail=f"Failed to generate diagram: {response.text}"
-            )
-
-        result_data = response.json()
-        diagram_code = result_data["choices"][0]["message"]["content"].strip()
-
-        # Clean up the diagram code (remove markdown code blocks if present)
-        if diagram_code.startswith("```plantuml") or diagram_code.startswith("```puml"):
-            diagram_code = (
-                diagram_code.replace("```plantuml", "")
-                .replace("```puml", "")
-                .replace("```", "")
-                .strip()
-            )
-        elif diagram_code.startswith("```mermaid"):
-            diagram_code = diagram_code.replace("```mermaid", "").replace("```", "").strip()
-        elif diagram_code.startswith("```"):
-            diagram_code = diagram_code.replace("```", "").strip()
-
-        # Sanitize based on diagram type
-        import re
-
-        if diagram_type == "c4_plantuml":
-            # PlantUML sanitization is minimal - just ensure it has proper start/end tags
-            if not diagram_code.startswith("@startuml"):
-                diagram_code = "@startuml\n" + diagram_code
-            if not diagram_code.endswith("@enduml"):
-                diagram_code = diagram_code + "\n@enduml"
-        else:
-            # Sanitize Mermaid syntax to prevent parsing errors
-            # Remove quotes from node labels and escape special characters
-
-            # Fix: Remove double quotes around node labels that contain special chars
-            # Match patterns like: A["@vitejs/plugin-react"] or B["some text"]
-            diagram_code = re.sub(r'\["([^"]+)"\]', r"[\1]", diagram_code)
-            diagram_code = re.sub(r'\("([^"]+)"\)', r"(\1)", diagram_code)
-            diagram_code = re.sub(r'\{"([^"]+)"\}', r"{\1}", diagram_code)
-
-            # Fix: Replace problematic characters in node labels
-            # Replace @ symbol which can cause issues
-            diagram_code = diagram_code.replace("@", "at-")
-
-            # Fix: Escape any remaining quotes in text
-            lines = diagram_code.split("\n")
-            sanitized_lines = []
-            for line in lines:
-                # Skip directive lines and graph declarations
-                if line.strip().startswith(
-                    ("graph", "flowchart", "%%", "classDef", "class ", "style ")
-                ):
-                    sanitized_lines.append(line)
-                else:
-                    # For node and edge definitions, ensure labels don't have problematic chars
-                    # Remove any stray quotes that might break parsing
-                    line = line.replace('"', "")
-                    sanitized_lines.append(line)
-
-            diagram_code = "\n".join(sanitized_lines)
-
-        # Save diagram and diagram type to database
-        project.architecture_diagram = diagram_code
-
-        # Store diagram type in project settings
-        if not project.settings:
-            project.settings = {}
-        project.settings["diagram_type"] = diagram_type
-        flag_modified(project, "settings")
-
-        await db.commit()
-        await db.refresh(project)
-
-        logger.info(
-            f"[DIAGRAM] Successfully generated and saved {diagram_type} diagram for project {project_id}"
-        )
-
+    if config_data:
         return {
-            "diagram": diagram_code,
-            "diagram_type": diagram_type,
-            "model_used": current_user.diagram_model,
-            "project_id": project_id,
+            "exists": True,
+            "apps": {
+                name: {
+                    "directory": app.directory,
+                    "port": app.port,
+                    "start": app.start,
+                    "env": app.env,
+                    "x": app.x,
+                    "y": app.y,
+                }
+                for name, app in config_data.apps.items()
+            },
+            "infrastructure": {
+                name: {
+                    "image": infra.image,
+                    "port": infra.port,
+                    "x": infra.x,
+                    "y": infra.y,
+                }
+                for name, infra in config_data.infrastructure.items()
+            },
+            "primaryApp": config_data.primaryApp,
         }
 
-    except HTTPException:
-        raise
+    # Nothing found
+    return {
+        "exists": False,
+        "apps": {},
+        "infrastructure": {},
+        "primaryApp": "",
+    }
+
+
+@router.post("/{project_slug}/setup-config", response_model=SetupConfigSyncResponse)
+async def save_setup_config(
+    project_slug: str,
+    config_data: TesslateConfigCreate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Save .tesslate/config.json and sync Container records.
+    Creates/updates/deletes containers to match the config.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    settings = get_settings()
+
+    from ..services.base_config_parser import (
+        TesslateProjectConfig,
+        AppConfig,
+        InfraConfig,
+        write_tesslate_config,
+        validate_startup_command,
+    )
+
+    # Validate all start commands
+    for app_name, app_data in config_data.apps.items():
+        if app_data.start:
+            is_valid, error = validate_startup_command(app_data.start)
+            if not is_valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"App '{app_name}' has invalid start command: {error}",
+                )
+
+    # Build internal config object
+    config = TesslateProjectConfig(
+        apps={
+            name: AppConfig(
+                directory=app.directory,
+                port=app.port,
+                start=app.start,
+                env=app.env,
+                x=app.x,
+                y=app.y,
+            )
+            for name, app in config_data.apps.items()
+        },
+        infrastructure={
+            name: InfraConfig(
+                image=infra.image,
+                port=infra.port,
+                x=infra.x,
+                y=infra.y,
+            )
+            for name, infra in config_data.infrastructure.items()
+        },
+        primaryApp=config_data.primaryApp,
+    )
+
+    # Write config file to filesystem/PVC
+    if settings.deployment_mode == "docker":
+        project_path = f"/projects/{project.slug}"
+        write_tesslate_config(project_path, config)
+    else:
+        # K8s: write via orchestrator
+        import json as json_mod
+
+        config_json = json_mod.dumps({
+            "apps": {
+                name: {"directory": a.directory, "port": a.port, "start": a.start, "env": a.env, "x": a.x, "y": a.y}
+                for name, a in config.apps.items()
+            },
+            "infrastructure": {
+                name: {"image": i.image, "port": i.port, "x": i.x, "y": i.y}
+                for name, i in config.infrastructure.items()
+            },
+            "primaryApp": config.primaryApp,
+        }, indent=2)
+
+        from ..services.orchestration import get_orchestrator
+        orchestrator = get_orchestrator()
+        await orchestrator.write_file(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            file_path=".tesslate/config.json",
+            content=config_json,
+            project_slug=project.slug,
+        )
+
+    # Sync Container records
+    container_ids = []
+    primary_container_id = None
+
+    # Get existing containers for this project
+    existing_result = await db.execute(
+        select(Container).where(Container.project_id == project.id)
+    )
+    existing_containers = {c.name: c for c in existing_result.scalars().all()}
+
+    # Create/update app containers
+    for app_name, app_config in config.apps.items():
+        if app_name in existing_containers:
+            # Update existing container
+            container = existing_containers[app_name]
+            container.directory = app_config.directory
+            container.internal_port = app_config.port or 3000
+            container.environment_vars = app_config.env or {}
+            if app_config.x is not None:
+                container.position_x = app_config.x
+            if app_config.y is not None:
+                container.position_y = app_config.y
+            del existing_containers[app_name]
+        else:
+            # Create new container
+            container = Container(
+                project_id=project.id,
+                name=app_name,
+                directory=app_config.directory,
+                container_name=f"{project.slug}-{app_name}",
+                internal_port=app_config.port or 3000,
+                environment_vars=app_config.env or {},
+                container_type="base",
+                status="stopped",
+                position_x=app_config.x or 200,
+                position_y=app_config.y or 200,
+            )
+            db.add(container)
+
+        await db.flush()
+        await db.refresh(container)
+        container_ids.append(str(container.id))
+        if app_name == config.primaryApp:
+            primary_container_id = str(container.id)
+
+    # Create/update infrastructure containers
+    for infra_name, infra_config in config.infrastructure.items():
+        if infra_name in existing_containers:
+            container = existing_containers[infra_name]
+            container.internal_port = infra_config.port
+            if infra_config.x is not None:
+                container.position_x = infra_config.x
+            if infra_config.y is not None:
+                container.position_y = infra_config.y
+            del existing_containers[infra_name]
+        else:
+            container = Container(
+                project_id=project.id,
+                name=infra_name,
+                directory=".",
+                container_name=f"{project.slug}-{infra_name}",
+                internal_port=infra_config.port,
+                container_type="service",
+                service_slug=infra_name,
+                status="stopped",
+                position_x=infra_config.x or 400,
+                position_y=infra_config.y or 400,
+            )
+            db.add(container)
+
+        await db.flush()
+        await db.refresh(container)
+        container_ids.append(str(container.id))
+
+    # Delete orphaned containers (those no longer in config)
+    for orphan_name, orphan_container in existing_containers.items():
+        logger.info(f"[SETUP-CONFIG] Deleting orphaned container: {orphan_name}")
+        await db.delete(orphan_container)
+
+    await db.commit()
+
+    return SetupConfigSyncResponse(
+        container_ids=container_ids,
+        primary_container_id=primary_container_id,
+    )
+
+
+@router.post("/{project_slug}/analyze", response_model=TesslateConfigResponse)
+async def analyze_project(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Analyze project files and generate .tesslate/config.json using LLM.
+    Returns a TesslateConfigResponse with the generated configuration.
+    """
+    from fastapi.responses import JSONResponse
+
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    settings = get_settings()
+
+    # Read file tree from filesystem/PVC
+    file_tree = []
+    config_files_content = {}
+
+    CONFIG_FILENAMES = {
+        "package.json", "requirements.txt", "go.mod", "Cargo.toml",
+        "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
+        "Makefile", "pyproject.toml", "pubspec.yaml", "Gemfile",
+        "composer.json", "pom.xml", "build.gradle", "mix.exs",
+        "TESSLATE.md", ".tesslate/config.json",
+    }
+    SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv", "vendor", "target"}
+    COMMON_SUBDIRS = ["", "frontend", "backend", "client", "server", "api", "web", "app", "src"]
+
+    if settings.deployment_mode == "docker":
+        project_path = f"/projects/{project.slug}"
+        # Walk directory for file tree
+        try:
+            walk_results = await walk_directory_async(
+                project_path, exclude_dirs=list(SKIP_DIRS)
+            )
+            for root, dirs, files in walk_results:
+                for f in files:
+                    rel = os.path.relpath(os.path.join(root, f), project_path).replace("\\", "/")
+                    file_tree.append(rel)
+                    # Read config files
+                    basename = os.path.basename(rel)
+                    if basename in CONFIG_FILENAMES or rel in CONFIG_FILENAMES:
+                        try:
+                            content = await read_file_async(os.path.join(root, f))
+                            if len(content) < 20000:
+                                config_files_content[rel] = content
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.warning(f"[ANALYZE] Could not walk project directory: {e}")
+    else:
+        # K8s: use orchestrator to list and read files
+        from ..services.orchestration import get_orchestrator
+        orchestrator = get_orchestrator()
+        try:
+            files_list = await orchestrator.list_files(
+                user_id=current_user.id,
+                project_id=project.id,
+                project_slug=project.slug,
+            )
+            if files_list:
+                file_tree = [f.get("path", f.get("name", "")) for f in files_list if isinstance(f, dict)]
+
+            # Read config files
+            for subdir in COMMON_SUBDIRS:
+                for config_name in CONFIG_FILENAMES:
+                    file_path = f"{subdir}/{config_name}".lstrip("/") if subdir else config_name
+                    try:
+                        content = await orchestrator.read_file(
+                            user_id=current_user.id,
+                            project_id=project.id,
+                            container_name=None,
+                            file_path=file_path,
+                            project_slug=project.slug,
+                        )
+                        if content and len(content) < 20000:
+                            config_files_content[file_path] = content
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"[ANALYZE] Could not read files from K8s: {e}")
+
+    if not file_tree:
+        raise HTTPException(status_code=400, detail="No files found in project to analyze")
+
+    # Build LLM prompt
+    file_tree_str = "\n".join(sorted(file_tree)[:500])
+    config_contents_str = "\n".join([
+        f"--- {path} ---\n{content[:3000]}"
+        for path, content in list(config_files_content.items())[:15]
+    ])
+
+    prompt = f"""Analyze this project and generate a .tesslate/config.json file.
+
+The config defines how to run this project in containerized dev environments.
+
+## File tree:
+{file_tree_str}
+
+## Config file contents:
+{config_contents_str}
+
+## Config format:
+The config has this structure:
+{{
+  "apps": {{
+    "<app-name>": {{
+      "directory": "<relative-dir or . for root>",
+      "port": <port-number or null for no-server>,
+      "start": "<shell command to install deps and start dev server>",
+      "env": {{"KEY": "value"}}
+    }}
+  }},
+  "infrastructure": {{
+    "<service-name>": {{
+      "image": "<docker-image:tag>",
+      "port": <internal-port>
+    }}
+  }},
+  "primaryApp": "<name of the main app to show in preview>"
+}}
+
+## Rules:
+1. Every start command MUST bind to 0.0.0.0 (not localhost) for container networking
+2. For Node.js: use `npm install && npm run dev -- --host 0.0.0.0` or equivalent
+3. For Python: use `pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8001 --reload`
+4. For Go: use `go mod tidy && go run .` or `air` if .air.toml exists
+5. If the project has frontend + backend in separate dirs, create separate apps
+6. If it's a monorepo with one entry point, use directory "." and one app
+7. For projects with no server (CLI tools, libraries), set port to null and start to "sleep infinity"
+8. Use common port conventions: Next.js=3000, Vite=5173, FastAPI=8001, Go=8080, Rails=3000, Django=8000
+9. primaryApp should be the frontend or the main user-facing app
+10. Only add infrastructure (postgres, redis, etc.) if the project clearly uses them
+
+Return ONLY valid JSON, no markdown code blocks, no explanation."""
+
+    # Call LLM
+    try:
+        import litellm
+
+        response = await litellm.acompletion(
+            model="glm-4-flash-250414",
+            messages=[
+                {"role": "system", "content": "You are a project analyzer. Return only valid JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            api_base=settings.litellm_api_base,
+            api_key=settings.litellm_master_key,
+            temperature=0.1,
+            max_tokens=2000,
+        )
+
+        response_text = response.choices[0].message.content.strip()
+
+        # Clean up response - strip markdown code blocks if present
+        if response_text.startswith("```"):
+            lines = response_text.split("\n")
+            response_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+        # Parse and validate
+        import json as json_mod
+        parsed = json_mod.loads(response_text)
+
+        # Validate structure
+        apps = parsed.get("apps", {})
+        if not apps:
+            raise ValueError("No apps found in generated config")
+
+        primary = parsed.get("primaryApp", "")
+        if not primary or primary not in apps:
+            primary = next(iter(apps))
+            parsed["primaryApp"] = primary
+
+        return {
+            "exists": False,
+            **parsed,
+        }
+
+    except json.JSONDecodeError as e:
+        logger.error(f"[ANALYZE] LLM returned invalid JSON: {e}")
+        raise HTTPException(status_code=500, detail="Failed to parse generated config. Please try again.")
     except Exception as e:
-        logger.error(f"[DIAGRAM] Failed to generate diagram: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to generate diagram: {str(e)}") from e
+        logger.error(f"[ANALYZE] Failed to analyze project: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to analyze project: {str(e)}")
 
 
 @router.get("/{project_slug}/settings")
@@ -4574,30 +4984,47 @@ async def create_container_connection(
                 status_code=409, detail="Connection already exists between these containers"
             )
 
-        # Auto-detect connector_type for service containers
-        connector_type = connection_data.connector_type
-        config = connection_data.config
-        if source.container_type == "service" and source.service_slug:
-            connector_type = "env_injection"
-            # Resolve template keys so the frontend knows what will be injected
+        # Auto-detect env vars to inject based on target type
+        # One edge type: "connects to" — env vars are auto-injected into source
+        connector_type = "env_injection"
+        config = connection_data.config or {}
+        env_mapping = {}
+        label = connection_data.label
+
+        if target.container_type == "service" and target.service_slug:
+            # Target is infrastructure (postgres, redis, etc.)
             from ..services.secret_manager_env import resolve_connection_env_vars
             from ..services.service_definitions import get_service
 
-            svc_def = get_service(source.service_slug)
-            resolved = resolve_connection_env_vars(source, svc_def)
+            svc_def = get_service(target.service_slug)
+            resolved = resolve_connection_env_vars(target, svc_def)
             if resolved:
-                config = config or {}
-                config["env_mapping"] = {k: k for k in resolved}
+                env_mapping = {k: k for k in resolved}
+                # Set label to the primary env var
+                if not label:
+                    label = next(iter(resolved.keys()), None)
+        elif target.container_type == "base":
+            # Target is an app — inject URL env var into source
+            target_name_upper = target.name.upper().replace("-", "_")
+            target_port = target.internal_port or target.port or 3000
+            env_key = f"{target_name_upper}_URL"
+            env_value = f"http://{target.name}:{target_port}"
+            env_mapping = {env_key: env_value}
+            if not label:
+                label = env_key
+
+        if env_mapping:
+            config["env_mapping"] = env_mapping
 
         # Create connection
         new_connection = ContainerConnection(
             project_id=project.id,
             source_container_id=connection_data.source_container_id,
             target_container_id=connection_data.target_container_id,
-            connection_type=connection_data.connection_type,
+            connection_type="depends_on",
             connector_type=connector_type,
             config=config,
-            label=connection_data.label,
+            label=label,
         )
 
         db.add(new_connection)

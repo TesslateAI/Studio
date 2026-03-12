@@ -46,6 +46,7 @@ import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
 import { ContainerSelector } from '../components/ContainerSelector';
+import { PreviewPortPicker, type PreviewableContainer } from '../components/PreviewPortPicker';
 import { projectsApi, marketplaceApi } from '../lib/api';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
@@ -90,6 +91,10 @@ export default function Project() {
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
   const [chatExpanded, setChatExpanded] = useState(false);
 
+  // Preview port picker state
+  const [previewableContainers, setPreviewableContainers] = useState<PreviewableContainer[]>([]);
+  const [selectedPreviewContainerId, setSelectedPreviewContainerId] = useState<string | null>(null);
+
   const [filesInitiallyLoaded, setFilesInitiallyLoaded] = useState(false);
   const fileRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRetryCountRef = useRef(0);
@@ -120,6 +125,25 @@ export default function Project() {
         if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
         fileRetryCountRef.current = 0;
         loadFilesWithRetry();
+        // Refresh previewable containers now that container(s) are running
+        if (slug) {
+          Promise.all([
+            projectsApi.getContainers(slug),
+            projectsApi.getContainersStatus(slug),
+          ]).then(([allContainers, status]) => {
+            const statusContainers = status?.containers ?? null;
+            const primaryId = currentContainerIdRef.current;
+            const previewable = buildPreviewableContainers(
+              allContainers,
+              statusContainers,
+              primaryId,
+            );
+            setPreviewableContainers(previewable);
+            if (previewable.length > 0) {
+              setSelectedPreviewContainerId((prev) => prev || previewable[0].id);
+            }
+          }).catch(() => { /* non-blocking */ });
+        }
       },
       onError: (error) => {
         setNeedsContainerStart(false);
@@ -551,6 +575,78 @@ export default function Project() {
     }
   };
 
+  /**
+   * Build the list of previewable containers from container metadata + runtime status.
+   * Excludes service containers (postgres, redis, etc.) and containers without ports/URLs.
+   */
+  const buildPreviewableContainers = (
+    allContainers: Array<Record<string, unknown>>,
+    statusContainers: Record<string, Record<string, unknown>> | null,
+    primaryContainerId: string | null,
+  ): PreviewableContainer[] => {
+    const sanitizeKey = (s: string) =>
+      s
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+    const previewable: PreviewableContainer[] = [];
+
+    for (const c of allContainers) {
+      // Skip service containers (postgres, redis, mongodb, etc.)
+      if (c.container_type === 'service') continue;
+      // Skip external-only containers
+      if (c.deployment_mode === 'external') continue;
+
+      const port = (c.internal_port as number) || (c.port as number);
+      if (!port) continue;
+
+      // Try to find runtime URL from status data
+      const rawDir = c.directory as string;
+      const dirKey = rawDir && rawDir !== '.' ? sanitizeKey(rawDir) : null;
+      const nameKey = c.name ? sanitizeKey(c.name as string) : null;
+      const runtimeStatus =
+        statusContainers?.[dirKey!] ?? statusContainers?.[nameKey!] ?? null;
+
+      // Only include containers that are running and have a URL
+      if (!runtimeStatus?.running || !runtimeStatus?.url) continue;
+
+      previewable.push({
+        id: c.id as string,
+        name: c.name as string,
+        port,
+        url: runtimeStatus.url as string,
+        isPrimary: (c.id as string) === primaryContainerId,
+      });
+    }
+
+    // Sort so primary is first
+    previewable.sort((a, b) => (a.isPrimary ? -1 : b.isPrimary ? 1 : 0));
+
+    return previewable;
+  };
+
+  const handlePreviewContainerSwitch = useCallback(
+    (target: PreviewableContainer) => {
+      const token = localStorage.getItem('token');
+      const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
+
+      setSelectedPreviewContainerId(target.id);
+      setDevServerUrl(target.url);
+
+      if (token && deploymentMode === 'kubernetes') {
+        const urlWithAuth =
+          target.url + (target.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
+        setDevServerUrlWithAuth(urlWithAuth);
+      } else {
+        setDevServerUrlWithAuth(target.url);
+      }
+      setCurrentPreviewUrl(target.url);
+    },
+    []
+  );
+
   const loadContainer = async () => {
     if (!slug) return;
     try {
@@ -594,6 +690,19 @@ export default function Project() {
           console.log('[loadContainer] status response:', JSON.stringify(status));
           console.log('[loadContainer] dirKey:', dirKey, 'nameKey:', nameKey);
           console.log('[loadContainer] containerStatus:', JSON.stringify(containerStatus));
+
+          // Build previewable containers list from status data
+          const statusContainers = status?.containers ?? null;
+          const previewable = buildPreviewableContainers(
+            allContainers,
+            statusContainers,
+            foundContainer.id as string,
+          );
+          setPreviewableContainers(previewable);
+          // Default to the current/primary container
+          if (!selectedPreviewContainerId && previewable.length > 0) {
+            setSelectedPreviewContainerId(previewable[0].id);
+          }
 
           // Check for hibernation - only explicit hibernated status, not just stopped
           if (
@@ -1399,6 +1508,9 @@ export default function Project() {
                           startupLogs={containerStartup.logs}
                           startupError={containerStartup.error || undefined}
                           onRetryStart={containerStartup.retry}
+                          previewableContainers={previewableContainers}
+                          selectedPreviewContainerId={selectedPreviewContainerId}
+                          onPreviewContainerSwitch={handlePreviewContainerSwitch}
                         />
                       ) : (
                         <>
@@ -1427,6 +1539,11 @@ export default function Project() {
                                 </span>
                               </div>
                             </div>
+                            <PreviewPortPicker
+                              containers={previewableContainers}
+                              selectedContainerId={selectedPreviewContainerId}
+                              onSelect={handlePreviewContainerSwitch}
+                            />
                             <button
                               onClick={refreshPreview}
                               className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
@@ -1577,6 +1694,9 @@ export default function Project() {
                         startupLogs={containerStartup.logs}
                         startupError={containerStartup.error || undefined}
                         onRetryStart={containerStartup.retry}
+                        previewableContainers={previewableContainers}
+                        selectedPreviewContainerId={selectedPreviewContainerId}
+                        onPreviewContainerSwitch={handlePreviewContainerSwitch}
                       />
                     ) : (
                       <>
@@ -1605,6 +1725,11 @@ export default function Project() {
                               </span>
                             </div>
                           </div>
+                          <PreviewPortPicker
+                            containers={previewableContainers}
+                            selectedContainerId={selectedPreviewContainerId}
+                            onSelect={handlePreviewContainerSwitch}
+                          />
                           <button
                             onClick={refreshPreview}
                             className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"

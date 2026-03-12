@@ -7,6 +7,7 @@ All seed functions are idempotent and safe to run on every startup.
 import logging
 
 from .marketplace_agents import (
+    auto_add_librarian_agent_to_users,
     auto_add_tesslate_agent_to_users,
     get_or_create_tesslate_account,
     seed_marketplace_agents,
@@ -28,6 +29,7 @@ __all__ = [
     "seed_themes",
     "seed_workflow_templates",
     "auto_add_tesslate_agent_to_users",
+    "auto_add_librarian_agent_to_users",
     "get_or_create_tesslate_account",
     "WORKFLOW_TEMPLATES",
 ]
@@ -80,6 +82,14 @@ async def run_all_seeds():
             logger.info("Auto-add Tesslate Agent: %d users updated", count)
         except Exception:
             logger.exception("Failed to auto-add Tesslate Agent to users")
+            await db.rollback()
+
+        # 4b. Auto-add Librarian agent to all users
+        try:
+            count = await auto_add_librarian_agent_to_users(db)
+            logger.info("Auto-add Librarian agent: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Librarian agent to users")
             await db.rollback()
 
         # 5. Themes

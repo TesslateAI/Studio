@@ -1706,17 +1706,35 @@ class DockerOrchestrator(BaseOrchestrator):
 
     async def _get_container_config(self, project, container) -> tuple:
         """
-        Get startup command and port from TESSLATE.md config.
+        Get startup command and port from .tesslate/config.json or TESSLATE.md.
+
+        Priority:
+        1. .tesslate/config.json (new config system)
+        2. TESSLATE.md from volume (legacy)
+        3. TESSLATE.md from base cache (legacy)
+        4. Generic fallback
 
         Returns:
             (startup_command, port)
         """
         from ...services.base_config_parser import (
             generate_startup_command,
+            get_app_startup_config,
             get_base_config_from_cache,
             get_base_config_from_volume,
         )
 
+        # Priority 1: .tesslate/config.json (unified config)
+        if self.use_volumes:
+            project_path = f"/projects/{project.slug}"
+            try:
+                command, port = get_app_startup_config(project_path, container.name)
+                logger.info(f"[DOCKER] Using config for '{container.name}': port={port}")
+                return command, port
+            except Exception as e:
+                logger.debug(f"[DOCKER] Could not use unified config: {e}")
+
+        # Priority 2-3: Legacy TESSLATE.md flow
         base_config = None
 
         # Try reading from shared projects volume

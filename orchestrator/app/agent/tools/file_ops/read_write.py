@@ -150,6 +150,63 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
         )
 
         if success:
+            # Auto-sync containers when .tesslate/config.json is written
+            if file_path.rstrip("/").endswith(".tesslate/config.json"):
+                try:
+                    from ....services.base_config_parser import parse_tesslate_config
+
+                    config = parse_tesslate_config(content)
+                    if config and config.apps:
+                        from ....database import AsyncSessionLocal
+                        from ....models import Container
+
+                        async with AsyncSessionLocal() as sync_db:
+                            from sqlalchemy import select
+
+                            # Get existing containers
+                            existing_result = await sync_db.execute(
+                                select(Container).where(
+                                    Container.project_id == context["project_id"]
+                                )
+                            )
+                            existing = {c.name: c for c in existing_result.scalars().all()}
+
+                            # Create/update app containers
+                            for app_name, app_cfg in config.apps.items():
+                                if app_name in existing:
+                                    c = existing[app_name]
+                                    c.directory = app_cfg.directory
+                                    c.internal_port = app_cfg.port or 3000
+                                    c.environment_vars = app_cfg.env or {}
+                                    del existing[app_name]
+                                else:
+                                    project_slug = context.get("project_slug", "")
+                                    c = Container(
+                                        project_id=context["project_id"],
+                                        name=app_name,
+                                        directory=app_cfg.directory,
+                                        container_name=f"{project_slug}-{app_name}",
+                                        internal_port=app_cfg.port or 3000,
+                                        environment_vars=app_cfg.env or {},
+                                        container_type="base",
+                                        status="stopped",
+                                        position_x=app_cfg.x or 200,
+                                        position_y=app_cfg.y or 200,
+                                    )
+                                    sync_db.add(c)
+
+                            # Delete orphaned containers
+                            for orphan in existing.values():
+                                if orphan.container_type == "base":
+                                    await sync_db.delete(orphan)
+
+                            await sync_db.commit()
+                            logger.info(
+                                "[AGENT] Auto-synced containers from .tesslate/config.json"
+                            )
+                except Exception as e:
+                    logger.warning(f"[AGENT] Failed to auto-sync containers: {e}")
+
             return success_output(
                 message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
                 file_path=file_path,

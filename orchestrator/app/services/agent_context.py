@@ -483,9 +483,41 @@ async def _build_tesslate_context(
                 except Exception as e:
                     logger.error(f"[TESSLATE-CONTEXT] Failed to copy template: {e}")
 
+        # Also try to read .tesslate/config.json for architecture context
+        config_content = None
+        try:
+            orchestrator = get_orchestrator()
+            config_content = await orchestrator.read_file(
+                user_id=user_id,
+                project_id=project.id,
+                container_name=container_name,
+                file_path=".tesslate/config.json",
+                project_slug=project.slug,
+            )
+        except Exception:
+            pass
+
+        if not config_content and not is_kubernetes_mode():
+            # Docker fallback
+            config_path = os.path.join(
+                get_project_path(user_id, project.id), ".tesslate", "config.json"
+            )
+            if os.path.exists(config_path):
+                try:
+                    async with aiofiles.open(config_path, encoding="utf-8") as f:
+                        config_content = await f.read()
+                except Exception:
+                    pass
+
+        # Build combined context
+        parts = []
         if tesslate_content:
-            # Return formatted context
-            return f"\n=== Project Context (TESSLATE.md) ===\n\n{tesslate_content}\n"
+            parts.append(f"=== Project Context (TESSLATE.md) ===\n\n{tesslate_content}")
+        if config_content:
+            parts.append(f"=== Architecture Config (.tesslate/config.json) ===\n\n{config_content}")
+
+        if parts:
+            return "\n" + "\n\n".join(parts) + "\n"
         else:
             return None
 

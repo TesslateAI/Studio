@@ -34,15 +34,6 @@ interface ArchitecturePanelProps {
 - **Mermaid**: Flowcharts, sequence diagrams, rendered client-side
 - **C4 PlantUML**: Context, container, component diagrams, rendered via Kroki
 
-**Generation**:
-```typescript
-const handleGenerateDiagram = async (type: 'mermaid' | 'c4_plantuml') => {
-  const response = await diagramApi.generateDiagram(projectSlug, type);
-  setDiagram(response.diagram);
-  setModelUsed(response.model_used);
-};
-```
-
 ---
 
 ### GitHubPanel.tsx

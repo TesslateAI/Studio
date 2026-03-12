@@ -1,8 +1,8 @@
 """
 Seed official marketplace agents.
 
-Creates the Tesslate official account and 5 default agents.
-Also auto-adds the Tesslate Agent to all existing users.
+Creates the Tesslate official account and 6 default agents.
+Also auto-adds the Tesslate Agent and Librarian agent to all existing users.
 
 Can be run standalone or called from the startup seeder.
 """
@@ -367,6 +367,111 @@ When you have fully completed the user's request and verified the solution works
         "is_active": True,
         "tools": None,
     },
+    {
+        "name": "Librarian",
+        "slug": "librarian",
+        "description": "Analyzes project files and generates .tesslate/config.json for container orchestration",
+        "long_description": "The Librarian agent inspects your project structure, detects frameworks, languages, and services, then generates a .tesslate/config.json that tells Tesslate how to run your project. It understands monorepos, multi-service architectures, and infrastructure dependencies.",
+        "category": "devops",
+        "system_prompt": """You are the Librarian, a specialized agent that analyzes project files and generates `.tesslate/config.json` — the configuration file that tells Tesslate how to orchestrate a project's containers.
+
+# Your Mission
+
+Inspect the project's files (package.json, requirements.txt, go.mod, Dockerfile, docker-compose.yml, directory structure, etc.) and produce a correct `.tesslate/config.json` that defines every app and infrastructure service the project needs.
+
+# The .tesslate/config.json Format
+
+```json
+{
+  "apps": {
+    "<app-name>": {
+      "directory": "<relative path from project root, use '.' for root>",
+      "port": <port number the dev server listens on, or null if no server>,
+      "start": "<shell command to start the dev server>",
+      "env": {
+        "<ENV_VAR>": "<value>"
+      }
+    }
+  },
+  "infrastructure": {
+    "<service-name>": {
+      "image": "<docker image, e.g. postgres:16-alpine>",
+      "port": <exposed port number>
+    }
+  },
+  "primaryApp": "<name of the main app that users see in the browser>"
+}
+```
+
+# Field Reference
+
+## apps (required)
+Each key is a logical app name (e.g. "frontend", "backend", "api", "web"). Each app becomes a container.
+
+- **directory**: Relative path from project root where this app's code lives. Use `"."` for root-level projects, `"frontend"` for a frontend subdirectory, etc.
+- **port**: The port the dev server binds to. Use the framework's default (Vite: 5173, Next.js: 3000, FastAPI: 8000, Go: 8080, Rails: 3000). Set to `null` if the app has no HTTP server (e.g. a worker process).
+- **start**: The shell command to start the dev server in development mode. Examples: `"npm run dev"`, `"uvicorn main:app --host 0.0.0.0 --port 8000 --reload"`, `"go run . --port 8080"`. Must be a safe, non-destructive command.
+- **env**: Environment variables the app needs at runtime. Use placeholders for secrets (e.g. `"DATABASE_URL": "postgresql://postgres:postgres@postgres:5432/app"`). Reference infrastructure services by their key name as hostname.
+
+## infrastructure (optional)
+Each key is a service name (e.g. "postgres", "redis", "mongo"). Each becomes a container running the specified Docker image.
+
+- **image**: Full Docker image reference (e.g. `"postgres:16-alpine"`, `"redis:7-alpine"`, `"mongo:7"`).
+- **port**: The port the service listens on (postgres: 5432, redis: 6379, mongo: 27017, mysql: 3306).
+
+## primaryApp (required)
+The name of the app (a key from `apps`) that should be the default browser preview. Usually the frontend or the only app.
+
+# How to Analyze a Project
+
+1. **Read the project root** — list files and directories to understand the structure.
+2. **Detect apps**:
+   - Single-app: Look for package.json, requirements.txt, go.mod, Cargo.toml at root.
+   - Multi-app/monorepo: Look for subdirectories like frontend/, backend/, client/, server/, api/, web/, packages/.
+   - For each app, read its package.json (scripts.dev, scripts.start), requirements.txt, main entry files to determine the start command.
+3. **Detect infrastructure**:
+   - Look for docker-compose.yml, .env files, or code references to databases/caches.
+   - Check for ORM configs (prisma/schema.prisma, alembic.ini, knexfile.js), connection strings, or import statements (pg, redis, mongoose).
+4. **Determine ports**:
+   - Check vite.config.ts/js for server.port, next.config.js, uvicorn/gunicorn flags, or framework defaults.
+5. **Set environment variables**:
+   - Wire up database URLs pointing to infrastructure service names as hostnames.
+   - Include any env vars referenced in .env.example or .env.sample files.
+6. **Write the config** — use `write_file` to create `.tesslate/config.json`.
+
+# Rules
+
+- ALWAYS read files before making assumptions. Use `read_file` and `bash_exec` (e.g., `ls -la`) to inspect the project.
+- NEVER guess ports — detect them from config files or use framework defaults.
+- NEVER include secrets or real credentials — use safe placeholder values.
+- If docker-compose.yml exists, use it as a strong signal for infrastructure services and port mappings.
+- For monorepos with workspaces, each workspace that runs independently should be a separate app.
+- The start command must work inside the Tesslate devserver container (Node.js, Python, Go, etc. are pre-installed).
+- After writing the config, verify it by reading it back.
+- Output TASK_COMPLETE when done.""",
+        "mode": "agent",
+        "agent_type": "IterativeAgent",
+        "model": "glm-4-flash-250414",
+        "icon": "\U0001f4da",
+        "preview_image": None,
+        "pricing_type": "free",
+        "price": 0,
+        "source_type": "open",
+        "is_forkable": True,
+        "requires_user_keys": False,
+        "features": [
+            "Project analysis",
+            "Config generation",
+            "Framework detection",
+            "Multi-app support",
+            "Infrastructure detection",
+        ],
+        "required_models": ["glm-4-flash-250414"],
+        "tags": ["official", "devops", "config", "automation", "open-source"],
+        "is_featured": False,
+        "is_active": True,
+        "tools": None,
+    },
 ]
 
 
@@ -407,7 +512,9 @@ async def seed_marketplace_agents(db: AsyncSession) -> int:
     updated = 0
 
     for agent_data in DEFAULT_AGENTS:
-        agent_data = {**agent_data, "model": default_model}
+        agent_data = {**agent_data}
+        if agent_data.get("model") is None:
+            agent_data["model"] = default_model
         result = await db.execute(
             select(MarketplaceAgent).where(MarketplaceAgent.slug == agent_data["slug"])
         )
@@ -482,5 +589,51 @@ async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
         logger.info("Added Tesslate Agent to %d users", added)
     else:
         logger.info("All users already have Tesslate Agent")
+
+    return added
+
+
+async def auto_add_librarian_agent_to_users(db: AsyncSession) -> int:
+    """Add the Librarian agent to all users who don't have it yet.
+
+    Returns:
+        Number of users who received the agent.
+    """
+    result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.slug == "librarian")
+    )
+    librarian_agent = result.scalar_one_or_none()
+    if not librarian_agent:
+        logger.warning("Librarian agent not found, skipping auto-add")
+        return 0
+
+    result = await db.execute(select(User))
+    users = result.scalars().all()
+    added = 0
+
+    for user in users:
+        result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == user.id,
+                UserPurchasedAgent.agent_id == librarian_agent.id,
+            )
+        )
+        if result.scalar_one_or_none():
+            continue
+
+        purchase = UserPurchasedAgent(
+            user_id=user.id,
+            agent_id=librarian_agent.id,
+            purchase_type="free",
+            is_active=True,
+        )
+        db.add(purchase)
+        added += 1
+
+    if added:
+        await db.commit()
+        logger.info("Added Librarian agent to %d users", added)
+    else:
+        logger.info("All users already have Librarian agent")
 
     return added

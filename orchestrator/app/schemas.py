@@ -250,6 +250,55 @@ class Container(ContainerBase):
         from_attributes = True
 
 
+# =============================================================================
+# Tesslate Config Schemas (.tesslate/config.json)
+# =============================================================================
+
+
+class AppConfigSchema(BaseModel):
+    """Schema for a single app in .tesslate/config.json."""
+    directory: str = "."
+    port: int | None = 3000
+    start: str
+    env: dict[str, str] = {}
+    x: float | None = None
+    y: float | None = None
+
+
+class InfraConfigSchema(BaseModel):
+    """Schema for an infrastructure service in .tesslate/config.json."""
+    image: str
+    port: int
+    x: float | None = None
+    y: float | None = None
+
+
+class TesslateConfigCreate(BaseModel):
+    """Request schema for creating/updating .tesslate/config.json."""
+    apps: dict[str, AppConfigSchema]
+    infrastructure: dict[str, InfraConfigSchema] = {}
+    primaryApp: str
+
+    @field_validator("primaryApp")
+    @classmethod
+    def validate_primary_app(cls, v, info):
+        apps = info.data.get("apps", {})
+        if apps and v not in apps:
+            raise ValueError(f"primaryApp '{v}' must be one of: {', '.join(apps.keys())}")
+        return v
+
+
+class TesslateConfigResponse(TesslateConfigCreate):
+    """Response schema for .tesslate/config.json."""
+    exists: bool = True
+
+
+class SetupConfigSyncResponse(BaseModel):
+    """Response from POST /setup-config after syncing containers."""
+    container_ids: list[str]
+    primary_container_id: str | None = None
+
+
 # Container Connection Schemas
 
 

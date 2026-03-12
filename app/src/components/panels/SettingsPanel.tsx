@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Check, Layers, Package, Download, Lock } from 'lucide-react';
+import { Settings, Monitor, Check, Layers, Package, Download, Lock, Cpu } from 'lucide-react';
 import { ChatCentered } from '@phosphor-icons/react';
-import { projectsApi } from '../../lib/api';
+import { projectsApi, setupApi } from '../../lib/api';
+import { ServiceConfigForm } from '../ServiceConfigForm';
+import type { TesslateConfig } from '../../types/tesslateConfig';
 import { ToggleSwitch } from '../ui/ToggleSwitch';
 import { useChatPosition, type ChatPosition } from '../../contexts/ChatPositionContext';
 import { ExportTemplateModal } from '../modals/ExportTemplateModal';
@@ -23,6 +25,9 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
   const [downloadingTesslate, setDownloadingTesslate] = useState(false);
   const [agentLockEnabled, setAgentLockEnabled] = useState(true);
   const [savingAgentLock, setSavingAgentLock] = useState(false);
+  const [servicesConfig, setServicesConfig] = useState<TesslateConfig | null>(null);
+  const [servicesEditing, setServicesEditing] = useState(false);
+  const [savingServices, setSavingServices] = useState(false);
   const { chatPosition, setChatPosition } = useChatPosition();
 
   useEffect(() => {
@@ -36,6 +41,19 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
       const settings = data.settings || {};
       setPreviewMode(settings.preview_mode || 'normal');
       setAgentLockEnabled(settings.agent_lock_enabled !== false); // default true
+      // Load services config
+      try {
+        const configData = await setupApi.getConfig(projectSlug);
+        if (configData.exists) {
+          setServicesConfig({
+            apps: configData.apps,
+            infrastructure: configData.infrastructure,
+            primaryApp: configData.primaryApp,
+          });
+        }
+      } catch (e) {
+        console.error('Failed to load services config:', e);
+      }
     } catch (error) {
       console.error('Failed to load settings:', error);
     } finally {
@@ -97,6 +115,21 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
       toast.error(axiosError.response?.data?.detail || 'Failed to update settings');
     } finally {
       setSavingAgentLock(false);
+    }
+  };
+
+  const handleSaveServices = async () => {
+    if (!servicesConfig) return;
+    setSavingServices(true);
+    try {
+      await setupApi.saveConfig(projectSlug, servicesConfig);
+      toast.success('Services configuration saved');
+      setServicesEditing(false);
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to save services config');
+    } finally {
+      setSavingServices(false);
     }
   };
 
@@ -357,6 +390,65 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
                 disabled={savingAgentLock}
               />
             </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-[var(--text)]/10 my-6" />
+
+        {/* Services Configuration */}
+        <div className="space-y-4">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Cpu size={18} className="text-[var(--text)]/60" />
+                <h3 className="text-sm font-medium text-[var(--text)]">Services</h3>
+              </div>
+              {servicesConfig && (
+                <button
+                  onClick={() => setServicesEditing(!servicesEditing)}
+                  className="text-xs text-[var(--primary)] hover:text-[var(--primary)]/80 transition-colors"
+                >
+                  {servicesEditing ? 'Cancel' : 'Edit'}
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-[var(--text)]/60 mb-4">
+              Configure apps, ports, start commands, and infrastructure
+            </p>
+
+            {servicesConfig ? (
+              <div>
+                <ServiceConfigForm
+                  config={servicesConfig}
+                  onChange={setServicesConfig}
+                  readOnly={!servicesEditing}
+                />
+                {servicesEditing && (
+                  <div className="mt-4 flex gap-2 justify-end">
+                    <button
+                      onClick={() => setServicesEditing(false)}
+                      className="px-4 py-2 text-sm text-[var(--text)]/60 hover:text-[var(--text)] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSaveServices}
+                      disabled={savingServices}
+                      className="px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {savingServices ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-4 rounded-lg border-2 border-dashed border-[var(--text)]/10 text-center">
+                <p className="text-xs text-[var(--text)]/40">
+                  No services configured yet
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

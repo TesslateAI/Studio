@@ -17,8 +17,10 @@ SECURITY: All startup commands are validated to prevent:
 - Resource exhaustion
 """
 
+import json
 import logging
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -462,3 +464,230 @@ def generate_startup_command(config: BaseConfig | None) -> list[str]:
     )
 
     return ["sh", "-c", generic_command]
+
+
+# ---------------------------------------------------------------------------
+# .tesslate/config.json parser (new config system)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AppConfig:
+    """Configuration for a single app in .tesslate/config.json."""
+    directory: str = "."
+    port: int | None = 3000
+    start: str = ""
+    env: dict[str, str] = field(default_factory=dict)
+    x: float | None = None
+    y: float | None = None
+
+
+@dataclass
+class InfraConfig:
+    """Configuration for an infrastructure service in .tesslate/config.json."""
+    image: str = ""
+    port: int = 5432
+    x: float | None = None
+    y: float | None = None
+
+
+@dataclass
+class TesslateProjectConfig:
+    """Parsed .tesslate/config.json configuration."""
+    apps: dict[str, AppConfig] = field(default_factory=dict)
+    infrastructure: dict[str, InfraConfig] = field(default_factory=dict)
+    primaryApp: str = ""
+
+
+def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
+    """
+    Parse .tesslate/config.json content and return validated config.
+
+    Args:
+        json_str: Raw JSON string from .tesslate/config.json
+
+    Returns:
+        TesslateProjectConfig with parsed and validated data
+
+    Raises:
+        ValueError: If JSON is invalid or contains dangerous commands
+    """
+    try:
+        data = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in .tesslate/config.json: {e}")
+
+    config = TesslateProjectConfig()
+
+    # Parse apps
+    for name, app_data in data.get("apps", {}).items():
+        start_cmd = app_data.get("start", "")
+        if start_cmd:
+            is_valid, error = validate_startup_command(start_cmd)
+            if not is_valid:
+                raise ValueError(f"App '{name}' has invalid start command: {error}")
+
+        config.apps[name] = AppConfig(
+            directory=app_data.get("directory", "."),
+            port=app_data.get("port", 3000),
+            start=start_cmd,
+            env=app_data.get("env", {}),
+            x=app_data.get("x"),
+            y=app_data.get("y"),
+        )
+
+    # Parse infrastructure
+    for name, infra_data in data.get("infrastructure", {}).items():
+        config.infrastructure[name] = InfraConfig(
+            image=infra_data.get("image", ""),
+            port=infra_data.get("port", 5432),
+            x=infra_data.get("x"),
+            y=infra_data.get("y"),
+        )
+
+    config.primaryApp = data.get("primaryApp", "")
+
+    # Validate primaryApp exists in apps (if specified)
+    if config.primaryApp and config.primaryApp not in config.apps:
+        logger.warning(f"[CONFIG] primaryApp '{config.primaryApp}' not found in apps, will use first app")
+        if config.apps:
+            config.primaryApp = next(iter(config.apps))
+
+    return config
+
+
+def read_tesslate_config(project_path: str) -> TesslateProjectConfig | None:
+    """
+    Read and parse .tesslate/config.json from a project directory.
+
+    Args:
+        project_path: Absolute path to project root (e.g., /projects/my-project-abc123)
+
+    Returns:
+        TesslateProjectConfig or None if file doesn't exist
+    """
+    config_path = Path(project_path) / ".tesslate" / "config.json"
+    try:
+        if config_path.exists():
+            content = config_path.read_text(encoding="utf-8")
+            config = parse_tesslate_config(content)
+            logger.info(f"[CONFIG] Successfully parsed .tesslate/config.json from {project_path}")
+            return config
+        else:
+            logger.debug(f"[CONFIG] No .tesslate/config.json found at {config_path}")
+            return None
+    except ValueError as e:
+        logger.error(f"[CONFIG] Failed to parse .tesslate/config.json: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"[CONFIG] Error reading .tesslate/config.json: {e}")
+        return None
+
+
+def write_tesslate_config(project_path: str, config: TesslateProjectConfig) -> None:
+    """
+    Write .tesslate/config.json to a project directory.
+
+    Args:
+        project_path: Absolute path to project root
+        config: TesslateProjectConfig to serialize
+    """
+    config_dir = Path(project_path) / ".tesslate"
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = config_dir / "config.json"
+
+    data: dict[str, Any] = {
+        "apps": {},
+        "infrastructure": {},
+        "primaryApp": config.primaryApp,
+    }
+
+    for name, app in config.apps.items():
+        app_data: dict[str, Any] = {
+            "directory": app.directory,
+            "port": app.port,
+            "start": app.start,
+            "env": app.env,
+        }
+        if app.x is not None:
+            app_data["x"] = app.x
+        if app.y is not None:
+            app_data["y"] = app.y
+        data["apps"][name] = app_data
+
+    for name, infra in config.infrastructure.items():
+        infra_data: dict[str, Any] = {
+            "image": infra.image,
+            "port": infra.port,
+        }
+        if infra.x is not None:
+            infra_data["x"] = infra.x
+        if infra.y is not None:
+            infra_data["y"] = infra.y
+        data["infrastructure"][name] = infra_data
+
+    config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    logger.info(f"[CONFIG] Wrote .tesslate/config.json to {config_path}")
+
+
+def get_app_startup_config(project_path: str, app_name: str) -> tuple[list[str], int]:
+    """
+    Unified function to get startup command and port for an app.
+
+    Priority:
+    1. .tesslate/config.json (new system)
+    2. TESSLATE.md (legacy fallback)
+    3. Generic fallback
+
+    Args:
+        project_path: Absolute path to project root
+        app_name: Name of the app (key in config.apps)
+
+    Returns:
+        Tuple of (command_array, port) where command_array is ['sh', '-c', '...']
+    """
+    # Priority 1: .tesslate/config.json
+    tesslate_config = read_tesslate_config(project_path)
+    if tesslate_config and app_name in tesslate_config.apps:
+        app = tesslate_config.apps[app_name]
+        port = app.port or 3000
+
+        if app.start:
+            # Build env var prefix if any
+            env_prefix = ""
+            if app.env:
+                env_parts = [f'export {k}="{v}"' for k, v in app.env.items()]
+                env_prefix = " && ".join(env_parts) + " && "
+
+            # Prepend dependency install for Node.js projects
+            deps_prefix = _install_deps_if_missing_command()
+
+            # Handle directory change if not root
+            dir_prefix = ""
+            if app.directory and app.directory != ".":
+                dir_prefix = f"cd {app.directory} && "
+
+            command = f"{dir_prefix}{env_prefix}{deps_prefix}{app.start}"
+            logger.info(f"[CONFIG] Using .tesslate/config.json for app '{app_name}': port={port}")
+            return ["sh", "-c", command], port
+        else:
+            # No start command - keep container alive
+            logger.info(f"[CONFIG] App '{app_name}' has no start command, using sleep infinity")
+            return ["sh", "-c", "sleep infinity"], port
+
+    # Priority 2: TESSLATE.md fallback
+    tesslate_md_path = Path(project_path) / "TESSLATE.md"
+    if tesslate_md_path.exists():
+        content = tesslate_md_path.read_text(encoding="utf-8")
+        base_config = parse_tesslate_md(content)
+        if base_config and base_config.validate():
+            port = base_config.port or 3000
+            command = generate_startup_command(base_config)
+            logger.info(f"[CONFIG] Using TESSLATE.md fallback for app '{app_name}': port={port}")
+            return command, port
+
+    # Priority 3: Generic fallback
+    logger.info(f"[CONFIG] Using generic fallback for app '{app_name}'")
+    command = generate_startup_command(None)
+    return command, 3000
