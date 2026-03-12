@@ -2659,9 +2659,10 @@ async def analyze_project(
         except Exception as e:
             logger.warning(f"[ANALYZE] Could not walk project directory: {e}")
     else:
-        # K8s: use orchestrator to list and read files
+        # K8s: try reading from PVC first, fall back to DB (ProjectFile records)
         from ..services.orchestration import get_orchestrator
         orchestrator = get_orchestrator()
+        k8s_success = False
         try:
             files_list = await orchestrator.list_files(
                 user_id=current_user.id,
@@ -2670,8 +2671,9 @@ async def analyze_project(
             )
             if files_list:
                 file_tree = [f.get("path", f.get("name", "")) for f in files_list if isinstance(f, dict)]
+                k8s_success = True
 
-            # Read config files
+            # Read config files from PVC
             for subdir in COMMON_SUBDIRS:
                 for config_name in CONFIG_FILENAMES:
                     file_path = f"{subdir}/{config_name}".lstrip("/") if subdir else config_name
@@ -2688,6 +2690,25 @@ async def analyze_project(
                         pass
         except Exception as e:
             logger.warning(f"[ANALYZE] Could not read files from K8s: {e}")
+
+        # Fallback: read from DB (ProjectFile records) — handles projects at setup stage
+        # where no K8s namespace/PVC exists yet
+        if not k8s_success:
+            logger.info("[ANALYZE] Falling back to ProjectFile records from DB")
+            from ..models import ProjectFile as PF
+            db_files_result = await db.execute(
+                select(PF).where(PF.project_id == project.id)
+            )
+            for pf in db_files_result.scalars().all():
+                fp = pf.file_path
+                # Skip dirs we don't care about
+                if any(skip in fp for skip in SKIP_DIRS):
+                    continue
+                file_tree.append(fp)
+                basename = os.path.basename(fp)
+                if basename in CONFIG_FILENAMES or fp in CONFIG_FILENAMES:
+                    if pf.content and len(pf.content) < 20000:
+                        config_files_content[fp] = pf.content
 
     if not file_tree:
         raise HTTPException(status_code=400, detail="No files found in project to analyze")
