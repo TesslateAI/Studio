@@ -22,7 +22,7 @@ The open-source platform where AI agents build complete applications: React fron
 [![Go](https://img.shields.io/badge/Go-Backend-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Ready-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
-[Quick Start](#quick-start) · [Features](#features) · [Documentation](https://docs.tesslate.com) · [Contributing](#contributing)
+[Quick Start](#quick-start) · [Features](#features) · [Install](https://tesslate.com/install) · [Documentation](https://docs.tesslate.com) · [Contributing](#contributing)
 
 **Includes support for llama.cpp, LM Studio, Ollama, Openrouter, and any provider you choose.**
 
@@ -69,6 +69,7 @@ The open-source platform where AI agents build complete applications: React fron
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YR5aKPyMuW)
 [![Website](https://img.shields.io/badge/Website-tesslate.com-FF6B6B?style=for-the-badge&logo=google-chrome&logoColor=white)](https://tesslate.com)
+[![Install](https://img.shields.io/badge/Install-One%20Command-F97316?style=for-the-badge&logo=terminal&logoColor=white)](https://tesslate.com/install)
 [![Hugging Face](https://img.shields.io/badge/HF-Models-FFD21E?style=for-the-badge)](https://huggingface.co/Tesslate)
 
 [![Twitter](https://img.shields.io/badge/Twitter-1DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://twitter.com/TesslateAI)
