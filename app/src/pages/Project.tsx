@@ -653,6 +653,12 @@ export default function Project() {
       const allContainers = await projectsApi.getContainers(slug);
       setContainers(allContainers);
 
+      // No containers = project needs setup
+      if (!allContainers || allContainers.length === 0) {
+        navigate(`/project/${slug}/setup`, { replace: true });
+        return;
+      }
+
       // Find current container (by ID or default to first)
       const foundContainer = containerId
         ? allContainers.find((c: Record<string, unknown>) => c.id === containerId)

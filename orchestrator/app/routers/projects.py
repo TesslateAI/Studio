@@ -1261,46 +1261,10 @@ async def _setup_base_project(
             logger.info(f"[CREATE] Created {len(tesslate_config.apps)} containers from .tesslate/config.json")
             return primary_container_id or str(container.id)
 
-        # Priority 2: Parse TESSLATE.md from cloned base to get port (legacy fallback)
-        from ..services.base_config_parser import parse_tesslate_md
-
-        tesslate_path = os.path.join(cached_base_path, "TESSLATE.md")
-        internal_port = 3000  # Default fallback
-        if os.path.exists(tesslate_path):
-            try:
-                tesslate_content = await read_file_async(tesslate_path)
-                base_config = parse_tesslate_md(tesslate_content)
-                internal_port = base_config.port
-                logger.info(f"[CREATE] Parsed port {internal_port} from TESSLATE.md")
-            except Exception as e:
-                logger.warning(
-                    f"[CREATE] Could not parse TESSLATE.md: {e}, using default port 3000"
-                )
-
-        # Use the base's display name (not slug) for the container name.
-        # User-submitted base slugs can include UUID+timestamp for uniqueness,
-        # but the container name should be human-readable and short.
-        base_display = re.sub(r"[^a-z0-9]+", "-", base_repo.name.lower()).strip("-")
-
-        container = Container(
-            project_id=db_project.id,
-            base_id=base_repo.id,
-            name=base_display,
-            directory=".",  # Root directory for single-container projects
-            container_name=f"{db_project.slug}-{base_display}",
-            internal_port=internal_port,
-            container_type="base",
-            status="stopped",
-            position_x=200,  # Default position for Architecture canvas
-            position_y=200,
-        )
-        db.add(container)
-        await db.commit()
-        await db.refresh(container)
-        logger.info(f"[CREATE] Created container {container.id} for base {base_repo.name}")
-
-        # Return container_id for navigation
-        return str(container.id)
+        # No .tesslate/config.json — project needs setup
+        task.update_progress(95, 100, "Project created - setup needed")
+        logger.info(f"[CREATE] No .tesslate/config.json in base {base_repo.slug}, needs setup")
+        return "needs_setup"
 
     except Exception as git_error:
         logger.error(f"[CREATE] Failed to setup base project: {git_error}", exc_info=True)
