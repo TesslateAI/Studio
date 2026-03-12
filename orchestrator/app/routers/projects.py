@@ -2764,18 +2764,21 @@ The config has this structure:
 
 Return ONLY valid JSON, no markdown code blocks, no explanation."""
 
-    # Call LLM
+    # Call LLM via OpenAI client pointed at LiteLLM proxy
     try:
-        import litellm
+        from openai import AsyncOpenAI
 
-        response = await litellm.acompletion(
+        client = AsyncOpenAI(
+            api_key=settings.litellm_master_key,
+            base_url=settings.litellm_api_base,
+        )
+
+        response = await client.chat.completions.create(
             model="glm-5",
             messages=[
                 {"role": "system", "content": "You are a project analyzer. Return only valid JSON."},
                 {"role": "user", "content": prompt},
             ],
-            api_base=settings.litellm_api_base,
-            api_key=settings.litellm_master_key,
             temperature=0.1,
             max_tokens=2000,
         )
