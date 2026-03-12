@@ -2666,7 +2666,7 @@ async def analyze_project(
             files_list = await orchestrator.list_files(
                 user_id=current_user.id,
                 project_id=project.id,
-                project_slug=project.slug,
+                container_name=".",
             )
             if files_list:
                 file_tree = [f.get("path", f.get("name", "")) for f in files_list if isinstance(f, dict)]
@@ -2679,9 +2679,8 @@ async def analyze_project(
                         content = await orchestrator.read_file(
                             user_id=current_user.id,
                             project_id=project.id,
-                            container_name=None,
+                            container_name=".",
                             file_path=file_path,
-                            project_slug=project.slug,
                         )
                         if content and len(content) < 20000:
                             config_files_content[file_path] = content
