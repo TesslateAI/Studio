@@ -5,8 +5,10 @@ import {
   MoreVertical,
   Eye,
   Ban,
+  Bot,
   Trash2,
   CreditCard,
+  Clock,
   Download,
   ChevronLeft,
   ChevronRight,
@@ -18,6 +20,7 @@ import {
 import { getAuthHeaders } from '../../lib/api';
 import toast from 'react-hot-toast';
 import { LoadingSpinner } from '../PulsingGridSpinner';
+import AgentRunViewer from './AgentRunViewer';
 
 interface UserListItem {
   id: string;
@@ -74,6 +77,19 @@ interface UsersResponse {
   pages: number;
 }
 
+interface AgentRunItem {
+  message_id: string;
+  chat_id: string;
+  project_name: string | null;
+  project_slug: string | null;
+  created_at: string;
+  completion_reason: string | null;
+  error: string | null;
+  iterations: number;
+  tool_calls_made: number;
+  agent_type: string | null;
+}
+
 export default function UserManagement() {
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,6 +109,16 @@ export default function UserManagement() {
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
+
+  // Agent runs state
+  const [detailTab, setDetailTab] = useState<'details' | 'agent-runs'>('details');
+  const [agentRuns, setAgentRuns] = useState<AgentRunItem[]>([]);
+  const [agentRunsLoading, setAgentRunsLoading] = useState(false);
+  const [agentRunsPage, setAgentRunsPage] = useState(1);
+  const [agentRunsPages, setAgentRunsPages] = useState(0);
+  const [agentRunsTotal, setAgentRunsTotal] = useState(0);
+  const [agentRunsFilter, setAgentRunsFilter] = useState('');
+  const [viewingRunId, setViewingRunId] = useState<string | null>(null);
 
   // Action states
   const [actionLoading, setActionLoading] = useState(false);
@@ -146,10 +172,45 @@ export default function UserManagement() {
 
       const data: UserDetail = await response.json();
       setSelectedUser(data);
+      setDetailTab('details');
+      setAgentRuns([]);
+      setAgentRunsPage(1);
+      setAgentRunsPages(0);
+      setAgentRunsTotal(0);
+      setAgentRunsFilter('');
       setShowDetailModal(true);
     } catch (error) {
       console.error('Failed to load user details:', error);
       toast.error('Failed to load user details');
+    }
+  };
+
+  const loadAgentRuns = async (userId: string, page: number = 1, filterOverride?: string) => {
+    try {
+      setAgentRunsLoading(true);
+      const params = new URLSearchParams();
+      params.append('page', page.toString());
+      params.append('page_size', '15');
+      const filter = filterOverride !== undefined ? filterOverride : agentRunsFilter;
+      if (filter) params.append('completion_reason', filter);
+
+      const response = await fetch(`/api/admin/users/${userId}/agent-runs?${params.toString()}`, {
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
+
+      if (!response.ok) throw new Error('Failed to load agent runs');
+
+      const data = await response.json();
+      setAgentRuns(data.items);
+      setAgentRunsTotal(data.total);
+      setAgentRunsPages(data.pages);
+      setAgentRunsPage(page);
+    } catch (error) {
+      console.error('Failed to load agent runs:', error);
+      toast.error('Failed to load agent runs');
+    } finally {
+      setAgentRunsLoading(false);
     }
   };
 
@@ -551,7 +612,38 @@ export default function UserManagement() {
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 space-y-6">
+            {/* Tabs */}
+            <div className="border-b border-[var(--text)]/15 px-6">
+              <div className="flex space-x-6">
+                <button
+                  onClick={() => setDetailTab('details')}
+                  className={`py-3 border-b-2 transition-colors text-sm font-medium ${
+                    detailTab === 'details'
+                      ? 'border-blue-500 text-blue-500'
+                      : 'border-transparent text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Details
+                </button>
+                <button
+                  onClick={() => {
+                    setDetailTab('agent-runs');
+                    if (agentRuns.length === 0 && selectedUser) {
+                      loadAgentRuns(selectedUser.id);
+                    }
+                  }}
+                  className={`py-3 border-b-2 transition-colors text-sm font-medium flex items-center space-x-2 ${
+                    detailTab === 'agent-runs'
+                      ? 'border-blue-500 text-blue-500'
+                      : 'border-transparent text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Bot size={14} />
+                  <span>Agent Runs</span>
+                </button>
+              </div>
+            </div>
+            {detailTab === 'details' && <div className="p-6 space-y-6">
               {/* Profile Header */}
               <div className="flex items-center space-x-4">
                 {selectedUser.avatar_url ? (
@@ -634,7 +726,131 @@ export default function UserManagement() {
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
+            {detailTab === 'agent-runs' && (
+              <div className="p-6 space-y-4">
+                {/* Filter */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <select
+                      value={agentRunsFilter}
+                      onChange={(e) => {
+                        const newFilter = e.target.value;
+                        setAgentRunsFilter(newFilter);
+                        if (selectedUser) {
+                          loadAgentRuns(selectedUser.id, 1, newFilter);
+                        }
+                      }}
+                      className="bg-gray-700 text-white text-sm rounded-lg px-3 py-2 border border-[var(--text)]/15"
+                    >
+                      <option value="">All Statuses</option>
+                      <option value="task_complete_signal">Completed</option>
+                      <option value="error">Error</option>
+                      <option value="cancelled">Cancelled</option>
+                      <option value="resource_limit_exceeded">Resource Limit</option>
+                      <option value="credit_deduction_failed">Credit Failed</option>
+                    </select>
+                    <span className="text-gray-500 text-sm">{agentRunsTotal} runs</span>
+                  </div>
+                  <button
+                    onClick={() => selectedUser && loadAgentRuns(selectedUser.id, agentRunsPage)}
+                    className="text-gray-400 hover:text-white transition-colors"
+                    title="Refresh"
+                  >
+                    <RefreshCw size={16} className={agentRunsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+
+                {/* Table */}
+                {agentRunsLoading ? (
+                  <div className="flex justify-center py-8">
+                    <LoadingSpinner />
+                  </div>
+                ) : agentRuns.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No agent runs found
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-750 border-b border-[var(--text)]/15">
+                        <tr>
+                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Project</th>
+                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Date</th>
+                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Status</th>
+                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Iterations</th>
+                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Tool Calls</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-700">
+                        {agentRuns.map((run) => (
+                          <tr
+                            key={run.message_id}
+                            onClick={() => setViewingRunId(run.message_id)}
+                            className="hover:bg-gray-700/50 transition-colors cursor-pointer"
+                          >
+                            <td className="px-4 py-3 text-gray-300 text-sm">
+                              {run.project_name || <span className="text-gray-500 italic">No project</span>}
+                            </td>
+                            <td className="px-4 py-3 text-gray-400 text-sm">
+                              <div className="flex items-center space-x-1">
+                                <Clock size={12} />
+                                <span>{new Date(run.created_at).toLocaleString()}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              {(() => {
+                                const reason = run.completion_reason;
+                                if (reason === 'task_complete_signal') return <span className="px-2 py-0.5 rounded-full text-xs bg-green-500/20 text-green-400">Completed</span>;
+                                if (reason === 'error') return <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/20 text-red-400">Error</span>;
+                                if (reason === 'cancelled') return <span className="px-2 py-0.5 rounded-full text-xs bg-yellow-500/20 text-yellow-400">Cancelled</span>;
+                                if (reason === 'resource_limit_exceeded') return <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">Resource Limit</span>;
+                                if (reason === 'credit_deduction_failed') return <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">Credit Failed</span>;
+                                return <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/20 text-gray-400">{reason || 'Unknown'}</span>;
+                              })()}
+                            </td>
+                            <td className="px-4 py-3 text-gray-300 text-sm text-right">{run.iterations}</td>
+                            <td className="px-4 py-3 text-gray-300 text-sm text-right">{run.tool_calls_made}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Pagination */}
+                {agentRunsPages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-gray-500 text-sm">
+                      Page {agentRunsPage} of {agentRunsPages}
+                    </span>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => selectedUser && loadAgentRuns(selectedUser.id, agentRunsPage - 1)}
+                        disabled={agentRunsPage <= 1}
+                        className="p-1 text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <button
+                        onClick={() => selectedUser && loadAgentRuns(selectedUser.id, agentRunsPage + 1)}
+                        disabled={agentRunsPage >= agentRunsPages}
+                        className="p-1 text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Error preview */}
+                {agentRuns.some(r => r.error) && (
+                  <div className="text-xs text-gray-500 italic">
+                    Click a row to view the full step-by-step execution trace
+                  </div>
+                )}
+              </div>
+            )}
             <div className="p-6 border-t border-[var(--text)]/15 flex justify-end">
               <button
                 onClick={() => setShowDetailModal(false)}
@@ -815,6 +1031,14 @@ export default function UserManagement() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Agent Run Viewer Modal */}
+      {viewingRunId && (
+        <AgentRunViewer
+          messageId={viewingRunId}
+          onClose={() => setViewingRunId(null)}
+        />
       )}
     </div>
   );

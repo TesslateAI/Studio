@@ -29,6 +29,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..models import (
     AdminAction,
+    AgentStep,
     Chat,
     CreditPurchase,
     Deployment,
@@ -4300,3 +4301,305 @@ async def export_audit_logs(
     except Exception as e:
         logger.error(f"Error exporting audit logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to export audit logs") from e
+
+
+# ---------------------------------------------------------------------------
+# Agent run inspection helpers
+# ---------------------------------------------------------------------------
+
+
+def _truncate_tool_results(results: list, max_len: int = 2000) -> list:
+    """Truncate tool result strings to *max_len* characters."""
+    truncated: list = []
+    for r in results:
+        if isinstance(r, str) and len(r) > max_len:
+            truncated.append(r[:max_len] + "... [truncated]")
+        elif isinstance(r, dict):
+            tr = dict(r)
+            for key in ("output", "result", "content"):
+                if key in tr and isinstance(tr[key], str) and len(tr[key]) > max_len:
+                    tr[key] = tr[key][:max_len] + "... [truncated]"
+            truncated.append(tr)
+        else:
+            truncated.append(r)
+    return truncated
+
+
+# ---------------------------------------------------------------------------
+# 1. GET /admin/users/{user_id}/agent-runs
+# ---------------------------------------------------------------------------
+
+
+@router.get("/users/{user_id}/agent-runs")
+async def get_user_agent_runs(
+    user_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    completion_reason: str | None = Query(None),
+    project_id: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Paginated list of agent runs (assistant messages with metadata) for a user."""
+    try:
+        user = await db.scalar(select(User).where(User.id == user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        query = (
+            select(
+                Message,
+                Chat.project_id,
+                Project.name.label("project_name"),
+                Project.slug.label("project_slug"),
+            )
+            .join(Chat, Message.chat_id == Chat.id)
+            .outerjoin(Project, Chat.project_id == Project.id)
+            .where(
+                Chat.user_id == user_id,
+                Message.role == "assistant",
+                Message.message_metadata.isnot(None),
+            )
+        )
+
+        if completion_reason:
+            query = query.where(
+                Message.message_metadata["completion_reason"].as_string() == completion_reason
+            )
+        if project_id:
+            query = query.where(Chat.project_id == project_id)
+        if date_from:
+            query = query.where(Message.created_at >= datetime.fromisoformat(date_from))
+        if date_to:
+            query = query.where(Message.created_at <= datetime.fromisoformat(date_to))
+
+        # Total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total = await db.scalar(count_query) or 0
+
+        # Paginate
+        offset = (page - 1) * page_size
+        result = await db.execute(
+            query.order_by(Message.created_at.desc()).offset(offset).limit(page_size)
+        )
+        rows = result.all()
+
+        items = []
+        for row in rows:
+            msg = row[0]
+            meta = msg.message_metadata or {}
+            items.append(
+                {
+                    "message_id": str(msg.id),
+                    "chat_id": str(msg.chat_id),
+                    "project_name": row.project_name,
+                    "project_slug": row.project_slug,
+                    "created_at": msg.created_at.isoformat(),
+                    "completion_reason": meta.get("completion_reason"),
+                    "error": meta.get("error"),  # TODO: fix worker.py to persist error from complete_data into message_metadata
+                    "iterations": meta.get("iterations", 0),
+                    "tool_calls_made": meta.get("tool_calls_made", 0),
+                    "agent_type": meta.get("agent_type"),
+                }
+            )
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "pages": (total + page_size - 1) // page_size if total else 0,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting agent runs for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get agent runs") from e
+
+
+# ---------------------------------------------------------------------------
+# 2. GET /admin/agent-runs/errors  (MUST be before the {message_id} route)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/agent-runs/errors")
+async def get_agent_run_errors(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    completion_reason: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Platform-wide error feed for agent runs."""
+    try:
+        error_reasons = ["error", "resource_limit_exceeded", "credit_deduction_failed"]
+
+        query = (
+            select(
+                Message,
+                User.email.label("user_email"),
+                User.id.label("uid"),
+                Project.name.label("project_name"),
+                Project.slug.label("project_slug"),
+            )
+            .join(Chat, Message.chat_id == Chat.id)
+            .join(User, Chat.user_id == User.id)
+            .outerjoin(Project, Chat.project_id == Project.id)
+            .where(
+                Message.role == "assistant",
+                Message.message_metadata.isnot(None),
+            )
+        )
+
+        if completion_reason:
+            query = query.where(
+                Message.message_metadata["completion_reason"].as_string() == completion_reason
+            )
+        else:
+            query = query.where(
+                or_(
+                    *[
+                        Message.message_metadata["completion_reason"].as_string() == r
+                        for r in error_reasons
+                    ]
+                )
+            )
+
+        if date_from:
+            query = query.where(Message.created_at >= datetime.fromisoformat(date_from))
+        if date_to:
+            query = query.where(Message.created_at <= datetime.fromisoformat(date_to))
+
+        # Total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total = await db.scalar(count_query) or 0
+
+        # Paginate
+        offset = (page - 1) * page_size
+        result = await db.execute(
+            query.order_by(Message.created_at.desc()).offset(offset).limit(page_size)
+        )
+        rows = result.all()
+
+        items = []
+        for row in rows:
+            msg = row[0]
+            meta = msg.message_metadata or {}
+            items.append(
+                {
+                    "message_id": str(msg.id),
+                    "user_email": row.user_email,
+                    "user_id": str(row.uid),
+                    "project_name": row.project_name,
+                    "project_slug": row.project_slug,
+                    "error": meta.get("error"),  # TODO: fix worker.py to persist error from complete_data into message_metadata
+                    "completion_reason": meta.get("completion_reason"),
+                    "created_at": msg.created_at.isoformat(),
+                }
+            )
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "pages": (total + page_size - 1) // page_size if total else 0,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting agent run errors: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get agent run errors") from e
+
+
+# ---------------------------------------------------------------------------
+# 3. GET /admin/agent-runs/{message_id}/steps
+# ---------------------------------------------------------------------------
+
+
+@router.get("/agent-runs/{message_id}/steps")
+async def get_agent_run_steps(
+    message_id: str,
+    include_debug: bool = Query(False),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Full step-by-step trace for a single agent run."""
+    try:
+        result = await db.execute(
+            select(
+                Message,
+                Project.id.label("proj_id"),
+                Project.name.label("proj_name"),
+                Project.slug.label("proj_slug"),
+            )
+            .join(Chat, Message.chat_id == Chat.id)
+            .outerjoin(Project, Chat.project_id == Project.id)
+            .where(Message.id == message_id)
+        )
+        row = result.one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agent run not found")
+
+        message = row[0]
+
+        # Build project dict
+        project_info = None
+        if row.proj_id:
+            project_info = {
+                "id": str(row.proj_id),
+                "name": row.proj_name,
+                "slug": row.proj_slug,
+            }
+
+        # Fetch all steps ordered by step_index
+        steps_result = await db.execute(
+            select(AgentStep)
+            .where(AgentStep.message_id == message_id)
+            .order_by(AgentStep.step_index)
+        )
+        steps = steps_result.scalars().all()
+
+        meta = message.message_metadata or {}
+
+        step_items = []
+        for step in steps:
+            sd = step.step_data or {}
+            item: dict[str, Any] = {
+                "step_index": step.step_index,
+                "iteration": sd.get("iteration"),
+                "thought": sd.get("thought"),
+                "tool_calls": sd.get("tool_calls", []),
+                "tool_results": _truncate_tool_results(sd.get("tool_results", []), 2000),
+                "response_text": sd.get("response_text"),
+                "timestamp": sd.get("timestamp"),
+            }
+            if include_debug:
+                item["_debug"] = sd.get("_debug")
+            step_items.append(item)
+
+        return {
+            "message": {
+                "id": str(message.id),
+                "chat_id": str(message.chat_id),
+                "created_at": message.created_at.isoformat(),
+                "completion_reason": meta.get("completion_reason"),
+                "error": meta.get("error"),  # TODO: fix worker.py to persist error from complete_data into message_metadata
+                "iterations": meta.get("iterations", 0),
+                "tool_calls_made": meta.get("tool_calls_made", 0),
+                "agent_type": meta.get("agent_type"),
+                "task_id": meta.get("task_id"),
+            },
+            "project": project_info,
+            "steps": step_items,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting steps for agent run {message_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get agent run steps") from e

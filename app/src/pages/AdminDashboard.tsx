@@ -9,6 +9,7 @@ import {
   Coins,
   Timer,
   Activity,
+  AlertCircle,
   ShoppingCart,
   Database,
   ArrowUp,
@@ -28,6 +29,7 @@ import ProjectAdmin from '../components/admin/ProjectAdmin';
 import BillingAdmin from '../components/admin/BillingAdmin';
 import DeploymentMonitor from '../components/admin/DeploymentMonitor';
 import BaseManagement from '../components/admin/BaseManagement';
+import AgentRunViewer from '../components/admin/AgentRunViewer';
 // Using simple chart placeholders for now
 // Will integrate charts later
 
@@ -94,6 +96,7 @@ export default function AdminDashboard() {
       'billing',
       'deployments',
       'bases',
+      'agent-errors',
     ];
     if (
       activeTab !== 'overview' &&
@@ -343,6 +346,7 @@ export default function AdminDashboard() {
               { id: 'marketplace', label: 'Marketplace' },
               { id: 'agents', label: 'Agents' },
               { id: 'bases', label: 'Bases' },
+              { id: 'agent-errors', label: 'Agent Errors' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -803,6 +807,7 @@ export default function AdminDashboard() {
 
         {activeTab === 'agents' && <AgentManagement />}
         {activeTab === 'bases' && <BaseManagement />}
+        {activeTab === 'agent-errors' && <AgentErrorsFeed />}
       </div>
     </div>
   );
@@ -1698,6 +1703,207 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Agent Errors Feed Component
+// ============================================================================
+
+interface AgentError {
+  message_id: string;
+  user_email: string;
+  user_id: string;
+  project_name: string | null;
+  project_slug: string | null;
+  error: string | null;
+  completion_reason: string;
+  created_at: string;
+}
+
+function AgentErrorsFeed() {
+  const [errors, setErrors] = React.useState<AgentError[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [page, setPage] = React.useState(1);
+  const [pages, setPages] = React.useState(0);
+  const [total, setTotal] = React.useState(0);
+  const [reasonFilter, setReasonFilter] = React.useState('');
+  const [viewingRunId, setViewingRunId] = React.useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = React.useState(true);
+
+  const loadErrors = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = new URLSearchParams();
+      params.append('page', page.toString());
+      params.append('page_size', '25');
+      if (reasonFilter) params.append('completion_reason', reasonFilter);
+
+      const response = await fetch(`/api/admin/agent-runs/errors?${params.toString()}`, {
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
+
+      if (!response.ok) throw new Error('Failed to load agent errors');
+
+      const data = await response.json();
+      setErrors(data.items);
+      setTotal(data.total);
+      setPages(data.pages);
+    } catch (error) {
+      console.error('Failed to load agent errors:', error);
+      toast.error('Failed to load agent errors');
+    } finally {
+      setLoading(false);
+    }
+  }, [page, reasonFilter]);
+
+  React.useEffect(() => {
+    loadErrors();
+  }, [loadErrors]);
+
+  // Auto-refresh every 30 seconds
+  React.useEffect(() => {
+    if (!autoRefresh) return;
+    const interval = setInterval(loadErrors, 30000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, loadErrors]);
+
+  const getReasonBadge = (reason: string) => {
+    switch (reason) {
+      case 'error':
+        return <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/20 text-red-400">Error</span>;
+      case 'resource_limit_exceeded':
+        return <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">Resource Limit</span>;
+      case 'credit_deduction_failed':
+        return <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">Credit Failed</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/20 text-gray-400">{reason}</span>;
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <AlertCircle className="text-red-400" size={20} />
+          <h2 className="text-lg font-semibold text-white">Agent Error Feed</h2>
+          <span className="text-gray-500 text-sm">{total} total errors</span>
+        </div>
+        <div className="flex items-center space-x-4">
+          <select
+            value={reasonFilter}
+            onChange={(e) => { setReasonFilter(e.target.value); setPage(1); }}
+            className="bg-gray-700 text-white text-sm rounded-lg px-3 py-2 border border-[var(--text)]/15"
+          >
+            <option value="">All Error Types</option>
+            <option value="error">Error</option>
+            <option value="resource_limit_exceeded">Resource Limit</option>
+            <option value="credit_deduction_failed">Credit Failed</option>
+          </select>
+          <label className="flex items-center space-x-2 text-sm text-gray-400">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="rounded"
+            />
+            <span>Auto-refresh (30s)</span>
+          </label>
+          <button
+            onClick={loadErrors}
+            className="text-gray-400 hover:text-white transition-colors"
+            title="Refresh now"
+          >
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {loading && errors.length === 0 ? (
+        <div className="flex justify-center py-12">
+          <LoadingSpinner />
+        </div>
+      ) : errors.length === 0 ? (
+        <div className="bg-gray-800 rounded-lg border border-[var(--text)]/15 p-12 text-center">
+          <AlertCircle className="mx-auto text-gray-600 mb-3" size={40} />
+          <p className="text-gray-400">No agent errors found</p>
+          <p className="text-gray-500 text-sm mt-1">This is a good thing!</p>
+        </div>
+      ) : (
+        <div className="bg-gray-800 rounded-lg border border-[var(--text)]/15 overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-750 border-b border-[var(--text)]/15">
+              <tr>
+                <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">User</th>
+                <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Project</th>
+                <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Error</th>
+                <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Type</th>
+                <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Time</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-700">
+              {errors.map((err) => (
+                <tr
+                  key={err.message_id}
+                  onClick={() => setViewingRunId(err.message_id)}
+                  className="hover:bg-gray-700/50 transition-colors cursor-pointer"
+                >
+                  <td className="px-4 py-3 text-sm">
+                    <span className="text-blue-400">{err.user_email}</span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-300 text-sm">
+                    {err.project_name || <span className="text-gray-500 italic">No project</span>}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-400 max-w-xs truncate" title={err.error || ''}>
+                    {err.error || 'No error message'}
+                  </td>
+                  <td className="px-4 py-3">
+                    {getReasonBadge(err.completion_reason)}
+                  </td>
+                  <td className="px-4 py-3 text-gray-400 text-sm whitespace-nowrap">
+                    {new Date(err.created_at).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {pages > 1 && (
+        <div className="flex items-center justify-between">
+          <span className="text-gray-500 text-sm">
+            Page {page} of {pages} ({total} total)
+          </span>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(pages, p + 1))}
+              disabled={page >= pages}
+              className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Agent Run Viewer Modal */}
+      {viewingRunId && (
+        <AgentRunViewer
+          messageId={viewingRunId}
+          onClose={() => setViewingRunId(null)}
+        />
+      )}
     </div>
   );
 }
