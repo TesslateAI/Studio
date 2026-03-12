@@ -63,6 +63,16 @@ litellm_settings:
 
 model_list:
 
+  - model_name: "tessa-coder-9b"
+    litellm_params:
+      model: "openai/smirki/tessa-coder-9b-sft-v0"
+      api_base: "https://tesslate--tesslate-vllm-benchmark-serve.modal.run/v1"
+      api_key: "no-key"
+    model_info:
+      max_tokens: 32768
+      max_input_tokens: 131072
+      access_groups: ["internal"]
+
   # # ===========================================================================
   # # AWS Bedrock
   # # ===========================================================================
