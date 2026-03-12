@@ -62,7 +62,7 @@ litellm_settings:
     ttl: 600
 
 model_list:
-  - model_name: "tessa-coder-9b"
+  - model_name: "tesslate-omnicoder-9b"
     litellm_params:
       model: "openai/smirki/tessa-coder-9b-sft-v0"
       api_base: "https://tesslate--tesslate-vllm-benchmark-serve.modal.run/v1"
