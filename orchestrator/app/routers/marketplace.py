@@ -18,6 +18,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..models import (
     AgentReview,
+    AgentSkillAssignment,
     BaseReview,
     MarketplaceAgent,
     MarketplaceBase,
@@ -29,7 +30,7 @@ from ..models import (
     UserPurchasedAgent,
     UserPurchasedBase,
 )
-from ..schemas import BaseSubmitRequest, BaseUpdateRequest
+from ..schemas import BaseSubmitRequest, BaseUpdateRequest, MarketplaceSkillResponse, SkillInstallRequest
 from ..services.cache_service import cache
 from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..username_validation import resolve_display_name
@@ -1456,7 +1457,10 @@ async def get_user_agents(
     result = await db.execute(
         select(MarketplaceAgent, UserPurchasedAgent)
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
-        .where(UserPurchasedAgent.user_id == current_user.id)
+        .where(
+            UserPurchasedAgent.user_id == current_user.id,
+            MarketplaceAgent.item_type.notin_(["skill", "subagent"]),
+        )
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .order_by(UserPurchasedAgent.purchase_date.desc())
     )
@@ -4229,3 +4233,431 @@ async def fork_theme(
     item["theme_json"] = forked.theme_json
 
     return {"message": "Theme forked successfully", "theme": item, "success": True}
+
+
+# ============================================================================
+# Skills – Browse, Detail, Purchase, Install, Detach, List
+# ============================================================================
+
+
+@router.get("/skills")
+async def get_marketplace_skills(
+    category: str | None = None,
+    pricing_type: str | None = None,
+    search: str | None = None,
+    sort: str = Query(
+        default="featured", regex="^(featured|popular|newest|name|rating|price_asc|price_desc)$"
+    ),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=12, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
+):
+    """
+    Browse marketplace skills with filtering and sorting.
+
+    Public endpoint – authentication is optional:
+    - Authenticated: Shows purchase status (is_purchased) for each skill
+    - Unauthenticated: Shows catalog without purchase status
+    """
+    # Base query – only active, published skills
+    query = (
+        select(MarketplaceAgent)
+        .where(
+            MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.item_type == "skill",
+            (MarketplaceAgent.forked_by_user_id.is_(None))
+            | (MarketplaceAgent.is_published.is_(True)),
+        )
+    )
+
+    # Apply filters
+    if category:
+        query = query.where(MarketplaceAgent.category == category)
+
+    if pricing_type:
+        query = query.where(MarketplaceAgent.pricing_type == pricing_type)
+
+    if search:
+        search_filter = f"%{search}%"
+        query = query.where(
+            func.lower(MarketplaceAgent.name).like(func.lower(search_filter))
+            | func.lower(MarketplaceAgent.description).like(func.lower(search_filter))
+            | func.lower(cast(MarketplaceAgent.tags, String)).like(func.lower(search_filter))
+        )
+
+    # Apply sorting – always include id as tiebreaker for stable pagination
+    if sort == "featured":
+        query = query.order_by(
+            MarketplaceAgent.is_featured.desc(),
+            MarketplaceAgent.downloads.desc(),
+            MarketplaceAgent.id,
+        )
+    elif sort == "popular":
+        query = query.order_by(MarketplaceAgent.downloads.desc(), MarketplaceAgent.id)
+    elif sort == "newest":
+        query = query.order_by(MarketplaceAgent.created_at.desc(), MarketplaceAgent.id)
+    elif sort == "name":
+        query = query.order_by(MarketplaceAgent.name.asc(), MarketplaceAgent.id)
+    elif sort == "rating":
+        query = query.order_by(
+            MarketplaceAgent.rating.desc(), MarketplaceAgent.downloads.desc(), MarketplaceAgent.id
+        )
+    elif sort == "price_asc":
+        query = query.order_by(MarketplaceAgent.price.asc(), MarketplaceAgent.id)
+    elif sort == "price_desc":
+        query = query.order_by(MarketplaceAgent.price.desc(), MarketplaceAgent.id)
+
+    # Total count before pagination
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Pagination
+    offset = (page - 1) * limit
+    query = query.offset(offset).limit(limit)
+
+    result = await db.execute(query)
+    skills = result.scalars().all()
+
+    # Purchased skill ids (only if authenticated)
+    purchased_skill_ids: list[UUID] = []
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedAgent.agent_id).where(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.is_active,
+            )
+        )
+        purchased_skill_ids = [row[0] for row in purchased_result.fetchall()]
+
+    response = []
+    for skill in skills:
+        response.append(
+            MarketplaceSkillResponse(
+                id=skill.id,
+                name=skill.name,
+                slug=skill.slug,
+                description=skill.description,
+                long_description=skill.long_description,
+                category=skill.category,
+                icon=skill.icon,
+                pricing_type=skill.pricing_type,
+                price=skill.price / 100.0 if skill.price else 0,
+                downloads=skill.downloads,
+                rating=skill.rating,
+                tags=skill.tags or [],
+                is_purchased=skill.id in purchased_skill_ids,
+            ).model_dump()
+        )
+
+    return {
+        "skills": response,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total + limit - 1) // limit,
+        "has_more": len(skills) == limit,
+    }
+
+
+@router.get("/skills/{slug}")
+async def get_skill_details(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
+):
+    """
+    Get detailed information about a specific skill.
+
+    Public endpoint – authentication is optional.
+    """
+    result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.slug == slug,
+            MarketplaceAgent.item_type == "skill",
+        )
+    )
+    skill = result.scalar_one_or_none()
+
+    if not skill or not skill.is_active:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    # Check purchase status
+    is_purchased = False
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.agent_id == skill.id,
+                UserPurchasedAgent.is_active,
+            )
+        )
+        is_purchased = purchased_result.scalar_one_or_none() is not None
+
+    return MarketplaceSkillResponse(
+        id=skill.id,
+        name=skill.name,
+        slug=skill.slug,
+        description=skill.description,
+        long_description=skill.long_description,
+        category=skill.category,
+        icon=skill.icon,
+        pricing_type=skill.pricing_type,
+        price=skill.price / 100.0 if skill.price else 0,
+        downloads=skill.downloads,
+        rating=skill.rating,
+        tags=skill.tags or [],
+        is_purchased=is_purchased,
+    )
+
+
+@router.post("/skills/{skill_id}/purchase")
+async def purchase_skill(
+    skill_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Purchase or add a free skill to user's library.
+    For paid skills, initiates the Stripe checkout process.
+    """
+    result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.id == skill_id,
+            MarketplaceAgent.item_type == "skill",
+        )
+    )
+    skill = result.scalar_one_or_none()
+
+    if not skill or not skill.is_active:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    # Check if already purchased
+    existing_result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.agent_id == skill_id,
+        )
+    )
+    existing_purchase = existing_result.scalar_one_or_none()
+
+    if existing_purchase and existing_purchase.is_active:
+        return {"message": "Skill already in your library", "skill_id": skill_id}
+
+    # Handle free skills
+    if skill.pricing_type == "free":
+        if existing_purchase:
+            existing_purchase.is_active = True
+            existing_purchase.purchase_date = datetime.now(UTC)
+        else:
+            purchase = UserPurchasedAgent(
+                user_id=current_user.id,
+                agent_id=skill_id,
+                purchase_type="free",
+                is_active=True,
+            )
+            db.add(purchase)
+
+        skill.downloads += 1
+        await db.commit()
+
+        return {
+            "message": "Free skill added to your library",
+            "skill_id": skill_id,
+            "success": True,
+        }
+
+    # For paid skills, create Stripe checkout session
+    from ..services.stripe_service import stripe_service
+
+    origin = (
+        request.headers.get("origin")
+        or request.headers.get("referer", "").rstrip("/").split("?")[0].rsplit("/", 1)[0]
+        or settings.get_app_base_url
+    )
+    success_url = (
+        f"{origin}/marketplace/success?skill={skill.slug}&session_id={{CHECKOUT_SESSION_ID}}"
+    )
+    cancel_url = f"{origin}/marketplace/skill/{skill.slug}"
+
+    try:
+        session = await stripe_service.create_agent_purchase_checkout(
+            user=current_user, agent=skill, success_url=success_url, cancel_url=cancel_url, db=db
+        )
+
+        if not session:
+            raise HTTPException(
+                status_code=500, detail="Stripe not configured or checkout creation failed"
+            )
+
+        return {
+            "checkout_url": session["url"] if isinstance(session, dict) else session.url,
+            "session_id": session["id"] if isinstance(session, dict) else session.id,
+            "skill_id": skill_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create Stripe checkout for skill: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create checkout session") from e
+
+
+@router.post("/skills/{skill_id}/install")
+async def install_skill_on_agent(
+    skill_id: UUID,
+    body: SkillInstallRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Attach a skill to an agent. The user must own both the skill (purchased)
+    and the agent (purchased or created by them).
+    """
+    # Verify the skill exists and is a skill
+    skill_result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.id == skill_id,
+            MarketplaceAgent.item_type == "skill",
+            MarketplaceAgent.is_active.is_(True),
+        )
+    )
+    skill = skill_result.scalar_one_or_none()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    # Verify user owns the skill
+    owned_result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.agent_id == skill_id,
+            UserPurchasedAgent.is_active,
+        )
+    )
+    if not owned_result.scalar_one_or_none():
+        raise HTTPException(status_code=403, detail="You must purchase this skill first")
+
+    # Verify the target agent exists
+    agent_result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.id == body.agent_id,
+            MarketplaceAgent.is_active.is_(True),
+        )
+    )
+    if not agent_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Check for existing assignment
+    existing_result = await db.execute(
+        select(AgentSkillAssignment).where(
+            AgentSkillAssignment.agent_id == body.agent_id,
+            AgentSkillAssignment.skill_id == skill_id,
+            AgentSkillAssignment.user_id == current_user.id,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+
+    if existing:
+        if existing.enabled:
+            return {"message": "Skill already installed on this agent", "success": True}
+        # Re-enable previously disabled assignment
+        existing.enabled = True
+        await db.commit()
+        return {"message": "Skill re-enabled on agent", "success": True}
+
+    assignment = AgentSkillAssignment(
+        agent_id=body.agent_id,
+        skill_id=skill_id,
+        user_id=current_user.id,
+        enabled=True,
+    )
+    db.add(assignment)
+    await db.commit()
+
+    return {"message": "Skill installed on agent", "success": True}
+
+
+@router.delete("/skills/{skill_id}/install/{agent_id}")
+async def uninstall_skill_from_agent(
+    skill_id: UUID,
+    agent_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Detach a skill from an agent.
+    """
+    result = await db.execute(
+        select(AgentSkillAssignment).where(
+            AgentSkillAssignment.agent_id == agent_id,
+            AgentSkillAssignment.skill_id == skill_id,
+            AgentSkillAssignment.user_id == current_user.id,
+        )
+    )
+    assignment = result.scalar_one_or_none()
+
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Skill assignment not found")
+
+    await db.delete(assignment)
+    await db.commit()
+
+    return {"message": "Skill detached from agent", "success": True}
+
+
+@router.get("/agents/{agent_id}/skills")
+async def get_agent_skills(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    List all skills currently attached to an agent for the current user.
+    """
+    # Verify agent exists
+    agent_result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.id == agent_id,
+            MarketplaceAgent.is_active.is_(True),
+        )
+    )
+    if not agent_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    result = await db.execute(
+        select(AgentSkillAssignment)
+        .options(selectinload(AgentSkillAssignment.skill))
+        .where(
+            AgentSkillAssignment.agent_id == agent_id,
+            AgentSkillAssignment.user_id == current_user.id,
+            AgentSkillAssignment.enabled.is_(True),
+        )
+    )
+    assignments = result.scalars().all()
+
+    skills = []
+    for assignment in assignments:
+        skill = assignment.skill
+        if not skill or not skill.is_active:
+            continue
+        skills.append(
+            MarketplaceSkillResponse(
+                id=skill.id,
+                name=skill.name,
+                slug=skill.slug,
+                description=skill.description,
+                long_description=skill.long_description,
+                category=skill.category,
+                icon=skill.icon,
+                pricing_type=skill.pricing_type,
+                price=skill.price / 100.0 if skill.price else 0,
+                downloads=skill.downloads,
+                rating=skill.rating,
+                tags=skill.tags or [],
+                is_purchased=True,
+            ).model_dump()
+        )
+
+    return {"skills": skills, "agent_id": agent_id}

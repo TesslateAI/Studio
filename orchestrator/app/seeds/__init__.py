@@ -15,6 +15,7 @@ from .marketplace_agents import (
 from .community_bases import seed_community_bases
 from .marketplace_bases import seed_marketplace_bases
 from .opensource_agents import seed_opensource_agents
+from .skills import seed_skills
 from .themes import seed_themes
 from .workflow_templates import WORKFLOW_TEMPLATES, seed_workflow_templates
 
@@ -26,6 +27,7 @@ __all__ = [
     "seed_community_bases",
     "seed_marketplace_agents",
     "seed_opensource_agents",
+    "seed_skills",
     "seed_themes",
     "seed_workflow_templates",
     "auto_add_tesslate_agent_to_users",
@@ -92,7 +94,15 @@ async def run_all_seeds():
             logger.exception("Failed to auto-add Librarian agent to users")
             await db.rollback()
 
-        # 5. Themes
+        # 5. Skills (item_type='skill')
+        try:
+            count = await seed_skills(db)
+            logger.info("Seed skills: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed skills")
+            await db.rollback()
+
+        # 7. Themes
         try:
             count = await seed_themes(db)
             logger.info("Seed themes: %d processed", count)
@@ -100,7 +110,7 @@ async def run_all_seeds():
             logger.exception("Failed to seed themes")
             await db.rollback()
 
-        # 6. Workflow templates
+        # 8. Workflow templates
         try:
             count = await seed_workflow_templates(db)
             logger.info("Seed workflow templates: %d new", count)

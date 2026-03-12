@@ -5414,7 +5414,12 @@ async def get_container(
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
-    container = await db.get(Container, container_id)
+    result = await db.execute(
+        select(Container)
+        .where(Container.id == container_id)
+        .options(selectinload(Container.base))
+    )
+    container = result.scalar_one_or_none()
     if not container or container.project_id != project.id:
         raise HTTPException(status_code=404, detail="Container not found")
 
@@ -5533,7 +5538,14 @@ async def update_container_credentials(
             container.external_endpoint = body.external_endpoint
 
         await db.commit()
-        await db.refresh(container)
+
+        # Re-fetch with eagerly loaded base to avoid MissingGreenlet in _container_response
+        refreshed = await db.execute(
+            select(Container)
+            .where(Container.id == container.id)
+            .options(selectinload(Container.base))
+        )
+        container = refreshed.scalar_one()
 
         logger.info(f"[CONTAINER] Updated credentials for container {container_id}")
 
@@ -5569,7 +5581,12 @@ async def rename_container(
 
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
-    container = await db.get(Container, container_id)
+    result = await db.execute(
+        select(Container)
+        .where(Container.id == container_id)
+        .options(selectinload(Container.base))
+    )
+    container = result.scalar_one_or_none()
     if not container or container.project_id != project.id:
         raise HTTPException(status_code=404, detail="Container not found")
 

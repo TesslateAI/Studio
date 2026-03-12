@@ -129,7 +129,7 @@ def register_web_tools(registry):
                 "required": ["url"],
             },
             executor=web_fetch_tool,
-            category=ToolCategory.PROJECT,  # Using PROJECT since there's no WEB category
+            category=ToolCategory.WEB,
             examples=[
                 '{"tool_name": "web_fetch", "parameters": {"url": "https://example.com/api/docs"}}',
                 '{"tool_name": "web_fetch", "parameters": {"url": "https://stackoverflow.com/questions/12345", "timeout": 15}}',

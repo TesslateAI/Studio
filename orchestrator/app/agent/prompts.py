@@ -175,10 +175,37 @@ async def get_user_message_wrapper(
         else:
             message_parts.append(git_ctx)
 
+    # 4.5 Skills catalog (progressive disclosure — names + descriptions only)
+    if project_context and project_context.get("available_skills"):
+        skills_section = render_skills_catalog(project_context["available_skills"])
+        if skills_section:
+            message_parts.append(skills_section)
+
     # 5. User request at the end
     message_parts.append(f"\n=== User Request ===\n{user_request}")
 
     return "\n".join(message_parts)
+
+
+def render_skills_catalog(skills) -> str:
+    """
+    Render available skills as a compact catalog for injection into the system prompt.
+
+    Progressive disclosure: only name + description (~20 tokens per skill).
+    Full instructions loaded on-demand via load_skill tool.
+    """
+    if not skills:
+        return ""
+    lines = ["\n=== AVAILABLE SKILLS ==="]
+    lines.append("Use the load_skill tool when a task matches a skill's description.")
+    for s in skills:
+        if hasattr(s, "source"):
+            tag = "(installed)" if s.source == "db" else f"(project: {s.file_path})"
+        else:
+            tag = ""
+        lines.append(f"- {s.name}: {s.description} {tag}")
+    lines.append("=== END SKILLS ===")
+    return "\n".join(lines)
 
 
 def get_mode_instructions(mode: str) -> str:

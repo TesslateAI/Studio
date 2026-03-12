@@ -177,6 +177,9 @@ resource "kubernetes_secret" "app_secrets" {
     # Database SSL (enabled when using RDS)
     DATABASE_SSL = tostring(var.create_rds)
 
+    # Discord notifications (empty = disabled, no PII sent)
+    DISCORD_WEBHOOK_URL = var.discord_webhook_url
+
     # Redis (ElastiCache or K8s-managed)
     REDIS_URL = var.create_elasticache ? (
       "redis://${aws_elasticache_replication_group.redis[0].primary_endpoint_address}:6379/0"

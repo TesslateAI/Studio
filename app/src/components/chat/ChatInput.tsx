@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, type FormEvent, type KeyboardEvent } from 'react';
 import { AgentSelector } from './AgentSelector';
 
 import { EditModeStatus, type EditMode } from './EditModeStatus';
@@ -51,6 +51,7 @@ interface ChatInputProps {
   onPrefillConsumed?: () => void;
   toolCallsCollapsed?: boolean;
   onToggleToolCallsCollapsed?: () => void;
+  availableSkills?: { name: string; description: string }[];
 }
 
 export function ChatInput({
@@ -76,12 +77,13 @@ export function ChatInput({
   onPrefillConsumed,
   toolCallsCollapsed = false,
   onToggleToolCallsCollapsed,
+  availableSkills = [],
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState<
-    Array<{ command: string; description: string }>
+    Array<{ command: string; description: string; isSkill: boolean }>
   >([]);
   const [messageHistory, setMessageHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -173,12 +175,19 @@ export function ChatInput({
     };
   }, [showSettings, showCommands]);
 
-  // Available slash commands
-  const slashCommands = [
-    { command: '/clear', description: 'Clear chat history' },
-    { command: '/plan', description: 'Toggle plan mode' },
-    // Add more commands here as needed
-  ];
+  // Available slash commands (built-in + installed skills)
+  const slashCommands = useMemo(() => {
+    const builtIn = [
+      { command: '/clear', description: 'Clear chat history', isSkill: false },
+      { command: '/plan', description: 'Toggle plan mode', isSkill: false },
+    ];
+    const skillCommands = availableSkills.map((skill) => ({
+      command: `/${skill.name}`,
+      description: skill.description,
+      isSkill: true,
+    }));
+    return [...builtIn, ...skillCommands];
+  }, [availableSkills]);
 
   // Check for landing page prompt on component mount
   useEffect(() => {
@@ -211,7 +220,7 @@ export function ChatInput({
       setShowCommands(false);
       setFilteredCommands([]);
     }
-  }, [message]);
+  }, [message, slashCommands]);
 
   // Auto-resize textarea as user types
   // Note: This causes a reflow but it's unavoidable for auto-sizing textareas
@@ -242,13 +251,21 @@ export function ChatInput({
 
   const sendMessage = () => {
     if (message.trim() && !disabled) {
-      // Check if it's a slash command
-      if (message.startsWith('/')) {
-        executeCommand(message.trim());
+      const trimmed = message.trim();
+      // Check if it's a built-in slash command
+      if (trimmed.startsWith('/')) {
+        const isBuiltIn = ['/clear', '/plan'].includes(trimmed);
+        if (isBuiltIn) {
+          executeCommand(trimmed);
+        } else {
+          // Skill slash commands are sent as regular messages to the agent
+          setMessageHistory((prev) => [...prev, trimmed]);
+          onSendMessage(trimmed);
+        }
       } else {
-        // Add to history
-        setMessageHistory((prev) => [...prev, message.trim()]);
-        onSendMessage(message.trim());
+        // Regular message
+        setMessageHistory((prev) => [...prev, trimmed]);
+        onSendMessage(trimmed);
       }
       setMessage('');
       setHistoryIndex(-1);
@@ -350,12 +367,19 @@ export function ChatInput({
                 }}
                 className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--primary)]/10 cursor-pointer transition-colors"
               >
-                <span className="text-[var(--primary)} font-mono font-semibold">{cmd.command}</span>
+                <span className="text-[var(--primary)] font-mono font-semibold">{cmd.command}</span>
                 <span className="text-[var(--text)]/60 text-sm">{cmd.description}</span>
+                {cmd.isSkill && (
+                  <span className="ml-auto text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--primary)]/15 text-[var(--primary)]">
+                    Skill
+                  </span>
+                )}
               </div>
             ))}
             <div className="mt-2 pt-2 border-t border-[var(--border-color)]">
-              <span className="text-xs text-[var(--text)]/40 px-3">Press Enter to execute</span>
+              <span className="text-xs text-[var(--text)]/40 px-3">
+                {filteredCommands.some((c) => c.isSkill) ? 'Press Enter to send' : 'Press Enter to execute'}
+              </span>
             </div>
           </div>
         </div>

@@ -224,11 +224,9 @@ def create_file_manager_deployment(
         ),
     )
 
-    # Add pod affinity if enabled (for shared RWO PVC - all pods must be on same node)
-    if enable_pod_affinity:
-        pod_spec.affinity = create_pod_affinity_spec(
-            project_id=str(project_id), topology_key=affinity_topology_key
-        )
+    # File-manager is the anchor pod — it schedules freely on any node.
+    # Dev containers use pod affinity to co-locate WITH the file-manager.
+    # Giving file-manager affinity causes deadlock: both pods wait for each other.
 
     # Add image pull secret if provided
     if image_pull_secret:
@@ -681,6 +679,10 @@ fi
         else ""
     )
 
+    # Sanitize URL for logging (hide tokens)
+    import re as _re
+    safe_log_url = _re.sub(r"https://[^@]+@", "https://***@", git_url)
+
     return f'''#!/bin/sh
 set -e
 
@@ -688,7 +690,7 @@ TARGET_DIR="{target_dir}"
 
 echo "[CLONE] ======================================"
 echo "[CLONE] Cloning repository"
-echo "[CLONE] URL: {git_url}"
+echo "[CLONE] URL: {safe_log_url}"
 echo "[CLONE] Branch: {branch}"
 echo "[CLONE] Target: $TARGET_DIR"
 echo "[CLONE] ======================================"

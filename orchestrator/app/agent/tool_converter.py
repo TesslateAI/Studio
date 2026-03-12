@@ -20,6 +20,8 @@ PARALLEL_TOOLS = frozenset(
         "get_project_info",
         "todo_read",
         "web_fetch",
+        "web_search",
+        "load_skill",
         "grep_files",
         "list_dir",
         "save_plan",

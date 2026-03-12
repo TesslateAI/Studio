@@ -455,6 +455,16 @@ variable "posthog_key" {
 }
 
 # -----------------------------------------------------------------------------
+# Discord Notifications
+# -----------------------------------------------------------------------------
+variable "discord_webhook_url" {
+  description = "Discord webhook URL for signup/login notifications (empty = disabled)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
 # Advanced Settings
 # -----------------------------------------------------------------------------
 variable "eks_addon_versions" {

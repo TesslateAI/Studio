@@ -1229,6 +1229,61 @@ export const marketplaceApi = {
     const response = await api.post(`/api/marketplace/themes/${themeId}/fork`, data || {});
     return response.data;
   },
+
+  // Skills marketplace endpoints
+  getAllSkills: async (
+    params?: {
+      category?: string;
+      pricing_type?: string;
+      search?: string;
+      sort?: string;
+      page?: number;
+      limit?: number;
+    },
+    options?: { signal?: AbortSignal }
+  ) => {
+    const queryParams = new URLSearchParams();
+    if (params?.category) queryParams.append('category', params.category);
+    if (params?.pricing_type) queryParams.append('pricing_type', params.pricing_type);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.sort) queryParams.append('sort', params.sort);
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+    const queryString = queryParams.toString();
+    const response = await api.get(
+      `/api/marketplace/skills${queryString ? `?${queryString}` : ''}`,
+      { signal: options?.signal }
+    );
+    return response.data;
+  },
+
+  getSkillDetails: async (slug: string) => {
+    const response = await api.get(`/api/marketplace/skills/${slug}`);
+    return response.data;
+  },
+
+  purchaseSkill: async (skillId: string) => {
+    const response = await api.post(`/api/marketplace/skills/${skillId}/purchase`);
+    return response.data;
+  },
+
+  installSkillOnAgent: async (skillId: string, agentId: string) => {
+    const response = await api.post(`/api/marketplace/skills/${skillId}/install`, {
+      agent_id: agentId,
+    });
+    return response.data;
+  },
+
+  uninstallSkillFromAgent: async (skillId: string, agentId: string) => {
+    const response = await api.delete(`/api/marketplace/skills/${skillId}/install/${agentId}`);
+    return response.data;
+  },
+
+  getAgentSkills: async (agentId: string) => {
+    const response = await api.get(`/api/marketplace/agents/${agentId}/skills`);
+    return response.data;
+  },
 };
 
 // Creator/Author profile API

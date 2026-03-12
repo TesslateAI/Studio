@@ -21,6 +21,7 @@ class ToolCategory(Enum):
     SHELL = "shell_commands"
     PROJECT = "project_management"
     BUILD = "build_operations"
+    WEB = "web_operations"
     VIEW_GRAPH = "graph_view_tools"  # Tools only available in graph/architecture view
 
 
@@ -167,6 +168,8 @@ class ToolRegistry:
             "shell_exec",
             "shell_open",  # Shell operations
             "web_fetch",  # Web operations (can leak data)
+            "web_search",  # Web search (can leak query data)
+            "send_message",  # Can send data externally
             # 'todo_write', 'save_plan', 'update_plan' excluded - safe planning operations
         }
 
@@ -261,6 +264,7 @@ def _register_all_tools(registry: ToolRegistry):
     from .planning_ops import register_all_planning_tools
     from .project_ops import register_all_project_tools
     from .shell_ops import register_all_shell_tools
+    from .skill_ops import register_all_skill_tools
     from .web_ops import register_all_web_tools
 
     # Register essential tools (use bash_exec for file listing, globbing, grepping)
@@ -268,7 +272,8 @@ def _register_all_tools(registry: ToolRegistry):
     register_all_shell_tools(registry)  # 4 tools: bash_exec, shell_open, shell_exec, shell_close
     register_all_project_tools(registry)  # 1 tool: get_project_info
     register_all_planning_tools(registry)  # 2 tools: todo_read, todo_write
-    register_all_web_tools(registry)  # 1 tool: web_fetch
+    register_all_web_tools(registry)  # 3 tools: web_fetch, web_search, send_message
+    register_all_skill_tools(registry)  # 1 tool: load_skill
 
     logger.info(f"Registered {len(registry._tools)} essential tools total")
 

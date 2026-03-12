@@ -1722,7 +1722,16 @@ class DockerOrchestrator(BaseOrchestrator):
             get_app_startup_config,
             get_base_config_from_cache,
             get_base_config_from_volume,
+            get_node_modules_fix_prefix,
         )
+
+        # Priority 0: Container DB record (set by setup-config or project creation)
+        if container.startup_command:
+            port = container.effective_port
+            deps_prefix = get_node_modules_fix_prefix()
+            command = ["sh", "-c", deps_prefix + container.startup_command]
+            logger.info(f"[DOCKER] ✅ Using startup_command from DB for '{container.name}': port={port}")
+            return command, port
 
         # Priority 1: .tesslate/config.json (unified config)
         if self.use_volumes:

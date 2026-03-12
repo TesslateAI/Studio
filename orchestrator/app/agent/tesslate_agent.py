@@ -660,8 +660,10 @@ class TesslateAgent(AbstractAgent):
                 Feature.PLAN_MODE
             ):
                 continue
-            # web_fetch requires WEB_SEARCH feature
-            if name == "web_fetch" and not self.features.enabled(Feature.WEB_SEARCH):
+            # web_fetch, web_search require WEB_SEARCH feature
+            if name in ("web_fetch", "web_search") and not self.features.enabled(
+                Feature.WEB_SEARCH
+            ):
                 continue
             filtered.append(tool)
         tools = filtered

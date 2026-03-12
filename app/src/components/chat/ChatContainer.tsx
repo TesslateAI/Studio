@@ -107,6 +107,7 @@ export function ChatContainer({
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
   const [toolCallsCollapsed, setToolCallsCollapsed] = useState(false);
+  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
   const [editMode, setEditMode] = useState<EditMode>(() => {
     const stored = localStorage.getItem(`editMode:${projectId}`);
     return stored === 'ask' || stored === 'allow' || stored === 'plan' ? stored : 'ask';
@@ -526,6 +527,33 @@ export function ChatContainer({
       }
     }
   }, [initialAgents, currentAgent.id, onSelectAgent]);
+
+  // Fetch installed skills for the current agent (for slash command autocomplete)
+  useEffect(() => {
+    if (!currentAgent.backendId) {
+      setAvailableSkills([]);
+      return;
+    }
+    let cancelled = false;
+    marketplaceApi
+      .getAgentSkills(currentAgent.backendId.toString())
+      .then((data) => {
+        if (!cancelled) {
+          setAvailableSkills(
+            (data.skills || []).map((s: { name: string; description: string }) => ({
+              name: s.name,
+              description: s.description,
+            }))
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableSkills([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentAgent.backendId]);
 
   // WebSocket connection with auto-reconnect and heartbeat
   useEffect(() => {
@@ -1912,6 +1940,7 @@ export function ChatContainer({
             onPrefillConsumed={onPrefillConsumed}
             toolCallsCollapsed={toolCallsCollapsed}
             onToggleToolCallsCollapsed={() => setToolCallsCollapsed((prev) => !prev)}
+            availableSkills={availableSkills}
           />
         </div>
       </div>

@@ -198,6 +198,7 @@ class Container(Base):
         Integer, nullable=True
     )  # Port the dev server listens on inside the container
     environment_vars = Column(JSON, nullable=True)  # Environment variables
+    startup_command = Column(String, nullable=True)  # Shell command to start the dev server
     dockerfile_path = Column(String, nullable=True)  # Relative path to Dockerfile
     volume_name = Column(String, nullable=True)  # Docker volume name for container files
 
@@ -964,6 +965,41 @@ class MarketplaceAgent(Base):
         "ProjectAgent", back_populates="agent", cascade="all, delete-orphan"
     )
     reviews = relationship("AgentReview", back_populates="agent", cascade="all, delete-orphan")
+    skill_assignments = relationship(
+        "AgentSkillAssignment",
+        back_populates="agent",
+        cascade="all, delete-orphan",
+        foreign_keys="AgentSkillAssignment.agent_id",
+    )
+
+    # Skill-specific field (item_type='skill')
+    skill_body = Column(Text, nullable=True)  # Full SKILL.md body (after frontmatter)
+
+
+class AgentSkillAssignment(Base):
+    """Tracks which skills are attached to which agents per user."""
+
+    __tablename__ = "agent_skill_assignments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    agent_id = Column(
+        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+    )
+    skill_id = Column(
+        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    enabled = Column(Boolean, default=True)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("agent_id", "skill_id", "user_id"),)
+
+    # Relationships
+    agent = relationship("MarketplaceAgent", back_populates="skill_assignments", foreign_keys=[agent_id])
+    skill = relationship("MarketplaceAgent", foreign_keys=[skill_id])
+    user = relationship("User")
 
 
 class UserPurchasedAgent(Base):

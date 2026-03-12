@@ -977,51 +977,56 @@ fi
                         db=db,
                     )
 
-            # Get base config for port and startup command
-            # Priority 1: .tesslate/config.json (new config system)
+            # Get startup command and port
+            # Priority 1: Container DB record (set by setup-config or project creation)
             startup_command = None
-            port = None
+            port = container.effective_port
 
-            try:
-                pods = self.k8s_client.core_v1.list_namespaced_pod(
-                    namespace=namespace, label_selector="app=file-manager"
+            if container.startup_command:
+                startup_command = container.startup_command
+                logger.info(
+                    f"[K8S] ✅ Using startup_command from DB for '{container.name}': "
+                    f"port={port}, cmd={startup_command[:80]}"
                 )
-                if pods.items:
-                    fm_pod = pods.items[0].metadata.name
-                    config_result = await asyncio.to_thread(
-                        self.k8s_client._exec_in_pod,
-                        fm_pod,
-                        namespace,
-                        "file-manager",
-                        ["cat", "/app/.tesslate/config.json"],
-                        timeout=10,
-                    )
-                    if config_result and not config_result.startswith("cat:"):
-                        from ...services.base_config_parser import parse_tesslate_config
-                        tesslate_config = parse_tesslate_config(config_result)
-                        # Find the matching app
-                        app_name = container.name if container.name in tesslate_config.apps else (
-                            tesslate_config.primaryApp if tesslate_config.primaryApp in tesslate_config.apps else None
-                        )
-                        if app_name and app_name in tesslate_config.apps:
-                            app_cfg = tesslate_config.apps[app_name]
-                            port = app_cfg.port or container.effective_port
-                            if app_cfg.start:
-                                startup_command = app_cfg.start
-                                logger.info(f"[K8S] ✅ Using .tesslate/config.json for '{app_name}': port={port}")
-            except Exception as e:
-                logger.debug(f"[K8S] Could not read .tesslate/config.json: {e}")
 
-            # Priority 2: TESSLATE.md (legacy)
+            # Priority 2: .tesslate/config.json from PVC (fallback for older projects)
+            if startup_command is None:
+                try:
+                    pods = self.k8s_client.core_v1.list_namespaced_pod(
+                        namespace=namespace, label_selector="app=file-manager"
+                    )
+                    if pods.items:
+                        fm_pod = pods.items[0].metadata.name
+                        config_result = await asyncio.to_thread(
+                            self.k8s_client._exec_in_pod,
+                            fm_pod,
+                            namespace,
+                            "file-manager",
+                            ["cat", "/app/.tesslate/config.json"],
+                            timeout=10,
+                        )
+                        if config_result and not config_result.startswith("cat:"):
+                            from ...services.base_config_parser import parse_tesslate_config
+                            tesslate_config = parse_tesslate_config(config_result)
+                            app_name = container.name if container.name in tesslate_config.apps else (
+                                tesslate_config.primaryApp if tesslate_config.primaryApp in tesslate_config.apps else None
+                            )
+                            if app_name and app_name in tesslate_config.apps:
+                                app_cfg = tesslate_config.apps[app_name]
+                                port = app_cfg.port or port
+                                if app_cfg.start:
+                                    startup_command = app_cfg.start
+                                    logger.info(f"[K8S] ✅ Using .tesslate/config.json for '{app_name}': port={port}")
+                except Exception as e:
+                    logger.warning(f"[K8S] Could not read .tesslate/config.json: {e}")
+
+            # Priority 3: TESSLATE.md (legacy)
             if startup_command is None:
                 base_config = await self._get_tesslate_config_from_pod(namespace, container_directory)
 
-                # Determine port
-                port = (
-                    base_config.port if base_config and base_config.port else None
-                ) or container.effective_port
+                if base_config and base_config.port:
+                    port = base_config.port
 
-                # Get startup command
                 if base_config and base_config.start_command:
                     startup_command = " && ".join(
                         line.strip()
@@ -1032,9 +1037,6 @@ fi
                 else:
                     startup_command = "npm install && npm run dev"
                     logger.warning(f"[K8S] ⚠️ No config found, using fallback: {startup_command}")
-
-            if port is None:
-                port = container.effective_port
 
             # Prepend node_modules/.bin permission fix (safety net for all platforms)
             from ...services.base_config_parser import get_node_modules_fix_prefix

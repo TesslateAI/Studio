@@ -7,6 +7,8 @@ from datetime import datetime
 
 import aiohttp
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,6 +17,14 @@ class DiscordWebhookService:
 
     def __init__(self, webhook_url: str):
         self.webhook_url = webhook_url
+
+    @property
+    def _source(self) -> str:
+        """Return the source environment label based on app_domain."""
+        domain = get_settings().app_domain
+        if "localhost" in domain:
+            return "Local Dev"
+        return domain
 
     async def send_signup_notification(self, username: str, email: str, name: str, user_id: str):
         """Send notification when a new user signs up."""
@@ -28,7 +38,7 @@ class DiscordWebhookService:
                 {"name": "User ID", "value": str(user_id), "inline": False},
             ],
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"},
+            "footer": {"text": "Tesslate Studio"},  # overridden in _send_webhook with source
         }
 
         await self._send_webhook(embeds=[embed])
@@ -52,7 +62,7 @@ class DiscordWebhookService:
             "color": 0x0099FF,  # Blue
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"},
+            "footer": {"text": "Tesslate Studio"},  # overridden in _send_webhook with source
         }
 
         await self._send_webhook(embeds=[embed])
@@ -71,7 +81,7 @@ class DiscordWebhookService:
             "color": 0x00FF00,  # Green
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"},
+            "footer": {"text": "Tesslate Studio"},  # overridden in _send_webhook with source
         }
 
         await self._send_webhook(embeds=[embed])
@@ -96,7 +106,7 @@ class DiscordWebhookService:
                 {"name": "User ID", "value": str(user_id), "inline": False},
             ],
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"},
+            "footer": {"text": "Tesslate Studio"},  # overridden in _send_webhook with source
         }
 
         await self._send_webhook(embeds=[embed])
@@ -106,6 +116,10 @@ class DiscordWebhookService:
         if not self.webhook_url:
             logger.warning("Discord webhook URL not configured")
             return
+
+        source = self._source
+        for embed in embeds:
+            embed["footer"] = {"text": f"Tesslate Studio • {source}"}
 
         payload = {"embeds": embeds}
 
@@ -123,7 +137,11 @@ class DiscordWebhookService:
             logger.error(f"Failed to send Discord webhook: {e}")
 
 
-# Global instance with the webhook URL
+# Global instance — webhook URL must be set via DISCORD_WEBHOOK_URL env var.
+# No hardcoded URL: prevents leaking PII (emails, names) to a third-party
+# Discord server when self-hosted or running locally.
+import os
+
 discord_service = DiscordWebhookService(
-    webhook_url="https://discordapp.com/api/webhooks/1431914022621548676/QXXwUS-QcylxtC51S5vxAgA7YzjmMEasoYMs00wt2g-3qkYBDT-M-syl3-UukY1memHH"
+    webhook_url=os.environ.get("DISCORD_WEBHOOK_URL", "")
 )

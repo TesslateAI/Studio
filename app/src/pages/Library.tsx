@@ -267,7 +267,6 @@ export default function Library() {
   const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
   const [editingBase, setEditingBase] = useState<LibraryBase | null>(null);
   const [editingTheme, setEditingTheme] = useState<LibraryTheme | null>(null);
-
   const logout = () => {
     localStorage.removeItem('token');
     navigate('/login');
@@ -3072,6 +3071,15 @@ function EditAgentModal({
     system_prompt: '',
   });
 
+  // Skills state
+  const [agentSkills, setAgentSkills] = useState<{ id: string; name: string; description: string; slug: string }[]>([]);
+  const [skillsExpanded, setSkillsExpanded] = useState(false);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [showSkillSearch, setShowSkillSearch] = useState(false);
+  const [skillSearchQuery, setSkillSearchQuery] = useState('');
+  const [skillSearchResults, setSkillSearchResults] = useState<{ id: string; name: string; description: string; slug: string; icon: string }[]>([]);
+  const [skillSearchLoading, setSkillSearchLoading] = useState(false);
+
   // Load subagents when section is expanded
   useEffect(() => {
     if (subagentsExpanded && agent.id && subagents.length === 0) {
@@ -3087,6 +3095,27 @@ function EditAgentModal({
         .finally(() => setSubagentsLoading(false));
     }
   }, [subagentsExpanded, agent.id, subagents.length]);
+
+  // Load skills when section is expanded
+  useEffect(() => {
+    if (skillsExpanded && agent.id && agentSkills.length === 0) {
+      setSkillsLoading(true);
+      marketplaceApi
+        .getAgentSkills(agent.id)
+        .then((data) => {
+          setAgentSkills((data.skills || []).map((s: { id: string; name: string; description: string; slug: string }) => ({
+            id: s.id,
+            name: s.name,
+            description: s.description,
+            slug: s.slug,
+          })));
+        })
+        .catch((err) => {
+          console.error('Failed to load agent skills:', err);
+        })
+        .finally(() => setSkillsLoading(false));
+    }
+  }, [skillsExpanded, agent.id, agentSkills.length]);
 
   const toggleFeature = (key: string) => {
     setFeatures((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -3146,6 +3175,60 @@ function EditAgentModal({
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
       toast.error(err.response?.data?.detail || 'Failed to delete subagent');
+    }
+  };
+
+  const handleSearchSkills = async (query: string) => {
+    setSkillSearchQuery(query);
+    if (!query.trim()) {
+      setSkillSearchResults([]);
+      return;
+    }
+    setSkillSearchLoading(true);
+    try {
+      const data = await marketplaceApi.getAllSkills({ search: query, limit: 5 });
+      const installed = new Set(agentSkills.map((s) => s.id));
+      setSkillSearchResults(
+        (data.skills || [])
+          .filter((s: { id: string }) => !installed.has(s.id))
+          .map((s: { id: string; name: string; description: string; slug: string; icon: string }) => ({
+            id: s.id,
+            name: s.name,
+            description: s.description,
+            slug: s.slug,
+            icon: s.icon,
+          }))
+      );
+    } catch {
+      setSkillSearchResults([]);
+    } finally {
+      setSkillSearchLoading(false);
+    }
+  };
+
+  const handleInstallSkill = async (skillId: string) => {
+    try {
+      await marketplaceApi.installSkillOnAgent(skillId, agent.id);
+      const skill = skillSearchResults.find((s) => s.id === skillId);
+      if (skill) {
+        setAgentSkills((prev) => [...prev, { id: skill.id, name: skill.name, description: skill.description, slug: skill.slug }]);
+        setSkillSearchResults((prev) => prev.filter((s) => s.id !== skillId));
+      }
+      toast.success('Skill installed');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to install skill');
+    }
+  };
+
+  const handleUninstallSkill = async (skillId: string) => {
+    try {
+      await marketplaceApi.uninstallSkillFromAgent(skillId, agent.id);
+      setAgentSkills((prev) => prev.filter((s) => s.id !== skillId));
+      toast.success('Skill removed');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to remove skill');
     }
   };
 
@@ -3532,6 +3615,133 @@ function EditAgentModal({
                   )}
                 </div>
               )}
+
+              {/* Skills Section (collapsible) */}
+              <div className="p-4 bg-[var(--text)]/5 rounded-lg border border-[var(--text)]/10">
+                <button
+                  type="button"
+                  onClick={() => setSkillsExpanded(!skillsExpanded)}
+                  className="w-full flex items-center justify-between text-sm font-semibold text-[var(--text)]"
+                >
+                  <span className="flex items-center gap-2">
+                    <Plugs size={16} />
+                    Skills
+                    {agentSkills.length > 0 && (
+                      <span className="text-xs font-normal text-[var(--text-subtle)]">
+                        ({agentSkills.length})
+                      </span>
+                    )}
+                  </span>
+                  {skillsExpanded ? <CaretDown size={16} /> : <CaretRight size={16} />}
+                </button>
+
+                {skillsExpanded && (
+                  <div className="mt-3 space-y-2">
+                    {skillsLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <LoadingSpinner />
+                      </div>
+                    ) : (
+                      <>
+                        {agentSkills.map((skill) => (
+                          <div
+                            key={skill.id}
+                            className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-[var(--text)]/10"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-medium text-[var(--text)]">
+                                {skill.name}
+                              </span>
+                              <p className="text-xs text-[var(--text-subtle)] truncate">
+                                {skill.description}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleUninstallSkill(skill.id)}
+                              className="p-1 hover:bg-red-500/10 rounded transition-colors text-red-400/60 hover:text-red-400 flex-shrink-0 ml-2"
+                              title="Remove skill"
+                            >
+                              <Trash size={12} />
+                            </button>
+                          </div>
+                        ))}
+
+                        {/* Search & add skills */}
+                        {showSkillSearch ? (
+                          <div className="p-3 bg-white/5 rounded-lg border border-[var(--primary)]/20 space-y-2">
+                            <input
+                              type="text"
+                              value={skillSearchQuery}
+                              onChange={(e) => handleSearchSkills(e.target.value)}
+                              placeholder="Search skills..."
+                              className="w-full px-3 py-1.5 bg-white/5 border border-[var(--border)] rounded text-sm text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
+                              autoFocus
+                            />
+                            {skillSearchLoading && (
+                              <div className="flex items-center justify-center py-2">
+                                <LoadingSpinner />
+                              </div>
+                            )}
+                            {skillSearchResults.map((skill) => (
+                              <div
+                                key={skill.id}
+                                className="flex items-center justify-between p-2 bg-white/5 rounded-lg"
+                              >
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  <span className="text-lg">{skill.icon}</span>
+                                  <div className="min-w-0">
+                                    <span className="text-sm font-medium text-[var(--text)]">
+                                      {skill.name}
+                                    </span>
+                                    <p className="text-xs text-[var(--text-subtle)] truncate">
+                                      {skill.description}
+                                    </p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleInstallSkill(skill.id)}
+                                  className="px-2 py-1 text-[10px] bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded transition-colors text-white flex-shrink-0 ml-2"
+                                >
+                                  Install
+                                </button>
+                              </div>
+                            ))}
+                            {skillSearchQuery && !skillSearchLoading && skillSearchResults.length === 0 && (
+                              <p className="text-xs text-[var(--text-subtle)] text-center py-2">
+                                No skills found
+                              </p>
+                            )}
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowSkillSearch(false);
+                                  setSkillSearchQuery('');
+                                  setSkillSearchResults([]);
+                                }}
+                                className="px-3 py-1 text-xs bg-white/5 hover:bg-white/10 rounded transition-colors text-[var(--text-muted)]"
+                              >
+                                Close
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowSkillSearch(true)}
+                            className="w-full flex items-center justify-center gap-1 py-2 text-xs text-[var(--text-subtle)] hover:text-[var(--text-muted)] hover:bg-white/5 rounded-lg border border-dashed border-[var(--text)]/10 hover:border-[var(--text)]/20 transition-colors"
+                          >
+                            <Plus size={12} />
+                            Add Skill
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

@@ -141,6 +141,16 @@ class Settings(BaseSettings):
     # This is derived from secret_key if not provided
     github_token_encryption_key: str = ""
 
+    # Web Search Configuration
+    web_search_provider: str = "tavily"  # tavily, brave, duckduckgo
+    tavily_api_key: str = ""
+    brave_search_api_key: str = ""
+    web_search_max_results: int = 5
+    web_search_timeout: int = 15
+
+    # Agent Discord Webhook (for send_message tool, separate from signup notifications)
+    agent_discord_webhook_url: str = ""
+
     # Deployment Configuration
     # Encryption key for deployment credentials (base64 encoded Fernet key)
     # If not provided, derived from secret_key

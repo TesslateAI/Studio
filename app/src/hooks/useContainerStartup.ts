@@ -308,9 +308,9 @@ export function useContainerStartup(
     [projectSlug, containerId, cleanup, pollTaskStatus, onError, startHealthChecking]
   );
 
-  // Retry function
+  // Retry function — use the stored containerId from the initial start
   const retry = useCallback(() => {
-    startContainer();
+    startContainer(activeContainerIdRef.current || undefined);
   }, [startContainer]);
 
   // Reset to idle

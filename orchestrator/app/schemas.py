@@ -944,6 +944,31 @@ class CreateGitHubRepoRequest(BaseModel):
 # ============================================================================
 
 
+class MarketplaceSkillResponse(BaseModel):
+    """Response schema for marketplace skill."""
+    id: UUID
+    name: str
+    slug: str
+    description: str
+    long_description: str | None = None
+    category: str
+    icon: str
+    pricing_type: str
+    price: float
+    downloads: int
+    rating: float
+    tags: list[str] | None = []
+    is_purchased: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class SkillInstallRequest(BaseModel):
+    """Request for installing a skill on an agent."""
+    agent_id: UUID
+
+
 class MarketplaceAgentResponse(BaseModel):
     """Response schema for marketplace agent."""
 

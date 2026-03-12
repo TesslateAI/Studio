@@ -254,6 +254,17 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     if container.directory and container.directory != ".":
                         container_directory = container.directory
 
+            # Discover available skills for this agent (progressive disclosure)
+            from .services.skill_discovery import discover_skills
+
+            available_skills = await discover_skills(
+                agent_id=agent_model.id if agent_model else None,
+                user_id=UUID(payload.user_id),
+                project_id=project_id,
+                container_name=container_name,
+                db=db,
+            )
+
             chat_history = payload.chat_history or await _get_chat_history(UUID(payload.chat_id), db, limit=10)
 
             project_context = payload.project_context or {
@@ -275,6 +286,10 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             architecture_context = await _build_architecture_context(project, db)
             if architecture_context:
                 project_context["architecture_context"] = architecture_context
+
+            # Add available skills to project_context (for prompt injection)
+            if available_skills:
+                project_context["available_skills"] = available_skills
 
             # Warm the local plan mirror from Redis before the agent builds its prompt.
             from .agent.plan_manager import PlanManager
@@ -307,6 +322,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "model_name": model_name,
                 "agent_id": agent_model.id,
                 "_active_plan": active_plan,
+                "available_skills": available_skills,
             }
 
             # 9. Create placeholder Message before agent loop (crash-safe)

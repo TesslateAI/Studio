@@ -65,9 +65,11 @@ SAFE_COMMAND_PREFIXES = [
     "python3",
     "pip",
     "pip3",
+    "uv",
     "uvicorn",
     "gunicorn",
-    "flask",  # Python
+    "flask",
+    "poetry",  # Python
     "go",
     "air",  # Go
     "cargo",
