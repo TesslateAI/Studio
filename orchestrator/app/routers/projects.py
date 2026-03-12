@@ -2494,8 +2494,25 @@ async def save_setup_config(
         project_path = f"/projects/{project.slug}"
         write_tesslate_config(project_path, config)
     else:
-        # K8s: write via orchestrator
+        # K8s: ensure environment exists, then write via orchestrator
         import json as json_mod
+        from ..services.orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+
+        # Create namespace + PVC + file-manager pod if they don't exist yet
+        # (projects at setup stage won't have K8s resources)
+        await orchestrator.ensure_project_environment(
+            project_id=project.id, user_id=current_user.id
+        )
+
+        # Wait for file-manager pod to be ready
+        namespace = orchestrator._get_namespace(str(project.id))
+        for attempt in range(15):
+            pod_name = await orchestrator.k8s_client.get_file_manager_pod(namespace)
+            if pod_name:
+                break
+            await asyncio.sleep(2)
 
         config_json = json_mod.dumps({
             "apps": {
@@ -2509,8 +2526,6 @@ async def save_setup_config(
             "primaryApp": config.primaryApp,
         }, indent=2)
 
-        from ..services.orchestration import get_orchestrator
-        orchestrator = get_orchestrator()
         await orchestrator.write_file(
             user_id=current_user.id,
             project_id=project.id,
