@@ -933,6 +933,7 @@ class MarketplaceAgent(Base):
 
     # Source type
     source_type = Column(String, default="closed")  # open, closed
+    git_repo_url = Column(String(500), nullable=True)  # GitHub repo URL for open-source items
     requires_user_keys = Column(Boolean, default=False)  # For passthrough pricing
 
     # Stats
@@ -1727,4 +1728,104 @@ class ExternalAPIKey(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    user = relationship("User")
+
+
+# ============================================================================
+# Channel & MCP System Models
+# ============================================================================
+
+
+class ChannelConfig(Base):
+    """Messaging channel configurations (Telegram, Slack, Discord, WhatsApp)."""
+
+    __tablename__ = "channel_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True, index=True)
+    channel_type = Column(String(20), nullable=False)  # telegram, slack, discord, whatsapp
+    name = Column(String(100), nullable=False)
+    credentials = Column(Text, nullable=False)  # Fernet-encrypted JSON
+    webhook_secret = Column(String(64), nullable=False)  # random secret for URL signing
+    default_agent_id = Column(
+        UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=True
+    )
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", backref="channel_configs")
+    project = relationship("Project", backref="channel_configs")
+    default_agent = relationship("MarketplaceAgent", foreign_keys=[default_agent_id])
+
+
+class ChannelMessage(Base):
+    """Audit log for messaging channel messages."""
+
+    __tablename__ = "channel_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    channel_config_id = Column(
+        UUID(as_uuid=True), ForeignKey("channel_configs.id"), nullable=False, index=True
+    )
+    direction = Column(String(10), nullable=False)  # inbound / outbound
+    jid = Column(String(255), nullable=False)  # canonical address
+    sender_name = Column(String(100), nullable=True)  # for swarm: which agent identity sent
+    content = Column(Text, nullable=False)
+    platform_message_id = Column(String(255), nullable=True)
+    task_id = Column(String, nullable=True)
+    status = Column(
+        String(20), nullable=False, default="delivered"
+    )  # delivered, failed, pending
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    # Relationships
+    channel_config = relationship("ChannelConfig", backref="messages")
+
+
+class UserMcpConfig(Base):
+    """Per-user MCP server installations from marketplace."""
+
+    __tablename__ = "user_mcp_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    marketplace_agent_id = Column(
+        UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=False
+    )
+    credentials = Column(Text, nullable=True)  # Fernet-encrypted JSON (API keys, tokens)
+    enabled_capabilities = Column(JSON, default=["tools", "resources", "prompts"])
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", backref="mcp_configs")
+    marketplace_agent = relationship("MarketplaceAgent", backref="mcp_installs")
+
+
+class AgentMcpAssignment(Base):
+    """Tracks which MCP servers are attached to which agents per user."""
+
+    __tablename__ = "agent_mcp_assignments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    agent_id = Column(
+        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+    )
+    mcp_config_id = Column(
+        UUID(as_uuid=True), ForeignKey("user_mcp_configs.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    enabled = Column(Boolean, default=True)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("agent_id", "mcp_config_id", "user_id"),)
+
+    agent = relationship("MarketplaceAgent", foreign_keys=[agent_id])
+    mcp_config = relationship("UserMcpConfig")
     user = relationship("User")

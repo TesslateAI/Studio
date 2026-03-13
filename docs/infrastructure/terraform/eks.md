@@ -39,6 +39,8 @@ Allows pods to assume IAM roles without embedding credentials.
 
 **Disk**: 50GB gp3 (per node)
 
+**AZ Pinning**: Node groups can be pinned to specific availability zones via `eks_node_azs` variable. This ensures EBS volumes and nodes are co-located in the same AZ, preventing cross-AZ volume attachment failures.
+
 **Labels**:
 - `role=primary`
 - `environment=production`
@@ -69,13 +71,13 @@ Allows pods to assume IAM roles without embedding credentials.
 ### CoreDNS
 
 DNS resolution for pods
-- Version: Latest
+- Version: Explicitly configured in Terraform (addon resource)
 - Replicas: 2
 
 ### kube-proxy
 
 Network proxy for Services
-- Version: Latest
+- Version: Explicitly configured in Terraform (addon resource)
 
 ### VPC CNI
 
@@ -127,7 +129,7 @@ Managed by EKS module, allows:
 
 ## Cluster Access (eks-deployer Role)
 
-EKS cluster access is managed via a dedicated `eks-deployer` IAM role rather than direct IAM user access entries. Users listed in `eks_admin_iam_arns` (in each environment's tfvars) can assume this role to get cluster admin access.
+EKS cluster access is managed via a dedicated `eks-deployer` IAM role with EKS access policy rather than direct IAM user access entries. Users listed in `eks_admin_iam_arns` (in each environment's tfvars) can assume this role to get cluster admin access.
 
 **Role**: `tesslate-{env}-eks-eks-deployer`
 **Access Policy**: `AmazonEKSClusterAdminPolicy` (full cluster admin)
@@ -136,6 +138,8 @@ EKS cluster access is managed via a dedicated `eks-deployer` IAM role rather tha
 The `aws-deploy.sh` script automatically assumes this role for all cluster operations (`deploy-k8s`, `build`, `reload`).
 
 **Full guide**: [EKS Cluster Access Guide](../../guides/eks-cluster-access.md)
+
+**Note**: The same `eks-deployer` pattern is used in both the per-environment stack (`k8s/terraform/aws/`) and the shared platform stack (`k8s/terraform/shared/`).
 
 ## IRSA Roles
 

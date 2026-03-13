@@ -7,12 +7,13 @@ This directory contains comprehensive documentation for Tesslate Studio's databa
 - **[CLAUDE.md](./CLAUDE.md)** - Agent context file for database schema development
 - **[core-models.md](./core-models.md)** - Core application models (Project, Container, User, Files)
 - **[chat-models.md](./chat-models.md)** - Chat and agent execution models
-- **[marketplace-models.md](./marketplace-models.md)** - Marketplace agents, bases, and transactions
+- **[marketplace-models.md](./marketplace-models.md)** - Marketplace agents, bases, skills, and transactions
+- **[channel-mcp-models.md](./channel-mcp-models.md)** - Channel integrations and MCP server models
 - **[auth-models.md](./auth-models.md)** - Authentication and OAuth models
 
 ## Database Architecture Overview
 
-Tesslate Studio uses PostgreSQL with SQLAlchemy ORM. The schema consists of 39 models organized into several functional domains:
+Tesslate Studio uses PostgreSQL with SQLAlchemy ORM. The schema consists of 45+ models organized into several functional domains:
 
 ### Core Models (10 models)
 Models that define the fundamental project and container structure:
@@ -35,14 +36,15 @@ Models for AI agent conversations and command execution:
 - `ShellSession` - Persistent terminal sessions
 - `PodAccessLog` - Kubernetes pod access audit logs
 
-### Marketplace Models (11 models)
+### Marketplace Models (12 models)
 Models for the agent and template marketplace:
-- `MarketplaceAgent` - AI agents available for purchase
+- `MarketplaceAgent` - AI agents available for purchase (also stores skills via `item_type='skill'`)
 - `MarketplaceBase` - Project templates (React, FastAPI, etc.)
 - `WorkflowTemplate` - Pre-configured multi-container workflows
 - `UserPurchasedAgent` - Agent library for users
 - `UserPurchasedBase` - Template library for users
 - `ProjectAgent` - Agents assigned to projects
+- `AgentSkillAssignment` - Skills attached to agents per user
 - `AgentReview` - User reviews for agents
 - `BaseReview` - User reviews for templates
 - `AgentCoInstall` - Recommendation system data
@@ -65,6 +67,13 @@ Models for user feedback and bug tracking:
 - `FeedbackPost` - Bug reports and feature suggestions
 - `FeedbackUpvote` - Upvotes on feedback posts
 - `FeedbackComment` - Comments on feedback posts
+
+### Channel & MCP Models (4 models)
+Models for messaging channel integrations and MCP server extensibility:
+- `ChannelConfig` - Messaging channel configurations (Telegram, Slack, Discord, WhatsApp)
+- `ChannelMessage` - Channel message audit log (inbound/outbound)
+- `UserMcpConfig` - Per-user MCP server installations from marketplace
+- `AgentMcpAssignment` - MCP servers attached to agents per user
 
 ### Kanban & Project Management (4 models)
 Models for project task management (defined in `models_kanban.py`):
@@ -160,6 +169,31 @@ User → UserPurchasedAgent → MarketplaceAgent
 
 User → UserPurchasedBase → MarketplaceBase
                          └─> Project (created from template)
+```
+
+### Channel Integration Flow
+How messaging channels connect to agents:
+
+```
+User → ChannelConfig (Telegram/Slack/Discord/WhatsApp)
+                      ├─> default_agent → MarketplaceAgent
+                      └─> ChannelMessage (audit log)
+```
+
+### MCP Server Flow
+How MCP servers extend agent capabilities:
+
+```
+User → UserMcpConfig (installed MCP server + credentials)
+                     └─> AgentMcpAssignment → MarketplaceAgent
+```
+
+### Skill Assignment Flow
+How skills are attached to agents per user:
+
+```
+User → AgentSkillAssignment → MarketplaceAgent (agent)
+                             → MarketplaceAgent (skill, item_type='skill')
 ```
 
 ### Billing Flow

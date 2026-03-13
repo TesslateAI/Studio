@@ -1282,3 +1282,165 @@ class ActiveAgentTaskResponse(BaseModel):
     chat_id: UUID
     message: str | None = None
     started_at: datetime | None = None
+
+
+# =============================================================================
+# Channel Configuration Schemas
+# =============================================================================
+
+
+class ChannelConfigCreate(BaseModel):
+    """Create a messaging channel configuration."""
+
+    channel_type: str  # telegram, slack, discord, whatsapp
+    name: str
+    credentials: dict[str, Any]  # Will be encrypted before storage
+    project_id: UUID | None = None
+    default_agent_id: UUID | None = None
+
+    @field_validator("channel_type")
+    @classmethod
+    def validate_channel_type(cls, v):
+        valid = {"telegram", "slack", "discord", "whatsapp"}
+        if v not in valid:
+            raise ValueError(f"channel_type must be one of: {', '.join(sorted(valid))}")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Name cannot be empty")
+        if len(v) > 100:
+            raise ValueError("Name cannot exceed 100 characters")
+        return v.strip()
+
+
+class ChannelConfigUpdate(BaseModel):
+    """Update a messaging channel configuration."""
+
+    name: str | None = None
+    credentials: dict[str, Any] | None = None
+    default_agent_id: UUID | None = None
+    is_active: bool | None = None
+
+
+class ChannelConfigResponse(BaseModel):
+    """Response for a channel configuration."""
+
+    id: UUID
+    channel_type: str
+    name: str
+    project_id: UUID | None = None
+    default_agent_id: UUID | None = None
+    is_active: bool
+    webhook_url: str | None = None  # Generated webhook URL
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChannelTestRequest(BaseModel):
+    """Test a channel configuration."""
+
+    jid: str  # Target address to send test message
+
+
+class ChannelMessageResponse(BaseModel):
+    """Response for a channel message audit log entry."""
+
+    id: UUID
+    channel_config_id: UUID
+    direction: str
+    jid: str
+    sender_name: str | None = None
+    content: str
+    platform_message_id: str | None = None
+    task_id: str | None = None
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# =============================================================================
+# MCP Server Schemas
+# =============================================================================
+
+
+class McpInstallRequest(BaseModel):
+    """Install an MCP server from marketplace."""
+
+    marketplace_agent_id: UUID
+    credentials: dict[str, Any] | None = None  # API keys etc, will be encrypted
+
+
+class McpConfigUpdate(BaseModel):
+    """Update an installed MCP server configuration."""
+
+    credentials: dict[str, Any] | None = None
+    enabled_capabilities: list[str] | None = None
+    is_active: bool | None = None
+
+    @field_validator("enabled_capabilities")
+    @classmethod
+    def validate_capabilities(cls, v):
+        if v is not None:
+            valid = {"tools", "resources", "prompts"}
+            for cap in v:
+                if cap not in valid:
+                    raise ValueError(
+                        f"Invalid capability '{cap}'. Must be one of: {', '.join(sorted(valid))}"
+                    )
+        return v
+
+
+class McpConfigResponse(BaseModel):
+    """Response for an installed MCP server."""
+
+    id: UUID
+    marketplace_agent_id: UUID
+    server_name: str | None = None
+    server_slug: str | None = None
+    enabled_capabilities: list[str] | None = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class McpDiscoverResponse(BaseModel):
+    """Response from MCP server discovery."""
+
+    tools: list[dict[str, Any]] = []
+    resources: list[dict[str, Any]] = []
+    prompts: list[dict[str, Any]] = []
+    resource_templates: list[dict[str, Any]] = []
+
+
+class McpTestResponse(BaseModel):
+    """Response from testing an MCP server connection."""
+
+    success: bool
+    tool_count: int = 0
+    resource_count: int = 0
+    prompt_count: int = 0
+    error: str | None = None
+
+
+class AgentMcpAssignmentResponse(BaseModel):
+    id: UUID
+    agent_id: UUID
+    mcp_config_id: UUID
+    server_name: str | None = None
+    server_slug: str | None = None
+    enabled: bool = True
+    added_at: datetime | None = None
+
+    class Config:
+        from_attributes = True

@@ -592,6 +592,7 @@ class TesslateAgent(AbstractAgent):
         project_context = context.get("project_context") or {}
         project_context["user_id"] = context.get("user_id")
         project_context["project_id"] = context.get("project_id")
+        project_context["container_directory"] = context.get("container_directory")
         user_message = await get_user_message_wrapper(user_request, project_context)
 
         messages: list[dict[str, Any]] = [

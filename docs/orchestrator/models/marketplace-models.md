@@ -55,6 +55,7 @@ class MarketplaceAgent(Base):
 
     # Source type
     source_type: str            # open, closed
+    git_repo_url: str           # GitHub repo URL for open-source items (nullable, max 500 chars)
     requires_user_keys: bool    # For passthrough pricing (user brings API keys)
 
     # Stats
@@ -67,6 +68,9 @@ class MarketplaceAgent(Base):
     features: JSON              # ["Code generation", "File editing", ...]
     required_models: JSON       # Models this agent needs access to
     tags: JSON                  # ["react", "typescript", "ai", ...]
+
+    # Skill-specific field (item_type='skill')
+    skill_body: str             # Full SKILL.md body after frontmatter (nullable, Text)
 
     # Status
     is_featured: bool           # Show on homepage
@@ -125,6 +129,9 @@ created_by_user = relationship("User", foreign_keys=[created_by_user_id])
 purchased_by = relationship("UserPurchasedAgent", back_populates="agent")
 project_assignments = relationship("ProjectAgent", back_populates="agent")
 reviews = relationship("AgentReview", back_populates="agent")
+
+# Skills attached to this agent (per user)
+skill_assignments = relationship("AgentSkillAssignment", back_populates="agent")
 ```
 
 ### Common Queries
@@ -838,6 +845,83 @@ recommendations = result.scalars().all()
 
 ---
 
+## AgentSkillAssignment Model
+
+Tracks which skills (marketplace agents with `item_type='skill'`) are attached to which agents, per user. This is a three-way junction table enabling users to customize their agents with reusable skill modules.
+
+### Schema
+
+```python
+class AgentSkillAssignment(Base):
+    __tablename__ = "agent_skill_assignments"
+
+    # Identity
+    id: UUID
+    agent_id: UUID              # Foreign key to MarketplaceAgent (the agent)
+    skill_id: UUID              # Foreign key to MarketplaceAgent (the skill, item_type='skill')
+    user_id: UUID               # Foreign key to User
+
+    # Status
+    enabled: bool               # Is this skill active on the agent?
+    added_at: datetime          # When the skill was attached
+
+    # Unique constraint: (agent_id, skill_id, user_id)
+```
+
+### Key Relationships
+
+```python
+agent = relationship("MarketplaceAgent", back_populates="skill_assignments", foreign_keys=[agent_id])
+skill = relationship("MarketplaceAgent", foreign_keys=[skill_id])
+user = relationship("User")
+```
+
+### Common Queries
+
+**Get skills attached to an agent for a user**:
+```python
+result = await db.execute(
+    select(MarketplaceAgent)
+    .join(AgentSkillAssignment, AgentSkillAssignment.skill_id == MarketplaceAgent.id)
+    .where(AgentSkillAssignment.agent_id == agent_id)
+    .where(AgentSkillAssignment.user_id == user.id)
+    .where(AgentSkillAssignment.enabled == True)
+)
+skills = result.scalars().all()
+```
+
+**Attach a skill to an agent**:
+```python
+assignment = AgentSkillAssignment(
+    agent_id=agent.id,
+    skill_id=skill.id,
+    user_id=user.id,
+    enabled=True
+)
+db.add(assignment)
+await db.commit()
+```
+
+**Detach a skill from an agent**:
+```python
+await db.execute(
+    delete(AgentSkillAssignment)
+    .where(AgentSkillAssignment.agent_id == agent_id)
+    .where(AgentSkillAssignment.skill_id == skill_id)
+    .where(AgentSkillAssignment.user_id == user_id)
+)
+await db.commit()
+```
+
+### Notes
+
+- Both `agent_id` and `skill_id` reference `marketplace_agents.id` — skills are stored as MarketplaceAgent rows with `item_type='skill'`
+- The `skill_body` field on MarketplaceAgent holds the full SKILL.md content for skill-type items
+- The unique constraint on `(agent_id, skill_id, user_id)` prevents duplicate attachments
+- CASCADE deletes: removing the agent, skill, or user automatically cleans up assignments
+
+---
+
 ## Summary
 
 The marketplace models enable a rich ecosystem where users can:
@@ -845,6 +929,7 @@ The marketplace models enable a rich ecosystem where users can:
 - **Discover** agents and templates through categories, tags, and search
 - **Purchase** agents with various pricing models (free, monthly, API, one-time)
 - **Fork** open-source agents to create custom versions
+- **Attach skills** to agents for per-user customization
 - **Review** agents and templates to help others
 - **Assign** agents to specific projects
 - **Install** workflow templates for rapid project setup

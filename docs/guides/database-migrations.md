@@ -490,6 +490,16 @@ See existing migrations in `orchestrator/alembic/versions/` for reference:
 | `a1b2c3d4e5f6_add_deployment_models.py` | Deployment feature |
 | `20251220_add_avatar_url_to_users.py` | Adding column example |
 
+### Recent Migrations (0023-0027)
+
+| Migration | Purpose | Key Changes |
+|-----------|---------|-------------|
+| `0023_add_container_startup_command.py` | Container startup customization | Adds `startup_command` column to `containers` table |
+| `0024_add_skills_system.py` | Skills marketplace | Adds `skill_body` column to `marketplace_agents`, creates `agent_skill_assignments` table |
+| `0025_add_channel_and_mcp_system.py` | Channels and MCP servers | Creates `channel_configs`, `channel_messages`, `user_mcp_configs` tables |
+| `0026_add_agent_mcp_assignments.py` | Agent-MCP linking | Creates `agent_mcp_assignments` table for connecting agents to MCP servers |
+| `0027_add_git_repo_url_to_marketplace_agents.py` | Git repo tracking | Adds `git_repo_url` column to `marketplace_agents` for open-source skill/agent source repos |
+
 ## Database Seeding
 
 After running migrations on a fresh database, seed marketplace data:
@@ -499,9 +509,13 @@ After running migrations on a fresh database, seed marketplace data:
 docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_skills.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_mcp_servers.py tesslate-orchestrator:/tmp/
 docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
 docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
 docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_skills.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_mcp_servers.py
 ```
 
 For themes, also copy the JSON files:
@@ -523,12 +537,28 @@ See the **Database Seeding** section in the root [CLAUDE.md](../../CLAUDE.md) fo
 
 | Script | Location | Seeds |
 |--------|----------|-------|
-| `seed_marketplace_bases.py` | `scripts/seed/` | 5 project templates |
-| `seed_marketplace_agents.py` | `scripts/seed/` | 5 official agents + Tesslate account |
+| `seed_marketplace_bases.py` | `scripts/seed/` | 4 project templates |
+| `seed_marketplace_agents.py` | `scripts/seed/` | 6 official agents + Tesslate account (includes Librarian) |
 | `seed_opensource_agents.py` | `scripts/seed/` | 6 open-source agents |
+| `seed_skills.py` | `scripts/seed/` | 11 marketplace skills (open-source from GitHub) |
+| `seed_mcp_servers.py` | `scripts/seed/` | 6 MCP server configurations |
 | `seed_themes.py` | `scripts/seed/` | 7 UI themes (reads from `scripts/themes/*.json`) |
+| `seed_community_bases.py` | `scripts/seed/` | 63 community open-source bases |
 
 All scripts are **idempotent** — safe to re-run without duplicating data.
+
+### Automatic Seeding on Startup
+
+The backend runs all seeds automatically on startup via `run_all_seeds()` in `orchestrator/app/seeds/__init__.py`. This includes:
+1. Marketplace bases and community bases
+2. Official agents (6 agents including the Librarian)
+3. Open-source agents
+4. Auto-adding the Tesslate Agent and Librarian agent to all users
+5. Skills (item_type='skill')
+6. Themes
+7. Workflow templates
+
+The Librarian agent is automatically added to all user libraries on startup via `auto_add_librarian_agent_to_users()`.
 
 ## Next Steps
 

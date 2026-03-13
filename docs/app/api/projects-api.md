@@ -98,6 +98,13 @@ export const projectsApi = {
 | `gitlab` | Clone from GitLab | `git_repo_url`, `git_branch` |
 | `bitbucket` | Clone from Bitbucket | `git_repo_url`, `git_branch` |
 
+### Setup Config Operations
+
+See [Setup API](./setup-api.md) for dedicated setup-config and analyze endpoints:
+- `GET /api/projects/{slug}/setup-config` - Get existing `.tesslate/config.json`
+- `POST /api/projects/{slug}/setup-config` - Save config and sync containers
+- `POST /api/projects/{slug}/analyze` - AI-powered project analysis
+
 ### File Operations
 
 ```typescript

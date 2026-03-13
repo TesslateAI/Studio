@@ -4,9 +4,10 @@ You are working on Tesslate Studio's Kubernetes configuration. This context prov
 
 ## File Locations
 
-**Base manifests**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/base/`
-**Overlays**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/overlays/{minikube,aws}/`
-**Terraform**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/terraform/aws/`
+**Base manifests**: `k8s/base/`
+**Overlays**: `k8s/overlays/{minikube,aws-base,aws-beta,aws-production}/`
+**Terraform (per-env)**: `k8s/terraform/aws/`
+**Terraform (shared)**: `k8s/terraform/shared/`
 
 ## Quick Commands
 
@@ -60,12 +61,17 @@ kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
 - Shares `tesslate-secrets` and config with backend
 - Separate resource limits for worker pods
 - AWS overlay patch: `k8s/overlays/aws-base/worker-patch.yaml`
+- `revisionHistoryLimit: 3`
 
 **Redis** (`k8s/base/redis/`):
-- `redis-deployment.yaml` - Single replica Redis with PVC persistence
+- `redis-deployment.yaml` - Single replica Redis with PVC persistence, `revisionHistoryLimit: 3`
 - `redis-service.yaml` - ClusterIP service (port 6379)
 - `redis-pvc.yaml` - 1Gi persistent volume claim
 - ConfigMap with `maxmemory 512mb`, `volatile-lru` eviction, `appendonly yes`
+
+**Base Deployment Defaults**:
+- All deployments (backend, frontend, worker, postgres, redis, minio) include `revisionHistoryLimit: 3`
+- CronJobs use `envFrom` with `secretRef` instead of individual `valueFrom` entries
 
 ## Common Tasks
 
@@ -146,10 +152,13 @@ spec:
 
 **Storage**: Projects use persistent EBS volumes that survive pod restarts.
 
-**Snapshots**: Created via `snapshot_manager.py` using K8s VolumeSnapshot API
-- Function: `create_snapshot()` - Creates EBS snapshot (non-blocking)
-- Function: `restore_from_snapshot()` - Creates PVC from snapshot
+**Snapshots**: Created via `snapshot_manager.py` using K8s VolumeSnapshot API with per-PVC support:
+- Function: `create_snapshot(pvc_name=...)` - Creates EBS snapshot for a specific PVC (non-blocking)
+- Function: `restore_from_snapshot(pvc_name=...)` - Creates PVC from snapshot
+- Function: `get_latest_ready_snapshots_by_pvc()` - Returns dict of PVC name to latest snapshot
 - Function: `cleanup_expired_snapshots()` - Removes old soft-deleted snapshots
+- Snapshot rotation (`_rotate_snapshots`) is scoped per PVC
+- `is_latest` tracking is per PVC
 
 **Cleanup cronjobs**: `k8s/base/core/`
 - `cleanup-cronjob.yaml` - Runs every 2 minutes, creates snapshots for idle projects

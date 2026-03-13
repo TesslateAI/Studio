@@ -487,6 +487,52 @@ async def long_running_tool(params, context):
     return success_output(message="Complete", result=result)
 ```
 
+## Skills System
+
+In addition to tools, agents can be extended with **skills** — reusable knowledge modules that inject domain-specific guidelines into the agent's context. Unlike tools (which execute code), skills provide declarative knowledge as markdown content.
+
+### How Skills Differ from Tools
+
+| Aspect | Tool | Skill |
+|--------|------|-------|
+| Type | Executable function | Markdown knowledge |
+| Stored as | `Tool` dataclass in registry | `MarketplaceAgent` with `item_type='skill'` |
+| Execution | Called via tool_call | Injected into system prompt context |
+| DB field | `tools` (JSON list) | `skill_body` (Text) |
+| Assignment | Via `tool_configs` on agent | Via `agent_skill_assignments` table |
+
+### Skill Body Format
+
+Skills are stored in the `skill_body` column of `MarketplaceAgent` records:
+
+```markdown
+## Vercel React Best Practices
+
+### Guidelines
+- Prefer React Server Components for data fetching
+- Use Suspense boundaries for streaming UI
+- Leverage Next.js App Router conventions
+- Implement proper caching with revalidation strategies
+```
+
+### Adding New Skills
+
+Skills are seeded via `orchestrator/app/seeds/skills.py`. To add a new skill:
+
+1. Add an entry to the `OPENSOURCE_SKILLS` list in `orchestrator/app/seeds/skills.py`
+2. Include `item_type: "skill"`, a `slug`, `skill_body` or `fallback_skill_body`, and optionally a `github_raw_url` for fetching from GitHub
+3. Run the seed: `docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_skills.py`
+
+Skills are assigned to agents per-user via the `agent_skill_assignments` table (migration 0024).
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `orchestrator/app/seeds/skills.py` | Skill definitions and seeding logic |
+| `scripts/seed/seed_skills.py` | Standalone seed script |
+| `orchestrator/alembic/versions/0024_add_skills_system.py` | Database migration |
+
 ## Complete Example
 
 See `orchestrator/app/agent/tools/file_ops/read_write.py` for a complete, production-ready tool implementation.
@@ -494,5 +540,6 @@ See `orchestrator/app/agent/tools/file_ops/read_write.py` for a complete, produc
 ## Next Steps
 
 - [Adding Routers](adding-routers.md) - Create API endpoints
+- [Universal Project Setup](universal-project-setup.md) - Understand .tesslate/config.json
 - [Troubleshooting](troubleshooting.md) - Debug tool issues
 - [Local Development](local-development.md) - Test your tools

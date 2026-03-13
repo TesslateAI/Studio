@@ -43,7 +43,8 @@ Practical how-to guides for developing, deploying, and extending Tesslate Studio
 
 | Guide | Description | When to Use |
 |-------|-------------|-------------|
-| [Agent System Architecture](agent-system-architecture.md) | Comprehensive agent system documentation | Understanding AI agents |
+| [Agent System Architecture](agent-system-architecture.md) | Comprehensive agent system documentation | Understanding AI agents, skills, and tools |
+| [Universal Project Setup](universal-project-setup.md) | `.tesslate/config.json` project configuration system | Understanding project config, container startup |
 | [Edit Mode Implementation](edit-mode-implementation.md) | Three-mode edit system (Ask/Allow/Plan) | Understanding edit flow |
 | [View-Scoped Tools](../orchestrator/agent/tools/view-scoped-tools.md) | View-specific agent tools | Extending view-based tools |
 

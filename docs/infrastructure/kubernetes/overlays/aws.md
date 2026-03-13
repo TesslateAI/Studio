@@ -1,17 +1,25 @@
 # AWS EKS Overlay Configuration
 
-Configuration for production deployment on AWS EKS.
+Configuration for AWS EKS deployment (beta and production).
 
-**Location**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/overlays/aws/`
+**Locations**:
+- Shared base: `k8s/overlays/aws-base/`
+- Beta: `k8s/overlays/aws-beta/`
+- Production: `k8s/overlays/aws-production/`
 
 ## Overview
 
-AWS overlay configures Tesslate Studio for production with:
+The AWS overlay is split into a shared base and environment-specific patches:
+- **aws-base**: Common configuration (backend env vars, worker patch, `envFrom` for secrets)
+- **aws-beta**: Beta-specific patches (replicas, resources, rollout strategy)
+- **aws-production**: Production-specific patches
+
+Both environments configure:
 - ECR container registry
 - AWS S3 for project storage
 - TLS with cert-manager
-- Production resource limits
-- Domain: `your-domain.com`
+- Environment-specific resource limits
+- Domains: `your-domain.com` (beta), `your-domain.com` (production)
 
 ## Key Configuration
 
@@ -112,6 +120,16 @@ kubectl delete pod -n tesslate -l app=tesslate-backend
   value: "tesslate-wildcard-tls"
 ```
 
+**Additional env vars** (added to `aws-base/backend-patch.yaml`):
+```yaml
+- name: DISCORD_WEBHOOK_URL
+  valueFrom: ...
+- name: AGENT_DISCORD_WEBHOOK_URL
+  valueFrom: ...
+- name: TAVILY_API_KEY
+  valueFrom: ...
+```
+
 **S3 Settings**:
 ```yaml
 - name: S3_ENDPOINT_URL
@@ -144,6 +162,11 @@ resources:
 ```
 
 **Replicas**: 1 (CRITICAL - tasks stored in-memory, scaling requires distributed state)
+
+**Beta Overlay** (`aws-beta/`):
+- Custom replica counts
+- Environment-specific resource requests/limits
+- Rollout strategy patches (e.g., `maxSurge`, `maxUnavailable`)
 
 ### Frontend Configuration
 

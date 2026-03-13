@@ -22,13 +22,19 @@ Tesslate Studio consists of four major systems:
 |------|---------|
 | [orchestrator/app/main.py](../orchestrator/app/main.py) | Backend entry point, middleware, routers |
 | [orchestrator/app/config.py](../orchestrator/app/config.py) | All configuration settings |
-| [orchestrator/app/models.py](../orchestrator/app/models.py) | Database models (39 classes) |
+| [orchestrator/app/models.py](../orchestrator/app/models.py) | Database models (45+ classes) |
 | [app/src/App.tsx](../app/src/App.tsx) | Frontend router and auth |
 | [app/src/lib/api.ts](../app/src/lib/api.ts) | API client (1300+ lines) |
 | [docker-compose.yml](../docker-compose.yml) | Local development stack |
 | [k8s/base/kustomization.yaml](../k8s/base/kustomization.yaml) | Kubernetes base config |
 | [orchestrator/app/worker.py](../orchestrator/app/worker.py) | ARQ worker for distributed agent execution |
 | [orchestrator/app/routers/external_agent.py](../orchestrator/app/routers/external_agent.py) | External agent API |
+| [orchestrator/app/routers/channels.py](../orchestrator/app/routers/channels.py) | Messaging channel configuration |
+| [orchestrator/app/routers/mcp.py](../orchestrator/app/routers/mcp.py) | User MCP server management |
+| [orchestrator/app/routers/mcp_server.py](../orchestrator/app/routers/mcp_server.py) | MCP server marketplace catalog |
+| [orchestrator/app/services/skill_discovery.py](../orchestrator/app/services/skill_discovery.py) | Skill discovery and loading |
+| [orchestrator/app/services/channels/](../orchestrator/app/services/channels/) | Channel integrations (Telegram, Slack, Discord, WhatsApp) |
+| [orchestrator/app/services/mcp/](../orchestrator/app/services/mcp/) | MCP client, bridge, and manager |
 
 ## Related Contexts (Load These For)
 
@@ -64,6 +70,14 @@ Tesslate Studio consists of four major systems:
 | `SMTP_SENDER_EMAIL` | Sender email address (e.g., noreply@domain.com) |
 | `TWO_FA_ENABLED` | Enable email 2FA for logins (default: false) |
 | `REDIS_URL` | Redis connection string (cross-pod comms) |
+| `WEB_SEARCH_PROVIDER` | Web search provider: tavily, brave, duckduckgo |
+| `TAVILY_API_KEY` | Tavily API key for web search |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key |
+| `AGENT_DISCORD_WEBHOOK_URL` | Discord webhook for agent send_message tool |
+| `CHANNEL_ENCRYPTION_KEY` | Fernet key for channel credential encryption |
+| `MCP_TOOL_CACHE_TTL` | MCP tool schema cache TTL in seconds (default: 300) |
+| `MCP_TOOL_TIMEOUT` | MCP tool call timeout in seconds (default: 30) |
+| `MCP_MAX_SERVERS_PER_USER` | Max MCP servers per user (default: 20) |
 
 ### Project URL Patterns
 
@@ -147,6 +161,11 @@ Load this root CLAUDE.md when:
 | Understand real-time agent system | [guides/real-time-agent-architecture.md](guides/real-time-agent-architecture.md) |
 | External agent API | [orchestrator/routers/external-agent.md](orchestrator/routers/external-agent.md) |
 | Redis/pub-sub infrastructure | [orchestrator/services/pubsub.md](orchestrator/services/pubsub.md) |
+| Skills system | [orchestrator/agent/CLAUDE.md](orchestrator/agent/CLAUDE.md) |
+| Messaging channels | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → channels.py |
+| MCP server integration | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → mcp.py, mcp_server.py |
+| Web search tool | [orchestrator/agent/tools/CLAUDE.md](orchestrator/agent/tools/CLAUDE.md) |
+| Universal project setup | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → projects.py setup-config |
 
 ## Important Notes
 

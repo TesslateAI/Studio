@@ -17,6 +17,7 @@ This directory contains all top-level route components that make up the Tesslate
 | `/referral` | `Referrals.tsx` | Referral program | No |
 | `/dashboard` | `Dashboard.tsx` | Project list and creation | Yes |
 | `/project/:slug` | `ProjectGraphCanvas.tsx` | Architecture visualization | Yes |
+| `/project/:slug/setup` | `ProjectSetup.tsx` | Project setup wizard | Yes |
 | `/project/:slug/builder` | `Project.tsx` | Main code editor and preview | Yes |
 | `/marketplace` | `Marketplace.tsx` | Browse agents and bases | Yes |
 | `/marketplace/success` | `MarketplaceSuccess.tsx` | Purchase confirmation | Yes |
@@ -63,6 +64,7 @@ Routes using this layout:
 ### Standalone Routes
 These routes have their own layouts:
 
+- **Project Setup** (`/project/:slug/setup`): Full-screen setup wizard with agent/manual tabs
 - **Project Builder** (`/project/:slug/builder`): Full-screen editor with chat sidebar
 - **Graph Canvas** (`/project/:slug`): Full-screen XYFlow canvas with floating panels
 - **Admin Dashboard** (`/admin`): Custom admin layout
@@ -81,11 +83,12 @@ See: `auth.md`
 
 ### 2. Project Management
 - **Dashboard**: Project list, creation, deletion, filtering
+- **ProjectSetup**: Setup wizard with agent/manual tabs for configuring `.tesslate/config.json`
 - **ProjectGraphCanvas**: Visual architecture editor with XYFlow
 - **Project**: Code editor, chat, preview, panels (main builder)
-- **Library**: User's purchased agents and project bases
+- **Library**: User's purchased agents, skills, MCP servers, and project bases
 
-See: `dashboard.md`, `project-graph.md`, `project-builder.md`
+See: `dashboard.md`, `project-setup.md`, `project-graph.md`, `project-builder.md`
 
 ### 3. Marketplace
 - **Marketplace**: Browse and search agents/bases

@@ -37,7 +37,8 @@ The agent system follows a modular, extensible design:
 │    │ - Shell Ops (4 tools)  │                          │
 │    │ - Project Ops (1 tool) │                          │
 │    │ - Planning Ops (2 tools)│                         │
-│    │ - Web Ops (1 tool)     │                          │
+│    │ - Web Ops (3 tools)    │                          │
+│    │ - Skill Ops (1 tool)   │                          │
 │    │ - Graph Ops (9 tools)  │                          │
 │    └────────────────────────┘                          │
 │                                                         │
@@ -140,8 +141,13 @@ Tools are organized into categories:
 - `todo_read`: Read current task list
 - `todo_write`: Update task list with progress
 
-### Web Operations (1 tool)
+### Web Operations (3 tools)
 - `web_fetch`: Fetch external web content
+- `web_search`: Search the web for current information (Tavily/Brave/DuckDuckGo with automatic fallback)
+- `send_message`: Send messages via chat, Discord webhook, external webhook, or reply channel (Telegram, Slack, etc.)
+
+### Skill Operations (1 tool)
+- `load_skill`: Load full skill instructions on-demand (progressive disclosure -- only name + description in system prompt)
 
 ### Graph Operations (9 tools)
 Used only in graph/architecture view for container management:
@@ -293,12 +299,22 @@ Managed by `subagent_manager.py`, allows the main agent to spawn specialized sub
 | `orchestrator/app/agent/prompts.py` | System prompt templates and marker substitution |
 | `orchestrator/app/agent/tools/registry.py` | Tool registration and execution |
 | `orchestrator/app/agent/tools/approval_manager.py` | User approval system for ask mode |
+| `orchestrator/app/agent/tools/web_ops/search.py` | Web search tool (Tavily/Brave/DuckDuckGo) |
+| `orchestrator/app/agent/tools/web_ops/providers.py` | Search provider abstraction |
+| `orchestrator/app/agent/tools/web_ops/send_message.py` | Send message tool (chat, Discord, webhook, reply) |
+| `orchestrator/app/agent/tools/skill_ops/load_skill.py` | Skill loading via progressive disclosure |
+| `orchestrator/app/services/skill_discovery.py` | Skill discovery from DB and project files |
+| `orchestrator/app/services/channels/` | Messaging channel integrations |
+| `orchestrator/app/services/mcp/` | MCP server management and tool bridging |
 
 ## Related Contexts
 
 - **Tools System**: See `orchestrator/app/agent/tools/README.md`
 - **Chat Router**: See `orchestrator/app/routers/chat.py` for agent execution
 - **Orchestration Services**: See `orchestrator/app/services/orchestration/` for container operations
+- **Skill Discovery**: See `orchestrator/app/services/skill_discovery.py` for skill catalog building
+- **Channel Service**: See `orchestrator/app/services/channels/` for messaging channel integrations
+- **MCP Service**: See `orchestrator/app/services/mcp/` for MCP server management
 
 ## When to Load This Context
 

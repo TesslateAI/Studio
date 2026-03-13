@@ -13,10 +13,11 @@ k8s/
 ├── base/                    # Base manifests (shared)
 │   ├── kustomization.yaml
 │   ├── namespace/           # tesslate namespace
-│   ├── core/                # Backend, frontend, cleanup cronjob
+│   ├── core/                # Backend, frontend, worker, cleanup cronjob
 │   ├── database/            # PostgreSQL
 │   ├── ingress/             # Main ingress
 │   ├── security/            # RBAC, network policies, quotas
+│   ├── redis/               # Redis deployment
 │   └── minio/               # MinIO (for local S3)
 └── overlays/                # Environment-specific patches
     ├── minikube/            # Local development
@@ -26,12 +27,12 @@ k8s/
     │   ├── ingress-patch.yaml
     │   ├── storage-class.yaml
     │   └── secrets/         # Local secrets (gitignored)
-    └── aws/                 # AWS EKS production
-        ├── kustomization.yaml
-        ├── backend-patch.yaml
-        ├── frontend-patch.yaml
-        ├── ingress-patch.yaml
-        └── storage-class.yaml
+    ├── aws-base/            # Shared AWS configuration
+    │   ├── backend-patch.yaml
+    │   ├── worker-patch.yaml
+    │   └── ...
+    ├── aws-beta/            # Beta environment
+    └── aws-production/      # Production environment
 ```
 
 ## Deployment Strategy
@@ -69,15 +70,18 @@ Patches base manifests with environment-specific values:
 
 ### Resource Types
 
-**Deployments**:
+**Deployments** (all with `revisionHistoryLimit: 3`):
 - `tesslate-backend`: Orchestrator API
 - `tesslate-frontend`: React UI
+- `tesslate-worker`: ARQ worker for agent tasks
 - `postgres`: Database
+- `redis`: Redis server
 
 **Services**:
 - `tesslate-backend-service`: ClusterIP (port 8000)
 - `tesslate-frontend-service`: ClusterIP (port 80)
 - `postgres`: ClusterIP (port 5432)
+- `redis`: ClusterIP (port 6379)
 
 **Ingress**:
 - `tesslate-ingress`: Routes platform traffic
@@ -150,17 +154,25 @@ kubectl port-forward -n tesslate svc/tesslate-backend-service 8000:8000
 - Image pull policy: `Always` (check for updates)
 - Storage class: `tesslate-block-storage` (EBS gp3)
 - S3: Native AWS S3 via IRSA
-- Domain: `your-domain.com`
+- Domain: `your-domain.com` (beta), `your-domain.com` (production)
 - TLS: Enabled via cert-manager
+
+**Overlays**: Split into shared base + environment-specific patches:
+- `k8s/overlays/aws-base/` - Shared AWS configuration (backend-patch, worker-patch)
+- `k8s/overlays/aws-beta/` - Beta environment patches (replicas, resources, rollout strategy)
+- `k8s/overlays/aws-production/` - Production environment patches
 
 **Deploy**:
 ```bash
-kubectl apply -k k8s/overlays/aws
+# Recommended: use aws-deploy.sh
+./scripts/aws-deploy.sh deploy-k8s beta
+./scripts/aws-deploy.sh deploy-k8s production
 ```
 
 **Access**:
 ```
-https://your-domain.com
+https://your-domain.com          (beta)
+https://your-domain.com   (production)
 ```
 
 ## Resource Limits

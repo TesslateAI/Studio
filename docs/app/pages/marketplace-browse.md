@@ -16,7 +16,7 @@ This page implements infinite scroll, search debouncing, request cancellation, a
 
 **File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/MarketplaceBrowse.tsx`
 **Route**: `/marketplace/browse/:itemType`
-**Item Types**: `agent`, `base`, `tool`, `integration`
+**Item Types**: `agent`, `base`, `tool`, `integration`, `skill`, `mcp_server`
 
 ### Purpose
 
@@ -24,7 +24,7 @@ Browse all marketplace items of a specific type with comprehensive filtering, so
 
 ### Features
 
-- **Item Type Filtering**: View agents, bases, tools, or integrations
+- **Item Type Filtering**: View agents, bases, tools, integrations, skills, or MCP servers
 - **Category Filtering**: Filter by category (builder, frontend, fullstack, backend, data, devops, mobile)
 - **Price Filtering**: All, Free, or Paid items
 - **Sorting**: Popular, Highest Rated, Recently Added, Name A-Z, Price Low-High, Price High-Low
@@ -78,7 +78,7 @@ const [userTier, setUserTier] = useState<string>('free');
 ### Type Definitions
 
 ```typescript
-type ItemType = 'agent' | 'base' | 'tool' | 'integration';
+type ItemType = 'agent' | 'base' | 'tool' | 'integration' | 'skill' | 'mcp_server';
 type SortOption = 'featured' | 'popular' | 'newest' | 'name' | 'rating' | 'price_asc' | 'price_desc';
 type PricingFilter = 'all' | 'free' | 'paid';
 
@@ -579,7 +579,11 @@ const handleInstall = async (item: MarketplaceItem) => {
     const data =
       item.item_type === 'base'
         ? await marketplaceApi.purchaseBase(item.id)
-        : await marketplaceApi.purchaseAgent(item.id);
+        : item.item_type === 'skill'
+          ? await marketplaceApi.purchaseSkill(item.id)
+          : item.item_type === 'mcp_server'
+            ? await marketplaceApi.installMcpServer(item.id)
+            : await marketplaceApi.purchaseAgent(item.id);
 
     if (data.checkout_url) {
       // Paid item: redirect to Stripe checkout
@@ -707,6 +711,52 @@ GET /api/marketplace/bases/browse?page={page}&limit={limit}&category={category}&
   "page": 1,
   "limit": 20,
   "total_pages": 4
+}
+```
+
+### Get All Skills
+
+```typescript
+GET /api/marketplace/skills?category={category}&pricing_type={pricing}&search={search}&sort={sort}&page={page}&limit={limit}
+
+// Response
+{
+  "skills": [
+    {
+      "id": "uuid",
+      "name": "Skill Name",
+      "description": "Skill description",
+      "slug": "skill-slug",
+      "category": "backend",
+      "pricing_type": "free" | "paid",
+      "price": 0,
+      "is_purchased": false,
+      "tags": ["api", "automation"]
+    }
+  ],
+  "total": 50
+}
+```
+
+### Get All MCP Servers
+
+```typescript
+GET /api/marketplace/mcp-servers?category={category}&pricing_type={pricing}&search={search}&sort={sort}&page={page}&limit={limit}
+
+// Response
+{
+  "mcp_servers": [
+    {
+      "id": "uuid",
+      "name": "MCP Server Name",
+      "description": "Server description",
+      "slug": "server-slug",
+      "category": "data",
+      "pricing_type": "free",
+      "price": 0
+    }
+  ],
+  "total": 20
 }
 ```
 

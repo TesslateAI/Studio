@@ -26,9 +26,13 @@ When working on infrastructure:
 - Devserver: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/Dockerfile.devserver`
 
 ### Terraform
-- AWS EKS: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/terraform/aws/eks.tf`
-- ECR: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/terraform/aws/ecr.tf`
-- S3: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/terraform/aws/s3.tf`
+- AWS Environment Stack: `k8s/terraform/aws/`
+  - EKS: `k8s/terraform/aws/eks.tf` (includes CoreDNS/kube-proxy addons, `eks-deployer` role, `eks_node_azs` pinning)
+  - ECR locals: `k8s/terraform/aws/ecr.tf`
+  - S3: `k8s/terraform/aws/s3.tf`
+  - IAM: `k8s/terraform/aws/iam.tf` (`eks-deployer` role with EKS access policy)
+- Shared Platform Stack: `k8s/terraform/shared/`
+  - ECR repos, platform EKS, Headscale VPN, NGINX Ingress, cert-manager, Cloudflare DNS
 
 ### Backend Configuration
 - Config: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/config.py`
@@ -117,7 +121,9 @@ Common Tasks:
 aws eks update-kubeconfig --region us-east-1 --name <EKS_CLUSTER_NAME>
 
 # Build & deploy (recommended — handles ECR login, platform, push, pod restart)
+# Uses docker buildx build --platform linux/amd64 --push (no tag/push steps needed)
 ./scripts/aws-deploy.sh build production backend
+./scripts/aws-deploy.sh build beta frontend backend
 
 # Manual build (ALWAYS use --platform linux/amd64 — EKS nodes are amd64)
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
@@ -126,8 +132,9 @@ docker buildx build --platform linux/amd64 --no-cache -t <AWS_ACCOUNT_ID>.dkr.ec
 # Force pod restart (imagePullPolicy: Always pulls new image)
 kubectl delete pod -n tesslate -l app=tesslate-backend
 
-# Deploy manifests
-kubectl apply -k k8s/overlays/aws
+# Deploy manifests (environment-specific overlays)
+./scripts/aws-deploy.sh deploy-k8s beta
+./scripts/aws-deploy.sh deploy-k8s production
 
 # Restart ingress after backend changes
 kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
@@ -267,7 +274,13 @@ tesslate-devserver:latest
 **Workflow** (recommended — use `aws-deploy.sh build`):
 ```bash
 ./scripts/aws-deploy.sh build production backend frontend devserver
+
+# Shared environment support
+./scripts/aws-deploy.sh build beta
+./scripts/aws-deploy.sh build production backend
 ```
+
+The build script uses `docker buildx build --platform linux/amd64 --push` (combines build and push in a single step).
 
 **Manual workflow**:
 1. Login: `aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin {registry}`
@@ -458,6 +471,19 @@ Resource: `aws_s3_bucket_lifecycle_configuration.tesslate_projects`
 Example: Expire inactive projects after 180 days (uncomment rule)
 
 ## Quick Reference
+
+### Deployment Defaults
+All base deployments include `revisionHistoryLimit: 3` to limit ReplicaSet history and reduce etcd storage.
+
+### Resource Quotas (`k8s/base/security/resource-quotas.yaml`)
+- Pods: 20
+- CPU requests: 12 / limits: 24
+- Memory requests: 24Gi / limits: 48Gi
+- PVCs: 10
+- Storage: 100Gi
+
+### CronJob Env Vars
+CronJobs use `envFrom` with `secretRef` instead of individual `valueFrom` entries for simplified configuration.
 
 ### Namespaces
 - `tesslate`: Platform services (backend, frontend, postgres, Redis, worker)

@@ -730,6 +730,104 @@ DELETE /api/projects/{project_slug}/assets/{asset_id}
 
 Deletes an asset from the project.
 
+## Setup Configuration
+
+The setup configuration system manages `.tesslate/config.json`, a unified configuration file that defines how project containers are started. The startup command priority chain is:
+
+1. **DB `startup_command`** on the Container model (highest priority)
+2. **`.tesslate/config.json`** (unified config system)
+3. **`TESSLATE.md`** (legacy)
+4. **Generic fallback** (framework auto-detection)
+
+### Read Setup Config
+
+```
+GET /api/projects/{project_slug}/setup-config
+```
+
+Reads `.tesslate/config.json` from the project filesystem (Docker) or PVC (K8s). Falls back to parsing `TESSLATE.md` if `config.json` does not exist.
+
+**Response** (`TesslateConfigResponse`):
+```json
+{
+  "exists": true,
+  "apps": {
+    "frontend": {
+      "directory": ".",
+      "port": 3000,
+      "start": "npm install && npm run dev -- --host 0.0.0.0",
+      "env": {"NODE_ENV": "development"},
+      "x": 200,
+      "y": 200
+    }
+  },
+  "infrastructure": {
+    "postgres": {
+      "image": "postgres:16",
+      "port": 5432,
+      "x": 400,
+      "y": 400
+    }
+  },
+  "primaryApp": "frontend"
+}
+```
+
+When no config is found, returns `{"exists": false, "apps": {}, "infrastructure": {}, "primaryApp": ""}`.
+
+### Save Setup Config and Sync Containers
+
+```
+POST /api/projects/{project_slug}/setup-config
+```
+
+Writes `.tesslate/config.json` to the project filesystem/PVC and synchronizes Container records in the database. Creates new containers for apps/infrastructure defined in the config, updates existing ones, and deletes orphaned containers that are no longer present in the config.
+
+**Request Body** (`TesslateConfigCreate`):
+```json
+{
+  "apps": {
+    "frontend": {
+      "directory": ".",
+      "port": 3000,
+      "start": "npm install && npm run dev -- --host 0.0.0.0",
+      "env": {}
+    }
+  },
+  "infrastructure": {},
+  "primaryApp": "frontend"
+}
+```
+
+**Response** (`SetupConfigSyncResponse`):
+```json
+{
+  "container_ids": ["uuid-1", "uuid-2"],
+  "primary_container_id": "uuid-1"
+}
+```
+
+**Validation**: All `start` commands are validated against a blocklist of dangerous patterns before saving.
+
+**K8s Behavior**: Ensures the project environment (namespace + PVC + file-manager pod) exists before writing the config file. Waits up to 30 seconds for the file-manager pod to become ready.
+
+### Analyze Project
+
+```
+POST /api/projects/{project_slug}/analyze
+```
+
+Uses an LLM to analyze the project's file tree and configuration files, then generates a `.tesslate/config.json` recommendation. Does not persist the config -- the client should call `POST /setup-config` with the result to save it.
+
+**Response**: Same shape as `TesslateConfigResponse` with `exists: false`.
+
+**Behavior**:
+- Reads up to 500 files from the project file tree
+- Reads up to 15 config files (package.json, requirements.txt, Dockerfile, etc.) capped at 20KB each
+- Docker mode: walks the filesystem directly
+- K8s mode: reads from PVC first, falls back to ProjectFile database records
+- Raises 400 if no files are found in the project
+
 ## Project Settings
 
 ### Get Settings

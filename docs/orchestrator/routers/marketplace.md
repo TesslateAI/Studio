@@ -833,9 +833,214 @@ func.lower(cast(MarketplaceAgent.tags, String)).like(func.lower(search_filter))
 func.lower(MarketplaceAgent.tags).like(func.lower(search_filter))
 ```
 
+## Skill Marketplace
+
+Skills are specialized, installable capabilities that can be attached to agents. They use the same `MarketplaceAgent` model with `item_type="skill"`.
+
+### Browse Skills
+
+```
+GET /api/marketplace/skills
+```
+
+**(Public, optional auth)** Browse marketplace skills with filtering, sorting, and pagination.
+
+**Query Parameters**:
+- `category`: Filter by category
+- `pricing_type`: Filter by pricing (free, credits)
+- `search`: Search in name, description, and tags
+- `sort`: Sort by (featured, popular, newest, name, rating, price_asc, price_desc)
+- `page`: Page number (1-indexed, default: 1)
+- `limit`: Results per page (default: 12, max: 100)
+
+**Response**:
+```json
+{
+  "skills": [
+    {
+      "id": "uuid",
+      "name": "TypeScript Linter",
+      "slug": "typescript-linter",
+      "description": "Lint and fix TypeScript code",
+      "category": "web-development",
+      "item_type": "skill",
+      "pricing_type": "free",
+      "price": 0,
+      "downloads": 250,
+      "rating": 4.8,
+      "is_purchased": false,
+      "creator_type": "official",
+      "creator_name": "Tesslate",
+      "tags": ["typescript", "linting"]
+    }
+  ],
+  "total": 20,
+  "page": 1,
+  "limit": 12,
+  "total_pages": 2,
+  "has_more": true
+}
+```
+
+### Get Skill Details
+
+```
+GET /api/marketplace/skills/{slug}
+```
+
+**(Public, optional auth)** Returns detailed information about a specific skill.
+
+**Response**: Full skill object including `long_description`, `features`, `model`, `mode`, `agent_type`, `source_type`, and purchase status.
+
+### Purchase Skill
+
+```
+POST /api/marketplace/skills/{skill_id}/purchase
+```
+
+**(Authenticated)** Purchase or add a free skill to the user's library.
+
+- Free skills are added immediately; `downloads` is incremented.
+- Paid skills initiate a Stripe checkout session; returns `checkout_url` and `session_id`.
+- Returns early if the skill is already in the user's library.
+
+**Response** (free):
+```json
+{
+  "message": "Free skill added to your library",
+  "skill_id": "uuid",
+  "success": true
+}
+```
+
+**Response** (paid):
+```json
+{
+  "checkout_url": "https://checkout.stripe.com/...",
+  "session_id": "cs_...",
+  "skill_id": "uuid"
+}
+```
+
+### Install Skill on Agent
+
+```
+POST /api/marketplace/skills/{skill_id}/install
+```
+
+**(Authenticated)** Attach a purchased skill to an agent.
+
+**Request Body** (`SkillInstallRequest`):
+```json
+{
+  "agent_id": "uuid"
+}
+```
+
+**Restrictions**:
+- User must own the skill (purchased with `is_active=True`)
+- Target agent must exist and be active
+- Idempotent: re-enables a previously disabled assignment if one exists
+
+**Response**:
+```json
+{
+  "message": "Skill installed on agent",
+  "success": true
+}
+```
+
+### Uninstall Skill from Agent
+
+```
+DELETE /api/marketplace/skills/{skill_id}/install/{agent_id}
+```
+
+**(Authenticated)** Detach a skill from an agent. Hard-deletes the `AgentSkillAssignment` record.
+
+**Response**:
+```json
+{
+  "message": "Skill detached from agent",
+  "success": true
+}
+```
+
+### List Agent Skills
+
+```
+GET /api/marketplace/agents/{agent_id}/skills
+```
+
+**(Authenticated)** List all skills currently attached to an agent for the current user. Only returns enabled, active skills.
+
+**Response**:
+```json
+{
+  "skills": [
+    {
+      "id": "uuid",
+      "name": "TypeScript Linter",
+      "slug": "typescript-linter",
+      "description": "...",
+      "item_type": "skill",
+      "is_purchased": true
+    }
+  ]
+}
+```
+
+## MCP Server Marketplace
+
+MCP (Model Context Protocol) servers are browsable in the marketplace and installable via the `/api/mcp` router. The marketplace provides browse and detail endpoints.
+
+### Browse MCP Servers
+
+```
+GET /api/marketplace/mcp-servers
+```
+
+**(Public, optional auth)** Browse marketplace MCP servers with filtering, sorting, and pagination. Same query parameters and response shape as the skills browse endpoint.
+
+**Query Parameters**:
+- `category`, `pricing_type`, `search`, `sort`, `page`, `limit` (same as skills)
+
+**Response**:
+```json
+{
+  "mcp_servers": [
+    {
+      "id": "uuid",
+      "name": "GitHub MCP",
+      "slug": "github-mcp",
+      "description": "GitHub API integration via MCP",
+      "item_type": "mcp_server",
+      "pricing_type": "free",
+      "downloads": 120,
+      "is_purchased": false,
+      "tags": ["github", "git"]
+    }
+  ],
+  "total": 8,
+  "page": 1,
+  "limit": 12,
+  "total_pages": 1,
+  "has_more": false
+}
+```
+
+### Get MCP Server Details
+
+```
+GET /api/marketplace/mcp-servers/{slug}
+```
+
+**(Public, optional auth)** Returns detailed information about a specific MCP server. Same response shape as skill details with `item_type="mcp_server"`.
+
 ## Related Files
 
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/models.py` - MarketplaceAgent, MarketplaceBase models
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/recommendations.py` - Recommendation engine
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/litellm_service.py` - Model management
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/agent/factory.py` - Agent instantiation from marketplace models
+- `orchestrator/app/models.py` - MarketplaceAgent, MarketplaceBase, AgentSkillAssignment models
+- `orchestrator/app/services/recommendations.py` - Recommendation engine
+- `orchestrator/app/services/litellm_service.py` - Model management
+- `orchestrator/app/agent/factory.py` - Agent instantiation from marketplace models
+- `orchestrator/app/routers/mcp.py` - MCP server install/uninstall/manage endpoints

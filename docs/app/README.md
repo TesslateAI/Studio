@@ -33,12 +33,14 @@ app/
 │   │
 │   ├── pages/                      # Top-level route components
 │   │   ├── Dashboard.tsx           # Project list, creation, user profile
+│   │   ├── ProjectSetup.tsx        # Setup wizard (agent/manual) for .tesslate/config.json
 │   │   ├── Project.tsx             # Main builder: editor + chat + preview
 │   │   ├── ProjectGraphCanvas.tsx  # Architecture visualization with XYFlow
-│   │   ├── Marketplace.tsx         # Browse AI agents and project bases
-│   │   ├── MarketplaceDetail.tsx   # Agent/base details and purchase
+│   │   ├── Marketplace.tsx         # Browse AI agents, bases, skills, MCP servers
+│   │   ├── MarketplaceBrowse.tsx   # Filtered browse with infinite scroll
+│   │   ├── MarketplaceDetail.tsx   # Agent/base/MCP server details and purchase
 │   │   ├── MarketplaceAuthor.tsx   # Creator profile page
-│   │   ├── Library.tsx             # User's purchased agents and bases
+│   │   ├── Library.tsx             # User's agents, bases, skills, MCP servers
 │   │   ├── settings/               # Modular settings pages
 │   │   │   ├── ProfileSettings.tsx       # Profile, avatar, bio
 │   │   │   ├── PreferencesSettings.tsx   # Theme, diagram model
@@ -183,7 +185,8 @@ app/
 │   │   ├── billing.ts              # Billing and subscription types
 │   │   ├── git.ts                  # Git operation types
 │   │   ├── git-providers.ts        # Git provider types (GH/GL/BB)
-│   │   └── assets.ts               # Asset management types
+│   │   ├── assets.ts               # Asset management types
+│   │   └── tesslateConfig.ts       # TesslateConfig, AppConfig, InfraConfig types
 │   │
 │   ├── theme/                      # Theme and styling
 │   │   ├── index.ts                # Theme provider and context

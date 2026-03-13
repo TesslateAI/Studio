@@ -43,6 +43,18 @@ import {
   X,
   Info,
   MagnifyingGlass,
+  Lightning,
+  GithubLogo,
+  Code,
+  PaintBucket,
+  Broadcast,
+  TestTube,
+  Database,
+  Shield,
+  FilmStrip,
+  Sparkle,
+  Stack,
+  ArrowSquareOut,
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { ModelSelector } from '../components/chat/ModelSelector';
@@ -137,7 +149,7 @@ interface Provider {
   api_type?: string;
 }
 
-type TabType = 'agents' | 'bases' | 'themes' | 'models';
+type TabType = 'agents' | 'bases' | 'skills' | 'mcp_servers' | 'themes' | 'models';
 
 interface ModelInfo {
   id: string;
@@ -208,6 +220,35 @@ interface LibraryBase {
   created_at: string;
 }
 
+interface LibrarySkill {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  category: string;
+  icon: string;
+  pricing_type: string;
+  price: number;
+  downloads: number;
+  rating: number;
+  tags: string[];
+  is_purchased: boolean;
+  source_type?: string;
+  git_repo_url?: string;
+  features?: string[];
+}
+
+interface InstalledMcpServer {
+  id: string;
+  server_name: string | null;
+  server_slug: string | null;
+  is_active: boolean;
+  marketplace_agent_id: string;
+  enabled_capabilities: string[] | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
 // All available tools in the system
 const _ALL_TOOLS = [
   'read_file',
@@ -267,6 +308,8 @@ export default function Library() {
   const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
   const [editingBase, setEditingBase] = useState<LibraryBase | null>(null);
   const [editingTheme, setEditingTheme] = useState<LibraryTheme | null>(null);
+  const [skills, setSkills] = useState<LibrarySkill[]>([]);
+  const [mcpServers, setMcpServers] = useState<InstalledMcpServer[]>([]);
   const logout = () => {
     localStorage.removeItem('token');
     navigate('/login');
@@ -344,6 +387,12 @@ export default function Library() {
       } else if (activeTab === 'bases') {
         await loadCreatedBases();
         setLoading(false);
+      } else if (activeTab === 'skills') {
+        await loadSkills();
+        setLoading(false);
+      } else if (activeTab === 'mcp_servers') {
+        await loadMcpServers();
+        setLoading(false);
       } else if (activeTab === 'themes') {
         await loadLibraryThemes();
         setLoading(false);
@@ -369,6 +418,28 @@ export default function Library() {
     } catch (error) {
       console.error('Failed to load library:', error);
       toast.error('Failed to load library');
+    }
+  };
+
+  const loadSkills = async () => {
+    try {
+      const data = await marketplaceApi.getAllSkills({ limit: 100 });
+      setSkills(
+        (data.skills || []).filter((s: Record<string, unknown>) => s.is_purchased)
+      );
+    } catch (err) {
+      console.error('Failed to load skills:', err);
+      toast.error('Failed to load skills');
+    }
+  };
+
+  const loadMcpServers = async () => {
+    try {
+      const data = await marketplaceApi.getInstalledMcpServers();
+      setMcpServers(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to load MCP servers:', err);
+      toast.error('Failed to load MCP servers');
     }
   };
 
@@ -627,6 +698,28 @@ export default function Library() {
               Bases
             </button>
             <button
+              onClick={() => setActiveTab('skills')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'skills'
+                  ? 'bg-[var(--primary)] text-white'
+                  : 'bg-[var(--surface)] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+              }`}
+            >
+              <Lightning size={16} weight={activeTab === 'skills' ? 'fill' : 'regular'} />
+              Skills
+            </button>
+            <button
+              onClick={() => setActiveTab('mcp_servers')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'mcp_servers'
+                  ? 'bg-[var(--primary)] text-white'
+                  : 'bg-[var(--surface)] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+              }`}
+            >
+              <Plugs size={16} weight={activeTab === 'mcp_servers' ? 'fill' : 'regular'} />
+              MCP Servers
+            </button>
+            <button
               onClick={() => setActiveTab('models')}
               className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
                 activeTab === 'models'
@@ -679,6 +772,24 @@ export default function Library() {
               }}
               onToggleVisibility={handleToggleBaseVisibility}
               onDelete={handleDeleteBase}
+            />
+          )}
+
+          {activeTab === 'skills' && (
+            <SkillsTab
+              skills={skills}
+              agents={agents}
+              loading={loading}
+              onBrowse={() => navigate('/marketplace/browse/skill')}
+            />
+          )}
+
+          {activeTab === 'mcp_servers' && (
+            <McpServersTab
+              servers={mcpServers}
+              loading={loading}
+              onReload={loadMcpServers}
+              onBrowse={() => navigate('/marketplace/browse/mcp_server')}
             />
           )}
 
@@ -3013,6 +3124,456 @@ interface SubagentItem {
   is_builtin: boolean;
 }
 
+// Category-to-icon mapping for skills (replaces emoji icons)
+const SKILL_CATEGORY_ICONS: Record<string, React.ReactNode> = {
+  frontend: <Code size={20} weight="duotone" />,
+  design: <PaintBucket size={20} weight="duotone" />,
+  backend: <Broadcast size={20} weight="duotone" />,
+  testing: <TestTube size={20} weight="duotone" />,
+  database: <Database size={20} weight="duotone" />,
+  security: <Shield size={20} weight="duotone" />,
+  media: <FilmStrip size={20} weight="duotone" />,
+  'code-quality': <Sparkle size={20} weight="duotone" />,
+  deployment: <Rocket size={20} weight="duotone" />,
+  devops: <Stack size={20} weight="duotone" />,
+};
+
+function getSkillCategoryIcon(category: string): React.ReactNode {
+  return SKILL_CATEGORY_ICONS[category] || <Lightning size={20} weight="duotone" />;
+}
+
+// MCP Servers Tab Component
+function McpServersTab({
+  servers,
+  loading,
+  onReload,
+  onBrowse,
+}: {
+  servers: InstalledMcpServer[];
+  loading: boolean;
+  onReload: () => void;
+  onBrowse: () => void;
+}) {
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [uninstallingId, setUninstallingId] = useState<string | null>(null);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  const activeCount = servers.filter((s) => s.is_active).length;
+  const inactiveCount = servers.filter((s) => !s.is_active).length;
+
+  const handleUninstall = async (configId: string) => {
+    setUninstallingId(configId);
+    try {
+      await marketplaceApi.uninstallMcpServer(configId);
+      toast.success('MCP server uninstalled');
+      onReload();
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to uninstall MCP server');
+    } finally {
+      setUninstallingId(null);
+    }
+  };
+
+  const handleTestConnection = async (configId: string) => {
+    setTestingId(configId);
+    try {
+      const result = await marketplaceApi.testMcpServer(configId);
+      if (result.success) {
+        toast.success('Connection successful');
+      } else {
+        toast.error(result.error || 'Connection failed');
+      }
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Connection test failed');
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  return (
+    <>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className="text-sm font-semibold text-[var(--text)]">Installed MCP Servers</h3>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            MCP servers extend your agents with external tool integrations and data sources
+          </p>
+        </div>
+        <button
+          onClick={onBrowse}
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-xl text-sm font-medium hover:opacity-90 transition-all"
+        >
+          <Plus size={16} />
+          Browse MCP Servers
+        </button>
+      </div>
+
+      {servers.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mb-4 border border-[var(--border)]">
+            <Plugs size={32} className="text-[var(--text-subtle)]" />
+          </div>
+          <h3 className="text-lg font-semibold text-[var(--text)] mb-2">No MCP servers yet</h3>
+          <p className="text-sm text-[var(--text-muted)] max-w-sm mb-6">
+            MCP servers connect your agents to external tools, APIs, and data sources.
+            Browse the marketplace to find and install MCP servers.
+          </p>
+          <button
+            onClick={onBrowse}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[var(--primary)] text-white rounded-xl text-sm font-medium hover:opacity-90 transition-all"
+          >
+            <Plus size={16} />
+            Browse MCP Servers Marketplace
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
+              <div className="text-2xl font-bold text-[var(--text)] mb-1">{servers.length}</div>
+              <div className="text-sm text-[var(--text-muted)]">Total Servers</div>
+            </div>
+            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
+              <div className="text-2xl font-bold text-[var(--text)] mb-1">{activeCount}</div>
+              <div className="text-sm text-[var(--text-muted)]">Active</div>
+            </div>
+            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
+              <div className="text-2xl font-bold text-[var(--text)] mb-1">{inactiveCount}</div>
+              <div className="text-sm text-[var(--text-muted)]">Inactive</div>
+            </div>
+          </div>
+
+          {/* Servers Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {servers.map((server) => (
+              <div
+                key={server.id}
+                role="article"
+                aria-label={`${server.server_name || server.server_slug || 'MCP'} MCP server`}
+                className="group relative flex flex-col bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-large)] p-4 sm:p-5 hover:border-[rgba(var(--primary-rgb),0.3)] hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] transition-all duration-200 ease-out"
+              >
+                {/* Header: icon + title */}
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)] transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
+                    <Plugs size={20} weight="duotone" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-semibold text-[var(--text)] line-clamp-1 group-hover:text-[var(--primary)] transition-colors">
+                      {server.server_name || server.server_slug || 'MCP Server'}
+                    </h4>
+                    <span className="text-xs text-[var(--text-muted)] font-mono">{server.server_slug}</span>
+                  </div>
+                </div>
+
+                {/* Status badge */}
+                <div className="flex items-center gap-2 mb-4">
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                      server.is_active
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-[var(--text-subtle)]/10 text-[var(--text-muted)] border border-[var(--border)]'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        server.is_active ? 'bg-emerald-400' : 'bg-[var(--text-subtle)]'
+                      }`}
+                    />
+                    {server.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 mt-auto pt-2 border-t border-[var(--border)]">
+                  <button
+                    onClick={() => handleTestConnection(server.id)}
+                    disabled={testingId === server.id}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--surface-hover)] rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <TestTube size={14} />
+                    {testingId === server.id ? 'Testing...' : 'Test Connection'}
+                  </button>
+                  <button
+                    onClick={() => handleUninstall(server.id)}
+                    disabled={uninstallingId === server.id}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Trash size={14} />
+                    {uninstallingId === server.id ? 'Removing...' : 'Uninstall'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// Skills Tab Component
+function SkillsTab({
+  skills,
+  agents,
+  loading,
+  onBrowse,
+}: {
+  skills: LibrarySkill[];
+  agents: LibraryAgent[];
+  loading: boolean;
+  onBrowse: () => void;
+}) {
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  const openSourceCount = skills.filter(s => s.source_type === 'open' && s.git_repo_url).length;
+  const categoryCount = new Set(skills.map(s => s.category)).size;
+
+  return (
+    <>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className="text-sm font-semibold text-[var(--text)]">Installed Skills</h3>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            Skills extend your agents with specialized knowledge and workflows
+          </p>
+        </div>
+        <button
+          onClick={onBrowse}
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-xl text-sm font-medium hover:opacity-90 transition-all"
+        >
+          <Plus size={16} />
+          Browse Skills
+        </button>
+      </div>
+
+      {skills.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mb-4 border border-[var(--border)]">
+            <Lightning size={32} className="text-[var(--text-subtle)]" />
+          </div>
+          <h3 className="text-lg font-semibold text-[var(--text)] mb-2">No skills yet</h3>
+          <p className="text-sm text-[var(--text-muted)] max-w-sm mb-6">
+            Skills teach your agents specialized patterns and best practices.
+            Browse the marketplace to find skills for frontend, backend, DevOps, and more.
+          </p>
+          <button
+            onClick={onBrowse}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[var(--primary)] text-white rounded-xl text-sm font-medium hover:opacity-90 transition-all"
+          >
+            <Plus size={16} />
+            Browse Skills Marketplace
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
+              <div className="text-2xl font-bold text-[var(--text)] mb-1">{skills.length}</div>
+              <div className="text-sm text-[var(--text-muted)]">Total Skills</div>
+            </div>
+            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
+              <div className="text-2xl font-bold text-[var(--text)] mb-1">{openSourceCount}</div>
+              <div className="text-sm text-[var(--text-muted)]">Open Source</div>
+            </div>
+            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
+              <div className="text-2xl font-bold text-[var(--text)] mb-1">{categoryCount}</div>
+              <div className="text-sm text-[var(--text-muted)]">Categories</div>
+            </div>
+          </div>
+
+          {/* Skills Grid */}
+          <div ref={dropdownRef} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {skills.map((skill) => (
+              <SkillCard key={skill.id} skill={skill} agents={agents} />
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// Individual skill card — matches AgentsTab card design
+function SkillCard({ skill, agents }: { skill: LibrarySkill; agents: LibraryAgent[] }) {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showDropdown) return;
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showDropdown]);
+
+  const handleInstall = async (agentId: string, agentName: string) => {
+    setInstalling(true);
+    try {
+      await marketplaceApi.installSkillOnAgent(skill.id, agentId);
+      toast.success(`${skill.name} added to ${agentName}`);
+      setShowDropdown(false);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to install skill');
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const enabledAgents = agents.filter(a => a.is_enabled !== false);
+
+  return (
+    <div
+      role="article"
+      aria-label={`${skill.name} skill`}
+      className="group relative flex flex-col bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-large)] p-4 sm:p-5 hover:border-[rgba(var(--primary-rgb),0.3)] hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] transition-all duration-200 ease-out"
+    >
+      {/* Header: icon + title */}
+      <div className="flex items-start gap-3 mb-3">
+        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)] transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
+          {getSkillCategoryIcon(skill.category)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-semibold text-[var(--text)] line-clamp-1 group-hover:text-[var(--primary)] transition-colors">
+            {skill.name}
+          </h4>
+          <span className="text-xs text-[var(--text-muted)] capitalize">{skill.category}</span>
+        </div>
+      </div>
+
+      {/* Description */}
+      <p className="text-xs sm:text-[13px] leading-relaxed text-[var(--text-muted)] line-clamp-2 mb-3 min-h-[32px]">
+        {skill.description}
+      </p>
+
+      {/* Badges row */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+        {skill.source_type === 'open' ? (
+          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-success)]/15 text-[var(--status-success)] text-[11px] rounded font-medium">
+            <LockSimpleOpen size={11} />
+            Open
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent)]/15 text-[var(--accent)] text-[11px] rounded font-medium">
+            <LockKey size={11} />
+            Closed
+          </span>
+        )}
+        {skill.pricing_type === 'free' && (
+          <span className="px-2 py-0.5 bg-[var(--status-success)]/10 text-[var(--status-success)] text-[11px] rounded font-medium">
+            Free
+          </span>
+        )}
+        {skill.features && skill.features.length > 0 && (
+          <>
+            {skill.features.slice(0, 2).map((feature, i) => (
+              <span
+                key={i}
+                className="px-2 py-0.5 bg-[var(--surface-hover)] text-[var(--text-muted)] text-[11px] rounded font-medium truncate max-w-[120px]"
+              >
+                {feature}
+              </span>
+            ))}
+            {skill.features.length > 2 && (
+              <span className="px-1.5 py-0.5 text-[var(--text-subtle)] text-[11px] font-medium">
+                +{skill.features.length - 2}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* GitHub repo link */}
+      {skill.git_repo_url && (
+        <a
+          href={skill.git_repo_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors mb-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GithubLogo size={13} weight="fill" />
+          <span className="truncate">{skill.git_repo_url.replace('https://github.com/', '')}</span>
+          <ArrowSquareOut size={10} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+        </a>
+      )}
+
+      {/* Spacer to push action to bottom */}
+      <div className="flex-1" />
+
+      {/* Add to Agent action */}
+      <div ref={dropdownRef} className="relative mt-1">
+        <button
+          onClick={() => setShowDropdown(!showDropdown)}
+          disabled={installing}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20 transition-colors disabled:opacity-50"
+        >
+          {installing ? (
+            <LoadingSpinner />
+          ) : (
+            <>
+              <Plugs size={14} />
+              Add to Agent
+            </>
+          )}
+        </button>
+        {showDropdown && (
+          <div className="absolute left-0 right-0 bottom-full mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl z-20 py-1.5 max-h-52 overflow-y-auto">
+            {enabledAgents.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-[var(--text-muted)] text-center">
+                No active agents. Enable an agent first.
+              </p>
+            ) : (
+              enabledAgents.map((agent) => (
+                <button
+                  key={agent.id}
+                  onClick={() => handleInstall(agent.id, agent.name)}
+                  className="w-full text-left px-3 py-2 text-xs text-[var(--text)] hover:bg-[var(--primary)]/5 transition-colors flex items-center gap-2.5"
+                >
+                  {agent.avatar_url ? (
+                    <img src={agent.avatar_url} alt="" className="w-6 h-6 rounded-lg object-cover border border-[var(--border)]" />
+                  ) : (
+                    <div className="w-6 h-6 rounded-lg bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center">
+                      <img src="/favicon.svg" alt="" className="w-4 h-4" />
+                    </div>
+                  )}
+                  <span className="truncate font-medium">{agent.name}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Edit Agent Modal Component
 function EditAgentModal({
   agent,
@@ -3077,7 +3638,7 @@ function EditAgentModal({
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [showSkillSearch, setShowSkillSearch] = useState(false);
   const [skillSearchQuery, setSkillSearchQuery] = useState('');
-  const [skillSearchResults, setSkillSearchResults] = useState<{ id: string; name: string; description: string; slug: string; icon: string }[]>([]);
+  const [skillSearchResults, setSkillSearchResults] = useState<{ id: string; name: string; description: string; slug: string; category: string }[]>([]);
   const [skillSearchLoading, setSkillSearchLoading] = useState(false);
 
   // Load subagents when section is expanded
@@ -3191,12 +3752,12 @@ function EditAgentModal({
       setSkillSearchResults(
         (data.skills || [])
           .filter((s: { id: string }) => !installed.has(s.id))
-          .map((s: { id: string; name: string; description: string; slug: string; icon: string }) => ({
+          .map((s: { id: string; name: string; description: string; slug: string; category: string }) => ({
             id: s.id,
             name: s.name,
             description: s.description,
             slug: s.slug,
-            icon: s.icon,
+            category: s.category,
           }))
       );
     } catch {
@@ -3688,8 +4249,10 @@ function EditAgentModal({
                                 key={skill.id}
                                 className="flex items-center justify-between p-2 bg-white/5 rounded-lg"
                               >
-                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  <span className="text-lg">{skill.icon}</span>
+                                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                  <div className="w-7 h-7 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center shrink-0 text-[var(--primary)]">
+                                    {getSkillCategoryIcon(skill.category)}
+                                  </div>
                                   <div className="min-w-0">
                                     <span className="text-sm font-medium text-[var(--text)]">
                                       {skill.name}

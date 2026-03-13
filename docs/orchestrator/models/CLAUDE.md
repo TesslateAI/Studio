@@ -39,7 +39,7 @@
 
 **Container** (models.py)
 - Purpose: Individual services in a project (frontend, backend, database)
-- Key fields: `name`, `directory`, `port`, `internal_port`, `container_type`, `deployment_mode`, `status`
+- Key fields: `name`, `directory`, `port`, `internal_port`, `startup_command`, `container_type`, `deployment_mode`, `status`
 - **Port columns**: `port` = exposed/mapped port (host side in Docker), `internal_port` = port the dev server listens on inside the container
 - **`effective_port` property**: Returns `internal_port or port or 3000`. Single source of truth for "what port is the server on." All callsites should use this instead of ad-hoc fallback chains.
 - Related: Project, MarketplaceBase, ContainerConnection
@@ -110,9 +110,11 @@
 
 ### Marketplace Models
 **MarketplaceAgent** (models.py)
-- Purpose: AI agents available for purchase
-- Key fields: `name`, `slug`, `system_prompt`, `tools`, `pricing_type`, `price`, `model`
-- Related: Can be forked by users (parent_agent_id), reviewed, purchased
+- Purpose: AI agents available for purchase (also stores skills via `item_type='skill'`)
+- Key fields: `name`, `slug`, `system_prompt`, `tools`, `pricing_type`, `price`, `model`, `skill_body`, `git_repo_url`
+- `skill_body`: Full SKILL.md content for skill-type items (nullable, Text)
+- `git_repo_url`: GitHub repo URL for open-source items (nullable, String(500))
+- Related: Can be forked by users (parent_agent_id), reviewed, purchased, has skill_assignments
 
 **MarketplaceBase** (models.py)
 - Purpose: Project templates (React, FastAPI, Next.js, etc.) — both seeded and user-submitted
@@ -133,6 +135,12 @@
 **ProjectAgent** (models.py)
 - Purpose: Assigns agents to specific projects
 - Key fields: `project_id`, `agent_id`, `enabled`, `added_at`
+
+**AgentSkillAssignment** (models.py)
+- Purpose: Tracks which skills are attached to which agents per user
+- Key fields: `agent_id`, `skill_id`, `user_id`, `enabled`, `added_at`
+- Both `agent_id` and `skill_id` reference `marketplace_agents.id`
+- Unique constraint: (agent_id, skill_id, user_id)
 
 **AgentReview** / **BaseReview** (models.py)
 - Purpose: User reviews and ratings
@@ -226,6 +234,27 @@
 **FeedbackComment** (models.py)
 - Purpose: Comments on feedback posts
 - Key fields: `feedback_id`, `content`, `user_id`
+
+### Channel & MCP Models
+**ChannelConfig** (models.py)
+- Purpose: Messaging channel configurations (Telegram, Slack, Discord, WhatsApp)
+- Key fields: `user_id`, `project_id`, `channel_type`, `name`, `credentials` (Fernet-encrypted), `webhook_secret`, `default_agent_id`, `is_active`
+- Related: User, Project, MarketplaceAgent (default agent)
+
+**ChannelMessage** (models.py)
+- Purpose: Audit log for messaging channel messages (inbound and outbound)
+- Key fields: `channel_config_id`, `direction` (inbound/outbound), `jid`, `sender_name`, `content`, `platform_message_id`, `task_id`, `status`
+- Related: ChannelConfig
+
+**UserMcpConfig** (models.py)
+- Purpose: Per-user MCP server installations from marketplace
+- Key fields: `user_id`, `marketplace_agent_id`, `credentials` (Fernet-encrypted), `enabled_capabilities` (JSON), `is_active`
+- Related: User, MarketplaceAgent
+
+**AgentMcpAssignment** (models.py)
+- Purpose: Tracks which MCP servers are attached to which agents per user
+- Key fields: `agent_id`, `mcp_config_id`, `user_id`, `enabled`, `added_at`
+- Unique constraint: (agent_id, mcp_config_id, user_id)
 
 ## Common SQLAlchemy Patterns
 
@@ -513,7 +542,7 @@ last_activity, hibernated_at, s3_archive_size_bytes
 ### Container Fields
 ```
 id, project_id, base_id, name, directory, container_name
-port, internal_port, environment_vars, dockerfile_path
+port, internal_port, environment_vars, startup_command, dockerfile_path
 container_type (base, service), service_slug, deployment_mode (container, external)
 external_endpoint, credentials_id, status, position_x, position_y
 ```
@@ -530,9 +559,19 @@ ExternalAPIKey: id, user_id, key_hash, key_prefix, name, scopes, project_ids, is
 ```
 id, name, slug, description, category, item_type
 system_prompt, agent_type, tools, tool_configs, model
+skill_body (SKILL.md content for skills), git_repo_url
 pricing_type (free, monthly, api, one_time), price
 is_forkable, parent_agent_id, forked_by_user_id
 downloads, rating, reviews_count, usage_count
+```
+
+### Channel & MCP Fields
+```
+ChannelConfig: id, user_id, project_id, channel_type, name, credentials (encrypted), webhook_secret, default_agent_id, is_active
+ChannelMessage: id, channel_config_id, direction, jid, sender_name, content, platform_message_id, task_id, status
+UserMcpConfig: id, user_id, marketplace_agent_id, credentials (encrypted), enabled_capabilities (JSON), is_active
+AgentMcpAssignment: id, agent_id, mcp_config_id, user_id, enabled, added_at
+AgentSkillAssignment: id, agent_id, skill_id, user_id, enabled, added_at
 ```
 
 ## Database Connection Info

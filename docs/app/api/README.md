@@ -77,11 +77,12 @@ Handles 401 errors and CSRF token refresh:
 | `chatApi` | Agent chat, streaming, approvals | [chat-api.md](./chat-api.md) |
 | `gitApi` | Git operations | [git-api.md](./git-api.md) |
 | `tasksApi` | Background task tracking | [core-api.md](./core-api.md) |
-| `marketplaceApi` | Agents, bases, purchases | [core-api.md](./core-api.md) |
+| `marketplaceApi` | Agents, bases, skills, MCP servers, purchases | [core-api.md](./core-api.md) |
 | `billingApi` | Subscriptions, credits | [core-api.md](./core-api.md) |
 | `assetsApi` | Asset management | [projects-api.md](./projects-api.md) |
 | `deploymentsApi` | External deployments | [core-api.md](./core-api.md) |
 | `secretsApi` | API keys management | [core-api.md](./core-api.md) |
+| `setupApi` | Project setup config, analysis | [setup-api.md](./setup-api.md) |
 
 ## WebSocket Connections
 

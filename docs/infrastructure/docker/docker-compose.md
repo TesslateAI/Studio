@@ -64,6 +64,13 @@ FRONTEND_PORT=5173
 
 See `.env.example` for full list.
 
+### devserver
+- Build-only service for `tesslate-devserver:latest` image
+- Uses `orchestrator/Dockerfile.devserver`
+- Entrypoint: `true` (exits immediately after build)
+- `restart: "no"` — not a running service
+- Ensures the devserver image is built as part of `docker compose up --build`
+
 ## Health Checks
 
 All services have health checks for proper startup ordering:

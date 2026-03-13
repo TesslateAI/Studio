@@ -60,10 +60,12 @@ Isolated Dev Environments
 
 | File | Path | Purpose |
 |------|------|---------|
-| K8s Orchestrator | `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/orchestration/kubernetes_orchestrator.py` | Kubernetes container lifecycle |
-| K8s Client | `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/orchestration/kubernetes/client.py` | Kubernetes API wrapper |
-| K8s Helpers | `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/orchestration/kubernetes/helpers.py` | Manifest generation (Deployment, Service, Ingress) |
-| S3 Manager | `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/s3_manager.py` | S3 hydration/dehydration for K8s |
+| K8s Orchestrator | `orchestrator/app/services/orchestration/kubernetes_orchestrator.py` | Kubernetes container lifecycle (multi-PVC hibernation/restore) |
+| Docker Orchestrator | `orchestrator/app/services/orchestration/docker.py` | Docker Compose lifecycle (`_resolve_service_name()` for proper service naming) |
+| K8s Client | `orchestrator/app/services/orchestration/kubernetes/client.py` | Kubernetes API wrapper |
+| K8s Helpers | `orchestrator/app/services/orchestration/kubernetes/helpers.py` | Manifest generation (Deployment, Service, Ingress) |
+| Snapshot Manager | `orchestrator/app/services/snapshot_manager.py` | Per-PVC EBS VolumeSnapshot management |
+| S3 Manager | `orchestrator/app/services/s3_manager.py` | S3 hydration/dehydration for K8s |
 
 ### AI Agent System
 
@@ -201,7 +203,7 @@ S3_BUCKET_NAME=tesslate-project-storage-prod
 - Per-project namespaces (`proj-{uuid}`)
 - NetworkPolicy isolation
 
-**Key Code**: `kubernetes_orchestrator.py`, `kubernetes/client.py`, `s3_manager.py`
+**Key Code**: `kubernetes_orchestrator.py`, `kubernetes/client.py`, `snapshot_manager.py`, `s3_manager.py`
 
 ## Data Flow Patterns
 

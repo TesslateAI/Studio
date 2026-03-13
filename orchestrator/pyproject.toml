@@ -56,6 +56,10 @@ dependencies = [
     "redis[hiredis]>=5.0.0",
     # ARQ - async Redis task queue for agent worker fleet
     "arq>=0.26.0",
+    # MCP (Model Context Protocol) SDK
+    "mcp>=1.8.0",
+    # Ed25519 verification for Discord webhooks
+    "PyNaCl>=1.5.0",
 ]
 
 [project.optional-dependencies]

@@ -456,6 +456,24 @@ class Settings(BaseSettings):
         24  # Tier 2: Remove containers paused for X hours (default: 24)
     )
 
+    # ==========================================================================
+    # Messaging Channel Configuration
+    # ==========================================================================
+    channel_encryption_key: str = ""  # Fernet key for channel credentials. Uses deployment_encryption_key if empty
+    channel_webhook_rate_limit: int = 60  # Max webhook calls per config per minute
+
+    @property
+    def get_channel_encryption_key(self) -> str:
+        """Get encryption key for channel credentials."""
+        return self.channel_encryption_key or self.deployment_encryption_key or self.secret_key
+
+    # ==========================================================================
+    # MCP (Model Context Protocol) Configuration
+    # ==========================================================================
+    mcp_tool_cache_ttl: int = 300  # Seconds to cache MCP tool/resource/prompt schemas
+    mcp_tool_timeout: int = 30  # Seconds per MCP tool call (HTTP transport)
+    mcp_max_servers_per_user: int = 20  # Max installed MCP servers per user
+
     class Config:
         # For Docker Compose: environment variables are passed directly
         # For native development: looks for .env in parent directory (project root)

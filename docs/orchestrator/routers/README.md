@@ -30,7 +30,10 @@ orchestrator/app/routers/
 ├── referrals.py             # Referral program
 ├── creators.py              # Creator program management
 ├── github.py                # GitHub-specific operations
-└── webhooks.py              # Webhook endpoints
+├── webhooks.py              # Webhook endpoints
+├── channels.py              # Messaging channels (Telegram, Slack, Discord, WhatsApp)
+├── mcp.py                   # MCP server install/manage, agent assignments
+└── mcp_server.py            # Tesslate-as-MCP-server (Streamable HTTP)
 ```
 
 ## Base Paths
@@ -42,14 +45,17 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 ```
 
 Key base paths:
-- `/api/projects` - Project management
+- `/api/projects` - Project management, setup config, project analysis
 - `/api/chat` - Chat and agent interactions
-- `/api/marketplace` - Agent and base marketplace
+- `/api/marketplace` - Agent, skill, base, and MCP server marketplace
 - `/api/billing` - Subscription and billing
 - `/api/deployments` - External deployments
 - `/api/admin` - Admin operations (superuser only)
 - `/api/auth` - Authentication
 - `/api/git` - Git operations (typically nested under projects)
+- `/api/channels` - Messaging channel integrations
+- `/api/mcp` - MCP server management and agent assignments
+- `/api/mcp/server` - Tesslate-as-MCP-server (Streamable HTTP)
 
 Some routers don't define a prefix and expect the including router to handle it. For example, `auth.py` is mounted at `/api/auth` by `main.py`.
 
@@ -295,3 +301,17 @@ def test_endpoint(client: TestClient):
 - [Services](../services/) - Business logic services
 - [Agent System](../agent/) - AI agent implementation
 - [Deployment Modes](../../k8s/ARCHITECTURE.md) - Docker vs Kubernetes
+
+## Router Documentation Index
+
+- [projects.md](projects.md) - Project CRUD, files, containers, setup config, project analysis
+- [marketplace.md](marketplace.md) - Agent, skill, base, and MCP server marketplace
+- [chat.md](chat.md) - Chat management, agent streaming
+- [channels.md](channels.md) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
+- [mcp.md](mcp.md) - MCP server install/manage, agent assignments, Tesslate MCP server
+- [deployments.md](deployments.md) - External deployments (Vercel, Netlify, Cloudflare)
+- [billing.md](billing.md) - Subscriptions, credits, usage tracking
+- [admin.md](admin.md) - Platform metrics, user management
+- [git.md](git.md) - Git operations
+- [themes.md](themes.md) - Theme API (public endpoints)
+- [external-agent.md](external-agent.md) - External agent API (API keys, SSE, webhooks)

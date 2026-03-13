@@ -113,7 +113,10 @@ Tesslate Studio is an AI-powered web application builder that enables users to c
 
 ### Container Runtime
 - **Docker Mode**: Docker Compose + Traefik (local development)
+  - Includes `devserver` build-only service for building the devserver image
 - **Kubernetes Mode**: K8s + NGINX Ingress (production)
+  - All base deployments use `revisionHistoryLimit: 3`
+  - AWS overlays split into `aws-base`, `aws-beta`, `aws-production`
 - **Responsibilities**: Running user project environments in isolation
 
 ## How Systems Interact

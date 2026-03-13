@@ -58,6 +58,9 @@ Tesslate Studio is an AI-powered web application builder that lets users create,
 │  │  LiteLLM (AI)   Stripe (billing)   OAuth (GitHub/Google)         │   │
 │  │  SMTP Email (2FA, password reset)                                │   │
 │  │  Vercel/Netlify/Cloudflare (external deployment)                 │   │
+│  │  MCP Servers (GitHub, Brave, Slack, PostgreSQL, Filesystem)      │   │
+│  │  Messaging Channels (Telegram, Slack, Discord, WhatsApp)         │   │
+│  │  Web Search (Tavily, Brave, DuckDuckGo)                          │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -70,7 +73,7 @@ Tesslate Studio is an AI-powered web application builder that lets users create,
 | **Frontend** | React 19, TypeScript, Vite, Tailwind CSS, Monaco Editor, XYFlow |
 | **Backend** | FastAPI, Python 3.11, SQLAlchemy, Pydantic |
 | **Database** | PostgreSQL (asyncpg) |
-| **AI/LLM** | LiteLLM → OpenAI, Anthropic, Qwen models |
+| **AI/LLM** | LiteLLM → OpenAI, Anthropic, Qwen models; MCP servers |
 | **Containers** | Docker Compose (dev), Kubernetes (prod) |
 | **Storage** | AWS S3 / MinIO (project hibernation) |
 | **Task Queue** | Redis, ARQ (distributed agent execution) |
@@ -86,8 +89,32 @@ The heart of Tesslate Studio. Agents receive user requests, call LLMs with syste
 - **IterativeAgent**: Multi-step tool execution
 - **ReActAgent**: Reasoning + Acting pattern
 - **TesslateAgent**: Production agent with native function calling, trajectory recording, planning mode, subagents, and context compaction
+- **Librarian Agent**: Analyzes projects and generates `.tesslate/config.json`
 
 See: [Agent Documentation](orchestrator/agent/README.md)
+
+### 1b. Skills System
+Lightweight instruction sets (markdown bodies) attached to agents via the marketplace. Skills teach agents specialized patterns without custom code.
+
+- **Open-source skills**: Fetched from GitHub SKILL.md files (Vercel React, Web Design, Remotion, etc.)
+- **Tesslate skills**: Bundled skill bodies (Deploy to Vercel, Testing Setup, Docker Setup, etc.)
+- **Skill discovery**: Agents can load skills at runtime via the `load_skill` tool
+
+See: [Agent Documentation](orchestrator/agent/README.md)
+
+### 1c. MCP Server System
+Model Context Protocol (MCP) servers from the marketplace provide additional tools to agents.
+
+- **Marketplace catalog**: Pre-seeded MCP servers (GitHub, Brave Search, Slack, PostgreSQL, Filesystem)
+- **User configuration**: Per-user MCP server installation with encrypted credentials
+- **Agent integration**: MCP tools bridged into the agent tool registry at runtime
+
+### 1d. Messaging Channels
+Agents can interact via external messaging platforms.
+
+- **Supported platforms**: Telegram, Slack, Discord, WhatsApp
+- **Channel configuration**: Encrypted credential storage per user
+- **Agent tool**: `send_message` tool for outbound messaging from agents
 
 ### 2. Container Orchestration
 Each user project runs in isolated containers with its own dev server.
@@ -123,6 +150,18 @@ Distributed agent execution with progressive persistence and cross-pod visibilit
 - **External API**: API key-based access for Slack, CLI, and webhook integrations
 
 See: [Real-Time Agent Architecture](guides/real-time-agent-architecture.md)
+
+### 6. Universal Project Setup
+Config-driven project architecture via `.tesslate/config.json`. The Librarian agent analyzes projects and generates this configuration, defining containers, startup commands, connections, and metadata.
+
+See: [Orchestrator Documentation](orchestrator/README.md)
+
+### 7. Web Search
+Multi-provider web search tool available to agents during code generation.
+
+- **Providers**: Tavily (default), Brave Search, DuckDuckGo
+- **Configuration**: `WEB_SEARCH_PROVIDER`, provider-specific API keys
+- **Agent tool**: `web_search` for real-time information retrieval
 
 ## Repository Structure
 
@@ -214,5 +253,5 @@ When adding new documentation:
 
 ## Version
 
-Documentation version: 2026.2
-Last updated: February 2026
+Documentation version: 2026.3
+Last updated: March 2026

@@ -61,11 +61,26 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 ### Real-Time Agent Infrastructure
 - **pubsub.py** (643 lines) - `PubSubService` for cross-pod communication via Redis Pub/Sub channels, Redis Streams for durable agent events, and project locks
 - **worker.py** (509 lines) - ARQ worker for decoupled agent task execution with progressive step persistence and real-time streaming
-- **agent_context.py** (494 lines) - Build agent execution context (project info, git status, architecture, chat history, TESSLATE.md)
+- **agent_context.py** (494 lines) - Build agent execution context (project info, git status, architecture, chat history, TESSLATE.md, `.tesslate/config.json`)
 - **agent_task.py** (72 lines) - `AgentTaskPayload` serializable envelope for dispatching tasks to the worker fleet
 - **distributed_lock.py** (225 lines) - Redis-based distributed lock for coordinating background loops across replicas
 - **session_router.py** (116 lines) - Track shell session ownership across pods via Redis keys
 - **task_manager.py** (184 lines) - Track background task status with Redis fallback for cross-pod visibility (enhanced with Redis store)
+- **skill_discovery.py** - `SkillCatalogEntry` discovery from DB (`AgentSkillAssignment`) and project files (`.agents/skills/SKILL.md`). Only loads name + description for progressive disclosure; full body loaded on-demand by `load_skill` tool.
+
+### Messaging Channels (orchestrator/app/services/channels/)
+- **base.py** - `AbstractChannel` ABC and `InboundMessage` dataclass for all channel implementations
+- **telegram.py** - Telegram Bot API channel implementation
+- **slack.py** - Slack Bot channel implementation
+- **discord_bot.py** - Discord Bot channel implementation
+- **whatsapp.py** - WhatsApp Business API channel implementation
+- **registry.py** - Channel factory (`get_channel()`), credential encryption/decryption via Fernet
+- **formatting.py** - Platform-specific message formatting utilities
+
+### MCP Integration (orchestrator/app/services/mcp/)
+- **client.py** - MCP client with dual transport support (stdio + Streamable HTTP) via `connect_mcp()` context manager
+- **bridge.py** - Bridges MCP tools, resources, and prompts into Tesslate's `ToolRegistry` as native `Tool` objects
+- **manager.py** - `McpManager` for per-user MCP server discovery, Redis-backed schema caching (`mcp_tool_cache_ttl`), and tool bridging
 
 ### Container Startup
 - **tmux_session_manager.py** - Tmux session startup strategies per base type (nextjs-16, vite-react-fastapi, vite-react-go, expo-react-native)
@@ -101,6 +116,9 @@ Service definitions now include deployment targets (Vercel, Netlify, Cloudflare)
 - [agent-task.md](./agent-task.md) - Agent task payload serialization
 - [distributed-lock.md](./distributed-lock.md) - Redis-based distributed locks
 - [session-router.md](./session-router.md) - Cross-pod shell session routing
+- [skill-discovery.md](./skill-discovery.md) - Skill discovery service for progressive disclosure
+- [channels.md](./channels.md) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
+- [mcp.md](./mcp.md) - MCP server management, client, and tool bridging
 
 ## Common Service Patterns
 
@@ -590,4 +608,20 @@ from services.session_router import get_session_router
 router = get_session_router()
 await router.register_session(session_id)
 is_local = await router.is_local(session_id)
+
+# Discover available skills for an agent
+from services.skill_discovery import discover_skills
+skills = await discover_skills(agent_id, user_id, project_id, container_name, db)
+# Returns list of SkillCatalogEntry (name + description only, no body)
+
+# Use messaging channels
+from services.channels.registry import get_channel, encrypt_credentials, decrypt_credentials
+channel = get_channel("telegram", credentials)
+await channel.send_message(jid="telegram:123456", text="Hello!")
+
+# Use MCP manager
+from services.mcp.manager import McpManager
+mgr = McpManager()
+schema = await mgr.discover_server(server_config, credentials)
+tools = await mgr.get_agent_tools(agent_id, user_id, db)  # Returns list[Tool] for registration
 ```

@@ -237,6 +237,29 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 tools_override=tools_override,
             )
 
+            # 7b. Load MCP tools for this user/agent and inject into tool registry
+            mcp_context: dict | None = None
+            try:
+                from .services.mcp.manager import get_mcp_manager
+
+                mcp_mgr = get_mcp_manager()
+                mcp_context = await mcp_mgr.get_user_mcp_context(
+                    user_id=payload.user_id,
+                    db=db,
+                    agent_id=str(agent_model.id),
+                )
+                mcp_tools = mcp_context.get("tools", [])
+                if mcp_tools and hasattr(agent_instance, "tools") and agent_instance.tools:
+                    for mcp_tool in mcp_tools:
+                        agent_instance.tools.register(mcp_tool)
+                    logger.info(
+                        "[WORKER] Registered %d MCP tools for agent '%s'",
+                        len(mcp_tools),
+                        agent_model.slug,
+                    )
+            except Exception as mcp_err:
+                logger.warning("[WORKER] MCP context loading failed (non-fatal): %s", mcp_err)
+
             container_id = UUID(payload.container_id) if payload.container_id else None
             container_name = payload.container_name
             container_directory = payload.container_directory
@@ -291,6 +314,13 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             if available_skills:
                 project_context["available_skills"] = available_skills
 
+            # Add MCP resource/prompt catalogs to project_context for prompt injection
+            if mcp_context:
+                if mcp_context.get("resource_catalog"):
+                    project_context["mcp_resource_catalog"] = mcp_context["resource_catalog"]
+                if mcp_context.get("prompt_catalog"):
+                    project_context["mcp_prompt_catalog"] = mcp_context["prompt_catalog"]
+
             # Warm the local plan mirror from Redis before the agent builds its prompt.
             from .agent.plan_manager import PlanManager
 
@@ -324,6 +354,16 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "_active_plan": active_plan,
                 "available_skills": available_skills,
             }
+
+            # Inject MCP server configs so bridge executors can reconnect
+            if mcp_context and mcp_context.get("mcp_configs"):
+                context["mcp_configs"] = mcp_context["mcp_configs"]
+
+            # Inject channel context for send_message "reply" channel
+            if payload.channel_config_id:
+                context["channel_config_id"] = payload.channel_config_id
+                context["channel_jid"] = payload.channel_jid
+                context["channel_type"] = payload.channel_type
 
             # 9. Create placeholder Message before agent loop (crash-safe)
             assistant_message = Message(

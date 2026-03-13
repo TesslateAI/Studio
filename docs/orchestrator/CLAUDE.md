@@ -10,11 +10,14 @@ The orchestrator is Tesslate Studio's FastAPI backend handling all API requests,
 |------|---------|
 | [main.py](../../orchestrator/app/main.py) | FastAPI app entry, middleware, router registration |
 | [config.py](../../orchestrator/app/config.py) | All configuration via Pydantic BaseSettings |
-| [models.py](../../orchestrator/app/models.py) | 39 SQLAlchemy database models |
+| [models.py](../../orchestrator/app/models.py) | 45+ SQLAlchemy database models |
 | [database.py](../../orchestrator/app/database.py) | Async SQLAlchemy engine setup |
 | [schemas.py](../../orchestrator/app/schemas.py) | Pydantic request/response schemas |
 | [worker.py](../../orchestrator/app/worker.py) | ARQ worker for distributed agent execution |
 | [auth_external.py](../../orchestrator/app/auth_external.py) | API key authentication for external agent API |
+| [services/skill_discovery.py](../../orchestrator/app/services/skill_discovery.py) | Skill discovery and loading for agents |
+| [services/channels/](../../orchestrator/app/services/channels/) | Messaging channel integrations (Telegram, Slack, Discord, WhatsApp) |
+| [services/mcp/](../../orchestrator/app/services/mcp/) | MCP client, bridge, and server manager |
 
 ## Related Contexts (Load These For)
 
@@ -38,9 +41,20 @@ orchestrator/app/
 ├── config.py         # Settings
 ├── models.py         # DB models
 ├── routers/          # API endpoints (25+ files)
+│   ├── channels.py   # Messaging channel config
+│   ├── mcp.py        # User MCP server management
+│   └── mcp_server.py # MCP server marketplace catalog
 ├── services/         # Business logic (30+ files)
+│   ├── skill_discovery.py  # Skill discovery & loading
+│   ├── channels/     # Channel integrations (Telegram, Slack, Discord, WhatsApp)
+│   └── mcp/          # MCP client, bridge, manager
+├── seeds/            # Database seed data
+│   ├── skills.py     # Marketplace skills (15+)
+│   └── marketplace_agents.py # Marketplace agents
 └── agent/            # AI system
     └── tools/        # Agent tools
+        ├── web_ops/  # Web search, fetch, send_message
+        └── skill_ops/ # Skill loading
 ```
 
 ### Common Patterns
@@ -93,18 +107,29 @@ await orchestrator.start_project(project, containers, connections, user_id, db)
 | `LITELLM_API_BASE` | LLM proxy URL | `http://litellm:8000` |
 | `S3_BUCKET_NAME` | Project storage | `tesslate-projects-prod` |
 | `REDIS_URL` | Redis connection | `redis://redis:6379/0` |
+| `WEB_SEARCH_PROVIDER` | Web search backend | `tavily` |
+| `TAVILY_API_KEY` | Tavily search API key | `tvly-...` |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key | `BSA...` |
+| `AGENT_DISCORD_WEBHOOK_URL` | Discord webhook for agent messaging | `https://discord.com/api/webhooks/...` |
+| `CHANNEL_ENCRYPTION_KEY` | Fernet key for channel credentials | Base64-encoded key |
+| `MCP_TOOL_CACHE_TTL` | MCP schema cache TTL (seconds) | `300` |
+| `MCP_TOOL_TIMEOUT` | MCP tool call timeout (seconds) | `30` |
+| `MCP_MAX_SERVERS_PER_USER` | Max MCP servers per user | `20` |
 
 ### Key Routers
 
 | Router | Base Path | Purpose |
 |--------|-----------|---------|
-| projects | `/api/projects` | Project CRUD, files, containers |
+| projects | `/api/projects` | Project CRUD, files, containers, setup-config |
 | chat | `/api/chat` | Agent chat, streaming |
 | two_fa | `/api/auth` | Email 2FA login, verification, password reset |
-| marketplace | `/api/marketplace` | Agent/base marketplace |
+| marketplace | `/api/marketplace` | Agent/base/skill/MCP marketplace |
 | billing | `/api/billing` | Subscriptions, credits |
 | git | `/api/git` | Git operations |
 | external_agent | `/api/external` | External agent API (API key auth, SSE events) |
+| channels | `/api/channels` | Messaging channel configuration (Telegram, Slack, Discord, WhatsApp) |
+| mcp | `/api/mcp` | User MCP server management and tool execution |
+| mcp_server | `/api/mcp-servers` | MCP server marketplace catalog |
 
 ### Middleware Stack (Order Matters)
 

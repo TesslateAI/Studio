@@ -4,28 +4,29 @@ Quick reference for Terraform infrastructure management.
 
 ## File Locations
 
-**Terraform files**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/terraform/aws/`
+**AWS environment stack**: `k8s/terraform/aws/`
+**Shared platform stack**: `k8s/terraform/shared/`
 
 ## Quick Commands
 
 ```bash
-# Navigate
+# Preferred: use aws-deploy.sh helper script
+./scripts/aws-deploy.sh init production     # Initialize with production backend
+./scripts/aws-deploy.sh plan production     # Plan changes
+./scripts/aws-deploy.sh apply production    # Apply changes
+
+# Shared stack (ECR, platform EKS, Headscale)
+./scripts/aws-deploy.sh init shared
+./scripts/aws-deploy.sh plan shared
+./scripts/aws-deploy.sh apply shared
+
+# Manual (fallback)
 cd k8s/terraform/aws
-
-# Initialize
 terraform init
-
-# Plan changes
 terraform plan
-
-# Apply changes
 terraform apply
-
-# View outputs
 terraform output
-
-# Destroy (DANGEROUS)
-terraform destroy
+terraform destroy  # DANGEROUS
 ```
 
 ## Common Tasks
@@ -72,19 +73,24 @@ terraform output cluster_name
 
 ## Critical Files
 
+### AWS Environment Stack (`k8s/terraform/aws/`)
 - `main.tf`: Provider configuration
-- `eks.tf`: Cluster and nodes
+- `eks.tf`: Cluster, nodes, addons (CoreDNS, kube-proxy), `eks-deployer` IAM role
 - `ecr.tf`: ECR URL locals (repos managed by shared stack)
 - `s3.tf`: Project storage
+- `iam.tf`: IAM roles including `eks-deployer` with EKS access policy
+- `kubernetes.tf`: K8s resources, secrets (including DISCORD_WEBHOOK_URL, AGENT_DISCORD_WEBHOOK_URL, TAVILY_API_KEY)
 - `terraform.{env}.tfvars`: Your values (gitignored, stored in AWS Secrets Manager)
 
-## Shared ECR Stack
+### Shared Platform Stack (`k8s/terraform/shared/`)
+- `ecr.tf`: ECR repositories (shared across all environments)
+- `eks.tf`: Platform EKS cluster for internal tools (Headscale VPN)
+- `helm.tf`: NGINX Ingress, cert-manager, EBS CSI driver
+- `headscale.tf`: Headscale VPN server with Litestream SQLite replication
+- `dns.tf`: Cloudflare DNS management
+- `s3.tf`: S3 buckets for Headscale state
+- `iam.tf`: EKS deployer role, IRSA roles for node groups
 
-ECR repos are managed by a **dedicated shared stack** at `k8s/terraform/shared/`:
-```bash
-./scripts/aws-deploy.sh init shared
-./scripts/aws-deploy.sh plan shared
-./scripts/aws-deploy.sh apply shared
-```
+See [shared.md](shared.md) for full documentation.
 
 Environment stacks reference ECR via `local.ecr_*_url` locals (computed from account ID + region). See [ecr.md](ecr.md).

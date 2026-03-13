@@ -5,6 +5,7 @@ Allows agents to proactively send messages to users via configured channels:
 - chat: Appears as an agent event in the chat stream (default)
 - discord: Sends via Discord webhook (if configured)
 - webhook: Posts to external webhook URL (if external agent API invocation)
+- reply: Responds via the originating messaging channel (Telegram, Slack, etc.)
 """
 
 import logging
@@ -43,10 +44,10 @@ async def send_message_executor(params: dict[str, Any], context: dict[str, Any])
             suggestion="Provide a meaningful message to send",
         )
 
-    if channel not in ("chat", "discord", "webhook"):
+    if channel not in ("chat", "discord", "webhook", "reply"):
         return error_output(
             message=f"Invalid channel '{channel}'",
-            suggestion="Use 'chat', 'discord', or 'webhook'",
+            suggestion="Use 'chat', 'discord', 'webhook', or 'reply'",
         )
 
     if channel == "chat":
@@ -131,6 +132,65 @@ async def send_message_executor(params: dict[str, Any], context: dict[str, Any])
                 suggestion="Check webhook URL and ensure it's accessible",
             )
 
+    elif channel == "reply":
+        # Reply channel: respond via the originating messaging channel
+        channel_config_id = context.get("channel_config_id")
+        channel_jid = context.get("channel_jid")
+        channel_type = context.get("channel_type")
+
+        if not channel_config_id or not channel_jid or not channel_type:
+            return error_output(
+                message="Reply channel is only available for channel-triggered tasks",
+                suggestion="Use 'chat' channel instead, or invoke this agent via a messaging channel (Telegram, Slack, etc.)",
+            )
+
+        try:
+            from ....services.channels.registry import decrypt_credentials, get_channel
+
+            # Load the ChannelConfig from DB to get encrypted credentials
+            db = context.get("db")
+            if not db:
+                return error_output(
+                    message="Database session not available in execution context",
+                    suggestion="This is an internal error — please report it",
+                )
+
+            from ....models import ChannelConfig
+            from sqlalchemy import select
+
+            result = await db.execute(
+                select(ChannelConfig).where(ChannelConfig.id == channel_config_id)
+            )
+            config = result.scalar_one_or_none()
+            if not config:
+                return error_output(
+                    message=f"Channel config '{channel_config_id}' not found",
+                    suggestion="The channel configuration may have been deleted",
+                )
+
+            credentials = decrypt_credentials(config.credentials)
+            channel_instance = get_channel(channel_type, credentials)
+
+            sender = params.get("sender")
+            await channel_instance.send_message(
+                jid=channel_jid,
+                text=message,
+                sender=sender,
+            )
+
+            return success_output(
+                message=f"Message sent to {channel_type} channel",
+                channel="reply",
+                channel_type=channel_type,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to send reply message via {channel_type}: {e}")
+            return error_output(
+                message=f"Failed to send reply message via {channel_type}: {str(e)}",
+                suggestion="Check channel configuration and credentials",
+            )
+
     return error_output(message="Unexpected channel state")
 
 
@@ -150,9 +210,13 @@ def register_send_message_tools(registry):
                     },
                     "channel": {
                         "type": "string",
-                        "description": "Notification channel: 'chat' (default, appears in chat), 'discord' (webhook), or 'webhook' (external callback URL)",
+                        "description": "Notification channel: 'chat' (default, appears in chat), 'discord' (webhook), 'webhook' (external callback URL), or 'reply' (respond via originating messaging channel)",
                         "default": "chat",
-                        "enum": ["chat", "discord", "webhook"],
+                        "enum": ["chat", "discord", "webhook", "reply"],
+                    },
+                    "sender": {
+                        "type": "string",
+                        "description": "Optional sender identity for pool/swarm messages (only used with 'reply' channel)",
                     },
                 },
                 "required": ["message"],

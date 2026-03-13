@@ -199,12 +199,23 @@ See [kubernetes-client.md](./kubernetes-client.md) for details.
 
 Manifest generation functions:
 - `create_pvc_manifest()` - Project storage
+- `create_service_pvc_manifest()` - Service-specific PVC storage
 - `create_file_manager_deployment()` - Always-running file pod
 - `create_container_deployment()` - Dev server deployment
+- `create_service_container_deployment()` - Service container deployment
 - `create_service_manifest()` / `create_ingress_manifest()` - Networking
 - `generate_git_clone_script()` - Template initialization
 
 See [kubernetes-helpers.md](./kubernetes-helpers.md) for details.
+
+### Container Startup Command Priority
+
+Both Docker and Kubernetes orchestrators use the same priority chain for determining the startup command:
+
+1. **DB `startup_command`** (`Container.startup_command`) - Set by setup-config or project creation
+2. **`.tesslate/config.json`** - Read from project files
+3. **TESSLATE.md** - Legacy markdown config
+4. **Generic fallback** - `npm install && npm run dev`
 
 ## Common Operations
 

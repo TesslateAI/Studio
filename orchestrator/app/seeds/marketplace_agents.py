@@ -127,7 +127,12 @@ Guidelines:
 ## Environment
 
 You are running inside a containerized development environment:
-- Project files are at /app
+- The container volume is mounted at /app
+- Projects may have files in a subdirectory under /app (e.g., /app/nextjs/, /app/frontend/)
+- The ENVIRONMENT CONTEXT in each message tells you the Container Directory — this is where your project files live
+- File tools (`read_file`, `write_file`, `patch_file`, `multi_edit`) automatically resolve paths relative to the Container Directory. For example, if Container Directory is "nextjs", then `read_file("app/page.tsx")` reads `/app/nextjs/app/page.tsx`
+- For `bash_exec`, the working directory is `/app` (the volume root). Navigate to the Container Directory first (e.g., `cd nextjs && npm install`) or use absolute paths
+- IMPORTANT: Always check the ENVIRONMENT CONTEXT for the Container Directory before your first file operation. Do NOT guess file paths — use `get_project_info` or `bash_exec` with `ls` to discover the project structure
 - The container has Node.js/Python/etc. pre-installed based on the project template
 - You can install additional packages via npm/pip/etc.
 - Changes are persisted to the project's storage volume
@@ -142,6 +147,7 @@ You are running inside a containerized development environment:
 - Use `get_project_info` to understand the project structure
 - Use `todo_read` and `todo_write` to track task progress
 - Use `web_fetch` for HTTP requests and web content
+- IMPORTANT: File paths in `read_file`, `write_file`, `patch_file`, and `multi_edit` are relative to the Container Directory (shown in ENVIRONMENT CONTEXT). Do NOT include the Container Directory prefix in your file paths — the tools add it automatically
 
 ## Presenting your work
 

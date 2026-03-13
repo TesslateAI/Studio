@@ -14,6 +14,8 @@ The `SnapshotManager` service handles EBS VolumeSnapshot operations for project 
 |---------|-------------|
 | **Non-blocking** | Snapshot creation returns immediately; frontend polls for status |
 | **Near-instant restore** | EBS lazy-loads data from snapshot for fast startup |
+| **Per-PVC snapshots** | Supports project-storage and service PVCs independently |
+| **Per-PVC rotation** | Snapshot rotation (`_rotate_snapshots`) is scoped to each PVC |
 | **Timeline UI** | Up to 5 snapshots per project for version history |
 | **Soft delete** | Snapshots retained 30 days after project deletion |
 
@@ -22,15 +24,17 @@ The `SnapshotManager` service handles EBS VolumeSnapshot operations for project 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    SnapshotManager                           │
+│                (Per-PVC Snapshot Management)                 │
 ├─────────────────────────────────────────────────────────────┤
-│  create_snapshot()     │  Creates VolumeSnapshot from PVC   │
-│  restore_from_snapshot │  Creates PVC from VolumeSnapshot   │
-│  wait_for_snapshot_ready │  Polls until readyToUse: true   │
-│  get_project_snapshots │  Lists snapshots for Timeline UI   │
-│  get_latest_ready_snapshot │  Latest ready snapshot per PVC │
-│  get_latest_ready_snapshots_by_pvc │  Dict of PVC→snapshot  │
-│  soft_delete_project_snapshots │  Marks for 30-day retention│
-│  cleanup_expired_snapshots │  Deletes old soft-deleted     │
+│  create_snapshot(pvc_name)         │  Creates VolumeSnapshot │
+│  restore_from_snapshot(pvc_name)   │  Creates PVC from snap  │
+│  wait_for_snapshot_ready           │  Polls readyToUse: true │
+│  get_project_snapshots             │  Lists for Timeline UI  │
+│  get_latest_ready_snapshot(pvc)    │  Latest per specific PVC│
+│  get_latest_ready_snapshots_by_pvc │  Dict of PVC→snapshot   │
+│  soft_delete_project_snapshots     │  30-day retention       │
+│  cleanup_expired_snapshots         │  Deletes old soft-del   │
+│  _rotate_snapshots (per PVC)       │  Rotation scoped to PVC │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -236,37 +240,57 @@ async def create_manual_snapshot(project_id: UUID, request: SnapshotCreate, ...)
     return SnapshotResponse(id=snapshot.id, status="pending", ...)
 ```
 
-### Hibernation Snapshot (Background Task)
+### Hibernation Snapshot (Background Task — Multi-PVC)
 
 ```python
 # In kubernetes_orchestrator.py
 async def _save_to_snapshot(self, project_id, user_id, namespace, db):
     snapshot_manager = get_snapshot_manager()
 
-    # Create snapshot
-    snapshot, error = await snapshot_manager.create_snapshot(
-        project_id, user_id, db, snapshot_type="hibernation"
-    )
+    # Discover all PVCs: project-storage + service PVCs
+    pvc_names = await self._get_hibernation_pvc_names(namespace)
+    # e.g. ["project-storage", "svc-postgres-data"]
 
-    # CRITICAL: Wait for ready before deleting namespace!
-    success, wait_error = await snapshot_manager.wait_for_snapshot_ready(snapshot, db)
+    # Create snapshot for each PVC
+    for pvc_name in pvc_names:
+        snapshot, error = await snapshot_manager.create_snapshot(
+            project_id, user_id, db,
+            snapshot_type="hibernation",
+            pvc_name=pvc_name  # Per-PVC snapshot
+        )
 
-    return success
+        # CRITICAL: Wait for ready before deleting namespace!
+        success, wait_error = await snapshot_manager.wait_for_snapshot_ready(snapshot, db)
+        if not success:
+            return False  # Abort — don't delete namespace
+
+    return True
 ```
 
-### Project Restoration
+### Project Restoration (Multi-PVC)
 
 ```python
 # In kubernetes_orchestrator.py
 async def _restore_from_snapshot(self, project_id, user_id, namespace, db):
     snapshot_manager = get_snapshot_manager()
 
-    # Create PVC from latest snapshot (or specific snapshot_id)
+    # 1. Restore project-storage PVC first
     success, error = await snapshot_manager.restore_from_snapshot(
-        project_id, user_id, namespace, db
+        project_id, user_id, db, pvc_name="project-storage"
     )
 
-    return success  # PVC ready immediately (EBS lazy-loads)
+    # 2. Restore service PVCs
+    service_snapshots = await snapshot_manager.get_latest_ready_snapshots_by_pvc(
+        project_id, db, snapshot_type="hibernation"
+    )
+    for pvc_name, snapshot in service_snapshots.items():
+        if pvc_name != "project-storage":
+            await snapshot_manager.restore_from_snapshot(
+                project_id, user_id, db,
+                snapshot_id=snapshot.id, pvc_name=pvc_name
+            )
+
+    return success  # PVCs ready immediately (EBS lazy-loads)
 ```
 
 ## Configuration

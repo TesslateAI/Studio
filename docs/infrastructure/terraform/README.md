@@ -17,18 +17,31 @@ Terraform provisions all AWS resources for Tesslate Studio production deployment
 ## Structure
 
 ```
-k8s/terraform/aws/
-├── main.tf                  # Provider and locals
-├── variables.tf             # Input variables
-├── outputs.tf               # Output values
-├── vpc.tf                   # VPC, subnets, NAT gateway
-├── eks.tf                   # EKS cluster, node groups, IRSA
-├── ecr.tf                   # Container registries
-├── s3.tf                    # Project storage bucket
-├── iam.tf                   # IAM roles for pods
-├── helm.tf                  # Helm charts (ingress, cert-manager)
-├── kubernetes.tf            # K8s resources (storage class, namespaces)
-└── terraform.tfvars         # Variable values (gitignored)
+k8s/terraform/
+├── aws/                     # Per-environment stack (production, beta)
+│   ├── main.tf              # Provider and locals
+│   ├── variables.tf         # Input variables
+│   ├── outputs.tf           # Output values
+│   ├── vpc.tf               # VPC, subnets, NAT gateway
+│   ├── eks.tf               # EKS cluster, node groups, IRSA, addons
+│   ├── ecr.tf               # ECR URL locals (repos managed by shared stack)
+│   ├── s3.tf                # Project storage bucket
+│   ├── iam.tf               # IAM roles for pods, eks-deployer role
+│   ├── helm.tf              # Helm charts (ingress, cert-manager)
+│   ├── kubernetes.tf        # K8s resources (storage class, namespaces, secrets)
+│   └── terraform.tfvars     # Variable values (gitignored, stored in AWS Secrets Manager)
+└── shared/                  # Shared platform stack
+    ├── main.tf              # Providers (AWS, K8s, Helm, Kubectl, Cloudflare)
+    ├── variables.tf         # Input variables
+    ├── outputs.tf           # ECR URLs, cluster info, Headscale URL
+    ├── ecr.tf               # ECR repositories (shared across environments)
+    ├── vpc.tf               # Isolated VPC (10.1.0.0/16)
+    ├── eks.tf               # Platform EKS cluster for internal tools
+    ├── iam.tf               # EKS deployer role, IRSA roles
+    ├── helm.tf              # NGINX Ingress, cert-manager
+    ├── dns.tf               # Cloudflare DNS records
+    ├── headscale.tf         # Headscale VPN deployment
+    └── s3.tf                # Litestream S3 bucket
 ```
 
 ## Prerequisites
@@ -186,13 +199,15 @@ See [eks.md](eks.md) for detailed documentation.
 1. **Primary** (on-demand): t3.large, 1-10 nodes, desired 2
 2. **Spot** (optional): t3.large/xlarge spot instances
 
-**Addons**:
-- CoreDNS (DNS resolution)
-- kube-proxy (networking)
+**Addons** (explicitly configured in Terraform):
+- CoreDNS (DNS resolution) — version pinned in Terraform
+- kube-proxy (networking) — version pinned in Terraform
 - VPC CNI (pod networking)
 - EBS CSI Driver (block storage)
 
 **IRSA Enabled**: IAM roles for service accounts
+
+**Node Group AZ Pinning**: Node groups can be pinned to specific availability zones via `eks_node_azs` variable (ensures EBS volumes and nodes are co-located)
 
 ### ECR Repositories (ecr.tf)
 
@@ -223,6 +238,11 @@ See [s3.md](s3.md) for detailed documentation.
 - CORS for frontend uploads
 
 ### IAM Roles (iam.tf)
+
+**EKS Deployer Role** (`tesslate-{env}-eks-deployer`):
+- Allows: EKS cluster admin access via `AmazonEKSClusterAdminPolicy`
+- Trust policy: Allows `sts:AssumeRole` from ARNs in `eks_admin_iam_arns`
+- Used by `aws-deploy.sh` for all cluster operations
 
 **Backend Service Account Role**:
 - Allows: S3 read/write to project bucket
@@ -452,4 +472,5 @@ terraform destroy -target=module.eks
 - [eks.md](eks.md): EKS cluster configuration
 - [ecr.md](ecr.md): Container registry
 - [s3.md](s3.md): Project storage
+- [shared.md](shared.md): Shared platform stack (ECR, Headscale VPN, platform EKS)
 - Terraform AWS Provider: https://registry.terraform.io/providers/hashicorp/aws/latest/docs

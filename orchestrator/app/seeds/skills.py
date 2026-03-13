@@ -43,6 +43,7 @@ OPENSOURCE_SKILLS = [
         "is_featured": True,
         "is_active": True,
         "is_published": True,
+        "git_repo_url": "https://github.com/vercel-labs/agent-skills",
         "downloads": 0,
         "rating": 5.0,
         "tags": ["react", "nextjs", "vercel", "performance", "open-source"],
@@ -88,6 +89,7 @@ OPENSOURCE_SKILLS = [
         "is_featured": True,
         "is_active": True,
         "is_published": True,
+        "git_repo_url": "https://github.com/vercel-labs/agent-skills",
         "downloads": 0,
         "rating": 5.0,
         "tags": ["design", "accessibility", "wcag", "responsive", "open-source"],
@@ -137,6 +139,7 @@ OPENSOURCE_SKILLS = [
         "is_featured": True,
         "is_active": True,
         "is_published": True,
+        "git_repo_url": "https://github.com/anthropics/skills",
         "downloads": 0,
         "rating": 5.0,
         "tags": ["frontend", "design-patterns", "components", "ui", "open-source"],
@@ -185,6 +188,7 @@ OPENSOURCE_SKILLS = [
         "is_featured": False,
         "is_active": True,
         "is_published": True,
+        "git_repo_url": "https://github.com/remotion-dev/skills",
         "downloads": 0,
         "rating": 5.0,
         "tags": ["remotion", "video", "react", "animation", "open-source"],
@@ -233,6 +237,7 @@ OPENSOURCE_SKILLS = [
         "is_featured": True,
         "is_active": True,
         "is_published": True,
+        "git_repo_url": "https://github.com/roin-orca/skills",
         "downloads": 0,
         "rating": 5.0,
         "tags": ["code-quality", "refactoring", "review", "efficiency", "open-source"],
@@ -671,6 +676,7 @@ async def seed_skills(db: AsyncSession) -> int:
             for key, value in skill_data.items():
                 if key != "slug":
                     setattr(existing, key, value)
+            existing.git_repo_url = skill_data.get("git_repo_url")
             if not existing.created_by_user_id:
                 existing.created_by_user_id = tesslate_user.id
             updated += 1

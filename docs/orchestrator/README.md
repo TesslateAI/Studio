@@ -17,14 +17,17 @@ orchestrator/
 ├── app/
 │   ├── main.py              # FastAPI entry point
 │   ├── config.py            # Configuration settings
-│   ├── models.py            # Database models (39 classes)
+│   ├── models.py            # Database models (45+ classes)
 │   ├── schemas.py           # Pydantic schemas
 │   ├── database.py          # SQLAlchemy setup
 │   │
 │   ├── routers/             # API endpoints
-│   │   ├── projects.py      # Project CRUD, files, containers (5142 lines)
-│   │   ├── chat.py          # Agent chat, streaming (2044 lines)
-│   │   ├── marketplace.py   # Agent/base marketplace (2417 lines)
+│   │   ├── projects.py      # Project CRUD, files, containers, setup-config
+│   │   ├── chat.py          # Agent chat, streaming
+│   │   ├── marketplace.py   # Agent/base/skill/MCP marketplace
+│   │   ├── channels.py      # Messaging channel configuration
+│   │   ├── mcp.py           # User MCP server management
+│   │   ├── mcp_server.py    # MCP server marketplace catalog
 │   │   └── ...              # 20+ more routers
 │   │
 │   ├── services/            # Business logic
@@ -33,13 +36,37 @@ orchestrator/
 │   │   │   ├── docker.py    # Docker Compose mode
 │   │   │   └── kubernetes_orchestrator.py  # K8s mode
 │   │   ├── s3_manager.py    # S3 sandwich pattern
+│   │   ├── skill_discovery.py # Skill discovery and loading
+│   │   ├── channels/        # Messaging channel integrations
+│   │   │   ├── base.py      # Abstract channel interface
+│   │   │   ├── telegram.py  # Telegram bot integration
+│   │   │   ├── slack.py     # Slack integration
+│   │   │   ├── discord_bot.py # Discord webhook integration
+│   │   │   ├── whatsapp.py  # WhatsApp integration
+│   │   │   ├── formatting.py # Cross-platform message formatting
+│   │   │   └── registry.py  # Channel provider registry
+│   │   ├── mcp/             # Model Context Protocol
+│   │   │   ├── client.py    # MCP client for server communication
+│   │   │   ├── bridge.py    # Bridge MCP tools into agent tool registry
+│   │   │   └── manager.py   # MCP server lifecycle management
 │   │   └── ...              # 30+ services
+│   │
+│   ├── seeds/               # Database seed data
+│   │   ├── skills.py        # Marketplace skills (15+ open-source + Tesslate)
+│   │   └── marketplace_agents.py # Marketplace agents
 │   │
 │   └── agent/               # AI agent system
 │       ├── base.py          # AbstractAgent
 │       ├── stream_agent.py  # Streaming agent
 │       ├── factory.py       # Agent creation
-│       └── tools/           # Agent tools (bash, read/write, etc.)
+│       └── tools/           # Agent tools
+│           ├── web_ops/     # Web search, fetch, send_message
+│           │   ├── search.py     # Multi-provider web search
+│           │   ├── fetch.py      # HTTP fetch tool
+│           │   ├── send_message.py # Messaging channel tool
+│           │   └── providers.py  # Search provider implementations
+│           └── skill_ops/   # Skill tools
+│               └── load_skill.py # Load skill at runtime
 │
 ├── Dockerfile               # Backend image
 ├── Dockerfile.devserver     # User project container image
@@ -61,10 +88,13 @@ orchestrator/
 | File | Lines | Purpose |
 |------|-------|---------|
 | [main.py](../../orchestrator/app/main.py) | ~700 | Entry point, middleware, router registration |
-| [config.py](../../orchestrator/app/config.py) | ~200 | All configuration settings (env vars) |
-| [models.py](../../orchestrator/app/models.py) | ~1000 | 39 SQLAlchemy database models |
-| [routers/projects.py](../../orchestrator/app/routers/projects.py) | 5142 | Core project management API |
+| [config.py](../../orchestrator/app/config.py) | ~490 | All configuration settings (env vars) |
+| [models.py](../../orchestrator/app/models.py) | ~1800 | 45+ SQLAlchemy database models |
+| [routers/projects.py](../../orchestrator/app/routers/projects.py) | 5142+ | Core project management API, setup-config |
 | [routers/chat.py](../../orchestrator/app/routers/chat.py) | 2044 | Agent chat and streaming |
+| [routers/channels.py](../../orchestrator/app/routers/channels.py) | - | Messaging channel CRUD and webhook |
+| [routers/mcp.py](../../orchestrator/app/routers/mcp.py) | - | User MCP server install/config/execute |
+| [routers/mcp_server.py](../../orchestrator/app/routers/mcp_server.py) | - | MCP server marketplace catalog |
 | [agent/stream_agent.py](../../orchestrator/app/agent/stream_agent.py) | ~150 | Streaming AI agent implementation |
 
 ## Technology Stack
@@ -84,8 +114,17 @@ orchestrator/
 ```
 HTTP Request → Middleware (Auth, CORS) → Router → Service → Database/External
      │                                      │
-     │                                      └── Agent System (for /chat)
-     │                                           └── LLM + Tools
+     │                                      ├── Agent System (for /chat)
+     │                                      │    ├── LLM + Tools
+     │                                      │    ├── Skills (loaded at runtime)
+     │                                      │    ├── MCP Tools (bridged from MCP servers)
+     │                                      │    └── Web Search (Tavily/Brave/DuckDuckGo)
+     │                                      │
+     │                                      ├── Channel System (for /channels)
+     │                                      │    └── Telegram/Slack/Discord/WhatsApp
+     │                                      │
+     │                                      └── MCP System (for /mcp)
+     │                                           └── MCP Server lifecycle + tool execution
      │
      └── Response (JSON/Streaming)
 ```
@@ -116,6 +155,10 @@ uvicorn app.main:app --reload --port 8000
 | `DEPLOYMENT_MODE` | `docker` or `kubernetes` |
 | `LITELLM_API_BASE` | LLM API endpoint |
 | `APP_DOMAIN` | Application domain |
+| `WEB_SEARCH_PROVIDER` | Search backend (tavily/brave/duckduckgo) |
+| `TAVILY_API_KEY` | Tavily search API key |
+| `CHANNEL_ENCRYPTION_KEY` | Fernet key for channel credentials |
+| `MCP_TOOL_TIMEOUT` | MCP tool call timeout (seconds) |
 
 ## Common Tasks
 
@@ -126,6 +169,9 @@ uvicorn app.main:app --reload --port 8000
 | Add agent tool | [agent/tools/](agent/tools/README.md) |
 | Add database model | [models/](models/README.md) |
 | Change container behavior | [orchestration/](orchestration/README.md) |
+| Add messaging channel | `services/channels/` - implement `base.py` interface |
+| Add MCP integration | `services/mcp/` - client, bridge, manager |
+| Add marketplace skill | `seeds/skills.py` - add to OPENSOURCE_SKILLS or TESSLATE_SKILLS |
 
 ## Related Documentation
 

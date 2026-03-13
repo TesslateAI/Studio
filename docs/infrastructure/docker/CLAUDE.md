@@ -76,6 +76,7 @@ docker compose up --build -d
 | `traefik` | `tesslate-traefik` | 80, 443, 8080 | Reverse proxy + dashboard |
 | `redis` | `tesslate-redis` | 6379 | Redis (pub/sub, task queue, cache) |
 | `worker` | `tesslate-worker` | — | ARQ worker (agent task execution) |
+| `devserver` | — | — | Build-only service for tesslate-devserver image |
 
 ## Access URLs
 

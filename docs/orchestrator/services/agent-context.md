@@ -2,7 +2,7 @@
 
 **File**: `orchestrator/app/services/agent_context.py` (494 lines)
 
-Constructs the complete execution context required for an agent task, including project metadata, container architecture, git status, chat history, and TESSLATE.md documentation. This context is pre-built before dispatching to the worker to minimize database queries during agent execution.
+Constructs the complete execution context required for an agent task, including project metadata, container architecture, git status, chat history, TESSLATE.md documentation, and `.tesslate/config.json` configuration. This context is pre-built before dispatching to the worker to minimize database queries during agent execution.
 
 ## When to Load This Context
 
@@ -29,6 +29,8 @@ Load this context when:
 - **[agent-task.md](./agent-task.md)**: Serializable payload that carries the context
 - **[../agent/CLAUDE.md](../agent/CLAUDE.md)**: AI agent system that uses the context
 - **[../models/CLAUDE.md](../models/CLAUDE.md)**: Database models for Message, AgentStep, Container
+- **[skill-discovery.md](./skill-discovery.md)**: Skill discovery integrated into context building
+- **[mcp.md](./mcp.md)**: MCP tools bridged and registered during context assembly
 
 ## Architecture
 
@@ -48,15 +50,26 @@ Load this context when:
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────────────────────────────────┐ │
-│  │  Architecture │  │  TESSLATE.md                             │ │
-│  │  Context      │  │  Documentation                           │ │
+│  │  Architecture │  │  TESSLATE.md + .tesslate/config.json     │ │
+│  │  Context      │  │  Documentation & Configuration           │ │
 │  │              │  │                                          │ │
 │  │  _build_     │  │  _build_tesslate_context()               │ │
-│  │  architecture │  │  → Read from container                  │ │
-│  │  _context()  │  │  → Copy if missing                      │ │
-│  │  → containers│  │  → Project-specific docs                │ │
-│  │  → connections│  │                                          │ │
+│  │  architecture │  │  → Read TESSLATE.md from container      │ │
+│  │  _context()  │  │  → Read .tesslate/config.json           │ │
+│  │  → containers│  │  → Copy if missing                      │ │
+│  │  → connections│  │  → Project-specific docs                │ │
 │  │  → env vars  │  │                                          │ │
+│  └──────────────┘  └──────────────────────────────────────────┘ │
+│                                                                  │
+│  ┌──────────────┐  ┌──────────────────────────────────────────┐ │
+│  │  Skills       │  │  MCP Tools                               │ │
+│  │  Discovery    │  │  Bridging                                │ │
+│  │              │  │                                          │ │
+│  │  discover_   │  │  McpManager.get_agent_tools()            │ │
+│  │  skills()    │  │  → Discover server capabilities          │ │
+│  │  → DB skills │  │  → Cache schemas in Redis                │ │
+│  │  → File skills│  │  → Bridge into ToolRegistry             │ │
+│  │  → Catalog   │  │  → Register on agent instance            │ │
 │  └──────────────┘  └──────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────┘
 ```

@@ -362,6 +362,79 @@ The repository import modal has been refactored into sub-components for maintain
 | `ConnectProviderInline` | `modals/RepoImportModal/ConnectProviderInline.tsx` | OAuth popup for connecting git providers |
 | `useRepoResolver` | `modals/RepoImportModal/useRepoResolver.ts` | Custom hook for URL resolution with debounce |
 
+### ServiceConfigForm
+
+**File**: `app/src/components/ServiceConfigForm.tsx`
+
+Reusable form component for editing `.tesslate/config.json` structure. Used by the ProjectSetup page for both agent-analyzed and manual configurations.
+
+```typescript
+interface ServiceConfigFormProps {
+  config: TesslateConfig;
+  onChange: (config: TesslateConfig) => void;
+  readOnly?: boolean;
+}
+```
+
+**Features**:
+- **Apps section**: Add, remove, and edit app services with expandable cards
+  - Directory, port, start command, environment variables per app
+  - Primary app selector (determines default preview container)
+  - Inline env var adder with key/value inputs
+- **Infrastructure section**: Add pre-built infrastructure from catalog
+  - Built-in catalog: PostgreSQL, Redis, MySQL, MongoDB, MinIO
+  - Shows image name and port for each service
+- Read-only mode support via `readOnly` prop
+
+**Infrastructure Catalog**:
+```typescript
+const INFRA_CATALOG: Record<string, { image: string; port: number }> = {
+  postgres: { image: 'postgres:16', port: 5432 },
+  redis: { image: 'redis:7-alpine', port: 6379 },
+  mysql: { image: 'mysql:8', port: 3306 },
+  mongo: { image: 'mongo:7', port: 27017 },
+  minio: { image: 'minio/minio:latest', port: 9000 },
+};
+```
+
+### PreviewPortPicker
+
+**File**: `app/src/components/PreviewPortPicker.tsx`
+
+Dropdown component for switching the browser preview between multiple previewable containers in a project. Only renders when there are 2 or more previewable containers.
+
+```typescript
+export interface PreviewableContainer {
+  id: string;
+  name: string;
+  port: number;
+  url: string;
+  isPrimary: boolean;
+}
+
+interface PreviewPortPickerProps {
+  containers: PreviewableContainer[];
+  selectedContainerId: string | null;
+  onSelect: (container: PreviewableContainer) => void;
+}
+```
+
+**Features**:
+- Compact button showing current container name and port
+- Dropdown with all previewable containers
+- Primary container indicator
+- Click-outside to close
+- Hidden when fewer than 2 containers
+
+**Usage** (in Project.tsx):
+```typescript
+<PreviewPortPicker
+  containers={previewableContainers}
+  selectedContainerId={selectedPreviewContainerId}
+  onSelect={handlePreviewContainerSwitch}
+/>
+```
+
 ### Container Loading Overlay
 
 **Pattern for Container Startup Feedback**:

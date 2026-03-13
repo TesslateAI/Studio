@@ -12,7 +12,7 @@ export interface MarketplaceItem {
   description: string;
   long_description?: string;
   category: string;
-  item_type: 'agent' | 'base' | 'theme' | 'tool' | 'integration';
+  item_type: 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
   mode?: string;
   agent_type?: string;
   model?: string;

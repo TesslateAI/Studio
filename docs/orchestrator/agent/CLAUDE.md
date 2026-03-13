@@ -22,6 +22,12 @@ This context provides information about Tesslate Studio's AI agent system, inclu
 - `orchestrator/app/agent/tools/approval_manager.py` - User approval system for ask mode
 - `orchestrator/app/agent/tools/file_ops/` - File read/write/edit tools
 - `orchestrator/app/agent/tools/shell_ops/` - Shell and command execution tools
+- `orchestrator/app/agent/tools/web_ops/` - Web fetch, search, and send_message tools
+  - `search.py` - web_search tool (searches via Tavily/Brave/DuckDuckGo)
+  - `providers.py` - Search provider abstraction with automatic fallback
+  - `send_message.py` - send_message tool (chat, Discord, webhook, or reply channel)
+- `orchestrator/app/agent/tools/skill_ops/` - Skill loading via progressive disclosure
+  - `load_skill.py` - Loads full skill instructions on-demand from DB or project files
 - `orchestrator/app/agent/tools/graph_ops/` - Container management tools for graph view
 
 ### TesslateAgent Supporting Files
@@ -133,6 +139,9 @@ This context relates to:
 - **Worker** (`orchestrator/app/worker.py`) - Distributed agent execution
 - **Pub/Sub** (`orchestrator/app/services/pubsub.py`) - Real-time event streaming
 - **External API** (`orchestrator/app/routers/external_agent.py`) - External agent invocation
+- **Skill Discovery** (`orchestrator/app/services/skill_discovery.py`) - Discovers available skills for progressive disclosure
+- **Channel Service** (`orchestrator/app/services/channels/`) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
+- **MCP Service** (`orchestrator/app/services/mcp/`) - MCP server management and tool bridging
 
 ## Agent Execution Patterns
 

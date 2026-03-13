@@ -17,6 +17,8 @@ This document provides a comprehensive overview of the agent system in Tesslate 
 11. [Edit Mode System](#11-edit-mode-system)
 12. [Model Adapters](#12-model-adapters)
 13. [Complete Execution Flow](#13-complete-execution-flow)
+14. [Universal Project Setup (.tesslate/config.json)](#14-universal-project-setup-tesslateconfigjson)
+15. [Skills System](#15-skills-system)
 
 ---
 
@@ -271,7 +273,7 @@ erDiagram
         string name
         string slug
         string description
-        string item_type "agent|base|tool|integration"
+        string item_type "agent|base|skill|mcp_server"
         string system_prompt
         string mode "stream|agent"
         string agent_type "StreamAgent|IterativeAgent|ReActAgent"
@@ -1303,6 +1305,187 @@ sequenceDiagram
 
 ---
 
+## 14. Universal Project Setup (.tesslate/config.json)
+
+### 14.1 Overview
+
+The Universal Project Setup system uses `.tesslate/config.json` to define how a project's containers are created, configured, and started. This replaces the legacy `TESSLATE.md`-only approach with a structured JSON configuration that supports multi-service architectures, infrastructure dependencies, and per-app startup commands.
+
+The **Librarian agent** (auto-added to all users) is responsible for analyzing project files and generating `.tesslate/config.json` when a project is first set up or imported.
+
+### 14.2 Config Structure
+
+```json
+{
+  "apps": {
+    "frontend": {
+      "directory": "frontend",
+      "port": 5173,
+      "start": "npm run dev",
+      "env": { "NODE_ENV": "development" }
+    },
+    "backend": {
+      "directory": "backend",
+      "port": 8000,
+      "start": "uvicorn main:app --host 0.0.0.0 --port 8000",
+      "env": {}
+    }
+  },
+  "infrastructure": {
+    "postgres": {
+      "image": "postgres:15-alpine",
+      "port": 5432
+    }
+  },
+  "primaryApp": "frontend"
+}
+```
+
+### 14.3 Config Data Model
+
+```mermaid
+flowchart TB
+    subgraph TesslateProjectConfig
+        direction TB
+        Apps["apps: dict[str, AppConfig]"]
+        Infra["infrastructure: dict[str, InfraConfig]"]
+        Primary["primaryApp: str"]
+    end
+
+    subgraph AppConfig
+        AD["directory: str"]
+        AP["port: int"]
+        AS["start: str"]
+        AE["env: dict"]
+    end
+
+    subgraph InfraConfig
+        II["image: str"]
+        IP["port: int"]
+    end
+
+    Apps --> AppConfig
+    Infra --> InfraConfig
+```
+
+### 14.4 Container Startup Priority
+
+When starting a container, the system resolves the startup command using this priority chain:
+
+```mermaid
+flowchart TB
+    Start([Start Container]) --> DB{DB startup_command?}
+    DB -->|Yes| UseDB[Use DB startup_command]
+    DB -->|No| Config{.tesslate/config.json?}
+    Config -->|Yes| UseConfig[Use config.json app start]
+    Config -->|No| Legacy{TESSLATE.md?}
+    Legacy -->|Yes| UseLegacy[Use TESSLATE.md start command]
+    Legacy -->|No| Fallback[Generic auto-detect fallback]
+```
+
+1. **DB `startup_command`**: Per-container override stored in the `containers` table (migration 0023)
+2. **`.tesslate/config.json`**: Structured project config with per-app startup commands
+3. **`TESSLATE.md`**: Legacy markdown-based config (still supported as fallback)
+4. **Generic fallback**: Auto-detects `package.json`, `requirements.txt`, `go.mod`, etc.
+
+### 14.5 Auto-Sync Flow
+
+When an agent writes `.tesslate/config.json`, containers are automatically created or updated in the database:
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant FS as Filesystem
+    participant O as Orchestrator
+    participant DB as Database
+
+    A->>FS: Write .tesslate/config.json
+    Note over FS: {apps: {frontend, backend}, infrastructure: {postgres}}
+
+    O->>FS: Read config on project start
+    O->>O: Parse TesslateProjectConfig
+
+    loop For each app in config.apps
+        O->>DB: Create/update Container (name, directory, port, startup)
+    end
+
+    loop For each service in config.infrastructure
+        O->>DB: Create/update Container (name, image, port)
+    end
+```
+
+### 14.6 Key Files
+
+| File | Purpose |
+|------|---------|
+| `orchestrator/app/services/base_config_parser.py` | Config parsing, validation, and startup command resolution |
+| `orchestrator/app/seeds/marketplace_agents.py` | Librarian agent definition (generates config.json) |
+
+For the complete guide, see [Universal Project Setup](universal-project-setup.md).
+
+---
+
+## 15. Skills System
+
+### 15.1 Overview
+
+Skills are reusable knowledge modules (stored as `MarketplaceAgent` records with `item_type='skill'`) that can be attached to agents to extend their capabilities. Skills contain a `skill_body` field with markdown-formatted instructions, guidelines, or best practices that get injected into the agent's context.
+
+### 15.2 Skill Data Model
+
+```mermaid
+erDiagram
+    MarketplaceAgent ||--o{ AgentSkillAssignment : "assigned_to"
+    MarketplaceAgent {
+        uuid id PK
+        string item_type "agent|skill|mcp_server|base"
+        string skill_body "Markdown skill content"
+        string git_repo_url "Source repo URL"
+    }
+
+    AgentSkillAssignment {
+        uuid id PK
+        uuid agent_id FK
+        uuid skill_id FK
+        uuid user_id FK
+    }
+```
+
+Skills are linked to agents via the `agent_skill_assignments` table (migration 0024). A single skill can be assigned to multiple agents, and each assignment is user-scoped.
+
+### 15.3 Skill Sources
+
+Skills can come from two sources:
+
+1. **GitHub open-source skills**: Fetched from public repositories (e.g., `vercel-labs/agent-skills`, `anthropics/skills`). The `git_repo_url` and `github_raw_url` fields track the source. A `fallback_skill_body` is stored in case the GitHub fetch fails.
+2. **Custom Tesslate skills**: Bundled skill content defined directly in the seed data.
+
+### 15.4 Seeded Skills
+
+| Skill | Category | Source |
+|-------|----------|--------|
+| Vercel React Best Practices | frontend | vercel-labs/agent-skills |
+| Web Design Guidelines | design | vercel-labs/agent-skills |
+| Frontend Design | frontend | anthropics/skills |
+| Remotion Best Practices | frontend | remotion/skills |
+| Simplify | general | anthropics/skills |
+| Deploy Vercel | deployment | vercel-labs/agent-skills |
+| Testing Setup | testing | open-source |
+| API Design | backend | open-source |
+| Docker Setup | devops | open-source |
+| Auth Integration | backend | open-source |
+| Database Schema | backend | open-source |
+
+### 15.5 Key Files
+
+| File | Purpose |
+|------|---------|
+| `orchestrator/app/seeds/skills.py` | Skill definitions and `seed_skills()` function |
+| `scripts/seed/seed_skills.py` | Standalone seed script for skills |
+| `orchestrator/alembic/versions/0024_add_skills_system.py` | Skills migration (skill_body + agent_skill_assignments) |
+
+---
+
 ## Key Files Reference
 
 | Component | File Path |
@@ -1326,3 +1509,5 @@ sequenceDiagram
 | Volume Manager | `orchestrator/app/services/volume_manager.py` |
 | PTY Broker | `orchestrator/app/services/pty_broker.py` |
 | Shell Session Manager | `orchestrator/app/services/shell_session_manager.py` |
+| Base Config Parser | `orchestrator/app/services/base_config_parser.py` |
+| Skills Seed | `orchestrator/app/seeds/skills.py` |

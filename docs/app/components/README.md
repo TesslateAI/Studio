@@ -35,6 +35,8 @@ components/
 - **Preview.tsx** - Standalone preview component
 - **ToolCallDisplay.tsx** - Visualization of agent tool invocations
 - **ToolManagement.tsx** - Agent tool configuration UI
+- **ServiceConfigForm.tsx** - Form for editing `.tesslate/config.json` (apps, infrastructure, env vars)
+- **PreviewPortPicker.tsx** - Dropdown to switch browser preview between multiple containers
 - **DashboardLayout.tsx** - Main dashboard wrapper
 - **Layout.tsx** - Application shell
 - **DottedSurface.tsx** - Animated background pattern

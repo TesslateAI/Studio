@@ -78,6 +78,25 @@ The services layer sits between the API routers and the data models, providing r
 - **[discord_service.py](c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/discord_service.py)** - Discord webhook notifications
 - **[ntfy_service.py](c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/ntfy_service.py)** - Ntfy.sh notifications
 
+### Messaging Channels
+- **channels/** - Multi-platform messaging channel integrations
+  - `base.py` - `AbstractChannel` ABC, `InboundMessage` dataclass
+  - `telegram.py` - Telegram Bot API integration
+  - `slack.py` - Slack Bot integration
+  - `discord_bot.py` - Discord Bot integration
+  - `whatsapp.py` - WhatsApp Business API integration
+  - `registry.py` - Channel factory and credential encryption (Fernet)
+  - `formatting.py` - Platform-specific message formatting
+
+### MCP Integration
+- **mcp/** - Model Context Protocol server management
+  - `client.py` - MCP client with stdio + Streamable HTTP transport
+  - `bridge.py` - Bridges MCP tools/resources/prompts into Tesslate's ToolRegistry
+  - `manager.py` - `McpManager` for per-user server discovery and Redis-backed schema caching
+
+### Skill Discovery
+- **[skill_discovery.py](../../orchestrator/app/services/skill_discovery.py)** - Discovers available skills from DB (AgentSkillAssignment) and project files (.agents/skills/SKILL.md). Returns lightweight `SkillCatalogEntry` objects (name + description only) for progressive disclosure.
+
 ## Architecture Patterns
 
 ### Singleton Pattern
@@ -285,6 +304,9 @@ async def test_create_resource():
 - [litellm.md](./litellm.md) - LiteLLM AI model routing
 - [stripe.md](./stripe.md) - Stripe payment processing
 - [deployment-providers.md](./deployment-providers.md) - External deployment providers
+- [skill-discovery.md](./skill-discovery.md) - Skill discovery service for progressive disclosure
+- [channels.md](./channels.md) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
+- [mcp.md](./mcp.md) - MCP server management, client, and tool bridging
 - [CLAUDE.md](./CLAUDE.md) - Agent context for services development
 
 ## Key Design Principles

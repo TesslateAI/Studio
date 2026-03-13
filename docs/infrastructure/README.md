@@ -35,7 +35,7 @@ infrastructure/
 │   │   ├── README.md
 │   │   ├── CLAUDE.md
 │   │   ├── minikube.md          # Local development
-│   │   └── aws.md               # AWS EKS production
+│   │   └── aws.md               # AWS EKS (beta + production)
 │   ├── rbac.md                  # RBAC configuration
 │   ├── network-policies.md      # Network security
 │   └── s3-sandwich.md           # Hibernation pattern
@@ -49,7 +49,8 @@ infrastructure/
     ├── CLAUDE.md
     ├── eks.md                   # EKS cluster
     ├── ecr.md                   # Container registry
-    └── s3.md                    # Project storage
+    ├── s3.md                    # Project storage
+    └── shared.md                # Shared platform stack (ECR, Headscale VPN)
 ```
 
 ## Key Concepts
@@ -141,16 +142,13 @@ minikube -p tesslate tunnel
 ### Production (AWS EKS)
 
 ```bash
-# Login to ECR
+# Recommended: use aws-deploy.sh (handles ECR login, platform build, push, restart)
+./scripts/aws-deploy.sh build production backend frontend devserver
+./scripts/aws-deploy.sh deploy-k8s production
+
+# Manual build (ALWAYS use --platform linux/amd64)
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-
-# Build and push
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
-docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-
-# Deploy
-kubectl apply -k k8s/overlays/aws
+docker buildx build --platform linux/amd64 --no-cache -t <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:production -f orchestrator/Dockerfile orchestrator/ --push
 
 # Force pod restart
 kubectl delete pod -n tesslate -l app=tesslate-backend
@@ -163,6 +161,7 @@ kubectl delete pod -n tesslate -l app=tesslate-backend
 **Purpose**: FastAPI orchestrator that manages projects, containers, and AI agents
 **Base**: `python:3.11-slim`
 **Key Dependencies**: Docker CLI (for Docker mode), uvicorn, SQLAlchemy, Kubernetes client
+**Package Manager**: `pip install` directly (no `uv`)
 
 ### tesslate-frontend
 **File**: `app/Dockerfile.prod`
@@ -181,9 +180,13 @@ kubectl delete pod -n tesslate -l app=tesslate-backend
 
 ### Core Services (Kubernetes `tesslate` namespace)
 
+All deployments include `revisionHistoryLimit: 3` for ReplicaSet history management.
+
 - **tesslate-backend**: Orchestrator API (Port 8000)
 - **tesslate-frontend**: React UI (Port 80)
+- **tesslate-worker**: ARQ worker for agent task execution
 - **postgres**: PostgreSQL database (Port 5432)
+- **redis**: Redis server (Port 6379)
 - **dev-environment-cleanup**: CronJob for hibernation (every 2 minutes)
 
 ### User Project Namespace (`proj-{uuid}`)
@@ -310,7 +313,8 @@ kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
 
 ## References
 
-- Kubernetes Manifests: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/`
-- Docker Compose: `c:/Users/Smirk/Downloads/Tesslate-Studio/docker-compose.yml`
-- Terraform: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/terraform/aws/`
-- Backend Config: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/config.py`
+- Kubernetes Manifests: `k8s/`
+- Docker Compose: `docker-compose.yml`
+- Terraform (per-environment): `k8s/terraform/aws/`
+- Terraform (shared platform): `k8s/terraform/shared/`
+- Backend Config: `orchestrator/app/config.py`

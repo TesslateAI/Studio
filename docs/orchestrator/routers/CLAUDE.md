@@ -35,6 +35,9 @@ Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 - `webhooks.py` (52 lines) - Webhook endpoints
 - `referrals.py` (46 lines) - Referral program
 - `external_agent.py` (500 lines) - External API for agent invocation (API key auth, SSE events, webhook callbacks)
+- `channels.py` (~730 lines) - Messaging channel configs (Telegram, Slack, Discord, WhatsApp), webhook inbound, message history
+- `mcp.py` (~510 lines) - MCP server install/uninstall, credential management, discovery, agent assignments
+- `mcp_server.py` (~120 lines) - Tesslate-as-MCP-server (FastMCP Streamable HTTP transport)
 
 ### Supporting Files
 - `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/main.py` - FastAPI app setup, middleware, router registration
@@ -133,7 +136,8 @@ async def get_agents(
 
 **Public Routers:**
 - `themes.py` - Theme presets (needed before login for UI)
-- `marketplace.py` - Agent browsing (public access, optional auth for user context)
+- `marketplace.py` - Agent/skill/MCP server browsing (public access, optional auth for user context)
+- `channels.py` - Webhook inbound endpoints (unauthenticated, platform signature verified)
 
 ### New Marketplace Endpoints
 
@@ -483,9 +487,11 @@ success, build_output = await builder.trigger_build(
 ## Examples
 
 See individual router documentation files for detailed examples:
-- `projects.md` - Project management workflows
+- `projects.md` - Project management workflows, setup config, project analysis
 - `chat.md` - Agent chat streaming
-- `marketplace.md` - Agent publishing and purchasing
+- `marketplace.md` - Agent/skill/MCP server publishing and purchasing
 - `themes.md` - Theme API (public endpoints)
 - `deployments.md` - External deployment workflows
 - `billing.md` - Subscription and payment flows
+- `channels.md` - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
+- `mcp.md` - MCP server install/manage, agent assignments, Tesslate MCP server

@@ -8,7 +8,7 @@ Side panels provide specialized functionality for project management, architectu
 
 ### ArchitecturePanel.tsx
 
-**AI-Generated Diagrams**: Visualizes project architecture using Mermaid or C4 PlantUML diagrams.
+**AI-Generated Diagrams**: Visualizes project architecture using Mermaid or C4 PlantUML diagrams. This panel has been significantly streamlined (~381 lines removed) to focus on core diagram rendering.
 
 **Features**:
 - Generate Mermaid flowcharts or C4 architecture diagrams
@@ -16,7 +16,6 @@ Side panels provide specialized functionality for project management, architectu
 - Zoom controls (zoom in/out, reset, percentage display)
 - Theme-aware rendering (dark/light colors)
 - PlantUML rendering via Kroki API
-- Diagram persistence (saved in project settings)
 
 **Props**:
 ```typescript

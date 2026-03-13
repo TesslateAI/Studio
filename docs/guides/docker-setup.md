@@ -108,22 +108,26 @@ The database is auto-initialized on first startup (tables created via Alembic mi
 
 ### 7. Seed the Database
 
-After the first startup, seed marketplace data (bases, agents, themes):
+After the first startup, seed marketplace data (bases, agents, skills, themes):
 
 ```bash
 # Copy seed scripts into the backend container
 docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_skills.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_mcp_servers.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_themes.py tesslate-orchestrator:/tmp/
 docker exec tesslate-orchestrator mkdir -p /tmp/themes
 docker cp scripts/themes/. tesslate-orchestrator:/tmp/themes/
 
-# Run seed scripts (order matters: bases → agents → themes)
+# Run seed scripts (order matters: bases → agents → skills → themes)
 # On Windows (Git Bash/MSYS2), prefix each with MSYS_NO_PATHCONV=1
 docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
 docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
 docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_skills.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_mcp_servers.py
 docker exec -e PYTHONPATH=/app tesslate-orchestrator python -c "
 import asyncio, sys; sys.path.insert(0, '/app')
 from pathlib import Path
@@ -134,12 +138,16 @@ asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
 
 This creates:
 - **4 marketplace bases**: Next.js 16, Vite+React+FastAPI, Vite+React+Go, Expo
-- **5 official agents**: Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent
+- **6 official agents**: Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent, Librarian
 - **6 open-source agents**: Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer
+- **11 marketplace skills**: Open-source skills from GitHub (Vercel React, Web Design, Frontend Design, Remotion, etc.)
+- **6 MCP servers**: GitHub, Slack, and other MCP server configurations
 - **7 themes**: default-dark, default-light, midnight, ocean, forest, rose, sunset
 - **1 system account**: Tesslate official account (official@tesslate.com)
 
 All seed scripts are idempotent — safe to re-run without duplicating data.
+
+> **Note**: Seeds also run automatically on backend startup via `run_all_seeds()`. The Librarian agent is automatically added to all user libraries.
 
 ## What Gets Created
 

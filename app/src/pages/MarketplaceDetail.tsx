@@ -171,8 +171,33 @@ export default function MarketplaceDetail() {
           navigate('/marketplace');
         }
       } catch {
-        toast.error('Failed to load extension');
-        navigate('/marketplace');
+        // Try MCP server if base not found
+        try {
+          const mcpData = await marketplaceApi.getMcpServerDetails(slug!);
+          if (mcpData) {
+            setItem({ ...mcpData, item_type: 'mcp_server' });
+            // Load related MCP servers from same category
+            try {
+              const relatedResult = await marketplaceApi.getAllMcpServers({
+                category: mcpData.category || undefined,
+                limit: 5,
+              });
+              const related = (relatedResult.mcp_servers || [])
+                .filter((s: Record<string, unknown>) => s.slug !== slug)
+                .slice(0, 4)
+                .map((s: Record<string, unknown>) => ({ ...s, item_type: 'mcp_server' }));
+              setRelatedItems(related);
+            } catch {
+              // Non-blocking: related items are optional
+            }
+          } else {
+            toast.error('Extension not found');
+            navigate('/marketplace');
+          }
+        } catch {
+          toast.error('Failed to load extension');
+          navigate('/marketplace');
+        }
       }
     } finally {
       setLoading(false);
@@ -203,7 +228,9 @@ export default function MarketplaceDetail() {
       const data =
         item.item_type === 'base'
           ? await marketplaceApi.purchaseBase(item.id)
-          : await marketplaceApi.purchaseAgent(item.id);
+          : item.item_type === 'mcp_server'
+            ? await marketplaceApi.installMcpServer(item.id)
+            : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
@@ -251,7 +278,9 @@ export default function MarketplaceDetail() {
       const data =
         relatedItem.item_type === 'base'
           ? await marketplaceApi.purchaseBase(relatedItem.id)
-          : await marketplaceApi.purchaseAgent(relatedItem.id);
+          : relatedItem.item_type === 'mcp_server'
+            ? await marketplaceApi.installMcpServer(relatedItem.id)
+            : await marketplaceApi.purchaseAgent(relatedItem.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;

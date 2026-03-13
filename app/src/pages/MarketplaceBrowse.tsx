@@ -12,7 +12,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateBreadcrumbStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
-type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration';
+type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -49,6 +49,8 @@ const itemTypeLabels: Record<ItemType, string> = {
   theme: 'Themes',
   tool: 'Tools',
   integration: 'Integrations',
+  skill: 'Skills',
+  mcp_server: 'MCP Servers',
 };
 
 export default function MarketplaceBrowse() {
@@ -59,7 +61,7 @@ export default function MarketplaceBrowse() {
   const { isAuthenticated } = useMarketplaceAuth();
 
   // Validate item type
-  const itemType: ItemType = ['agent', 'base', 'theme', 'tool', 'integration'].includes(
+  const itemType: ItemType = ['agent', 'base', 'theme', 'tool', 'integration', 'skill', 'mcp_server'].includes(
     itemTypeParam || ''
   )
     ? (itemTypeParam as ItemType)
@@ -222,6 +224,42 @@ export default function MarketplaceBrowse() {
           }));
           resultTotal = result.total || data.length;
           resultTotalPages = result.total_pages || 1;
+        } else if (itemType === 'skill') {
+          const result = await marketplaceApi.getAllSkills(
+            {
+              category: category !== 'all' ? category : undefined,
+              pricing_type: pricing !== 'all' ? pricing : undefined,
+              search: search || undefined,
+              sort,
+              page: pageNum,
+              limit: ITEMS_PER_PAGE,
+            },
+            { signal: abortControllerRef.current.signal }
+          );
+          data = (result.skills || []).map((skill: Record<string, unknown>) => ({
+            ...skill,
+            item_type: 'skill' as ItemType,
+          }));
+          resultTotal = result.total || data.length;
+          resultTotalPages = result.total_pages || 1;
+        } else if (itemType === 'mcp_server') {
+          const result = await marketplaceApi.getAllMcpServers(
+            {
+              category: category !== 'all' ? category : undefined,
+              pricing_type: pricing !== 'all' ? pricing : undefined,
+              search: search || undefined,
+              sort,
+              page: pageNum,
+              limit: ITEMS_PER_PAGE,
+            },
+            { signal: abortControllerRef.current.signal }
+          );
+          data = (result.mcp_servers || []).map((server: Record<string, unknown>) => ({
+            ...server,
+            item_type: 'mcp_server' as ItemType,
+          }));
+          resultTotal = result.total || data.length;
+          resultTotalPages = result.total_pages || 1;
         } else {
           data = [];
         }
@@ -351,7 +389,11 @@ export default function MarketplaceBrowse() {
           ? await marketplaceApi.addThemeToLibrary(item.id)
           : item.item_type === 'base'
             ? await marketplaceApi.purchaseBase(item.id)
-            : await marketplaceApi.purchaseAgent(item.id);
+            : item.item_type === 'skill'
+              ? await marketplaceApi.purchaseSkill(item.id)
+              : item.item_type === 'mcp_server'
+                ? await marketplaceApi.installMcpServer(item.id)
+                : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;

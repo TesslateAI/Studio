@@ -264,6 +264,15 @@ kubectl logs -n headscale -l app.kubernetes.io/name=headscale -c litestream-rest
 | ECR (shared images) | $1-5 |
 | **Total** | **~$154** |
 
+## Relationship to AWS Environment Stacks
+
+The shared stack and per-environment stacks (`k8s/terraform/aws/`) are fully independent:
+- **Shared**: Manages ECR repos, platform EKS cluster, Headscale VPN, Cloudflare DNS
+- **Per-env**: Manages application EKS cluster, S3, IAM, Helm charts per environment (beta/production)
+- **No cross-state dependencies**: Environments reference ECR via computed URL locals (`local.ecr_*_url`)
+
+Both stacks use the same `eks-deployer` IAM role pattern for cluster access and the same `aws-deploy.sh` helper script.
+
 ## Related Documentation
 
 - [Architecture Diagram](../../architecture/diagrams/shared-platform.mmd)

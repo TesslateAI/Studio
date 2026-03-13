@@ -39,7 +39,8 @@ Tools are organized by function:
 | **Shell Commands** | 4 | Execute commands, manage sessions |
 | **Project Management** | 1 | Query project metadata |
 | **Planning** | 2 | Task planning and tracking |
-| **Web Operations** | 1 | Fetch external content |
+| **Web Operations** | 3 | Fetch content, search the web, send messages |
+| **Skill Operations** | 1 | Load skill instructions on-demand |
 | **Graph Operations** | 9 | Container management (graph view only) |
 
 ## Architecture
@@ -215,8 +216,11 @@ Dangerous tools require user approval:
 ```python
 DANGEROUS_TOOLS = {
     'write_file', 'patch_file', 'multi_edit',  # File modifications
+    'apply_patch',                              # Unified patches
     'bash_exec', 'shell_exec', 'shell_open',   # Shell operations
-    'web_fetch'                                 # Web operations
+    'web_fetch',                                # Web operations (can leak data)
+    'web_search',                               # Web search (can leak query data)
+    'send_message',                             # Can send data externally
 }
 ```
 
@@ -268,11 +272,19 @@ All dangerous tools blocked with error:
 | `todo_read` | Read task list | None |
 | `todo_write` | Update task list | todos[] |
 
-### Web Operations (1 tool)
+### Web Operations (3 tools)
 
 | Tool | Purpose | Parameters |
 |------|---------|------------|
 | `web_fetch` | Fetch external URL | url |
+| `web_search` | Search the web for current information | query, max_results, detailed |
+| `send_message` | Send message via chat, Discord, webhook, or reply channel | message, channel, sender |
+
+### Skill Operations (1 tool)
+
+| Tool | Purpose | Parameters |
+|------|---------|------------|
+| `load_skill` | Load full skill instructions on-demand | skill_name |
 
 ### Graph Operations (9 tools)
 
@@ -511,6 +523,8 @@ examples=[
 - `registry.md` - Tool registry internals
 - `file-ops.md` - File operation tools
 - `shell-ops.md` - Shell command tools
+- `web-search.md` - Web search tool and provider abstraction
+- `skill-ops.md` - Skill loading tool and progressive disclosure
 - `graph-ops.md` - Graph view container tools
 - `approval.md` - User approval system
 
@@ -527,4 +541,6 @@ examples=[
 | `tools/graph_ops/` | Container management tools |
 | `tools/project_ops/` | Project metadata tools |
 | `tools/planning_ops/` | Task planning tools |
-| `tools/web_ops/` | Web fetching tools |
+| `tools/web_ops/` | Web fetch, search, and send_message tools |
+| `tools/web_ops/providers.py` | Search provider abstraction (Tavily, Brave, DuckDuckGo) |
+| `tools/skill_ops/` | Skill loading tool (progressive disclosure) |

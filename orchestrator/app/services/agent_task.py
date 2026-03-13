@@ -53,6 +53,11 @@ class AgentTaskPayload:
     # External invocation
     webhook_callback_url: str | None = None  # POST result to this URL on completion
 
+    # Channel context (for messaging channel-triggered tasks)
+    channel_config_id: str | None = None  # ChannelConfig UUID
+    channel_jid: str | None = None  # Canonical address (e.g., "telegram:123456")
+    channel_type: str | None = None  # "telegram", "slack", "discord", "whatsapp"
+
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""
         return asdict(self)

@@ -42,9 +42,10 @@ Load this context when:
 - Direct filesystem access via shared volume (`/projects`)
 - Traefik integration for routing (`*.localhost`)
 - Dynamic `docker-compose.yml` generation
+- `_resolve_service_name()` for proper Docker Compose service name resolution (handles both full container names with slug prefix and display names)
 - Key patterns:
   - Volume subpath isolation (requires Docker Compose v2.23.0+)
-  - Regional Traefik for scalability
+  - Direct Traefik routing (single Traefik → container)
   - Two-tier cleanup (pause → delete)
 
 ### Kubernetes Orchestrator
@@ -340,7 +341,14 @@ Resolution order (defined in `Container.effective_port` property on the model):
 2. `port` — the exposed/mapped port (sometimes the same)
 3. `3000` — last-resort default
 
-At container startup, the Docker and K8s orchestrators also check TESSLATE.md at runtime as a live override (in case the file changed after project creation). The pattern is: `base_config.port if available, else container.effective_port`.
+## Container Startup Command Priority Chain
+
+Both Docker and Kubernetes orchestrators determine the startup command and port using the same priority chain:
+
+1. **DB `startup_command`** (`Container.startup_command`): Highest priority. Set by setup-config or project creation.
+2. **`.tesslate/config.json`**: Read from PVC via file-manager pod (K8s) or filesystem (Docker). Fallback for older projects.
+3. **TESSLATE.md**: Legacy markdown config parsed for port and start_command.
+4. **Generic fallback**: `npm install && npm run dev` with port from `container.effective_port`.
 
 ## Agent-Assisted Container Startup
 

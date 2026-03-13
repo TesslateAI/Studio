@@ -32,6 +32,7 @@ Load this context when:
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/types/git.ts`**: Git operation types
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/types/assets.ts`**: File and asset types
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/types/theme.ts`**: Theme types + runtime validation
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/types/tesslateConfig.ts`**: TesslateConfig, AppConfig, InfraConfig types
 
 ### Contexts
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/contexts/AuthContext.tsx`**: Centralized auth state
@@ -74,8 +75,11 @@ Load this context when:
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/DeploymentSettings.tsx`**: Provider credentials
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/BillingSettings.tsx`**: Subscription, invoices
 
+### Project Setup Page
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/ProjectSetup.tsx`**: Setup wizard with agent/manual tabs
+
 ### Marketplace Pages
-- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/MarketplaceBrowse.tsx`**: Browse with filtering
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/MarketplaceBrowse.tsx`**: Browse with filtering (agents, bases, skills, MCP servers)
 
 ### Other Pages
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/UserProfile.tsx`**: Username route resolver (`/@username`)
@@ -111,9 +115,10 @@ When working on specific features, also load:
 ### Pages
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/docs/app/pages/`**: Detailed page documentation
   - `dashboard.md`: Project list and creation
+  - `project-setup.md`: Setup wizard with agent/manual tabs
   - `project-builder.md`: Main editor interface
   - `project-graph.md`: Architecture visualization
-  - `marketplace.md`: Agent/base browsing and purchase
+  - `marketplace.md`: Agent/base/skill/MCP server browsing and purchase
   - `marketplace-browse.md`: Browse and category pages with filtering
   - `settings.md`: Modular settings architecture (6 pages)
   - `billing.md`: Subscription management
@@ -162,6 +167,18 @@ const response = await chatApi.sendMessage(projectId, {
 const agents = await marketplaceApi.getAgents();
 const agent = await marketplaceApi.getAgentBySlug('advanced-fullstack');
 await marketplaceApi.purchaseAgent(agentSlug);
+
+// Marketplace (Skills & MCP Servers)
+const skills = await marketplaceApi.getAllSkills({ category: 'backend' });
+await marketplaceApi.purchaseSkill(skillId);
+const mcpServers = await marketplaceApi.getAllMcpServers();
+await marketplaceApi.installMcpServer(marketplaceAgentId);
+const installed = await marketplaceApi.getInstalledMcpServers();
+
+// Setup
+const config = await setupApi.getConfig(slug);
+const analysis = await setupApi.analyzeProject(slug);
+const result = await setupApi.saveConfig(slug, config);
 ```
 
 **Authentication**: The axios instance automatically adds:

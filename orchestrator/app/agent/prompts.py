@@ -11,7 +11,9 @@ from uuid import UUID
 from ..utils.resource_naming import get_container_name, get_project_path
 
 
-async def get_environment_context(user_id: UUID, project_id: str) -> str:
+async def get_environment_context(
+    user_id: UUID, project_id: str, container_directory: str | None = None
+) -> str:
     """
     Get environment context for the agent.
 
@@ -20,10 +22,12 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
     - Operating system info
     - Current working directory
     - Container/pod information
+    - Container directory (subdirectory scope for file operations)
 
     Args:
         user_id: User ID
         project_id: Project ID
+        container_directory: Optional subdirectory for container-scoped file operations
 
     Returns:
         Formatted environment context string
@@ -53,6 +57,22 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
         container_name = get_container_name(user_id, project_id, mode="docker")
         context_parts.append(f"Container: {container_name}")
         context_parts.append("Current Working Directory: /app")
+
+    # Container directory scope — file tools auto-resolve paths relative to this
+    if container_directory and container_directory != ".":
+        context_parts.append(f"Container Directory: {container_directory}")
+        context_parts.append(
+            f"File Scope: File tools (read_file, write_file, patch_file) automatically resolve "
+            f"paths relative to /app/{container_directory}/. Use paths relative to that directory "
+            f"(e.g., 'app/page.tsx' resolves to '/app/{container_directory}/app/page.tsx'). "
+            f"For bash_exec, the working directory is /app — use 'cd {container_directory} && ...' "
+            f"or full paths like '/app/{container_directory}/...'."
+        )
+    else:
+        context_parts.append("Container Directory: . (project root)")
+        context_parts.append(
+            "File Scope: File tools resolve paths relative to /app/."
+        )
 
     # Project path context
     context_parts.append(f"Project Path: users/{user_id}/{project_id}/")
@@ -148,9 +168,12 @@ async def get_user_message_wrapper(
     if include_environment and project_context:
         user_id = project_context.get("user_id")
         project_id = project_context.get("project_id")
+        container_directory = project_context.get("container_directory")
 
         if user_id and project_id:
-            env_context = await get_environment_context(user_id, str(project_id))
+            env_context = await get_environment_context(
+                user_id, str(project_id), container_directory=container_directory
+            )
             message_parts.append(env_context)
 
     # 2. File Listing Context

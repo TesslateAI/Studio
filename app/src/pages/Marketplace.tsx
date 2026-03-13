@@ -7,6 +7,7 @@ import {
   Package,
   Wrench,
   Plug,
+  Plugs,
   PaintBrush,
   CaretDown,
   Folder,
@@ -20,6 +21,7 @@ import {
   Article,
   X,
   Funnel,
+  Lightning,
 } from '@phosphor-icons/react';
 import { MobileMenu, UserDropdown } from '../components/ui';
 import {
@@ -35,7 +37,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateMarketplaceStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
-type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration';
+type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -172,6 +174,8 @@ export default function Marketplace() {
     { id: 'tool', label: 'Tools', icon: <Wrench size={16} /> },
     { id: 'integration', label: 'Integrations', icon: <Plug size={16} /> },
     { id: 'theme', label: 'Themes', icon: <PaintBrush size={16} /> },
+    { id: 'skill', label: 'Skills', icon: <Lightning size={16} /> },
+    { id: 'mcp_server', label: 'MCP Servers', icon: <Plugs size={16} /> },
   ];
 
   const sortOptions: { id: SortOption; label: string }[] = [
@@ -258,6 +262,38 @@ export default function Marketplace() {
           data = (result.items || []).map((theme: Record<string, unknown>) => ({
             ...theme,
             item_type: 'theme' as ItemType,
+          }));
+        } else if (itemType === 'skill') {
+          const result = await marketplaceApi.getAllSkills(
+            {
+              category: category !== 'all' ? category : undefined,
+              pricing_type: pricing !== 'all' ? pricing : undefined,
+              search: search || undefined,
+              sort,
+              page: pageNum,
+              limit: ITEMS_PER_PAGE,
+            },
+            { signal: abortControllerRef.current.signal }
+          );
+          data = (result.skills || []).map((skill: Record<string, unknown>) => ({
+            ...skill,
+            item_type: 'skill' as ItemType,
+          }));
+        } else if (itemType === 'mcp_server') {
+          const result = await marketplaceApi.getAllMcpServers(
+            {
+              category: category !== 'all' ? category : undefined,
+              pricing_type: pricing !== 'all' ? pricing : undefined,
+              search: search || undefined,
+              sort,
+              page: pageNum,
+              limit: ITEMS_PER_PAGE,
+            },
+            { signal: abortControllerRef.current.signal }
+          );
+          data = (result.mcp_servers || []).map((server: Record<string, unknown>) => ({
+            ...server,
+            item_type: 'mcp_server' as ItemType,
           }));
         } else {
           // Tools and integrations - coming soon
@@ -372,7 +408,11 @@ export default function Marketplace() {
           ? await marketplaceApi.addThemeToLibrary(item.id)
           : item.item_type === 'base'
             ? await marketplaceApi.purchaseBase(item.id)
-            : await marketplaceApi.purchaseAgent(item.id);
+            : item.item_type === 'skill'
+              ? await marketplaceApi.purchaseSkill(item.id)
+              : item.item_type === 'mcp_server'
+                ? await marketplaceApi.installMcpServer(item.id)
+                : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;

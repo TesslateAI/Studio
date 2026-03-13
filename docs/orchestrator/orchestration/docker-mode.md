@@ -324,13 +324,16 @@ volumes:
     name: my-app-abc123-postgres-data
 ```
 
-## Startup Commands: TESSLATE.md Integration
+## Container Startup Command Priority
 
-The orchestrator reads `TESSLATE.md` from project files to determine:
-- **Port**: Which port the dev server listens on
-- **Startup command**: How to start the dev server
+The orchestrator determines the startup command and port using a priority chain (same logic as Kubernetes mode):
 
-**Example TESSLATE.md**:
+1. **DB `startup_command`** (`Container.startup_command`): Set during project creation or by setup-config. Highest priority.
+2. **`.tesslate/config.json`**: JSON configuration file in project root. Fallback for older projects.
+3. **TESSLATE.md**: Legacy markdown-based config parsed for port and start_command.
+4. **Generic fallback**: `npm install && npm run dev` with port `3000`.
+
+**Example TESSLATE.md** (priority 3):
 ```markdown
 # Next.js 16 Template
 
@@ -340,7 +343,7 @@ The orchestrator reads `TESSLATE.md` from project files to determine:
 - **Start Command**: `npm run dev`
 ```
 
-**Parsing**:
+**Parsing (TESSLATE.md)**:
 ```python
 from orchestrator.app.services.base_config_parser import get_base_config_from_volume
 
@@ -348,10 +351,6 @@ base_config = await get_base_config_from_volume(project_slug)
 port = base_config.port  # 3000
 command = base_config.start_command  # "npm run dev"
 ```
-
-**Fallback**: If no `TESSLATE.md` exists, uses defaults:
-- Port: `3000`
-- Command: `npm run dev` or `python app.py` (based on file detection)
 
 ## Networking & Isolation
 
@@ -399,6 +398,24 @@ extra_hosts:
 
 This ensures malicious code in user projects cannot access the orchestrator's database or backend services.
 
+## Service Name Resolution
+
+The Docker orchestrator uses `_resolve_service_name()` to correctly map container names to Docker Compose service names:
+
+```python
+def _resolve_service_name(self, container_name: str, project_slug: str) -> str:
+    """Extract the Docker Compose service name from a container name.
+
+    Handles both formats:
+    - Full container name with slug prefix (Container.container_name):
+      e.g. "my-proj-abc-next-js-16" → "next-js-16"
+    - Display/service name (Container.name):
+      e.g. "Next.js 16" → "next-js-16"
+    """
+```
+
+This is used throughout command execution, container status checks, and log retrieval to ensure the correct Docker container is targeted regardless of whether the caller passes the full container name or the display name.
+
 ## Command Execution
 
 The orchestrator can execute commands inside running containers:
@@ -416,8 +433,8 @@ output = await orchestrator.execute_command(
 
 **Implementation**:
 ```python
-# Build Docker container name
-service_name = self._sanitize_service_name(container_name)
+# Resolve Docker Compose service name from container name
+service_name = self._resolve_service_name(container_name, project_slug)
 docker_container = f"{project_slug}-{service_name}"
 
 # Execute via docker exec

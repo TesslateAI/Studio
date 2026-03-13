@@ -19,10 +19,11 @@ Load this context when:
 | Page | File | Route | Key Features |
 |------|------|-------|--------------|
 | Dashboard | `Dashboard.tsx` | `/dashboard` | Project list, creation, task polling |
+| Project Setup | `ProjectSetup.tsx` | `/project/:slug/setup` | Setup wizard with agent/manual tabs |
 | Project Builder | `Project.tsx` | `/project/:slug/builder` | Editor, chat, preview, panels |
 | Graph Canvas | `ProjectGraphCanvas.tsx` | `/project/:slug` | XYFlow architecture visualization |
-| Marketplace | `Marketplace.tsx` | `/marketplace` | Browse agents/bases with filtering |
-| Library | `Library.tsx` | `/library` | User's purchased items and API keys |
+| Marketplace | `Marketplace.tsx` | `/marketplace` | Browse agents/bases/skills/MCP servers |
+| Library | `Library.tsx` | `/library` | User's purchased items, skills, MCP servers |
 | Billing | `BillingSettings.tsx` | `/settings/billing` | Subscription, credits, usage |
 | Profile | `ProfileSettings.tsx` | `/settings/profile` | Name, email, avatar, bio, socials |
 | Preferences | `PreferencesSettings.tsx` | `/settings/preferences` | Theme preset, chat position |
@@ -222,6 +223,35 @@ const task = await tasksApi.get(taskId);
 
 See: `dashboard.md`
 
+### Project Setup (`ProjectSetup.tsx`)
+**Purpose**: Setup wizard for configuring `.tesslate/config.json`
+
+**Key Features**:
+- Agent tab: AI-powered project analysis detects frameworks, ports, start commands
+- Manual tab: Hand-configure apps and infrastructure via `ServiceConfigForm`
+- Existing config detection and pre-population
+- Skip option for workspace-only setup
+- Saves config and creates containers, then navigates to builder
+
+**State Management**:
+```typescript
+type Tab = 'agent' | 'manual';
+const [activeTab, setActiveTab] = useState<Tab>('agent');
+const [config, setConfig] = useState<TesslateConfig>(DEFAULT_CONFIG);
+const [isAnalyzing, setIsAnalyzing] = useState(false);
+const [analysisDone, setAnalysisDone] = useState(false);
+const [isSaving, setIsSaving] = useState(false);
+```
+
+**API Calls**:
+```typescript
+const config = await setupApi.getConfig(slug);
+const analysis = await setupApi.analyzeProject(slug);
+const result = await setupApi.saveConfig(slug, config);
+```
+
+See: `project-setup.md`
+
 ### Project Builder (`Project.tsx`)
 **Purpose**: Main code editor with AI chat
 
@@ -285,10 +315,10 @@ const nodeTypes = {
 See: `project-graph.md`
 
 ### Marketplace (`Marketplace.tsx`)
-**Purpose**: Browse and purchase agents/bases
+**Purpose**: Browse and purchase agents/bases/skills/MCP servers
 
 **Key Features**:
-- Filter by type (agents, bases, tools, integrations)
+- Filter by type (agents, bases, tools, integrations, skills, MCP servers)
 - Search by name, description, tags
 - Sort by featured, popular, newest, name
 - Featured items carousel
@@ -299,33 +329,42 @@ See: `project-graph.md`
 ```typescript
 const [items, setItems] = useState<MarketplaceItem[]>([]);
 const [filteredItems, setFilteredItems] = useState<MarketplaceItem[]>([]);
-const [selectedItemType, setSelectedItemType] = useState<'agent' | 'base' | 'tool' | 'integration'>('agent');
+const [selectedItemType, setSelectedItemType] = useState<ItemType>('agent');
 const [searchQuery, setSearchQuery] = useState('');
-const [sortBy, setSortBy] = useState<'featured' | 'popular' | 'newest' | 'name'>('featured');
+const [sortBy, setSortBy] = useState<SortOption>('featured');
+```
+
+**Item Types**:
+```typescript
+type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
 ```
 
 **API Calls**:
 ```typescript
-// Load items
+// Load items by type
 const agents = await marketplaceApi.getAllAgents();
 const bases = await marketplaceApi.getAllBases();
+const skills = await marketplaceApi.getAllSkills();
+const mcpServers = await marketplaceApi.getAllMcpServers();
 
-// Purchase
+// Purchase / install
 await marketplaceApi.purchaseAgent(slug);
+await marketplaceApi.purchaseSkill(skillId);
+await marketplaceApi.installMcpServer(marketplaceAgentId);
 ```
 
 See: `marketplace.md`
 
 ### Library (`Library.tsx`)
-**Purpose**: User's purchased items, submitted bases, and API keys
+**Purpose**: User's purchased items, skills, MCP servers, submitted bases, and API keys
 
 **Tabs**:
 1. **Agents**: Purchased and custom agents with enable/disable
 2. **Bases**: User-submitted project templates with visibility toggle, edit, and delete
-3. **Models**: Available LLM models with pricing
-4. **API Keys**: Manage external provider keys (OpenAI, Anthropic, etc.)
-5. **Subscriptions**: Current plan and usage
-6. **Credits**: Credit balance and purchase history
+3. **Skills**: Purchased skills from the marketplace
+4. **MCP Servers**: Installed MCP server configurations with uninstall
+5. **Themes**: User's theme presets
+6. **Models**: Available LLM models with pricing
 
 **Bases Tab Features**:
 - "Submit Base" button opens `SubmitBaseModal` (create/edit modes)
@@ -335,15 +374,25 @@ See: `marketplace.md`
 - Delete base (soft delete with confirmation dialog)
 - Download count display
 
+**Skills Tab Features**:
+- Displays purchased skills filtered from `marketplaceApi.getAllSkills()`
+- Card grid with skill name, description, and category
+
+**MCP Servers Tab Features**:
+- Displays installed MCP servers via `marketplaceApi.getInstalledMcpServers()`
+- Shows server name, URL, and status
+- Uninstall button with confirmation
+
 **State Management**:
 ```typescript
-type TabType = 'agents' | 'bases' | 'models' | 'api-keys' | 'subscriptions';
+type TabType = 'agents' | 'bases' | 'skills' | 'mcp_servers' | 'themes' | 'models';
 
 const [activeTab, setActiveTab] = useState<TabType>('agents');
 const [agents, setAgents] = useState<LibraryAgent[]>([]);
 const [bases, setBases] = useState<LibraryBase[]>([]);
+const [skills, setSkills] = useState<LibrarySkill[]>([]);
+const [mcpServers, setMcpServers] = useState<InstalledMcpServer[]>([]);
 const [models, setModels] = useState<Model[]>([]);
-const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
 const [editingBase, setEditingBase] = useState<LibraryBase | null>(null);
 ```
@@ -624,6 +673,14 @@ Use semantic HTML and ARIA labels:
 
 ## Related Documentation
 
-- **Component Docs**: See `c:/Users/Smirk/Downloads/Tesslate-Studio/docs/app/components/` (to be created)
-- **API Docs**: See `c:/Users/Smirk/Downloads/Tesslate-Studio/docs/orchestrator/routers/`
-- **Frontend Context**: See `c:/Users/Smirk/Downloads/Tesslate-Studio/docs/app/CLAUDE.md`
+- **`dashboard.md`**: Dashboard page details
+- **`project-setup.md`**: Project setup wizard details
+- **`project-builder.md`**: Project builder page details
+- **`project-graph.md`**: Graph canvas page details
+- **`marketplace.md`**: Marketplace pages details
+- **`marketplace-browse.md`**: Marketplace browse page details (skills, MCP servers)
+- **`billing.md`**: Billing pages details
+- **`auth.md`**: Authentication pages details
+- **Component Docs**: See `docs/app/components/`
+- **API Docs**: See `docs/orchestrator/routers/`
+- **Frontend Context**: See `docs/app/CLAUDE.md`

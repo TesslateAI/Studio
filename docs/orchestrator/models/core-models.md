@@ -326,6 +326,7 @@ class Container(Base):
     port: int                   # Exposed port
     internal_port: int          # Container internal port
     environment_vars: JSON      # Environment variables
+    startup_command: str        # Shell command to start the dev server (nullable)
     dockerfile_path: str        # Relative path to Dockerfile
     volume_name: str            # Docker volume name
 

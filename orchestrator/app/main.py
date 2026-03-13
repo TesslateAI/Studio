@@ -23,6 +23,7 @@ from .routers import (
     agents,
     auth,
     billing,
+    channels,
     chat,
     creators,
     deployment_credentials,
@@ -36,6 +37,8 @@ from .routers import (
     github,
     kanban,
     marketplace,
+    mcp,
+    mcp_server,
     projects,
     referrals,
     secrets,
@@ -1020,6 +1023,18 @@ app.include_router(deployment_targets.router)  # Deployment target nodes in Reac
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)
+app.include_router(channels.router, tags=["channels"])  # /api/channels - Messaging channels
+app.include_router(mcp.router, tags=["mcp"])  # /api/mcp - MCP server management
+app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoint
+
+# Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
+try:
+    from .routers.mcp_server import get_mcp_asgi_app
+
+    app.mount("/api/mcp/server/mcp", get_mcp_asgi_app())
+    logger.info("MCP Streamable HTTP server mounted at /api/mcp/server/mcp")
+except Exception as e:
+    logger.warning(f"Failed to mount MCP ASGI app: {e}")
 
 
 @app.get("/")

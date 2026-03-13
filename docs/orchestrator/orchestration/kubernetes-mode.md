@@ -326,6 +326,12 @@ result = await orchestrator.start_container(
    - Command: `tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null`
    - Probes: Startup, readiness, liveness (HTTP on port)
    - Pod affinity: If multi-container project
+
+**Startup Command Priority Chain**:
+1. **DB startup_command** (`Container.startup_command`): Set by setup-config or project creation
+2. **`.tesslate/config.json`**: Read from PVC via file-manager pod (fallback for older projects)
+3. **TESSLATE.md**: Legacy config file parsed for port and start_command
+4. **Generic fallback**: `npm install && npm run dev`
 4. **Create Service**: ClusterIP, selector by `container-id`
 5. **Create Ingress**: NGINX, TLS with wildcard cert
 6. **Return URL**: `https://{slug}-{container}.your-domain.com`
@@ -360,10 +366,11 @@ success = await orchestrator.hibernate_project(project_id, user_id, db=db)
 1. **Discover PVCs** via `_get_hibernation_pvc_names(namespace)`:
    - Always includes `project-storage`
    - Includes service PVCs labeled `tesslate.io/component=service-storage` or prefixed `svc-`
-2. **Skip check**: Only skips snapshot if the project is NOT initialized AND there are no service PVCs. If there are service PVCs, snapshots are created even for uninitialized projects.
-3. **Create VolumeSnapshots** (via `SnapshotManager`):
-   - For each PVC, create VolumeSnapshot and wait for `status.readyToUse: true` (timeout: 300s)
-   - Create ProjectSnapshot database record per PVC
+2. **Skip check**: Only skips snapshot if the project is NOT initialized AND there are no service PVCs. If there are service PVCs (e.g., Postgres data), snapshots are created even for uninitialized projects.
+3. **Create VolumeSnapshots per PVC** (via `SnapshotManager`):
+   - For each PVC discovered in step 1, create a VolumeSnapshot and wait for `status.readyToUse: true` (timeout: 300s)
+   - Create a ProjectSnapshot database record per PVC (with `pvc_name` field)
+   - Snapshot rotation (`_rotate_snapshots`) is scoped per PVC
    - If any snapshot fails, hibernation is aborted
 4. **Delete namespace**: Cascades to all resources (PVCs, pods, services, ingresses)
 5. **Update database**: `Project.environment_status = 'hibernated'`, `hibernated_at = now()`
@@ -389,7 +396,7 @@ namespace = await orchestrator.restore_project(project_id, user_id)
 4. **Create file-manager pod** (mounts restored PVCs)
 5. **Update database**: `Project.environment_status = 'active'`, `hibernated_at = NULL`
 
-**Key benefit**: node_modules, all dependencies, and service data (databases, caches) are preserved in snapshots. No npm install needed - the project is ready in seconds!
+**Key benefit**: node_modules, all dependencies, and service data (databases, caches) are preserved in per-PVC snapshots. No npm install needed - the project is ready in seconds!
 
 ### Deleting Project (Permanent)
 

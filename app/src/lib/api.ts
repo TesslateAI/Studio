@@ -1258,6 +1258,74 @@ export const marketplaceApi = {
     return response.data;
   },
 
+  // MCP Servers marketplace endpoints
+  getAllMcpServers: async (
+    params?: {
+      category?: string;
+      pricing_type?: string;
+      search?: string;
+      sort?: string;
+      page?: number;
+      limit?: number;
+    },
+    options?: { signal?: AbortSignal }
+  ) => {
+    const queryParams = new URLSearchParams();
+    if (params?.category) queryParams.append('category', params.category);
+    if (params?.pricing_type) queryParams.append('pricing_type', params.pricing_type);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.sort) queryParams.append('sort', params.sort);
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    const query = queryParams.toString();
+    const response = await api.get(`/api/marketplace/mcp-servers${query ? `?${query}` : ''}`, {
+      signal: options?.signal,
+    });
+    return response.data;
+  },
+
+  getMcpServerDetails: async (slug: string) => {
+    const response = await api.get(`/api/marketplace/mcp-servers/${slug}`);
+    return response.data;
+  },
+
+  // MCP install/manage (separate from marketplace browse)
+  installMcpServer: async (marketplaceAgentId: string, credentials?: Record<string, string>) => {
+    const response = await api.post('/api/mcp/install', {
+      marketplace_agent_id: marketplaceAgentId,
+      credentials: credentials || {},
+    });
+    return response.data;
+  },
+
+  getInstalledMcpServers: async () => {
+    const response = await api.get('/api/mcp/installed');
+    return response.data;
+  },
+
+  uninstallMcpServer: async (configId: string) => {
+    await api.delete(`/api/mcp/installed/${configId}`);
+  },
+
+  testMcpServer: async (configId: string) => {
+    const response = await api.post(`/api/mcp/installed/${configId}/test`);
+    return response.data;
+  },
+
+  assignMcpToAgent: async (configId: string, agentId: string) => {
+    const response = await api.post(`/api/mcp/installed/${configId}/assign/${agentId}`);
+    return response.data;
+  },
+
+  unassignMcpFromAgent: async (configId: string, agentId: string) => {
+    await api.delete(`/api/mcp/installed/${configId}/assign/${agentId}`);
+  },
+
+  getAgentMcpServers: async (agentId: string) => {
+    const response = await api.get(`/api/mcp/agent/${agentId}/servers`);
+    return response.data;
+  },
+
   getSkillDetails: async (slug: string) => {
     const response = await api.get(`/api/marketplace/skills/${slug}`);
     return response.data;

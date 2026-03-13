@@ -30,7 +30,7 @@ from ..models import (
     UserPurchasedAgent,
     UserPurchasedBase,
 )
-from ..schemas import BaseSubmitRequest, BaseUpdateRequest, MarketplaceSkillResponse, SkillInstallRequest
+from ..schemas import BaseSubmitRequest, BaseUpdateRequest, SkillInstallRequest
 from ..services.cache_service import cache
 from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..username_validation import resolve_display_name
@@ -384,12 +384,13 @@ async def get_marketplace_agents(
     - Authenticated: Shows purchase status (is_purchased) for each item
     - Unauthenticated: Shows catalog without purchase status
     """
-    # Base query - show official agents AND published community agents
+    # Base query - show official agents AND published community agents (exclude skills/subagents)
     query = (
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.item_type.notin_(["skill", "subagent", "mcp_server"]),
             (MarketplaceAgent.forked_by_user_id.is_(None))
             | (MarketplaceAgent.is_published.is_(True)),
         )
@@ -1459,7 +1460,7 @@ async def get_user_agents(
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
         .where(
             UserPurchasedAgent.user_id == current_user.id,
-            MarketplaceAgent.item_type.notin_(["skill", "subagent"]),
+            MarketplaceAgent.item_type.notin_(["skill", "subagent", "mcp_server"]),
         )
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .order_by(UserPurchasedAgent.purchase_date.desc())
@@ -4263,6 +4264,7 @@ async def get_marketplace_skills(
     # Base query – only active, published skills
     query = (
         select(MarketplaceAgent)
+        .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
             MarketplaceAgent.item_type == "skill",
@@ -4333,23 +4335,51 @@ async def get_marketplace_skills(
 
     response = []
     for skill in skills:
-        response.append(
-            MarketplaceSkillResponse(
-                id=skill.id,
-                name=skill.name,
-                slug=skill.slug,
-                description=skill.description,
-                long_description=skill.long_description,
-                category=skill.category,
-                icon=skill.icon,
-                pricing_type=skill.pricing_type,
-                price=skill.price / 100.0 if skill.price else 0,
-                downloads=skill.downloads,
-                rating=skill.rating,
-                tags=skill.tags or [],
-                is_purchased=skill.id in purchased_skill_ids,
-            ).model_dump()
-        )
+        creator_type = "official"
+        creator_name = "Tesslate"
+        creator_username = None
+        creator_avatar_url = None
+        if skill.forked_by_user_id:
+            creator_type = "community"
+            if skill.forked_by_user:
+                creator_name = _resolve_display_name(skill.forked_by_user)
+                creator_username = skill.forked_by_user.username
+                creator_avatar_url = skill.forked_by_user.avatar_url
+
+        response.append({
+            "id": skill.id,
+            "name": skill.name,
+            "slug": skill.slug,
+            "description": skill.description,
+            "long_description": skill.long_description,
+            "category": skill.category,
+            "item_type": skill.item_type,
+            "mode": skill.mode,
+            "agent_type": skill.agent_type,
+            "model": skill.model,
+            "source_type": skill.source_type,
+            "is_forkable": skill.is_forkable,
+            "is_active": skill.is_active,
+            "icon": skill.icon,
+            "avatar_url": skill.avatar_url,
+            "git_repo_url": skill.git_repo_url,
+            "pricing_type": skill.pricing_type,
+            "price": skill.price / 100.0 if skill.price else 0,
+            "usage_count": skill.usage_count or 0,
+            "downloads": skill.downloads,
+            "rating": skill.rating,
+            "reviews_count": skill.reviews_count,
+            "features": skill.features,
+            "tags": skill.tags or [],
+            "is_featured": skill.is_featured,
+            "is_purchased": skill.id in purchased_skill_ids,
+            "creator_type": creator_type,
+            "creator_name": creator_name,
+            "creator_username": creator_username,
+            "created_by_user_id": str(skill.created_by_user_id) if skill.created_by_user_id else None,
+            "forked_by_user_id": str(skill.forked_by_user_id) if skill.forked_by_user_id else None,
+            "creator_avatar_url": creator_avatar_url,
+        })
 
     return {
         "skills": response,
@@ -4373,7 +4403,9 @@ async def get_skill_details(
     Public endpoint – authentication is optional.
     """
     result = await db.execute(
-        select(MarketplaceAgent).where(
+        select(MarketplaceAgent)
+        .options(selectinload(MarketplaceAgent.forked_by_user))
+        .where(
             MarketplaceAgent.slug == slug,
             MarketplaceAgent.item_type == "skill",
         )
@@ -4395,21 +4427,51 @@ async def get_skill_details(
         )
         is_purchased = purchased_result.scalar_one_or_none() is not None
 
-    return MarketplaceSkillResponse(
-        id=skill.id,
-        name=skill.name,
-        slug=skill.slug,
-        description=skill.description,
-        long_description=skill.long_description,
-        category=skill.category,
-        icon=skill.icon,
-        pricing_type=skill.pricing_type,
-        price=skill.price / 100.0 if skill.price else 0,
-        downloads=skill.downloads,
-        rating=skill.rating,
-        tags=skill.tags or [],
-        is_purchased=is_purchased,
-    )
+    creator_type = "official"
+    creator_name = "Tesslate"
+    creator_username = None
+    creator_avatar_url = None
+    if skill.forked_by_user_id:
+        creator_type = "community"
+        if skill.forked_by_user:
+            creator_name = _resolve_display_name(skill.forked_by_user)
+            creator_username = skill.forked_by_user.username
+            creator_avatar_url = skill.forked_by_user.avatar_url
+
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "slug": skill.slug,
+        "description": skill.description,
+        "long_description": skill.long_description,
+        "category": skill.category,
+        "item_type": skill.item_type,
+        "mode": skill.mode,
+        "agent_type": skill.agent_type,
+        "model": skill.model,
+        "source_type": skill.source_type,
+        "is_forkable": skill.is_forkable,
+        "is_active": skill.is_active,
+        "icon": skill.icon,
+        "avatar_url": skill.avatar_url,
+        "git_repo_url": skill.git_repo_url,
+        "pricing_type": skill.pricing_type,
+        "price": skill.price / 100.0 if skill.price else 0,
+        "usage_count": skill.usage_count or 0,
+        "downloads": skill.downloads,
+        "rating": skill.rating,
+        "reviews_count": skill.reviews_count,
+        "features": skill.features,
+        "tags": skill.tags or [],
+        "is_featured": skill.is_featured,
+        "is_purchased": is_purchased,
+        "creator_type": creator_type,
+        "creator_name": creator_name,
+        "creator_username": creator_username,
+        "created_by_user_id": str(skill.created_by_user_id) if skill.created_by_user_id else None,
+        "forked_by_user_id": str(skill.forked_by_user_id) if skill.forked_by_user_id else None,
+        "creator_avatar_url": creator_avatar_url,
+    }
 
 
 @router.post("/skills/{skill_id}/purchase")
@@ -4609,7 +4671,7 @@ async def uninstall_skill_from_agent(
 
 @router.get("/agents/{agent_id}/skills")
 async def get_agent_skills(
-    agent_id: str,
+    agent_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -4628,7 +4690,10 @@ async def get_agent_skills(
 
     result = await db.execute(
         select(AgentSkillAssignment)
-        .options(selectinload(AgentSkillAssignment.skill))
+        .options(
+            selectinload(AgentSkillAssignment.skill)
+            .selectinload(MarketplaceAgent.forked_by_user)
+        )
         .where(
             AgentSkillAssignment.agent_id == agent_id,
             AgentSkillAssignment.user_id == current_user.id,
@@ -4642,22 +4707,289 @@ async def get_agent_skills(
         skill = assignment.skill
         if not skill or not skill.is_active:
             continue
-        skills.append(
-            MarketplaceSkillResponse(
-                id=skill.id,
-                name=skill.name,
-                slug=skill.slug,
-                description=skill.description,
-                long_description=skill.long_description,
-                category=skill.category,
-                icon=skill.icon,
-                pricing_type=skill.pricing_type,
-                price=skill.price / 100.0 if skill.price else 0,
-                downloads=skill.downloads,
-                rating=skill.rating,
-                tags=skill.tags or [],
-                is_purchased=True,
-            ).model_dump()
+
+        creator_type = "official"
+        creator_name = "Tesslate"
+        creator_username = None
+        creator_avatar_url = None
+        if skill.forked_by_user_id:
+            creator_type = "community"
+            if skill.forked_by_user:
+                creator_name = _resolve_display_name(skill.forked_by_user)
+                creator_username = skill.forked_by_user.username
+                creator_avatar_url = skill.forked_by_user.avatar_url
+
+        skills.append({
+            "id": skill.id,
+            "name": skill.name,
+            "slug": skill.slug,
+            "description": skill.description,
+            "long_description": skill.long_description,
+            "category": skill.category,
+            "item_type": skill.item_type,
+            "mode": skill.mode,
+            "agent_type": skill.agent_type,
+            "model": skill.model,
+            "source_type": skill.source_type,
+            "is_forkable": skill.is_forkable,
+            "is_active": skill.is_active,
+            "icon": skill.icon,
+            "avatar_url": skill.avatar_url,
+            "git_repo_url": skill.git_repo_url,
+            "pricing_type": skill.pricing_type,
+            "price": skill.price / 100.0 if skill.price else 0,
+            "usage_count": skill.usage_count or 0,
+            "downloads": skill.downloads,
+            "rating": skill.rating,
+            "reviews_count": skill.reviews_count,
+            "features": skill.features,
+            "tags": skill.tags or [],
+            "is_featured": skill.is_featured,
+            "is_purchased": True,
+            "creator_type": creator_type,
+            "creator_name": creator_name,
+            "creator_username": creator_username,
+            "created_by_user_id": str(skill.created_by_user_id) if skill.created_by_user_id else None,
+            "forked_by_user_id": str(skill.forked_by_user_id) if skill.forked_by_user_id else None,
+            "creator_avatar_url": creator_avatar_url,
+        })
+
+    return {"skills": skills, "agent_id": str(agent_id)}
+
+
+# ============================================================================
+# MCP Servers – Browse, Detail
+# ============================================================================
+
+
+@router.get("/mcp-servers")
+async def get_marketplace_mcp_servers(
+    category: str | None = None,
+    pricing_type: str | None = None,
+    search: str | None = None,
+    sort: str = Query(
+        default="featured", regex="^(featured|popular|newest|name|rating|price_asc|price_desc)$"
+    ),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=12, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
+):
+    """
+    Browse marketplace MCP servers with filtering and sorting.
+
+    Public endpoint – authentication is optional:
+    - Authenticated: Shows purchase status (is_purchased) for each MCP server
+    - Unauthenticated: Shows catalog without purchase status
+    """
+    # Base query – only active, published MCP servers
+    query = (
+        select(MarketplaceAgent)
+        .options(selectinload(MarketplaceAgent.forked_by_user))
+        .where(
+            MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.item_type == "mcp_server",
+            (MarketplaceAgent.forked_by_user_id.is_(None))
+            | (MarketplaceAgent.is_published.is_(True)),
+        )
+    )
+
+    # Apply filters
+    if category:
+        query = query.where(MarketplaceAgent.category == category)
+
+    if pricing_type:
+        query = query.where(MarketplaceAgent.pricing_type == pricing_type)
+
+    if search:
+        search_filter = f"%{search}%"
+        query = query.where(
+            func.lower(MarketplaceAgent.name).like(func.lower(search_filter))
+            | func.lower(MarketplaceAgent.description).like(func.lower(search_filter))
+            | func.lower(cast(MarketplaceAgent.tags, String)).like(func.lower(search_filter))
         )
 
-    return {"skills": skills, "agent_id": agent_id}
+    # Apply sorting – always include id as tiebreaker for stable pagination
+    if sort == "featured":
+        query = query.order_by(
+            MarketplaceAgent.is_featured.desc(),
+            MarketplaceAgent.downloads.desc(),
+            MarketplaceAgent.id,
+        )
+    elif sort == "popular":
+        query = query.order_by(MarketplaceAgent.downloads.desc(), MarketplaceAgent.id)
+    elif sort == "newest":
+        query = query.order_by(MarketplaceAgent.created_at.desc(), MarketplaceAgent.id)
+    elif sort == "name":
+        query = query.order_by(MarketplaceAgent.name.asc(), MarketplaceAgent.id)
+    elif sort == "rating":
+        query = query.order_by(
+            MarketplaceAgent.rating.desc(), MarketplaceAgent.downloads.desc(), MarketplaceAgent.id
+        )
+    elif sort == "price_asc":
+        query = query.order_by(MarketplaceAgent.price.asc(), MarketplaceAgent.id)
+    elif sort == "price_desc":
+        query = query.order_by(MarketplaceAgent.price.desc(), MarketplaceAgent.id)
+
+    # Total count before pagination
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Pagination
+    offset = (page - 1) * limit
+    query = query.offset(offset).limit(limit)
+
+    result = await db.execute(query)
+    mcp_servers = result.scalars().all()
+
+    # Purchased MCP server ids (only if authenticated)
+    purchased_mcp_server_ids: list[UUID] = []
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedAgent.agent_id).where(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.is_active,
+            )
+        )
+        purchased_mcp_server_ids = [row[0] for row in purchased_result.fetchall()]
+
+    response = []
+    for mcp_server in mcp_servers:
+        creator_type = "official"
+        creator_name = "Tesslate"
+        creator_username = None
+        creator_avatar_url = None
+        if mcp_server.forked_by_user_id:
+            creator_type = "community"
+            if mcp_server.forked_by_user:
+                creator_name = _resolve_display_name(mcp_server.forked_by_user)
+                creator_username = mcp_server.forked_by_user.username
+                creator_avatar_url = mcp_server.forked_by_user.avatar_url
+
+        response.append({
+            "id": mcp_server.id,
+            "name": mcp_server.name,
+            "slug": mcp_server.slug,
+            "description": mcp_server.description,
+            "long_description": mcp_server.long_description,
+            "category": mcp_server.category,
+            "item_type": mcp_server.item_type,
+            "mode": mcp_server.mode,
+            "agent_type": mcp_server.agent_type,
+            "model": mcp_server.model,
+            "source_type": mcp_server.source_type,
+            "is_forkable": mcp_server.is_forkable,
+            "is_active": mcp_server.is_active,
+            "icon": mcp_server.icon,
+            "avatar_url": mcp_server.avatar_url,
+            "git_repo_url": mcp_server.git_repo_url,
+            "pricing_type": mcp_server.pricing_type,
+            "price": mcp_server.price / 100.0 if mcp_server.price else 0,
+            "usage_count": mcp_server.usage_count or 0,
+            "downloads": mcp_server.downloads,
+            "rating": mcp_server.rating,
+            "reviews_count": mcp_server.reviews_count,
+            "features": mcp_server.features,
+            "tags": mcp_server.tags or [],
+            "is_featured": mcp_server.is_featured,
+            "is_purchased": mcp_server.id in purchased_mcp_server_ids,
+            "creator_type": creator_type,
+            "creator_name": creator_name,
+            "creator_username": creator_username,
+            "created_by_user_id": str(mcp_server.created_by_user_id) if mcp_server.created_by_user_id else None,
+            "forked_by_user_id": str(mcp_server.forked_by_user_id) if mcp_server.forked_by_user_id else None,
+            "creator_avatar_url": creator_avatar_url,
+        })
+
+    return {
+        "mcp_servers": response,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total + limit - 1) // limit,
+        "has_more": len(mcp_servers) == limit,
+    }
+
+
+@router.get("/mcp-servers/{slug}")
+async def get_mcp_server_details(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
+):
+    """
+    Get detailed information about a specific MCP server.
+
+    Public endpoint – authentication is optional.
+    """
+    result = await db.execute(
+        select(MarketplaceAgent)
+        .options(selectinload(MarketplaceAgent.forked_by_user))
+        .where(
+            MarketplaceAgent.slug == slug,
+            MarketplaceAgent.item_type == "mcp_server",
+        )
+    )
+    mcp_server = result.scalar_one_or_none()
+
+    if not mcp_server or not mcp_server.is_active:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+
+    # Check purchase status
+    is_purchased = False
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.agent_id == mcp_server.id,
+                UserPurchasedAgent.is_active,
+            )
+        )
+        is_purchased = purchased_result.scalar_one_or_none() is not None
+
+    creator_type = "official"
+    creator_name = "Tesslate"
+    creator_username = None
+    creator_avatar_url = None
+    if mcp_server.forked_by_user_id:
+        creator_type = "community"
+        if mcp_server.forked_by_user:
+            creator_name = _resolve_display_name(mcp_server.forked_by_user)
+            creator_username = mcp_server.forked_by_user.username
+            creator_avatar_url = mcp_server.forked_by_user.avatar_url
+
+    return {
+        "id": mcp_server.id,
+        "name": mcp_server.name,
+        "slug": mcp_server.slug,
+        "description": mcp_server.description,
+        "long_description": mcp_server.long_description,
+        "category": mcp_server.category,
+        "item_type": mcp_server.item_type,
+        "mode": mcp_server.mode,
+        "agent_type": mcp_server.agent_type,
+        "model": mcp_server.model,
+        "source_type": mcp_server.source_type,
+        "is_forkable": mcp_server.is_forkable,
+        "is_active": mcp_server.is_active,
+        "icon": mcp_server.icon,
+        "avatar_url": mcp_server.avatar_url,
+        "git_repo_url": mcp_server.git_repo_url,
+        "pricing_type": mcp_server.pricing_type,
+        "price": mcp_server.price / 100.0 if mcp_server.price else 0,
+        "usage_count": mcp_server.usage_count or 0,
+        "downloads": mcp_server.downloads,
+        "rating": mcp_server.rating,
+        "reviews_count": mcp_server.reviews_count,
+        "features": mcp_server.features,
+        "tags": mcp_server.tags or [],
+        "is_featured": mcp_server.is_featured,
+        "is_purchased": is_purchased,
+        "creator_type": creator_type,
+        "creator_name": creator_name,
+        "creator_username": creator_username,
+        "created_by_user_id": str(mcp_server.created_by_user_id) if mcp_server.created_by_user_id else None,
+        "forked_by_user_id": str(mcp_server.forked_by_user_id) if mcp_server.forked_by_user_id else None,
+        "creator_avatar_url": creator_avatar_url,
+    }

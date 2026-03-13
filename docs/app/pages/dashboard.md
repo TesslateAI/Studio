@@ -114,7 +114,10 @@ const loadProjects = async () => {
 
 ### Creating a Project
 
-Projects are created with a base template selected. After creation, the user is navigated directly to the **Builder view** (not the architecture canvas) for immediate coding.
+Projects are created with a base template selected. After creation, the user is navigated based on the task result:
+- If `container_id === 'needs_setup'`: redirects to the **Project Setup** page (`/project/:slug/setup`)
+- If `container_id` is a valid ID: navigates to the **Builder view** with that container
+- Otherwise: navigates to the **Builder view** without a container
 
 ```typescript
 const handleCreateProject = async (projectName: string, baseId?: string) => {
@@ -123,7 +126,7 @@ const handleCreateProject = async (projectName: string, baseId?: string) => {
     const response = await projectsApi.create(
       projectName,
       '',
-      'base',  // Always use 'base' source type
+      'base',
       undefined,
       'main',
       baseId
@@ -132,13 +135,15 @@ const handleCreateProject = async (projectName: string, baseId?: string) => {
     const project = response.project;
     const taskId = response.task_id;
 
-    // Poll for task completion to get container_id
     if (taskId) {
       const result = await tasksApi.pollUntilComplete(taskId);
+      const taskResult = result?.result as { container_id?: string } | undefined;
 
-      // Navigate to builder with container if available
-      if (result?.container_id) {
-        navigate(`/project/${project.slug}/builder?container=${result.container_id}`);
+      if (taskResult?.container_id === 'needs_setup') {
+        // Project needs setup - redirect to setup screen
+        navigate(`/project/${project.slug}/setup`);
+      } else if (taskResult?.container_id) {
+        navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
       } else {
         navigate(`/project/${project.slug}/builder`);
       }
@@ -347,6 +352,10 @@ if (!isDesktop) {
 - **`LoadingSpinner`**: Loading state indicator
 - **`StatusBadge`**: Project status badge
 - **`MobileMenu`**: Mobile navigation menu
+
+## Related Pages
+
+- **`ProjectSetup`** (`/project/:slug/setup`): Redirected to when project needs `.tesslate/config.json` setup. See `project-setup.md`.
 
 ## API Endpoints Used
 

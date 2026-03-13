@@ -37,8 +37,15 @@ This context provides information about Tesslate Studio's agent tool system, inc
   - `todos.py` - todo_read, todo_write
   - **Redis persistence**: Todos and plans are persisted to Redis for cross-pod visibility via `_persist_todos`/`_load_todos` (in `todos.py`) and `PlanManager._persist_plan`/`_load_plan`. In-memory storage remains the primary cache; Redis serves as a backing store with a 24-hour TTL.
 
-- `orchestrator/app/agent/tools/web_ops/` - Web operations
+- `orchestrator/app/agent/tools/web_ops/` - Web operations (3 tools)
   - `fetch.py` - web_fetch
+  - `search.py` - web_search (searches the web via Tavily/Brave/DuckDuckGo)
+  - `send_message.py` - send_message (sends messages via chat, Discord, webhook, or reply channel)
+  - `providers.py` - Search provider abstraction (`SearchProvider` ABC with `TavilyProvider`, `BraveSearchProvider`, `DuckDuckGoProvider`)
+
+- `orchestrator/app/agent/tools/skill_ops/` - Skill loading (1 tool)
+  - `load_skill.py` - load_skill (loads full skill instructions on-demand from DB or project files)
+  - **Progressive disclosure**: Only skill name + description are included in the system prompt; the agent calls `load_skill` to fetch the full instruction body when needed
 
 ### View-Scoped Tools
 - `orchestrator/app/agent/tools/view_scoped_factory.py` - Create view-specific tool registries
@@ -53,7 +60,8 @@ This context provides information about Tesslate Studio's agent tool system, inc
 | **Shell Operations** | 4 | `shell_ops/bash.py`, `shell_ops/session.py`, `shell_ops/execute.py` |
 | **Project Operations** | 1 | `project_ops/metadata.py` |
 | **Planning Operations** | 2 | `planning_ops/todos.py` |
-| **Web Operations** | 1 | `web_ops/fetch.py` |
+| **Web Operations** | 3 | `web_ops/fetch.py`, `web_ops/search.py`, `web_ops/send_message.py` |
+| **Skill Operations** | 1 | `skill_ops/load_skill.py` |
 | **Graph Operations** | 9 | `graph_ops/containers.py`, `graph_ops/grid.py`, `graph_ops/shell.py` |
 
 ## Related Contexts
@@ -62,6 +70,9 @@ This context relates to:
 - **Agent Context** (`orchestrator/app/agent/CLAUDE.md`) - Agent system that uses tools
 - **Orchestration Services** - Services that tools interact with (file I/O, shell execution)
 - **Chat Router** (`orchestrator/app/routers/chat.py`) - Tool execution endpoint
+- **Skill Discovery** (`orchestrator/app/services/skill_discovery.py`) - Discovers available skills for the `load_skill` tool
+- **Channel Service** (`orchestrator/app/services/channels/`) - Channel implementations used by `send_message` reply channel
+- **MCP Service** (`orchestrator/app/services/mcp/`) - MCP tools dynamically registered on agent before task execution
 
 ## Quick Reference
 
@@ -182,3 +193,18 @@ Load this context when:
    - Connecting tools to orchestration services
    - File I/O operations
    - Shell command execution
+
+6. **Skill System**
+   - Adding or modifying skills (DB or project file-based)
+   - Debugging skill discovery or load_skill tool
+   - Understanding progressive disclosure pattern
+
+7. **Web Search**
+   - Configuring search providers (Tavily, Brave, DuckDuckGo)
+   - Modifying search result formatting
+   - Adding new search providers
+
+8. **Messaging Channels**
+   - Adding new send_message channels
+   - Debugging channel reply delivery
+   - Understanding the reply channel flow (Telegram, Slack, Discord, WhatsApp)

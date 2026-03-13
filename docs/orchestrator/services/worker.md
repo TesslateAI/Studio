@@ -37,6 +37,8 @@ Load this context when:
 - **[agent-context.md](./agent-context.md)**: Context building functions (called by worker)
 - **[distributed-lock.md](./distributed-lock.md)**: Project-level lock coordination
 - **[../agent/CLAUDE.md](../agent/CLAUDE.md)**: Agent execution engine
+- **[skill-discovery.md](./skill-discovery.md)**: Skill discovery (called by worker to populate agent context)
+- **[mcp.md](./mcp.md)**: MCP tool bridging (MCP tools registered on agent before task execution)
 
 ## Architecture
 
@@ -101,8 +103,11 @@ async def execute_agent_task(ctx, payload_dict: dict):
        - Resolve container name/directory from DB if not in payload
        - Build chat_history via _get_chat_history() if not in payload
        - Build project_context with tesslate_context, git_context, architecture_context
+       - Read .tesslate/config.json alongside TESSLATE.md
        - Warm active plan from Redis via PlanManager.get_plan()
-    4. Create agent instance from config
+       - Discover available skills via skill_discovery.discover_skills()
+       - Bridge MCP tools via McpManager.get_agent_tools() and register on agent
+    4. Create agent instance from config (agent may specify its own model override)
     5. Run agent with streaming iterations
     6. Persist each step to AgentStep table
     7. Publish each event to Redis Stream
@@ -178,6 +183,9 @@ The worker builds the full agent execution context from the database and Redis, 
 | `architecture_context` | `_build_architecture_context()` — project structure | Omitted if not found |
 | `container_name` / `container_directory` | Container record from DB via `_resolve_container_name()` | Uses payload values if provided |
 | `_active_plan` | `PlanManager.get_plan()` from Redis | `None` if no active plan |
+| `available_skills` | `skill_discovery.discover_skills()` from DB + project files | Empty list if no skills |
+| `mcp_tools` | `McpManager.get_agent_tools()` — bridged MCP tools registered on agent | Empty list if no MCP servers |
+| `tesslate_config` | `.tesslate/config.json` from container | `None` if not found |
 
 ### The `_active_plan` Key
 

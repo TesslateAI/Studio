@@ -70,6 +70,18 @@ POST /api/projects → routers/projects.py
       └─ Return project slug (e.g., "my-app-k3x8n2")
 ```
 
+### 1b. Universal Project Setup (setup-config)
+```
+POST /api/projects/{id}/setup-config → routers/projects.py
+  ├─> Read .tesslate/config.json from project
+  ├─> Parse containers, startup commands, connections
+  ├─> Create/update Container models from config
+  └─> Return structured project configuration
+
+The Librarian agent analyzes a project and generates .tesslate/config.json,
+which defines containers, startup_command, connections, and metadata.
+```
+
 ### 2. Agent Chat (AI Code Generation)
 ```
 POST /api/chat/agent/stream → routers/chat.py
@@ -142,12 +154,15 @@ tesslate-studio/
 │       ├── schemas.py        # Pydantic request/response schemas
 │       ├── config.py         # Settings (env vars, deployment mode)
 │       ├── routers/          # API endpoints
-│       │   ├── projects.py   # Project CRUD, start/stop containers
+│       │   ├── projects.py   # Project CRUD, start/stop containers, setup-config
 │       │   ├── chat.py       # Agent chat, streaming responses
 │       │   ├── billing.py    # Stripe subscriptions
 │       │   ├── deployments.py # Vercel/Netlify/Cloudflare
 │       │   ├── git.py        # Git operations
 │       │   ├── external_agent.py # External agent API (API keys, SSE, webhooks)
+│       │   ├── channels.py   # Messaging channel configuration (Telegram, Slack, Discord, WhatsApp)
+│       │   ├── mcp.py        # User MCP server management
+│       │   ├── mcp_server.py # MCP server marketplace catalog
 │       │   └── ...
 │       ├── services/
 │       │   ├── docker_compose_orchestrator.py  # Docker container mgmt
@@ -163,22 +178,46 @@ tesslate-studio/
 │       │   ├── agent_context.py            # Agent execution context builder
 │       │   ├── agent_task.py               # Agent task payload serialization
 │       │   ├── session_router.py           # Cross-pod shell session routing
+│       │   ├── skill_discovery.py          # Skill discovery and loading for agents
+│       │   ├── channels/                   # Messaging channel integrations
+│       │   │   ├── base.py                 # Abstract channel interface
+│       │   │   ├── telegram.py             # Telegram bot
+│       │   │   ├── slack.py                # Slack
+│       │   │   ├── discord_bot.py          # Discord webhook
+│       │   │   ├── whatsapp.py             # WhatsApp
+│       │   │   ├── formatting.py           # Cross-platform message formatting
+│       │   │   └── registry.py             # Channel provider registry
+│       │   ├── mcp/                        # Model Context Protocol
+│       │   │   ├── client.py               # MCP client for server communication
+│       │   │   ├── bridge.py               # Bridge MCP tools into agent tool registry
+│       │   │   └── manager.py              # MCP server lifecycle management
 │       │   └── ...
+│       ├── seeds/            # Database seed data
+│       │   ├── skills.py     # Marketplace skills (15+ skills)
+│       │   └── marketplace_agents.py # Official + community agents
 │       ├── worker.py         # ARQ worker for agent tasks
 │       ├── auth_external.py  # API key authentication
 │       └── agent/            # AI agent system
 │           ├── base.py       # Abstract agent interface
 │           ├── stream_agent.py # Streaming agent implementation
 │           ├── factory.py    # Agent instantiation
-│           └── tools/        # File ops, shell ops, web fetch, etc.
+│           └── tools/        # Agent tools
+│               ├── web_ops/          # Web operations
+│               │   ├── search.py     # Multi-provider web search (Tavily/Brave/DuckDuckGo)
+│               │   ├── fetch.py      # HTTP requests for web content
+│               │   ├── send_message.py # Send messages via channels (Discord, etc.)
+│               │   └── providers.py  # Search provider implementations
+│               └── skill_ops/        # Skill operations
+│                   └── load_skill.py # Load skill instructions at runtime
 │
 ├── app/                      # React frontend
 │   └── src/
-│       ├── pages/            # Dashboard, Project, Marketplace, etc.
+│       ├── pages/            # Dashboard, Project, Marketplace, Library, etc.
 │       ├── components/
 │       │   ├── chat/         # ChatContainer, AgentMessage
 │       │   ├── panels/       # Architecture, Git, Assets, Kanban
 │       │   ├── billing/      # Subscription UI
+│       │   ├── marketplace/  # AgentCard, skill/MCP browsing
 │       │   └── modals/       # CreateProject, Deployment, etc.
 │       └── lib/              # API client, utilities
 │
@@ -199,11 +238,23 @@ tesslate-studio/
 │   │   │   ├── frontend-patch.yaml
 │   │   │   └── secrets/      # Generated from .env.minikube
 │   │   └── production/       # DigitalOcean patches
+│   ├── terraform/
+│   │   └── shared/           # Shared ECR stack (cross-environment)
 │   ├── scripts/              # Helper scripts
 │   ├── .env.example          # Template for credentials
 │   ├── .env.minikube         # Local credentials (gitignored)
 │   ├── QUICKSTART.md         # Getting started guide
 │   └── ARCHITECTURE.md       # Detailed K8s architecture
+│
+├── scripts/
+│   └── seed/                 # Database seed scripts
+│       ├── seed_marketplace_bases.py
+│       ├── seed_marketplace_agents.py
+│       ├── seed_opensource_agents.py
+│       ├── seed_themes.py
+│       ├── seed_community_bases.py
+│       ├── seed_skills.py          # Skills (open-source + Tesslate)
+│       └── seed_mcp_servers.py     # MCP servers (GitHub, Brave, Slack, etc.)
 │
 └── docker-compose.yml        # Local dev setup (Docker mode)
 ```
@@ -213,15 +264,20 @@ tesslate-studio/
 - **User**: Auth, profile, subscription tier, theme_preset
 - **Project**: Name, slug, owner, files, containers
 - **ProjectSnapshot**: EBS VolumeSnapshot records for project versioning/timeline
-- **Container**: Individual service in a project (frontend, backend, db)
+- **Container**: Individual service in a project (frontend, backend, db); includes `startup_command`
 - **ContainerConnection**: Dependencies between containers
 - **Chat/Message**: Conversation history with AI
-- **MarketplaceAgent**: Pre-built AI agents for purchase
+- **MarketplaceAgent**: Pre-built AI agents, skills (`item_type='skill'`, `skill_body`), and MCP servers (`item_type='mcp_server'`); includes `git_repo_url`
+- **AgentSkillAssignment**: Many-to-many linking skills to agents in a project
 - **Deployment**: External deployment records
 - **DeploymentCredential**: OAuth tokens for Vercel/Netlify/etc.
 - **Theme**: Customizable theme presets with colors, typography, spacing, animations
 - **AgentStep**: Append-only agent execution steps (progressive persistence)
 - **ExternalAPIKey**: API keys for external agent invocation (SHA-256 hashed)
+- **ChannelConfig**: Messaging channel configuration per user (encrypted credentials)
+- **ChannelMessage**: Message log for channel interactions
+- **UserMcpConfig**: Per-user MCP server installation with encrypted env vars
+- **AgentMcpAssignment**: Many-to-many linking MCP servers to agents
 
 ## Agent Tools (orchestrator/app/agent/tools/)
 
@@ -231,7 +287,10 @@ tesslate-studio/
 | `edit.py` | Edit specific file sections |
 | `bash.py` | Execute shell commands |
 | `session.py` | Persistent shell sessions |
-| `fetch.py` | HTTP requests for web content |
+| `web_ops/fetch.py` | HTTP requests for web content |
+| `web_ops/search.py` | Multi-provider web search (Tavily/Brave/DuckDuckGo) |
+| `web_ops/send_message.py` | Send messages via channels (Discord webhook, etc.) |
+| `skill_ops/load_skill.py` | Load skill instructions at runtime from marketplace |
 | `todos.py` | Task planning and tracking |
 | `metadata.py` | Query project info |
 
@@ -318,6 +377,11 @@ Each `CLAUDE.md` file contains:
 | External agent API | `docs/orchestrator/routers/external-agent.md` |
 | Redis/pub-sub infrastructure | `docs/orchestrator/services/pubsub.md` |
 | Worker system | `docs/orchestrator/services/worker.md` |
+| Skills system | `docs/orchestrator/agent/CLAUDE.md` |
+| Messaging channels | `docs/orchestrator/routers/CLAUDE.md` → channels.py |
+| MCP server integration | `docs/orchestrator/routers/CLAUDE.md` → mcp.py, mcp_server.py |
+| Web search tool | `docs/orchestrator/agent/tools/CLAUDE.md` |
+| Universal project setup | `docs/orchestrator/routers/CLAUDE.md` → projects.py setup-config |
 
 ## Deployment Modes
 
@@ -349,7 +413,7 @@ docker compose up --build -d
 
 ### Database Seeding
 
-Seeds marketplace bases, agents, open-source agents, and themes. **Required after first setup or clean slate reset.**
+Seeds marketplace bases, agents, open-source agents, themes, skills, and MCP servers. **Required after first setup or clean slate reset.**
 
 Scripts are in `scripts/seed/` and are idempotent (safe to re-run).
 
@@ -364,6 +428,8 @@ docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_themes.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_community_bases.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_skills.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_mcp_servers.py tesslate-orchestrator:/tmp/
 
 # 3. Copy theme JSON files
 docker exec tesslate-orchestrator mkdir -p /tmp/themes
@@ -383,6 +449,10 @@ asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
 "
 # Community bases (open-source project templates)
 docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_community_bases.py
+# Skills (open-source + Tesslate custom skills)
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_skills.py
+# MCP servers (GitHub, Brave Search, Slack, PostgreSQL, Filesystem)
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_mcp_servers.py
 ```
 
 #### Seed All (Kubernetes)
@@ -396,6 +466,8 @@ kubectl cp scripts/seed/seed_marketplace_agents.py tesslate/$POD:/tmp/
 kubectl cp scripts/seed/seed_opensource_agents.py tesslate/$POD:/tmp/
 kubectl cp scripts/seed/seed_themes.py tesslate/$POD:/tmp/
 kubectl cp scripts/seed/seed_community_bases.py tesslate/$POD:/tmp/
+kubectl cp scripts/seed/seed_skills.py tesslate/$POD:/tmp/
+kubectl cp scripts/seed/seed_mcp_servers.py tesslate/$POD:/tmp/
 kubectl cp scripts/themes tesslate/$POD:/tmp/themes
 
 # Run (on Windows prefix with MSYS_NO_PATHCONV=1)
@@ -409,6 +481,8 @@ exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
 asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
 "
 kubectl exec -n tesslate $POD -- python /tmp/seed_community_bases.py
+kubectl exec -n tesslate $POD -- python /tmp/seed_skills.py
+kubectl exec -n tesslate $POD -- python /tmp/seed_mcp_servers.py
 ```
 
 #### What Gets Seeded
@@ -416,10 +490,12 @@ kubectl exec -n tesslate $POD -- python /tmp/seed_community_bases.py
 | Script | Data | Count |
 |--------|------|-------|
 | `seed_marketplace_bases.py` | Project templates (Next.js 16, Vite+React+FastAPI, Vite+React+Go, Expo) | 4 |
-| `seed_marketplace_agents.py` | Official agents + Tesslate account (Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent) | 5 |
+| `seed_marketplace_agents.py` | Official agents + Tesslate account (Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent, Librarian) | 6 |
 | `seed_opensource_agents.py` | Community agents (Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer) | 6 |
 | `seed_themes.py` | UI themes (default-dark, default-light, midnight, ocean, forest, rose, sunset) | 7 |
 | `seed_community_bases.py` | Community open-source bases (Go, Rust, Django, Laravel, Rails, Flutter, .NET, etc.) | 63 |
+| `seed_skills.py` | Marketplace skills - open-source (Vercel React, Web Design, Frontend Design, Remotion, Simplify) + Tesslate (Deploy Vercel, Testing, API Design, Docker, Auth, DB Schema) | 11 |
+| `seed_mcp_servers.py` | MCP servers (GitHub, Brave Search, Slack, PostgreSQL, Filesystem) | 5 |
 
 ### Kubernetes (Minikube/Production)
 - `DEPLOYMENT_MODE=kubernetes` in config
@@ -447,6 +523,20 @@ k8s_enable_pod_affinity: bool      # Keep multi-container projects on same node
 redis_url: str                     # Redis connection string (empty = in-memory fallback)
 worker_max_jobs: int               # Concurrent agent tasks per worker pod (10)
 worker_job_timeout: int            # Task timeout in seconds (600)
+
+# Web Search
+web_search_provider: str           # tavily, brave, or duckduckgo (default: tavily)
+tavily_api_key: str                # Tavily API key
+brave_search_api_key: str          # Brave Search API key
+
+# Messaging Channels
+agent_discord_webhook_url: str     # Discord webhook URL for agent send_message tool
+channel_encryption_key: str        # Fernet key for channel credential encryption
+
+# MCP (Model Context Protocol)
+mcp_tool_cache_ttl: int            # MCP tool schema cache TTL in seconds (300)
+mcp_tool_timeout: int              # MCP tool call timeout in seconds (30)
+mcp_max_servers_per_user: int      # Max installed MCP servers per user (20)
 ```
 
 #### Minikube vs Production Config

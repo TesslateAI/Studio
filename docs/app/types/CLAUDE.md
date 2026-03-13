@@ -271,12 +271,72 @@ const { isValid, error } = validateTheme(theme);
 
 **Solution**: Validation only checks required properties. Optional properties (like `author`, `description`) are not validated.
 
+## TesslateConfig Types
+
+**File**: `app/src/types/tesslateConfig.ts`
+
+Types for the `.tesslate/config.json` project configuration file, used by the Project Setup wizard and `setupApi`.
+
+### Type Hierarchy
+
+```
+TesslateConfig
+├── apps: Record<string, AppConfig>
+│   └── AppConfig
+│       ├── directory: string           # Working directory
+│       ├── port: number | null         # Listening port
+│       ├── start: string               # Start command
+│       ├── env: Record<string, string> # Environment variables
+│       ├── x?: number                  # Graph X position
+│       └── y?: number                  # Graph Y position
+├── infrastructure: Record<string, InfraConfig>
+│   └── InfraConfig
+│       ├── image: string               # Docker image
+│       ├── port: number                # Service port
+│       ├── x?: number                  # Graph X position
+│       └── y?: number                  # Graph Y position
+└── primaryApp: string                  # Name of the primary app
+```
+
+### Response Types
+
+```typescript
+// GET /api/projects/{slug}/setup-config
+interface TesslateConfigResponse extends TesslateConfig {
+  exists: boolean;  // Whether config file was found
+}
+
+// POST /api/projects/{slug}/setup-config
+interface SetupConfigSyncResponse {
+  container_ids: string[];           // Created container IDs
+  primary_container_id: string | null; // Primary app's container ID
+}
+```
+
+### Usage
+
+```typescript
+import type { TesslateConfig, AppConfig, InfraConfig } from '../types/tesslateConfig';
+
+const config: TesslateConfig = {
+  apps: {
+    frontend: { directory: '.', port: 3000, start: 'npm run dev', env: {} },
+    backend: { directory: 'api/', port: 8000, start: 'python -m uvicorn main:app', env: {} },
+  },
+  infrastructure: {
+    postgres: { image: 'postgres:16', port: 5432 },
+  },
+  primaryApp: 'frontend',
+};
+```
+
 ## Type Files Overview
 
 ```
 app/src/
 ├── types/
-│   └── theme.ts           # Theme types + validation
+│   ├── theme.ts           # Theme types + validation
+│   └── tesslateConfig.ts  # TesslateConfig, AppConfig, InfraConfig
 ├── lib/
 │   └── api.ts             # API types (source of truth)
 └── theme/

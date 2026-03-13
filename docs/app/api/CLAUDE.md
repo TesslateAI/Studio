@@ -158,16 +158,18 @@ const files = await projectsApi.getFiles(slug);
 | `chatApi` | `/api/chat/` | Messages, streaming, approvals |
 | `gitApi` | `/api/projects/{id}/git/` | Version control |
 | `tasksApi` | `/api/tasks/` | Background task status |
-| `marketplaceApi` | `/api/marketplace/` | Agents, bases, reviews (agent + base) |
+| `marketplaceApi` | `/api/marketplace/` | Agents, bases, skills, MCP servers, reviews |
 | `billingApi` | `/api/billing/` | Subscriptions, credits |
 | `assetsApi` | `/api/projects/{slug}/assets/` | File uploads |
 | `deploymentsApi` | `/api/deployments/` | External deploys |
 | `secretsApi` | `/api/secrets/` | API keys |
 | `usersApi` | `/api/users/` | Profile, preferences |
 | `configApi` | `/api/config` | App configuration |
+| `setupApi` | `/api/projects/{slug}/` | Setup config, project analysis |
 
 ## Type Definitions Location
 
 - Agent types: `app/src/types/agent.ts`
 - Git types: `app/src/types/git.ts`
+- TesslateConfig types: `app/src/types/tesslateConfig.ts`
 - Inline types: `app/src/lib/api.ts` (UserProfile, etc.)

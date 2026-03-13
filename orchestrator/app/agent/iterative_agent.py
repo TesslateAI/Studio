@@ -169,6 +169,7 @@ class IterativeAgent(AbstractAgent):
 
         project_context["user_id"] = context.get("user_id")
         project_context["project_id"] = context.get("project_id")
+        project_context["container_directory"] = context.get("container_directory")
 
         # Initialize conversation with system prompt (with marker substitution)
         full_system_prompt = self._get_system_prompt(context)
