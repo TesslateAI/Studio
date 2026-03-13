@@ -1742,14 +1742,14 @@ class ChannelConfig(Base):
     __tablename__ = "channel_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
     channel_type = Column(String(20), nullable=False)  # telegram, slack, discord, whatsapp
     name = Column(String(100), nullable=False)
     credentials = Column(Text, nullable=False)  # Fernet-encrypted JSON
     webhook_secret = Column(String(64), nullable=False)  # random secret for URL signing
     default_agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
@@ -1768,7 +1768,7 @@ class ChannelMessage(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     channel_config_id = Column(
-        UUID(as_uuid=True), ForeignKey("channel_configs.id"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("channel_configs.id", ondelete="CASCADE"), nullable=False, index=True
     )
     direction = Column(String(10), nullable=False)  # inbound / outbound
     jid = Column(String(255), nullable=False)  # canonical address
@@ -1791,9 +1791,9 @@ class UserMcpConfig(Base):
     __tablename__ = "user_mcp_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     marketplace_agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
     credentials = Column(Text, nullable=True)  # Fernet-encrypted JSON (API keys, tokens)
     enabled_capabilities = Column(JSON, default=["tools", "resources", "prompts"])
