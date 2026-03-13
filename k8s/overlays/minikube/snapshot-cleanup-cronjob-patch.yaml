@@ -1,0 +1,20 @@
+# Snapshot Cleanup CronJob Patch for Minikube
+# Minikube doesn't support VolumeSnapshots, so suspend this cronjob
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: snapshot-cleanup
+  namespace: tesslate
+spec:
+  suspend: true  # VolumeSnapshots not supported on minikube
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          containers:
+          - name: cleanup
+            imagePullPolicy: Never  # Use locally loaded image

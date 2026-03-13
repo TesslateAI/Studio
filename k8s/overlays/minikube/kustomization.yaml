@@ -25,6 +25,9 @@ patches:
   - path: frontend-patch.yaml
   # Ingress patches for local domain
   - path: ingress-patch.yaml
+  # CronJob patches for Minikube (imagePullPolicy: Never for local images)
+  - path: cleanup-cronjob-patch.yaml
+  - path: snapshot-cleanup-cronjob-patch.yaml
 
 images:
   # Use latest tag everywhere (same as production)
