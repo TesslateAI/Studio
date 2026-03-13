@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { Robot, Wrench, ArrowRight, ArrowLeft, SpinnerGap } from '@phosphor-icons/react';
 import { setupApi } from '../lib/api';
 import { ServiceConfigForm } from '../components/ServiceConfigForm';
+import { ModelSelector } from '../components/chat/ModelSelector';
 import type { TesslateConfig } from '../types/tesslateConfig';
 
 type Tab = 'agent' | 'manual';
@@ -31,6 +32,7 @@ export default function ProjectSetup() {
   const [analysisDone, setAnalysisDone] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [existingConfig, setExistingConfig] = useState(false);
+  const [analyzeModel, setAnalyzeModel] = useState('glm-5');
 
   // Load existing config on mount
   useEffect(() => {
@@ -50,7 +52,7 @@ export default function ProjectSetup() {
     setAnalysisDone(false);
 
     try {
-      const result = await setupApi.analyzeProject(slug);
+      const result = await setupApi.analyzeProject(slug, analyzeModel);
       if (result.apps && Object.keys(result.apps).length > 0) {
         setConfig({
           apps: result.apps,
@@ -70,7 +72,7 @@ export default function ProjectSetup() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [slug, isAnalyzing]);
+  }, [slug, isAnalyzing, analyzeModel]);
 
   const handleSave = async () => {
     if (!slug || isSaving) return;
@@ -194,20 +196,27 @@ export default function ProjectSetup() {
                 <p className="text-sm text-[var(--text)]/50 mb-6 max-w-md mx-auto">
                   Our AI will scan your project files to detect frameworks, ports, and startup commands automatically.
                 </p>
-                <button
-                  onClick={handleAnalyze}
-                  disabled={isAnalyzing}
-                  className="px-6 py-3 bg-[var(--primary)] text-white rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2 mx-auto"
-                >
-                  {isAnalyzing ? (
-                    <>
-                      <SpinnerGap size={18} className="animate-spin" />
-                      Analyzing...
-                    </>
-                  ) : (
-                    'Analyze Project'
-                  )}
-                </button>
+                <div className="flex items-center gap-3 justify-center">
+                  <ModelSelector
+                    value={analyzeModel}
+                    onModelChange={setAnalyzeModel}
+                    dropUp={false}
+                  />
+                  <button
+                    onClick={handleAnalyze}
+                    disabled={isAnalyzing}
+                    className="px-6 py-3 bg-[var(--primary)] text-white rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <SpinnerGap size={18} className="animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      'Analyze Project'
+                    )}
+                  </button>
+                </div>
               </div>
             )}
 

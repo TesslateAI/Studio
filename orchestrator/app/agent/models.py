@@ -142,6 +142,28 @@ def get_builtin_provider_config(provider_slug: str) -> dict[str, Any] | None:
     return BUILTIN_PROVIDERS.get(provider_slug)
 
 
+def resolve_model_name(model: str) -> str:
+    """Strip routing prefixes from a model ID to get the name for the LLM API call.
+
+    - "builtin/deepseek-v3.2" → "deepseek-v3.2"
+    - "openrouter/anthropic/claude-3.5-sonnet" → "anthropic/claude-3.5-sonnet"
+    - "custom/my-provider/model-x" → "model-x" (strips custom/ and provider slug)
+    - "gpt-4o" → "gpt-4o" (no prefix, unchanged)
+    """
+    if model.startswith(BUILTIN_PREFIX):
+        return model[len(BUILTIN_PREFIX):]
+    if model.startswith(CUSTOM_PREFIX):
+        stripped = model[len(CUSTOM_PREFIX):]
+        # custom/{provider_slug}/{model_id} → {model_id}
+        parts = stripped.split("/", 1)
+        return parts[1] if len(parts) > 1 else stripped
+    if "/" in model:
+        provider_slug = model.split("/", 1)[0]
+        if provider_slug in BUILTIN_PROVIDERS:
+            return model.removeprefix(f"{provider_slug}/")
+    return model
+
+
 def get_byok_provider_prefixes() -> tuple[str, ...]:
     """Return all BYOK provider prefixes derived from BUILTIN_PROVIDERS.
 

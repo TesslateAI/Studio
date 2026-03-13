@@ -1050,6 +1050,23 @@ fi
             env_overrides = await build_env_overrides(db, project.id, [container])
             extra_env = env_overrides.get(container.id, {})
 
+            # Auto-inject sibling container URLs for service discovery
+            # e.g. BACKEND_URL=http://dev-backend:8001, FRONTEND_URL=http://dev-frontend:5173
+            for sibling in all_containers:
+                if sibling.id == container.id:
+                    continue
+                if getattr(sibling, "container_type", "base") == "service":
+                    continue
+                sib_name = sibling.name.upper().replace("-", "_")
+                sib_k8s_name = self._sanitize_name(
+                    sibling.name if sibling.directory in (".", "", None) else sibling.directory
+                )
+                sib_port = sibling.effective_port
+                sib_url = f"http://dev-{sib_k8s_name}:{sib_port}"
+                extra_env.setdefault(f"{sib_name}_URL", sib_url)
+                # Also set VITE_ prefixed version for Vite projects
+                extra_env.setdefault(f"VITE_{sib_name}_URL", sib_url)
+
             # Create Deployment (NO init containers - files already exist!)
             deployment = create_container_deployment(
                 namespace=namespace,

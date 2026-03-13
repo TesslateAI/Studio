@@ -1725,8 +1725,9 @@ export const setupApi = {
     return response.data;
   },
 
-  analyzeProject: async (slug: string): Promise<TesslateConfigResponse> => {
-    const response = await api.post(`/api/projects/${slug}/analyze`);
+  analyzeProject: async (slug: string, model?: string): Promise<TesslateConfigResponse> => {
+    const params = model ? { model } : {};
+    const response = await api.post(`/api/projects/${slug}/analyze`, null, { params });
     return response.data;
   },
 };

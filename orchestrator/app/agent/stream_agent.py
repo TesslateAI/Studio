@@ -100,19 +100,9 @@ class StreamAgent(AbstractAgent):
 
             # Prepare request parameters
             # Strip routing prefix before sending to LLM API
-            from .models import BUILTIN_PREFIX, BUILTIN_PROVIDERS
+            from .models import BUILTIN_PROVIDERS, resolve_model_name
 
-            if model.startswith(BUILTIN_PREFIX):
-                model_id = model[len(BUILTIN_PREFIX) :]
-            elif "/" in model:
-                # For BYOK models ("provider/model-name"), strip the provider prefix
-                provider_slug = model.split("/", 1)[0]
-                if provider_slug in BUILTIN_PROVIDERS:
-                    model_id = model.removeprefix(f"{provider_slug}/")
-                else:
-                    model_id = model
-            else:
-                model_id = model
+            model_id = resolve_model_name(model)
 
             stream_params = {
                 "model": model_id,

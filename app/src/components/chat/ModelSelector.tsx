@@ -15,7 +15,10 @@ interface ModelInfo {
 }
 
 interface ModelSelectorProps {
-  currentAgent: ChatAgent;
+  /** Provide either currentAgent OR value for standalone usage */
+  currentAgent?: ChatAgent;
+  /** Direct model ID — alternative to currentAgent for standalone usage */
+  value?: string;
   onModelChange: (model: string) => void;
   compact?: boolean;
   /** When true (default), dropdown opens upward; when false, opens downward */
@@ -66,6 +69,7 @@ function providerOrder(provider: string): number {
 
 export function ModelSelector({
   currentAgent,
+  value,
   onModelChange,
   compact = false,
   dropUp = true,
@@ -82,8 +86,8 @@ export function ModelSelector({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const activeModel = currentAgent.selectedModel || currentAgent.model || '';
-  const isReadOnly = currentAgent.sourceType === 'closed' && !currentAgent.isCustom;
+  const activeModel = value || currentAgent?.selectedModel || currentAgent?.model || '';
+  const isReadOnly = currentAgent ? (currentAgent.sourceType === 'closed' && !currentAgent.isCustom) : false;
 
   // Position state for portal-based dropdown
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);

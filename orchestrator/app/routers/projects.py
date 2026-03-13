@@ -606,6 +606,7 @@ async def _setup_git_provider_project(
                 container_name=f"{db_project.slug}-{app_name}",
                 internal_port=app_config.port or 3000,
                 environment_vars=app_config.env or {},
+                startup_command=app_config.start or None,
                 container_type="base",
                 status="stopped",
                 position_x=app_config.x or 200,
@@ -899,11 +900,14 @@ async def _setup_archive_base_project(
     else:
         tesslate_path = os.path.join(project_path, "TESSLATE.md")
 
+    startup_cmd = None
     if os.path.exists(tesslate_path):
         try:
             tesslate_content = await read_file_async(tesslate_path)
             base_config = parse_tesslate_md(tesslate_content)
             internal_port = base_config.port
+            if base_config.start_command and base_config.is_validated:
+                startup_cmd = base_config.start_command
             logger.info(f"[CREATE] Parsed port {internal_port} from template TESSLATE.md")
         except Exception as e:
             logger.warning(f"[CREATE] Could not parse TESSLATE.md: {e}, using default port 3000")
@@ -917,6 +921,7 @@ async def _setup_archive_base_project(
         directory=".",
         container_name=f"{db_project.slug}-{base_display}",
         internal_port=internal_port,
+        startup_command=startup_cmd,
         container_type="base",
         status="stopped",
         position_x=200,
@@ -2553,6 +2558,7 @@ async def save_setup_config(
             container.directory = app_config.directory
             container.internal_port = app_config.port or 3000
             container.environment_vars = app_config.env or {}
+            container.startup_command = app_config.start or None
             if app_config.x is not None:
                 container.position_x = app_config.x
             if app_config.y is not None:
@@ -2567,6 +2573,7 @@ async def save_setup_config(
                 container_name=f"{project.slug}-{app_name}",
                 internal_port=app_config.port or 3000,
                 environment_vars=app_config.env or {},
+                startup_command=app_config.start or None,
                 container_type="base",
                 status="stopped",
                 position_x=app_config.x or 200,
@@ -2625,6 +2632,7 @@ async def save_setup_config(
 @router.post("/{project_slug}/analyze", response_model=TesslateConfigResponse)
 async def analyze_project(
     project_slug: str,
+    model: str | None = None,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2781,15 +2789,13 @@ Return ONLY valid JSON, no markdown code blocks, no explanation."""
 
     # Call LLM via OpenAI client pointed at LiteLLM proxy
     try:
-        from openai import AsyncOpenAI
+        from ..agent.models import get_llm_client, resolve_model_name
 
-        client = AsyncOpenAI(
-            api_key=settings.litellm_master_key,
-            base_url=settings.litellm_api_base,
-        )
-
+        analyze_model = model or settings.default_model
+        client = await get_llm_client(current_user.id, analyze_model, db)
+        resolved_model = resolve_model_name(analyze_model)
         response = await client.chat.completions.create(
-            model="glm-5",
+            model=resolved_model,
             messages=[
                 {"role": "system", "content": "You are a project analyzer. Return only valid JSON."},
                 {"role": "user", "content": prompt},
@@ -2828,6 +2834,13 @@ Return ONLY valid JSON, no markdown code blocks, no explanation."""
         logger.error(f"[ANALYZE] LLM returned invalid JSON: {e}")
         raise HTTPException(status_code=500, detail="Failed to parse generated config. Please try again.")
     except Exception as e:
+        error_str = str(e).lower()
+        if "429" in str(e) or "rate" in error_str or "resource_exhausted" in error_str or "throttl" in error_str:
+            logger.warning(f"[ANALYZE] Rate limited by LLM provider: {e}")
+            raise HTTPException(status_code=429, detail="AI model is temporarily rate-limited. Please try again in a moment.")
+        if "400" in str(e) or "invalid model" in error_str:
+            logger.warning(f"[ANALYZE] Invalid model: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid model. Please select a different model.")
         logger.error(f"[ANALYZE] Failed to analyze project: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to analyze project: {str(e)}")
 
