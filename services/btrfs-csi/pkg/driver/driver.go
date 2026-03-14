@@ -15,6 +15,7 @@ import (
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/fileops"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/gc"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/metrics"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/s3"
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
@@ -168,6 +169,9 @@ func (d *Driver) runNode(ctx context.Context) error {
 			klog.Errorf("FileOps server failed: %v", err)
 		}
 	}()
+
+	// Start Prometheus metrics server.
+	go metrics.StartMetricsServer(":9090", "", "")
 
 	// Start garbage collector for orphaned subvolumes and stale snapshots.
 	gcCollector := gc.NewCollector(d.btrfs, d.s3c, gc.Config{
