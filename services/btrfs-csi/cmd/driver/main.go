@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,11 +30,14 @@ func main() {
 		mode         = flag.String("mode", "all", "Driver mode: controller, node, or all")
 		nodeOpsAddr  = flag.String("nodeops-addr", "", "NodeOps gRPC address (controller mode, e.g., node-svc:9741)")
 		nodeOpsPort  = flag.Int("nodeops-port", 9741, "NodeOps gRPC listen port (node mode)")
-		s3Endpoint   = flag.String("s3-endpoint", "", "S3-compatible endpoint for snapshot offload")
-		s3Bucket     = flag.String("s3-bucket", "", "S3 bucket for snapshot storage")
-		s3AccessKey  = flag.String("s3-access-key", "", "S3 access key")
-		s3SecretKey  = flag.String("s3-secret-key", "", "S3 secret key")
-		s3Region     = flag.String("s3-region", "us-east-1", "S3 region")
+		storageProvider = flag.String("storage-provider", "", "Object storage provider (s3, gcs, azureblob)")
+		storageBucket   = flag.String("storage-bucket", "", "Object storage bucket name")
+		// Deprecated: use --storage-provider/--storage-bucket + RCLONE_* env vars
+		s3Endpoint  = flag.String("s3-endpoint", "", "(deprecated) S3-compatible endpoint")
+		s3Bucket    = flag.String("s3-bucket", "", "(deprecated) S3 bucket for snapshot storage")
+		s3AccessKey = flag.String("s3-access-key", "", "(deprecated) S3 access key")
+		s3SecretKey = flag.String("s3-secret-key", "", "(deprecated) S3 secret key")
+		s3Region    = flag.String("s3-region", "us-east-1", "(deprecated) S3 region")
 		syncInterval = flag.Duration("sync-interval", 60*time.Second, "Interval between sync daemon runs")
 		showVersion  = flag.Bool("version", false, "Print version and exit")
 	)
@@ -43,6 +47,47 @@ func main() {
 	if *showVersion {
 		fmt.Printf("tesslate-btrfs-csi %s (commit: %s)\n", version, commit)
 		os.Exit(0)
+	}
+
+	// Env var fallbacks for storage configuration.
+	if *storageProvider == "" {
+		if v := os.Getenv("STORAGE_PROVIDER"); v != "" {
+			*storageProvider = v
+		}
+	}
+	if *storageBucket == "" {
+		if v := os.Getenv("STORAGE_BUCKET"); v != "" {
+			*storageBucket = v
+		}
+	}
+
+	// Deprecated S3 flag compatibility: map old flags to new config.
+	if *storageProvider == "" && *s3Endpoint != "" {
+		klog.Warning("--s3-* flags are deprecated; use --storage-provider + RCLONE_* env vars")
+		*storageProvider = "s3"
+		if *storageBucket == "" {
+			*storageBucket = *s3Bucket
+		}
+	}
+
+	// Collect RCLONE_* env vars for object storage configuration.
+	storageEnvMap := make(map[string]string)
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "RCLONE_") {
+			parts := strings.SplitN(env, "=", 2)
+			if len(parts) == 2 {
+				storageEnvMap[parts[0]] = parts[1]
+			}
+		}
+	}
+
+	// If using deprecated S3 flags and no RCLONE_* vars set, map them.
+	if *s3Endpoint != "" && len(storageEnvMap) == 0 {
+		storageEnvMap["RCLONE_S3_PROVIDER"] = "AWS"
+		storageEnvMap["RCLONE_S3_ENDPOINT"] = *s3Endpoint
+		storageEnvMap["RCLONE_S3_ACCESS_KEY_ID"] = *s3AccessKey
+		storageEnvMap["RCLONE_S3_SECRET_ACCESS_KEY"] = *s3SecretKey
+		storageEnvMap["RCLONE_S3_REGION"] = *s3Region
 	}
 
 	if *nodeID == "" {
@@ -65,7 +110,7 @@ func main() {
 		driver.WithMode(*mode),
 		driver.WithNodeOpsAddr(*nodeOpsAddr),
 		driver.WithNodeOpsPort(*nodeOpsPort),
-		driver.WithS3Config(*s3Endpoint, *s3Bucket, *s3AccessKey, *s3SecretKey, *s3Region),
+		driver.WithStorageConfig(*storageProvider, *storageBucket, storageEnvMap),
 		driver.WithSyncInterval(*syncInterval),
 	)
 

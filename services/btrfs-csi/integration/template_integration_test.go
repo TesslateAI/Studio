@@ -23,8 +23,8 @@ func TestTemplate_UploadAndEnsure(t *testing.T) {
 	ctx := context.Background()
 
 	bucket := uniqueName("tmpl-upload")
-	s3c := newS3Client(t, bucket)
-	tmplMgr := template.NewManager(mgr, s3c, pool)
+	store := newObjectStorage(t, bucket)
+	tmplMgr := template.NewManager(mgr, store, pool)
 
 	tmplName := uniqueName("tmpl")
 	tmplPath := "templates/" + tmplName
@@ -76,8 +76,8 @@ func TestTemplate_EnsureTemplate_AlreadyExists(t *testing.T) {
 	ctx := context.Background()
 
 	bucket := uniqueName("tmpl-exists")
-	s3c := newS3Client(t, bucket)
-	tmplMgr := template.NewManager(mgr, s3c, pool)
+	store := newObjectStorage(t, bucket)
+	tmplMgr := template.NewManager(mgr, store, pool)
 
 	tmplName := uniqueName("tmpl")
 	tmplPath := "templates/" + tmplName
@@ -108,8 +108,8 @@ func TestTemplate_RefreshTemplate(t *testing.T) {
 	ctx := context.Background()
 
 	bucket := uniqueName("tmpl-refresh")
-	s3c := newS3Client(t, bucket)
-	tmplMgr := template.NewManager(mgr, s3c, pool)
+	store := newObjectStorage(t, bucket)
+	tmplMgr := template.NewManager(mgr, store, pool)
 
 	tmplName := uniqueName("tmpl")
 	tmplPath := "templates/" + tmplName
@@ -164,8 +164,8 @@ func TestTemplate_EnsureTemplate_NotInS3(t *testing.T) {
 	ctx := context.Background()
 
 	bucket := uniqueName("tmpl-notfound")
-	s3c := newS3Client(t, bucket)
-	tmplMgr := template.NewManager(mgr, s3c, pool)
+	store := newObjectStorage(t, bucket)
+	tmplMgr := template.NewManager(mgr, store, pool)
 
 	tmplName := uniqueName("tmpl")
 
@@ -184,8 +184,8 @@ func TestTemplate_ListTemplates(t *testing.T) {
 	ctx := context.Background()
 
 	bucket := uniqueName("tmpl-list")
-	s3c := newS3Client(t, bucket)
-	tmplMgr := template.NewManager(mgr, s3c, pool)
+	store := newObjectStorage(t, bucket)
+	tmplMgr := template.NewManager(mgr, store, pool)
 
 	const count = 3
 	tmplNames := make([]string, count)

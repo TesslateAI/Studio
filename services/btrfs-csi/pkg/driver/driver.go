@@ -17,7 +17,7 @@ import (
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/gc"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/metrics"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
-	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/s3"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/template"
 )
@@ -40,11 +40,9 @@ type Driver struct {
 	endpoint string
 	mode     Mode
 
-	s3Endpoint  string
-	s3Bucket    string
-	s3AccessKey string
-	s3SecretKey string
-	s3Region    string
+	storageProvider string
+	storageBucket   string
+	storageEnv      map[string]string
 
 	syncInterval time.Duration
 	nodeOpsAddr  string // Address of nodeops gRPC server (for controller mode)
@@ -52,7 +50,7 @@ type Driver struct {
 
 	// Node-mode subsystems (nil in controller mode).
 	btrfs   *btrfs.Manager
-	s3c     *s3.Client
+	store   objstore.ObjectStorage
 	syncer  *bsync.Daemon
 	tmplMgr *template.Manager
 
@@ -76,13 +74,26 @@ func WithMode(mode string) Option        { return func(d *Driver) { d.mode = Mod
 func WithNodeOpsAddr(addr string) Option { return func(d *Driver) { d.nodeOpsAddr = addr } }
 func WithNodeOpsPort(port int) Option    { return func(d *Driver) { d.nodeOpsPort = port } }
 
+func WithStorageConfig(provider, bucket string, env map[string]string) Option {
+	return func(d *Driver) {
+		d.storageProvider = provider
+		d.storageBucket = bucket
+		d.storageEnv = env
+	}
+}
+
+// Deprecated: Use WithStorageConfig instead.
 func WithS3Config(endpoint, bucket, accessKey, secretKey, region string) Option {
 	return func(d *Driver) {
-		d.s3Endpoint = endpoint
-		d.s3Bucket = bucket
-		d.s3AccessKey = accessKey
-		d.s3SecretKey = secretKey
-		d.s3Region = region
+		d.storageProvider = "s3"
+		d.storageBucket = bucket
+		d.storageEnv = map[string]string{
+			"RCLONE_S3_PROVIDER":          "AWS",
+			"RCLONE_S3_ENDPOINT":          endpoint,
+			"RCLONE_S3_ACCESS_KEY_ID":     accessKey,
+			"RCLONE_S3_SECRET_ACCESS_KEY": secretKey,
+			"RCLONE_S3_REGION":            region,
+		}
 	}
 }
 
@@ -133,25 +144,24 @@ func (d *Driver) runNode(ctx context.Context) error {
 		}
 	}
 
-	// Initialize S3 client if configured.
-	if d.s3Endpoint != "" && d.s3Bucket != "" {
-		useSSL := !strings.Contains(d.s3Endpoint, "localhost") && !strings.Contains(d.s3Endpoint, "127.0.0.1")
-		client, err := s3.NewClient(d.s3Endpoint, d.s3AccessKey, d.s3SecretKey, d.s3Bucket, d.s3Region, useSSL)
+	// Initialize object storage if configured.
+	if d.storageProvider != "" && d.storageBucket != "" {
+		store, err := objstore.NewRcloneStorage(d.storageProvider, d.storageBucket, d.storageEnv)
 		if err != nil {
-			klog.Errorf("Failed to create S3 client: %v", err)
+			klog.Errorf("Failed to create object storage: %v", err)
 		} else {
-			d.s3c = client
+			d.store = store
 		}
 	}
 
-	// Start sync daemon if S3 is configured.
-	if d.s3c != nil {
-		d.syncer = bsync.NewDaemon(d.btrfs, d.s3c, d.syncInterval)
+	// Start sync daemon if object storage is configured.
+	if d.store != nil {
+		d.syncer = bsync.NewDaemon(d.btrfs, d.store, d.syncInterval)
 		go d.syncer.Start(ctx)
 		klog.Info("Sync daemon started")
 	}
 
-	d.tmplMgr = template.NewManager(d.btrfs, d.s3c, d.poolPath)
+	d.tmplMgr = template.NewManager(d.btrfs, d.store, d.poolPath)
 
 	// Start nodeops gRPC server for controller delegation.
 	d.nodeOpsSrv = nodeops.NewServer(d.btrfs, d.syncer, d.tmplMgr)
@@ -174,7 +184,7 @@ func (d *Driver) runNode(ctx context.Context) error {
 	go metrics.StartMetricsServer(":9090", "", "")
 
 	// Start garbage collector for orphaned subvolumes and stale snapshots.
-	gcCollector := gc.NewCollector(d.btrfs, d.s3c, gc.Config{
+	gcCollector := gc.NewCollector(d.btrfs, d.store, gc.Config{
 		Interval:    10 * time.Minute,
 		GracePeriod: 24 * time.Hour,
 		DryRun:      false,
@@ -360,10 +370,10 @@ func (l *localNodeOps) EnsureTemplate(ctx context.Context, name string) error {
 
 func (l *localNodeOps) RestoreVolume(ctx context.Context, volumeID string) error {
 	if l.syncer == nil {
-		return fmt.Errorf("S3 sync not configured, cannot restore volume %q", volumeID)
+		return fmt.Errorf("object storage sync not configured, cannot restore volume %q", volumeID)
 	}
 
-	objects, err := l.syncer.ListS3Objects(ctx, fmt.Sprintf("volumes/%s/", volumeID))
+	objects, err := l.syncer.ListObjects(ctx, fmt.Sprintf("volumes/%s/", volumeID))
 	if err != nil {
 		return err
 	}
@@ -372,7 +382,7 @@ func (l *localNodeOps) RestoreVolume(ctx context.Context, volumeID string) error
 	}
 
 	// Use the latest object.
-	return l.syncer.RestoreFromS3(ctx, volumeID, objects[len(objects)-1])
+	return l.syncer.RestoreFromStorage(ctx, volumeID, objects[len(objects)-1])
 }
 
 func (l *localNodeOps) PromoteToTemplate(ctx context.Context, volumeID, templateName string) error {

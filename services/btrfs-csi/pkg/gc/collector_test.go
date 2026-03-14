@@ -21,8 +21,8 @@ func TestNewCollector(t *testing.T) {
 	if c.btrfs != mgr {
 		t.Fatalf("expected btrfs manager %p, got %p", mgr, c.btrfs)
 	}
-	if c.s3 != nil {
-		t.Fatalf("expected nil s3 client, got %v", c.s3)
+	if c.store != nil {
+		t.Fatalf("expected nil object storage, got %v", c.store)
 	}
 	if c.config.Interval != 5*time.Minute {
 		t.Fatalf("expected interval 5m, got %v", c.config.Interval)
@@ -90,14 +90,14 @@ func TestCleanOrphanedSubvolumes_NilCallback(t *testing.T) {
 	}
 }
 
-func TestCleanOrphanedS3Snapshots_NilS3(t *testing.T) {
+func TestCleanOrphanedS3Snapshots_NilStore(t *testing.T) {
 	mgr := btrfs.NewManager("/pool")
 	c := NewCollector(mgr, nil, Config{
 		Interval:    time.Minute,
 		GracePeriod: time.Minute,
 	})
 
-	// Set a knownVolumes func so only the nil-s3 guard triggers.
+	// Set a knownVolumes func so only the nil-store guard triggers.
 	c.SetKnownVolumesFunc(func(ctx context.Context) (map[string]bool, error) {
 		return map[string]bool{"vol-1": true}, nil
 	})
@@ -112,7 +112,7 @@ func TestCleanOrphanedS3Snapshots_NilS3(t *testing.T) {
 }
 
 func TestCleanOrphanedS3Snapshots_NilCallback(t *testing.T) {
-	// Both s3 and knownVolumes are nil. The guard checks s3 == nil || knownVolumes == nil.
+	// Both store and knownVolumes are nil. The guard checks store == nil || knownVolumes == nil.
 	mgr := btrfs.NewManager("/pool")
 	c := NewCollector(mgr, nil, Config{
 		Interval:    time.Minute,
@@ -171,9 +171,9 @@ func TestStart_ContextCancel(t *testing.T) {
 }
 
 func TestRunOnce_NilCallbacks(t *testing.T) {
-	// knownVolumes is nil and s3 is nil.
+	// knownVolumes is nil and store is nil.
 	// cleanOrphanedSubvolumes -> (0, nil)  [nil callback guard]
-	// cleanOrphanedS3Snapshots -> (0, nil) [nil s3/callback guard]
+	// cleanOrphanedS3Snapshots -> (0, nil) [nil store/callback guard]
 	// cleanStaleLocalSnapshots -> (0, err) [btrfs command fails]
 	// RunOnce logs errors but always returns nil.
 	mgr := btrfs.NewManager("/nonexistent-pool-path")

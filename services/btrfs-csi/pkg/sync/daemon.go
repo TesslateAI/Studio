@@ -11,8 +11,21 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
-	s3client "github.com/TesslateAI/tesslate-btrfs-csi/pkg/s3"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/metrics"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
 )
+
+// countingWriter wraps an io.Writer and tracks the number of bytes written.
+type countingWriter struct {
+	w     io.Writer
+	bytes int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.bytes += int64(n)
+	return n, err
+}
 
 // trackedVolume holds per-volume sync state.
 type trackedVolume struct {
@@ -21,10 +34,10 @@ type trackedVolume struct {
 	lastSyncAt time.Time
 }
 
-// Daemon periodically snapshots tracked volumes and uploads them to S3.
+// Daemon periodically snapshots tracked volumes and uploads them to object storage.
 type Daemon struct {
 	btrfs    *btrfs.Manager
-	s3       *s3client.Client
+	store    objstore.ObjectStorage
 	interval time.Duration
 	mu       sync.Mutex
 	tracked  map[string]*trackedVolume // volumeID -> tracking state
@@ -32,12 +45,12 @@ type Daemon struct {
 	wg       sync.WaitGroup
 }
 
-// NewDaemon creates a sync Daemon that uses the given btrfs manager, S3
-// client, and sync interval.
-func NewDaemon(btrfs *btrfs.Manager, s3 *s3client.Client, interval time.Duration) *Daemon {
+// NewDaemon creates a sync Daemon that uses the given btrfs manager, object
+// storage backend, and sync interval.
+func NewDaemon(btrfs *btrfs.Manager, store objstore.ObjectStorage, interval time.Duration) *Daemon {
 	return &Daemon{
 		btrfs:    btrfs,
-		s3:       s3,
+		store:    store,
 		interval: interval,
 		tracked:  make(map[string]*trackedVolume),
 		stopCh:   make(chan struct{}),
@@ -178,6 +191,7 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 		newSnapID, err := d.syncOne(ctx, item.volumeID, item.lastSnapID)
 		if err != nil {
 			klog.Errorf("Sync failed for volume %s: %v", item.volumeID, err)
+			metrics.SyncFailures.Inc()
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -190,6 +204,7 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 			tv.lastSyncAt = time.Now()
 		}
 		d.mu.Unlock()
+		metrics.SyncLag.WithLabelValues(item.volumeID).Set(0)
 	}
 
 	return firstErr
@@ -197,10 +212,12 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 
 // syncOne performs the sync algorithm for a single volume:
 //  1. Create a read-only snapshot of volumes/{id} at snapshots/{id}@sync-new
-//  2. btrfs send (incremental if lastSnapID exists) | zstd | upload to S3
+//  2. btrfs send (incremental if lastSnapID exists) | zstd | upload to object storage
 //  3. Delete the previous sync snapshot
 //  4. Return the new snapshot name
 func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (string, error) {
+	start := time.Now()
+
 	volumePath := fmt.Sprintf("volumes/%s", volumeID)
 	newSnapName := fmt.Sprintf("%s@sync-new", volumeID)
 	newSnapPath := fmt.Sprintf("snapshots/%s", newSnapName)
@@ -222,23 +239,23 @@ func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (stri
 		return "", fmt.Errorf("create sync snapshot: %w", err)
 	}
 
-	// 2. Send (incremental or full) and upload to S3.
+	// 2. Send (incremental or full) and upload to object storage.
 	var parentPath string
-	var s3Key string
+	var objKey string
 	ts := time.Now().UTC().Format("20060102T150405Z")
 
 	if lastSnapID != "" {
 		parentSnapPath := fmt.Sprintf("snapshots/%s", lastSnapID)
 		if d.btrfs.SubvolumeExists(ctx, parentSnapPath) {
 			parentPath = parentSnapPath
-			s3Key = fmt.Sprintf("volumes/%s/incremental-%s.zst", volumeID, ts)
+			objKey = fmt.Sprintf("volumes/%s/incremental-%s.zst", volumeID, ts)
 		} else {
 			// Parent disappeared; fall back to full send.
 			klog.Warningf("Previous sync snapshot %s missing, falling back to full send for %s", lastSnapID, volumeID)
-			s3Key = fmt.Sprintf("volumes/%s/full-%s.zst", volumeID, ts)
+			objKey = fmt.Sprintf("volumes/%s/full-%s.zst", volumeID, ts)
 		}
 	} else {
-		s3Key = fmt.Sprintf("volumes/%s/full-%s.zst", volumeID, ts)
+		objKey = fmt.Sprintf("volumes/%s/full-%s.zst", volumeID, ts)
 	}
 
 	sendReader, err := d.btrfs.Send(ctx, newSnapPath, parentPath)
@@ -250,11 +267,12 @@ func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (stri
 
 	// Pipe through zstd compression before uploading.
 	pr, pw := io.Pipe()
+	cw := &countingWriter{w: pw}
 	compressErrCh := make(chan error, 1)
 	go func() {
 		defer sendReader.Close()
 
-		encoder, encErr := zstd.NewWriter(pw)
+		encoder, encErr := zstd.NewWriter(cw)
 		if encErr != nil {
 			pw.CloseWithError(encErr)
 			compressErrCh <- encErr
@@ -278,10 +296,10 @@ func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (stri
 	}()
 
 	// Upload the compressed stream. Size is unknown (-1) since we are streaming.
-	if uploadErr := d.s3.Upload(ctx, s3Key, pr, -1); uploadErr != nil {
+	if uploadErr := d.store.Upload(ctx, objKey, pr, -1); uploadErr != nil {
 		_ = pr.Close()
 		_ = d.btrfs.DeleteSubvolume(ctx, newSnapPath)
-		return "", fmt.Errorf("upload to S3 key %q: %w", s3Key, uploadErr)
+		return "", fmt.Errorf("upload to object storage key %q: %w", objKey, uploadErr)
 	}
 	_ = pr.Close()
 
@@ -290,7 +308,9 @@ func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (stri
 		return "", fmt.Errorf("zstd compression: %w", compressErr)
 	}
 
-	klog.V(2).Infof("Synced volume %s to %s", volumeID, s3Key)
+	metrics.SyncDuration.Observe(time.Since(start).Seconds())
+	metrics.SyncBytesTransferred.Add(float64(cw.bytes))
+	klog.V(2).Infof("Synced volume %s to %s", volumeID, objKey)
 
 	// 3. Delete the previous sync snapshot if it exists.
 	if lastSnapID != "" {
@@ -306,13 +326,13 @@ func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (stri
 	return newSnapName, nil
 }
 
-// ListS3Objects lists all S3 object keys matching the given prefix.
-func (d *Daemon) ListS3Objects(ctx context.Context, prefix string) ([]string, error) {
-	if d.s3 == nil {
-		return nil, fmt.Errorf("S3 client not configured")
+// ListObjects lists all object keys matching the given prefix.
+func (d *Daemon) ListObjects(ctx context.Context, prefix string) ([]string, error) {
+	if d.store == nil {
+		return nil, fmt.Errorf("object storage not configured")
 	}
 
-	objects, err := d.s3.List(ctx, prefix)
+	objects, err := d.store.List(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -324,40 +344,41 @@ func (d *Daemon) ListS3Objects(ctx context.Context, prefix string) ([]string, er
 	return keys, nil
 }
 
-// RestoreFromS3 downloads a compressed btrfs send stream from S3 and receives
-// it into the volumes directory to reconstruct a subvolume. Used for cross-node
-// migration when a volume is needed on a different node.
-// If s3Key is empty, the latest full send is found automatically.
-func (d *Daemon) RestoreFromS3(ctx context.Context, volumeID, s3Key string) error {
-	if d.s3 == nil {
-		return fmt.Errorf("S3 client not configured")
+// RestoreFromStorage downloads a compressed btrfs send stream from object
+// storage and receives it into the volumes directory to reconstruct a
+// subvolume. Used for cross-node migration when a volume is needed on a
+// different node. If objKey is empty, the latest full send is found
+// automatically.
+func (d *Daemon) RestoreFromStorage(ctx context.Context, volumeID, objKey string) error {
+	if d.store == nil {
+		return fmt.Errorf("object storage not configured")
 	}
 
 	// Auto-discover latest full send if no key specified.
-	if s3Key == "" {
-		keys, err := d.ListS3Objects(ctx, fmt.Sprintf("volumes/%s/", volumeID))
+	if objKey == "" {
+		keys, err := d.ListObjects(ctx, fmt.Sprintf("volumes/%s/", volumeID))
 		if err != nil {
-			return fmt.Errorf("list S3 objects: %w", err)
+			return fmt.Errorf("list storage objects: %w", err)
 		}
 		if len(keys) == 0 {
-			return fmt.Errorf("no snapshots in S3 for volume %q", volumeID)
+			return fmt.Errorf("no snapshots in object storage for volume %q", volumeID)
 		}
 		// Prefer the latest full send; fall back to latest object.
-		s3Key = keys[len(keys)-1]
+		objKey = keys[len(keys)-1]
 		for i := len(keys) - 1; i >= 0; i-- {
 			if len(keys[i]) > 5 && keys[i][len(keys[i])-8:] != "full-" {
 				continue
 			}
-			s3Key = keys[i]
+			objKey = keys[i]
 			break
 		}
 	}
 
-	klog.Infof("Restoring volume %q from S3: %s", volumeID, s3Key)
+	klog.Infof("Restoring volume %q from storage: %s", volumeID, objKey)
 
-	reader, err := d.s3.Download(ctx, s3Key)
+	reader, err := d.store.Download(ctx, objKey)
 	if err != nil {
-		return fmt.Errorf("download %q: %w", s3Key, err)
+		return fmt.Errorf("download %q: %w", objKey, err)
 	}
 	defer reader.Close()
 
@@ -373,6 +394,6 @@ func (d *Daemon) RestoreFromS3(ctx context.Context, volumeID, s3Key string) erro
 		return fmt.Errorf("btrfs receive volume %q: %w", volumeID, err)
 	}
 
-	klog.Infof("Volume %q restored from S3 successfully", volumeID)
+	klog.Infof("Volume %q restored from storage successfully", volumeID)
 	return nil
 }

@@ -11,7 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
-	s3client "github.com/TesslateAI/tesslate-btrfs-csi/pkg/s3"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
 )
 
 // Config holds configuration for the garbage collector.
@@ -27,10 +27,10 @@ type Config struct {
 	DryRun bool
 }
 
-// Collector periodically scans for orphaned subvolumes and expired S3 snapshots.
+// Collector periodically scans for orphaned subvolumes and expired storage snapshots.
 type Collector struct {
 	btrfs  *btrfs.Manager
-	s3     *s3client.Client
+	store  objstore.ObjectStorage
 	config Config
 
 	// knownVolumes is a callback that returns the set of volume IDs currently
@@ -40,10 +40,10 @@ type Collector struct {
 }
 
 // NewCollector creates a new garbage collector.
-func NewCollector(btrfs *btrfs.Manager, s3 *s3client.Client, cfg Config) *Collector {
+func NewCollector(btrfs *btrfs.Manager, store objstore.ObjectStorage, cfg Config) *Collector {
 	return &Collector{
 		btrfs:  btrfs,
-		s3:     s3,
+		store:  store,
 		config: cfg,
 	}
 }
@@ -142,9 +142,9 @@ func (c *Collector) cleanOrphanedSubvolumes(ctx context.Context) (int, error) {
 	return deleted, nil
 }
 
-// cleanOrphanedS3Snapshots removes S3 objects for volumes that no longer exist.
+// cleanOrphanedS3Snapshots removes storage objects for volumes that no longer exist.
 func (c *Collector) cleanOrphanedS3Snapshots(ctx context.Context) (int, error) {
-	if c.s3 == nil || c.knownVolumes == nil {
+	if c.store == nil || c.knownVolumes == nil {
 		return 0, nil
 	}
 
@@ -153,10 +153,10 @@ func (c *Collector) cleanOrphanedS3Snapshots(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("get known volumes: %w", err)
 	}
 
-	// List all volume prefixes in S3.
-	objects, err := c.s3.List(ctx, "volumes/")
+	// List all volume prefixes in object storage.
+	objects, err := c.store.List(ctx, "volumes/")
 	if err != nil {
-		return 0, fmt.Errorf("list S3 objects: %w", err)
+		return 0, fmt.Errorf("list storage objects: %w", err)
 	}
 
 	// Group by volume ID.
@@ -176,11 +176,11 @@ func (c *Collector) cleanOrphanedS3Snapshots(ctx context.Context) (int, error) {
 	deleted := 0
 	for _, key := range orphanKeys {
 		if c.config.DryRun {
-			klog.Infof("GC [dry-run]: would delete S3 object %q", key)
+			klog.Infof("GC [dry-run]: would delete storage object %q", key)
 		} else {
-			klog.V(4).Infof("GC: deleting S3 object %q", key)
-			if delErr := c.s3.Delete(ctx, key); delErr != nil {
-				klog.Errorf("GC: failed to delete S3 object %q: %v", key, delErr)
+			klog.V(4).Infof("GC: deleting storage object %q", key)
+			if delErr := c.store.Delete(ctx, key); delErr != nil {
+				klog.Errorf("GC: failed to delete storage object %q: %v", key, delErr)
 				continue
 			}
 		}

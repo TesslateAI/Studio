@@ -169,7 +169,7 @@ func TestGC_CleanOrphanedS3Snapshots(t *testing.T) {
 	mgr := newBtrfsManager(t)
 	ctx := context.Background()
 	bucket := uniqueName("gc-s3")
-	s3c := newS3Client(t, bucket)
+	store := newObjectStorage(t, bucket)
 
 	// Upload S3 objects for three "volumes".
 	volIDs := []string{
@@ -179,13 +179,13 @@ func TestGC_CleanOrphanedS3Snapshots(t *testing.T) {
 	}
 	for _, vid := range volIDs {
 		key := "volumes/" + vid + "/full-test.zst"
-		if err := s3c.Upload(ctx, key, bytes.NewReader([]byte("test")), 4); err != nil {
+		if err := store.Upload(ctx, key, bytes.NewReader([]byte("test")), 4); err != nil {
 			t.Fatalf("upload %s: %v", key, err)
 		}
 	}
 
 	// Only volIDs[0] is "known"; the other two are orphans.
-	collector := gc.NewCollector(mgr, s3c, gc.Config{
+	collector := gc.NewCollector(mgr, store, gc.Config{
 		GracePeriod: 0,
 		DryRun:      false,
 	})
@@ -198,7 +198,7 @@ func TestGC_CleanOrphanedS3Snapshots(t *testing.T) {
 	}
 
 	// Kept volume's object must still exist.
-	exists, err := s3c.Exists(ctx, "volumes/"+volIDs[0]+"/full-test.zst")
+	exists, err := store.Exists(ctx, "volumes/"+volIDs[0]+"/full-test.zst")
 	if err != nil {
 		t.Fatalf("Exists check: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestGC_CleanOrphanedS3Snapshots(t *testing.T) {
 
 	// Orphan volumes' objects must be gone.
 	for _, vid := range volIDs[1:] {
-		exists, err := s3c.Exists(ctx, "volumes/"+vid+"/full-test.zst")
+		exists, err := store.Exists(ctx, "volumes/"+vid+"/full-test.zst")
 		if err != nil {
 			t.Fatalf("Exists check: %v", err)
 		}
@@ -285,7 +285,7 @@ func TestGC_FullCycle(t *testing.T) {
 	ctx := context.Background()
 	pool := getPoolPath(t)
 	bucket := uniqueName("gc-full")
-	s3c := newS3Client(t, bucket)
+	store := newObjectStorage(t, bucket)
 
 	// --- Volumes ---
 	keptVol := "volumes/" + uniqueName("gc-full-keep")
@@ -317,7 +317,7 @@ func TestGC_FullCycle(t *testing.T) {
 	orphanS3Vol := uniqueName("s3-orphan")
 	for _, vid := range []string{keptS3Vol, orphanS3Vol} {
 		key := "volumes/" + vid + "/full-snap.zst"
-		if err := s3c.Upload(ctx, key, bytes.NewReader([]byte("data")), 4); err != nil {
+		if err := store.Upload(ctx, key, bytes.NewReader([]byte("data")), 4); err != nil {
 			t.Fatalf("upload %s: %v", key, err)
 		}
 	}
@@ -339,7 +339,7 @@ func TestGC_FullCycle(t *testing.T) {
 	}
 
 	// --- Run GC ---
-	collector := gc.NewCollector(mgr, s3c, gc.Config{
+	collector := gc.NewCollector(mgr, store, gc.Config{
 		GracePeriod: 0,
 		DryRun:      false,
 	})
@@ -363,7 +363,7 @@ func TestGC_FullCycle(t *testing.T) {
 	}
 
 	// --- Verify S3 ---
-	exists, err := s3c.Exists(ctx, "volumes/"+keptS3Vol+"/full-snap.zst")
+	exists, err := store.Exists(ctx, "volumes/"+keptS3Vol+"/full-snap.zst")
 	if err != nil {
 		t.Fatalf("S3 Exists: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestGC_FullCycle(t *testing.T) {
 		t.Error("kept S3 object should still exist")
 	}
 
-	exists, err = s3c.Exists(ctx, "volumes/"+orphanS3Vol+"/full-snap.zst")
+	exists, err = store.Exists(ctx, "volumes/"+orphanS3Vol+"/full-snap.zst")
 	if err != nil {
 		t.Fatalf("S3 Exists: %v", err)
 	}

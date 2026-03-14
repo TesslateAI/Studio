@@ -16,18 +16,18 @@ import (
 // Sync daemon integration tests
 // --------------------------------------------------------------------------
 
-// TestSync_FullCycle creates a volume, syncs it to S3, and verifies that a
-// full snapshot object was uploaded.
+// TestSync_FullCycle creates a volume, syncs it to object storage, and verifies
+// that a full snapshot object was uploaded.
 func TestSync_FullCycle(t *testing.T) {
 	pool := getPoolPath(t)
 	mgr := newBtrfsManager(t)
 	ctx := context.Background()
 
 	bucket := uniqueName("sync-full")
-	s3c := newS3Client(t, bucket)
+	store := newObjectStorage(t, bucket)
 
 	// 1h interval so the daemon never auto-fires during the test.
-	daemon := bsync.NewDaemon(mgr, s3c, 1*time.Hour)
+	daemon := bsync.NewDaemon(mgr, store, 1*time.Hour)
 
 	volID := uniqueName("sync")
 	volPath := "volumes/" + volID
@@ -49,17 +49,17 @@ func TestSync_FullCycle(t *testing.T) {
 		t.Fatalf("SyncVolume: %v", err)
 	}
 
-	keys, err := daemon.ListS3Objects(ctx, "volumes/"+volID+"/")
+	keys, err := daemon.ListObjects(ctx, "volumes/"+volID+"/")
 	if err != nil {
-		t.Fatalf("ListS3Objects: %v", err)
+		t.Fatalf("ListObjects: %v", err)
 	}
 	if len(keys) < 1 {
-		t.Fatalf("expected at least 1 S3 object, got %d", len(keys))
+		t.Fatalf("expected at least 1 object, got %d", len(keys))
 	}
 	if !strings.Contains(keys[0], "full-") {
 		t.Errorf("expected first key to contain 'full-', got %q", keys[0])
 	}
-	t.Logf("Uploaded S3 key: %s", keys[0])
+	t.Logf("Uploaded key: %s", keys[0])
 }
 
 // TestSync_IncrementalSync verifies that a second sync produces an
@@ -70,8 +70,8 @@ func TestSync_IncrementalSync(t *testing.T) {
 	ctx := context.Background()
 
 	bucket := uniqueName("sync-incr")
-	s3c := newS3Client(t, bucket)
-	daemon := bsync.NewDaemon(mgr, s3c, 1*time.Hour)
+	store := newObjectStorage(t, bucket)
+	daemon := bsync.NewDaemon(mgr, store, 1*time.Hour)
 
 	volID := uniqueName("sync")
 	volPath := "volumes/" + volID
@@ -100,12 +100,12 @@ func TestSync_IncrementalSync(t *testing.T) {
 		t.Fatalf("second SyncVolume: %v", err)
 	}
 
-	keys, err := daemon.ListS3Objects(ctx, "volumes/"+volID+"/")
+	keys, err := daemon.ListObjects(ctx, "volumes/"+volID+"/")
 	if err != nil {
-		t.Fatalf("ListS3Objects: %v", err)
+		t.Fatalf("ListObjects: %v", err)
 	}
 	if len(keys) != 2 {
-		t.Fatalf("expected 2 S3 objects, got %d: %v", len(keys), keys)
+		t.Fatalf("expected 2 objects, got %d: %v", len(keys), keys)
 	}
 
 	var hasFull, hasIncremental bool
@@ -123,19 +123,19 @@ func TestSync_IncrementalSync(t *testing.T) {
 	if !hasIncremental {
 		t.Error("expected one key containing 'incremental-'")
 	}
-	t.Logf("S3 keys: %v", keys)
+	t.Logf("Object keys: %v", keys)
 }
 
-// TestSync_RestoreFromS3 syncs a volume to S3, deletes it locally, then
-// restores from S3 using an explicit key and verifies file content.
-func TestSync_RestoreFromS3(t *testing.T) {
+// TestSync_RestoreFromStorage syncs a volume to object storage, deletes it
+// locally, then restores using an explicit key and verifies file content.
+func TestSync_RestoreFromStorage(t *testing.T) {
 	pool := getPoolPath(t)
 	mgr := newBtrfsManager(t)
 	ctx := context.Background()
 
 	bucket := uniqueName("sync-rest")
-	s3c := newS3Client(t, bucket)
-	daemon := bsync.NewDaemon(mgr, s3c, 1*time.Hour)
+	store := newObjectStorage(t, bucket)
+	daemon := bsync.NewDaemon(mgr, store, 1*time.Hour)
 
 	volID := uniqueName("sync")
 	volPath := "volumes/" + volID
@@ -160,15 +160,15 @@ func TestSync_RestoreFromS3(t *testing.T) {
 		t.Fatalf("SyncVolume: %v", err)
 	}
 
-	// Get the S3 key that was uploaded.
-	keys, err := daemon.ListS3Objects(ctx, "volumes/"+volID+"/")
+	// Get the object key that was uploaded.
+	keys, err := daemon.ListObjects(ctx, "volumes/"+volID+"/")
 	if err != nil {
-		t.Fatalf("ListS3Objects: %v", err)
+		t.Fatalf("ListObjects: %v", err)
 	}
 	if len(keys) == 0 {
-		t.Fatal("no S3 objects found after sync")
+		t.Fatal("no objects found after sync")
 	}
-	s3Key := keys[0]
+	objKey := keys[0]
 
 	// Delete local volume and sync snapshot.
 	if err := mgr.DeleteSubvolume(ctx, volPath); err != nil {
@@ -178,25 +178,25 @@ func TestSync_RestoreFromS3(t *testing.T) {
 		t.Fatalf("delete sync snapshot: %v", err)
 	}
 
-	// Restore using the explicit S3 key.
-	if err := daemon.RestoreFromS3(ctx, volID, s3Key); err != nil {
-		t.Fatalf("RestoreFromS3: %v", err)
+	// Restore using the explicit object key.
+	if err := daemon.RestoreFromStorage(ctx, volID, objKey); err != nil {
+		t.Fatalf("RestoreFromStorage: %v", err)
 	}
 
 	// Verify file content in the restored subvolume.
 	verifyFileContent(t, filepath.Join(pool, restoredPath, "testfile.txt"), "restore-me")
 }
 
-// TestSync_RestoreFromS3_AutoDiscover syncs a volume, deletes it locally,
-// then restores with an empty s3Key to trigger auto-discovery.
-func TestSync_RestoreFromS3_AutoDiscover(t *testing.T) {
+// TestSync_RestoreFromStorage_AutoDiscover syncs a volume, deletes it locally,
+// then restores with an empty key to trigger auto-discovery.
+func TestSync_RestoreFromStorage_AutoDiscover(t *testing.T) {
 	pool := getPoolPath(t)
 	mgr := newBtrfsManager(t)
 	ctx := context.Background()
 
 	bucket := uniqueName("sync-auto")
-	s3c := newS3Client(t, bucket)
-	daemon := bsync.NewDaemon(mgr, s3c, 1*time.Hour)
+	store := newObjectStorage(t, bucket)
+	daemon := bsync.NewDaemon(mgr, store, 1*time.Hour)
 
 	volID := uniqueName("sync")
 	volPath := "volumes/" + volID
@@ -227,24 +227,24 @@ func TestSync_RestoreFromS3_AutoDiscover(t *testing.T) {
 		t.Fatalf("delete sync snapshot: %v", err)
 	}
 
-	// Restore with auto-discovery (empty s3Key).
-	if err := daemon.RestoreFromS3(ctx, volID, ""); err != nil {
-		t.Fatalf("RestoreFromS3 auto-discover: %v", err)
+	// Restore with auto-discovery (empty key).
+	if err := daemon.RestoreFromStorage(ctx, volID, ""); err != nil {
+		t.Fatalf("RestoreFromStorage auto-discover: %v", err)
 	}
 
 	verifyFileContent(t, filepath.Join(pool, restoredPath, "autofile.txt"), "auto-discover-data")
 }
 
 // TestSync_SyncAll_MultipleVolumes tracks three volumes, syncs each one
-// individually, and verifies all three have S3 objects.
+// individually, and verifies all three have stored objects.
 func TestSync_SyncAll_MultipleVolumes(t *testing.T) {
 	pool := getPoolPath(t)
 	mgr := newBtrfsManager(t)
 	ctx := context.Background()
 
 	bucket := uniqueName("sync-multi")
-	s3c := newS3Client(t, bucket)
-	daemon := bsync.NewDaemon(mgr, s3c, 1*time.Hour)
+	store := newObjectStorage(t, bucket)
+	daemon := bsync.NewDaemon(mgr, store, 1*time.Hour)
 
 	const count = 3
 	volIDs := make([]string, count)
@@ -275,29 +275,29 @@ func TestSync_SyncAll_MultipleVolumes(t *testing.T) {
 		}
 	}
 
-	// Verify each volume has at least one S3 object.
+	// Verify each volume has at least one stored object.
 	for _, id := range volIDs {
-		keys, err := daemon.ListS3Objects(ctx, "volumes/"+id+"/")
+		keys, err := daemon.ListObjects(ctx, "volumes/"+id+"/")
 		if err != nil {
-			t.Fatalf("ListS3Objects(%s): %v", id, err)
+			t.Fatalf("ListObjects(%s): %v", id, err)
 		}
 		if len(keys) < 1 {
-			t.Errorf("volume %s: expected at least 1 S3 object, got %d", id, len(keys))
+			t.Errorf("volume %s: expected at least 1 object, got %d", id, len(keys))
 		}
-		t.Logf("volume %s: %d S3 objects", id, len(keys))
+		t.Logf("volume %s: %d objects", id, len(keys))
 	}
 }
 
-// TestSync_ListS3Objects performs a full sync then an incremental sync and
-// verifies ListS3Objects returns both keys with the correct prefixes.
-func TestSync_ListS3Objects(t *testing.T) {
+// TestSync_ListObjects performs a full sync then an incremental sync and
+// verifies ListObjects returns both keys with the correct prefixes.
+func TestSync_ListObjects(t *testing.T) {
 	pool := getPoolPath(t)
 	mgr := newBtrfsManager(t)
 	ctx := context.Background()
 
 	bucket := uniqueName("sync-list")
-	s3c := newS3Client(t, bucket)
-	daemon := bsync.NewDaemon(mgr, s3c, 1*time.Hour)
+	store := newObjectStorage(t, bucket)
+	daemon := bsync.NewDaemon(mgr, store, 1*time.Hour)
 
 	volID := uniqueName("sync")
 	volPath := "volumes/" + volID
@@ -326,12 +326,12 @@ func TestSync_ListS3Objects(t *testing.T) {
 		t.Fatalf("second SyncVolume: %v", err)
 	}
 
-	keys, err := daemon.ListS3Objects(ctx, "volumes/"+volID+"/")
+	keys, err := daemon.ListObjects(ctx, "volumes/"+volID+"/")
 	if err != nil {
-		t.Fatalf("ListS3Objects: %v", err)
+		t.Fatalf("ListObjects: %v", err)
 	}
 	if len(keys) != 2 {
-		t.Fatalf("expected 2 S3 keys, got %d: %v", len(keys), keys)
+		t.Fatalf("expected 2 keys, got %d: %v", len(keys), keys)
 	}
 
 	var hasFull, hasIncremental bool

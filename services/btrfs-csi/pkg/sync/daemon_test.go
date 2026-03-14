@@ -12,7 +12,7 @@ func TestNewDaemon(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
 	interval := 30 * time.Second
 
-	// Pass nil for s3 client since we only test constructor fields.
+	// Pass nil for object storage since we only test constructor fields.
 	d := NewDaemon(bm, nil, interval)
 
 	if d == nil {
@@ -21,8 +21,8 @@ func TestNewDaemon(t *testing.T) {
 	if d.btrfs != bm {
 		t.Error("btrfs manager not set correctly")
 	}
-	if d.s3 != nil {
-		t.Error("s3 client should be nil when passed nil")
+	if d.store != nil {
+		t.Error("object storage should be nil when passed nil")
 	}
 	if d.interval != interval {
 		t.Errorf("interval = %v, want %v", d.interval, interval)
@@ -163,46 +163,46 @@ func TestTrackVolume_SetsVolumeID(t *testing.T) {
 	}
 }
 
-func TestListS3Objects_NilS3Client(t *testing.T) {
+func TestListObjects_NilStore(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
 	d := NewDaemon(bm, nil, 60*time.Second)
 
-	_, err := d.ListS3Objects(context.Background(), "some/prefix")
+	_, err := d.ListObjects(context.Background(), "some/prefix")
 	if err == nil {
-		t.Fatal("expected error when s3 client is nil")
+		t.Fatal("expected error when object storage is nil")
 	}
 
-	wantMsg := "S3 client not configured"
+	wantMsg := "object storage not configured"
 	if err.Error() != wantMsg {
 		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
 	}
 }
 
-func TestRestoreFromS3_NilS3Client(t *testing.T) {
+func TestRestoreFromStorage_NilStore(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
 	d := NewDaemon(bm, nil, 60*time.Second)
 
-	err := d.RestoreFromS3(context.Background(), "vol-1", "backups/vol-1/snap.tar.zst")
+	err := d.RestoreFromStorage(context.Background(), "vol-1", "backups/vol-1/snap.tar.zst")
 	if err == nil {
-		t.Fatal("expected error when s3 client is nil")
+		t.Fatal("expected error when object storage is nil")
 	}
 
-	wantMsg := "S3 client not configured"
+	wantMsg := "object storage not configured"
 	if err.Error() != wantMsg {
 		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
 	}
 }
 
-func TestRestoreFromS3_EmptyKey_NilS3(t *testing.T) {
+func TestRestoreFromStorage_EmptyKey_NilStore(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
 	d := NewDaemon(bm, nil, 60*time.Second)
 
-	err := d.RestoreFromS3(context.Background(), "vol-1", "")
+	err := d.RestoreFromStorage(context.Background(), "vol-1", "")
 	if err == nil {
-		t.Fatal("expected error when s3 client is nil, even with empty key")
+		t.Fatal("expected error when object storage is nil, even with empty key")
 	}
 
-	wantMsg := "S3 client not configured"
+	wantMsg := "object storage not configured"
 	if err.Error() != wantMsg {
 		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
 	}

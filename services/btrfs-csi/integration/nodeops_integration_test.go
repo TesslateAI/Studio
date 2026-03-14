@@ -184,8 +184,8 @@ func TestNodeOps_ListSubvolumes(t *testing.T) {
 
 func TestNodeOps_TrackAndUntrackVolume(t *testing.T) {
 	bm := newBtrfsManager(t)
-	s3 := newS3Client(t, "tesslate-sync-test")
-	syncer := bsync.NewDaemon(bm, s3, 1*time.Hour)
+	store := newObjectStorage(t, "tesslate-sync-test")
+	syncer := bsync.NewDaemon(bm, store, 1*time.Hour)
 	t.Cleanup(func() { syncer.Stop() })
 
 	addr := startNodeOpsServer(t, bm, syncer, nil)
@@ -202,14 +202,14 @@ func TestNodeOps_TrackAndUntrackVolume(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// EnsureTemplate (full round-trip via S3)
+// EnsureTemplate (full round-trip via object storage)
 // ---------------------------------------------------------------------------
 
 func TestNodeOps_EnsureTemplate(t *testing.T) {
 	pool := getPoolPath(t)
 	bm := newBtrfsManager(t)
-	s3 := newS3Client(t, "tesslate-templates-test")
-	tmplMgr := template.NewManager(bm, s3, pool)
+	store := newObjectStorage(t, "tesslate-templates-test")
+	tmplMgr := template.NewManager(bm, store, pool)
 	ctx := context.Background()
 
 	tmplName := uniqueName("tmpl")
@@ -262,8 +262,8 @@ func TestNodeOps_EnsureTemplate(t *testing.T) {
 func TestNodeOps_RestoreVolume(t *testing.T) {
 	pool := getPoolPath(t)
 	bm := newBtrfsManager(t)
-	s3 := newS3Client(t, "tesslate-sync-test")
-	syncer := bsync.NewDaemon(bm, s3, 1*time.Hour)
+	store := newObjectStorage(t, "tesslate-sync-test")
+	syncer := bsync.NewDaemon(bm, store, 1*time.Hour)
 	t.Cleanup(func() { syncer.Stop() })
 
 	ctx := context.Background()
@@ -337,8 +337,8 @@ func TestNodeOps_RestoreVolume(t *testing.T) {
 func TestNodeOps_PromoteToTemplate(t *testing.T) {
 	pool := getPoolPath(t)
 	bm := newBtrfsManager(t)
-	s3 := newS3Client(t, "tesslate-templates-test")
-	tmplMgr := template.NewManager(bm, s3, pool)
+	store := newObjectStorage(t, "tesslate-templates-test")
+	tmplMgr := template.NewManager(bm, store, pool)
 	ctx := context.Background()
 
 	volID := uniqueName("promote")
@@ -385,8 +385,8 @@ func TestNodeOps_PromoteToTemplate(t *testing.T) {
 func TestNodeOps_PromoteToTemplate_RefreshExisting(t *testing.T) {
 	pool := getPoolPath(t)
 	bm := newBtrfsManager(t)
-	s3 := newS3Client(t, "tesslate-templates-test")
-	tmplMgr := template.NewManager(bm, s3, pool)
+	store := newObjectStorage(t, "tesslate-templates-test")
+	tmplMgr := template.NewManager(bm, store, pool)
 	ctx := context.Background()
 
 	tmplName := uniqueName("tmpl-refresh")
@@ -429,8 +429,8 @@ func TestNodeOps_PromoteToTemplate_RefreshExisting(t *testing.T) {
 
 func TestNodeOps_PromoteToTemplate_VolumeNotFound(t *testing.T) {
 	bm := newBtrfsManager(t)
-	s3 := newS3Client(t, "tesslate-templates-test")
-	tmplMgr := template.NewManager(bm, s3, getPoolPath(t))
+	store := newObjectStorage(t, "tesslate-templates-test")
+	tmplMgr := template.NewManager(bm, store, getPoolPath(t))
 
 	addr := startNodeOpsServer(t, bm, nil, tmplMgr)
 	client := connectNodeOpsClient(t, addr)
@@ -481,8 +481,8 @@ func TestNodeOps_ErrorPropagation(t *testing.T) {
 func TestNodeOps_AllRPCs_Sequential(t *testing.T) {
 	pool := getPoolPath(t)
 	bm := newBtrfsManager(t)
-	s3 := newS3Client(t, "tesslate-sync-test")
-	syncer := bsync.NewDaemon(bm, s3, 1*time.Hour)
+	store := newObjectStorage(t, "tesslate-sync-test")
+	syncer := bsync.NewDaemon(bm, store, 1*time.Hour)
 	t.Cleanup(func() { syncer.Stop() })
 
 	addr := startNodeOpsServer(t, bm, syncer, nil)

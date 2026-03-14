@@ -9,21 +9,21 @@ import (
 	"testing"
 )
 
-func TestS3_EnsureBucket(t *testing.T) {
+func TestObjStore_EnsureBucket(t *testing.T) {
 	bucket := uniqueName("test-ensure")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
-	// EnsureBucket was already called by newS3Client; call it again to
+	// EnsureBucket was already called by newObjectStorage; call it again to
 	// verify idempotency.
-	if err := c.EnsureBucket(ctx, "us-east-1"); err != nil {
+	if err := c.EnsureBucket(ctx); err != nil {
 		t.Fatalf("second EnsureBucket: %v", err)
 	}
 }
 
-func TestS3_UploadAndDownload(t *testing.T) {
+func TestObjStore_UploadAndDownload(t *testing.T) {
 	bucket := uniqueName("test-updown")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	data := bytes.Repeat([]byte("A"), 1024) // 1KB
@@ -48,15 +48,15 @@ func TestS3_UploadAndDownload(t *testing.T) {
 	}
 }
 
-func TestS3_UploadStreamingUnknownSize(t *testing.T) {
+func TestObjStore_UploadStreamingUnknownSize(t *testing.T) {
 	bucket := uniqueName("test-stream")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	data := []byte("streaming upload with unknown size")
 	key := "stream/unknown.dat"
 
-	// size=-1 signals unknown size to the S3 client.
+	// size=-1 signals unknown size to the storage backend.
 	if err := c.Upload(ctx, key, bytes.NewReader(data), -1); err != nil {
 		t.Fatalf("Upload (unknown size): %v", err)
 	}
@@ -76,9 +76,9 @@ func TestS3_UploadStreamingUnknownSize(t *testing.T) {
 	}
 }
 
-func TestS3_Exists_True(t *testing.T) {
+func TestObjStore_Exists_True(t *testing.T) {
 	bucket := uniqueName("test-exists-t")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	key := "exists/yes.txt"
@@ -96,9 +96,9 @@ func TestS3_Exists_True(t *testing.T) {
 	}
 }
 
-func TestS3_Exists_False(t *testing.T) {
+func TestObjStore_Exists_False(t *testing.T) {
 	bucket := uniqueName("test-exists-f")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	exists, err := c.Exists(ctx, "no/such/key.txt")
@@ -110,9 +110,9 @@ func TestS3_Exists_False(t *testing.T) {
 	}
 }
 
-func TestS3_Delete(t *testing.T) {
+func TestObjStore_Delete(t *testing.T) {
 	bucket := uniqueName("test-delete")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	key := "delete/me.txt"
@@ -134,9 +134,9 @@ func TestS3_Delete(t *testing.T) {
 	}
 }
 
-func TestS3_Delete_NonExistent(t *testing.T) {
+func TestObjStore_Delete_NonExistent(t *testing.T) {
 	bucket := uniqueName("test-delnone")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	// Deleting a non-existent key should not return an error.
@@ -145,9 +145,9 @@ func TestS3_Delete_NonExistent(t *testing.T) {
 	}
 }
 
-func TestS3_List(t *testing.T) {
+func TestObjStore_List(t *testing.T) {
 	bucket := uniqueName("test-list")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	// Upload 5 objects under the "data/" prefix.
@@ -184,9 +184,9 @@ func TestS3_List(t *testing.T) {
 	}
 }
 
-func TestS3_List_EmptyPrefix(t *testing.T) {
+func TestObjStore_List_EmptyPrefix(t *testing.T) {
 	bucket := uniqueName("test-listempty")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	// Fresh bucket with no objects -- List should return 0 results.
@@ -199,9 +199,9 @@ func TestS3_List_EmptyPrefix(t *testing.T) {
 	}
 }
 
-func TestS3_LargeObject(t *testing.T) {
+func TestObjStore_LargeObject(t *testing.T) {
 	bucket := uniqueName("test-large")
-	c := newS3Client(t, bucket)
+	c := newObjectStorage(t, bucket)
 	ctx := context.Background()
 
 	// 10 MB object.

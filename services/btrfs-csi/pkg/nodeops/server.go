@@ -354,13 +354,13 @@ func (s *Server) restoreVolumeFromS3(ctx context.Context, volumeID string) error
 	s3Prefix := fmt.Sprintf("volumes/%s/", volumeID)
 
 	// List all snapshots for this volume to find the latest full send.
-	objects, err := s.syncer.ListS3Objects(ctx, s3Prefix)
+	objects, err := s.syncer.ListObjects(ctx, s3Prefix)
 	if err != nil {
-		return fmt.Errorf("list S3 objects for volume %q: %w", volumeID, err)
+		return fmt.Errorf("list storage objects for volume %q: %w", volumeID, err)
 	}
 
 	if len(objects) == 0 {
-		return fmt.Errorf("no snapshots found in S3 for volume %q", volumeID)
+		return fmt.Errorf("no snapshots found in object storage for volume %q", volumeID)
 	}
 
 	// Find the latest full send (we need a full send for initial restore).
@@ -379,12 +379,12 @@ func (s *Server) restoreVolumeFromS3(ctx context.Context, volumeID string) error
 		klog.Warningf("No full send found for volume %q, using latest: %s", volumeID, latestFullKey)
 	}
 
-	klog.Infof("Restoring volume %q from S3: %s", volumeID, latestFullKey)
+	klog.Infof("Restoring volume %q from storage: %s", volumeID, latestFullKey)
 
-	if err := s.syncer.RestoreFromS3(ctx, volumeID, latestFullKey); err != nil {
-		return fmt.Errorf("restore from S3: %w", err)
+	if err := s.syncer.RestoreFromStorage(ctx, volumeID, latestFullKey); err != nil {
+		return fmt.Errorf("restore from storage: %w", err)
 	}
 
-	klog.Infof("Volume %q restored successfully from S3", volumeID)
+	klog.Infof("Volume %q restored successfully from storage", volumeID)
 	return nil
 }

@@ -20,7 +20,7 @@ import (
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/fileops"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
-	s3client "github.com/TesslateAI/tesslate-btrfs-csi/pkg/s3"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/template"
 )
@@ -56,21 +56,26 @@ func getS3Endpoint(t *testing.T) string {
 	return ep
 }
 
-// newS3Client creates an s3client.Client connected to a real MinIO instance.
-// It ensures the given bucket exists before returning.
-func newS3Client(t *testing.T, bucket string) *s3client.Client {
+// newObjectStorage creates an objstore.ObjectStorage connected to a real MinIO
+// instance via rclone. It ensures the given bucket exists before returning.
+func newObjectStorage(t *testing.T, bucket string) objstore.ObjectStorage {
 	t.Helper()
 	endpoint := getS3Endpoint(t)
 
-	c, err := s3client.NewClient(endpoint, "minioadmin", "minioadmin", bucket, "us-east-1", false)
+	store, err := objstore.NewRcloneStorage("s3", bucket, map[string]string{
+		"RCLONE_S3_PROVIDER":          "Minio",
+		"RCLONE_S3_ENDPOINT":          "http://" + endpoint,
+		"RCLONE_S3_ACCESS_KEY_ID":     "minioadmin",
+		"RCLONE_S3_SECRET_ACCESS_KEY": "minioadmin",
+	})
 	if err != nil {
-		t.Fatalf("newS3Client: %v", err)
+		t.Fatalf("newObjectStorage: %v", err)
 	}
 
-	if err := c.EnsureBucket(context.Background(), "us-east-1"); err != nil {
+	if err := store.EnsureBucket(context.Background()); err != nil {
 		t.Fatalf("EnsureBucket(%s): %v", bucket, err)
 	}
-	return c
+	return store
 }
 
 // newBtrfsManager is shorthand for btrfs.NewManager(getPoolPath(t)).

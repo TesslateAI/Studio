@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 
 FROM alpine:3.20
 
-RUN apk add --no-cache btrfs-progs e2fsprogs util-linux zstd
+RUN apk add --no-cache btrfs-progs e2fsprogs util-linux zstd rclone
 
 COPY --from=builder /tesslate-btrfs-csi /usr/local/bin/tesslate-btrfs-csi
 

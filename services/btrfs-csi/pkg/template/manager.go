@@ -11,22 +11,22 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
-	s3client "github.com/TesslateAI/tesslate-btrfs-csi/pkg/s3"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
 )
 
-// Manager downloads golden templates from S3 and prepares them as local btrfs
-// subvolumes under /pool/templates/.
+// Manager downloads golden templates from object storage and prepares them as
+// local btrfs subvolumes under /pool/templates/.
 type Manager struct {
 	btrfs    *btrfs.Manager
-	s3       *s3client.Client
+	store    objstore.ObjectStorage
 	poolPath string
 }
 
 // NewManager creates a template Manager.
-func NewManager(btrfs *btrfs.Manager, s3 *s3client.Client, poolPath string) *Manager {
+func NewManager(btrfs *btrfs.Manager, store objstore.ObjectStorage, poolPath string) *Manager {
 	return &Manager{
 		btrfs:    btrfs,
-		s3:       s3,
+		store:    store,
 		poolPath: poolPath,
 	}
 }
@@ -41,7 +41,7 @@ func (m *Manager) EnsureTemplate(ctx context.Context, name string) error {
 		return nil
 	}
 
-	klog.V(2).Infof("Template %s not found locally, downloading from S3", name)
+	klog.V(2).Infof("Template %s not found locally, downloading from object storage", name)
 	return m.downloadTemplate(ctx, name)
 }
 
@@ -144,7 +144,7 @@ func (m *Manager) UploadTemplate(ctx context.Context, name string) error {
 	}()
 
 	s3Key := fmt.Sprintf("templates/%s/latest.zst", name)
-	if uploadErr := m.s3.Upload(ctx, s3Key, pr, -1); uploadErr != nil {
+	if uploadErr := m.store.Upload(ctx, s3Key, pr, -1); uploadErr != nil {
 		_ = pr.Close()
 		return fmt.Errorf("upload template %q: %w", name, uploadErr)
 	}
@@ -162,23 +162,23 @@ func (m *Manager) UploadTemplate(ctx context.Context, name string) error {
 // If the S3 object does not exist, a warning is logged but no error is returned
 // (the template may not have been uploaded yet).
 func (m *Manager) downloadTemplate(ctx context.Context, name string) error {
-	if m.s3 == nil {
-		return fmt.Errorf("S3 client not configured, cannot download template %s", name)
+	if m.store == nil {
+		return fmt.Errorf("object storage not configured, cannot download template %s", name)
 	}
 
 	s3Key := fmt.Sprintf("templates/%s/latest.zst", name)
 
-	exists, err := m.s3.Exists(ctx, s3Key)
+	exists, err := m.store.Exists(ctx, s3Key)
 	if err != nil {
-		return fmt.Errorf("check S3 for template %s: %w", name, err)
+		return fmt.Errorf("check object storage for template %s: %w", name, err)
 	}
 	if !exists {
-		return fmt.Errorf("template %s not found in S3 at %s", name, s3Key)
+		return fmt.Errorf("template %s not found in object storage at %s", name, s3Key)
 	}
 
-	reader, err := m.s3.Download(ctx, s3Key)
+	reader, err := m.store.Download(ctx, s3Key)
 	if err != nil {
-		return fmt.Errorf("download template %s from S3: %w", name, err)
+		return fmt.Errorf("download template %s from object storage: %w", name, err)
 	}
 	defer reader.Close()
 
@@ -194,6 +194,6 @@ func (m *Manager) downloadTemplate(ctx context.Context, name string) error {
 		return fmt.Errorf("btrfs receive template %q: %w", name, err)
 	}
 
-	klog.Infof("Downloaded and received template %s from S3", name)
+	klog.Infof("Downloaded and received template %s from object storage", name)
 	return nil
 }
