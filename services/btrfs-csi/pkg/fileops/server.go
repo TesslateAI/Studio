@@ -18,9 +18,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 )
+
+func init() {
+	encoding.RegisterCodec(jsonCodec{})
+}
 
 // Server exposes file operations over gRPC on port 9742.
 // Access is restricted by NetworkPolicy to the tesslate namespace.
@@ -187,10 +192,13 @@ func (jsonCodec) Marshal(v interface{}) ([]byte, error)     { return json.Marsha
 func (jsonCodec) Unmarshal(data []byte, v interface{}) error { return json.Unmarshal(data, v) }
 func (jsonCodec) Name() string                              { return "json" }
 
+// fileOpsServiceServer is the interface type required by gRPC's RegisterService.
+type fileOpsServiceServer interface{}
+
 func registerFileOpsServer(srv *grpc.Server, s *Server) {
 	srv.RegisterService(&grpc.ServiceDesc{
 		ServiceName: "fileops.FileOps",
-		HandlerType: (*Server)(nil),
+		HandlerType: (*fileOpsServiceServer)(nil),
 		Methods: []grpc.MethodDesc{
 			{MethodName: "ReadFile", Handler: s.handleReadFile},
 			{MethodName: "WriteFile", Handler: s.handleWriteFile},

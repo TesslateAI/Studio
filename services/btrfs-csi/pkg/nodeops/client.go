@@ -40,6 +40,17 @@ func NewClient(addr string, tlsCfg *TLSConfig) (*Client, error) {
 	return &Client{conn: conn}, nil
 }
 
+// NewClientWithDialOptions creates a nodeops client with custom gRPC dial options.
+// This is useful for testing with plaintext connections (grpc.WithTransportCredentials(insecure.NewCredentials())).
+func NewClientWithDialOptions(addr string, opts ...grpc.DialOption) (*Client, error) {
+	opts = append(opts, grpc.WithDefaultCallOptions(grpc.ForceCodec(jsonCodec{})))
+	conn, err := grpc.NewClient(addr, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("connect to nodeops at %s: %w", addr, err)
+	}
+	return &Client{conn: conn}, nil
+}
+
 // loadClientTLS returns TLS credentials. If cfg has cert/key files, mutual TLS
 // is used. Otherwise a TLS connection with the system certificate pool is
 // established.

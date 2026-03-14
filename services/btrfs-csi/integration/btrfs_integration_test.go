@@ -12,15 +12,6 @@ import (
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
 )
 
-func getPoolPath(t *testing.T) string {
-	t.Helper()
-	pool := os.Getenv("TESSLATE_BTRFS_POOL")
-	if pool == "" {
-		t.Skip("TESSLATE_BTRFS_POOL not set — skipping integration tests")
-	}
-	return pool
-}
-
 // --------------------------------------------------------------------------
 // Subvolume lifecycle
 // --------------------------------------------------------------------------

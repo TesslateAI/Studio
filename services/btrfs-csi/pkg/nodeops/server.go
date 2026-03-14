@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 
@@ -20,6 +21,10 @@ import (
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/template"
 )
+
+func init() {
+	encoding.RegisterCodec(jsonCodec{})
+}
 
 // Server exposes btrfs operations over gRPC for controller delegation.
 // It runs on each node alongside the CSI node plugin.
@@ -161,10 +166,13 @@ func (jsonCodec) Unmarshal(data []byte, v interface{}) error { return json.Unmar
 func (jsonCodec) Name() string                              { return "json" }
 
 // registerNodeOpsServer registers all RPC handlers on the gRPC server.
+// nodeOpsServiceServer is the interface type required by gRPC's RegisterService.
+type nodeOpsServiceServer interface{}
+
 func registerNodeOpsServer(srv *grpc.Server, s *Server) {
 	srv.RegisterService(&grpc.ServiceDesc{
 		ServiceName: "nodeops.NodeOps",
-		HandlerType: (*Server)(nil),
+		HandlerType: (*nodeOpsServiceServer)(nil),
 		Methods: []grpc.MethodDesc{
 			{MethodName: "CreateSubvolume", Handler: s.handleCreateSubvolume},
 			{MethodName: "DeleteSubvolume", Handler: s.handleDeleteSubvolume},

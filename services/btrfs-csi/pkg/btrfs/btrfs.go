@@ -135,7 +135,7 @@ func (m *Manager) SubvolumeExists(ctx context.Context, name string) bool {
 // ListSubvolumes lists subvolumes under the pool whose path contains the
 // given prefix. It parses output from `btrfs subvolume list`.
 func (m *Manager) ListSubvolumes(ctx context.Context, prefix string) ([]SubvolumeInfo, error) {
-	output, err := m.run(ctx, "subvolume", "list", "-o", "--sort=ogen", m.poolPath)
+	output, err := m.run(ctx, "subvolume", "list", "--sort=ogen", m.poolPath)
 	if err != nil {
 		return nil, fmt.Errorf("list subvolumes: %w", err)
 	}

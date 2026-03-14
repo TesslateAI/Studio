@@ -3,7 +3,7 @@ set -euo pipefail
 
 POOL_DIR="/mnt/tesslate-pool"
 LOOP_FILE="/tmp/btrfs-test.img"
-LOOP_SIZE="512M"
+LOOP_SIZE="1G"
 
 echo "=== Setting up btrfs loopback filesystem ==="
 
@@ -27,15 +27,36 @@ echo "=== btrfs pool ready at $POOL_DIR ==="
 btrfs filesystem usage "$POOL_DIR"
 echo ""
 
+# --- Start MinIO for S3 integration tests ---
+echo "=== Starting MinIO (S3-compatible storage) ==="
+MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
+    minio server /tmp/minio-data --address ":9000" --console-address ":9001" --quiet &
+MINIO_PID=$!
+
+# Wait for MinIO to be ready (up to 10 seconds).
+for i in $(seq 1 20); do
+    if wget -q --spider http://localhost:9000/minio/health/live 2>/dev/null; then
+        echo "MinIO ready"
+        break
+    fi
+    sleep 0.5
+done
+
+export TESSLATE_S3_ENDPOINT="localhost:9000"
+
 # Run integration tests
 echo "=== Running integration tests ==="
 cd /build
-TESSLATE_BTRFS_POOL="$POOL_DIR" go test -v -tags=integration -count=1 ./integration/... -timeout 120s
+TESSLATE_BTRFS_POOL="$POOL_DIR" TESSLATE_S3_ENDPOINT="$TESSLATE_S3_ENDPOINT" go test -v -tags=integration -count=1 ./integration/... -timeout 300s
 EXIT_CODE=$?
 
 # Cleanup
 echo ""
 echo "=== Cleanup ==="
+# Kill MinIO
+if [ -n "$MINIO_PID" ]; then
+    kill $MINIO_PID 2>/dev/null || true
+fi
 umount "$POOL_DIR" 2>/dev/null || true
 rm -f "$LOOP_FILE"
 
