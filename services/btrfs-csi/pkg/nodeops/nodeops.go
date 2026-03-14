@@ -36,6 +36,12 @@ type NodeOps interface {
 
 	// EnsureTemplate ensures a template subvolume exists locally.
 	EnsureTemplate(ctx context.Context, name string) error
+
+	// RestoreVolume restores a volume from object storage (S3) to the local
+	// node. Used for cross-node migration when a volume is needed on a
+	// different node than where it was last active. Returns an error if no
+	// backup exists in S3.
+	RestoreVolume(ctx context.Context, volumeID string) error
 }
 
 // SubvolumeInfo mirrors btrfs.SubvolumeInfo for the nodeops API boundary.

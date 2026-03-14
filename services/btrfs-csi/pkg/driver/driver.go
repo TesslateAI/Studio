@@ -344,3 +344,20 @@ func (l *localNodeOps) UntrackVolume(ctx context.Context, volumeID string) error
 func (l *localNodeOps) EnsureTemplate(ctx context.Context, name string) error {
 	return l.tmplMgr.EnsureTemplate(ctx, name)
 }
+
+func (l *localNodeOps) RestoreVolume(ctx context.Context, volumeID string) error {
+	if l.syncer == nil {
+		return fmt.Errorf("S3 sync not configured, cannot restore volume %q", volumeID)
+	}
+
+	objects, err := l.syncer.ListS3Objects(ctx, fmt.Sprintf("volumes/%s/", volumeID))
+	if err != nil {
+		return err
+	}
+	if len(objects) == 0 {
+		return fmt.Errorf("no snapshots in S3 for volume %q", volumeID)
+	}
+
+	// Use the latest object.
+	return l.syncer.RestoreFromS3(ctx, volumeID, objects[len(objects)-1])
+}

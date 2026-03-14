@@ -132,3 +132,7 @@ func (c *Client) UntrackVolume(ctx context.Context, volumeID string) error {
 func (c *Client) EnsureTemplate(ctx context.Context, name string) error {
 	return c.invoke(ctx, "EnsureTemplate", &TemplateRequest{Name: name}, &Empty{})
 }
+
+func (c *Client) RestoreVolume(ctx context.Context, volumeID string) error {
+	return c.invoke(ctx, "RestoreVolume", &VolumeTrackRequest{VolumeID: volumeID}, &Empty{})
+}

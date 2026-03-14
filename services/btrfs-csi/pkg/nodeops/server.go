@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -174,6 +175,7 @@ func registerNodeOpsServer(srv *grpc.Server, s *Server) {
 			{MethodName: "TrackVolume", Handler: s.handleTrackVolume},
 			{MethodName: "UntrackVolume", Handler: s.handleUntrackVolume},
 			{MethodName: "EnsureTemplate", Handler: s.handleEnsureTemplate},
+			{MethodName: "RestoreVolume", Handler: s.handleRestoreVolume},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -282,4 +284,62 @@ func (s *Server) handleEnsureTemplate(_ interface{}, ctx context.Context, dec fu
 		return nil, status.Errorf(codes.Internal, "ensure template: %v", err)
 	}
 	return &Empty{}, nil
+}
+
+func (s *Server) handleRestoreVolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req VolumeTrackRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if err := s.restoreVolumeFromS3(ctx, req.VolumeID); err != nil {
+		return nil, status.Errorf(codes.Internal, "restore volume: %v", err)
+	}
+	return &Empty{}, nil
+}
+
+// restoreVolumeFromS3 downloads the latest snapshot chain from S3 and
+// reconstructs the volume via btrfs receive.
+func (s *Server) restoreVolumeFromS3(ctx context.Context, volumeID string) error {
+	if s.syncer == nil {
+		return fmt.Errorf("S3 sync not configured, cannot restore volume %q", volumeID)
+	}
+
+	// The sync daemon uploads to s3://bucket/volumes/{volumeID}/full-*.zst or incremental-*.zst.
+	// For restore, we download the latest full send stream and apply it.
+	s3Prefix := fmt.Sprintf("volumes/%s/", volumeID)
+
+	// List all snapshots for this volume to find the latest full send.
+	objects, err := s.syncer.ListS3Objects(ctx, s3Prefix)
+	if err != nil {
+		return fmt.Errorf("list S3 objects for volume %q: %w", volumeID, err)
+	}
+
+	if len(objects) == 0 {
+		return fmt.Errorf("no snapshots found in S3 for volume %q", volumeID)
+	}
+
+	// Find the latest full send (we need a full send for initial restore).
+	var latestFullKey string
+	for i := len(objects) - 1; i >= 0; i-- {
+		if strings.Contains(objects[i], "full-") {
+			latestFullKey = objects[i]
+			break
+		}
+	}
+
+	if latestFullKey == "" {
+		// No full send — use the latest object (could be incremental, but it's
+		// better than nothing; the sync daemon should always create an initial full).
+		latestFullKey = objects[len(objects)-1]
+		klog.Warningf("No full send found for volume %q, using latest: %s", volumeID, latestFullKey)
+	}
+
+	klog.Infof("Restoring volume %q from S3: %s", volumeID, latestFullKey)
+
+	if err := s.syncer.RestoreFromS3(ctx, volumeID, latestFullKey); err != nil {
+		return fmt.Errorf("restore from S3: %w", err)
+	}
+
+	klog.Infof("Volume %q restored successfully from S3", volumeID)
+	return nil
 }

@@ -305,3 +305,50 @@ func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (stri
 	// 4. Return the new snapshot name.
 	return newSnapName, nil
 }
+
+// ListS3Objects lists all S3 object keys matching the given prefix.
+func (d *Daemon) ListS3Objects(ctx context.Context, prefix string) ([]string, error) {
+	if d.s3 == nil {
+		return nil, fmt.Errorf("S3 client not configured")
+	}
+
+	objects, err := d.s3.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	keys := make([]string, 0, len(objects))
+	for _, obj := range objects {
+		keys = append(keys, obj.Key)
+	}
+	return keys, nil
+}
+
+// RestoreFromS3 downloads a compressed btrfs send stream from S3 and receives
+// it into the volumes directory to reconstruct a subvolume. Used for cross-node
+// migration when a volume is needed on a different node.
+func (d *Daemon) RestoreFromS3(ctx context.Context, volumeID, s3Key string) error {
+	if d.s3 == nil {
+		return fmt.Errorf("S3 client not configured")
+	}
+
+	reader, err := d.s3.Download(ctx, s3Key)
+	if err != nil {
+		return fmt.Errorf("download %q: %w", s3Key, err)
+	}
+	defer reader.Close()
+
+	// Decompress the zstd stream.
+	decoder, decErr := zstd.NewReader(reader)
+	if decErr != nil {
+		return fmt.Errorf("zstd decoder: %w", decErr)
+	}
+	defer decoder.Close()
+
+	// Receive into the volumes directory.
+	if err := d.btrfs.Receive(ctx, "volumes", decoder); err != nil {
+		return fmt.Errorf("btrfs receive volume %q: %w", volumeID, err)
+	}
+
+	return nil
+}
