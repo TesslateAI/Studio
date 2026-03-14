@@ -14,6 +14,7 @@ import (
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/fileops"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/gc"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/s3"
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
@@ -167,6 +168,14 @@ func (d *Driver) runNode(ctx context.Context) error {
 			klog.Errorf("FileOps server failed: %v", err)
 		}
 	}()
+
+	// Start garbage collector for orphaned subvolumes and stale snapshots.
+	gcCollector := gc.NewCollector(d.btrfs, d.s3c, gc.Config{
+		Interval:    10 * time.Minute,
+		GracePeriod: 24 * time.Hour,
+		DryRun:      false,
+	})
+	go gcCollector.Start(ctx)
 
 	// In "all" mode, also register the controller (for minikube/testing).
 	// The controller uses a local nodeops implementation that calls btrfs directly.
