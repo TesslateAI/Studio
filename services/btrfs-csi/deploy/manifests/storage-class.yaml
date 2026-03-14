@@ -6,7 +6,6 @@ provisioner: btrfs.csi.tesslate.io
 reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
-parameters: {}
 
 ---
 apiVersion: storage.k8s.io/v1

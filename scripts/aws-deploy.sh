@@ -514,8 +514,12 @@ case "$COMMAND" in
             done
         fi
 
-        # Switch context and restart pods
+        # Switch context, apply manifests, and restart pods
         ensure_kubectl_context
+        echo
+
+        info "Applying kustomize manifests..."
+        apply_kustomize
         echo
 
         info "Restarting pods..."
