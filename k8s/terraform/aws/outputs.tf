@@ -82,6 +82,21 @@ output "s3_bucket_region" {
   value       = aws_s3_bucket.tesslate_projects.region
 }
 
+output "btrfs_snapshots_bucket_name" {
+  description = "S3 bucket name for btrfs CSI snapshot storage"
+  value       = aws_s3_bucket.btrfs_snapshots.id
+}
+
+output "btrfs_snapshots_bucket_arn" {
+  description = "S3 bucket ARN for btrfs CSI snapshot storage"
+  value       = aws_s3_bucket.btrfs_snapshots.arn
+}
+
+output "btrfs_csi_role_arn" {
+  description = "IAM role ARN for btrfs CSI driver service account"
+  value       = module.btrfs_csi_irsa.iam_role_arn
+}
+
 # -----------------------------------------------------------------------------
 # ECR Outputs
 # -----------------------------------------------------------------------------
