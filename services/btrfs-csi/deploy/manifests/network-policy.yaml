@@ -9,7 +9,8 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # Allow nodeops gRPC (port 9741) only from tesslate backend pods.
+    # Allow nodeops gRPC (port 9741) and FileOps gRPC (port 9742)
+    # only from tesslate backend pods.
     - from:
         - namespaceSelector:
             matchLabels:
@@ -20,8 +21,5 @@ spec:
       ports:
         - protocol: TCP
           port: 9741
-    # Allow CSI node registration from kubelet (runs on the host network).
-    - from: []
-      ports:
         - protocol: TCP
           port: 9742

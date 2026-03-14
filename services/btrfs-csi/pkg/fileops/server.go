@@ -1,0 +1,543 @@
+package fileops
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
+	"k8s.io/klog/v2"
+)
+
+// Server exposes file operations over gRPC on port 9742.
+// Access is restricted by NetworkPolicy to the tesslate namespace.
+type Server struct {
+	poolPath string
+	srv      *grpc.Server
+}
+
+// TLSConfig holds paths for mTLS certificate files.
+type TLSConfig struct {
+	CertFile string
+	KeyFile  string
+	CAFile   string
+}
+
+// NewServer creates a FileOps server that operates on the given btrfs pool.
+func NewServer(poolPath string) *Server {
+	return &Server{poolPath: poolPath}
+}
+
+// Start begins serving FileOps gRPC on the given address (e.g., ":9742").
+func (s *Server) Start(addr string, tlsCfg *TLSConfig) error {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("fileops listen on %s: %w", addr, err)
+	}
+
+	var opts []grpc.ServerOption
+	if creds, tlsErr := loadServerTLS(tlsCfg); tlsErr != nil {
+		return fmt.Errorf("fileops TLS: %w", tlsErr)
+	} else if creds != nil {
+		opts = append(opts, grpc.Creds(creds))
+		klog.Info("FileOps gRPC server using mTLS")
+	}
+
+	// Limit message size to 64MB for large file transfers.
+	opts = append(opts,
+		grpc.MaxRecvMsgSize(64*1024*1024),
+		grpc.MaxSendMsgSize(64*1024*1024),
+	)
+
+	s.srv = grpc.NewServer(opts...)
+	registerFileOpsServer(s.srv, s)
+
+	klog.Infof("FileOps gRPC server listening on %s", addr)
+	return s.srv.Serve(listener)
+}
+
+func loadServerTLS(cfg *TLSConfig) (credentials.TransportCredentials, error) {
+	if cfg == nil || cfg.CertFile == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(cfg.CertFile); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load key pair: %w", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	if cfg.CAFile != "" {
+		caPEM, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read CA file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+		tlsConfig.ClientCAs = pool
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
+}
+
+// Stop gracefully stops the server.
+func (s *Server) Stop() {
+	if s.srv != nil {
+		s.srv.GracefulStop()
+	}
+}
+
+// volumePath returns the safe absolute path to a file within a volume.
+func (s *Server) volumePath(volumeID, filePath string) (string, error) {
+	volDir := filepath.Join(s.poolPath, "volumes", volumeID)
+	full := filepath.Join(volDir, filePath)
+	clean := filepath.Clean(full)
+	volClean := filepath.Clean(volDir)
+
+	if !strings.HasPrefix(clean, volClean+string(filepath.Separator)) && clean != volClean {
+		return "", fmt.Errorf("path traversal detected: %q resolves outside volume %q", filePath, volumeID)
+	}
+	return clean, nil
+}
+
+// --- Request/response types ---
+
+type (
+	ReadFileRequest struct {
+		VolumeID string `json:"volume_id"`
+		Path     string `json:"path"`
+	}
+	ReadFileResponse struct {
+		Data []byte `json:"data"`
+	}
+
+	WriteFileRequest struct {
+		VolumeID string `json:"volume_id"`
+		Path     string `json:"path"`
+		Data     []byte `json:"data"`
+		Mode     uint32 `json:"mode"`
+	}
+
+	ListDirRequest struct {
+		VolumeID  string `json:"volume_id"`
+		Path      string `json:"path"`
+		Recursive bool   `json:"recursive"`
+	}
+	ListDirResponse struct {
+		Entries []FileInfo `json:"entries"`
+	}
+
+	StatPathRequest struct {
+		VolumeID string `json:"volume_id"`
+		Path     string `json:"path"`
+	}
+
+	DeletePathRequest struct {
+		VolumeID string `json:"volume_id"`
+		Path     string `json:"path"`
+	}
+
+	MkdirAllRequest struct {
+		VolumeID string `json:"volume_id"`
+		Path     string `json:"path"`
+	}
+
+	TarRequest struct {
+		VolumeID string `json:"volume_id"`
+		Path     string `json:"path"`
+		Data     []byte `json:"data,omitempty"`
+	}
+	TarResponse struct {
+		Data []byte `json:"data"`
+	}
+
+	FileInfoResponse struct {
+		Info FileInfo `json:"info"`
+	}
+
+	Empty struct{}
+)
+
+type jsonCodec struct{}
+
+func (jsonCodec) Marshal(v interface{}) ([]byte, error)     { return json.Marshal(v) }
+func (jsonCodec) Unmarshal(data []byte, v interface{}) error { return json.Unmarshal(data, v) }
+func (jsonCodec) Name() string                              { return "json" }
+
+func registerFileOpsServer(srv *grpc.Server, s *Server) {
+	srv.RegisterService(&grpc.ServiceDesc{
+		ServiceName: "fileops.FileOps",
+		HandlerType: (*Server)(nil),
+		Methods: []grpc.MethodDesc{
+			{MethodName: "ReadFile", Handler: s.handleReadFile},
+			{MethodName: "WriteFile", Handler: s.handleWriteFile},
+			{MethodName: "ListDir", Handler: s.handleListDir},
+			{MethodName: "StatPath", Handler: s.handleStatPath},
+			{MethodName: "DeletePath", Handler: s.handleDeletePath},
+			{MethodName: "MkdirAll", Handler: s.handleMkdirAll},
+			{MethodName: "TarCreate", Handler: s.handleTarCreate},
+			{MethodName: "TarExtract", Handler: s.handleTarExtract},
+		},
+		Streams: []grpc.StreamDesc{},
+	}, s)
+}
+
+func (s *Server) handleReadFile(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req ReadFileRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Path == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+
+	fullPath, err := s.volumePath(req.VolumeID, req.Path)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if os.IsNotExist(err) {
+		return nil, status.Errorf(codes.NotFound, "file not found: %s", req.Path)
+	} else if err != nil {
+		return nil, status.Errorf(codes.Internal, "read file: %v", err)
+	}
+
+	return &ReadFileResponse{Data: data}, nil
+}
+
+func (s *Server) handleWriteFile(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req WriteFileRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Path == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+
+	fullPath, err := s.volumePath(req.VolumeID, req.Path)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	// Ensure parent directory exists.
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, status.Errorf(codes.Internal, "create parent dir: %v", err)
+	}
+
+	mode := fs.FileMode(req.Mode)
+	if mode == 0 {
+		mode = 0644
+	}
+
+	if err := os.WriteFile(fullPath, req.Data, mode); err != nil {
+		return nil, status.Errorf(codes.Internal, "write file: %v", err)
+	}
+
+	return &Empty{}, nil
+}
+
+func (s *Server) handleListDir(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req ListDirRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+
+	dirPath := req.Path
+	if dirPath == "" {
+		dirPath = "."
+	}
+
+	fullPath, err := s.volumePath(req.VolumeID, dirPath)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	var entries []FileInfo
+
+	if req.Recursive {
+		volBase, _ := s.volumePath(req.VolumeID, ".")
+		err = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil // Skip entries we can't read.
+			}
+			info, statErr := d.Info()
+			if statErr != nil {
+				return nil
+			}
+			relPath, _ := filepath.Rel(volBase, path)
+			entries = append(entries, FileInfo{
+				Name:    d.Name(),
+				Path:    relPath,
+				Size:    info.Size(),
+				IsDir:   d.IsDir(),
+				ModTime: info.ModTime().Unix(),
+				Mode:    uint32(info.Mode()),
+			})
+			return nil
+		})
+	} else {
+		dirEntries, readErr := os.ReadDir(fullPath)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				return nil, status.Errorf(codes.NotFound, "directory not found: %s", dirPath)
+			}
+			return nil, status.Errorf(codes.Internal, "read dir: %v", readErr)
+		}
+		for _, d := range dirEntries {
+			info, statErr := d.Info()
+			if statErr != nil {
+				continue
+			}
+			entries = append(entries, FileInfo{
+				Name:    d.Name(),
+				Path:    filepath.Join(dirPath, d.Name()),
+				Size:    info.Size(),
+				IsDir:   d.IsDir(),
+				ModTime: info.ModTime().Unix(),
+				Mode:    uint32(info.Mode()),
+			})
+		}
+		err = nil
+	}
+
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list dir: %v", err)
+	}
+
+	return &ListDirResponse{Entries: entries}, nil
+}
+
+func (s *Server) handleStatPath(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req StatPathRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Path == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+
+	fullPath, err := s.volumePath(req.VolumeID, req.Path)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	info, err := os.Stat(fullPath)
+	if os.IsNotExist(err) {
+		return nil, status.Errorf(codes.NotFound, "path not found: %s", req.Path)
+	} else if err != nil {
+		return nil, status.Errorf(codes.Internal, "stat: %v", err)
+	}
+
+	return &FileInfoResponse{Info: FileInfo{
+		Name:    info.Name(),
+		Path:    req.Path,
+		Size:    info.Size(),
+		IsDir:   info.IsDir(),
+		ModTime: info.ModTime().Unix(),
+		Mode:    uint32(info.Mode()),
+	}}, nil
+}
+
+func (s *Server) handleDeletePath(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req DeletePathRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Path == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+
+	fullPath, err := s.volumePath(req.VolumeID, req.Path)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	if err := os.RemoveAll(fullPath); err != nil {
+		return nil, status.Errorf(codes.Internal, "delete: %v", err)
+	}
+
+	return &Empty{}, nil
+}
+
+func (s *Server) handleMkdirAll(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req MkdirAllRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Path == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+
+	fullPath, err := s.volumePath(req.VolumeID, req.Path)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
+		return nil, status.Errorf(codes.Internal, "mkdir: %v", err)
+	}
+
+	return &Empty{}, nil
+}
+
+func (s *Server) handleTarCreate(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req TarRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Path == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+
+	fullPath, err := s.volumePath(req.VolumeID, req.Path)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	err = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		info, statErr := d.Info()
+		if statErr != nil {
+			return nil
+		}
+
+		relPath, _ := filepath.Rel(fullPath, path)
+		if relPath == "." {
+			return nil
+		}
+
+		header, headerErr := tar.FileInfoHeader(info, "")
+		if headerErr != nil {
+			return headerErr
+		}
+		header.Name = relPath
+
+		if writeErr := tw.WriteHeader(header); writeErr != nil {
+			return writeErr
+		}
+
+		if !d.IsDir() {
+			file, openErr := os.Open(path)
+			if openErr != nil {
+				return openErr
+			}
+			defer file.Close()
+			if _, copyErr := io.Copy(tw, file); copyErr != nil {
+				return copyErr
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "create tar: %v", err)
+	}
+
+	if err := tw.Close(); err != nil {
+		return nil, status.Errorf(codes.Internal, "finalize tar: %v", err)
+	}
+
+	return &TarResponse{Data: buf.Bytes()}, nil
+}
+
+func (s *Server) handleTarExtract(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req TarRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Path == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+	if len(req.Data) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "tar data is required")
+	}
+
+	destPath, err := s.volumePath(req.VolumeID, req.Path)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return nil, status.Errorf(codes.Internal, "mkdir dest: %v", err)
+	}
+
+	tr := tar.NewReader(bytes.NewReader(req.Data))
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "read tar: %v", err)
+		}
+
+		targetPath := filepath.Join(destPath, header.Name)
+		cleanTarget := filepath.Clean(targetPath)
+		cleanDest := filepath.Clean(destPath)
+
+		// Prevent path traversal in tar entries.
+		if !strings.HasPrefix(cleanTarget, cleanDest+string(filepath.Separator)) && cleanTarget != cleanDest {
+			continue // Skip entries that escape the destination.
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(cleanTarget, os.FileMode(header.Mode)); err != nil {
+				return nil, status.Errorf(codes.Internal, "mkdir tar entry: %v", err)
+			}
+		case tar.TypeReg:
+			// Limit individual file extraction to 1GB to prevent zip bomb attacks.
+			const maxFileSize int64 = 1 << 30
+			if header.Size > maxFileSize {
+				return nil, status.Errorf(codes.InvalidArgument, "tar entry %q exceeds max size (%d > %d)", header.Name, header.Size, maxFileSize)
+			}
+			if err := os.MkdirAll(filepath.Dir(cleanTarget), 0755); err != nil {
+				return nil, status.Errorf(codes.Internal, "mkdir parent: %v", err)
+			}
+			file, createErr := os.OpenFile(cleanTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			if createErr != nil {
+				return nil, status.Errorf(codes.Internal, "create file: %v", createErr)
+			}
+			if _, copyErr := io.CopyN(file, tr, maxFileSize); copyErr != nil && copyErr != io.EOF {
+				file.Close()
+				return nil, status.Errorf(codes.Internal, "write file: %v", copyErr)
+			}
+			file.Close()
+		}
+	}
+
+	return &Empty{}, nil
+}

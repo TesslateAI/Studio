@@ -30,6 +30,9 @@ spec:
             - name: nodeops
               containerPort: 9741
               protocol: TCP
+            - name: fileops
+              containerPort: 9742
+              protocol: TCP
           env:
             - name: NODE_NAME
               valueFrom:

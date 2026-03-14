@@ -13,6 +13,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/fileops"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/s3"
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
@@ -56,8 +57,9 @@ type Driver struct {
 	// Controller-mode subsystem (nil in node mode).
 	nodeOps nodeops.NodeOps
 
-	srv       *grpc.Server
+	srv        *grpc.Server
 	nodeOpsSrv *nodeops.Server
+	fileOpsSrv *fileops.Server
 }
 
 // Option configures the Driver via the functional options pattern.
@@ -158,6 +160,14 @@ func (d *Driver) runNode(ctx context.Context) error {
 		}
 	}()
 
+	// Start FileOps gRPC server for Tier 0 file operations.
+	d.fileOpsSrv = fileops.NewServer(d.poolPath)
+	go func() {
+		if err := d.fileOpsSrv.Start(":9742", nil); err != nil {
+			klog.Errorf("FileOps server failed: %v", err)
+		}
+	}()
+
 	// In "all" mode, also register the controller (for minikube/testing).
 	// The controller uses a local nodeops implementation that calls btrfs directly.
 	if d.mode == ModeAll {
@@ -244,6 +254,9 @@ func (d *Driver) startCSIServer(ctx context.Context) error {
 
 // Stop performs a graceful shutdown of the driver.
 func (d *Driver) Stop() {
+	if d.fileOpsSrv != nil {
+		d.fileOpsSrv.Stop()
+	}
 	if d.nodeOpsSrv != nil {
 		d.nodeOpsSrv.Stop()
 	}
