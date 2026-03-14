@@ -14,7 +14,6 @@
 project_name = "tesslate"
 environment  = "production"
 aws_region   = "us-east-1"
-image_tag    = ""  # ECR image tag (defaults to environment name if empty)
 
 # -----------------------------------------------------------------------------
 # Domain Configuration (REQUIRED)
@@ -205,20 +204,12 @@ elasticache_node_type = "cache.t4g.micro"
 
 # -----------------------------------------------------------------------------
 # Replica & Scaling Configuration
+# Replica counts and resource limits for backend/frontend/worker are managed
+# in kustomize overlays (k8s/overlays/aws-{env}/replicas-patch.yaml).
+# Only nginx_ingress and coredns replicas remain here (Helm/EKS managed).
 # -----------------------------------------------------------------------------
-backend_replicas       = 2
-frontend_replicas      = 2
-worker_replicas        = 2
 nginx_ingress_replicas = 2
 coredns_replicas       = 2
-
-# -----------------------------------------------------------------------------
-# Backend Resource Limits
-# -----------------------------------------------------------------------------
-backend_cpu_request    = "500m"
-backend_memory_request = "1Gi"
-backend_cpu_limit      = "2000m"   # Beta: 2000m, Production: 4000m
-backend_memory_limit   = "2Gi"     # Beta: 2Gi, Production: 4Gi
 
 # -----------------------------------------------------------------------------
 # GitHub Actions CI/CD (Optional)

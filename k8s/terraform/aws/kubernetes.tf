@@ -494,24 +494,6 @@ resource "aws_db_instance" "tesslate" {
   })
 }
 
-# -----------------------------------------------------------------------------
-# Generated Kustomize Replica Patch
-# Terraform generates a kustomize-compatible patch with replica counts
-# so that kustomize overlays don't hardcode replica values.
-# -----------------------------------------------------------------------------
-resource "local_file" "replicas_patch" {
-  content  = templatefile("${path.module}/templates/replicas-patch.yaml.tpl", {
-    backend_replicas       = var.backend_replicas
-    frontend_replicas      = var.frontend_replicas
-    worker_replicas        = var.worker_replicas
-    backend_cpu_request    = var.backend_cpu_request
-    backend_memory_request = var.backend_memory_request
-    backend_cpu_limit      = var.backend_cpu_limit
-    backend_memory_limit   = var.backend_memory_limit
-  })
-  filename = "${path.module}/../../overlays/aws-${var.environment}/generated-replicas-patch.yaml"
-}
-
 # Scale down K8s postgres if it exists (no-op if deployment doesn't exist)
 resource "null_resource" "postgres_scale_down" {
   count = var.create_rds ? 1 : 0

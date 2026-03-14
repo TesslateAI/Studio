@@ -7,7 +7,7 @@ resources:
   - ../aws-base
 
 patches:
-  - path: generated-replicas-patch.yaml
+  - path: replicas-patch.yaml
 
 images:
   - name: tesslate-backend
