@@ -162,3 +162,69 @@ func TestTrackVolume_SetsVolumeID(t *testing.T) {
 		t.Errorf("lastSyncAt should be zero time, got %v", tv.lastSyncAt)
 	}
 }
+
+func TestListS3Objects_NilS3Client(t *testing.T) {
+	bm := btrfs.NewManager("/pool")
+	d := NewDaemon(bm, nil, 60*time.Second)
+
+	_, err := d.ListS3Objects(context.Background(), "some/prefix")
+	if err == nil {
+		t.Fatal("expected error when s3 client is nil")
+	}
+
+	wantMsg := "S3 client not configured"
+	if err.Error() != wantMsg {
+		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
+	}
+}
+
+func TestRestoreFromS3_NilS3Client(t *testing.T) {
+	bm := btrfs.NewManager("/pool")
+	d := NewDaemon(bm, nil, 60*time.Second)
+
+	err := d.RestoreFromS3(context.Background(), "vol-1", "backups/vol-1/snap.tar.zst")
+	if err == nil {
+		t.Fatal("expected error when s3 client is nil")
+	}
+
+	wantMsg := "S3 client not configured"
+	if err.Error() != wantMsg {
+		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
+	}
+}
+
+func TestRestoreFromS3_EmptyKey_NilS3(t *testing.T) {
+	bm := btrfs.NewManager("/pool")
+	d := NewDaemon(bm, nil, 60*time.Second)
+
+	err := d.RestoreFromS3(context.Background(), "vol-1", "")
+	if err == nil {
+		t.Fatal("expected error when s3 client is nil, even with empty key")
+	}
+
+	wantMsg := "S3 client not configured"
+	if err.Error() != wantMsg {
+		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
+	}
+}
+
+func TestStart_ContextCancel(t *testing.T) {
+	bm := btrfs.NewManager("/pool")
+	d := NewDaemon(bm, nil, 60*time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	done := make(chan struct{})
+	go func() {
+		d.Start(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Start returned promptly — success.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return within 2 seconds after context cancellation")
+	}
+}
