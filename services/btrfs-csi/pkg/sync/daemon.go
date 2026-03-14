@@ -327,10 +327,33 @@ func (d *Daemon) ListS3Objects(ctx context.Context, prefix string) ([]string, er
 // RestoreFromS3 downloads a compressed btrfs send stream from S3 and receives
 // it into the volumes directory to reconstruct a subvolume. Used for cross-node
 // migration when a volume is needed on a different node.
+// If s3Key is empty, the latest full send is found automatically.
 func (d *Daemon) RestoreFromS3(ctx context.Context, volumeID, s3Key string) error {
 	if d.s3 == nil {
 		return fmt.Errorf("S3 client not configured")
 	}
+
+	// Auto-discover latest full send if no key specified.
+	if s3Key == "" {
+		keys, err := d.ListS3Objects(ctx, fmt.Sprintf("volumes/%s/", volumeID))
+		if err != nil {
+			return fmt.Errorf("list S3 objects: %w", err)
+		}
+		if len(keys) == 0 {
+			return fmt.Errorf("no snapshots in S3 for volume %q", volumeID)
+		}
+		// Prefer the latest full send; fall back to latest object.
+		s3Key = keys[len(keys)-1]
+		for i := len(keys) - 1; i >= 0; i-- {
+			if len(keys[i]) > 5 && keys[i][len(keys[i])-8:] != "full-" {
+				continue
+			}
+			s3Key = keys[i]
+			break
+		}
+	}
+
+	klog.Infof("Restoring volume %q from S3: %s", volumeID, s3Key)
 
 	reader, err := d.s3.Download(ctx, s3Key)
 	if err != nil {
@@ -350,5 +373,6 @@ func (d *Daemon) RestoreFromS3(ctx context.Context, volumeID, s3Key string) erro
 		return fmt.Errorf("btrfs receive volume %q: %w", volumeID, err)
 	}
 
+	klog.Infof("Volume %q restored from S3 successfully", volumeID)
 	return nil
 }

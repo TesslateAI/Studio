@@ -46,9 +46,19 @@ func (ns *NodeServer) NodePublishVolume(
 	targetPath := req.GetTargetPath()
 	sourcePath := filepath.Join(ns.driver.poolPath, "volumes", volID)
 
-	// Verify the source subvolume exists.
+	// Verify the source subvolume exists. If missing, attempt cross-node
+	// restore from object storage (handles node failure recovery).
 	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-		return nil, status.Errorf(codes.NotFound, "volume %q not found at %s", volID, sourcePath)
+		klog.Warningf("Volume %q not found locally, attempting restore from S3", volID)
+		if ns.driver.syncer != nil {
+			if restoreErr := ns.driver.syncer.RestoreFromS3(ctx, volID, ""); restoreErr != nil {
+				klog.Errorf("Failed to restore volume %q from S3: %v", volID, restoreErr)
+				return nil, status.Errorf(codes.NotFound, "volume %q not found locally and S3 restore failed: %v", volID, restoreErr)
+			}
+			klog.Infof("Volume %q restored from S3 successfully", volID)
+		} else {
+			return nil, status.Errorf(codes.NotFound, "volume %q not found at %s", volID, sourcePath)
+		}
 	} else if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to stat source path: %v", err)
 	}
