@@ -1,7 +1,7 @@
 """
 MCP client with dual transport support (stdio + Streamable HTTP).
 
-Uses the official ``mcp`` Python SDK (>=1.8.0) to connect to MCP servers,
+Uses the official ``mcp`` Python SDK (>=1.9.2) to connect to MCP servers,
 negotiate capabilities, and yield an initialised ClientSession.
 """
 
@@ -14,7 +14,7 @@ from typing import Any
 
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 
 from ...config import get_settings
 
@@ -119,9 +119,10 @@ async def _connect_streamable_http(
 
     logger.info("Connecting to MCP server via streamable-http: %s", url)
 
-    async with sse_client(url=url, headers=headers, timeout=timeout) as (
+    async with streamable_http_client(url=url, headers=headers) as (
         read_stream,
         write_stream,
+        _,
     ):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()

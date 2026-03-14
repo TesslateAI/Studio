@@ -57,7 +57,7 @@ dependencies = [
     # ARQ - async Redis task queue for agent worker fleet
     "arq>=0.26.0",
     # MCP (Model Context Protocol) SDK
-    "mcp>=1.8.0",
+    "mcp>=1.9.2",
     # Ed25519 verification for Discord webhooks
     "PyNaCl>=1.5.0",
     # gRPC client for btrfs CSI NodeOps service

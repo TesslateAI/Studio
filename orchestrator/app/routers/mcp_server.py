@@ -4,14 +4,14 @@ Expose Tesslate Studio as an MCP server via Streamable HTTP transport.
 Uses FastMCP from the ``mcp`` Python SDK to register Tesslate's core tools
 and serve them over the MCP JSON-RPC protocol. The ASGI app is mounted
 in main.py under ``/api/mcp/server``.
-
-Authentication uses the same API key mechanism as the External Agent API.
 """
 
 import logging
+from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from mcp.server.fastmcp import FastMCP
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +21,68 @@ logger = logging.getLogger(__name__)
 
 mcp_app = FastMCP(
     "Tesslate Studio",
+    stateless_http=True,
+    json_response=True,
     instructions=(
         "Tools for managing and building web applications via Tesslate Studio. "
         "Use these tools to list files, read code, and run commands in project containers."
     ),
 )
 
+# Mount at root of wherever Starlette mounts us (e.g. /api/mcp/server)
+mcp_app.settings.streamable_http_path = "/"
+
 
 # ---------------------------------------------------------------------------
-# MCP tool registrations (stubs — full delegation requires container context)
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_project(project_id: str):
+    """Resolve project_id (slug or UUID) to (project, orchestrator) tuple."""
+    from ..config import get_settings
+    from ..database import AsyncSessionLocal
+    from ..models import Container, Project
+
+    settings = get_settings()
+
+    async with AsyncSessionLocal() as db:
+        # Try UUID first, then slug
+        try:
+            pid = UUID(project_id)
+            result = await db.execute(select(Project).where(Project.id == pid))
+        except ValueError:
+            result = await db.execute(select(Project).where(Project.slug == project_id))
+
+        project = result.scalar_one_or_none()
+        if not project:
+            return None, None, None
+
+        # Get first container for the project
+        container_result = await db.execute(
+            select(Container)
+            .where(Container.project_id == project.id)
+            .order_by(Container.created_at)
+            .limit(1)
+        )
+        container = container_result.scalar_one_or_none()
+        container_name = container.name if container else "frontend"
+
+        if settings.deployment_mode == "kubernetes":
+            from ..services.orchestration.kubernetes_orchestrator import KubernetesOrchestrator
+            return project, container_name, KubernetesOrchestrator()
+        else:
+            from ..services.orchestration.docker import DockerComposeOrchestrator
+            return project, container_name, DockerComposeOrchestrator()
+
+
+# ---------------------------------------------------------------------------
+# MCP tool registrations
 # ---------------------------------------------------------------------------
 
 
 @mcp_app.tool()
-async def list_project_files(project_id: str, path: str = "/") -> str:
+async def list_project_files(project_id: str, path: str = "/") -> dict:
     """List files in a Tesslate project directory.
 
     Args:
@@ -44,11 +92,22 @@ async def list_project_files(project_id: str, path: str = "/") -> str:
     Returns:
         A listing of files and directories at the given path.
     """
-    return f"[MCP] Listing files in project {project_id} at path '{path}' — MCP server operational"
+    project, container_name, orchestrator = await _resolve_project(project_id)
+    if not project:
+        return {"error": f"Project '{project_id}' not found"}
+
+    try:
+        files = await orchestrator.list_files(
+            project.owner_id, project.id, container_name, path
+        )
+        return {"project_id": str(project.id), "path": path, "files": files}
+    except Exception as e:
+        logger.error("MCP list_project_files failed: %s", e)
+        return {"error": str(e), "project_id": project_id, "path": path}
 
 
 @mcp_app.tool()
-async def read_project_file(project_id: str, path: str) -> str:
+async def read_project_file(project_id: str, path: str) -> dict:
     """Read a file from a Tesslate project.
 
     Args:
@@ -58,11 +117,25 @@ async def read_project_file(project_id: str, path: str) -> str:
     Returns:
         The contents of the requested file.
     """
-    return f"[MCP] Reading '{path}' from project {project_id} — MCP server operational"
+    project, container_name, orchestrator = await _resolve_project(project_id)
+    if not project:
+        return {"error": f"Project '{project_id}' not found"}
+
+    try:
+        content = await orchestrator.read_file(
+            project.owner_id, project.id, container_name, path,
+            project_slug=project.slug,
+        )
+        if content is None:
+            return {"error": f"File '{path}' not found", "project_id": str(project.id)}
+        return {"project_id": str(project.id), "path": path, "content": content}
+    except Exception as e:
+        logger.error("MCP read_project_file failed: %s", e)
+        return {"error": str(e), "project_id": project_id, "path": path}
 
 
 @mcp_app.tool()
-async def run_project_command(project_id: str, command: str) -> str:
+async def run_project_command(project_id: str, command: str) -> dict:
     """Execute a shell command inside a Tesslate project container.
 
     Args:
@@ -72,9 +145,18 @@ async def run_project_command(project_id: str, command: str) -> str:
     Returns:
         The stdout/stderr output of the command.
     """
-    return (
-        f"[MCP] Running command '{command}' in project {project_id} — MCP server operational"
-    )
+    project, container_name, orchestrator = await _resolve_project(project_id)
+    if not project:
+        return {"error": f"Project '{project_id}' not found"}
+
+    try:
+        result = await orchestrator.execute_command(
+            project.owner_id, project.id, container_name, command,
+        )
+        return {"project_id": str(project.id), "command": command, "output": result}
+    except Exception as e:
+        logger.error("MCP run_project_command failed: %s", e)
+        return {"error": str(e), "project_id": project_id, "command": command}
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +198,6 @@ def get_mcp_asgi_app():
 
         from .routers.mcp_server import get_mcp_asgi_app, router as mcp_server_router
         app.include_router(mcp_server_router)
-        app.mount("/api/mcp/server/mcp", get_mcp_asgi_app())
+        app.mount("/api/mcp/server", get_mcp_asgi_app())
     """
     return mcp_app.streamable_http_app()

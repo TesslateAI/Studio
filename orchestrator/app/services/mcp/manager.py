@@ -87,7 +87,7 @@ class McpManager:
             # Discover resource templates
             try:
                 templates_resp = await session.list_resource_templates()
-                templates_list = getattr(templates_resp, "resource_templates", [])
+                templates_list = getattr(templates_resp, "resourceTemplates", [])
                 result["resource_templates"] = [
                     {
                         "uriTemplate": getattr(t, "uriTemplate", ""),

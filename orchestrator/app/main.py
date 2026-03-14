@@ -1106,8 +1106,8 @@ app.include_router(internal.router, prefix="/api")  # /api/internal - Cluster-in
 try:
     from .routers.mcp_server import get_mcp_asgi_app
 
-    app.mount("/api/mcp/server/mcp", get_mcp_asgi_app())
-    logger.info("MCP Streamable HTTP server mounted at /api/mcp/server/mcp")
+    app.mount("/api/mcp/server", get_mcp_asgi_app())
+    logger.info("MCP Streamable HTTP server mounted at /api/mcp/server")
 except Exception as e:
     logger.warning(f"Failed to mount MCP ASGI app: {e}")
 

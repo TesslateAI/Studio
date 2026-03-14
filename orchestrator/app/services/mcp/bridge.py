@@ -196,14 +196,20 @@ def _make_tool_executor(server_slug: str, mcp_tool_name: str):
             async with connect_mcp(cfg["server"], cfg["credentials"]) as session:
                 result = await session.call_tool(mcp_tool_name, params)
 
-            # Extract text from content items.
-            texts: list[str] = []
-            for item in getattr(result, "content", []):
-                text = getattr(item, "text", None)
-                if text is not None:
-                    texts.append(text)
+            # Prefer structured output if available (MCP spec 2025-06-18+)
+            structured = getattr(result, "structuredContent", None)
+            if structured is not None:
+                import json as _json
 
-            output_text = "\n".join(texts) if texts else "(no output)"
+                output_text = _json.dumps(structured, indent=2, default=str)
+            else:
+                # Extract text from content items.
+                texts: list[str] = []
+                for item in getattr(result, "content", []):
+                    text = getattr(item, "text", None)
+                    if text is not None:
+                        texts.append(text)
+                output_text = "\n".join(texts) if texts else "(no output)"
 
             if getattr(result, "isError", False):
                 return error_output(
