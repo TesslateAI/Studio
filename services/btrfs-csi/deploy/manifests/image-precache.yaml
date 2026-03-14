@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tesslate-image-precache
+  labels:
+    app: tesslate-image-precache
+spec:
+  selector:
+    matchLabels:
+      app: tesslate-image-precache
+  template:
+    metadata:
+      labels:
+        app: tesslate-image-precache
+    spec:
+      # Low priority — don't compete with real workloads.
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Pull devserver image so Tier 1/2 pods start in ~3-5s instead of 30-60s.
+        - name: pull-devserver
+          image: tesslate-devserver:latest
+          command: ["true"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 1m
+              memory: 1Mi
+            limits:
+              cpu: 10m
+              memory: 8Mi
+
+        # Pull common service images for Tier 2 service containers.
+        - name: pull-postgres
+          image: postgres:16-alpine
+          command: ["true"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 1m
+              memory: 1Mi
+            limits:
+              cpu: 10m
+              memory: 8Mi
+
+        - name: pull-redis
+          image: redis:7-alpine
+          command: ["true"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 1m
+              memory: 1Mi
+            limits:
+              cpu: 10m
+              memory: 8Mi
+
+      containers:
+        # Pause container keeps the DaemonSet running with minimal resources.
+        # The init containers already pulled the images.
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 1m
+              memory: 1Mi
+            limits:
+              cpu: 5m
+              memory: 4Mi
