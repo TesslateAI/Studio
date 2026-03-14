@@ -80,305 +80,13 @@ model_list:
   # # Models with bedrock/converse/ prefix need the Converse API format
   # # ===========================================================================
 
-  # # --- Anthropic Claude ---
-
-  # - model_name: "claude-opus-4.6"
-  #   litellm_params:
-  #     model: "bedrock/us.anthropic.claude-opus-4-6-v1"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.000005
-  #     output_cost_per_token: 0.000025
-  #     max_tokens: 128000
-  #     max_input_tokens: 200000
-  #     access_groups: ["internal"]
-
-  # - model_name: "claude-sonnet-4.6"
-  #   litellm_params:
-  #     model: "bedrock/us.anthropic.claude-sonnet-4-6"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.000003
-  #     output_cost_per_token: 0.000015
-  #     max_tokens: 64000
-  #     max_input_tokens: 200000
-  #     access_groups: ["internal"]
-
-  # - model_name: "claude-opus-4.5"
-  #   litellm_params:
-  #     model: "bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.000005
-  #     output_cost_per_token: 0.000025
-  #     max_tokens: 128000
-  #     max_input_tokens: 200000
-  #     access_groups: ["internal"]
-
-  # - model_name: "claude-sonnet-4.5"
-  #   litellm_params:
-  #     model: "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.000003
-  #     output_cost_per_token: 0.000015
-  #     max_tokens: 64000
-  #     max_input_tokens: 200000
-  #     access_groups: ["internal"]
-
-  # - model_name: "claude-haiku-4.5"
-  #   litellm_params:
-  #     model: "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.000001
-  #     output_cost_per_token: 0.000005
-  #     max_tokens: 64000
-  #     max_input_tokens: 200000
-  #     access_groups: ["internal"]
-
-  # # --- DeepSeek ---
-
-  # - model_name: "deepseek-r1"
-  #   litellm_params:
-  #     model: "bedrock/us.deepseek.r1-v1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000135
-  #     output_cost_per_token: 0.0000054
-  #     max_tokens: 32768
-  #     max_input_tokens: 128000
-  #     access_groups: ["internal"]
-
-  # - model_name: "deepseek-v3.2"
-  #   litellm_params:
-  #     model: "bedrock/deepseek.v3.2"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000062
-  #     output_cost_per_token: 0.00000185
-  #     max_tokens: 32768
-  #     max_input_tokens: 128000
-  #     access_groups: ["internal"]
-
-  # # --- Meta Llama ---
-
-  # - model_name: "llama-4-maverick-17b"
-  #   litellm_params:
-  #     model: "bedrock/us.meta.llama4-maverick-17b-instruct-v1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000024
-  #     output_cost_per_token: 0.00000097
-  #     max_tokens: 32768
-  #     max_input_tokens: 1048576
-  #     access_groups: ["internal"]
-
-  # - model_name: "llama-4-scout-17b"
-  #   litellm_params:
-  #     model: "bedrock/us.meta.llama4-scout-17b-instruct-v1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000017
-  #     output_cost_per_token: 0.00000066
-  #     max_tokens: 32768
-  #     max_input_tokens: 1048576
-  #     access_groups: ["internal"]
-
-  # # --- Mistral AI ---
-
-  # - model_name: "mistral-large-3"
-  #   litellm_params:
-  #     model: "bedrock/mistral.mistral-large-3-675b-instruct"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.0000005
-  #     output_cost_per_token: 0.0000015
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # - model_name: "devstral-2-135b"
-  #   litellm_params:
-  #     model: "bedrock/converse/mistral.devstral-2-123b"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.0000004
-  #     output_cost_per_token: 0.000002
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # # --- MiniMax ---
-
-  # - model_name: "minimax-m2.1"
-  #   litellm_params:
-  #     model: "bedrock/minimax.minimax-m2.1"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.0000003
-  #     output_cost_per_token: 0.0000012
-  #     max_tokens: 32768
-  #     max_input_tokens: 1048576
-  #     access_groups: ["internal"]
-
-  # # --- Qwen ---
-
-  # - model_name: "qwen3-coder-30b"
-  #   litellm_params:
-  #     model: "bedrock/qwen.qwen3-coder-30b-a3b-v1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000015
-  #     output_cost_per_token: 0.0000006
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # - model_name: "qwen3-32b"
-  #   litellm_params:
-  #     model: "bedrock/qwen.qwen3-32b-v1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000015
-  #     output_cost_per_token: 0.0000006
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # - model_name: "qwen3-next-80b"
-  #   litellm_params:
-  #     model: "bedrock/qwen.qwen3-next-80b-a3b"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000015
-  #     output_cost_per_token: 0.0000012
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # - model_name: "qwen3-coder-next"
-  #   litellm_params:
-  #     model: "bedrock/qwen.qwen3-coder-next"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.0000005
-  #     output_cost_per_token: 0.0000012
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # # --- Moonshot AI (Kimi) ---
-
-  # - model_name: "kimi-k2-thinking"
-  #   litellm_params:
-  #     model: "bedrock/moonshot.kimi-k2-thinking"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.0000006
-  #     output_cost_per_token: 0.0000025
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # - model_name: "kimi-k2.5"
-  #   litellm_params:
-  #     model: "bedrock/moonshotai.kimi-k2.5"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.0000006
-  #     output_cost_per_token: 0.000003
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # # --- OpenAI OSS ---
-
-  # - model_name: "gpt-oss-120b"
-  #   litellm_params:
-  #     model: "bedrock/openai.gpt-oss-120b-1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000015
-  #     output_cost_per_token: 0.0000006
-  #     max_tokens: 32768
-  #     max_input_tokens: 200000
-  #     access_groups: ["internal"]
-
-  # - model_name: "gpt-oss-20b"
-  #   litellm_params:
-  #     model: "bedrock/openai.gpt-oss-20b-1:0"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000007
-  #     output_cost_per_token: 0.00000015
-  #     max_tokens: 32768
-  #     max_input_tokens: 200000
-  #     access_groups: ["internal"]
-
-  # # --- Z.AI (GLM) ---
-
-  # - model_name: "glm-4.7"
-  #   litellm_params:
-  #     model: "bedrock/zai.glm-4.7"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.0000006
-  #     output_cost_per_token: 0.0000022
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # - model_name: "glm-4.7-flash"
-  #   litellm_params:
-  #     model: "bedrock/converse/zai.glm-4.7-flash"
-  #     api_key: "os.environ/BEDROCK_API_KEY"
-  #     aws_region_name: "os.environ/BEDROCK_AWS_REGION"
-  #   model_info:
-  #     input_cost_per_token: 0.00000007
-  #     output_cost_per_token: 0.0000004
-  #     max_tokens: 32768
-  #     max_input_tokens: 131072
-  #     access_groups: ["internal"]
-
-  # ===========================================================================
-  # Google Vertex AI
-  # ===========================================================================
-  # Auth: Service account JSON via VERTEX_CREDENTIALS env var
-  # NOT PROVISIONED — enable models in GCP Model Garden before use.
-  # Models sharing a model_name with Bedrock form a deployment group;
-  # LiteLLM will auto-fallback between them on failure.
-  # ===========================================================================
-
-  # --- Anthropic Claude (global endpoint) ---
+  # --- Anthropic Claude ---
 
   - model_name: "claude-opus-4.6"
     litellm_params:
-      model: "vertex_ai/claude-opus-4-6"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/us.anthropic.claude-opus-4-6-v1"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.000005
       output_cost_per_token: 0.000025
@@ -388,10 +96,9 @@ model_list:
 
   - model_name: "claude-sonnet-4.6"
     litellm_params:
-      model: "vertex_ai/claude-sonnet-4-6"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/us.anthropic.claude-sonnet-4-6"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.000003
       output_cost_per_token: 0.000015
@@ -401,10 +108,9 @@ model_list:
 
   - model_name: "claude-opus-4.5"
     litellm_params:
-      model: "vertex_ai/claude-opus-4-5"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.000005
       output_cost_per_token: 0.000025
@@ -414,10 +120,9 @@ model_list:
 
   - model_name: "claude-sonnet-4.5"
     litellm_params:
-      model: "vertex_ai/claude-sonnet-4-5"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.000003
       output_cost_per_token: 0.000015
@@ -427,10 +132,9 @@ model_list:
 
   - model_name: "claude-haiku-4.5"
     litellm_params:
-      model: "vertex_ai/claude-haiku-4-5"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.000001
       output_cost_per_token: 0.000005
@@ -442,27 +146,24 @@ model_list:
 
   - model_name: "deepseek-r1"
     litellm_params:
-      model: "vertex_ai/deepseek-ai/deepseek-r1-0528-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "us-central1"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/us.deepseek.r1-v1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.00000135
       output_cost_per_token: 0.0000054
       max_tokens: 32768
       max_input_tokens: 128000
-      rpm_limit: 600
       access_groups: ["internal"]
 
   - model_name: "deepseek-v3.2"
     litellm_params:
-      model: "vertex_ai/deepseek-ai/deepseek-v3.2-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/deepseek.v3.2"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.00000056
-      output_cost_per_token: 0.00000168
+      input_cost_per_token: 0.00000062
+      output_cost_per_token: 0.00000185
       max_tokens: 32768
       max_input_tokens: 128000
       access_groups: ["internal"]
@@ -471,170 +172,99 @@ model_list:
 
   - model_name: "llama-4-maverick-17b"
     litellm_params:
-      model: "vertex_ai/meta/llama-4-maverick-17b-128e-instruct-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "us-east5"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/us.meta.llama4-maverick-17b-instruct-v1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.00000035
-      output_cost_per_token: 0.00000115
+      input_cost_per_token: 0.00000024
+      output_cost_per_token: 0.00000097
       max_tokens: 32768
       max_input_tokens: 1048576
-      rpm_limit: 120
       access_groups: ["internal"]
 
   - model_name: "llama-4-scout-17b"
     litellm_params:
-      model: "vertex_ai/meta/llama-4-scout-17b-16e-instruct-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "us-east5"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/us.meta.llama4-scout-17b-instruct-v1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.00000025
-      output_cost_per_token: 0.0000007
+      input_cost_per_token: 0.00000017
+      output_cost_per_token: 0.00000066
       max_tokens: 32768
       max_input_tokens: 1048576
-      rpm_limit: 120
-      access_groups: ["internal"]
-
-  - model_name: "llama-3.3-70b"
-    litellm_params:
-      model: "vertex_ai/meta/llama-3.3-70b-instruct-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "us-central1"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
-    model_info:
-      input_cost_per_token: 0.00000072
-      output_cost_per_token: 0.00000072
-      max_tokens: 32768
-      max_input_tokens: 128000
-      rpm_limit: 100
       access_groups: ["internal"]
 
   # --- Mistral AI ---
 
-  - model_name: "mistral-medium-3"
+  - model_name: "mistral-large-3"
     litellm_params:
-      model: "vertex_ai/mistral-medium-3"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "us-central1"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/mistral.mistral-large-3-675b-instruct"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
+    model_info:
+      input_cost_per_token: 0.0000005
+      output_cost_per_token: 0.0000015
+      max_tokens: 32768
+      max_input_tokens: 131072
+      access_groups: ["internal"]
+
+  - model_name: "devstral-2-135b"
+    litellm_params:
+      model: "bedrock/converse/mistral.devstral-2-123b"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.0000004
       output_cost_per_token: 0.000002
       max_tokens: 32768
       max_input_tokens: 131072
-      rpm_limit: 90
-      tpm_limit: 315000
       access_groups: ["internal"]
 
-  - model_name: "mistral-small-3.1"
-    litellm_params:
-      model: "vertex_ai/mistral-small-2503"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "us-central1"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
-    model_info:
-      input_cost_per_token: 0.0000001
-      output_cost_per_token: 0.0000003
-      max_tokens: 32768
-      max_input_tokens: 131072
-      rpm_limit: 5
-      tpm_limit: 200000
-      access_groups: ["internal"]
+  # --- MiniMax ---
 
-  - model_name: "codestral-2"
+  - model_name: "minimax-m2.1"
     litellm_params:
-      model: "vertex_ai/codestral-2"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "us-central1"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/minimax.minimax-m2.1"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.0000003
-      output_cost_per_token: 0.0000009
+      output_cost_per_token: 0.0000012
       max_tokens: 32768
-      max_input_tokens: 131072
-      rpm_limit: 1100
-      tpm_limit: 1100000
-      access_groups: ["internal"]
-
-  # --- Google Gemini ---
-
-  - model_name: "gemini-3.1-pro-preview"
-    litellm_params:
-      model: "vertex_ai/gemini-3.1-pro-preview"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
-    model_info:
-      input_cost_per_token: 0.000002
-      output_cost_per_token: 0.000012
-      max_tokens: 65536
-      max_input_tokens: 1048576
-      access_groups: ["internal"]
-
-  - model_name: "gemini-3-pro-preview"
-    litellm_params:
-      model: "vertex_ai/gemini-3-pro-preview"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
-    model_info:
-      input_cost_per_token: 0.000002
-      output_cost_per_token: 0.000012
-      max_tokens: 65536
-      max_input_tokens: 1048576
-      access_groups: ["internal"]
-
-  - model_name: "gemini-3-flash-preview"
-    litellm_params:
-      model: "vertex_ai/gemini-3-flash-preview"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
-    model_info:
-      input_cost_per_token: 0.0000005
-      output_cost_per_token: 0.000003
-      max_tokens: 65536
       max_input_tokens: 1048576
       access_groups: ["internal"]
 
   # --- Qwen ---
 
-  - model_name: "qwen3-235b"
+  - model_name: "qwen3-coder-30b"
     litellm_params:
-      model: "vertex_ai/qwen/qwen3-235b-a22b-instruct-2507-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/qwen.qwen3-coder-30b-a3b-v1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.00000022
-      output_cost_per_token: 0.00000088
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000006
       max_tokens: 32768
       max_input_tokens: 131072
-      rpm_limit: 14
       access_groups: ["internal"]
 
-  - model_name: "qwen3-coder"
+  - model_name: "qwen3-32b"
     litellm_params:
-      model: "vertex_ai/qwen/qwen3-coder-480b-a35b-instruct-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/qwen.qwen3-32b-v1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.00000022
-      output_cost_per_token: 0.0000018
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000006
       max_tokens: 32768
       max_input_tokens: 131072
-      rpm_limit: 26
       access_groups: ["internal"]
 
   - model_name: "qwen3-next-80b"
     litellm_params:
-      model: "vertex_ai/qwen/qwen3-next-80b-a3b-instruct-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/qwen.qwen3-next-80b-a3b"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.00000015
       output_cost_per_token: 0.0000012
@@ -642,15 +272,40 @@ model_list:
       max_input_tokens: 131072
       access_groups: ["internal"]
 
-  - model_name: "qwen3-next-80b-thinking"
+  - model_name: "qwen3-coder-next"
     litellm_params:
-      model: "vertex_ai/qwen/qwen3-next-80b-a3b-thinking-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/qwen.qwen3-coder-next"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.00000015
+      input_cost_per_token: 0.0000005
       output_cost_per_token: 0.0000012
+      max_tokens: 32768
+      max_input_tokens: 131072
+      access_groups: ["internal"]
+
+  # --- Moonshot AI (Kimi) ---
+
+  - model_name: "kimi-k2-thinking"
+    litellm_params:
+      model: "bedrock/moonshot.kimi-k2-thinking"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
+    model_info:
+      input_cost_per_token: 0.0000006
+      output_cost_per_token: 0.0000025
+      max_tokens: 32768
+      max_input_tokens: 131072
+      access_groups: ["internal"]
+
+  - model_name: "kimi-k2.5"
+    litellm_params:
+      model: "bedrock/moonshotai.kimi-k2.5"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
+    model_info:
+      input_cost_per_token: 0.0000006
+      output_cost_per_token: 0.000003
       max_tokens: 32768
       max_input_tokens: 131072
       access_groups: ["internal"]
@@ -659,89 +314,434 @@ model_list:
 
   - model_name: "gpt-oss-120b"
     litellm_params:
-      model: "vertex_ai/openai/gpt-oss-120b-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/openai.gpt-oss-120b-1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.00000009
-      output_cost_per_token: 0.00000036
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000006
       max_tokens: 32768
       max_input_tokens: 200000
-      rpm_limit: 325
       access_groups: ["internal"]
 
   - model_name: "gpt-oss-20b"
     litellm_params:
-      model: "vertex_ai/openai/gpt-oss-20b-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/openai.gpt-oss-20b-1:0"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
       input_cost_per_token: 0.00000007
-      output_cost_per_token: 0.00000025
+      output_cost_per_token: 0.00000015
       max_tokens: 32768
       max_input_tokens: 200000
-      rpm_limit: 600
       access_groups: ["internal"]
 
-  # --- Moonshot AI (Kimi) ---
-
-  - model_name: "kimi-k2-thinking"
-    litellm_params:
-      model: "vertex_ai/moonshotai/kimi-k2-thinking-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
-    model_info:
-      input_cost_per_token: 0.0000006
-      output_cost_per_token: 0.0000025
-      max_tokens: 32768
-      max_input_tokens: 131072
-      access_groups: ["internal"]
-
-  # --- Zhipu AI (GLM) ---
-
-  - model_name: "glm-5"
-    litellm_params:
-      model: "vertex_ai/zai-org/glm-5-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
-    model_info:
-      input_cost_per_token: 0.0000005
-      output_cost_per_token: 0.000002
-      max_tokens: 32768
-      max_input_tokens: 131072
-      access_groups: ["internal"]
+  # --- Z.AI (GLM) ---
 
   - model_name: "glm-4.7"
     litellm_params:
-      model: "vertex_ai/zai-org/glm-4.7-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/zai.glm-4.7"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.0000002
-      output_cost_per_token: 0.0000008
+      input_cost_per_token: 0.0000006
+      output_cost_per_token: 0.0000022
       max_tokens: 32768
       max_input_tokens: 131072
       access_groups: ["internal"]
 
-  # --- MiniMax ---
-
-  - model_name: "minimax-m2"
+  - model_name: "glm-4.7-flash"
     litellm_params:
-      model: "vertex_ai/minimaxai/minimax-m2-maas"
-      vertex_project: "os.environ/VERTEX_PROJECT"
-      vertex_location: "global"
-      vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+      model: "bedrock/converse/zai.glm-4.7-flash"
+      api_key: "os.environ/BEDROCK_API_KEY"
+      aws_region_name: "os.environ/BEDROCK_AWS_REGION"
     model_info:
-      input_cost_per_token: 0.00000055
-      output_cost_per_token: 0.0000022
+      input_cost_per_token: 0.00000007
+      output_cost_per_token: 0.0000004
       max_tokens: 32768
-      max_input_tokens: 1048576
+      max_input_tokens: 131072
       access_groups: ["internal"]
+
+  # ===========================================================================
+  # Google Vertex AI
+  # ===========================================================================
+  # Auth: Service account JSON via VERTEX_CREDENTIALS env var
+  # NOT PROVISIONED — enable models in GCP Model Garden before use.
+  # Models sharing a model_name with Bedrock form a deployment group;
+  # LiteLLM will auto-fallback between them on failure.
+  # ===========================================================================
+
+  # # --- Anthropic Claude (global endpoint) ---
+
+  # - model_name: "claude-opus-4.6"
+  #   litellm_params:
+  #     model: "vertex_ai/claude-opus-4-6"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.000005
+  #     output_cost_per_token: 0.000025
+  #     max_tokens: 128000
+  #     max_input_tokens: 200000
+  #     access_groups: ["internal"]
+
+  # - model_name: "claude-sonnet-4.6"
+  #   litellm_params:
+  #     model: "vertex_ai/claude-sonnet-4-6"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.000003
+  #     output_cost_per_token: 0.000015
+  #     max_tokens: 64000
+  #     max_input_tokens: 200000
+  #     access_groups: ["internal"]
+
+  # - model_name: "claude-opus-4.5"
+  #   litellm_params:
+  #     model: "vertex_ai/claude-opus-4-5"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.000005
+  #     output_cost_per_token: 0.000025
+  #     max_tokens: 128000
+  #     max_input_tokens: 200000
+  #     access_groups: ["internal"]
+
+  # - model_name: "claude-sonnet-4.5"
+  #   litellm_params:
+  #     model: "vertex_ai/claude-sonnet-4-5"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.000003
+  #     output_cost_per_token: 0.000015
+  #     max_tokens: 64000
+  #     max_input_tokens: 200000
+  #     access_groups: ["internal"]
+
+  # - model_name: "claude-haiku-4.5"
+  #   litellm_params:
+  #     model: "vertex_ai/claude-haiku-4-5"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.000001
+  #     output_cost_per_token: 0.000005
+  #     max_tokens: 64000
+  #     max_input_tokens: 200000
+  #     access_groups: ["internal"]
+
+  # # --- DeepSeek ---
+
+  # - model_name: "deepseek-r1"
+  #   litellm_params:
+  #     model: "vertex_ai/deepseek-ai/deepseek-r1-0528-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "us-central1"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000135
+  #     output_cost_per_token: 0.0000054
+  #     max_tokens: 32768
+  #     max_input_tokens: 128000
+  #     rpm_limit: 600
+  #     access_groups: ["internal"]
+
+  # - model_name: "deepseek-v3.2"
+  #   litellm_params:
+  #     model: "vertex_ai/deepseek-ai/deepseek-v3.2-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000056
+  #     output_cost_per_token: 0.00000168
+  #     max_tokens: 32768
+  #     max_input_tokens: 128000
+  #     access_groups: ["internal"]
+
+  # # --- Meta Llama ---
+
+  # - model_name: "llama-4-maverick-17b"
+  #   litellm_params:
+  #     model: "vertex_ai/meta/llama-4-maverick-17b-128e-instruct-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "us-east5"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000035
+  #     output_cost_per_token: 0.00000115
+  #     max_tokens: 32768
+  #     max_input_tokens: 1048576
+  #     rpm_limit: 120
+  #     access_groups: ["internal"]
+
+  # - model_name: "llama-4-scout-17b"
+  #   litellm_params:
+  #     model: "vertex_ai/meta/llama-4-scout-17b-16e-instruct-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "us-east5"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000025
+  #     output_cost_per_token: 0.0000007
+  #     max_tokens: 32768
+  #     max_input_tokens: 1048576
+  #     rpm_limit: 120
+  #     access_groups: ["internal"]
+
+  # - model_name: "llama-3.3-70b"
+  #   litellm_params:
+  #     model: "vertex_ai/meta/llama-3.3-70b-instruct-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "us-central1"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000072
+  #     output_cost_per_token: 0.00000072
+  #     max_tokens: 32768
+  #     max_input_tokens: 128000
+  #     rpm_limit: 100
+  #     access_groups: ["internal"]
+
+  # # --- Mistral AI ---
+
+  # - model_name: "mistral-medium-3"
+  #   litellm_params:
+  #     model: "vertex_ai/mistral-medium-3"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "us-central1"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.0000004
+  #     output_cost_per_token: 0.000002
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     rpm_limit: 90
+  #     tpm_limit: 315000
+  #     access_groups: ["internal"]
+
+  # - model_name: "mistral-small-3.1"
+  #   litellm_params:
+  #     model: "vertex_ai/mistral-small-2503"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "us-central1"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.0000001
+  #     output_cost_per_token: 0.0000003
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     rpm_limit: 5
+  #     tpm_limit: 200000
+  #     access_groups: ["internal"]
+
+  # - model_name: "codestral-2"
+  #   litellm_params:
+  #     model: "vertex_ai/codestral-2"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "us-central1"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.0000003
+  #     output_cost_per_token: 0.0000009
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     rpm_limit: 1100
+  #     tpm_limit: 1100000
+  #     access_groups: ["internal"]
+
+  # # --- Google Gemini ---
+
+  # - model_name: "gemini-3.1-pro-preview"
+  #   litellm_params:
+  #     model: "vertex_ai/gemini-3.1-pro-preview"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.000002
+  #     output_cost_per_token: 0.000012
+  #     max_tokens: 65536
+  #     max_input_tokens: 1048576
+  #     access_groups: ["internal"]
+
+  # - model_name: "gemini-3-pro-preview"
+  #   litellm_params:
+  #     model: "vertex_ai/gemini-3-pro-preview"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.000002
+  #     output_cost_per_token: 0.000012
+  #     max_tokens: 65536
+  #     max_input_tokens: 1048576
+  #     access_groups: ["internal"]
+
+  # - model_name: "gemini-3-flash-preview"
+  #   litellm_params:
+  #     model: "vertex_ai/gemini-3-flash-preview"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.0000005
+  #     output_cost_per_token: 0.000003
+  #     max_tokens: 65536
+  #     max_input_tokens: 1048576
+  #     access_groups: ["internal"]
+
+  # # --- Qwen ---
+
+  # - model_name: "qwen3-235b"
+  #   litellm_params:
+  #     model: "vertex_ai/qwen/qwen3-235b-a22b-instruct-2507-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000022
+  #     output_cost_per_token: 0.00000088
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     rpm_limit: 14
+  #     access_groups: ["internal"]
+
+  # - model_name: "qwen3-coder"
+  #   litellm_params:
+  #     model: "vertex_ai/qwen/qwen3-coder-480b-a35b-instruct-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000022
+  #     output_cost_per_token: 0.0000018
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     rpm_limit: 26
+  #     access_groups: ["internal"]
+
+  # - model_name: "qwen3-next-80b"
+  #   litellm_params:
+  #     model: "vertex_ai/qwen/qwen3-next-80b-a3b-instruct-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000015
+  #     output_cost_per_token: 0.0000012
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     access_groups: ["internal"]
+
+  # - model_name: "qwen3-next-80b-thinking"
+  #   litellm_params:
+  #     model: "vertex_ai/qwen/qwen3-next-80b-a3b-thinking-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000015
+  #     output_cost_per_token: 0.0000012
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     access_groups: ["internal"]
+
+  # # --- OpenAI OSS ---
+
+  # - model_name: "gpt-oss-120b"
+  #   litellm_params:
+  #     model: "vertex_ai/openai/gpt-oss-120b-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000009
+  #     output_cost_per_token: 0.00000036
+  #     max_tokens: 32768
+  #     max_input_tokens: 200000
+  #     rpm_limit: 325
+  #     access_groups: ["internal"]
+
+  # - model_name: "gpt-oss-20b"
+  #   litellm_params:
+  #     model: "vertex_ai/openai/gpt-oss-20b-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000007
+  #     output_cost_per_token: 0.00000025
+  #     max_tokens: 32768
+  #     max_input_tokens: 200000
+  #     rpm_limit: 600
+  #     access_groups: ["internal"]
+
+  # # --- Moonshot AI (Kimi) ---
+
+  # - model_name: "kimi-k2-thinking"
+  #   litellm_params:
+  #     model: "vertex_ai/moonshotai/kimi-k2-thinking-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.0000006
+  #     output_cost_per_token: 0.0000025
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     access_groups: ["internal"]
+
+  # # --- Zhipu AI (GLM) ---
+
+  # - model_name: "glm-5"
+  #   litellm_params:
+  #     model: "vertex_ai/zai-org/glm-5-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.0000005
+  #     output_cost_per_token: 0.000002
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     access_groups: ["internal"]
+
+  # - model_name: "glm-4.7"
+  #   litellm_params:
+  #     model: "vertex_ai/zai-org/glm-4.7-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.0000002
+  #     output_cost_per_token: 0.0000008
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     access_groups: ["internal"]
+
+  # # --- MiniMax ---
+
+  # - model_name: "minimax-m2"
+  #   litellm_params:
+  #     model: "vertex_ai/minimaxai/minimax-m2-maas"
+  #     vertex_project: "os.environ/VERTEX_PROJECT"
+  #     vertex_location: "global"
+  #     vertex_credentials: "os.environ/VERTEX_CREDENTIALS"
+  #   model_info:
+  #     input_cost_per_token: 0.00000055
+  #     output_cost_per_token: 0.0000022
+  #     max_tokens: 32768
+  #     max_input_tokens: 1048576
+  #     access_groups: ["internal"]
 
   # ===========================================================================
   # Azure OpenAI (disabled)
@@ -763,28 +763,28 @@ model_list:
 
   # --- MiniMax ---
 
-  - model_name: "minimax-m2.5"
-    litellm_params:
-      model: "openai/minimax/minimax-m2.5"
-      api_key: "os.environ/NANOGPT_API_KEY"
-      api_base: "https://nano-gpt.com/api/v1"
-    model_info:
-      input_cost_per_token: 0.0000003
-      output_cost_per_token: 0.0000012
-      max_tokens: 32768
-      max_input_tokens: 1048576
-      access_groups: ["internal"]
+  # - model_name: "minimax-m2.5"
+  #   litellm_params:
+  #     model: "openai/minimax/minimax-m2.5"
+  #     api_key: "os.environ/NANOGPT_API_KEY"
+  #     api_base: "https://nano-gpt.com/api/v1"
+  #   model_info:
+  #     input_cost_per_token: 0.0000003
+  #     output_cost_per_token: 0.0000012
+  #     max_tokens: 32768
+  #     max_input_tokens: 1048576
+  #     access_groups: ["internal"]
 
-  # --- Moonshot AI (Kimi) ---
+  # # --- Moonshot AI (Kimi) ---
 
-  - model_name: "kimi-k2.5"
-    litellm_params:
-      model: "openai/moonshotai/kimi-k2.5"
-      api_key: "os.environ/NANOGPT_API_KEY"
-      api_base: "https://nano-gpt.com/api/v1"
-    model_info:
-      input_cost_per_token: 0.0000006
-      output_cost_per_token: 0.000003
-      max_tokens: 32768
-      max_input_tokens: 131072
-      access_groups: ["internal"]
+  # - model_name: "kimi-k2.5"
+  #   litellm_params:
+  #     model: "openai/moonshotai/kimi-k2.5"
+  #     api_key: "os.environ/NANOGPT_API_KEY"
+  #     api_base: "https://nano-gpt.com/api/v1"
+  #   model_info:
+  #     input_cost_per_token: 0.0000006
+  #     output_cost_per_token: 0.000003
+  #     max_tokens: 32768
+  #     max_input_tokens: 131072
+  #     access_groups: ["internal"]
