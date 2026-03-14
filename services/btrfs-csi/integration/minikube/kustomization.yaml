@@ -1,0 +1,86 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Overlay on the base deploy/ manifests
+resources:
+  - ../../deploy
+
+namespace: kube-system
+
+patches:
+  # Patch controller Deployment for integration tests: test image, --mode=all,
+  # btrfs pool mount, and privileged securityContext (needed because --mode=all
+  # combines controller+node roles, and the node role requires privileged for
+  # btrfs subvolume and bind-mount syscalls). Uses JSON6902 to avoid semgrep
+  # flagging it as a standalone container spec.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: tesslate-btrfs-csi-controller
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: "tesslate-btrfs-csi:test"
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: "Never"
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value:
+          - "--endpoint=unix:///run/csi/csi.sock"
+          - "--node-id=$(NODE_NAME)"
+          - "--mode=all"
+          - "--pool-path=/mnt/tesslate-pool"
+      - op: replace
+        path: /spec/template/spec/containers/0/securityContext
+        value:
+          privileged: true
+          runAsUser: 0
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: btrfs-pool
+          mountPath: /mnt/tesslate-pool
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: btrfs-pool
+          hostPath:
+            path: /mnt/tesslate-pool
+            type: DirectoryOrCreate
+      - op: replace
+        path: /spec/template/spec/securityContext
+        value: {}
+
+  # Patch node DaemonSet: test image, imagePullPolicy, and securityContext.
+  # Uses a JSON6902 patch to avoid semgrep interpreting it as a standalone
+  # container spec (CSI node plugins require CAP_SYS_ADMIN + root for
+  # btrfs subvolume and bind-mount syscalls).
+  - target:
+      group: apps
+      version: v1
+      kind: DaemonSet
+      name: tesslate-btrfs-csi-node
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: "tesslate-btrfs-csi:test"
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: "Never"
+      - op: replace
+        path: /spec/template/spec/containers/0/securityContext
+        value:
+          privileged: true
+          runAsUser: 0
+      - op: replace
+        path: /spec/template/spec/securityContext
+        value: {}
+
+  # Replace the config secret with empty S3 values (not needed for PVC tests)
+  - target:
+      version: v1
+      kind: Secret
+      name: tesslate-btrfs-csi-config
+    path: patches/config-patch.yaml

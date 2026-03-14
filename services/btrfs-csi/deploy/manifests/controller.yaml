@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-btrfs-csi-controller
+  labels:
+    app: tesslate-btrfs-csi-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tesslate-btrfs-csi-controller
+  template:
+    metadata:
+      labels:
+        app: tesslate-btrfs-csi-controller
+    spec:
+      serviceAccountName: tesslate-btrfs-csi-controller
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tesslate-btrfs-csi
+          image: tesslate-btrfs-csi:latest
+          args:
+            - "--endpoint=unix:///run/csi/csi.sock"
+            - "--node-id=$(NODE_NAME)"
+            - "--mode=controller"
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          envFrom:
+            - secretRef:
+                name: tesslate-btrfs-csi-config
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /run/csi
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+        - name: csi-provisioner
+          image: registry.k8s.io/sig-storage/csi-provisioner:v5.1.0
+          args:
+            - "--csi-address=/run/csi/csi.sock"
+            - "--leader-election=true"
+            - "--feature-gates=Topology=true"
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /run/csi
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+        - name: csi-snapshotter
+          image: registry.k8s.io/sig-storage/csi-snapshotter:v8.2.0
+          args:
+            - "--csi-address=/run/csi/csi.sock"
+            - "--leader-election=true"
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /run/csi
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+      volumes:
+        - name: socket-dir
+          emptyDir: {}

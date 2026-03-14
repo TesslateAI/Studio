@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tesslate-btrfs-csi-node
+  labels:
+    app: tesslate-btrfs-csi-node
+spec:
+  selector:
+    matchLabels:
+      app: tesslate-btrfs-csi-node
+  template:
+    metadata:
+      labels:
+        app: tesslate-btrfs-csi-node
+    spec:
+      serviceAccountName: tesslate-btrfs-csi-node
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tesslate-btrfs-csi
+          image: tesslate-btrfs-csi:latest
+          args:
+            - "--endpoint=unix:///run/csi/csi.sock"
+            - "--node-id=$(NODE_NAME)"
+            - "--pool-path=/mnt/tesslate-pool"
+            - "--mode=node"
+            - "--nodeops-port=9741"
+          ports:
+            - name: nodeops
+              containerPort: 9741
+              protocol: TCP
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          envFrom:
+            - secretRef:
+                name: tesslate-btrfs-csi-config
+          securityContext:
+            # nosemgrep: yaml.kubernetes.security.privileged-container
+            # CSI node plugins MUST run privileged for Bidirectional mount propagation
+            # (required by K8s CSI spec to expose volumes to kubelet). This is standard
+            # for all CSI drivers — see kubernetes-csi/csi-driver-host-path as reference.
+            privileged: true
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /run/csi
+            - name: kubelet-dir
+              mountPath: /var/lib/kubelet
+              mountPropagation: Bidirectional
+            - name: btrfs-pool
+              mountPath: /mnt/tesslate-pool
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+        - name: csi-node-driver-registrar
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0
+          args:
+            - "--csi-address=/run/csi/csi.sock"
+            - "--kubelet-registration-path=/var/lib/kubelet/plugins/btrfs.csi.tesslate.io/csi.sock"
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /run/csi
+            - name: registration-dir
+              mountPath: /registration
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/btrfs.csi.tesslate.io
+            type: DirectoryOrCreate
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+        - name: kubelet-dir
+          hostPath:
+            path: /var/lib/kubelet
+            type: Directory
+        - name: btrfs-pool
+          hostPath:
+            path: /mnt/tesslate-pool
+            type: DirectoryOrCreate

@@ -1,0 +1,11 @@
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: btrfs.csi.tesslate.io
+spec:
+  attachRequired: false
+  podInfoOnMount: false
+  volumeLifecycleModes:
+    - Persistent
+  storageCapacity: false
+  fsGroupPolicy: File
