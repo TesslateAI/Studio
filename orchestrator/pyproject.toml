@@ -60,6 +60,8 @@ dependencies = [
     "mcp>=1.8.0",
     # Ed25519 verification for Discord webhooks
     "PyNaCl>=1.5.0",
+    # gRPC client for btrfs CSI NodeOps service
+    "grpcio>=1.60.0",
 ]
 
 [project.optional-dependencies]

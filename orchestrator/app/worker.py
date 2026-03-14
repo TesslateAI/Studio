@@ -658,6 +658,83 @@ async def _publish_error(pubsub, task_id: str, message: str):
         )
 
 
+async def refresh_templates(ctx: dict):
+    """Check for outdated templates and trigger rebuilds.
+
+    Compares git HEAD SHA of each base's repo with the SHA stored in
+    the TemplateBuild record. If different, triggers a rebuild.
+    """
+    from sqlalchemy import select
+
+    from .config import get_settings
+
+    settings = get_settings()
+    if not settings.template_build_enabled:
+        return
+
+    from .database import AsyncSessionLocal
+    from .models import MarketplaceBase, TemplateBuild
+    from .services.template_builder import TemplateBuilderService
+
+    async with AsyncSessionLocal() as db:
+        # Find bases with ready templates that have a git repo
+        result = await db.execute(
+            select(MarketplaceBase).where(
+                MarketplaceBase.template_slug.isnot(None),
+                MarketplaceBase.git_repo_url.isnot(None),
+            )
+        )
+        bases = result.scalars().all()
+
+        if not bases:
+            return
+
+        builder = TemplateBuilderService()
+        rebuilt = 0
+        for base in bases:
+            try:
+                # Get latest remote SHA via git ls-remote
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "ls-remote", base.git_repo_url, "HEAD",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+                if proc.returncode != 0:
+                    continue
+                remote_sha = stdout.decode().split()[0][:40]
+
+                # Get latest successful build SHA
+                latest_build = await db.scalar(
+                    select(TemplateBuild)
+                    .where(
+                        TemplateBuild.base_slug == base.slug,
+                        TemplateBuild.status == "ready",
+                    )
+                    .order_by(TemplateBuild.completed_at.desc())
+                    .limit(1)
+                )
+
+                if latest_build and latest_build.git_commit_sha == remote_sha:
+                    continue  # Template is up to date
+
+                logger.info(
+                    "[WORKER] Template %s outdated (remote=%s, build=%s), rebuilding...",
+                    base.slug,
+                    remote_sha[:8],
+                    (latest_build.git_commit_sha or "none")[:8] if latest_build else "none",
+                )
+                await builder.build_template(base, db)
+                rebuilt += 1
+            except Exception:
+                logger.exception(
+                    "[WORKER] Failed to refresh template for %s", base.slug
+                )
+
+        if rebuilt:
+            logger.info("[WORKER] Refreshed %d templates", rebuilt)
+
+
 async def startup(ctx: dict):
     """Worker startup hook — initialize logging."""
     logging.basicConfig(
@@ -696,6 +773,36 @@ def _get_worker_settings():
     return s.worker_max_jobs, s.worker_job_timeout, s.worker_max_tries
 
 
+def _build_cron_jobs():
+    """Build list of ARQ cron jobs from settings."""
+    from arq.cron import cron
+
+    from .config import get_settings
+
+    s = get_settings()
+    jobs = []
+
+    if s.template_build_enabled and s.template_refresh_interval_hours > 0:
+        # Run template refresh at the configured interval.
+        # ARQ cron uses hour= to set which hours the job runs.
+        # For a 24h interval, run at midnight; for shorter intervals,
+        # build a set of hours to match the cadence.
+        interval_h = s.template_refresh_interval_hours
+        run_hours = set(range(0, 24, interval_h)) if interval_h < 24 else {0}
+        jobs.append(
+            cron(
+                refresh_templates,
+                hour=run_hours,
+                minute={0},
+                timeout=s.template_build_timeout + 120,  # extra grace for multiple builds
+                unique=True,
+                run_at_startup=False,
+            )
+        )
+
+    return jobs
+
+
 _max_jobs, _job_timeout, _max_tries = _get_worker_settings()
 
 
@@ -703,6 +810,7 @@ class WorkerSettings:
     """ARQ worker configuration."""
 
     functions = [execute_agent_task, send_webhook_callback]
+    cron_jobs = _build_cron_jobs()
     redis_settings = _get_redis_settings()
     max_jobs = _max_jobs
     job_timeout = _job_timeout

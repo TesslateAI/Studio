@@ -293,6 +293,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         user_id: UUID,
         is_hibernated: bool = False,
         db: AsyncSession | None = None,
+        storage_class_override: str | None = None,
     ) -> str:
         """
         Ensure project environment exists (namespace + PVC + file-manager).
@@ -307,6 +308,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
             user_id: User UUID
             is_hibernated: Whether project was hibernated (needs snapshot restoration)
             db: Database session (required if is_hibernated=True)
+            storage_class_override: Override StorageClass for PVC creation
+                (used for template-based projects with btrfs CSI snapshots)
 
         Returns:
             Namespace name
@@ -337,11 +340,16 @@ class KubernetesOrchestrator(BaseOrchestrator):
             if not restore_success:
                 if is_hibernated:
                     logger.warning(f"[K8S] No snapshot found for {project_id}, creating empty PVC")
+                storage_class = storage_class_override or self.settings.k8s_storage_class
+                if storage_class_override:
+                    logger.info(
+                        f"[K8S] Using template StorageClass {storage_class} for project {project_id}"
+                    )
                 pvc = create_pvc_manifest(
                     namespace=namespace,
                     project_id=project_id,
                     user_id=user_id,
-                    storage_class=self.settings.k8s_storage_class,
+                    storage_class=storage_class,
                     size=self.settings.k8s_pvc_size,
                     access_mode=self.settings.k8s_pvc_access_mode,
                 )
@@ -697,7 +705,11 @@ fi
             if not namespace_exists:
                 is_hibernated = project.environment_status == "hibernated"
                 await self.ensure_project_environment(
-                    project.id, user_id, is_hibernated=is_hibernated, db=db
+                    project.id,
+                    user_id,
+                    is_hibernated=is_hibernated,
+                    db=db,
+                    storage_class_override=getattr(project, "template_storage_class", None),
                 )
                 if is_hibernated:
                     project.environment_status = "active"
@@ -888,7 +900,11 @@ fi
                     )
 
                 await self.ensure_project_environment(
-                    project.id, user_id, is_hibernated=is_hibernated, db=db
+                    project.id,
+                    user_id,
+                    is_hibernated=is_hibernated,
+                    db=db,
+                    storage_class_override=getattr(project, "template_storage_class", None),
                 )
 
                 # Update environment_status to 'active' after restore
@@ -1298,7 +1314,11 @@ fi
 
         # Ensure environment exists (with snapshot restoration if hibernated)
         namespace = await self.ensure_project_environment(
-            project.id, user_id, is_hibernated=is_hibernated, db=db
+            project.id,
+            user_id,
+            is_hibernated=is_hibernated,
+            db=db,
+            storage_class_override=getattr(project, "template_storage_class", None),
         )
 
         # Update environment_status to 'active' after restore

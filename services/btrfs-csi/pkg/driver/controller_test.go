@@ -252,6 +252,18 @@ func (m *mockNodeOps) RestoreVolume(_ context.Context, volumeID string) error {
 	return m.restoreErr
 }
 
+func (m *mockNodeOps) PromoteToTemplate(_ context.Context, volumeID, templateName string) error {
+	volPath := "volumes/" + volumeID
+	if !m.subvolumes[volPath] {
+		return fmt.Errorf("volume %q not found", volumeID)
+	}
+	tmplPath := "templates/" + templateName
+	delete(m.subvolumes, tmplPath)
+	m.subvolumes[tmplPath] = true
+	delete(m.subvolumes, volPath)
+	return nil
+}
+
 // newTestControllerServer builds a ControllerServer backed by the given mock.
 func newTestControllerServer(mock *mockNodeOps) *ControllerServer {
 	d := &Driver{
@@ -898,5 +910,58 @@ func TestListSnapshots_FilterBySource(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PromoteToTemplate mock tests
+// ---------------------------------------------------------------------------
+
+func TestMockPromoteToTemplate_Success(t *testing.T) {
+	mock := newMockNodeOps()
+	mock.subvolumes["volumes/build-vol"] = true
+
+	err := mock.PromoteToTemplate(context.Background(), "build-vol", "nextjs")
+	if err != nil {
+		t.Fatalf("PromoteToTemplate returned error: %v", err)
+	}
+
+	// Source volume should be deleted.
+	if mock.subvolumes["volumes/build-vol"] {
+		t.Error("source volume volumes/build-vol should have been deleted")
+	}
+
+	// Template should exist.
+	if !mock.subvolumes["templates/nextjs"] {
+		t.Error("template templates/nextjs should have been created")
+	}
+}
+
+func TestMockPromoteToTemplate_VolumeNotFound(t *testing.T) {
+	mock := newMockNodeOps()
+
+	err := mock.PromoteToTemplate(context.Background(), "nonexistent", "tmpl")
+	if err == nil {
+		t.Fatal("expected error for nonexistent volume, got nil")
+	}
+}
+
+func TestMockPromoteToTemplate_RefreshExistingTemplate(t *testing.T) {
+	mock := newMockNodeOps()
+	mock.subvolumes["volumes/build-vol-2"] = true
+	mock.subvolumes["templates/react"] = true // pre-existing template
+
+	err := mock.PromoteToTemplate(context.Background(), "build-vol-2", "react")
+	if err != nil {
+		t.Fatalf("PromoteToTemplate returned error: %v", err)
+	}
+
+	// Template should still exist (replaced).
+	if !mock.subvolumes["templates/react"] {
+		t.Error("template templates/react should exist after refresh")
+	}
+	// Source volume should be cleaned up.
+	if mock.subvolumes["volumes/build-vol-2"] {
+		t.Error("source volume should have been deleted after promote")
 	}
 }

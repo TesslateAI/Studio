@@ -969,3 +969,122 @@ def create_service_pvc_manifest(
 # - Full volume preserved (node_modules included - no npm install)
 # - Versioning (up to 5 snapshots per project)
 # =============================================================================
+
+
+# =============================================================================
+# Template Builder Job
+# =============================================================================
+
+
+def create_template_builder_job(
+    namespace: str,
+    build_id: str,
+    git_url: str,
+    git_branch: str,
+    pvc_name: str,
+    devserver_image: str,
+    timeout_seconds: int = 600,
+) -> client.V1Job:
+    """Create a K8s Job that clones a repo and installs dependencies into a PVC."""
+
+    build_script = '''set -e
+echo "TEMPLATE_BUILD_STARTING"
+git clone --depth=1 --branch "$GIT_BRANCH" "$GIT_URL" /tmp/src
+cp -a /tmp/src/. /workspace/
+rm -rf /workspace/.git
+cd /workspace
+for dir in . frontend backend client server api web; do
+  [ ! -d "/workspace/$dir" ] && continue
+  cd "/workspace/$dir"
+  if [ -f package-lock.json ]; then npm ci; continue; fi
+  if [ -f yarn.lock ]; then yarn install --frozen-lockfile; continue; fi
+  if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; continue; fi
+  if [ -f bun.lockb ]; then bun install; continue; fi
+  if [ -f package.json ]; then npm install; continue; fi
+  if [ -f requirements.txt ]; then pip install -r requirements.txt; continue; fi
+  if [ -f go.mod ]; then go mod download; continue; fi
+done
+echo "TEMPLATE_BUILD_COMPLETE"'''
+
+    job_name = f"tmpl-build-{build_id[:8]}"
+
+    return client.V1Job(
+        api_version="batch/v1",
+        kind="Job",
+        metadata=client.V1ObjectMeta(
+            name=job_name,
+            namespace=namespace,
+            labels={
+                "app.kubernetes.io/managed-by": "tesslate",
+                "tesslate.io/component": "template-builder",
+                "tesslate.io/build-id": build_id,
+            },
+        ),
+        spec=client.V1JobSpec(
+            backoff_limit=0,
+            active_deadline_seconds=timeout_seconds,
+            ttl_seconds_after_finished=300,
+            template=client.V1PodTemplateSpec(
+                metadata=client.V1ObjectMeta(
+                    labels={
+                        "app.kubernetes.io/managed-by": "tesslate",
+                        "tesslate.io/component": "template-builder",
+                    },
+                ),
+                spec=client.V1PodSpec(
+                    restart_policy="Never",
+                    security_context=client.V1PodSecurityContext(
+                        run_as_user=1000,
+                        run_as_non_root=True,
+                    ),
+                    containers=[
+                        client.V1Container(
+                            name="builder",
+                            image=devserver_image,
+                            command=["/bin/sh", "-c", build_script],
+                            env=[
+                                client.V1EnvVar(name="GIT_URL", value=git_url),
+                                client.V1EnvVar(name="GIT_BRANCH", value=git_branch),
+                            ],
+                            volume_mounts=[
+                                client.V1VolumeMount(
+                                    name="workspace",
+                                    mount_path="/workspace",
+                                ),
+                            ],
+                            resources=client.V1ResourceRequirements(
+                                requests={"memory": "256Mi", "cpu": "100m"},
+                                limits={"memory": "1536Mi", "cpu": "1000m"},
+                            ),
+                        ),
+                    ],
+                    volumes=[
+                        client.V1Volume(
+                            name="workspace",
+                            persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                                claim_name=pvc_name,
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+        ),
+    )
+
+
+def create_builder_network_policy(namespace: str) -> client.V1NetworkPolicy:
+    """Create NetworkPolicy for template builder: allow all egress, deny ingress."""
+    return client.V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=client.V1ObjectMeta(
+            name="template-builder-policy",
+            namespace=namespace,
+        ),
+        spec=client.V1NetworkPolicySpec(
+            pod_selector=client.V1LabelSelector(),  # all pods
+            policy_types=["Ingress", "Egress"],
+            ingress=[],  # deny all ingress
+            egress=[client.V1NetworkPolicyEgressRule()],  # allow all egress
+        ),
+    )

@@ -71,6 +71,11 @@ class Project(Base):
         UUID(as_uuid=True), nullable=True
     )  # Reference to most recent snapshot (for quick restore)
 
+    # Template-based project creation (btrfs CSI snapshot)
+    template_storage_class = Column(
+        String(200), nullable=True
+    )  # StorageClass name for template PVC (e.g., tesslate-btrfs-nextjs)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -1117,6 +1122,9 @@ class MarketplaceBase(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # Pre-built btrfs template slug (when set, instant project creation is available)
+    template_slug = Column(String(100), nullable=True)
+
     # User-submitted bases
     created_by_user_id = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -1829,3 +1837,32 @@ class AgentMcpAssignment(Base):
     agent = relationship("MarketplaceAgent", foreign_keys=[agent_id])
     mcp_config = relationship("UserMcpConfig")
     user = relationship("User")
+
+
+# ============================================================================
+# Template Build System Models
+# ============================================================================
+
+
+class TemplateBuild(Base):
+    """Tracks template build status for marketplace bases."""
+
+    __tablename__ = "template_builds"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    base_id = Column(
+        UUID(as_uuid=True), ForeignKey("marketplace_bases.id", ondelete="CASCADE"), nullable=True
+    )
+    base_slug = Column(String, nullable=False, index=True)
+    git_commit_sha = Column(String(40), nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    # statuses: pending, building, promoting, ready, failed
+    error_message = Column(Text, nullable=True)
+    build_duration_seconds = Column(Integer, nullable=True)
+    template_size_bytes = Column(BigInteger, nullable=True)
+    retry_count = Column(Integer, default=0)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    base = relationship("MarketplaceBase", backref="template_builds")

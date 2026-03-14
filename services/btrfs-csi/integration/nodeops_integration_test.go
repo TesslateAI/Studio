@@ -331,6 +331,126 @@ func TestNodeOps_RestoreVolume(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// PromoteToTemplate (full round-trip via S3)
+// ---------------------------------------------------------------------------
+
+func TestNodeOps_PromoteToTemplate(t *testing.T) {
+	pool := getPoolPath(t)
+	bm := newBtrfsManager(t)
+	s3 := newS3Client(t, "tesslate-templates-test")
+	tmplMgr := template.NewManager(bm, s3, pool)
+	ctx := context.Background()
+
+	volID := uniqueName("promote")
+	volPath := "volumes/" + volID
+	tmplName := uniqueName("tmpl-promote")
+
+	// Create a "build volume" and write some content (simulating a builder job).
+	if err := bm.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("create build volume: %v", err)
+	}
+	writeTestFile(t, filepath.Join(pool, volPath), "package.json", `{"name": "test"}`)
+	writeTestFile(t, filepath.Join(pool, volPath), "node_modules/.package-lock.json", "{}")
+
+	// Start server with template manager.
+	addr := startNodeOpsServer(t, bm, nil, tmplMgr)
+	client := connectNodeOpsClient(t, addr)
+
+	// Promote the volume to a template.
+	if err := client.PromoteToTemplate(ctx, volID, tmplName); err != nil {
+		t.Fatalf("PromoteToTemplate: %v", err)
+	}
+
+	tmplPath := "templates/" + tmplName
+	t.Cleanup(func() {
+		_ = bm.DeleteSubvolume(context.Background(), tmplPath)
+		// Also clean up the upload snapshot created by UploadTemplate.
+		_ = bm.DeleteSubvolume(context.Background(), "snapshots/"+tmplName+"-tmpl-upload")
+	})
+
+	// The source volume should be deleted.
+	if bm.SubvolumeExists(ctx, volPath) {
+		t.Error("source volume should have been deleted after promotion")
+	}
+
+	// The template subvolume should exist.
+	if !bm.SubvolumeExists(ctx, tmplPath) {
+		t.Fatal("template subvolume does not exist after promotion")
+	}
+
+	// Verify the template content is preserved.
+	verifyFileContent(t, filepath.Join(pool, tmplPath, "package.json"), `{"name": "test"}`)
+}
+
+func TestNodeOps_PromoteToTemplate_RefreshExisting(t *testing.T) {
+	pool := getPoolPath(t)
+	bm := newBtrfsManager(t)
+	s3 := newS3Client(t, "tesslate-templates-test")
+	tmplMgr := template.NewManager(bm, s3, pool)
+	ctx := context.Background()
+
+	tmplName := uniqueName("tmpl-refresh")
+	tmplPath := "templates/" + tmplName
+
+	// Create an existing template (simulating a previous build).
+	if err := bm.CreateSubvolume(ctx, tmplPath); err != nil {
+		t.Fatalf("create existing template: %v", err)
+	}
+	writeTestFile(t, filepath.Join(pool, tmplPath), "old.txt", "old-content")
+
+	// Create a new build volume with updated content.
+	volID := uniqueName("promote-v2")
+	volPath := "volumes/" + volID
+	if err := bm.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("create build volume: %v", err)
+	}
+	writeTestFile(t, filepath.Join(pool, volPath), "new.txt", "new-content")
+
+	addr := startNodeOpsServer(t, bm, nil, tmplMgr)
+	client := connectNodeOpsClient(t, addr)
+
+	// Promote should replace the existing template.
+	if err := client.PromoteToTemplate(ctx, volID, tmplName); err != nil {
+		t.Fatalf("PromoteToTemplate (refresh): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = bm.DeleteSubvolume(context.Background(), tmplPath)
+		_ = bm.DeleteSubvolume(context.Background(), "snapshots/"+tmplName+"-tmpl-upload")
+	})
+
+	// New content should be present.
+	verifyFileContent(t, filepath.Join(pool, tmplPath, "new.txt"), "new-content")
+
+	// Old content should NOT be present (template was replaced, not merged).
+	if _, err := os.Stat(filepath.Join(pool, tmplPath, "old.txt")); err == nil {
+		t.Error("old.txt should not exist in refreshed template")
+	}
+}
+
+func TestNodeOps_PromoteToTemplate_VolumeNotFound(t *testing.T) {
+	bm := newBtrfsManager(t)
+	s3 := newS3Client(t, "tesslate-templates-test")
+	tmplMgr := template.NewManager(bm, s3, getPoolPath(t))
+
+	addr := startNodeOpsServer(t, bm, nil, tmplMgr)
+	client := connectNodeOpsClient(t, addr)
+	ctx := context.Background()
+
+	err := client.PromoteToTemplate(ctx, "nonexistent-"+uniqueName("x"), "tmpl")
+	if err == nil {
+		t.Fatal("expected error for nonexistent volume, got nil")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got %T: %v", err, err)
+	}
+	if st.Code() != codes.NotFound {
+		t.Errorf("code = %v, want %v: %s", st.Code(), codes.NotFound, st.Message())
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Error propagation (path traversal)
 // ---------------------------------------------------------------------------
 

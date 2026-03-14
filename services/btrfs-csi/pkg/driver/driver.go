@@ -374,3 +374,27 @@ func (l *localNodeOps) RestoreVolume(ctx context.Context, volumeID string) error
 	// Use the latest object.
 	return l.syncer.RestoreFromS3(ctx, volumeID, objects[len(objects)-1])
 }
+
+func (l *localNodeOps) PromoteToTemplate(ctx context.Context, volumeID, templateName string) error {
+	volPath := fmt.Sprintf("volumes/%s", volumeID)
+	tmplPath := fmt.Sprintf("templates/%s", templateName)
+	// Delete existing template if present (refresh case)
+	if l.btrfs.SubvolumeExists(ctx, tmplPath) {
+		if err := l.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
+			return fmt.Errorf("delete existing template: %w", err)
+		}
+	}
+	// Snapshot volume as read-only template
+	if err := l.btrfs.SnapshotSubvolume(ctx, volPath, tmplPath, true); err != nil {
+		return fmt.Errorf("snapshot to template: %w", err)
+	}
+	// Upload to S3
+	if err := l.tmplMgr.UploadTemplate(ctx, templateName); err != nil {
+		return fmt.Errorf("upload template: %w", err)
+	}
+	// Cleanup build volume
+	if err := l.btrfs.DeleteSubvolume(ctx, volPath); err != nil {
+		return fmt.Errorf("cleanup build volume: %w", err)
+	}
+	return nil
+}

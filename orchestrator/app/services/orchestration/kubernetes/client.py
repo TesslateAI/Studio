@@ -50,8 +50,10 @@ class KubernetesClient:
 
         # Initialize API clients
         self.apps_v1 = client.AppsV1Api()
+        self.batch_v1 = client.BatchV1Api()
         self.core_v1 = client.CoreV1Api()
         self.networking_v1 = client.NetworkingV1Api()
+        self.storage_v1 = client.StorageV1Api()
 
         # Use centralized config for namespaces
         self.namespace = os.getenv("KUBERNETES_NAMESPACE", self.settings.k8s_default_namespace)
@@ -1722,6 +1724,114 @@ class KubernetesClient:
     def track_activity(self, user_id: UUID, project_id: str) -> None:
         """Track activity for a development environment (no-op in K8s mode)."""
         logger.debug(f"[K8S] Activity tracked for user {user_id}, project {project_id}")
+
+    # =========================================================================
+    # JOB MANAGEMENT
+    # =========================================================================
+
+    async def create_job(self, namespace: str, job: client.V1Job) -> client.V1Job | None:
+        """Create a Job in the given namespace."""
+        job_name = job.metadata.name if job.metadata else "unknown"
+        try:
+            result = await asyncio.to_thread(
+                self.batch_v1.create_namespaced_job,
+                namespace=namespace,
+                body=job,
+            )
+            logger.info(f"[K8S] Created Job: {job_name} in {namespace}")
+            return result
+        except ApiException as e:
+            if e.status == 409:
+                logger.info(f"[K8S] Job {job_name} already exists in {namespace}")
+                return None
+            raise
+
+    async def get_job_status(self, name: str, namespace: str) -> str:
+        """Get job status. Returns 'running', 'succeeded', or 'failed'."""
+        try:
+            job = await asyncio.to_thread(
+                self.batch_v1.read_namespaced_job,
+                name=name,
+                namespace=namespace,
+            )
+            if job.status.succeeded and job.status.succeeded > 0:
+                return "succeeded"
+            if job.status.failed and job.status.failed > 0:
+                return "failed"
+            return "running"
+        except ApiException as e:
+            if e.status == 404:
+                return "failed"
+            raise
+
+    async def delete_job(self, name: str, namespace: str) -> None:
+        """Delete a Job and its dependent pods."""
+        try:
+            await asyncio.to_thread(
+                self.batch_v1.delete_namespaced_job,
+                name=name,
+                namespace=namespace,
+                body=client.V1DeleteOptions(propagation_policy="Background"),
+            )
+            logger.info(f"[K8S] Deleted Job: {name} in {namespace}")
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+    # =========================================================================
+    # STORAGE CLASS MANAGEMENT
+    # =========================================================================
+
+    async def create_storage_class(
+        self, name: str, provisioner: str, parameters: dict
+    ) -> client.V1StorageClass | None:
+        """Create a StorageClass with the given provisioner and parameters."""
+        sc = client.V1StorageClass(
+            api_version="storage.k8s.io/v1",
+            kind="StorageClass",
+            metadata=client.V1ObjectMeta(name=name),
+            provisioner=provisioner,
+            parameters=parameters,
+            reclaim_policy="Delete",
+            volume_binding_mode="Immediate",
+        )
+        try:
+            result = await asyncio.to_thread(
+                self.storage_v1.create_storage_class,
+                body=sc,
+            )
+            logger.info(f"[K8S] Created StorageClass: {name}")
+            return result
+        except ApiException as e:
+            if e.status == 409:
+                logger.info(f"[K8S] StorageClass {name} already exists")
+                return None
+            raise
+
+    async def delete_storage_class(self, name: str) -> None:
+        """Delete a StorageClass."""
+        try:
+            await asyncio.to_thread(
+                self.storage_v1.delete_storage_class,
+                name=name,
+            )
+            logger.info(f"[K8S] Deleted StorageClass: {name}")
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+    async def storage_class_exists(self, name: str) -> bool:
+        """Check if a StorageClass exists."""
+        try:
+            await asyncio.to_thread(
+                self.storage_v1.read_storage_class,
+                name=name,
+            )
+            return True
+        except ApiException as e:
+            if e.status == 404:
+                return False
+            raise
 
 
 # Global instance - lazily initialized

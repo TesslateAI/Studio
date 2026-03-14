@@ -99,3 +99,65 @@ func TestServerStop_NilGrpc(t *testing.T) {
 	// Stop should not panic when srv is nil (before Start is called).
 	s.Stop()
 }
+
+// ---------------------------------------------------------------------------
+// PromoteTemplateRequest serialization
+// ---------------------------------------------------------------------------
+
+func TestPromoteTemplateRequest_Marshal(t *testing.T) {
+	codec := jsonCodec{}
+	req := PromoteTemplateRequest{
+		VolumeID:     "vol-abc123",
+		TemplateName: "nextjs",
+	}
+
+	data, err := codec.Marshal(req)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var decoded PromoteTemplateRequest
+	if err := codec.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if decoded.VolumeID != req.VolumeID {
+		t.Errorf("VolumeID = %q, want %q", decoded.VolumeID, req.VolumeID)
+	}
+	if decoded.TemplateName != req.TemplateName {
+		t.Errorf("TemplateName = %q, want %q", decoded.TemplateName, req.TemplateName)
+	}
+}
+
+func TestPromoteTemplateRequest_JSONFieldNames(t *testing.T) {
+	// Verify the JSON field names match what the Python gRPC client sends.
+	codec := jsonCodec{}
+	data := []byte(`{"volume_id":"vol-x","template_name":"react"}`)
+
+	var req PromoteTemplateRequest
+	if err := codec.Unmarshal(data, &req); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if req.VolumeID != "vol-x" {
+		t.Errorf("VolumeID = %q, want %q", req.VolumeID, "vol-x")
+	}
+	if req.TemplateName != "react" {
+		t.Errorf("TemplateName = %q, want %q", req.TemplateName, "react")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handlePromoteToTemplate requires tmplMgr
+// ---------------------------------------------------------------------------
+
+func TestPromoteToTemplate_NilTmplMgr(t *testing.T) {
+	// When tmplMgr is nil the handler will panic on UploadTemplate.
+	// This verifies the server constructor stores the manager correctly
+	// so callers know they must provide it.
+	bm := btrfs.NewManager("/pool")
+	s := NewServer(bm, nil, nil)
+
+	if s.tmplMgr != nil {
+		t.Error("expected nil tmplMgr")
+	}
+}

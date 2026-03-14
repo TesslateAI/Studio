@@ -4625,3 +4625,157 @@ async def get_agent_run_steps(
     except Exception as e:
         logger.error(f"Error getting steps for agent run {message_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get agent run steps") from e
+
+
+# ============================================================================
+# Template Build Management
+# ============================================================================
+
+
+class TemplateBuildResponse(BaseModel):
+    id: str
+    base_slug: str
+    status: str
+    git_commit_sha: str | None = None
+    error_message: str | None = None
+    build_duration_seconds: int | None = None
+    retry_count: int = 0
+    started_at: str | None = None
+    completed_at: str | None = None
+    created_at: str | None = None
+
+
+@router.post("/templates/build")
+async def build_all_official_templates(
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Build templates for all featured bases without ready templates.
+
+    Triggers asynchronous template builds and returns the list of builds started.
+    """
+    from ..services.template_builder import TemplateBuilderService
+
+    settings = get_settings()
+
+    if not settings.template_build_enabled:
+        raise HTTPException(status_code=400, detail="Template building is disabled")
+
+
+    # Query bases that need templates (non-blocking — just the query)
+    from ..models import MarketplaceBase
+
+    result = await db.execute(
+        select(MarketplaceBase).where(
+            MarketplaceBase.is_featured.is_(True),
+            MarketplaceBase.is_active.is_(True),
+            MarketplaceBase.template_slug.is_(None),
+            MarketplaceBase.git_repo_url.isnot(None),
+        )
+    )
+    bases = result.scalars().all()
+    base_slugs = [b.slug for b in bases]
+
+    if not base_slugs:
+        return {"message": "All featured bases already have templates", "queued": []}
+
+    # Fire-and-forget: build in background so the endpoint returns immediately
+    import asyncio
+
+    from ..database import AsyncSessionLocal
+
+    async def _build_all():
+        builder = TemplateBuilderService()
+        async with AsyncSessionLocal() as bg_db:
+            await builder.build_all_official(bg_db)
+
+    asyncio.create_task(_build_all())
+
+    return {
+        "message": f"Queued template builds for {len(base_slugs)} bases",
+        "queued": base_slugs,
+    }
+
+
+@router.post("/templates/build/{slug}")
+async def build_template_for_base(
+    slug: str,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Force rebuild of a template for a specific base slug."""
+    from ..services.template_builder import TemplateBuilderService
+
+    settings = get_settings()
+
+    if not settings.template_build_enabled:
+        raise HTTPException(status_code=400, detail="Template building is disabled")
+
+
+    # Verify the base exists before queuing
+    from ..models import MarketplaceBase
+
+    base = await db.scalar(
+        select(MarketplaceBase).where(MarketplaceBase.slug == slug)
+    )
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base not found: {slug}")
+
+    # Fire-and-forget: build in background
+    import asyncio
+
+    from ..database import AsyncSessionLocal
+
+    async def _build_one():
+        builder = TemplateBuilderService()
+        async with AsyncSessionLocal() as bg_db:
+            await builder.rebuild_template(slug, bg_db)
+
+    asyncio.create_task(_build_one())
+
+    return {
+        "message": f"Template build queued for {slug}",
+        "slug": slug,
+    }
+
+
+@router.get("/templates/status")
+async def get_template_build_status(
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    status_filter: str | None = Query(None, alias="status"),
+) -> dict[str, Any]:
+    """List all TemplateBuild records with optional status filter."""
+    from ..models import TemplateBuild
+
+    query = select(TemplateBuild).order_by(desc(TemplateBuild.created_at))
+
+    if status_filter:
+        query = query.where(TemplateBuild.status == status_filter)
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total = await db.scalar(count_query)
+
+    result = await db.execute(query.offset(offset).limit(limit))
+    builds = result.scalars().all()
+
+    return {
+        "total": total,
+        "builds": [
+            TemplateBuildResponse(
+                id=str(b.id),
+                base_slug=b.base_slug,
+                status=b.status,
+                git_commit_sha=b.git_commit_sha,
+                error_message=b.error_message,
+                build_duration_seconds=b.build_duration_seconds,
+                retry_count=b.retry_count or 0,
+                started_at=b.started_at.isoformat() if b.started_at else None,
+                completed_at=b.completed_at.isoformat() if b.completed_at else None,
+                created_at=b.created_at.isoformat() if b.created_at else None,
+            ).model_dump()
+            for b in builds
+        ],
+    }

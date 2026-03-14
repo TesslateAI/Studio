@@ -18,9 +18,17 @@ echo ""
 # -------------------------------------------------------------------
 # 1. Delete test namespace and all its resources
 # -------------------------------------------------------------------
-echo "--- Deleting test namespace '$NS' ---"
+echo "--- Deleting test namespaces ---"
 $KUBECTL delete namespace "$NS" --ignore-not-found --wait=true --timeout=60s 2>/dev/null || true
-echo "Test namespace cleaned up."
+$KUBECTL delete namespace "csi-template-test" --ignore-not-found --wait=true --timeout=60s 2>/dev/null || true
+echo "Test namespaces cleaned up."
+echo ""
+
+# -------------------------------------------------------------------
+# 1b. Clean up template test StorageClass (cluster-scoped)
+# -------------------------------------------------------------------
+echo "--- Cleaning up template test StorageClass ---"
+$KUBECTL delete storageclass tesslate-btrfs-test-tmpl --ignore-not-found 2>/dev/null || true
 echo ""
 
 # -------------------------------------------------------------------

@@ -17,9 +17,69 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # Ensures /mnt/tesslate-pool is a btrfs filesystem.
+        # If not already btrfs, creates a loopback image and mounts it.
+        # The mount persists on the host via Bidirectional mountPropagation.
+        - name: init-btrfs-pool
+          image: tesslate-btrfs-csi:latest
+          imagePullPolicy: Always
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              POOL="/mnt/tesslate-pool"
+              IMG="/mnt/tesslate-pool-data/pool.img"
+              SIZE="${BTRFS_POOL_SIZE_GB:-50}"
+
+              # Check if already btrfs
+              if btrfs filesystem show "$POOL" >/dev/null 2>&1; then
+                echo "Pool $POOL is already btrfs, skipping init"
+                exit 0
+              fi
+
+              echo "Initializing btrfs loopback pool (${SIZE}GB)..."
+              mkdir -p /mnt/tesslate-pool-data
+
+              if [ ! -f "$IMG" ]; then
+                echo "Creating sparse loopback image at $IMG..."
+                truncate -s "${SIZE}G" "$IMG"
+                mkfs.btrfs -f -L tesslate-pool "$IMG"
+                echo "Loopback image created."
+              fi
+
+              echo "Mounting $IMG at $POOL..."
+              mount -o loop,compress=zstd "$IMG" "$POOL"
+
+              # Ensure pool subdirectories exist
+              mkdir -p "$POOL/volumes" "$POOL/snapshots" "$POOL/templates"
+              echo "btrfs pool initialized at $POOL"
+          env:
+            - name: BTRFS_POOL_SIZE_GB
+              value: "50"
+          securityContext:
+            # nosemgrep: yaml.kubernetes.security.privileged-container
+            # Must be privileged to mount loopback devices on the host.
+            privileged: true
+            runAsUser: 0
+          volumeMounts:
+            - name: btrfs-pool
+              mountPath: /mnt/tesslate-pool
+              mountPropagation: Bidirectional
+            - name: btrfs-pool-data
+              mountPath: /mnt/tesslate-pool-data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
       containers:
         - name: tesslate-btrfs-csi
           image: tesslate-btrfs-csi:latest
+          imagePullPolicy: Always
           args:
             - "--endpoint=unix:///run/csi/csi.sock"
             - "--node-id=$(NODE_NAME)"
@@ -47,6 +107,7 @@ spec:
             # (required by K8s CSI spec to expose volumes to kubelet). This is standard
             # for all CSI drivers — see kubernetes-csi/csi-driver-host-path as reference.
             privileged: true
+            runAsUser: 0
           volumeMounts:
             - name: socket-dir
               mountPath: /run/csi
@@ -55,6 +116,7 @@ spec:
               mountPropagation: Bidirectional
             - name: btrfs-pool
               mountPath: /mnt/tesslate-pool
+              mountPropagation: Bidirectional
           resources:
             requests:
               cpu: 50m
@@ -99,4 +161,8 @@ spec:
         - name: btrfs-pool
           hostPath:
             path: /mnt/tesslate-pool
+            type: DirectoryOrCreate
+        - name: btrfs-pool-data
+          hostPath:
+            path: /mnt/tesslate-pool-data
             type: DirectoryOrCreate

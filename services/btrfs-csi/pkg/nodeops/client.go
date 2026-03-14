@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/klog/v2"
 )
 
@@ -51,16 +52,22 @@ func NewClientWithDialOptions(addr string, opts ...grpc.DialOption) (*Client, er
 	return &Client{conn: conn}, nil
 }
 
-// loadClientTLS returns TLS credentials. If cfg has cert/key files, mutual TLS
-// is used. Otherwise a TLS connection with the system certificate pool is
-// established.
+// loadClientTLS returns transport credentials appropriate for the config:
+//   - cfg == nil: plaintext (for cluster-internal traffic protected by NetworkPolicy)
+//   - cfg with CertFile: mutual TLS
+//   - cfg without CertFile but with CAFile: server-auth TLS
 func loadClientTLS(cfg *TLSConfig) (credentials.TransportCredentials, error) {
+	// No TLS config → plaintext, matching server behavior when no certs are provided.
+	if cfg == nil {
+		return insecure.NewCredentials(), nil
+	}
+
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS13,
 	}
 
 	// Load client certificate for mTLS if provided.
-	if cfg != nil && cfg.CertFile != "" {
+	if cfg.CertFile != "" {
 		if _, err := os.Stat(cfg.CertFile); err == nil {
 			cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
 			if err != nil {
@@ -71,7 +78,7 @@ func loadClientTLS(cfg *TLSConfig) (credentials.TransportCredentials, error) {
 	}
 
 	// Load custom CA if provided.
-	if cfg != nil && cfg.CAFile != "" {
+	if cfg.CAFile != "" {
 		caPEM, err := os.ReadFile(cfg.CAFile)
 		if err != nil {
 			return nil, fmt.Errorf("read CA file: %w", err)
@@ -146,4 +153,10 @@ func (c *Client) EnsureTemplate(ctx context.Context, name string) error {
 
 func (c *Client) RestoreVolume(ctx context.Context, volumeID string) error {
 	return c.invoke(ctx, "RestoreVolume", &VolumeTrackRequest{VolumeID: volumeID}, &Empty{})
+}
+
+func (c *Client) PromoteToTemplate(ctx context.Context, volumeID, templateName string) error {
+	return c.invoke(ctx, "PromoteToTemplate", &PromoteTemplateRequest{
+		VolumeID: volumeID, TemplateName: templateName,
+	}, &Empty{})
 }

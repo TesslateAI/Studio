@@ -61,6 +61,12 @@ rules:
     - cronjobs
   verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
+# StorageClasses (template builder)
+- apiGroups: ["storage.k8s.io"]
+  resources:
+    - storageclasses
+  verbs: ["create", "delete", "get", "list"]
+
 # VolumeSnapshots (for EBS snapshot-based hibernation)
 - apiGroups: ["snapshot.storage.k8s.io"]
   resources:

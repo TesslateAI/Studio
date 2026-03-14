@@ -527,6 +527,32 @@ async def startup():
     else:
         logger.info("Skipping base cache manager initialization (Kubernetes mode)")
 
+    # Eagerly build btrfs templates for featured bases on startup (K8s only)
+    if (
+        settings.is_kubernetes_mode
+        and settings.template_build_enabled
+        and settings.template_build_eager_official
+    ):
+        async def _build_official_templates():
+            from .database import AsyncSessionLocal
+
+            await asyncio.sleep(30)  # Wait for K8s services to be ready
+            try:
+                async with AsyncSessionLocal() as db:
+                    from .services.template_builder import TemplateBuilderService
+
+                    builder = TemplateBuilderService()
+                    builds = await builder.build_all_official(db)
+                    if builds:
+                        logger.info(
+                            "Built %d official templates on startup", len(builds)
+                        )
+            except Exception:
+                logger.exception("Failed to build official templates on startup")
+
+        asyncio.create_task(_build_official_templates())
+        logger.info("Template builder: queued eager builds for official bases")
+
 
 @app.on_event("shutdown")
 async def shutdown():

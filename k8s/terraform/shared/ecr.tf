@@ -73,6 +73,28 @@ resource "aws_ecr_repository" "devserver" {
 }
 
 # -----------------------------------------------------------------------------
+# btrfs CSI Driver ECR Repository
+# -----------------------------------------------------------------------------
+resource "aws_ecr_repository" "btrfs_csi" {
+  name                 = "${var.project_name}-btrfs-csi"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = false
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = {
+    Name      = "${var.project_name}-btrfs-csi"
+    Component = "btrfs-csi"
+  }
+}
+
+# -----------------------------------------------------------------------------
 # ECR Lifecycle Policy (shared by all repos)
 # -----------------------------------------------------------------------------
 # Note: tagStatus=any rules MUST have the lowest priority (highest number)
@@ -121,6 +143,11 @@ resource "aws_ecr_lifecycle_policy" "frontend" {
 
 resource "aws_ecr_lifecycle_policy" "devserver" {
   repository = aws_ecr_repository.devserver.name
+  policy     = local.ecr_lifecycle_policy
+}
+
+resource "aws_ecr_lifecycle_policy" "btrfs_csi" {
+  repository = aws_ecr_repository.btrfs_csi.name
   policy     = local.ecr_lifecycle_policy
 }
 

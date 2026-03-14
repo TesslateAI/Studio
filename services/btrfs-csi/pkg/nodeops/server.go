@@ -155,6 +155,11 @@ type (
 		Name string `json:"name"`
 	}
 
+	PromoteTemplateRequest struct {
+		VolumeID     string `json:"volume_id"`
+		TemplateName string `json:"template_name"`
+	}
+
 	Empty struct{}
 )
 
@@ -184,6 +189,7 @@ func registerNodeOpsServer(srv *grpc.Server, s *Server) {
 			{MethodName: "UntrackVolume", Handler: s.handleUntrackVolume},
 			{MethodName: "EnsureTemplate", Handler: s.handleEnsureTemplate},
 			{MethodName: "RestoreVolume", Handler: s.handleRestoreVolume},
+			{MethodName: "PromoteToTemplate", Handler: s.handlePromoteToTemplate},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -301,6 +307,37 @@ func (s *Server) handleRestoreVolume(_ interface{}, ctx context.Context, dec fun
 	}
 	if err := s.restoreVolumeFromS3(ctx, req.VolumeID); err != nil {
 		return nil, status.Errorf(codes.Internal, "restore volume: %v", err)
+	}
+	return &Empty{}, nil
+}
+
+func (s *Server) handlePromoteToTemplate(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req PromoteTemplateRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	// Verify source volume exists
+	if !s.btrfs.SubvolumeExists(ctx, "volumes/"+req.VolumeID) {
+		return nil, status.Errorf(codes.NotFound, "volume %q does not exist", req.VolumeID)
+	}
+	// Delete existing template if present (refresh case)
+	tmplPath := "templates/" + req.TemplateName
+	if s.btrfs.SubvolumeExists(ctx, tmplPath) {
+		if err := s.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "delete existing template: %v", err)
+		}
+	}
+	// Snapshot volume as read-only template
+	if err := s.btrfs.SnapshotSubvolume(ctx, "volumes/"+req.VolumeID, tmplPath, true); err != nil {
+		return nil, status.Errorf(codes.Internal, "snapshot to template: %v", err)
+	}
+	// Upload to S3
+	if err := s.tmplMgr.UploadTemplate(ctx, req.TemplateName); err != nil {
+		return nil, status.Errorf(codes.Internal, "upload template: %v", err)
+	}
+	// Cleanup build volume
+	if err := s.btrfs.DeleteSubvolume(ctx, "volumes/"+req.VolumeID); err != nil {
+		return nil, status.Errorf(codes.Internal, "cleanup build volume: %v", err)
 	}
 	return &Empty{}, nil
 }

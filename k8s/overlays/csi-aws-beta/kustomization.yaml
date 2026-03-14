@@ -1,0 +1,12 @@
+# AWS EKS Beta Overlay for btrfs CSI Driver
+# Deploy with: kubectl apply -k k8s/overlays/csi-aws-beta
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../services/btrfs-csi/deploy
+
+images:
+  - name: tesslate-btrfs-csi
+    newName: <ECR_REGISTRY>/tesslate-btrfs-csi
+    newTag: beta

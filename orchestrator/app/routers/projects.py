@@ -1003,6 +1003,26 @@ async def _setup_base_project(
     # Note: MarketplaceBase doesn't have a metadata column - framework detection
     # happens via TESSLATE.md parsing during container startup
 
+    # Check for pre-built template (instant project creation via btrfs snapshot)
+    if settings.deployment_mode == "kubernetes" and base_repo.template_slug:
+        # Template available - PVC will be created from template StorageClass
+        # instead of the default empty StorageClass. This means files
+        # are pre-populated from the btrfs snapshot (~1ms vs 60-240s clone).
+        db_project.template_storage_class = f"tesslate-btrfs-{base_repo.template_slug}"
+        await db.commit()
+        logger.info(
+            "Using pre-built template %s for project %s",
+            base_repo.template_slug,
+            db_project.slug,
+        )
+        db_project.has_git_repo = True
+        db_project.git_remote_url = base_repo.git_repo_url
+        await db.commit()
+        task.update_progress(80, 100, "Template applied (instant clone)")
+        # Container records are created later via the setup-config endpoint,
+        # which reads .tesslate/config.json from the template-populated PVC.
+        return "needs_setup"
+
     # Handle archive-based templates (exported from projects)
     if base_repo.source_type == "archive":
         return await _setup_archive_base_project(
@@ -2508,7 +2528,9 @@ async def save_setup_config(
         # Create namespace + PVC + file-manager pod if they don't exist yet
         # (projects at setup stage won't have K8s resources)
         await orchestrator.ensure_project_environment(
-            project_id=project.id, user_id=current_user.id
+            project_id=project.id,
+            user_id=current_user.id,
+            storage_class_override=getattr(project, "template_storage_class", None),
         )
 
         # Wait for file-manager pod to be ready

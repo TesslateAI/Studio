@@ -418,6 +418,20 @@ class Settings(BaseSettings):
     k8s_user_environments_namespace: str = "tesslate-user-environments"
 
     # ==========================================================================
+    # Template Builder ─────────────────────────────────────────────────
+    # ==========================================================================
+    # Pre-builds base project templates as btrfs subvolumes so new projects
+    # can be created via instant snapshot-clone instead of cold setup.
+    template_build_enabled: bool = True
+    template_build_timeout: int = 600  # 10 min max per build
+    template_build_max_retries: int = 3
+    template_build_namespace_prefix: str = "tmpl-build-"
+    template_refresh_interval_hours: int = 24
+    template_build_eager_official: bool = True  # Build official bases on startup
+    template_build_lazy_community: bool = True  # Build community bases on first use
+    template_build_nodeops_address: str = "tesslate-btrfs-csi-node-svc.kube-system.svc:9741"
+
+    # ==========================================================================
     # SMTP Configuration (for 2FA email codes)
     # ==========================================================================
     smtp_host: str = ""

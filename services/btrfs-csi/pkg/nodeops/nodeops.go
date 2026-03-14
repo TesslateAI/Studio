@@ -42,6 +42,10 @@ type NodeOps interface {
 	// different node than where it was last active. Returns an error if no
 	// backup exists in S3.
 	RestoreVolume(ctx context.Context, volumeID string) error
+
+	// PromoteToTemplate snapshots a volume as a read-only template and uploads to S3.
+	// The source volume is deleted after successful promotion.
+	PromoteToTemplate(ctx context.Context, volumeID, templateName string) error
 }
 
 // SubvolumeInfo mirrors btrfs.SubvolumeInfo for the nodeops API boundary.

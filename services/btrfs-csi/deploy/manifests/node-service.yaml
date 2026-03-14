@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tesslate-btrfs-csi-node-svc
+  labels:
+    app: tesslate-btrfs-csi-node
+spec:
+  selector:
+    app: tesslate-btrfs-csi-node
+  ports:
+    - name: nodeops
+      port: 9741
+      targetPort: 9741
+  clusterIP: None  # headless — routes directly to DaemonSet pods

@@ -21,10 +21,12 @@ spec:
       containers:
         - name: tesslate-btrfs-csi
           image: tesslate-btrfs-csi:latest
+          imagePullPolicy: Always
           args:
             - "--endpoint=unix:///run/csi/csi.sock"
             - "--node-id=$(NODE_NAME)"
             - "--mode=controller"
+            - "--nodeops-addr=tesslate-btrfs-csi-node-svc.kube-system.svc:9741"
           env:
             - name: NODE_NAME
               valueFrom:

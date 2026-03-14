@@ -37,15 +37,15 @@ echo ""
 # -------------------------------------------------------------------
 # Phase 2: Run tests
 # -------------------------------------------------------------------
-echo ">>>>> PHASE 2: TESTS <<<<<"
+echo ">>>>> PHASE 2a: PVC LIFECYCLE TESTS <<<<<"
 echo ""
 if "$SCRIPT_DIR/test-pvc-lifecycle.sh"; then
     echo ""
-    echo "All tests passed."
+    echo "PVC lifecycle tests passed."
 else
     TEST_EXIT=$?
     echo ""
-    echo "Tests FAILED (exit code: $TEST_EXIT)."
+    echo "PVC lifecycle tests FAILED (exit code: $TEST_EXIT)."
     echo ""
 
     # Dump diagnostic info on failure
@@ -76,6 +76,47 @@ else
     echo ""
     echo "Events in csi-test namespace:"
     $KUBECTL get events -n csi-test --sort-by=.lastTimestamp 2>/dev/null | tail -20 || echo "(namespace not found)"
+fi
+echo ""
+
+# -------------------------------------------------------------------
+# Phase 2b: Template lifecycle tests
+# -------------------------------------------------------------------
+echo ">>>>> PHASE 2b: TEMPLATE LIFECYCLE TESTS <<<<<"
+echo ""
+if [ "$TEST_EXIT" -eq 0 ]; then
+    if "$SCRIPT_DIR/test-template-lifecycle.sh"; then
+        echo ""
+        echo "Template lifecycle tests passed."
+    else
+        TEST_EXIT=$?
+        echo ""
+        echo "Template lifecycle tests FAILED (exit code: $TEST_EXIT)."
+        echo ""
+
+        # Dump diagnostic info on failure
+        PROFILE="tesslate-csi-test"
+        KUBECTL="kubectl --context=${PROFILE}"
+
+        echo "--- Diagnostic info ---"
+        echo ""
+        echo "CSI controller logs:"
+        $KUBECTL logs -n kube-system deployment/tesslate-btrfs-csi-controller -c tesslate-btrfs-csi --tail=50 2>/dev/null || echo "(no logs)"
+
+        echo ""
+        echo "Pods in csi-template-test namespace:"
+        $KUBECTL get pods -n csi-template-test -o wide 2>/dev/null || echo "(namespace not found)"
+
+        echo ""
+        echo "PVCs in csi-template-test namespace:"
+        $KUBECTL get pvc -n csi-template-test 2>/dev/null || echo "(namespace not found)"
+
+        echo ""
+        echo "Events in csi-template-test namespace:"
+        $KUBECTL get events -n csi-template-test --sort-by=.lastTimestamp 2>/dev/null | tail -20 || echo "(namespace not found)"
+    fi
+else
+    echo "Skipping template tests (PVC lifecycle tests failed)."
 fi
 echo ""
 
