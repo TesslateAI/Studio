@@ -408,3 +408,7 @@ func (l *localNodeOps) PromoteToTemplate(ctx context.Context, volumeID, template
 	}
 	return nil
 }
+
+func (l *localNodeOps) SetOwnership(ctx context.Context, name string, uid, gid int) error {
+	return l.btrfs.SetOwnership(ctx, name, uid, gid)
+}

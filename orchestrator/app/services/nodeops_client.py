@@ -97,10 +97,15 @@ class NodeOpsClient:
             template_name,
         )
 
-    async def create_subvolume(self, name: str, *, timeout: float = 30.0) -> None:
+    async def create_subvolume(self, name: str, *, uid: int = 1000, gid: int = 1000, timeout: float = 30.0) -> None:
         """Create a new btrfs subvolume."""
-        await self._call("CreateSubvolume", {"name": name}, timeout=timeout)
+        await self._call("CreateSubvolume", {"name": name, "uid": uid, "gid": gid}, timeout=timeout)
         logger.info("CreateSubvolume succeeded: name=%s", name)
+
+    async def set_ownership(self, name: str, uid: int = 1000, gid: int = 1000, *, timeout: float = 30.0) -> None:
+        """Recursively chown a subvolume to the given uid:gid."""
+        await self._call("SetOwnership", {"name": name, "uid": uid, "gid": gid}, timeout=timeout)
+        logger.info("SetOwnership succeeded: name=%s uid=%d gid=%d", name, uid, gid)
 
     async def delete_subvolume(self, name: str, *, timeout: float = 30.0) -> None:
         """Delete a btrfs subvolume."""

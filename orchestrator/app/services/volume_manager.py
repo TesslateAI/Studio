@@ -215,6 +215,20 @@ class VolumeManager:
             else:
                 raise
 
+    async def fix_ownership(self, volume_id: str, node_name: str, uid: int = 1000, gid: int = 1000) -> None:
+        """Fix ownership of an existing volume (migration for pre-fix volumes)."""
+        address = await self._discovery.get_nodeops_address(node_name)
+        async with NodeOpsClient(address) as client:
+            await client.set_ownership(f"volumes/{volume_id}", uid=uid, gid=gid)
+
+        logger.info(
+            "[VOLUME] Fixed ownership for volume %s on node %s (uid=%d, gid=%d)",
+            volume_id,
+            node_name,
+            uid,
+            gid,
+        )
+
     # ------------------------------------------------------------------
     # Node selection
     # ------------------------------------------------------------------

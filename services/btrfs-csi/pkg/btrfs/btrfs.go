@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -327,6 +328,33 @@ func (m *Manager) EnableQuotas(ctx context.Context) error {
 	}
 	klog.V(2).Info("btrfs quotas enabled")
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Ownership operations
+// ---------------------------------------------------------------------------
+
+// SafePath validates and returns the clean absolute path for a subvolume name.
+// Exposed for use by nodeops handlers that need to perform post-creation operations.
+func (m *Manager) SafePath(name string) (string, error) {
+	return m.safePath(name)
+}
+
+// SetOwnership recursively chowns a subvolume to the given uid:gid.
+func (m *Manager) SetOwnership(ctx context.Context, name string, uid, gid int) error {
+	target, err := m.safePath(name)
+	if err != nil {
+		return err
+	}
+	return filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return os.Chown(path, uid, gid)
+	})
 }
 
 // ---------------------------------------------------------------------------

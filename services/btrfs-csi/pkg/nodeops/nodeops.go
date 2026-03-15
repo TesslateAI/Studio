@@ -46,6 +46,9 @@ type NodeOps interface {
 	// PromoteToTemplate snapshots a volume as a read-only template and uploads to S3.
 	// The source volume is deleted after successful promotion.
 	PromoteToTemplate(ctx context.Context, volumeID, templateName string) error
+
+	// SetOwnership recursively chowns a subvolume to the given uid:gid.
+	SetOwnership(ctx context.Context, name string, uid, gid int) error
 }
 
 // SubvolumeInfo mirrors btrfs.SubvolumeInfo for the nodeops API boundary.

@@ -264,6 +264,10 @@ func (m *mockNodeOps) PromoteToTemplate(_ context.Context, volumeID, templateNam
 	return nil
 }
 
+func (m *mockNodeOps) SetOwnership(_ context.Context, _ string, _, _ int) error {
+	return nil
+}
+
 // newTestControllerServer builds a ControllerServer backed by the given mock.
 func newTestControllerServer(mock *mockNodeOps) *ControllerServer {
 	d := &Driver{

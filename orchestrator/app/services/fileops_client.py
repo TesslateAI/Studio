@@ -111,6 +111,8 @@ class FileOpsClient:
         data: bytes,
         *,
         mode: int = 0o644,
+        uid: int = 1000,
+        gid: int = 1000,
         timeout: float = 30.0,
     ) -> None:
         """Write raw bytes to a file on a volume."""
@@ -121,6 +123,8 @@ class FileOpsClient:
                 "path": path,
                 "data": base64.b64encode(data).decode("ascii"),
                 "mode": mode,
+                "uid": uid,
+                "gid": gid,
             },
             timeout=timeout,
         )
@@ -181,11 +185,11 @@ class FileOpsClient:
         )
 
     async def mkdir_all(
-        self, volume_id: str, path: str, *, timeout: float = 30.0
+        self, volume_id: str, path: str, *, uid: int = 1000, gid: int = 1000, timeout: float = 30.0
     ) -> None:
         """Create a directory and all parents on a volume."""
         await self._call(
-            "MkdirAll", {"volume_id": volume_id, "path": path}, timeout=timeout
+            "MkdirAll", {"volume_id": volume_id, "path": path, "uid": uid, "gid": gid}, timeout=timeout
         )
         logger.info(
             "MkdirAll succeeded: volume=%s path=%s", volume_id, path
@@ -210,6 +214,8 @@ class FileOpsClient:
         path: str,
         data: bytes,
         *,
+        uid: int = 1000,
+        gid: int = 1000,
         timeout: float = 60.0,
     ) -> None:
         """Extract a tar archive to a path on a volume."""
@@ -219,6 +225,8 @@ class FileOpsClient:
                 "volume_id": volume_id,
                 "path": path,
                 "data": base64.b64encode(data).decode("ascii"),
+                "uid": uid,
+                "gid": gid,
             },
             timeout=timeout,
         )
@@ -244,11 +252,13 @@ class FileOpsClient:
         text: str,
         *,
         mode: int = 0o644,
+        uid: int = 1000,
+        gid: int = 1000,
         timeout: float = 30.0,
     ) -> None:
         """Write UTF-8 text to a file."""
         await self.write_file(
-            volume_id, path, text.encode("utf-8"), mode=mode, timeout=timeout
+            volume_id, path, text.encode("utf-8"), mode=mode, uid=uid, gid=gid, timeout=timeout
         )
 
     # ------------------------------------------------------------------

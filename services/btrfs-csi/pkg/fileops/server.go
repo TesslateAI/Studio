@@ -146,6 +146,8 @@ type (
 		Path     string `json:"path"`
 		Data     []byte `json:"data"`
 		Mode     uint32 `json:"mode"`
+		Uid      int    `json:"uid"`
+		Gid      int    `json:"gid"`
 	}
 
 	ListDirRequest struct {
@@ -170,12 +172,16 @@ type (
 	MkdirAllRequest struct {
 		VolumeID string `json:"volume_id"`
 		Path     string `json:"path"`
+		Uid      int    `json:"uid"`
+		Gid      int    `json:"gid"`
 	}
 
 	TarRequest struct {
 		VolumeID string `json:"volume_id"`
 		Path     string `json:"path"`
 		Data     []byte `json:"data,omitempty"`
+		Uid      int    `json:"uid"`
+		Gid      int    `json:"gid"`
 	}
 	TarResponse struct {
 		Data []byte `json:"data"`
@@ -187,6 +193,19 @@ type (
 
 	Empty struct{}
 )
+
+// chownNewParents chowns directories from child up to (but not including) root.
+// Best-effort: stops on first error or after 256 iterations.
+func chownNewParents(dir, root string, uid, gid int) {
+	dir = filepath.Clean(dir)
+	root = filepath.Clean(root)
+	for i := 0; i < 256 && dir != root && strings.HasPrefix(dir, root+string(filepath.Separator)); i++ {
+		if err := os.Chown(dir, uid, gid); err != nil {
+			break
+		}
+		dir = filepath.Dir(dir)
+	}
+}
 
 type jsonCodec struct{}
 
@@ -266,6 +285,14 @@ func (s *Server) handleWriteFile(_ interface{}, ctx context.Context, dec func(in
 
 	if err := os.WriteFile(fullPath, req.Data, mode); err != nil {
 		return nil, status.Errorf(codes.Internal, "write file: %v", err)
+	}
+
+	if req.Uid > 0 || req.Gid > 0 {
+		if err := os.Chown(fullPath, req.Uid, req.Gid); err != nil {
+			return nil, status.Errorf(codes.Internal, "chown file: %v", err)
+		}
+		volDir := filepath.Join(s.poolPath, "volumes", req.VolumeID)
+		chownNewParents(dir, volDir, req.Uid, req.Gid)
 	}
 
 	return &Empty{}, nil
@@ -415,6 +442,11 @@ func (s *Server) handleMkdirAll(_ interface{}, ctx context.Context, dec func(int
 		return nil, status.Errorf(codes.Internal, "mkdir: %v", err)
 	}
 
+	if req.Uid > 0 || req.Gid > 0 {
+		volDir := filepath.Join(s.poolPath, "volumes", req.VolumeID)
+		chownNewParents(fullPath, volDir, req.Uid, req.Gid)
+	}
+
 	return &Empty{}, nil
 }
 
@@ -546,6 +578,10 @@ func (s *Server) handleTarExtract(_ interface{}, ctx context.Context, dec func(i
 				return nil, status.Errorf(codes.Internal, "write file: %v", copyErr)
 			}
 			file.Close()
+		}
+
+		if req.Uid > 0 || req.Gid > 0 {
+			os.Chown(cleanTarget, req.Uid, req.Gid)
 		}
 	}
 

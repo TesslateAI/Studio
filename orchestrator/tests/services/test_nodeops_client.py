@@ -245,7 +245,7 @@ class TestCreateSubvolume:
             client = NodeOpsClient("localhost:9741")
             await client.create_subvolume("proj-abc")
 
-        stub.assert_awaited_once_with({"name": "proj-abc"}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with({"name": "proj-abc", "uid": 1000, "gid": 1000}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
 
     @pytest.mark.asyncio
     async def test_custom_timeout(self):
@@ -256,7 +256,7 @@ class TestCreateSubvolume:
             client = NodeOpsClient("localhost:9741")
             await client.create_subvolume("proj-abc", timeout=10.0)
 
-        stub.assert_awaited_once_with({"name": "proj-abc"}, timeout=10.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with({"name": "proj-abc", "uid": 1000, "gid": 1000}, timeout=10.0, metadata=(("content-type", "application/grpc+json"),))
 
 
 @pytest.mark.unit

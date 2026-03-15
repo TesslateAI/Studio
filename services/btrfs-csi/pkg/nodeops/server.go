@@ -134,6 +134,8 @@ type (
 		Dest     string `json:"dest,omitempty"`
 		ReadOnly bool   `json:"read_only,omitempty"`
 		Prefix   string `json:"prefix,omitempty"`
+		Uid      int    `json:"uid,omitempty"`
+		Gid      int    `json:"gid,omitempty"`
 	}
 
 	SubvolumeExistsResponse struct {
@@ -160,6 +162,12 @@ type (
 	PromoteTemplateRequest struct {
 		VolumeID     string `json:"volume_id"`
 		TemplateName string `json:"template_name"`
+	}
+
+	SetOwnershipRequest struct {
+		Name string `json:"name"`
+		Uid  int    `json:"uid"`
+		Gid  int    `json:"gid"`
 	}
 
 	Empty struct{}
@@ -192,6 +200,7 @@ func registerNodeOpsServer(srv *grpc.Server, s *Server) {
 			{MethodName: "EnsureTemplate", Handler: s.handleEnsureTemplate},
 			{MethodName: "RestoreVolume", Handler: s.handleRestoreVolume},
 			{MethodName: "PromoteToTemplate", Handler: s.handlePromoteToTemplate},
+			{MethodName: "SetOwnership", Handler: s.handleSetOwnership},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -204,6 +213,15 @@ func (s *Server) handleCreateSubvolume(_ interface{}, ctx context.Context, dec f
 	}
 	if err := s.btrfs.CreateSubvolume(ctx, req.Name); err != nil {
 		return nil, status.Errorf(codes.Internal, "create subvolume: %v", err)
+	}
+	if req.Uid > 0 || req.Gid > 0 {
+		target, err := s.btrfs.SafePath(req.Name)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "resolve subvolume path: %v", err)
+		}
+		if err := os.Chown(target, req.Uid, req.Gid); err != nil {
+			return nil, status.Errorf(codes.Internal, "chown new subvolume: %v", err)
+		}
 	}
 	return &Empty{}, nil
 }
@@ -340,6 +358,23 @@ func (s *Server) handlePromoteToTemplate(_ interface{}, ctx context.Context, dec
 	// Cleanup build volume
 	if err := s.btrfs.DeleteSubvolume(ctx, "volumes/"+req.VolumeID); err != nil {
 		return nil, status.Errorf(codes.Internal, "cleanup build volume: %v", err)
+	}
+	return &Empty{}, nil
+}
+
+func (s *Server) handleSetOwnership(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req SetOwnershipRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "name is required")
+	}
+	if req.Uid == 0 && req.Gid == 0 {
+		return &Empty{}, nil // Nothing to do
+	}
+	if err := s.btrfs.SetOwnership(ctx, req.Name, req.Uid, req.Gid); err != nil {
+		return nil, status.Errorf(codes.Internal, "set ownership: %v", err)
 	}
 	return &Empty{}, nil
 }

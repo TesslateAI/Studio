@@ -160,3 +160,7 @@ func (c *Client) PromoteToTemplate(ctx context.Context, volumeID, templateName s
 		VolumeID: volumeID, TemplateName: templateName,
 	}, &Empty{})
 }
+
+func (c *Client) SetOwnership(ctx context.Context, name string, uid, gid int) error {
+	return c.invoke(ctx, "SetOwnership", &SetOwnershipRequest{Name: name, Uid: uid, Gid: gid}, &Empty{})
+}
