@@ -111,6 +111,8 @@ class TemplateBuilderService:
             await k8s.apply_network_policy(net_policy, namespace)
 
             # 3. Create PVC (empty btrfs subvolume) --------------------
+            # Must use the btrfs CSI StorageClass — not the default EBS class.
+            # PromoteToTemplate only works on btrfs subvolumes.
             pvc = k8s_client.V1PersistentVolumeClaim(
                 metadata=k8s_client.V1ObjectMeta(
                     name=pvc_name,
@@ -122,7 +124,7 @@ class TemplateBuilderService:
                     },
                 ),
                 spec=k8s_client.V1PersistentVolumeClaimSpec(
-                    storage_class_name=settings.k8s_storage_class,
+                    storage_class_name=settings.template_build_storage_class,
                     access_modes=["ReadWriteOnce"],
                     resources=k8s_client.V1ResourceRequirements(
                         requests={"storage": "10Gi"}

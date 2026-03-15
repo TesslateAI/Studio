@@ -426,6 +426,7 @@ class Settings(BaseSettings):
     template_build_timeout: int = 600  # 10 min max per build
     template_build_max_retries: int = 3
     template_build_namespace_prefix: str = "tmpl-build-"
+    template_build_storage_class: str = "tesslate-btrfs"  # Must be btrfs CSI (not EBS)
     template_refresh_interval_hours: int = 24
     template_build_eager_official: bool = True  # Build official bases on startup
     template_build_lazy_community: bool = True  # Build community bases on first use

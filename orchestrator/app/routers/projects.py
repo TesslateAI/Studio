@@ -252,6 +252,23 @@ async def get_project_by_slug(db: AsyncSession, project_slug: str, user_id: UUID
     return project
 
 
+async def track_project_activity(project_id: UUID, db: AsyncSession) -> None:
+    """Update last_activity timestamp on a project.
+
+    Lightweight helper called from key project-scoped endpoints
+    to track when a project was last accessed. Used by hibernation
+    and scale-to-zero policies.
+    """
+    from sqlalchemy import update as sa_update
+
+    await db.execute(
+        sa_update(Project)
+        .where(Project.id == project_id)
+        .values(last_activity=func.now())
+    )
+    await db.commit()
+
+
 @router.get("/", response_model=list[ProjectSchema])
 async def get_projects(
     current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
@@ -1005,23 +1022,66 @@ async def _setup_base_project(
 
     # Check for pre-built template (instant project creation via btrfs snapshot)
     if settings.deployment_mode == "kubernetes" and base_repo.template_slug:
-        # Template available - PVC will be created from template StorageClass
-        # instead of the default empty StorageClass. This means files
-        # are pre-populated from the btrfs snapshot (~1ms vs 60-240s clone).
-        db_project.template_storage_class = f"tesslate-btrfs-{base_repo.template_slug}"
+        from ..services.volume_manager import get_volume_manager
+
+        # 1. Set provisioning state
+        db_project.volume_state = "provisioning"
+        db_project.compute_tier = "none"
         await db.commit()
-        logger.info(
-            "Using pre-built template %s for project %s",
-            base_repo.template_slug,
-            db_project.slug,
-        )
+
+        task.update_progress(20, 100, "Creating project from template snapshot...")
+
+        # 2. Create btrfs snapshot (~1ms)
+        vm = get_volume_manager()
+        volume_id, node_name = await vm.create_volume(template=base_repo.template_slug)
+
+        # 3. Update project with volume info
+        db_project.volume_id = volume_id
+        db_project.node_name = node_name
+        db_project.volume_state = "local"
         db_project.has_git_repo = True
         db_project.git_remote_url = base_repo.git_repo_url
         await db.commit()
+
+        logger.info(
+            "Created v2 volume %s from template %s for project %s",
+            volume_id,
+            base_repo.template_slug,
+            db_project.slug,
+        )
+
+        task.update_progress(60, 100, "Reading project configuration...")
+
+        # 4. Read .tesslate/config.json via FileOps
+        from ..services.orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+        config = await orchestrator._get_tesslate_config_from_volume(
+            volume_id, node_name, "."
+        )
+
+        # 5. Create Container records from config
+        primary_container_id = None
+        if config and config.apps:
+            for app_name, app_config in config.apps.items():
+                container = Container(
+                    project_id=db_project.id,
+                    base_id=base_repo.id,
+                    name=app_name,
+                    directory=app_config.directory,
+                    container_name=f"{db_project.slug}-{app_name}",
+                    internal_port=app_config.port or 3000,
+                    startup_command=app_config.start,
+                    status="created",
+                )
+                db.add(container)
+                if primary_container_id is None:
+                    await db.flush()
+                    primary_container_id = str(container.id)
+            await db.commit()
+
         task.update_progress(80, 100, "Template applied (instant clone)")
-        # Container records are created later via the setup-config endpoint,
-        # which reads .tesslate/config.json from the template-populated PVC.
-        return "needs_setup"
+        return primary_container_id or "needs_setup"
 
     # Handle archive-based templates (exported from projects)
     if base_repo.source_type == "archive":
@@ -1150,11 +1210,24 @@ async def _setup_base_project(
 
         task.update_progress(40, 100, "Base loaded successfully")
 
-        # Save files to database (needed for K8s mode and as source of truth)
+        # Save files to volume (v2) or database (v1)
         if settings.deployment_mode == "kubernetes":
-            # K8s mode: Save base files to database (will sync to PVC on container start)
-            task.update_progress(50, 100, "Saving base files to database")
-            files_saved = 0
+            # K8s mode: Write base files to btrfs volume via FileOps
+            from ..services.volume_manager import get_volume_manager
+            from ..services.node_discovery import NodeDiscovery
+            from ..services.fileops_client import FileOpsClient
+
+            task.update_progress(50, 100, "Creating project volume...")
+
+            db_project.volume_state = "provisioning"
+            db_project.compute_tier = "none"
+            await db.commit()
+
+            vm = get_volume_manager()
+            volume_id, node_name = await vm.create_empty_volume()
+
+            task.update_progress(60, 100, "Writing base files to volume...")
+
             walk_results = await walk_directory_async(
                 cached_base_path,
                 exclude_dirs=[
@@ -1168,31 +1241,45 @@ async def _setup_base_project(
                 ],
             )
 
-            for root, _dirs, files in walk_results:
-                for file in files:
-                    if file.startswith(".") or file.endswith(
-                        (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
-                    ):
-                        continue
+            discovery = NodeDiscovery()
+            address = await discovery.get_fileops_address(node_name)
+            files_saved = 0
+            async with FileOpsClient(address) as client:
+                for root, _dirs, files in walk_results:
+                    for file in files:
+                        if file.startswith(".") or file.endswith(
+                            (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
+                        ):
+                            continue
 
-                    file_full_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_full_path, cached_base_path).replace(
-                        "\\", "/"
-                    )
+                        file_full_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(
+                            file_full_path, cached_base_path
+                        ).replace("\\", "/")
 
-                    try:
-                        content = await read_file_async(file_full_path)
-                        db_file = ProjectFile(
-                            project_id=db_project.id, file_path=relative_path, content=content
-                        )
-                        db.add(db_file)
-                        files_saved += 1
-                    except Exception as e:
-                        logger.warning(f"[CREATE] Could not read base file {relative_path}: {e}")
+                        try:
+                            content = await read_file_async(file_full_path)
+                            data = (
+                                content.encode("utf-8")
+                                if isinstance(content, str)
+                                else content
+                            )
+                            await client.write_file(volume_id, relative_path, data)
+                            files_saved += 1
+                        except Exception as e:
+                            logger.warning(
+                                f"[CREATE] Could not write base file {relative_path}: {e}"
+                            )
 
+            db_project.volume_id = volume_id
+            db_project.node_name = node_name
+            db_project.volume_state = "local"
             await db.commit()
-            task.update_progress(90, 100, f"Saved {files_saved} base files to database")
-            logger.info(f"[CREATE] Saved {files_saved} base files to database for K8s mode")
+
+            task.update_progress(90, 100, f"Wrote {files_saved} base files to volume")
+            logger.info(
+                f"[CREATE] Wrote {files_saved} base files to v2 volume {volume_id} for K8s mode"
+            )
 
         elif settings.deployment_mode == "docker":
             if use_volumes:
@@ -2338,6 +2425,7 @@ async def get_setup_config(
     Falls back to parsing TESSLATE.md if config.json doesn't exist.
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
+    await track_project_activity(project.id, db)
     settings = get_settings()
 
     from ..services.base_config_parser import (
@@ -2376,9 +2464,17 @@ async def get_setup_config(
                 except Exception as e:
                     logger.warning(f"[SETUP-CONFIG] Could not parse TESSLATE.md: {e}")
     else:
-        # K8s: read from PVC via file-manager pod
+        # K8s: check v2 volume state first, then fall back to pod-exec
         from ..services.orchestration import get_orchestrator
         orchestrator = get_orchestrator()
+
+        # v2 routing hints for FileOps
+        v2_hints = {
+            "volume_id": project.volume_id,
+            "node_name": project.node_name,
+            "volume_state": project.volume_state,
+        }
+
         try:
             config_json = await orchestrator.read_file(
                 user_id=current_user.id,
@@ -2386,6 +2482,7 @@ async def get_setup_config(
                 container_name=None,
                 file_path=".tesslate/config.json",
                 project_slug=project.slug,
+                **v2_hints,
             )
             if config_json:
                 from ..services.base_config_parser import parse_tesslate_config
@@ -2402,6 +2499,7 @@ async def get_setup_config(
                     container_name=None,
                     file_path="TESSLATE.md",
                     project_slug=project.slug,
+                    **v2_hints,
                 )
                 if tesslate_content:
                     base_config = parse_tesslate_md(tesslate_content)
@@ -2469,6 +2567,7 @@ async def save_setup_config(
     Creates/updates/deletes containers to match the config.
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
+    await track_project_activity(project.id, db)
     settings = get_settings()
 
     from ..services.base_config_parser import (
@@ -2519,27 +2618,36 @@ async def save_setup_config(
         project_path = f"/projects/{project.slug}"
         write_tesslate_config(project_path, config)
     else:
-        # K8s: ensure environment exists, then write via orchestrator
+        # K8s: write config via orchestrator (v2 uses FileOps, v1 uses pod-exec)
         import json as json_mod
         from ..services.orchestration import get_orchestrator
 
         orchestrator = get_orchestrator()
 
-        # Create namespace + PVC + file-manager pod if they don't exist yet
-        # (projects at setup stage won't have K8s resources)
-        await orchestrator.ensure_project_environment(
-            project_id=project.id,
-            user_id=current_user.id,
-            storage_class_override=getattr(project, "template_storage_class", None),
-        )
+        # v2 routing hints
+        v2_hints = {
+            "volume_id": project.volume_id,
+            "node_name": project.node_name,
+            "volume_state": project.volume_state,
+        }
 
-        # Wait for file-manager pod to be ready
-        namespace = orchestrator._get_namespace(str(project.id))
-        for attempt in range(15):
-            pod_name = await orchestrator.k8s_client.get_file_manager_pod(namespace)
-            if pod_name:
-                break
-            await asyncio.sleep(2)
+        is_v2 = project.volume_state not in ("legacy", None) and project.volume_id and project.node_name
+
+        if not is_v2:
+            # v1: ensure environment exists (namespace + PVC + file-manager pod)
+            await orchestrator.ensure_project_environment(
+                project_id=project.id,
+                user_id=current_user.id,
+                storage_class_override=getattr(project, "template_storage_class", None),
+            )
+
+            # Wait for file-manager pod to be ready
+            namespace = orchestrator._get_namespace(str(project.id))
+            for attempt in range(15):
+                pod_name = await orchestrator.k8s_client.get_file_manager_pod(namespace)
+                if pod_name:
+                    break
+                await asyncio.sleep(2)
 
         config_json = json_mod.dumps({
             "apps": {
@@ -2560,6 +2668,7 @@ async def save_setup_config(
             file_path=".tesslate/config.json",
             content=config_json,
             project_slug=project.slug,
+            **v2_hints,
         )
 
     # Sync Container records
@@ -5937,6 +6046,7 @@ async def start_all_containers(
     In Kubernetes mode: Creates namespace, deployments, and services.
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
+    await track_project_activity(project.id, db)
 
     try:
         # Get all containers and connections

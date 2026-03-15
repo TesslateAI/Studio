@@ -59,6 +59,13 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     from ....services.orchestration import get_orchestrator
     from ....utils.code_patching import apply_search_replace
 
+    # v2 routing hints
+    v2_hints = {
+        "volume_id": context.get("volume_id"),
+        "node_name": context.get("node_name"),
+        "volume_state": context.get("volume_state"),
+    }
+
     # 1. Read current file content
     try:
         orchestrator = get_orchestrator()
@@ -69,6 +76,7 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
             file_path=file_path,
             project_slug=project_slug,
             subdir=container_directory,
+            **v2_hints,
         )
     except Exception as e:
         logger.error(f"[PATCH-FILE] Failed to read '{file_path}': {e}")
@@ -102,6 +110,7 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
             content=result.content,
             project_slug=project_slug,
             subdir=container_directory,
+            **v2_hints,
         )
 
         if not success:
@@ -199,6 +208,13 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     from ....services.orchestration import get_orchestrator
     from ....utils.code_patching import apply_search_replace
 
+    # v2 routing hints
+    v2_hints = {
+        "volume_id": context.get("volume_id"),
+        "node_name": context.get("node_name"),
+        "volume_state": context.get("volume_state"),
+    }
+
     # 1. Read current file content
     try:
         orchestrator = get_orchestrator()
@@ -209,6 +225,7 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
             file_path=file_path,
             project_slug=project_slug,
             subdir=container_directory,
+            **v2_hints,
         )
     except Exception as e:
         logger.error(f"[MULTI-EDIT] Failed to read '{file_path}': {e}")
@@ -260,6 +277,7 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
             content=content,
             project_slug=project_slug,
             subdir=container_directory,
+            **v2_hints,
         )
 
         if not success:

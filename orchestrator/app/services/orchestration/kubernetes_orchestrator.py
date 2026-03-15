@@ -44,6 +44,9 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import grpc
+import grpc.aio
+
 from ..secret_manager_env import build_env_overrides
 from ..snapshot_manager import get_snapshot_manager
 from .base import BaseOrchestrator
@@ -80,6 +83,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         self.settings = get_settings()
         self._k8s_client: KubernetesClient | None = None
+        self._node_discovery = None  # Lazy-loaded, cached across calls
 
         # Note: Activity tracking is now database-based (Project.last_activity)
         # No in-memory tracking - supports horizontal scaling of backend
@@ -117,6 +121,150 @@ class KubernetesOrchestrator(BaseOrchestrator):
         """Get namespace for a project."""
         return self.k8s_client.get_project_namespace(project_id)
 
+    # =========================================================================
+    # V2 VOLUME-FIRST HELPERS
+    # =========================================================================
+
+    async def _get_fileops_client(self, node_name: str):
+        """Get a FileOpsClient connected to the CSI node hosting this volume."""
+        from ..fileops_client import FileOpsClient
+        from ..node_discovery import NodeDiscovery
+
+        if self._node_discovery is None:
+            self._node_discovery = NodeDiscovery()
+        address = await self._node_discovery.get_fileops_address(node_name)
+        return FileOpsClient(address)
+
+    async def _get_project_volume_info(
+        self, project_id: UUID
+    ) -> tuple[str, str | None, str | None]:
+        """Look up v2 volume fields from DB.
+
+        Returns: (volume_state, volume_id, node_name)
+        """
+        from ...database import AsyncSessionLocal
+        from ...models import Project
+
+        from sqlalchemy import select as sa_select
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                sa_select(Project.volume_state, Project.volume_id, Project.node_name).where(
+                    Project.id == project_id
+                )
+            )
+            row = result.one_or_none()
+            if row:
+                return row.volume_state, row.volume_id, row.node_name
+            return "legacy", None, None
+
+    @staticmethod
+    def _build_volume_path(file_path: str, subdir: str | None = None) -> str:
+        """Build a normalized path for FileOps (relative to volume root).
+
+        Same containment logic as _build_pod_path but without the /app prefix.
+        Volume root IS the /app equivalent. Uses an absolute anchor for
+        robust relative_to() checking — mirrors _build_pod_path's approach.
+        """
+        anchor = PurePosixPath("/vol")
+        base = anchor
+        if subdir and subdir != ".":
+            base = base / subdir
+
+        normalized = PurePosixPath(os.path.normpath(str(base / file_path)))
+
+        # Containment: must still be under /vol
+        try:
+            normalized.relative_to(anchor)
+        except ValueError as err:
+            raise ValueError(
+                f"Path escapes volume boundary: {file_path!r} (resolved to {normalized})"
+            ) from err
+
+        # Return path relative to the anchor (strip the /vol prefix)
+        return str(normalized.relative_to(anchor))
+
+    def _is_v2_project(
+        self,
+        volume_state: str | None,
+        volume_id: str | None,
+        node_name: str | None,
+    ) -> bool:
+        """Check if a project uses v2 volume-first storage."""
+        return volume_state not in ("legacy", None) and volume_id is not None and node_name is not None
+
+    async def _ensure_volume_accessible(
+        self,
+        project_id: UUID,
+        volume_state: str,
+        volume_id: str,
+        node_name: str,
+    ) -> tuple[str, str]:
+        """Ensure volume is locally accessible. Restores from S3 if needed.
+
+        Returns: (volume_id, possibly-updated node_name)
+        """
+        if volume_state == "local":
+            return volume_id, node_name
+
+        if volume_state == "remote_only":
+            from ..volume_manager import get_volume_manager
+
+            vm = get_volume_manager()
+            new_node = await vm.restore_volume(volume_id)
+
+            from ...database import AsyncSessionLocal
+            from ...models import Project
+
+            from sqlalchemy import update as sa_update
+
+            try:
+                async with AsyncSessionLocal() as db:
+                    await db.execute(
+                        sa_update(Project)
+                        .where(Project.id == project_id)
+                        .values(volume_state="local", node_name=new_node)
+                    )
+                    await db.commit()
+            except Exception as e:
+                logger.error(
+                    f"[K8S] Failed to update volume state after restore "
+                    f"(volume={volume_id}, node={new_node}): {e}"
+                )
+                # Volume is restored — proceed even if DB update fails.
+                # Next access will re-trigger restore (idempotent).
+            return volume_id, new_node
+
+        if volume_state in ("restoring", "provisioning"):
+            # Poll until local (max 60s)
+            for _ in range(30):
+                await asyncio.sleep(2)
+                vs, _, nn = await self._get_project_volume_info(project_id)
+                if vs == "local":
+                    return volume_id, nn or node_name
+            raise RuntimeError(f"Volume {volume_id} stuck in state '{volume_state}'")
+
+        raise ValueError(f"Unexpected volume_state: {volume_state}")
+
+    async def _get_tesslate_config_from_volume(
+        self, volume_id: str, node_name: str, container_directory: str
+    ) -> Any | None:
+        """Read and parse .tesslate/config.json via FileOps (v2 path)."""
+        from ...services.base_config_parser import parse_tesslate_config
+
+        config_path = (
+            f"{container_directory}/.tesslate/config.json"
+            if container_directory not in (".", "", None)
+            else ".tesslate/config.json"
+        )
+        try:
+            async with await self._get_fileops_client(node_name) as client:
+                content = await client.read_file_text(volume_id, config_path)
+                return parse_tesslate_config(content)
+        except Exception as e:
+            logger.debug(f"[K8S] Could not read config.json via FileOps: {e}")
+            return None
+
     async def _sync_db_files_to_pvc(
         self,
         project,
@@ -124,6 +272,10 @@ class KubernetesOrchestrator(BaseOrchestrator):
         raw_directory: str | None,
         namespace: str,
         db: AsyncSession,
+        # v2 routing hints
+        volume_id: str | None = None,
+        node_name: str | None = None,
+        volume_state: str | None = None,
     ) -> None:
         """
         Sync ProjectFile records from the database to the PVC.
@@ -174,6 +326,31 @@ class KubernetesOrchestrator(BaseOrchestrator):
             )
             return
 
+        # v2: write via FileOps
+        if self._is_v2_project(volume_state, volume_id, node_name):
+            volume_id, node_name = await self._ensure_volume_accessible(
+                project.id, volume_state, volume_id, node_name
+            )
+            async with await self._get_fileops_client(node_name) as client:
+                base_path = container_directory if container_directory != "." else ""
+                if base_path:
+                    await client.mkdir_all(volume_id, base_path)
+                synced = 0
+                for rel_path, content in files_to_sync:
+                    try:
+                        vol_path = f"{base_path}/{rel_path}" if base_path else rel_path
+                        data = content.encode("utf-8") if isinstance(content, str) else content
+                        await client.write_file(volume_id, vol_path, data)
+                        synced += 1
+                    except Exception as e:
+                        logger.warning(f"[K8S] Failed to sync {rel_path} via FileOps: {e}")
+            logger.info(
+                f"[K8S] Synced {synced}/{len(files_to_sync)} files via FileOps "
+                f"for {container_directory}"
+            )
+            return
+
+        # v1: pod-exec path
         pod_name = await self.k8s_client.get_file_manager_pod(namespace)
         if not pod_name:
             logger.error("[K8S] File-manager pod not found — cannot sync DB files to PVC")
@@ -210,7 +387,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 logger.warning(f"[K8S] Failed to sync {rel_path}: {e}")
 
         logger.info(
-            f"[K8S] ✅ Synced {synced}/{len(files_to_sync)} files from DB to PVC "
+            f"[K8S] Synced {synced}/{len(files_to_sync)} files from DB to PVC "
             f"for {container_directory}"
         )
 
@@ -991,6 +1168,9 @@ fi
                         raw_directory=container.directory,
                         namespace=namespace,
                         db=db,
+                        volume_id=getattr(project, "volume_id", None),
+                        node_name=getattr(project, "node_name", None),
+                        volume_state=getattr(project, "volume_state", None),
                     )
 
             # Get startup command and port
@@ -1823,8 +2003,34 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         file_path: str,
         project_slug: str = None,
         subdir: str = None,
+        # v2 routing hints (optional — avoids DB lookup when provided)
+        volume_id: str | None = None,
+        node_name: str | None = None,
+        volume_state: str | None = None,
     ) -> str | None:
         """Read a file from project storage."""
+        # v2 routing: check if this is a v2 project
+        if volume_state is None and volume_id is None:
+            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+
+        if self._is_v2_project(volume_state, volume_id, node_name):
+            vol_path = self._build_volume_path(file_path, subdir)
+            try:
+                volume_id, node_name = await self._ensure_volume_accessible(
+                    project_id, volume_state, volume_id, node_name
+                )
+                async with await self._get_fileops_client(node_name) as client:
+                    return await client.read_file_text(volume_id, vol_path)
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    return None
+                logger.error(f"[K8S] FileOps read_file error: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"[K8S] FileOps read_file error: {e}")
+                return None
+
+        # v1: existing pod-exec path (unchanged)
         namespace = self._get_namespace(str(project_id))
 
         # Build full path including subdir for multi-container projects
@@ -1865,8 +2071,30 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         content: str,
         project_slug: str = None,
         subdir: str = None,
+        # v2 routing hints
+        volume_id: str | None = None,
+        node_name: str | None = None,
+        volume_state: str | None = None,
     ) -> bool:
         """Write a file to project storage."""
+        # v2 routing
+        if volume_state is None and volume_id is None:
+            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+
+        if self._is_v2_project(volume_state, volume_id, node_name):
+            vol_path = self._build_volume_path(file_path, subdir)
+            try:
+                volume_id, node_name = await self._ensure_volume_accessible(
+                    project_id, volume_state, volume_id, node_name
+                )
+                async with await self._get_fileops_client(node_name) as client:
+                    await client.write_file_text(volume_id, vol_path, content)
+                return True
+            except Exception as e:
+                logger.error(f"[K8S] FileOps write_file error: {e}")
+                raise
+
+        # v1: existing pod-exec path (unchanged)
         namespace = self._get_namespace(str(project_id))
 
         # Build full path including subdir for multi-container projects
@@ -1907,12 +2135,34 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         project_id: UUID,
         file_path: str,
         data: bytes,
+        # v2 routing hints
+        volume_id: str | None = None,
+        node_name: str | None = None,
+        volume_state: str | None = None,
     ) -> bool:
         """Write binary data to a file in the project container using tar streaming.
 
         Uses tar stdin streaming to avoid ARG_MAX limits that break the
         echo|base64 approach for files larger than ~100KB.
         """
+        # v2 routing
+        if volume_state is None and volume_id is None:
+            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+
+        if self._is_v2_project(volume_state, volume_id, node_name):
+            vol_path = self._build_volume_path(file_path)
+            try:
+                volume_id, node_name = await self._ensure_volume_accessible(
+                    project_id, volume_state, volume_id, node_name
+                )
+                async with await self._get_fileops_client(node_name) as client:
+                    await client.write_file(volume_id, vol_path, data)
+                return True
+            except Exception as e:
+                logger.error(f"[K8S] FileOps write_binary error: {e}")
+                raise
+
+        # v1: existing pod-exec path
         namespace = self._get_namespace(str(project_id))
 
         pod_name = await self.k8s_client.get_file_manager_pod(namespace)
@@ -1932,9 +2182,40 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         )
 
     async def delete_file(
-        self, user_id: UUID, project_id: UUID, container_name: str, file_path: str
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        file_path: str,
+        # v2 routing hints
+        volume_id: str | None = None,
+        node_name: str | None = None,
+        volume_state: str | None = None,
     ) -> bool:
         """Delete a file from project storage."""
+        # v2 routing
+        if volume_state is None and volume_id is None:
+            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+
+        if self._is_v2_project(volume_state, volume_id, node_name):
+            vol_path = self._build_volume_path(file_path)
+            try:
+                volume_id, node_name = await self._ensure_volume_accessible(
+                    project_id, volume_state, volume_id, node_name
+                )
+                async with await self._get_fileops_client(node_name) as client:
+                    await client.delete_path(volume_id, vol_path)
+                return True
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    return True  # Already gone
+                logger.error(f"[K8S] FileOps delete_file error: {e}")
+                return False
+            except Exception as e:
+                logger.error(f"[K8S] FileOps delete_file error: {e}")
+                return False
+
+        # v1: existing pod-exec path
         namespace = self._get_namespace(str(project_id))
 
         try:
@@ -1963,9 +2244,48 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             return False
 
     async def list_files(
-        self, user_id: UUID, project_id: UUID, container_name: str, directory: str = "."
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        directory: str = ".",
+        # v2 routing hints
+        volume_id: str | None = None,
+        node_name: str | None = None,
+        volume_state: str | None = None,
     ) -> list[dict[str, Any]]:
         """List files in project storage."""
+        # v2 routing
+        if volume_state is None and volume_id is None:
+            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+
+        if self._is_v2_project(volume_state, volume_id, node_name):
+            vol_path = self._build_volume_path(directory) if directory != "." else "."
+            try:
+                volume_id, node_name = await self._ensure_volume_accessible(
+                    project_id, volume_state, volume_id, node_name
+                )
+                async with await self._get_fileops_client(node_name) as client:
+                    entries = await client.list_dir(volume_id, vol_path)
+                    return [
+                        {
+                            "name": entry.name,
+                            "type": "directory" if entry.is_dir else "file",
+                            "size": entry.size,
+                            "permissions": "",
+                        }
+                        for entry in entries
+                    ]
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    return []
+                logger.error(f"[K8S] FileOps list_files error: {e}")
+                return []
+            except Exception as e:
+                logger.error(f"[K8S] FileOps list_files error: {e}")
+                return []
+
+        # v1: existing pod-exec path
         namespace = self._get_namespace(str(project_id))
 
         try:
@@ -2439,8 +2759,41 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         container_name: str,
         pattern: str,
         directory: str = ".",
+        # v2 routing hints
+        volume_id: str | None = None,
+        node_name: str | None = None,
+        volume_state: str | None = None,
     ) -> list[dict[str, Any]]:
         """Find files matching a glob pattern."""
+        # v2 routing
+        if volume_state is None and volume_id is None:
+            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+
+        if self._is_v2_project(volume_state, volume_id, node_name):
+            import fnmatch
+
+            vol_path = self._build_volume_path(directory) if directory != "." else "."
+            try:
+                volume_id, node_name = await self._ensure_volume_accessible(
+                    project_id, volume_state, volume_id, node_name
+                )
+                async with await self._get_fileops_client(node_name) as client:
+                    entries = await client.list_dir(volume_id, vol_path, recursive=True)
+                    return [
+                        {
+                            "name": entry.name,
+                            "path": entry.path,
+                            "type": "directory" if entry.is_dir else "file",
+                            "size": entry.size,
+                        }
+                        for entry in entries
+                        if not entry.is_dir and fnmatch.fnmatch(entry.name, pattern)
+                    ]
+            except Exception as e:
+                logger.error(f"[K8S] FileOps glob_files error: {e}")
+                return []
+
+        # v1: pod-exec path
         return await self.k8s_client.glob_files_in_pod(
             user_id=user_id,
             project_id=str(project_id),
@@ -2459,8 +2812,57 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         file_pattern: str = "*",
         case_sensitive: bool = True,
         max_results: int = 100,
+        # v2 routing hints
+        volume_id: str | None = None,
+        node_name: str | None = None,
+        volume_state: str | None = None,
     ) -> list[dict[str, Any]]:
         """Search file contents for a pattern."""
+        # v2 routing — grep requires reading files individually, so for now
+        # delegate to pod-exec if a compute pod is available. The v2 path only
+        # kicks in when we truly have no pods running.
+        if volume_state is None and volume_id is None:
+            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+
+        if self._is_v2_project(volume_state, volume_id, node_name):
+            import fnmatch
+            import re
+
+            vol_path = self._build_volume_path(directory) if directory != "." else "."
+            try:
+                volume_id, node_name = await self._ensure_volume_accessible(
+                    project_id, volume_state, volume_id, node_name
+                )
+                regex = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
+                async with await self._get_fileops_client(node_name) as client:
+                    entries = await client.list_dir(volume_id, vol_path, recursive=True)
+                    results = []
+                    for entry in entries:
+                        if entry.is_dir:
+                            continue
+                        if file_pattern != "*" and not fnmatch.fnmatch(entry.name, file_pattern):
+                            continue
+                        try:
+                            content = await client.read_file_text(volume_id, entry.path)
+                            for line_no, line in enumerate(content.splitlines(), 1):
+                                if regex.search(line):
+                                    results.append(
+                                        {
+                                            "file": entry.path,
+                                            "line": line_no,
+                                            "content": line.rstrip(),
+                                        }
+                                    )
+                                    if len(results) >= max_results:
+                                        return results
+                        except Exception:
+                            continue
+                    return results
+            except Exception as e:
+                logger.error(f"[K8S] FileOps grep_files error: {e}")
+                return []
+
+        # v1: pod-exec path
         return await self.k8s_client.grep_in_pod(
             user_id=user_id,
             project_id=str(project_id),
