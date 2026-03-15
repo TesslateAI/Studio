@@ -8,14 +8,14 @@ metadata:
   namespace: tesslate
 spec:
   hard:
-    # Pod limits
-    pods: "20"
+    # Pod limits (platform ~6 + up to 20 compute pods + rolling update headroom)
+    pods: "30"
 
-    # Compute limits (sized for rolling updates with maxSurge pods)
-    requests.cpu: "12"
-    requests.memory: "24Gi"
-    limits.cpu: "24"
-    limits.memory: "48Gi"
+    # Compute limits (platform + compute pods at 100m/256Mi requests, 2000m/4Gi limits)
+    requests.cpu: "14"
+    requests.memory: "30Gi"
+    limits.cpu: "64"
+    limits.memory: "96Gi"
 
     # Storage limits
     persistentvolumeclaims: "10"

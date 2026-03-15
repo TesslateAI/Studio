@@ -437,8 +437,10 @@ class Settings(BaseSettings):
     # ==========================================================================
     fileops_enabled: bool = True  # Feature flag for v2 file operations via CSI
     fileops_timeout: int = 30  # Default gRPC timeout for file operations (seconds)
-    compute_pool_namespace: str = "tesslate-compute-pool"  # Namespace for ephemeral compute pods
+    compute_max_concurrent_pods: int = 5  # Max concurrent compute pods (env-var driven per environment)
     compute_pod_timeout: int = 600  # Seconds to wait for compute pod readiness
+    compute_reaper_interval_seconds: int = 60  # How often the orphaned-pod reaper runs
+    compute_reaper_max_age_seconds: int = 900  # 15 min — max pod age before reaping
 
     # ==========================================================================
     # SMTP Configuration (for 2FA email codes)

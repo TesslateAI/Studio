@@ -325,6 +325,29 @@ async def stats_flush_loop():
         await asyncio.sleep(5)
 
 
+async def _compute_pod_reaper_loop():
+    """Background task to reap orphaned ephemeral compute pods (Tier 1)."""
+    import asyncio
+
+    from .services.compute_manager import get_compute_manager
+
+    logger.info("[COMPUTE-REAPER] Started — interval=%ds, max_age=%ds",
+                settings.compute_reaper_interval_seconds,
+                settings.compute_reaper_max_age_seconds)
+
+    while True:
+        await asyncio.sleep(settings.compute_reaper_interval_seconds)
+        try:
+            compute = get_compute_manager()
+            reaped = await compute.reap_orphaned_pods(
+                max_age_seconds=settings.compute_reaper_max_age_seconds,
+            )
+            if reaped:
+                logger.warning("[COMPUTE-REAPER] Reaped %d orphaned pod(s)", reaped)
+        except Exception:
+            logger.exception("[COMPUTE-REAPER] Error during reap cycle")
+
+
 # Add security headers middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -516,6 +539,16 @@ async def startup():
         asyncio.create_task(daily_credit_reset_loop())
         # agent_task_cleanup_loop not needed without Redis
         logger.info("Background loops started without distributed locking (single-pod mode)")
+
+    # Tier 1 compute: start reaper (K8s only, pods run in tesslate namespace)
+    if settings.is_kubernetes_mode:
+        if redis:
+            asyncio.create_task(
+                dlock.run_with_lock("compute_reaper", _compute_pod_reaper_loop)
+            )
+        else:
+            asyncio.create_task(_compute_pod_reaper_loop())
+        logger.info("Compute pod reaper started")
 
     # Initialize base cache (Docker mode only - async - doesn't block startup)
     if is_docker_mode():

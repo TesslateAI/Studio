@@ -4,10 +4,12 @@ Bash Convenience Tool
 One-shot command execution using the orchestrator's execute_command method.
 Returns immediately when the command exits — no PTY session, no sleep.
 
-Works identically on Docker and Kubernetes (same orchestrator interface).
+v1 (legacy) projects use the orchestrator (Docker exec / K8s exec).
+v2 (volume-first) projects use ComputeManager ephemeral pods.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -15,6 +17,91 @@ from ..output_formatter import error_output, strip_ansi_codes, success_output
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
+
+
+def _is_v2_project(context: dict[str, Any]) -> bool:
+    """Detect v2 volume-first project from context hints."""
+    volume_state = context.get("volume_state")
+    volume_id = context.get("volume_id")
+    node_name = context.get("node_name")
+    return (
+        volume_state not in ("legacy", None)
+        and volume_id is not None
+        and node_name is not None
+    )
+
+
+async def _run_v2_ephemeral(
+    context: dict[str, Any], command: str, timeout: int
+) -> dict[str, Any]:
+    """Execute a command via ComputeManager ephemeral pod (Tier 1)."""
+    from ....database import AsyncSessionLocal
+    from ....models import Project
+    from ....services.compute_manager import ComputeQuotaExceeded, get_compute_manager
+
+    volume_id = context["volume_id"]
+    node_name = context["node_name"]
+    project_id = context["project_id"]
+
+    compute = get_compute_manager()
+
+    # Mark compute state in an isolated transaction (don't hold the agent session open)
+    async def _set_compute_state(tier: str, pod: str | None = None) -> None:
+        async with AsyncSessionLocal() as db:
+            project = await db.get(Project, project_id)
+            if project:
+                project.compute_tier = tier
+                project.active_compute_pod = pod
+                if tier != "none":
+                    project.last_activity = datetime.now(timezone.utc)
+                await db.commit()
+
+    await _set_compute_state("ephemeral")
+
+    try:
+        try:
+            output, exit_code, pod_name = await compute.run_command(
+                volume_id=volume_id,
+                node_name=node_name,
+                command=["/bin/sh", "-c", command],
+                timeout=timeout,
+            )
+        except ComputeQuotaExceeded:
+            return error_output(
+                message="Compute pool quota exceeded — too many concurrent commands",
+                suggestion="Wait a moment and retry, or start a full environment with project start",
+                details={"command": command},
+            )
+
+        clean_output = strip_ansi_codes(output) if output else ""
+
+        if exit_code == 124:
+            return error_output(
+                message=f"Command timed out after {timeout}s: {command}",
+                suggestion="Try a shorter command or increase the timeout parameter",
+                details={"command": command, "timeout": timeout, "exit_code": 124},
+            )
+
+        if exit_code != 0:
+            return error_output(
+                message=f"Command failed (exit code {exit_code}): {command}",
+                suggestion="Check the output for errors",
+                details={
+                    "command": command,
+                    "exit_code": exit_code,
+                    "output": clean_output,
+                },
+            )
+
+        logger.info("[BASH-V2] Command completed, output_length=%d", len(clean_output))
+        return success_output(
+            message=f"Executed '{command}'",
+            output=clean_output,
+            details={"command": command, "exit_code": 0},
+        )
+
+    finally:
+        await _set_compute_state("none")
 
 
 async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -34,20 +121,25 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
     Returns:
         Dict with command output and exit code info
     """
-    from ....services.orchestration import get_orchestrator
-
     command = params.get("command")
     timeout = int(params.get("timeout", 120))
 
     if not command:
         raise ValueError("command parameter is required")
 
+    logger.info(f"[BASH] Executing (one-shot): {command[:100]}...")
+
+    # v2 volume-first projects → ephemeral compute pod
+    if _is_v2_project(context):
+        return await _run_v2_ephemeral(context, command, timeout)
+
+    # v1 legacy path — orchestrator exec
+    from ....services.orchestration import get_orchestrator
+
     user_id = context["user_id"]
     project_id = context["project_id"]
     project_slug = context.get("project_slug", "")
     container_name = context.get("container_name")
-
-    logger.info(f"[BASH] Executing (one-shot): {command[:100]}...")
 
     try:
         orchestrator = get_orchestrator()
