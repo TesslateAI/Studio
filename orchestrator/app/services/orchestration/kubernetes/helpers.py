@@ -258,6 +258,7 @@ def create_container_deployment(
     image: str,
     port: int,
     startup_command: str,
+    working_directory: str = "",
     image_pull_policy: str = "IfNotPresent",
     image_pull_secret: str = None,
     enable_pod_affinity: bool = True,
@@ -276,10 +277,12 @@ def create_container_deployment(
         project_id: Project UUID
         user_id: User UUID
         container_id: Container UUID
-        container_directory: Container directory name (e.g., "frontend", "backend")
+        container_directory: Container directory name for K8s resource naming (DNS-safe)
         image: Container image
         port: Port the dev server listens on
         startup_command: Command to start the dev server (e.g., "npm run dev")
+        working_directory: Actual filesystem path ("." for root, "frontend", etc.).
+            Defaults to container_directory if not provided.
         image_pull_policy: Image pull policy
         image_pull_secret: Optional image pull secret
         enable_pod_affinity: Whether to enable pod affinity (for shared PVC)
@@ -303,7 +306,12 @@ def create_container_deployment(
     selector_labels = {"tesslate.io/container-id": str(container_id)}
 
     # Working directory inside container
-    working_dir = f"/app/{container_directory}"
+    # working_directory overrides container_directory for the actual filesystem path
+    effective_dir = working_directory or container_directory
+    if effective_dir in (".", ""):
+        working_dir = "/app"
+    else:
+        working_dir = f"/app/{effective_dir}"
 
     # Dev server container
     # Use exec to replace shell process - prevents exit when stdin closes
@@ -987,23 +995,54 @@ def create_template_builder_job(
 ) -> client.V1Job:
     """Create a K8s Job that clones a repo and installs dependencies into a PVC."""
 
-    build_script = '''set -e
+    build_script = r'''set -e
 echo "TEMPLATE_BUILD_STARTING"
+
+# 1. Clone repo
 git clone --depth=1 --branch "$GIT_BRANCH" "$GIT_URL" /tmp/src
 cp -a /tmp/src/. /workspace/
 rm -rf /workspace/.git
+
+# 2. Read .tesslate/config.json for app directories
 cd /workspace
-for dir in . frontend backend client server api web; do
-  [ ! -d "/workspace/$dir" ] && continue
-  cd "/workspace/$dir"
-  if [ -f package-lock.json ]; then npm ci; continue; fi
-  if [ -f yarn.lock ]; then yarn install --frozen-lockfile; continue; fi
-  if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; continue; fi
-  if [ -f bun.lockb ]; then bun install; continue; fi
-  if [ -f package.json ]; then npm install; continue; fi
-  if [ -f requirements.txt ]; then pip install -r requirements.txt; continue; fi
-  if [ -f go.mod ]; then go mod download; continue; fi
+DIRS=""
+if [ -f ".tesslate/config.json" ]; then
+    # Extract directory values from config.json using lightweight parsing
+    # Handles both "." (root) and subdirectories like "frontend", "backend"
+    DIRS=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('.tesslate/config.json'))
+    dirs = set()
+    for app in cfg.get('apps', {}).values():
+        d = app.get('directory', '.')
+        dirs.add('.' if d in ('', '.', None) else d)
+    print(' '.join(dirs))
+except Exception:
+    sys.exit(1)
+" 2>/dev/null) || DIRS=""
+fi
+
+# 3. Fallback: scan common directories if no config found
+if [ -z "$DIRS" ]; then
+    DIRS=". frontend backend client server api web"
+fi
+
+# 4. Install dependencies in each directory
+for dir in $DIRS; do
+    [ "$dir" != "." ] && [ ! -d "/workspace/$dir" ] && continue
+    cd "/workspace/$dir"
+    if [ -f package-lock.json ]; then npm ci
+    elif [ -f yarn.lock ]; then yarn install --frozen-lockfile
+    elif [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile
+    elif [ -f bun.lockb ] || [ -f bun.lock ]; then bun install
+    elif [ -f package.json ]; then npm install
+    elif [ -f requirements.txt ]; then pip install -r requirements.txt
+    elif [ -f go.mod ]; then go mod download
+    fi
+    cd /workspace
 done
+
 echo "TEMPLATE_BUILD_COMPLETE"'''
 
     job_name = f"tmpl-build-{build_id[:8]}"

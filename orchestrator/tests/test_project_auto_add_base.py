@@ -1,7 +1,7 @@
 """
 Unit tests for the auto-add base to library logic in project creation.
 
-Tests the _setup_base_project function's behavior when a user creates a project
+Tests the _ensure_user_has_base function's behavior when a user creates a project
 with a base that is/isn't in their library.
 """
 
@@ -82,28 +82,11 @@ def _make_db(base, purchase=None):
     return mock_db
 
 
-async def _run_setup(mock_project_data, mock_project, user_id, mock_settings, mock_db, mock_task):
-    """Run _setup_base_project, stopping after the library check via patched cache manager."""
-    with patch(
-        "app.services.base_cache_manager.get_base_cache_manager",
-        side_effect=Exception("stop after library check"),
-    ):
-        try:
-            from app.routers.projects import _setup_base_project
+async def _run_ensure(mock_project_data, mock_project, mock_base, mock_db):
+    """Run _ensure_user_has_base from the new pipeline module."""
+    from app.services.project_setup.pipeline import _ensure_user_has_base
 
-            await _setup_base_project(
-                mock_project_data,
-                mock_project,
-                user_id,
-                mock_settings,
-                mock_db,
-                mock_task,
-                "/tmp/test-project",
-            )
-        except ValueError:
-            raise  # Let ValueError (our business logic errors) propagate
-        except Exception:
-            pass  # Expected - we stopped execution after the library check
+    await _ensure_user_has_base(mock_base, mock_project_data, mock_db, mock_project)
 
 
 # ============================================================================
@@ -120,7 +103,7 @@ async def test_auto_add_free_base_to_library(
 
     mock_db = _make_db(mock_base, purchase=None)
 
-    await _run_setup(mock_project_data, mock_project, user_id, mock_settings, mock_db, mock_task)
+    await _run_ensure(mock_project_data, mock_project, mock_base, mock_db)
 
     # Verify db.add was called with a UserPurchasedBase
     assert mock_db.add.called, "db.add should have been called to auto-add base to library"
@@ -156,7 +139,7 @@ async def test_no_duplicate_when_base_already_in_library(
     mock_db = _make_db(mock_base, purchase=existing_purchase)
     original_downloads = mock_base.downloads
 
-    await _run_setup(mock_project_data, mock_project, user_id, mock_settings, mock_db, mock_task)
+    await _run_ensure(mock_project_data, mock_project, mock_base, mock_db)
 
     # db.add should NOT have been called
     assert not mock_db.add.called, "db.add should NOT be called when base is already in library"
@@ -182,7 +165,7 @@ async def test_reactivate_deactivated_free_base(
 
     mock_db = _make_db(mock_base, purchase=deactivated_purchase)
 
-    await _run_setup(mock_project_data, mock_project, user_id, mock_settings, mock_db, mock_task)
+    await _run_ensure(mock_project_data, mock_project, mock_base, mock_db)
 
     # Purchase should be re-activated (not a new one created)
     assert not mock_db.add.called, "db.add should NOT be called for re-activation"
@@ -209,9 +192,7 @@ async def test_paid_base_not_in_library_raises_error(
     mock_db = _make_db(mock_base, purchase=None)
 
     with pytest.raises(ValueError, match="requires purchase"):
-        await _run_setup(
-            mock_project_data, mock_project, user_id, mock_settings, mock_db, mock_task
-        )
+        await _run_ensure(mock_project_data, mock_project, mock_base, mock_db)
 
 
 @pytest.mark.asyncio
@@ -229,9 +210,7 @@ async def test_paid_base_deactivated_raises_error(
     mock_db = _make_db(mock_base, purchase=deactivated_purchase)
 
     with pytest.raises(ValueError, match="requires purchase"):
-        await _run_setup(
-            mock_project_data, mock_project, user_id, mock_settings, mock_db, mock_task
-        )
+        await _run_ensure(mock_project_data, mock_project, mock_base, mock_db)
 
     # Should NOT have been re-activated
     assert deactivated_purchase.is_active is False
@@ -247,18 +226,10 @@ async def test_base_not_found_raises_error(
     mock_project_data, mock_project, user_id, mock_settings, mock_task
 ):
     """When the base_id doesn't exist, a ValueError should be raised."""
+    from app.services.project_setup.pipeline import _build_source_spec
+
     mock_db = AsyncMock()
     mock_db.get = AsyncMock(return_value=None)
 
-    from app.routers.projects import _setup_base_project
-
     with pytest.raises(ValueError, match="Project base not found"):
-        await _setup_base_project(
-            mock_project_data,
-            mock_project,
-            user_id,
-            mock_settings,
-            mock_db,
-            mock_task,
-            "/tmp/test-project",
-        )
+        await _build_source_spec(mock_project_data, mock_project, mock_settings, mock_db)

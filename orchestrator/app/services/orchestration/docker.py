@@ -198,11 +198,9 @@ class DockerOrchestrator(BaseOrchestrator):
         return os.path.join(self.compose_files_dir, f"{project_slug}.yml")
 
     def _sanitize_service_name(self, name: str) -> str:
-        """Sanitize a name for Docker Compose service naming."""
-        service_name = name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-        service_name = "".join(c for c in service_name if c.isalnum() or c == "-")
-        service_name = re.sub(r"-+", "-", service_name).strip("-")
-        return service_name
+        """Sanitize a name for Docker service naming (DNS-safe)."""
+        from ...services.project_setup.naming import sanitize_name
+        return sanitize_name(name)
 
     def _resolve_service_name(self, container_name: str, project_slug: str) -> str:
         """Extract the Docker Compose service name from a container name.
@@ -1706,34 +1704,30 @@ class DockerOrchestrator(BaseOrchestrator):
 
     async def _get_container_config(self, project, container) -> tuple:
         """
-        Get startup command and port from .tesslate/config.json or TESSLATE.md.
+        Get startup command and port from DB record or .tesslate/config.json.
 
         Priority:
-        1. .tesslate/config.json (new config system)
-        2. TESSLATE.md from volume (legacy)
-        3. TESSLATE.md from base cache (legacy)
-        4. Generic fallback
+        1. Container DB record (startup_command set by setup-config or project creation)
+        2. .tesslate/config.json
+        3. Generic fallback (sleep infinity)
 
         Returns:
             (startup_command, port)
         """
         from ...services.base_config_parser import (
-            generate_startup_command,
             get_app_startup_config,
-            get_base_config_from_cache,
-            get_base_config_from_volume,
             get_node_modules_fix_prefix,
         )
 
-        # Priority 0: Container DB record (set by setup-config or project creation)
+        # Priority 1: Container DB record (set by setup-config or project creation)
         if container.startup_command:
             port = container.effective_port
             deps_prefix = get_node_modules_fix_prefix()
             command = ["sh", "-c", deps_prefix + container.startup_command]
-            logger.info(f"[DOCKER] ✅ Using startup_command from DB for '{container.name}': port={port}")
+            logger.info(f"[DOCKER] Using startup_command from DB for '{container.name}': port={port}")
             return command, port
 
-        # Priority 1: .tesslate/config.json (unified config)
+        # Priority 2: .tesslate/config.json (unified config)
         if self.use_volumes:
             project_path = f"/projects/{project.slug}"
             try:
@@ -1743,37 +1737,10 @@ class DockerOrchestrator(BaseOrchestrator):
             except Exception as e:
                 logger.debug(f"[DOCKER] Could not use unified config: {e}")
 
-        # Priority 2-3: Legacy TESSLATE.md flow
-        base_config = None
-
-        # Try reading from shared projects volume
-        if self.use_volumes:
-            try:
-                base_config = await get_base_config_from_volume(project.slug)
-            except Exception as e:
-                logger.debug(f"[DOCKER] Could not read config from project: {e}")
-
-        # Try cache if no volume config (marketplace bases)
-        if not base_config and container.base:
-            try:
-                base_slug = container.base.slug
-                base_config = await asyncio.to_thread(get_base_config_from_cache, base_slug)
-            except Exception as e:
-                logger.debug(f"[DOCKER] Could not read config from cache: {e}")
-
-        # Determine port: TESSLATE.md runtime override > container.effective_port (DB)
-        if base_config and base_config.port:
-            container_port = base_config.port
-            logger.info(f"[DOCKER] Using port from TESSLATE.md: {container_port}")
-        else:
-            container_port = container.effective_port
-            logger.info(f"[DOCKER] Using effective_port from database: {container_port}")
-
-        # Generate startup command
-        startup_command = generate_startup_command(base_config)
-        logger.info(f"[DOCKER] Generated startup command for {container.name}")
-
-        return startup_command, container_port
+        # Priority 3: Generic fallback
+        container_port = container.effective_port
+        logger.info(f"[DOCKER] No config found for '{container.name}', using sleep infinity")
+        return ["sh", "-c", "sleep infinity"], container_port
 
 
 # Singleton instance

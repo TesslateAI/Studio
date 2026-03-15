@@ -115,9 +115,7 @@ async def initialize_container_async(
                 project_id=project_id,
                 user_id=user_id,
                 container_id=container_id,
-                container_directory=container_dir
-                if container_dir != "."
-                else container.name.lower().replace(" ", "-"),
+                container_directory=container_dir,
                 git_url=git_url,
             )
 

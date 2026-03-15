@@ -300,35 +300,19 @@ async def _perform_project_setup(
     settings,
     task: Task,
 ) -> None:
-    """
-    Background worker function that performs project setup operations.
-
-    Args:
-        project_data: Original project creation request
-        db_project_id: Database project ID (already created)
-        db_project_slug: Database project slug
-        user_id: User ID
-        settings: Application settings
-        task: Task object for progress tracking
-    """
+    """Background worker function that performs project setup operations."""
     from ..database import AsyncSessionLocal
+    from ..services.project_setup import setup_project
 
-    # Create a new database session for this background task
     async with AsyncSessionLocal() as db:
         try:
-            # Fetch the project from DB
             from sqlalchemy import select
-
             result = await db.execute(select(Project).where(Project.id == db_project_id))
             db_project = result.scalar_one()
 
             project_path = os.path.abspath(get_project_path(user_id, db_project.id))
 
-            # Docker volume mode setting (currently unused)
-            # use_docker_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
-
-            # Step 1: Create directory (5%)
-            task.update_progress(5, 100, "Creating project directory")
+            # Docker mode: ensure project directory exists
             if settings.deployment_mode == "docker":
                 try:
                     await makedirs_async(project_path)
@@ -336,7 +320,6 @@ async def _perform_project_setup(
                 except Exception as e:
                     logger.warning(f"[CREATE] mkdir failed: {e}, trying subprocess")
                     import subprocess
-
                     await asyncio.to_thread(
                         subprocess.run,
                         ["mkdir", "-p", project_path],
@@ -345,1052 +328,26 @@ async def _perform_project_setup(
                     )
                 await asyncio.sleep(0.1)
 
-            # Handle different source types
-            container_id = None
-            if project_data.source_type in ("github", "gitlab", "bitbucket"):
-                container_id = await _setup_git_provider_project(
-                    project_data, db_project, user_id, settings, db, task, project_path
-                )
-            elif project_data.source_type == "base":
-                container_id = await _setup_base_project(
-                    project_data, db_project, user_id, settings, db, task, project_path
-                )
-            else:
-                raise ValueError(
-                    f"Invalid source_type: {project_data.source_type}. Must be 'base', 'github', 'gitlab', or 'bitbucket'."
-                )
+            # Run the unified pipeline
+            setup_result = await setup_project(
+                project_data=project_data,
+                db_project=db_project,
+                user_id=user_id,
+                settings=settings,
+                db=db,
+                task=task,
+            )
 
-            # Final step: Complete
             task.update_progress(100, 100, "Project setup complete")
             logger.info(f"[CREATE] Project {db_project.id} setup completed successfully")
 
-            # Return result with container_id for navigation
-            return {"slug": db_project_slug, "container_id": container_id}
+            # Always send to setup screen so user can review detected apps
+            # and optionally add infrastructure services (postgres, redis, etc.)
+            return {"slug": db_project_slug, "container_id": "needs_setup"}
 
         except Exception as e:
             logger.error(f"[CREATE] Background task error: {e}", exc_info=True)
             raise
-
-
-async def _setup_git_provider_project(
-    project_data: ProjectCreate,
-    db_project: Project,
-    user_id: UUID,
-    settings,
-    db: AsyncSession,
-    task: Task,
-    project_path: str,
-) -> str | None:
-    """
-    Unified setup for projects imported from GitHub, GitLab, or Bitbucket.
-
-    Uses the git_providers infrastructure for a consistent experience across all providers.
-
-    In K8s mode: Creates project environment (namespace + PVC + file-manager pod) and
-    clones directly into the PVC. Files are never stored in the database.
-
-    In Docker mode: Clones directly to the project filesystem path.
-
-    Returns:
-        Container ID string if container was created, None otherwise.
-    """
-    from ..services.git_providers import (
-        GitProviderType,
-        get_git_provider_manager,
-    )
-    from ..services.git_providers.credential_service import get_git_provider_credential_service
-
-    # Determine provider and repo URL
-    provider_name = project_data.source_type  # 'github', 'gitlab', 'bitbucket'
-
-    # Support both new unified fields and legacy github-specific fields
-    repo_url = project_data.git_repo_url or project_data.github_repo_url
-    branch = project_data.git_branch or project_data.github_branch or "main"
-
-    if not repo_url:
-        raise ValueError(f"No repository URL provided for {provider_name} import")
-
-    provider_type = GitProviderType(provider_name)
-    provider_manager = get_git_provider_manager()
-
-    # Step 1: Get credentials and parse URL
-    task.update_progress(10, 100, f"Preparing to import from {provider_name.title()}")
-    logger.info(f"[CREATE] Importing from {provider_name}: {repo_url}")
-
-    # Get credentials for this provider
-    credential_service = get_git_provider_credential_service()
-    access_token = await credential_service.get_access_token(db, user_id, provider_type)
-
-    # Parse repository URL to extract owner/repo info (use class, not instance)
-    provider_class = provider_manager.get_provider_class(provider_type)
-    repo_info = provider_class.parse_repo_url(repo_url)
-    if not repo_info:
-        raise ValueError(f"Invalid {provider_name} repository URL: {repo_url}")
-
-    # Get default branch if not specified and we have credentials
-    if not project_data.git_branch and not project_data.github_branch and access_token:
-        try:
-            provider_instance = provider_class(access_token)
-            branch = await provider_instance.get_default_branch(
-                repo_info["owner"], repo_info["repo"]
-            )
-            logger.info(f"[CREATE] Using default branch: {branch}")
-        except Exception as e:
-            logger.warning(f"[CREATE] Could not fetch default branch, using 'main': {e}")
-
-    # Format clone URL with authentication if available
-    authenticated_url = provider_class.format_clone_url(
-        repo_info["owner"], repo_info["repo"], access_token
-    )
-
-    # Validate that the repository is accessible before allocating resources
-    task.update_progress(15, 100, "Validating repository access...")
-    await _validate_git_repo_accessible(authenticated_url, auth_token=access_token)
-    logger.info(f"[CREATE] Repository validated: {repo_url}")
-
-    # Check repository size before cloning (best-effort, non-blocking on failure)
-    MAX_REPO_SIZE_KB = 1_000_000  # 1 GB in KB
-    await _check_repo_size_limit(
-        provider_type=provider_type,
-        provider_class=provider_class,
-        owner=repo_info["owner"],
-        repo=repo_info["repo"],
-        access_token=access_token,
-        max_size_kb=MAX_REPO_SIZE_KB,
-    )
-
-    # Framework detection defaults (updated after clone based on package.json)
-    framework_name = "unknown"
-    framework_port = 5173  # default fallback
-
-    # ==========================================================================
-    # K8s Mode: Create environment and clone directly to PVC
-    # ==========================================================================
-    if settings.deployment_mode != "docker":
-        from ..services.orchestration import get_orchestrator
-        from ..services.orchestration.kubernetes.helpers import generate_git_clone_script
-
-        orchestrator = get_orchestrator()
-
-        # Step 2: Create K8s environment (namespace + PVC + file-manager pod)
-        task.update_progress(20, 100, "Creating project environment...")
-        logger.info(f"[CREATE] K8s mode: Creating environment for project {db_project.id}")
-
-        namespace = await orchestrator.ensure_project_environment(
-            project_id=db_project.id, user_id=user_id
-        )
-        logger.info(f"[CREATE] K8s environment created: {namespace}")
-
-        # Step 3: Wait for file-manager pod to be ready
-        task.update_progress(30, 100, "Waiting for project environment...")
-        pod_name = None
-        for attempt in range(20):  # Up to 60 seconds
-            pod_name = await orchestrator.k8s_client.get_file_manager_pod(namespace)
-            if pod_name:
-                break
-            logger.info(f"[CREATE] Waiting for file-manager pod... (attempt {attempt + 1}/20)")
-            await asyncio.sleep(3)
-
-        if not pod_name:
-            raise RuntimeError("File manager pod not ready after 60 seconds")
-
-        logger.info(f"[CREATE] File-manager pod ready: {pod_name}")
-
-        # Step 4: Clone directly into PVC via file-manager pod
-        task.update_progress(40, 100, f"Cloning repository from {provider_name.title()}...")
-
-        # Generate clone script - clone to /app (root of PVC)
-        clone_script = generate_git_clone_script(
-            git_url=authenticated_url,
-            branch=branch,
-            target_dir="/app",
-            install_deps=False,  # Don't install deps during import - user can do this when they start container
-        )
-
-        logger.info("[CREATE] Executing git clone in file-manager pod...")
-        result = await asyncio.to_thread(
-            orchestrator.k8s_client._exec_in_pod,
-            pod_name,
-            namespace,
-            "file-manager",
-            ["/bin/sh", "-c", clone_script],
-            timeout=300,  # 5 minutes for large repos
-        )
-
-        logger.info("[CREATE] Git clone completed in PVC")
-        logger.debug(f"[CREATE] Clone output: {result[:500] if result else 'None'}...")
-        task.update_progress(70, 100, "Repository cloned to project storage")
-
-        # Step 5: Auto-patch project (run patch script in pod)
-        task.update_progress(80, 100, "Patching project for Tesslate compatibility...")
-        # TODO: Run patcher inside pod if needed - for now skip since basic Next.js should work
-        logger.info("[CREATE] Skipping auto-patch in K8s mode (TODO: implement in-pod patching)")
-
-        task.update_progress(90, 100, "Project files ready")
-
-    # ==========================================================================
-    # Docker Mode: Clone directly to filesystem
-    # ==========================================================================
-    else:
-        from ..services.project_patcher import ProjectPatcher
-
-        # Step 2: Clone repository
-        task.update_progress(20, 100, f"Cloning repository from {provider_name.title()}...")
-
-        git_cmd = ["git", "clone"]
-        if branch:
-            git_cmd.extend(["--branch", branch])
-        git_cmd.extend([authenticated_url, project_path])
-
-        logger.info(f"[CREATE] Executing git clone to: {project_path}")
-        process = await asyncio.create_subprocess_exec(
-            *git_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
-
-        if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "Unknown error"
-            raise RuntimeError(f"Git clone failed: {error_msg}")
-
-        logger.info(f"[CREATE] Repository cloned successfully to {project_path}")
-        task.update_progress(60, 100, "Repository cloned successfully")
-
-        # Step 3: Auto-patch project
-        task.update_progress(70, 100, "Patching project for Tesslate compatibility")
-        try:
-            patcher = ProjectPatcher(project_path)
-            await patcher.auto_patch()
-        except Exception as patch_error:
-            logger.warning(f"[CREATE] Auto-patch error: {patch_error}")
-
-        task.update_progress(90, 100, "Project setup complete")
-
-    # Update project with Git info
-    db_project.has_git_repo = True
-    db_project.git_remote_url = repo_url
-
-    from ..models import GitRepository
-
-    git_repo = GitRepository(
-        project_id=db_project.id,
-        user_id=user_id,
-        repo_url=repo_url,
-        repo_name=repo_info["repo"],
-        repo_owner=repo_info["owner"],
-        default_branch=branch,
-        auth_method="pat" if access_token else "none",
-    )
-    db.add(git_repo)
-    await db.commit()
-
-    # Check for .tesslate/config.json in the cloned repo
-    task.update_progress(90, 100, "Checking for project configuration...")
-
-    from ..services.base_config_parser import read_tesslate_config
-
-    config = None
-    if settings.deployment_mode == "docker":
-        config = read_tesslate_config(project_path)
-    else:
-        # K8s: try reading from PVC
-        try:
-            from ..services.orchestration import get_orchestrator as _get_orch
-            orch = _get_orch()
-            config_content = await orch.read_file(
-                user_id=user_id,
-                project_id=db_project.id,
-                container_name=None,
-                file_path=".tesslate/config.json",
-                project_slug=db_project.slug,
-            )
-            if config_content:
-                from ..services.base_config_parser import parse_tesslate_config
-                config = parse_tesslate_config(config_content)
-        except Exception as e:
-            logger.debug(f"[CREATE] Could not read .tesslate/config.json from PVC: {e}")
-
-    if config and config.apps:
-        # Config exists - create containers from it
-        task.update_progress(95, 100, "Creating containers from config")
-        primary_container_id = None
-
-        for app_name, app_config in config.apps.items():
-            container = Container(
-                project_id=db_project.id,
-                base_id=None,
-                name=app_name,
-                directory=app_config.directory,
-                container_name=f"{db_project.slug}-{app_name}",
-                internal_port=app_config.port or 3000,
-                environment_vars=app_config.env or {},
-                startup_command=app_config.start or None,
-                container_type="base",
-                status="stopped",
-                position_x=app_config.x or 200,
-                position_y=app_config.y or 200,
-            )
-            db.add(container)
-            await db.flush()
-            await db.refresh(container)
-            logger.info(f"[CREATE] Created container {container.id} for app '{app_name}'")
-            if app_name == config.primaryApp:
-                primary_container_id = str(container.id)
-
-        for infra_name, infra_config in config.infrastructure.items():
-            container = Container(
-                project_id=db_project.id,
-                name=infra_name,
-                directory=".",
-                container_name=f"{db_project.slug}-{infra_name}",
-                internal_port=infra_config.port,
-                container_type="service",
-                service_slug=infra_name,
-                status="stopped",
-                position_x=infra_config.x or 400,
-                position_y=infra_config.y or 400,
-            )
-            db.add(container)
-
-        await db.commit()
-        return primary_container_id or str(container.id)
-    else:
-        # No config found - mark as needs_setup, DON'T create container
-        task.update_progress(95, 100, "Project imported - setup needed")
-        logger.info(f"[CREATE] No .tesslate/config.json found, project needs setup")
-        return "needs_setup"
-
-
-async def _setup_github_project(
-    project_data: ProjectCreate,
-    db_project: Project,
-    user_id: UUID,
-    settings,
-    db: AsyncSession,
-    task: Task,
-    project_path: str,
-) -> None:
-    """
-    Setup project from GitHub repository.
-
-    DEPRECATED: This function is kept for backward compatibility.
-    New code should use _setup_git_provider_project which handles all providers.
-    """
-    import shutil
-    import tempfile
-
-    # Step 2: Clone repository (10-40%)
-    task.update_progress(10, 100, f"Cloning repository from GitHub: {project_data.github_repo_url}")
-    logger.info(f"[CREATE] Importing from GitHub: {project_data.github_repo_url}")
-
-    # Get GitHub credentials
-    from ..services.credential_manager import get_credential_manager
-
-    credential_manager = get_credential_manager()
-    access_token = await credential_manager.get_access_token(db, user_id)
-
-    # Clone repository
-    from ..services.github_client import GitHubClient
-    from ..services.project_patcher import ProjectPatcher
-
-    repo_info = GitHubClient.parse_repo_url(project_data.github_repo_url)
-    if not repo_info:
-        raise ValueError("Invalid GitHub repository URL")
-
-    # Get default branch
-    branch = project_data.github_branch or "main"
-    if not project_data.github_branch and access_token:
-        try:
-            github_client = GitHubClient(access_token)
-            branch = await github_client.get_default_branch(repo_info["owner"], repo_info["repo"])
-        except Exception:
-            pass
-
-    # For both Docker and K8s mode, clone to filesystem first
-    # Docker mode: clone to final project_path
-    # K8s mode: clone to temp directory, then save to database
-    if settings.deployment_mode == "docker":
-        clone_path = project_path
-    else:
-        # K8s mode: use temp directory
-        clone_path = tempfile.mkdtemp(prefix=f"tesslate-github-{db_project.id}-")
-        logger.info(f"[CREATE] K8s mode: cloning to temp directory: {clone_path}")
-
-    try:
-        # Clone directly to filesystem
-        repo_url = project_data.github_repo_url
-        if access_token and "github.com" in repo_url:
-            if repo_url.startswith("git@github.com:"):
-                repo_url = repo_url.replace("git@github.com:", "https://github.com/")
-            repo_url = repo_url.replace(
-                "https://github.com/", f"https://{access_token}@github.com/"
-            )
-
-        # Build git clone command
-        git_cmd = ["git", "clone"]
-        if branch:
-            git_cmd.extend(["--branch", branch])
-        git_cmd.extend([repo_url, clone_path])
-
-        logger.info(f"[CREATE] Executing git clone to: {clone_path}")
-        process = await asyncio.create_subprocess_exec(
-            *git_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
-
-        if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "Unknown error"
-            raise RuntimeError(f"Git clone failed: {error_msg}")
-
-        logger.info(f"[CREATE] Repository cloned successfully to {clone_path}")
-        task.update_progress(40, 100, "Repository cloned successfully")
-
-        # Step 3: Auto-patch project (40-60%)
-        task.update_progress(50, 100, "Patching project for Tesslate compatibility")
-        try:
-            patcher = ProjectPatcher(clone_path)
-            await patcher.auto_patch()
-        except Exception as patch_error:
-            logger.warning(f"[CREATE] Auto-patch error: {patch_error}")
-
-        task.update_progress(60, 100, "Patching complete")
-
-        # Step 4: Save files to database (60-90%)
-        task.update_progress(65, 100, "Saving cloned files to database")
-        files_saved = 0
-        walk_results = await walk_directory_async(
-            clone_path, exclude_dirs=["node_modules", ".git", "dist", "build", ".next"]
-        )
-
-        for root, _dirs, files in walk_results:
-            for file in files:
-                if file.startswith(".") or file.endswith(
-                    (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
-                ):
-                    continue
-
-                file_full_path = os.path.join(root, file)
-                relative_path = os.path.relpath(file_full_path, clone_path).replace("\\", "/")
-
-                try:
-                    content = await read_file_async(file_full_path)
-                    db_file = ProjectFile(
-                        project_id=db_project.id, file_path=relative_path, content=content
-                    )
-                    db.add(db_file)
-                    files_saved += 1
-                except Exception as e:
-                    logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
-
-        await db.commit()
-        task.update_progress(90, 100, f"Saved {files_saved} files to database")
-
-    finally:
-        # Clean up temp directory for K8s mode
-        if settings.deployment_mode != "docker" and clone_path != project_path:
-            try:
-                await asyncio.to_thread(shutil.rmtree, clone_path, ignore_errors=True)
-                logger.info(f"[CREATE] Cleaned up temp directory: {clone_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"[CREATE] Failed to cleanup temp directory: {cleanup_error}")
-
-    # Update project with Git info
-    db_project.has_git_repo = True
-    db_project.git_remote_url = project_data.github_repo_url
-
-    from ..models import GitRepository
-
-    git_repo = GitRepository(
-        project_id=db_project.id,
-        user_id=user_id,
-        repo_url=project_data.github_repo_url,
-        repo_name=repo_info["repo"],
-        repo_owner=repo_info["owner"],
-        default_branch=branch,
-        auth_method="pat" if access_token else "none",
-    )
-    db.add(git_repo)
-    await db.commit()
-
-
-async def _setup_archive_base_project(
-    base_repo: MarketplaceBase,
-    db_project: Project,
-    user_id: UUID,
-    settings,
-    db: AsyncSession,
-    task: Task,
-    project_path: str,
-) -> str:
-    """Setup project from an archive-based marketplace base (exported template)."""
-    import subprocess
-
-    from ..services.template_export import extract_archive_to_directory
-    from ..services.template_storage import get_template_storage
-
-    use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
-
-    if not base_repo.archive_path:
-        raise ValueError("Archive template has no archive file. Export may still be in progress.")
-
-    task.update_progress(20, 100, "Retrieving template archive...")
-
-    storage = get_template_storage()
-    archive_bytes = await storage.retrieve_archive(base_repo.archive_path)
-
-    task.update_progress(40, 100, "Extracting template files...")
-
-    if settings.deployment_mode == "docker" and use_volumes:
-        volume_project_path = f"/projects/{db_project.slug}"
-        os.makedirs(volume_project_path, exist_ok=True)
-        files_extracted = await extract_archive_to_directory(archive_bytes, volume_project_path)
-
-        # Fix permissions for devserver (runs as user 1000:1000)
-        subprocess.run(["chown", "-R", "1000:1000", volume_project_path], check=True)
-        logger.info(f"[CREATE] Extracted {files_extracted} files to volume: {volume_project_path}")
-        task.update_progress(80, 100, f"Extracted {files_extracted} files")
-
-    elif settings.deployment_mode == "kubernetes":
-        # K8s: Extract to temp directory and save to DB
-        import tempfile
-
-        temp_dir = tempfile.mkdtemp(prefix=f"archive-extract-{db_project.slug}-")
-        try:
-            files_extracted = await extract_archive_to_directory(archive_bytes, temp_dir)
-            task.update_progress(60, 100, "Saving files to database...")
-
-            files_saved = 0
-            walk_results = await walk_directory_async(
-                temp_dir,
-                exclude_dirs=[
-                    "node_modules",
-                    ".git",
-                    "dist",
-                    "build",
-                    ".next",
-                    "__pycache__",
-                    "venv",
-                ],
-            )
-            for root, _dirs, files in walk_results:
-                for file in files:
-                    if file.startswith(".") or file.endswith(
-                        (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
-                    ):
-                        continue
-                    file_full_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_full_path, temp_dir).replace("\\", "/")
-                    try:
-                        content = await read_file_async(file_full_path)
-                        db_file = ProjectFile(
-                            project_id=db_project.id, file_path=relative_path, content=content
-                        )
-                        db.add(db_file)
-                        files_saved += 1
-                    except Exception as e:
-                        logger.warning(
-                            f"[CREATE] Could not read extracted file {relative_path}: {e}"
-                        )
-
-            await db.commit()
-            task.update_progress(80, 100, f"Saved {files_saved} files to database")
-            logger.info(f"[CREATE] Saved {files_saved} extracted files for K8s mode")
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
-    else:
-        # Bind mount mode
-        os.makedirs(project_path, exist_ok=True)
-        files_extracted = await extract_archive_to_directory(archive_bytes, project_path)
-        task.update_progress(80, 100, f"Extracted {files_extracted} files")
-
-    await db.commit()
-
-    # Create container linked to the base
-    task.update_progress(90, 100, "Creating container from template")
-
-    # Check for TESSLATE.md in the archive for port config
-    from ..services.base_config_parser import parse_tesslate_md
-
-    internal_port = 3000  # Default fallback
-    if settings.deployment_mode == "docker" and use_volumes:
-        tesslate_path = os.path.join(f"/projects/{db_project.slug}", "TESSLATE.md")
-    else:
-        tesslate_path = os.path.join(project_path, "TESSLATE.md")
-
-    startup_cmd = None
-    if os.path.exists(tesslate_path):
-        try:
-            tesslate_content = await read_file_async(tesslate_path)
-            base_config = parse_tesslate_md(tesslate_content)
-            internal_port = base_config.port
-            if base_config.start_command and base_config.is_validated:
-                startup_cmd = base_config.start_command
-            logger.info(f"[CREATE] Parsed port {internal_port} from template TESSLATE.md")
-        except Exception as e:
-            logger.warning(f"[CREATE] Could not parse TESSLATE.md: {e}, using default port 3000")
-
-    base_display = re.sub(r"[^a-z0-9]+", "-", base_repo.name.lower()).strip("-")
-
-    container = Container(
-        project_id=db_project.id,
-        base_id=base_repo.id,
-        name=base_display,
-        directory=".",
-        container_name=f"{db_project.slug}-{base_display}",
-        internal_port=internal_port,
-        startup_command=startup_cmd,
-        container_type="base",
-        status="stopped",
-        position_x=200,
-        position_y=200,
-    )
-    db.add(container)
-    await db.commit()
-    await db.refresh(container)
-    logger.info(f"[CREATE] Created container {container.id} from archive template {base_repo.slug}")
-
-    return str(container.id)
-
-
-async def _setup_base_project(
-    project_data: ProjectCreate,
-    db_project: Project,
-    user_id: UUID,
-    settings,
-    db: AsyncSession,
-    task: Task,
-    project_path: str,
-) -> None:
-    """Setup project from marketplace base"""
-    # Docker volume mode setting
-    use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
-
-    if not project_data.base_id:
-        raise ValueError("base_id is required for source_type 'base'")
-
-    task.update_progress(10, 100, f"Loading marketplace base: {project_data.base_id}")
-
-    # Get base info first
-    from sqlalchemy import select
-
-    from ..models import MarketplaceBase, UserPurchasedBase
-
-    base_repo = await db.get(MarketplaceBase, project_data.base_id)
-    if not base_repo:
-        raise ValueError("Project base not found.")
-
-    # Check if user has this base in their library
-    purchase = await db.scalar(
-        select(UserPurchasedBase).where(
-            UserPurchasedBase.user_id == user_id,
-            UserPurchasedBase.base_id == project_data.base_id,
-        )
-    )
-
-    if purchase and not purchase.is_active:
-        # Re-activate a previously deactivated purchase
-        if base_repo.pricing_type != "free":
-            raise ValueError(
-                f"'{base_repo.name}' requires purchase. Please buy it from the marketplace first."
-            )
-        from datetime import UTC, datetime
-
-        purchase.is_active = True
-        purchase.purchase_date = datetime.now(UTC)
-        base_repo.downloads += 1
-        await db.flush()
-        logger.info(f"[CREATE] Re-activated base '{base_repo.name}' for user {user_id}")
-    elif not purchase:
-        # Auto-add free bases to the user's library on project creation
-        if base_repo.pricing_type != "free":
-            raise ValueError(
-                f"'{base_repo.name}' requires purchase. Please buy it from the marketplace first."
-            )
-        purchase = UserPurchasedBase(
-            user_id=user_id,
-            base_id=project_data.base_id,
-            purchase_type="free",
-            is_active=True,
-        )
-        db.add(purchase)
-        base_repo.downloads += 1
-        await db.flush()
-        logger.info(f"[CREATE] Auto-added base '{base_repo.name}' to user {user_id} library")
-
-    # Note: MarketplaceBase doesn't have a metadata column - framework detection
-    # happens via TESSLATE.md parsing during container startup
-
-    # Check for pre-built template (instant project creation via btrfs snapshot)
-    if settings.deployment_mode == "kubernetes" and base_repo.template_slug:
-        from ..services.volume_manager import get_volume_manager
-
-        # 1. Set provisioning state
-        db_project.volume_state = "provisioning"
-        db_project.compute_tier = "none"
-        await db.commit()
-
-        task.update_progress(20, 100, "Creating project from template snapshot...")
-
-        # 2. Create btrfs snapshot (~1ms)
-        vm = get_volume_manager()
-        volume_id, node_name = await vm.create_volume(template=base_repo.template_slug)
-
-        # 3. Update project with volume info
-        db_project.volume_id = volume_id
-        db_project.node_name = node_name
-        db_project.volume_state = "local"
-        db_project.has_git_repo = True
-        db_project.git_remote_url = base_repo.git_repo_url
-        await db.commit()
-
-        logger.info(
-            "Created v2 volume %s from template %s for project %s",
-            volume_id,
-            base_repo.template_slug,
-            db_project.slug,
-        )
-
-        task.update_progress(60, 100, "Reading project configuration...")
-
-        # 4. Read .tesslate/config.json via FileOps
-        from ..services.orchestration import get_orchestrator
-
-        orchestrator = get_orchestrator()
-        config = await orchestrator._get_tesslate_config_from_volume(
-            volume_id, node_name, "."
-        )
-
-        # 5. Create Container records from config
-        primary_container_id = None
-        if config and config.apps:
-            for app_name, app_config in config.apps.items():
-                container = Container(
-                    project_id=db_project.id,
-                    base_id=base_repo.id,
-                    name=app_name,
-                    directory=app_config.directory,
-                    container_name=f"{db_project.slug}-{app_name}",
-                    internal_port=app_config.port or 3000,
-                    startup_command=app_config.start,
-                    status="created",
-                )
-                db.add(container)
-                if primary_container_id is None:
-                    await db.flush()
-                    primary_container_id = str(container.id)
-            await db.commit()
-
-        task.update_progress(80, 100, "Template applied (instant clone)")
-        return primary_container_id or "needs_setup"
-
-    # Handle archive-based templates (exported from projects)
-    if base_repo.source_type == "archive":
-        return await _setup_archive_base_project(
-            base_repo, db_project, user_id, settings, db, task, project_path
-        )
-
-    # Track if we're using a temp clone directory (for K8s mode without local cache)
-    # Must be defined before try block so finally block can reference it
-    temp_clone_dir = None
-
-    try:
-        import tempfile
-
-        from ..services.base_cache_manager import get_base_cache_manager
-        from ..services.orchestration import get_orchestrator
-
-        task.update_progress(20, 100, "Copying pre-installed base from cache")
-
-        # Get cached base path (returns None in K8s mode)
-        base_cache_manager = get_base_cache_manager()
-        cached_base_path = await base_cache_manager.get_base_path(base_repo.slug)
-        get_orchestrator()
-
-        if cached_base_path is None or not os.path.exists(cached_base_path):
-            # Base not in local cache - need to git clone
-            # Validate repository is accessible before allocating resources
-            task.update_progress(22, 100, "Validating base repository...")
-            await _validate_git_repo_accessible(base_repo.git_repo_url)
-            logger.info(f"[CREATE] Base repo validated: {base_repo.git_repo_url}")
-
-            logger.info(f"[CREATE] Base {base_repo.slug} not in cache, cloning from git")
-            task.update_progress(25, 100, "Cloning base repository...")
-
-            # Clone to temp directory (unified approach for both K8s and Docker)
-            temp_clone_dir = tempfile.mkdtemp(prefix=f"base-clone-{base_repo.slug}-")
-            logger.info(
-                f"[CREATE] Cloning base {base_repo.slug} to temp directory: {temp_clone_dir}"
-            )
-
-            # Build clone command
-            clone_url = base_repo.git_repo_url
-            clone_cmd = ["git", "clone", "--depth=1"]
-            branch_ref = project_data.base_version or base_repo.default_branch
-            if branch_ref:
-                clone_cmd.extend(["--branch", branch_ref])
-            clone_cmd.extend([clone_url, temp_clone_dir])
-
-            # Execute git clone
-            process = await asyncio.create_subprocess_exec(
-                *clone_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            _, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
-
-            if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else "Unknown error"
-                raise RuntimeError(f"Git clone failed: {error_msg}")
-
-            logger.info(f"[CREATE] Successfully cloned base {base_repo.slug}")
-            cached_base_path = temp_clone_dir
-
-            # Docker mode: Copy files from temp to volume
-            if settings.deployment_mode == "docker" and use_volumes:
-                import subprocess
-
-                volume_project_path = f"/projects/{db_project.slug}"
-                os.makedirs(volume_project_path, exist_ok=True)
-
-                # Copy source files to volume (skip generated/dependency dirs)
-                # node_modules is NOT copied — the container installs deps on first boot
-                # This avoids broken symlinks when copying between filesystems/platforms
-                _SKIP_DIRS = {
-                    ".git",
-                    "node_modules",
-                    ".next",
-                    "__pycache__",
-                    ".venv",
-                    "dist",
-                    "build",
-                }
-                for item in os.listdir(temp_clone_dir):
-                    if item in _SKIP_DIRS:
-                        continue
-                    src = os.path.join(temp_clone_dir, item)
-                    dst = os.path.join(volume_project_path, item)
-                    if os.path.isdir(src):
-                        shutil.copytree(src, dst, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(src, dst)
-
-                # Fix permissions for devserver (runs as user 1000:1000)
-                subprocess.run(["chown", "-R", "1000:1000", volume_project_path], check=True)
-                logger.info(f"[CREATE] Copied base files to volume: {volume_project_path}")
-
-        # Docker mode with local cache: Copy files from cache to volume
-        if (
-            settings.deployment_mode == "docker"
-            and use_volumes
-            and os.path.exists(cached_base_path)
-            and not temp_clone_dir
-        ):
-            import subprocess
-
-            volume_project_path = f"/projects/{db_project.slug}"
-            os.makedirs(volume_project_path, exist_ok=True)
-
-            # Copy source files to volume (skip generated/dependency dirs)
-            # node_modules is NOT copied — the container installs deps on first boot
-            # This avoids broken symlinks when copying between filesystems/platforms
-            _SKIP_DIRS = {".git", "node_modules", ".next", "__pycache__", ".venv", "dist", "build"}
-            for item in os.listdir(cached_base_path):
-                if item in _SKIP_DIRS:
-                    continue
-                src = os.path.join(cached_base_path, item)
-                dst = os.path.join(volume_project_path, item)
-                if os.path.isdir(src):
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(src, dst)
-
-            # Fix permissions for devserver (runs as user 1000:1000)
-            subprocess.run(["chown", "-R", "1000:1000", volume_project_path], check=True)
-            logger.info(
-                f"[CREATE] Copied base {base_repo.slug} from cache to volume: {volume_project_path}"
-            )
-
-        task.update_progress(40, 100, "Base loaded successfully")
-
-        # Save files to volume (v2) or database (v1)
-        if settings.deployment_mode == "kubernetes":
-            # K8s mode: Write base files to btrfs volume via FileOps
-            from ..services.volume_manager import get_volume_manager
-            from ..services.node_discovery import NodeDiscovery
-            from ..services.fileops_client import FileOpsClient
-
-            task.update_progress(50, 100, "Creating project volume...")
-
-            db_project.volume_state = "provisioning"
-            db_project.compute_tier = "none"
-            await db.commit()
-
-            vm = get_volume_manager()
-            volume_id, node_name = await vm.create_empty_volume()
-
-            task.update_progress(60, 100, "Writing base files to volume...")
-
-            walk_results = await walk_directory_async(
-                cached_base_path,
-                exclude_dirs=[
-                    "node_modules",
-                    ".git",
-                    "dist",
-                    "build",
-                    ".next",
-                    "__pycache__",
-                    "venv",
-                ],
-            )
-
-            discovery = NodeDiscovery()
-            address = await discovery.get_fileops_address(node_name)
-            files_saved = 0
-            async with FileOpsClient(address) as client:
-                for root, _dirs, files in walk_results:
-                    for file in files:
-                        if file.startswith(".") or file.endswith(
-                            (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
-                        ):
-                            continue
-
-                        file_full_path = os.path.join(root, file)
-                        relative_path = os.path.relpath(
-                            file_full_path, cached_base_path
-                        ).replace("\\", "/")
-
-                        try:
-                            content = await read_file_async(file_full_path)
-                            data = (
-                                content.encode("utf-8")
-                                if isinstance(content, str)
-                                else content
-                            )
-                            await client.write_file(volume_id, relative_path, data)
-                            files_saved += 1
-                        except Exception as e:
-                            logger.warning(
-                                f"[CREATE] Could not write base file {relative_path}: {e}"
-                            )
-
-            db_project.volume_id = volume_id
-            db_project.node_name = node_name
-            db_project.volume_state = "local"
-            await db.commit()
-
-            task.update_progress(90, 100, f"Wrote {files_saved} base files to volume")
-            logger.info(
-                f"[CREATE] Wrote {files_saved} base files to v2 volume {volume_id} for K8s mode"
-            )
-
-        elif settings.deployment_mode == "docker":
-            if use_volumes:
-                # Volume mode: Files are in volume, skip DB sync for now
-                # TODO: Read files from volume and sync to database
-                task.update_progress(90, 100, "Files ready in volume (DB sync skipped)")
-                logger.info("[CREATE] Skipped DB sync for volume (files will sync on first edit)")
-            else:
-                # Bind mount mode: Sync files to database
-                task.update_progress(65, 100, "Saving base files to database")
-                files_saved = 0
-                walk_results = await walk_directory_async(
-                    project_path, exclude_dirs=["node_modules", ".git", "dist", "build", ".next"]
-                )
-
-                for root, _dirs, files in walk_results:
-                    for file in files:
-                        if file.startswith(".") or file.endswith(
-                            (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
-                        ):
-                            continue
-
-                        file_full_path = os.path.join(root, file)
-                        relative_path = os.path.relpath(file_full_path, project_path).replace(
-                            "\\", "/"
-                        )
-
-                        try:
-                            content = await read_file_async(file_full_path)
-                            db_file = ProjectFile(
-                                project_id=db_project.id, file_path=relative_path, content=content
-                            )
-                            db.add(db_file)
-                            files_saved += 1
-                        except Exception as e:
-                            logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
-
-                await db.commit()
-                task.update_progress(90, 100, f"Saved {files_saved} files to database")
-
-        db_project.has_git_repo = True
-        db_project.git_remote_url = base_repo.git_repo_url
-        await db.commit()
-
-        # Create container linked to the base
-        task.update_progress(95, 100, "Creating container from base")
-
-        # Priority 1: Check for .tesslate/config.json
-        from ..services.base_config_parser import read_tesslate_config as _read_config
-
-        tesslate_config = _read_config(cached_base_path)
-        if tesslate_config and tesslate_config.apps:
-            # Config-driven setup - create containers from config
-            primary_container_id = None
-            for app_name, app_config in tesslate_config.apps.items():
-                container = Container(
-                    project_id=db_project.id,
-                    base_id=base_repo.id,
-                    name=app_name,
-                    directory=app_config.directory,
-                    container_name=f"{db_project.slug}-{app_name}",
-                    internal_port=app_config.port or 3000,
-                    environment_vars=app_config.env or {},
-                    container_type="base",
-                    status="stopped",
-                    position_x=app_config.x or 200,
-                    position_y=app_config.y or 200,
-                )
-                db.add(container)
-                await db.flush()
-                await db.refresh(container)
-                if app_name == tesslate_config.primaryApp:
-                    primary_container_id = str(container.id)
-
-            for infra_name, infra_config in tesslate_config.infrastructure.items():
-                container = Container(
-                    project_id=db_project.id,
-                    name=infra_name,
-                    directory=".",
-                    container_name=f"{db_project.slug}-{infra_name}",
-                    internal_port=infra_config.port,
-                    container_type="service",
-                    service_slug=infra_name,
-                    status="stopped",
-                    position_x=infra_config.x or 400,
-                    position_y=infra_config.y or 400,
-                )
-                db.add(container)
-
-            await db.commit()
-            logger.info(f"[CREATE] Created {len(tesslate_config.apps)} containers from .tesslate/config.json")
-            return primary_container_id or str(container.id)
-
-        # No .tesslate/config.json — project needs setup
-        task.update_progress(95, 100, "Project created - setup needed")
-        logger.info(f"[CREATE] No .tesslate/config.json in base {base_repo.slug}, needs setup")
-        return "needs_setup"
-
-    except Exception as git_error:
-        logger.error(f"[CREATE] Failed to setup base project: {git_error}", exc_info=True)
-        # Re-raise the error - no fallback, let it fail properly
-        raise
-
-    finally:
-        # Clean up temp clone directory if created
-        if temp_clone_dir and os.path.exists(temp_clone_dir):
-            try:
-                shutil.rmtree(temp_clone_dir)
-                logger.info(f"[K8S] Cleaned up temp clone directory: {temp_clone_dir}")
-            except Exception as cleanup_error:
-                logger.warning(f"[K8S] Failed to cleanup temp directory: {cleanup_error}")
 
 
 @router.post("/")
@@ -2422,16 +1379,12 @@ async def get_setup_config(
 ):
     """
     Read .tesslate/config.json from the project filesystem/PVC.
-    Falls back to parsing TESSLATE.md if config.json doesn't exist.
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
     await track_project_activity(project.id, db)
     settings = get_settings()
 
-    from ..services.base_config_parser import (
-        read_tesslate_config,
-        parse_tesslate_md,
-    )
+    from ..services.base_config_parser import read_tesslate_config
 
     config_data = None
 
@@ -2439,32 +1392,8 @@ async def get_setup_config(
         # Docker: read from filesystem
         project_path = f"/projects/{project.slug}"
         config_data = read_tesslate_config(project_path)
-
-        if not config_data:
-            # Try TESSLATE.md fallback
-            tesslate_path = os.path.join(project_path, "TESSLATE.md")
-            if os.path.exists(tesslate_path):
-                try:
-                    content = await read_file_async(tesslate_path)
-                    base_config = parse_tesslate_md(content)
-                    if base_config and base_config.start_command:
-                        return {
-                            "exists": False,
-                            "apps": {
-                                "app": {
-                                    "directory": ".",
-                                    "port": base_config.port or 3000,
-                                    "start": base_config.start_command,
-                                    "env": {},
-                                }
-                            },
-                            "infrastructure": {},
-                            "primaryApp": "app",
-                        }
-                except Exception as e:
-                    logger.warning(f"[SETUP-CONFIG] Could not parse TESSLATE.md: {e}")
     else:
-        # K8s: check v2 volume state first, then fall back to pod-exec
+        # K8s: read from PVC via orchestrator
         from ..services.orchestration import get_orchestrator
         orchestrator = get_orchestrator()
 
@@ -2489,36 +1418,6 @@ async def get_setup_config(
                 config_data = parse_tesslate_config(config_json)
         except Exception as e:
             logger.debug(f"[SETUP-CONFIG] Could not read config from K8s: {e}")
-
-        if not config_data:
-            # Try TESSLATE.md fallback (same as Docker path)
-            try:
-                tesslate_content = await orchestrator.read_file(
-                    user_id=current_user.id,
-                    project_id=project.id,
-                    container_name=None,
-                    file_path="TESSLATE.md",
-                    project_slug=project.slug,
-                    **v2_hints,
-                )
-                if tesslate_content:
-                    base_config = parse_tesslate_md(tesslate_content)
-                    if base_config and base_config.start_command:
-                        return {
-                            "exists": False,
-                            "apps": {
-                                "app": {
-                                    "directory": ".",
-                                    "port": base_config.port or 3000,
-                                    "start": base_config.start_command,
-                                    "env": {},
-                                }
-                            },
-                            "infrastructure": {},
-                            "primaryApp": "app",
-                        }
-            except Exception as e:
-                logger.warning(f"[SETUP-CONFIG] Could not parse TESSLATE.md from K8s: {e}")
 
     if config_data:
         return {
@@ -2785,7 +1684,7 @@ async def analyze_project(
         "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
         "Makefile", "pyproject.toml", "pubspec.yaml", "Gemfile",
         "composer.json", "pom.xml", "build.gradle", "mix.exs",
-        "TESSLATE.md", ".tesslate/config.json",
+        ".tesslate/config.json",
     }
     SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv", "vendor", "target"}
     COMMON_SUBDIRS = ["", "frontend", "backend", "client", "server", "api", "web", "app", "src"]
@@ -2867,103 +1766,45 @@ async def analyze_project(
     if not file_tree:
         raise HTTPException(status_code=400, detail="No files found in project to analyze")
 
-    # Build LLM prompt
-    file_tree_str = "\n".join(sorted(file_tree)[:500])
-    config_contents_str = "\n".join([
-        f"--- {path} ---\n{content[:3000]}"
-        for path, content in list(config_files_content.items())[:15]
-    ])
-
-    prompt = f"""Analyze this project and generate a .tesslate/config.json file.
-
-The config defines how to run this project in containerized dev environments.
-
-## File tree:
-{file_tree_str}
-
-## Config file contents:
-{config_contents_str}
-
-## Config format:
-The config has this structure:
-{{
-  "apps": {{
-    "<app-name>": {{
-      "directory": "<relative-dir or . for root>",
-      "port": <port-number or null for no-server>,
-      "start": "<shell command to install deps and start dev server>",
-      "env": {{"KEY": "value"}}
-    }}
-  }},
-  "infrastructure": {{
-    "<service-name>": {{
-      "image": "<docker-image:tag>",
-      "port": <internal-port>
-    }}
-  }},
-  "primaryApp": "<name of the main app to show in preview>"
-}}
-
-## Rules:
-1. Every start command MUST bind to 0.0.0.0 (not localhost) for container networking
-2. For Node.js: use `npm install && npm run dev -- --host 0.0.0.0` or equivalent
-3. For Python: use `pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8001 --reload`
-4. For Go: use `go mod tidy && go run .` or `air` if .air.toml exists
-5. If the project has frontend + backend in separate dirs, create separate apps
-6. If it's a monorepo with one entry point, use directory "." and one app
-7. For projects with no server (CLI tools, libraries), set port to null and start to "sleep infinity"
-8. Use common port conventions: Next.js=3000, Vite=5173, FastAPI=8001, Go=8080, Rails=3000, Django=8000
-9. primaryApp should be the frontend or the main user-facing app
-10. Only add infrastructure (postgres, redis, etc.) if the project clearly uses them
-
-Return ONLY valid JSON, no markdown code blocks, no explanation."""
-
-    # Call LLM via OpenAI client pointed at LiteLLM proxy
+    # Call shared config resolver LLM function
     try:
-        from ..agent.models import get_llm_client, resolve_model_name
+        from ..services.project_setup.config_resolver import generate_config_via_llm
 
-        analyze_model = model or settings.default_model
-        client = await get_llm_client(current_user.id, analyze_model, db)
-        resolved_model = resolve_model_name(analyze_model)
-        response = await client.chat.completions.create(
-            model=resolved_model,
-            messages=[
-                {"role": "system", "content": "You are a project analyzer. Return only valid JSON."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.1,
-            max_tokens=2000,
+        config = await generate_config_via_llm(
+            file_tree=sorted(file_tree)[:500],
+            config_files_content=dict(list(config_files_content.items())[:15]),
+            user_id=current_user.id,
+            db=db,
+            model=model,
         )
 
-        response_text = response.choices[0].message.content.strip()
+        if not config:
+            raise HTTPException(status_code=500, detail="Failed to generate config. Please try again.")
 
-        # Clean up response - strip markdown code blocks if present
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-        # Parse and validate
-        import json as json_mod
-        parsed = json_mod.loads(response_text)
-
-        # Validate structure
-        apps = parsed.get("apps", {})
-        if not apps:
-            raise ValueError("No apps found in generated config")
-
-        primary = parsed.get("primaryApp", "")
-        if not primary or primary not in apps:
-            primary = next(iter(apps))
-            parsed["primaryApp"] = primary
-
+        # Convert to response format
         return {
             "exists": False,
-            **parsed,
+            "apps": {
+                name: {
+                    "directory": app.directory,
+                    "port": app.port,
+                    "start": app.start,
+                    "env": app.env,
+                }
+                for name, app in config.apps.items()
+            },
+            "infrastructure": {
+                name: {
+                    "image": infra.image,
+                    "port": infra.port,
+                }
+                for name, infra in config.infrastructure.items()
+            },
+            "primaryApp": config.primaryApp,
         }
 
-    except json.JSONDecodeError as e:
-        logger.error(f"[ANALYZE] LLM returned invalid JSON: {e}")
-        raise HTTPException(status_code=500, detail="Failed to parse generated config. Please try again.")
+    except HTTPException:
+        raise
     except Exception as e:
         error_str = str(e).lower()
         if "429" in str(e) or "rate" in error_str or "resource_exhausted" in error_str or "throttl" in error_str:

@@ -356,7 +356,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
             logger.error("[K8S] File-manager pod not found — cannot sync DB files to PVC")
             return
 
-        base_path = f"/app/{container_directory}"
+        base_path = "/app" if container_directory in (".", "") else f"/app/{container_directory}"
 
         # Create the directory first
         await asyncio.to_thread(
@@ -390,75 +390,6 @@ class KubernetesOrchestrator(BaseOrchestrator):
             f"[K8S] Synced {synced}/{len(files_to_sync)} files from DB to PVC "
             f"for {container_directory}"
         )
-
-    async def _get_tesslate_config_from_pod(
-        self, namespace: str, container_directory: str
-    ) -> Any | None:
-        """
-        Read and parse TESSLATE.md from the file-manager pod.
-
-        In K8s mode, we can't use Docker volumes, so we read directly from the pod.
-
-        Args:
-            namespace: K8s namespace
-            container_directory: Container directory name (e.g., "next-js-15")
-
-        Returns:
-            Parsed BaseConfig or None
-        """
-        from ...services.base_config_parser import parse_tesslate_md
-
-        try:
-            # Find file-manager pod
-            logger.info(f"[K8S] Looking for file-manager pod in namespace {namespace}")
-            pods = self.k8s_client.core_v1.list_namespaced_pod(
-                namespace=namespace, label_selector="app=file-manager"
-            )
-
-            if not pods.items:
-                logger.warning(f"[K8S] No file-manager pod found in {namespace}")
-                return None
-
-            pod_name = pods.items[0].metadata.name
-            logger.info(f"[K8S] Found file-manager pod: {pod_name}")
-
-            # Read TESSLATE.md from the pod
-            tesslate_path = f"/app/{container_directory}/TESSLATE.md"
-            logger.info(f"[K8S] Reading TESSLATE.md from {tesslate_path}")
-
-            result = await asyncio.to_thread(
-                self.k8s_client._exec_in_pod,
-                pod_name,
-                namespace,
-                "file-manager",
-                ["cat", tesslate_path],
-                timeout=10,
-            )
-
-            logger.info(f"[K8S] TESSLATE.md read result: {result[:200] if result else 'None'}...")
-
-            if result and not result.startswith("cat:"):
-                config = parse_tesslate_md(result)
-                logger.info(
-                    f"[K8S] Parsed config: start_command={config.start_command if config else 'None'}"
-                )
-
-                if config and config.validate():
-                    logger.info(
-                        f"[K8S] ✅ Validated TESSLATE.md: start_command={config.start_command}"
-                    )
-                    return config
-                else:
-                    logger.warning(
-                        f"[K8S] TESSLATE.md validation failed: {config.validation_error if config else 'no config'}"
-                    )
-            else:
-                logger.warning(f"[K8S] TESSLATE.md not found or error: {result}")
-
-        except Exception as e:
-            logger.error(f"[K8S] Could not read TESSLATE.md from pod: {e}", exc_info=True)
-
-        return None
 
     # =========================================================================
     # PROJECT ENVIRONMENT LIFECYCLE
@@ -665,7 +596,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         """
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
-        target_dir = f"/app/{container_directory}"
+        target_dir = "/app" if container_directory in (".", "") else f"/app/{container_directory}"
 
         logger.info(f"[K8S] Initializing files for container {container_directory}")
         logger.info(f"[K8S] Git URL: {git_url or 'None (using template)'}")
@@ -1034,11 +965,17 @@ fi
 
         project_id = str(project.id)
         namespace = self._get_namespace(project_id)
-        # Use container.name if directory is "." or empty (root directory = use container name)
-        dir_for_k8s = (
-            container.name if container.directory in (".", "", None) else container.directory
-        )
-        container_directory = self._sanitize_name(dir_for_k8s)
+
+        # directory is the actual filesystem path — no remapping to container name
+        raw_dir = container.directory if container.directory not in (".", "", None) else "."
+        # For K8s resource naming, we need a DNS-safe identifier
+        # When directory=".", use a sanitized version of the container name for resource naming only
+        if raw_dir == ".":
+            container_directory = self._sanitize_name(str(container.name))
+        else:
+            container_directory = self._sanitize_name(raw_dir)
+        # Working directory: actual filesystem path ("." means project root /app)
+        working_directory = raw_dir
 
         logger.info(f"[K8S] Starting container '{container_directory}' in namespace {namespace}")
 
@@ -1105,6 +1042,8 @@ fi
                 skip_reason = "git-imported container (files already on PVC)"
 
             needs_clone = True
+            # Use working_directory for file checks — the actual filesystem path
+            check_path = "/app" if working_directory == "." else f"/app/{working_directory}"
             if skip_reason:
                 logger.info(f"[K8S] Checking files after restore ({skip_reason})")
                 # Verify files actually exist on PVC before skipping clone
@@ -1119,7 +1058,7 @@ fi
                             [
                                 "/bin/sh",
                                 "-c",
-                                f"ls -1A /app/{container_directory} 2>/dev/null | wc -l",
+                                f"ls -1A {check_path} 2>/dev/null | wc -l",
                             ],
                             10,
                         )
@@ -1129,13 +1068,13 @@ fi
                         if file_count >= 3:
                             logger.info(
                                 f"[K8S] Skipping git clone - {skip_reason} "
-                                f"({file_count} files found in /app/{container_directory})"
+                                f"({file_count} files found in {check_path})"
                             )
                             needs_clone = False
                         else:
                             logger.warning(
                                 f"[K8S] Expected files from {skip_reason} but "
-                                f"/app/{container_directory} has {file_count} files — will clone"
+                                f"{check_path} has {file_count} files — will clone"
                             )
                 except Exception as e:
                     logger.warning(f"[K8S] Could not verify files after restore: {e} — will clone")
@@ -1155,7 +1094,7 @@ fi
                         project_id=project.id,
                         user_id=user_id,
                         container_id=container.id,
-                        container_directory=container_directory,
+                        container_directory=working_directory,
                         git_url=git_url,
                     )
                 else:
@@ -1164,7 +1103,7 @@ fi
                     await send_progress("initializing_files", "Syncing project files...", 50)
                     await self._sync_db_files_to_pvc(
                         project=project,
-                        container_directory=container_directory,
+                        container_directory=working_directory,
                         raw_directory=container.directory,
                         namespace=namespace,
                         db=db,
@@ -1216,23 +1155,10 @@ fi
                 except Exception as e:
                     logger.warning(f"[K8S] Could not read .tesslate/config.json: {e}")
 
-            # Priority 3: TESSLATE.md (legacy)
+            # Fallback: no config found
             if startup_command is None:
-                base_config = await self._get_tesslate_config_from_pod(namespace, container_directory)
-
-                if base_config and base_config.port:
-                    port = base_config.port
-
-                if base_config and base_config.start_command:
-                    startup_command = " && ".join(
-                        line.strip()
-                        for line in base_config.start_command.strip().split("\n")
-                        if line.strip() and not line.strip().startswith("#")
-                    )
-                    logger.info(f"[K8S] ✅ Using TESSLATE.md start_command: {startup_command}")
-                else:
-                    startup_command = "npm install && npm run dev"
-                    logger.warning(f"[K8S] ⚠️ No config found, using fallback: {startup_command}")
+                startup_command = "sleep infinity"
+                logger.warning(f"[K8S] ⚠️ No config found, using fallback: {startup_command}")
 
             # Prepend node_modules/.bin permission fix (safety net for all platforms)
             from ...services.base_config_parser import get_node_modules_fix_prefix
@@ -1273,6 +1199,7 @@ fi
                 image=self.settings.k8s_devserver_image,
                 port=port,
                 startup_command=startup_command,
+                working_directory=working_directory,
                 image_pull_policy=self.settings.k8s_image_pull_policy,
                 image_pull_secret=self.settings.k8s_image_pull_secret or None,
                 enable_pod_affinity=self.settings.k8s_enable_pod_affinity

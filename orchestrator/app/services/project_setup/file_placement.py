@@ -1,0 +1,162 @@
+import asyncio
+import logging
+import os
+import shutil
+import subprocess
+from dataclasses import dataclass
+
+from ...services.base_config_parser import TesslateProjectConfig, write_tesslate_config
+
+logger = logging.getLogger(__name__)
+
+SKIP_DIRS = frozenset({".git", "node_modules", ".next", "__pycache__", ".venv", "venv", "dist", "build"})
+
+
+@dataclass
+class PlacedFiles:
+    """Result of file placement."""
+    volume_id: str | None = None
+    node_name: str | None = None
+    project_path: str | None = None  # Docker filesystem path
+
+
+async def place_files(
+    source_path: str,
+    config: TesslateProjectConfig,
+    project_slug: str,
+    deployment_mode: str,
+    task=None,
+) -> PlacedFiles:
+    """
+    Place source files into the project's storage location.
+    Also writes .tesslate/config.json (the resolved/generated config) to the destination.
+
+    Args:
+        source_path: Path to source files (temp dir or cache dir)
+        config: Resolved project config to write
+        project_slug: Project slug
+        deployment_mode: "docker" or "kubernetes"
+        task: Optional task for progress updates
+    """
+    if deployment_mode == "docker":
+        return await _place_docker(source_path, config, project_slug, task)
+    else:
+        return await _place_kubernetes(source_path, config, project_slug, task)
+
+
+async def _place_docker(
+    source_path: str,
+    config: TesslateProjectConfig,
+    project_slug: str,
+    task=None,
+) -> PlacedFiles:
+    """Copy files to Docker volume at /projects/{slug}/"""
+    volume_path = f"/projects/{project_slug}"
+    os.makedirs(volume_path, exist_ok=True)
+
+    if task:
+        task.update_progress(60, 100, "Copying files to project volume...")
+
+    # Copy source files, skipping generated/dependency dirs
+    for item in os.listdir(source_path):
+        if item in SKIP_DIRS:
+            continue
+        src = os.path.join(source_path, item)
+        dst = os.path.join(volume_path, item)
+        if os.path.isdir(src):
+            await asyncio.to_thread(shutil.copytree, src, dst, dirs_exist_ok=True)
+        else:
+            await asyncio.to_thread(shutil.copy2, src, dst)
+
+    # Write resolved config
+    write_tesslate_config(volume_path, config)
+
+    # Fix permissions for devserver (runs as user 1000:1000)
+    await asyncio.to_thread(
+        subprocess.run, ["chown", "-R", "1000:1000", volume_path], check=True
+    )
+
+    logger.info(f"[PLACEMENT] Copied files to Docker volume: {volume_path}")
+
+    if task:
+        task.update_progress(80, 100, "Files placed in project volume")
+
+    return PlacedFiles(project_path=volume_path)
+
+
+async def _place_kubernetes(
+    source_path: str,
+    config: TesslateProjectConfig,
+    project_slug: str,  # noqa: ARG001 — reserved for future per-project naming
+    task=None,
+) -> PlacedFiles:
+    """Write files to btrfs volume via FileOps gRPC."""
+    from ...services.volume_manager import get_volume_manager
+    from ...services.node_discovery import NodeDiscovery
+    from ...services.fileops_client import FileOpsClient
+    from ...utils.async_fileio import read_file_async, walk_directory_async
+
+    if task:
+        task.update_progress(50, 100, "Creating project volume...")
+
+    vm = get_volume_manager()
+    volume_id, node_name = await vm.create_empty_volume()
+
+    if task:
+        task.update_progress(60, 100, "Writing files to volume...")
+
+    # Write source files to volume
+    walk_results = await walk_directory_async(
+        source_path, exclude_dirs=list(SKIP_DIRS)
+    )
+
+    discovery = NodeDiscovery()
+    address = await discovery.get_fileops_address(node_name)
+    files_written = 0
+
+    async with FileOpsClient(address) as client:
+        for root, _, files in walk_results:
+            for fname in files:
+                file_full_path = os.path.join(root, fname)
+                relative_path = os.path.relpath(file_full_path, source_path).replace("\\", "/")
+
+                try:
+                    content = await read_file_async(file_full_path)
+                    data = content.encode("utf-8") if isinstance(content, str) else content
+                    await client.write_file(volume_id, relative_path, data)
+                    files_written += 1
+                except Exception as e:
+                    logger.warning(f"[PLACEMENT] Could not write file {relative_path}: {e}")
+
+        # Write resolved config to volume
+        import json
+        config_data = _config_to_dict(config)
+        config_json = json.dumps(config_data, indent=2) + "\n"
+        await client.write_file(volume_id, ".tesslate/config.json", config_json.encode("utf-8"))
+
+    logger.info(f"[PLACEMENT] Wrote {files_written} files to volume {volume_id}")
+
+    if task:
+        task.update_progress(80, 100, f"Wrote {files_written} files to volume")
+
+    return PlacedFiles(volume_id=volume_id, node_name=node_name)
+
+
+def _config_to_dict(config: TesslateProjectConfig) -> dict:
+    """Convert TesslateProjectConfig to dict for JSON serialization."""
+    data = {"apps": {}, "infrastructure": {}, "primaryApp": config.primaryApp}
+    for name, app in config.apps.items():
+        app_data = {"directory": app.directory, "port": app.port, "start": app.start, "env": app.env}
+        if app.x is not None:
+            app_data["x"] = app.x
+        if app.y is not None:
+            app_data["y"] = app.y
+        data["apps"][name] = app_data
+    for name, infra in config.infrastructure.items():
+        infra_data = {"image": infra.image, "port": infra.port}
+        if infra.x is not None:
+            infra_data["x"] = infra.x
+        if infra.y is not None:
+            infra_data["y"] = infra.y
+        data["infrastructure"][name] = infra_data
+    return data
