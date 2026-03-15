@@ -76,6 +76,18 @@ class Project(Base):
         String(200), nullable=True
     )  # StorageClass name for template PVC (e.g., tesslate-btrfs-nextjs)
 
+    # v2 Volume-First Architecture
+    volume_id = Column(String(255), nullable=True, index=True)
+    node_name = Column(String(255), nullable=True)
+    volume_state = Column(
+        String(50), default="legacy", server_default="legacy", nullable=False
+    )  # legacy, provisioning, local, remote_only, restoring
+    compute_tier = Column(
+        String(50), default="none", server_default="none", nullable=False
+    )  # none, ephemeral, environment
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    active_compute_pod = Column(String(255), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

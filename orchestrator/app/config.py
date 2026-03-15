@@ -432,6 +432,14 @@ class Settings(BaseSettings):
     template_build_nodeops_address: str = "tesslate-btrfs-csi-node-svc.kube-system.svc:9741"
 
     # ==========================================================================
+    # v2 Volume-First Architecture
+    # ==========================================================================
+    fileops_enabled: bool = True  # Feature flag for v2 file operations via CSI
+    fileops_timeout: int = 30  # Default gRPC timeout for file operations (seconds)
+    compute_pool_namespace: str = "tesslate-compute-pool"  # Namespace for ephemeral compute pods
+    compute_pod_timeout: int = 600  # Seconds to wait for compute pod readiness
+
+    # ==========================================================================
     # SMTP Configuration (for 2FA email codes)
     # ==========================================================================
     smtp_host: str = ""

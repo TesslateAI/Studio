@@ -11,4 +11,7 @@ spec:
     - name: nodeops
       port: 9741
       targetPort: 9741
+    - name: fileops
+      port: 9742
+      targetPort: 9742
   clusterIP: None  # headless — routes directly to DaemonSet pods
