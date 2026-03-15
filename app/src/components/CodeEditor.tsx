@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   File,
   Folder,
@@ -54,7 +54,7 @@ interface CodeEditorProps {
   startupOverlay?: React.ReactNode;
 }
 
-export default function CodeEditor({
+function CodeEditor({
   projectId: _projectId,
   files,
   onFileUpdate,
@@ -73,6 +73,33 @@ export default function CodeEditor({
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const editorRef = useRef<unknown>(null);
 
+  // ── Zero-render stats: ref + direct DOM mutation instead of useState ──
+  const statsRef = useRef<{ lines: number; chars: number } | null>(null);
+  const statsElementRef = useRef<HTMLParagraphElement>(null);
+
+  function updateStatsDisplay(lines: number, chars: number) {
+    statsRef.current = { lines, chars };
+    if (statsElementRef.current) {
+      statsElementRef.current.textContent = `${lines} lines \u2022 ${chars} characters`;
+    }
+  }
+
+  // Local content cache: tracks what the user has typed so server refreshes
+  // don't overwrite in-progress edits and cause cursor jumps.
+  const localContentRef = useRef<Map<string, string>>(new Map());
+
+  // Debounced save: only call onFileUpdate after 500ms of idle
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingFileRef = useRef<string | null>(null);
+
+  // Stable ref to onFileUpdate to avoid re-creating callbacks when prop changes
+  const onFileUpdateRef = useRef(onFileUpdate);
+  onFileUpdateRef.current = onFileUpdate;
+
+  // Stable ref to selectedFile for callbacks that must not re-create on selection change
+  const selectedFileRef = useRef(selectedFile);
+  selectedFileRef.current = selectedFile;
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // Inline input state (create file/folder or rename)
@@ -82,6 +109,56 @@ export default function CodeEditor({
 
   const menuRef = useRef<HTMLDivElement>(null);
   const inlineInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Memoized Monaco options — same reference across all renders ──────
+  const editorOptions = useMemo(() => ({
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+    lineNumbers: 'on' as const,
+    minimap: { enabled: true },
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    tabSize: 2,
+    wordWrap: 'on' as const,
+    padding: { top: 16, bottom: 16 },
+    smoothScrolling: true,
+    cursorBlinking: 'smooth' as const,
+    cursorSmoothCaretAnimation: 'on' as const,
+    renderLineHighlight: 'all' as const,
+    bracketPairColorization: { enabled: true },
+    guides: { bracketPairs: true, indentation: true },
+    suggestOnTriggerCharacters: true,
+    quickSuggestions: true,
+    formatOnPaste: true,
+    formatOnType: true,
+  }), []);
+
+  // Flush any pending debounced save immediately
+  const flushPendingSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const file = pendingFileRef.current;
+    if (file) {
+      const content = localContentRef.current.get(file);
+      if (content !== undefined) {
+        onFileUpdateRef.current(file, content);
+      }
+      pendingFileRef.current = null;
+    }
+  }, []);
+
+  // Flush pending save before switching files
+  const switchToFile = useCallback((path: string) => {
+    flushPendingSave();
+    setSelectedFile(path);
+  }, [flushPendingSave]);
+
+  // Flush on unmount
+  useEffect(() => {
+    return () => flushPendingSave();
+  }, [flushPendingSave]);
 
   const getLanguage = (fileName: string): string => {
     const ext = fileName.split('.').pop()?.toLowerCase();
@@ -112,15 +189,52 @@ export default function CodeEditor({
     }
   };
 
-  const handleEditorDidMount = (editor: unknown) => {
-    editorRef.current = editor;
-  };
+  // ── Memoized Monaco callbacks — stable refs, zero re-renders on typing ──
 
-  const handleEditorChange = (value: string | undefined) => {
-    if (selectedFile && value !== undefined) {
-      onFileUpdate(selectedFile, value);
+  const handleEditorDidMount = useCallback((editor: unknown) => {
+    editorRef.current = editor;
+    const file = selectedFileRef.current;
+    if (file) {
+      const model = (editor as { getModel(): { getValue(): string } | null })?.getModel();
+      if (model) {
+        const content = model.getValue();
+        localContentRef.current.set(file, content);
+        updateStatsDisplay(content.split('\n').length, content.length);
+      }
     }
-  };
+  }, []);
+
+  const handleEditorChange = useCallback((value: string | undefined) => {
+    const file = selectedFileRef.current;
+    if (!file || value === undefined) return;
+
+    // Update local cache immediately — Monaco owns the content
+    localContentRef.current.set(file, value);
+
+    // Update stats via direct DOM mutation — NO React re-render
+    updateStatsDisplay(value.split('\n').length, value.length);
+
+    // Debounced save: fire onFileUpdate after 500ms of idle
+    pendingFileRef.current = file;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const pendingFile = pendingFileRef.current;
+      if (pendingFile) {
+        const latest = localContentRef.current.get(pendingFile);
+        if (latest !== undefined) {
+          onFileUpdateRef.current(pendingFile, latest);
+        }
+        pendingFileRef.current = null;
+      }
+      saveTimerRef.current = null;
+    }, 500);
+  }, []);
+
+  // Memoize file paths so the tree only rebuilds when paths change, not content
+  const filePathsKey = useMemo(
+    () => files.map(f => f.file_path).join('\0'),
+    [files]
+  );
 
   useEffect(() => {
     // Build file tree structure
@@ -185,10 +299,10 @@ export default function CodeEditor({
     if (!selectedFile && files.length > 0) {
       const firstFile = files.find((f) => !f.file_path.endsWith('/'));
       if (firstFile) {
-        setSelectedFile(firstFile.file_path);
+        switchToFile(firstFile.file_path);
       }
     }
-  }, [files]);
+  }, [filePathsKey]);
 
   const toggleDirectory = (path: string) => {
     setExpandedDirs((prev) => {
@@ -460,7 +574,7 @@ export default function CodeEditor({
                   toggleDirectory(node.path);
                   setSelectedDir(node.path);
                 } else {
-                  setSelectedFile(node.path);
+                  switchToFile(node.path);
                   setSelectedDir(null);
                 }
               }}
@@ -510,6 +624,22 @@ export default function CodeEditor({
   };
 
   const selectedFileContent = files.find((f) => f.file_path === selectedFile);
+  // Editor should stay mounted if we have local content even if polling temporarily drops the file
+  const hasEditorContent = selectedFile != null &&
+    (selectedFileContent != null || localContentRef.current.has(selectedFile));
+
+  // Compute initial stats text for the DOM ref (used when editor hasn't mounted yet)
+  const initialStatsText = useMemo(() => {
+    if (!selectedFile) return '';
+    const local = localContentRef.current.get(selectedFile);
+    if (local !== undefined) {
+      return `${local.split('\n').length} lines \u2022 ${local.length} characters`;
+    }
+    if (selectedFileContent) {
+      return `${selectedFileContent.content.split('\n').length} lines \u2022 ${selectedFileContent.content.length} characters`;
+    }
+    return '';
+  }, [selectedFile, selectedFileContent]);
 
   return (
     <div className="h-full flex bg-[var(--surface)] overflow-hidden">
@@ -610,7 +740,7 @@ export default function CodeEditor({
 
       {/* Code editor area */}
       <div className="flex-1 bg-[var(--background)] overflow-hidden flex flex-col">
-        {selectedFile && selectedFileContent ? (
+        {selectedFile && hasEditorContent ? (
           <>
             {/* File header */}
             <div className="px-4 h-12 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm flex items-center">
@@ -630,9 +760,8 @@ export default function CodeEditor({
                 {getFileIcon(selectedFile.split('/').pop() || '')}
                 <div className="flex-1">
                   <h4 className="text-sm font-semibold text-[var(--text)]">{selectedFile}</h4>
-                  <p className="text-xs text-[var(--text)]/50">
-                    {selectedFileContent.content.split('\n').length} lines •{' '}
-                    {selectedFileContent.content.length} characters
+                  <p ref={statsElementRef} className="text-xs text-[var(--text)]/50">
+                    {initialStatsText}
                   </p>
                 </div>
               </div>
@@ -644,34 +773,11 @@ export default function CodeEditor({
                 key={selectedFile}
                 height="100%"
                 language={getLanguage(selectedFile)}
-                value={selectedFileContent.content}
+                defaultValue={localContentRef.current.get(selectedFile) ?? selectedFileContent?.content ?? ''}
                 onChange={handleEditorChange}
                 onMount={handleEditorDidMount}
                 theme={theme === 'dark' ? 'vs-dark' : 'vs'}
-                options={{
-                  fontSize: 14,
-                  fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
-                  lineNumbers: 'on',
-                  minimap: { enabled: true },
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                  tabSize: 2,
-                  wordWrap: 'on',
-                  padding: { top: 16, bottom: 16 },
-                  smoothScrolling: true,
-                  cursorBlinking: 'smooth',
-                  cursorSmoothCaretAnimation: 'on',
-                  renderLineHighlight: 'all',
-                  bracketPairColorization: { enabled: true },
-                  guides: {
-                    bracketPairs: true,
-                    indentation: true,
-                  },
-                  suggestOnTriggerCharacters: true,
-                  quickSuggestions: true,
-                  formatOnPaste: true,
-                  formatOnType: true,
-                }}
+                options={editorOptions}
               />
             </div>
           </>
@@ -807,3 +913,5 @@ export default function CodeEditor({
     </div>
   );
 }
+
+export default React.memo(CodeEditor);

@@ -33,6 +33,8 @@ interface Project {
   status?: Status;
   agents?: Array<{ icon: string; name: string }>;
   environment_status?: EnvironmentStatus;
+  volume_state?: string;
+  compute_tier?: string;
 }
 
 export default function Dashboard() {
@@ -609,6 +611,8 @@ export default function Dashboard() {
                   isLive: project.status === 'launch',
                   slug: project.slug,
                   environmentStatus: project.environment_status,
+                  volume_state: project.volume_state,
+                  compute_tier: project.compute_tier,
                 }}
                 onOpen={() => navigate(`/project/${project.slug}/builder`)}
                 onDelete={() => deleteProject(project.id)}

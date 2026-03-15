@@ -55,9 +55,32 @@ import { fileEvents } from '../utils/fileEvents';
 import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { type ChatAgent } from '../types/chat';
+import { isV2Project, getV2Features, type VolumeState, type ComputeTier } from '../types/project';
 
 type PanelType = 'github' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
+
+// V2 placeholder for views that require compute (preview, terminal)
+function NoComputePlaceholder({ onStart }: { onStart?: () => void }) {
+  return (
+    <div className="h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
+      <div className="flex flex-col items-center gap-4 max-w-md text-center">
+        <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center">
+          <Monitor size={32} className="text-emerald-400" />
+        </div>
+        <h3 className="text-lg font-semibold text-[var(--text)]">Files available</h3>
+        <p className="text-[var(--text)]/60 text-sm">
+          No compute running. Start the environment for preview and terminal.
+        </p>
+        {onStart && (
+          <button onClick={onStart} className="px-5 py-2.5 bg-[var(--primary)] text-white rounded-lg hover:opacity-80 transition font-medium">
+            Start Environment
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function Project() {
   const { slug } = useParams<{ slug: string }>();
@@ -103,6 +126,9 @@ export default function Project() {
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const isPointerOverPreviewRef = useRef(false);
+
+  // Stable ref to the latest loadFiles so event listeners never capture a stale closure
+  const loadFilesRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   // Track if we need to start the container (for the startup hook)
   const [needsContainerStart, setNeedsContainerStart] = useState(false);
@@ -151,6 +177,27 @@ export default function Project() {
       },
     }
   );
+
+  // ============================================================================
+  // V2 TWO-AXIS STATE MODEL
+  // ============================================================================
+  const volumeState = (project?.volume_state as VolumeState) ?? 'legacy';
+  const computeTier = (project?.compute_tier as ComputeTier) ?? 'none';
+  const v2 = isV2Project(volumeState);
+  const v2Features = useMemo(
+    () => (v2 ? getV2Features(volumeState, computeTier) : null),
+    [v2, volumeState, computeTier]
+  );
+  const v2NoPreview  = v2 && !!v2Features && !v2Features.preview;
+  const v2NoTerminal = v2 && !!v2Features && !v2Features.terminal;
+  const v2HasFiles   = v2 && !!v2Features && v2Features.fileBrowser;
+
+  const handleStartCompute = useCallback(() => {
+    if (!container) return;
+    currentContainerIdRef.current = container.id as string;
+    setNeedsContainerStart(true);
+    containerStartup.startContainer(container.id as string);
+  }, [container, containerStartup]);
 
   // ============================================================================
   // PROJECT KEYBOARD SHORTCUTS
@@ -307,7 +354,9 @@ export default function Project() {
   // Reload files when container changes (to apply filtering)
   useEffect(() => {
     if (container) {
-      // Cancel any in-flight retry sequence before starting a new one
+      const vs = project?.volume_state as string;
+      if (vs && vs !== 'legacy') return; // v2: files already loaded via loadProject
+      // v1: Cancel any in-flight retry sequence before starting a new one
       fileRetryCancelledRef.current = true;
       if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
       fileRetryCountRef.current = 0;
@@ -315,7 +364,7 @@ export default function Project() {
       loadFilesWithRetry();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [container]);
+  }, [container, project?.volume_state]);
 
   useEffect(() => {
     localStorage.setItem('projectSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
@@ -391,18 +440,21 @@ export default function Project() {
     }
   }, [devServerUrl]);
 
-  // Listen for file change events from Assets panel and other components
+  // Listen for file change events from Assets panel and other components.
+  // Uses loadFilesRef to always call the latest loadFiles (with correct container
+  // context), avoiding a stale closure that would skip prefix filtering and
+  // corrupt the file tree with raw server paths.
   useEffect(() => {
     const unsubscribe = fileEvents.on((detail) => {
       console.log('File event received:', detail.type, detail.filePath);
-      // Refresh the file list when any file changes
-      loadFiles();
+      if (detail.type !== 'file-updated') {
+        loadFilesRef.current();
+      }
     });
 
     return () => {
       unsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   // Smart polling to catch file changes from agents using bash/exec commands
@@ -474,7 +526,17 @@ export default function Project() {
       const projectData = await projectsApi.get(slug);
       setProject(projectData);
 
-      // Only load files here if NOT viewing a specific container
+      const vs = (projectData.volume_state as string) ?? 'legacy';
+      if (vs !== 'legacy') {
+        // v2 project — only load files if volume is locally mounted
+        if (vs === 'local') {
+          loadFilesWithRetry();
+        }
+        // provisioning/restoring/remote_only: no files available yet
+        return;
+      }
+
+      // v1 legacy: Only load files here if NOT viewing a specific container
       // When viewing a container, loadFiles() will be called after container loads
       // to properly filter files for that container's directory
       if (!containerId) {
@@ -487,40 +549,24 @@ export default function Project() {
     }
   };
 
-  // Filter files to the active container's directory, stripping the prefix for display.
-  // In K8s mode files are already container-scoped so the prefix filter returns nothing;
-  // fall back to the raw data in that case.
-  const filterFilesForContainer = (filesData: Array<Record<string, unknown>>) => {
-    if (containerId && container && container.directory) {
-      const containerDir = container.directory as string;
-      const filteredFiles = filesData
-        .filter((file: Record<string, unknown>) =>
-          (file.file_path as string).startsWith(containerDir + '/')
-        )
-        .map((file: Record<string, unknown>) => ({
-          ...file,
-          file_path: (file.file_path as string).slice(containerDir.length + 1),
-        }));
-
-      // In K8s mode, files are already container-scoped (no prefix).
-      // If filtering by prefix returns nothing but we have data, use the data directly.
-      if (filteredFiles.length === 0 && filesData.length > 0) {
-        return filesData;
-      }
-      return filteredFiles;
-    }
-    return filesData;
-  };
-
   const loadFiles = async () => {
     if (!slug) return;
     try {
       const filesData = await projectsApi.getFiles(slug);
-      setFiles(filterFilesForContainer(filesData));
+      setFiles((prev) => {
+        // Skip update if file paths haven't changed — Monaco owns content,
+        // the tree only cares about paths. Prevents re-renders from 30s polling.
+        const prevPaths = prev.map(f => f.file_path).join('\0');
+        const newPaths = filesData.map((f: { file_path: string }) => f.file_path).join('\0');
+        if (prevPaths === newPaths) return prev;
+        return filesData;
+      });
     } catch (error) {
       console.error('Failed to load files:', error);
     }
   };
+  // Keep ref in sync so event listeners never use a stale closure
+  loadFilesRef.current = loadFiles;
 
   const FILE_RETRY_MAX = 8;
 
@@ -536,10 +582,8 @@ export default function Project() {
       // Bail if this sequence was cancelled while the request was in-flight
       if (fileRetryCancelledRef.current) return;
 
-      const resultFiles = filterFilesForContainer(filesData);
-
-      if (resultFiles.length > 0) {
-        setFiles(resultFiles);
+      if (filesData.length > 0) {
+        setFiles(filesData);
         setFilesInitiallyLoaded(true);
         fileRetryCountRef.current = 0;
         return;
@@ -554,7 +598,7 @@ export default function Project() {
         }, delay);
       } else {
         // Exhausted retries - accept empty
-        setFiles(resultFiles);
+        setFiles([]);
         setFilesInitiallyLoaded(true);
         fileRetryCountRef.current = 0;
       }
@@ -650,6 +694,11 @@ export default function Project() {
   const loadContainer = async () => {
     if (!slug) return;
     try {
+      // Fetch fresh project data to avoid stale closure on `project` state
+      // (loadProject and loadContainer fire in the same render cycle on mount)
+      const freshProject = await projectsApi.get(slug);
+      const freshVolumeState = (freshProject.volume_state as string) ?? 'legacy';
+
       const allContainers = await projectsApi.getContainers(slug);
       setContainers(allContainers);
 
@@ -768,6 +817,14 @@ export default function Project() {
           console.warn('Failed to check container status, will attempt start:', statusError);
         }
 
+        // v2: non-legacy volume state — don't auto-start container
+        if (freshVolumeState !== 'legacy') {
+          console.log('[loadContainer] v2: volume state', freshVolumeState, '— skipping container start');
+          containerStartup.reset();
+          setNeedsContainerStart(false);
+          return;
+        }
+
         // Container not running - use the startup hook to start it with real-time logs
         console.log('[loadContainer] Starting container via startup hook');
         const containerIdToStart = foundContainer.id as string;
@@ -831,31 +888,34 @@ export default function Project() {
     setPrefillChatMessage(message);
   }, []);
 
+  const noComputePlaceholder = (
+    <NoComputePlaceholder
+      onStart={v2Features?.startButton ? handleStartCompute : undefined}
+    />
+  );
+
+  const loadingOverlay =
+    containerStartup.isLoading || containerStartup.status === 'error' ? (
+      <ContainerLoadingOverlay
+        phase={containerStartup.phase}
+        progress={containerStartup.progress}
+        message={containerStartup.message}
+        logs={containerStartup.logs}
+        error={containerStartup.error || undefined}
+        onRetry={containerStartup.retry}
+        onAskAgent={handleAskAgent}
+        containerPort={(container?.internal_port as number) || 3000}
+      />
+    ) : null;
+
+  const codeEditorOverlay = v2HasFiles ? undefined : loadingOverlay ?? undefined;
+
   const handleFileUpdate = useCallback(
     async (filePath: string, content: string) => {
       if (!slug) return;
 
-      // For container-scoped views, prepend container directory when saving
-      // (we stripped it for display, now add it back for the API)
-      const saveFilePath =
-        containerId && container?.directory ? `${container.directory}/${filePath}` : filePath;
-
-      // Track if this is a new file or an update
-      let isNewFile = false;
-      setFiles((prev) => {
-        const existing = prev.find((f) => f.file_path === filePath);
-        isNewFile = !existing;
-        if (existing) {
-          return prev.map((f) => (f.file_path === filePath ? { ...f, content } : f));
-        }
-        return [...prev, { file_path: filePath, content }];
-      });
-
       try {
-        await projectsApi.saveFile(slug, saveFilePath, content);
-
-        // Emit file event to refresh the code editor file tree
-        fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
+        await projectsApi.saveFile(slug, filePath, content);
       } catch (error) {
         console.error('Failed to save file:', error);
         toast.error(`Failed to save ${filePath}`);
@@ -880,70 +940,63 @@ export default function Project() {
         }, 5000);
       }
     },
-    [slug, containerId, container]
+    [slug]
   );
 
   const handleFileCreate = useCallback(
     async (filePath: string) => {
       if (!slug) return;
-      const saveFilePath =
-        containerId && container?.directory ? `${container.directory}/${filePath}` : filePath;
       try {
-        await projectsApi.saveFile(slug, saveFilePath, '');
+        await projectsApi.saveFile(slug, filePath, '');
         fileEvents.emit('file-created', filePath);
       } catch (error) {
         console.error('Failed to create file:', error);
         toast.error(`Failed to create ${filePath}`);
       }
     },
-    [slug, containerId, container]
+    [slug]
   );
 
   const handleFileDelete = useCallback(
     async (filePath: string, isDirectory: boolean) => {
       if (!slug) return;
-      const saveFilePath =
-        containerId && container?.directory ? `${container.directory}/${filePath}` : filePath;
       try {
-        await projectsApi.deleteFile(slug, saveFilePath, isDirectory);
+        await projectsApi.deleteFile(slug, filePath, isDirectory);
         fileEvents.emit('file-deleted', filePath);
       } catch (error) {
         console.error('Failed to delete:', error);
         toast.error(`Failed to delete ${filePath}`);
       }
     },
-    [slug, containerId, container]
+    [slug]
   );
 
   const handleFileRename = useCallback(
     async (oldPath: string, newPath: string) => {
       if (!slug) return;
-      const prefix = containerId && container?.directory ? `${container.directory}/` : '';
       try {
-        await projectsApi.renameFile(slug, prefix + oldPath, prefix + newPath);
+        await projectsApi.renameFile(slug, oldPath, newPath);
         fileEvents.emit('files-changed');
       } catch (error) {
         console.error('Failed to rename:', error);
         toast.error(`Failed to rename ${oldPath}`);
       }
     },
-    [slug, containerId, container]
+    [slug]
   );
 
   const handleDirectoryCreate = useCallback(
     async (dirPath: string) => {
       if (!slug) return;
-      const saveDir =
-        containerId && container?.directory ? `${container.directory}/${dirPath}` : dirPath;
       try {
-        await projectsApi.createDirectory(slug, saveDir);
+        await projectsApi.createDirectory(slug, dirPath);
         fileEvents.emit('file-created', dirPath);
       } catch (error) {
         console.error('Failed to create directory:', error);
         toast.error(`Failed to create folder ${dirPath}`);
       }
     },
-    [slug, containerId, container]
+    [slug]
   );
 
   const loadDevServerUrl = async () => {
@@ -1486,18 +1539,7 @@ export default function Project() {
                 <Panel id="content" minSize="30" className="overflow-hidden">
                   {/* Preview View */}
                   <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-                    {containerStartup.isLoading || containerStartup.status === 'error' ? (
-                      <ContainerLoadingOverlay
-                        phase={containerStartup.phase}
-                        progress={containerStartup.progress}
-                        message={containerStartup.message}
-                        logs={containerStartup.logs}
-                        error={containerStartup.error || undefined}
-                        onRetry={containerStartup.retry}
-                        onAskAgent={handleAskAgent}
-                        containerPort={(container?.internal_port as number) || 3000}
-                      />
-                    ) : devServerUrl ? (
+                    {v2NoPreview ? noComputePlaceholder : loadingOverlay ?? (devServerUrl ? (
                       previewMode === 'browser-tabs' ? (
                         <BrowserPreview
                           devServerUrl={devServerUrl}
@@ -1581,7 +1623,7 @@ export default function Project() {
                       <div className="h-full flex items-center justify-center text-[var(--text)]/60">
                         <LoadingSpinner message="Loading project..." size={60} />
                       </div>
-                    )}
+                    ))}
                   </div>
 
                   {/* Code View */}
@@ -1597,20 +1639,7 @@ export default function Project() {
                       onFileRename={handleFileRename}
                       onDirectoryCreate={handleDirectoryCreate}
                       isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
-                      startupOverlay={
-                        containerStartup.isLoading || containerStartup.status === 'error' ? (
-                          <ContainerLoadingOverlay
-                            phase={containerStartup.phase}
-                            progress={containerStartup.progress}
-                            message={containerStartup.message}
-                            logs={containerStartup.logs}
-                            error={containerStartup.error || undefined}
-                            onRetry={containerStartup.retry}
-                            onAskAgent={handleAskAgent}
-                            containerPort={(container?.internal_port as number) || 3000}
-                          />
-                        ) : undefined
-                      }
+                      startupOverlay={codeEditorOverlay}
                     />
                   </div>
 
@@ -1632,7 +1661,9 @@ export default function Project() {
                   <div
                     className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}
                   >
-                    <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+                    {v2NoTerminal ? noComputePlaceholder : (
+                      <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+                    )}
                   </div>
                 </Panel>
 
@@ -1672,18 +1703,7 @@ export default function Project() {
               <div className="w-full h-full overflow-hidden">
                 {/* Preview View */}
                 <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-                  {containerStartup.isLoading || containerStartup.status === 'error' ? (
-                    <ContainerLoadingOverlay
-                      phase={containerStartup.phase}
-                      progress={containerStartup.progress}
-                      message={containerStartup.message}
-                      logs={containerStartup.logs}
-                      error={containerStartup.error || undefined}
-                      onRetry={containerStartup.retry}
-                      onAskAgent={handleAskAgent}
-                      containerPort={(container?.internal_port as number) || 3000}
-                    />
-                  ) : devServerUrl ? (
+                  {v2NoPreview ? noComputePlaceholder : loadingOverlay ?? (devServerUrl ? (
                     previewMode === 'browser-tabs' ? (
                       <BrowserPreview
                         devServerUrl={devServerUrl}
@@ -1767,7 +1787,7 @@ export default function Project() {
                     <div className="h-full flex items-center justify-center text-[var(--text)]/60">
                       <LoadingSpinner message="Loading project..." size={60} />
                     </div>
-                  )}
+                  ))}
                 </div>
 
                 {/* Code View */}
@@ -1783,20 +1803,7 @@ export default function Project() {
                     onFileRename={handleFileRename}
                     onDirectoryCreate={handleDirectoryCreate}
                     isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
-                    startupOverlay={
-                      containerStartup.isLoading || containerStartup.status === 'error' ? (
-                        <ContainerLoadingOverlay
-                          phase={containerStartup.phase}
-                          progress={containerStartup.progress}
-                          message={containerStartup.message}
-                          logs={containerStartup.logs}
-                          error={containerStartup.error || undefined}
-                          onRetry={containerStartup.retry}
-                          onAskAgent={handleAskAgent}
-                          containerPort={(container?.internal_port as number) || 3000}
-                        />
-                      ) : undefined
-                    }
+                    startupOverlay={codeEditorOverlay}
                   />
                 </div>
 
@@ -1814,7 +1821,9 @@ export default function Project() {
 
                 {/* Terminal View */}
                 <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-                  <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+                  {v2NoTerminal ? noComputePlaceholder : (
+                    <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+                  )}
                 </div>
               </div>
             )}
@@ -1824,18 +1833,7 @@ export default function Project() {
           <div className="md:hidden w-full h-full overflow-hidden">
             {/* Preview View */}
             <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-              {containerStartup.isLoading || containerStartup.status === 'error' ? (
-                <ContainerLoadingOverlay
-                  phase={containerStartup.phase}
-                  progress={containerStartup.progress}
-                  message={containerStartup.message}
-                  logs={containerStartup.logs}
-                  error={containerStartup.error || undefined}
-                  onRetry={containerStartup.retry}
-                  onAskAgent={handleAskAgent}
-                  containerPort={(container?.internal_port as number) || 3000}
-                />
-              ) : devServerUrl ? (
+              {v2NoPreview ? noComputePlaceholder : loadingOverlay ?? (devServerUrl ? (
                 <div className="w-full h-full bg-white">
                   <iframe
                     src={devServerUrlWithAuth || devServerUrl}
@@ -1847,7 +1845,7 @@ export default function Project() {
                 <div className="h-full flex items-center justify-center text-[var(--text)]/60">
                   <LoadingSpinner message="Loading project..." size={60} />
                 </div>
-              )}
+              ))}
             </div>
 
             {/* Code View */}
@@ -1863,20 +1861,7 @@ export default function Project() {
                 onFileRename={handleFileRename}
                 onDirectoryCreate={handleDirectoryCreate}
                 isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
-                startupOverlay={
-                  containerStartup.isLoading || containerStartup.status === 'error' ? (
-                    <ContainerLoadingOverlay
-                      phase={containerStartup.phase}
-                      progress={containerStartup.progress}
-                      message={containerStartup.message}
-                      logs={containerStartup.logs}
-                      error={containerStartup.error || undefined}
-                      onRetry={containerStartup.retry}
-                      onAskAgent={handleAskAgent}
-                      containerPort={(container?.internal_port as number) || 3000}
-                    />
-                  ) : undefined
-                }
+                startupOverlay={codeEditorOverlay}
               />
             </div>
 
@@ -1894,7 +1879,9 @@ export default function Project() {
 
             {/* Terminal View */}
             <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-              <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+              {v2NoTerminal ? noComputePlaceholder : (
+                <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+              )}
             </div>
           </div>
         </div>

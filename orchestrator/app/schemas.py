@@ -149,6 +149,8 @@ class Project(ProjectBase):
     updated_at: datetime | None
     environment_status: str | None = None  # 'active', 'hibernated', 'hibernating', 'corrupted'
     hibernated_at: datetime | None = None
+    volume_state: str = "legacy"   # legacy | provisioning | local | remote_only | restoring
+    compute_tier: str = "none"     # none | ephemeral | environment
 
     class Config:
         from_attributes = True

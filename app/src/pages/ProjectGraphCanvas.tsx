@@ -273,8 +273,9 @@ const ProjectGraphCanvasInner = () => {
   useEffect(() => {
     const unsubscribe = fileEvents.on((detail) => {
       console.log('File event received:', detail.type, detail.filePath);
-      // Refresh the file list when any file changes
-      loadFiles();
+      if (detail.type !== 'file-updated') {
+        loadFiles();
+      }
     });
 
     return () => {

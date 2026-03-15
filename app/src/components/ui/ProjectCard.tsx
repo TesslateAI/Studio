@@ -1,6 +1,7 @@
 import React, { type ReactNode } from 'react';
 import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
+import { isV2Project, type VolumeState, type ComputeTier } from '../../types/project';
 
 export type EnvironmentStatus =
   | 'active'
@@ -28,6 +29,8 @@ interface Project {
   gitSyncStatus?: 'synced' | 'ahead' | 'behind' | 'diverged' | 'error';
   slug?: string;
   environmentStatus?: EnvironmentStatus;
+  volume_state?: string;
+  compute_tier?: string;
 }
 
 interface ProjectCardProps {
@@ -143,6 +146,56 @@ export function ProjectCard({
     };
   };
 
+  // V2 two-axis status badge: volumeState × computeTier
+  const getV2StatusBadge = (
+    volumeState: VolumeState,
+    computeTier: ComputeTier,
+  ): { label: string; icon: React.ReactNode; className: string } | null => {
+    if (computeTier === 'environment') {
+      return {
+        label: 'Running',
+        icon: <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" />,
+        className: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
+      };
+    }
+    if (computeTier === 'ephemeral') {
+      return {
+        label: 'Agent active',
+        icon: <span className="inline-block w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />,
+        className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
+      };
+    }
+    // computeTier === 'none'
+    switch (volumeState) {
+      case 'local':
+        return {
+          label: 'Files ready',
+          icon: <span className="inline-block w-2 h-2 rounded-full bg-cyan-400" />,
+          className: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20',
+        };
+      case 'provisioning':
+        return {
+          label: 'Provisioning...',
+          icon: <span className="inline-block w-2 h-2 rounded-full bg-purple-400 animate-pulse" />,
+          className: 'bg-purple-500/10 text-purple-400 border border-purple-500/20',
+        };
+      case 'restoring':
+        return {
+          label: 'Restoring...',
+          icon: <span className="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />,
+          className: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20',
+        };
+      case 'remote_only':
+        return {
+          label: 'Hibernated',
+          icon: <span className="inline-block w-2 h-2 rounded-full bg-blue-400" />,
+          className: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+        };
+      default:
+        return null;
+    }
+  };
+
   return (
     <div
       className={`
@@ -241,6 +294,24 @@ export function ProjectCard({
               </h3>
               {/* Environment Status Badge */}
               {(() => {
+                // V2 projects: two-axis badge
+                if (isV2Project(project.volume_state)) {
+                  const v2Badge = getV2StatusBadge(
+                    project.volume_state as VolumeState,
+                    (project.compute_tier ?? 'none') as ComputeTier,
+                  );
+                  if (!v2Badge) return null;
+                  return (
+                    <div
+                      className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs flex-shrink-0 ${v2Badge.className}`}
+                      title={v2Badge.label}
+                    >
+                      {v2Badge.icon}
+                      <span className="font-medium text-[10px]">{v2Badge.label}</span>
+                    </div>
+                  );
+                }
+                // V1 legacy: existing badge
                 const statusConfig = getEnvStatusConfig(project.environmentStatus);
                 if (!statusConfig || project.environmentStatus === 'active') return null;
                 return (
