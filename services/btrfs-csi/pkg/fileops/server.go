@@ -62,9 +62,11 @@ func (s *Server) Start(addr string, tlsCfg *TLSConfig) error {
 	}
 
 	// Limit message size to 64MB for large file transfers.
+	// ForceServerCodec makes all RPCs use JSON regardless of content-type.
 	opts = append(opts,
 		grpc.MaxRecvMsgSize(64*1024*1024),
 		grpc.MaxSendMsgSize(64*1024*1024),
+		grpc.ForceServerCodec(jsonCodec{}),
 	)
 
 	s.srv = grpc.NewServer(opts...)

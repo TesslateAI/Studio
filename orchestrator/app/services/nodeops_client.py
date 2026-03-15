@@ -27,6 +27,13 @@ def _deserialize(data: bytes) -> dict:
     return json.loads(data) if data else {}
 
 
+# The CSI driver uses a registered JSON codec (not protobuf).
+# Go clients use grpc.ForceCodec(jsonCodec{}) which sets content-type
+# to application/grpc+json. Python gRPC doesn't have ForceCodec, so
+# we set the content-type via call metadata.
+_JSON_METADATA = (("content-type", "application/grpc+json"),)
+
+
 class NodeOpsClient:
     """Async client for the btrfs CSI NodeOps gRPC service.
 
@@ -45,6 +52,18 @@ class NodeOpsClient:
         if self._channel is None:
             self._channel = grpc.aio.insecure_channel(self._address)
         return self._channel
+
+    async def _call(
+        self, method: str, request: dict, *, timeout: float = 30.0
+    ) -> dict:
+        """Invoke a NodeOps RPC with JSON codec content-type."""
+        channel = await self._ensure_channel()
+        call = channel.unary_unary(
+            f"/nodeops.NodeOps/{method}",
+            request_serializer=_serialize,
+            response_deserializer=_deserialize,
+        )
+        return await call(request, timeout=timeout, metadata=_JSON_METADATA)
 
     async def promote_to_template(
         self,
@@ -67,16 +86,11 @@ class NodeOpsClient:
         Raises:
             grpc.aio.AioRpcError: On any gRPC failure.
         """
-        channel = await self._ensure_channel()
-        request = {"volume_id": volume_id, "template_name": template_name}
-
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/PromoteToTemplate",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
+        await self._call(
+            "PromoteToTemplate",
+            {"volume_id": volume_id, "template_name": template_name},
+            timeout=timeout,
         )
-        await call(request, timeout=timeout)
-
         logger.info(
             "PromoteToTemplate succeeded: volume=%s template=%s",
             volume_id,
@@ -85,24 +99,12 @@ class NodeOpsClient:
 
     async def create_subvolume(self, name: str, *, timeout: float = 30.0) -> None:
         """Create a new btrfs subvolume."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/CreateSubvolume",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call({"name": name}, timeout=timeout)
+        await self._call("CreateSubvolume", {"name": name}, timeout=timeout)
         logger.info("CreateSubvolume succeeded: name=%s", name)
 
     async def delete_subvolume(self, name: str, *, timeout: float = 30.0) -> None:
         """Delete a btrfs subvolume."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/DeleteSubvolume",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call({"name": name}, timeout=timeout)
+        await self._call("DeleteSubvolume", {"name": name}, timeout=timeout)
         logger.info("DeleteSubvolume succeeded: name=%s", name)
 
     async def snapshot_subvolume(
@@ -114,13 +116,8 @@ class NodeOpsClient:
         timeout: float = 30.0,
     ) -> None:
         """Snapshot a btrfs subvolume."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/SnapshotSubvolume",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call(
+        await self._call(
+            "SnapshotSubvolume",
             {"source": source, "dest": dest, "read_only": read_only},
             timeout=timeout,
         )
@@ -131,13 +128,7 @@ class NodeOpsClient:
 
     async def subvolume_exists(self, name: str, *, timeout: float = 30.0) -> bool:
         """Check if a btrfs subvolume exists."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/SubvolumeExists",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        resp = await call({"name": name}, timeout=timeout)
+        resp = await self._call("SubvolumeExists", {"name": name}, timeout=timeout)
         return resp.get("exists", False)
 
     async def get_capacity(self, *, timeout: float = 30.0) -> dict:
@@ -146,13 +137,7 @@ class NodeOpsClient:
         Returns:
             dict with "total" and "available" (bytes).
         """
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/GetCapacity",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        return await call({}, timeout=timeout)
+        return await self._call("GetCapacity", {}, timeout=timeout)
 
     async def list_subvolumes(
         self, prefix: str = "", *, timeout: float = 30.0
@@ -162,62 +147,39 @@ class NodeOpsClient:
         Returns:
             List of dicts with "id", "name", "path", "read_only".
         """
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/ListSubvolumes",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        resp = await call({"prefix": prefix}, timeout=timeout)
+        resp = await self._call("ListSubvolumes", {"prefix": prefix}, timeout=timeout)
         return resp.get("subvolumes", [])
 
     async def track_volume(self, volume_id: str, *, timeout: float = 30.0) -> None:
         """Register a volume for tracking by the CSI driver."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/TrackVolume",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call({"volume_id": volume_id}, timeout=timeout)
+        await self._call("TrackVolume", {"volume_id": volume_id}, timeout=timeout)
         logger.info("TrackVolume succeeded: volume_id=%s", volume_id)
 
     async def untrack_volume(self, volume_id: str, *, timeout: float = 30.0) -> None:
         """Unregister a volume from CSI driver tracking."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/UntrackVolume",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call({"volume_id": volume_id}, timeout=timeout)
+        await self._call("UntrackVolume", {"volume_id": volume_id}, timeout=timeout)
         logger.info("UntrackVolume succeeded: volume_id=%s", volume_id)
 
     async def ensure_template(
         self, name: str, *, timeout: float = 300.0
     ) -> None:
         """Ensure a template subvolume exists (download from S3 if needed)."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/EnsureTemplate",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call({"name": name}, timeout=timeout)
+        await self._call("EnsureTemplate", {"name": name}, timeout=timeout)
         logger.info("EnsureTemplate succeeded: name=%s", name)
 
     async def restore_volume(
         self, volume_id: str, *, timeout: float = 300.0
     ) -> None:
         """Restore a volume from object storage."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/nodeops.NodeOps/RestoreVolume",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call({"volume_id": volume_id}, timeout=timeout)
+        await self._call("RestoreVolume", {"volume_id": volume_id}, timeout=timeout)
         logger.info("RestoreVolume succeeded: volume_id=%s", volume_id)
+
+    async def sync_volume(
+        self, volume_id: str, *, timeout: float = 300.0
+    ) -> None:
+        """Trigger an S3 sync for a volume."""
+        await self._call("SyncVolume", {"volume_id": volume_id}, timeout=timeout)
+        logger.info("SyncVolume succeeded: volume_id=%s", volume_id)
 
     async def close(self) -> None:
         """Gracefully close the underlying gRPC channel."""

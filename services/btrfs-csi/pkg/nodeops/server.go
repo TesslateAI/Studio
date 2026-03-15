@@ -70,6 +70,8 @@ func (s *Server) Start(addr string, tlsCfg *TLSConfig) error {
 		klog.Info("NodeOps gRPC server using plaintext (cluster-internal, NetworkPolicy protected)")
 	}
 
+	// ForceServerCodec makes all RPCs use JSON regardless of content-type.
+	opts = append(opts, grpc.ForceServerCodec(jsonCodec{}))
 	s.srv = grpc.NewServer(opts...)
 	registerNodeOpsServer(s.srv, s)
 

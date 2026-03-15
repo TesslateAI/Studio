@@ -34,6 +34,13 @@ def _deserialize(data: bytes) -> dict:
     return json.loads(data) if data else {}
 
 
+# The CSI driver uses a registered JSON codec (not protobuf).
+# Go clients use grpc.ForceCodec(jsonCodec{}) which sets content-type
+# to application/grpc+json. Python gRPC doesn't have ForceCodec, so
+# we set the content-type via call metadata.
+_JSON_METADATA = (("content-type", "application/grpc+json"),)
+
+
 @dataclass(frozen=True, slots=True)
 class FileInfo:
     """Metadata for a single file or directory, matching the Go FileInfo struct."""
@@ -72,6 +79,18 @@ class FileOpsClient:
             )
         return self._channel
 
+    async def _call(
+        self, method: str, request: dict, *, timeout: float = 30.0
+    ) -> dict:
+        """Invoke a FileOps RPC with JSON codec content-type."""
+        channel = await self._ensure_channel()
+        call = channel.unary_unary(
+            f"/fileops.FileOps/{method}",
+            request_serializer=_serialize,
+            response_deserializer=_deserialize,
+        )
+        return await call(request, timeout=timeout, metadata=_JSON_METADATA)
+
     # ------------------------------------------------------------------
     # File operations
     # ------------------------------------------------------------------
@@ -80,14 +99,8 @@ class FileOpsClient:
         self, volume_id: str, path: str, *, timeout: float = 30.0
     ) -> bytes:
         """Read a file from a volume. Returns raw bytes."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/fileops.FileOps/ReadFile",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        resp = await call(
-            {"volume_id": volume_id, "path": path}, timeout=timeout
+        resp = await self._call(
+            "ReadFile", {"volume_id": volume_id, "path": path}, timeout=timeout
         )
         return base64.b64decode(resp.get("data", ""))
 
@@ -101,13 +114,8 @@ class FileOpsClient:
         timeout: float = 30.0,
     ) -> None:
         """Write raw bytes to a file on a volume."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/fileops.FileOps/WriteFile",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call(
+        await self._call(
+            "WriteFile",
             {
                 "volume_id": volume_id,
                 "path": path,
@@ -127,13 +135,8 @@ class FileOpsClient:
         timeout: float = 30.0,
     ) -> list[FileInfo]:
         """List directory contents on a volume."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/fileops.FileOps/ListDir",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        resp = await call(
+        resp = await self._call(
+            "ListDir",
             {"volume_id": volume_id, "path": path, "recursive": recursive},
             timeout=timeout,
         )
@@ -153,14 +156,8 @@ class FileOpsClient:
         self, volume_id: str, path: str, *, timeout: float = 30.0
     ) -> FileInfo:
         """Get file/directory metadata."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/fileops.FileOps/StatPath",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        resp = await call(
-            {"volume_id": volume_id, "path": path}, timeout=timeout
+        resp = await self._call(
+            "StatPath", {"volume_id": volume_id, "path": path}, timeout=timeout
         )
         info = resp.get("info", {})
         return FileInfo(
@@ -176,14 +173,8 @@ class FileOpsClient:
         self, volume_id: str, path: str, *, timeout: float = 30.0
     ) -> None:
         """Delete a file or directory on a volume."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/fileops.FileOps/DeletePath",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call(
-            {"volume_id": volume_id, "path": path}, timeout=timeout
+        await self._call(
+            "DeletePath", {"volume_id": volume_id, "path": path}, timeout=timeout
         )
         logger.info(
             "DeletePath succeeded: volume=%s path=%s", volume_id, path
@@ -193,14 +184,8 @@ class FileOpsClient:
         self, volume_id: str, path: str, *, timeout: float = 30.0
     ) -> None:
         """Create a directory and all parents on a volume."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/fileops.FileOps/MkdirAll",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call(
-            {"volume_id": volume_id, "path": path}, timeout=timeout
+        await self._call(
+            "MkdirAll", {"volume_id": volume_id, "path": path}, timeout=timeout
         )
         logger.info(
             "MkdirAll succeeded: volume=%s path=%s", volume_id, path
@@ -214,14 +199,8 @@ class FileOpsClient:
         self, volume_id: str, path: str, *, timeout: float = 60.0
     ) -> bytes:
         """Create a tar archive of a path on a volume. Returns raw bytes."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/fileops.FileOps/TarCreate",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        resp = await call(
-            {"volume_id": volume_id, "path": path}, timeout=timeout
+        resp = await self._call(
+            "TarCreate", {"volume_id": volume_id, "path": path}, timeout=timeout
         )
         return base64.b64decode(resp.get("data", ""))
 
@@ -234,13 +213,8 @@ class FileOpsClient:
         timeout: float = 60.0,
     ) -> None:
         """Extract a tar archive to a path on a volume."""
-        channel = await self._ensure_channel()
-        call = channel.unary_unary(
-            "/fileops.FileOps/TarExtract",
-            request_serializer=_serialize,
-            response_deserializer=_deserialize,
-        )
-        await call(
+        await self._call(
+            "TarExtract",
             {
                 "volume_id": volume_id,
                 "path": path,
