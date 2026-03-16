@@ -239,19 +239,12 @@ func TestNodeOps_EnsureTemplate(t *testing.T) {
 		t.Fatalf("EnsureTemplate: %v", err)
 	}
 
-	// btrfs receive names the subvolume after the snapshot basename, which is
-	// "{name}-tmpl-upload". Check both possible paths.
-	receivedPath := "templates/" + tmplName + "-tmpl-upload"
 	t.Cleanup(func() {
 		_ = bm.DeleteSubvolume(context.Background(), tmplPath)
-		_ = bm.DeleteSubvolume(context.Background(), receivedPath)
 	})
 
 	if !bm.SubvolumeExists(ctx, tmplPath) {
-		// Check the received name instead.
-		if _, err := os.Stat(filepath.Join(pool, receivedPath)); err != nil {
-			t.Fatal("template subvolume does not exist after EnsureTemplate (checked both original and received paths)")
-		}
+		t.Fatal("template subvolume does not exist after EnsureTemplate")
 	}
 }
 
@@ -365,7 +358,7 @@ func TestNodeOps_PromoteToTemplate(t *testing.T) {
 	t.Cleanup(func() {
 		_ = bm.DeleteSubvolume(context.Background(), tmplPath)
 		// Also clean up the upload snapshot created by UploadTemplate.
-		_ = bm.DeleteSubvolume(context.Background(), "snapshots/"+tmplName+"-tmpl-upload")
+		_ = bm.DeleteSubvolume(context.Background(), "snapshots/"+tmplName)
 	})
 
 	// The source volume should be deleted.
@@ -415,7 +408,7 @@ func TestNodeOps_PromoteToTemplate_RefreshExisting(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_ = bm.DeleteSubvolume(context.Background(), tmplPath)
-		_ = bm.DeleteSubvolume(context.Background(), "snapshots/"+tmplName+"-tmpl-upload")
+		_ = bm.DeleteSubvolume(context.Background(), "snapshots/"+tmplName)
 	})
 
 	// New content should be present.

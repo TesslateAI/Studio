@@ -1000,7 +1000,7 @@ echo "TEMPLATE_BUILD_STARTING"
 
 # 1. Clone repo
 git clone --depth=1 --branch "$GIT_BRANCH" "$GIT_URL" /tmp/src
-cp -a /tmp/src/. /workspace/
+cp -r /tmp/src/. /workspace/
 rm -rf /workspace/.git
 
 # 2. Read .tesslate/config.json for app directories
@@ -1074,6 +1074,8 @@ echo "TEMPLATE_BUILD_COMPLETE"'''
                     restart_policy="Never",
                     security_context=client.V1PodSecurityContext(
                         run_as_user=1000,
+                        run_as_group=1000,
+                        fs_group=1000,
                         run_as_non_root=True,
                     ),
                     containers=[

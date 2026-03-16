@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models import MarketplaceBase, TemplateBuild
+from .node_discovery import NodeDiscovery
 from .nodeops_client import NodeOpsClient
 from .orchestration.kubernetes.client import get_k8s_client
 from .orchestration.kubernetes.helpers import (
@@ -176,9 +177,14 @@ class TemplateBuilderService:
                     f"PVC {pvc_name} in {namespace} never became Bound"
                 )
 
-            async with NodeOpsClient(
-                settings.template_build_nodeops_address
-            ) as nodeops:
+            node_name = await self._get_pv_node(k8s, pv_name)
+            discovery = NodeDiscovery()
+            nodeops_address = await discovery.get_nodeops_address(node_name)
+            logger.info(
+                "Promoting template on node %s at %s", node_name, nodeops_address
+            )
+
+            async with NodeOpsClient(nodeops_address) as nodeops:
                 await nodeops.promote_to_template(pv_name, base.slug)
 
             # 7. Create StorageClass for this template -----------------
@@ -267,6 +273,23 @@ class TemplateBuilderService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _get_pv_node(k8s, pv_name: str) -> str:
+        """Get the node name where a PV is located from its nodeAffinity."""
+        pv = await asyncio.to_thread(
+            k8s.core_v1.read_persistent_volume, name=pv_name
+        )
+        affinity = pv.spec.node_affinity
+        if affinity and affinity.required:
+            for term in affinity.required.node_selector_terms:
+                for expr in (term.match_expressions or []):
+                    if expr.key in (
+                        "kubernetes.io/hostname",
+                        "btrfs.csi.tesslate.io/node",
+                    ) and expr.values:
+                        return expr.values[0]
+        raise RuntimeError(f"Cannot determine node for PV {pv_name}")
 
     async def _wait_for_pvc_bound(
         self,

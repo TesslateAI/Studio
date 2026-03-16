@@ -337,13 +337,13 @@ case "$COMMAND" in
             error "deploy-csi is not available for $ENVIRONMENT environment"
         fi
 
-        CSI_OVERLAY="$PROJECT_ROOT/k8s/overlays/csi-aws-${ENVIRONMENT}"
+        CSI_OVERLAY="$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/csi"
         if [ ! -d "$CSI_OVERLAY" ]; then
             error "CSI overlay not found: $CSI_OVERLAY"
         fi
 
         ensure_kubectl_context
-        info "Applying btrfs CSI driver manifests from aws-${ENVIRONMENT}..."
+        info "Applying btrfs CSI driver manifests from aws-${ENVIRONMENT}/csi..."
         kubectl apply -k "$CSI_OVERLAY"
         success "✓ CSI manifests applied"
         echo
@@ -562,7 +562,7 @@ case "$COMMAND" in
         for img in $IMAGES; do
             if [ -n "${CSI_RESTART[$img]:-}" ]; then
                 info "[btrfs-csi] Applying CSI manifests..."
-                kubectl apply -k "$PROJECT_ROOT/k8s/overlays/csi-aws-${ENVIRONMENT}"
+                kubectl apply -k "$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/csi"
                 info "[btrfs-csi] Rolling restart controller..."
                 kubectl rollout restart deployment/tesslate-btrfs-csi-controller -n kube-system
                 info "[btrfs-csi] Rolling restart node daemonset..."

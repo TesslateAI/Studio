@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -20,14 +21,18 @@ type Manager struct {
 	btrfs    *btrfs.Manager
 	store    objstore.ObjectStorage
 	poolPath string
+
+	mu        sync.Mutex            // guards tmplLocks
+	tmplLocks map[string]*sync.Mutex // per-template download locks
 }
 
 // NewManager creates a template Manager.
 func NewManager(btrfs *btrfs.Manager, store objstore.ObjectStorage, poolPath string) *Manager {
 	return &Manager{
-		btrfs:    btrfs,
-		store:    store,
-		poolPath: poolPath,
+		btrfs:     btrfs,
+		store:     store,
+		poolPath:  poolPath,
+		tmplLocks: make(map[string]*sync.Mutex),
 	}
 }
 
@@ -36,8 +41,27 @@ func NewManager(btrfs *btrfs.Manager, store objstore.ObjectStorage, poolPath str
 func (m *Manager) EnsureTemplate(ctx context.Context, name string) error {
 	tmplPath := fmt.Sprintf("templates/%s", name)
 
+	// Fast path: already present.
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
 		klog.V(4).Infof("Template %s already exists", name)
+		return nil
+	}
+
+	// Acquire per-template lock to prevent concurrent downloads.
+	m.mu.Lock()
+	lk, ok := m.tmplLocks[name]
+	if !ok {
+		lk = &sync.Mutex{}
+		m.tmplLocks[name] = lk
+	}
+	m.mu.Unlock()
+
+	lk.Lock()
+	defer lk.Unlock()
+
+	// Re-check after acquiring lock — another goroutine may have downloaded it.
+	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
+		klog.V(4).Infof("Template %s already exists (after lock)", name)
 		return nil
 	}
 
@@ -84,7 +108,7 @@ func (m *Manager) RefreshTemplate(ctx context.Context, name string) error {
 // compressed btrfs send stream.
 func (m *Manager) UploadTemplate(ctx context.Context, name string) error {
 	tmplPath := fmt.Sprintf("templates/%s", name)
-	snapPath := fmt.Sprintf("snapshots/%s-tmpl-upload", name)
+	snapPath := fmt.Sprintf("snapshots/%s", name)
 
 	if !m.btrfs.SubvolumeExists(ctx, tmplPath) {
 		return fmt.Errorf("template %q does not exist", name)
@@ -190,6 +214,8 @@ func (m *Manager) downloadTemplate(ctx context.Context, name string) error {
 	defer decoder.Close()
 
 	// Pipe decompressed data into btrfs receive targeting the templates directory.
+	// The send stream embeds the snapshot basename (which is just "{name}"),
+	// so btrfs receive creates "templates/{name}" directly.
 	if err := m.btrfs.Receive(ctx, "templates", decoder); err != nil {
 		return fmt.Errorf("btrfs receive template %q: %w", name, err)
 	}

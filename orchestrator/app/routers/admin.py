@@ -1270,6 +1270,8 @@ async def list_bases(
                     if base.created_by_user
                     else None,
                     "can_edit": can_edit_base(base),
+                    "template_slug": base.template_slug,
+                    "git_repo_url": base.git_repo_url,
                 }
                 for base in bases
             ],

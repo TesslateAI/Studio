@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Hammer } from 'lucide-react';
 import { LoadingSpinner } from '../PulsingGridSpinner';
 import toast from 'react-hot-toast';
 import { getAuthHeaders } from '../../lib/api';
@@ -25,6 +25,8 @@ interface BaseItem {
   created_by_tesslate: boolean;
   created_by_username: string | null;
   can_edit: boolean;
+  template_slug: string | null;
+  git_repo_url: string | null;
 }
 
 interface BaseDetailed extends BaseItem {
@@ -51,6 +53,7 @@ export default function BaseManagement() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedBase, setSelectedBase] = useState<BaseDetailed | null>(null);
+  const [buildingTemplate, setBuildingTemplate] = useState<string | null>(null);
   const [filter, setFilter] = useState({
     category: '',
     pricing_type: '',
@@ -203,6 +206,40 @@ export default function BaseManagement() {
     }
   };
 
+  const handleBuildTemplate = async (base: BaseItem) => {
+    if (!base.git_repo_url) {
+      toast.error('Base has no git repo URL — cannot build template');
+      return;
+    }
+
+    const action = base.template_slug ? 'rebuild' : 'build';
+    if (!confirm(`${action === 'rebuild' ? 'Rebuild' : 'Build'} template for "${base.name}"? This runs a K8s job that clones the repo and installs dependencies.`)) {
+      return;
+    }
+
+    setBuildingTemplate(base.slug);
+    try {
+      const response = await fetch(`/api/admin/templates/build/${base.slug}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to queue template build');
+      }
+
+      toast.success(`Template build queued for ${base.slug}`);
+    } catch (error: unknown) {
+      console.error('Failed to build template:', error);
+      const err = error as { message?: string };
+      toast.error(err.message || 'Failed to build template');
+    } finally {
+      setBuildingTemplate(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -285,6 +322,7 @@ export default function BaseManagement() {
               <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Pricing</th>
               <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Downloads</th>
               <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Status</th>
+              <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Template</th>
               <th className="text-right px-6 py-3 text-gray-400 font-medium text-sm">Actions</th>
             </tr>
           </thead>
@@ -346,7 +384,37 @@ export default function BaseManagement() {
                   </div>
                 </td>
                 <td className="px-6 py-4">
+                  {base.template_slug ? (
+                    <span className="px-2 py-1 rounded text-xs bg-emerald-500/20 text-emerald-400">
+                      Ready
+                    </span>
+                  ) : base.git_repo_url ? (
+                    <span className="px-2 py-1 rounded text-xs bg-gray-500/20 text-gray-400">
+                      Not built
+                    </span>
+                  ) : (
+                    <span className="px-2 py-1 rounded text-xs bg-gray-700/50 text-gray-500">
+                      N/A
+                    </span>
+                  )}
+                </td>
+                <td className="px-6 py-4">
                   <div className="flex items-center justify-end space-x-2">
+                    {base.git_repo_url && (
+                      <button
+                        onClick={() => handleBuildTemplate(base)}
+                        disabled={buildingTemplate === base.slug}
+                        className="text-purple-400 hover:text-purple-300 text-sm disabled:opacity-50 flex items-center space-x-1"
+                        title={base.template_slug ? 'Rebuild template' : 'Build template'}
+                      >
+                        {buildingTemplate === base.slug ? (
+                          <RefreshCw size={14} className="animate-spin" />
+                        ) : (
+                          <Hammer size={14} />
+                        )}
+                        <span>{base.template_slug ? 'Rebuild' : 'Build'}</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => loadBaseDetails(base.id)}
                       className="text-blue-400 hover:text-blue-300 text-sm"

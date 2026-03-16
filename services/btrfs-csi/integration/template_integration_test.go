@@ -28,11 +28,7 @@ func TestTemplate_UploadAndEnsure(t *testing.T) {
 
 	tmplName := uniqueName("tmpl")
 	tmplPath := "templates/" + tmplName
-	snapPath := "snapshots/" + tmplName + "-tmpl-upload"
-	// After EnsureTemplate downloads and receives from S3, the received
-	// subvolume name is the snapshot basename: {name}-tmpl-upload, placed
-	// in the "templates" directory.
-	receivedPath := "templates/" + tmplName + "-tmpl-upload"
+	snapPath := "snapshots/" + tmplName
 
 	if err := mgr.CreateSubvolume(ctx, tmplPath); err != nil {
 		t.Fatalf("CreateSubvolume: %v", err)
@@ -40,7 +36,6 @@ func TestTemplate_UploadAndEnsure(t *testing.T) {
 	t.Cleanup(func() {
 		mgr.DeleteSubvolume(context.Background(), tmplPath)
 		mgr.DeleteSubvolume(context.Background(), snapPath)
-		mgr.DeleteSubvolume(context.Background(), receivedPath)
 	})
 
 	writeTestFile(t, filepath.Join(pool, tmplPath), "index.js", "console.log('hello')")
@@ -61,10 +56,9 @@ func TestTemplate_UploadAndEnsure(t *testing.T) {
 		t.Fatalf("EnsureTemplate: %v", err)
 	}
 
-	// The received subvolume is at templates/{name}-tmpl-upload.
-	// Verify file content there.
-	verifyFileContent(t, filepath.Join(pool, receivedPath, "index.js"), "console.log('hello')")
-	verifyFileContent(t, filepath.Join(pool, receivedPath, "package.json"), `{"name":"test-tmpl"}`)
+	// The received subvolume is at templates/{name} (matching the snapshot basename).
+	verifyFileContent(t, filepath.Join(pool, tmplPath, "index.js"), "console.log('hello')")
+	verifyFileContent(t, filepath.Join(pool, tmplPath, "package.json"), `{"name":"test-tmpl"}`)
 }
 
 // TestTemplate_EnsureTemplate_AlreadyExists verifies that EnsureTemplate
@@ -113,8 +107,7 @@ func TestTemplate_RefreshTemplate(t *testing.T) {
 
 	tmplName := uniqueName("tmpl")
 	tmplPath := "templates/" + tmplName
-	snapPath := "snapshots/" + tmplName + "-tmpl-upload"
-	receivedPath := "templates/" + tmplName + "-tmpl-upload"
+	snapPath := "snapshots/" + tmplName
 
 	// Create and upload v1.
 	if err := mgr.CreateSubvolume(ctx, tmplPath); err != nil {
@@ -123,7 +116,6 @@ func TestTemplate_RefreshTemplate(t *testing.T) {
 	t.Cleanup(func() {
 		mgr.DeleteSubvolume(context.Background(), tmplPath)
 		mgr.DeleteSubvolume(context.Background(), snapPath)
-		mgr.DeleteSubvolume(context.Background(), receivedPath)
 	})
 
 	writeTestFile(t, filepath.Join(pool, tmplPath), "version.txt", "v1")
@@ -152,8 +144,8 @@ func TestTemplate_RefreshTemplate(t *testing.T) {
 		t.Fatalf("RefreshTemplate: %v", err)
 	}
 
-	// The received subvolume is at templates/{name}-tmpl-upload.
-	verifyFileContent(t, filepath.Join(pool, receivedPath, "version.txt"), "v2")
+	// After refresh, the template is at templates/{name}.
+	verifyFileContent(t, filepath.Join(pool, tmplPath, "version.txt"), "v2")
 }
 
 // TestTemplate_EnsureTemplate_NotInS3 verifies that EnsureTemplate returns

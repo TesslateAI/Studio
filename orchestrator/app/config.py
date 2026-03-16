@@ -428,7 +428,7 @@ class Settings(BaseSettings):
     template_build_namespace_prefix: str = "tmpl-build-"
     template_build_storage_class: str = "tesslate-btrfs"  # Must be btrfs CSI (not EBS)
     template_refresh_interval_hours: int = 24
-    template_build_eager_official: bool = True  # Build official bases on startup
+    template_build_eager_official: bool = False  # Admin-triggered only via /api/admin/templates/build
     template_build_lazy_community: bool = True  # Build community bases on first use
     template_build_nodeops_address: str = "tesslate-btrfs-csi-node-svc.kube-system.svc:9741"
 

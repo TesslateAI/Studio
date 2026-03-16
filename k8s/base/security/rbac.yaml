@@ -27,7 +27,7 @@ rules:
   resources: ["namespaces"]
   verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
-# Core resources (pods, services, PVCs, secrets, configmaps)
+# Core resources (pods, services, PVCs, PVs, secrets, configmaps)
 - apiGroups: [""]
   resources:
     - pods
@@ -35,6 +35,7 @@ rules:
     - pods/exec
     - services
     - persistentvolumeclaims
+    - persistentvolumes
     - secrets
     - configmaps
   verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]

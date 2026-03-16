@@ -12,6 +12,5 @@ resources:
   - manifests/controller.yaml
   - manifests/node.yaml
   - manifests/node-service.yaml
-  - manifests/config-secret.yaml
   - manifests/network-policy.yaml
   - manifests/image-precache.yaml

@@ -50,6 +50,56 @@ resource "kubernetes_service_account" "tesslate_backend" {
 }
 
 # -----------------------------------------------------------------------------
+# Service Account for btrfs CSI Node (with IRSA for S3 access)
+# -----------------------------------------------------------------------------
+resource "kubernetes_service_account" "btrfs_csi_node" {
+  metadata {
+    name      = "tesslate-btrfs-csi-node"
+    namespace = "kube-system"
+
+    annotations = {
+      "eks.amazonaws.com/role-arn" = module.btrfs_csi_irsa.iam_role_arn
+    }
+
+    labels = {
+      "app" = "tesslate-btrfs-csi-node"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [metadata[0].labels]
+  }
+
+  depends_on = [module.eks]
+}
+
+# -----------------------------------------------------------------------------
+# btrfs CSI Config Secret (S3 bucket + rclone settings)
+# -----------------------------------------------------------------------------
+resource "kubernetes_secret" "btrfs_csi_config" {
+  metadata {
+    name      = "tesslate-btrfs-csi-config"
+    namespace = "kube-system"
+  }
+
+  data = {
+    STORAGE_PROVIDER            = "s3"
+    STORAGE_BUCKET              = aws_s3_bucket.btrfs_snapshots.id
+    RCLONE_S3_PROVIDER          = "AWS"
+    RCLONE_S3_REGION            = var.aws_region
+    RCLONE_S3_ACCESS_KEY_ID     = ""  # Not needed with IRSA
+    RCLONE_S3_SECRET_ACCESS_KEY = ""  # Not needed with IRSA
+    RCLONE_S3_ENV_AUTH          = "true"
+    SYNC_INTERVAL               = "60"
+    POOL_PATH                   = "/mnt/tesslate-pool"
+  }
+
+  type = "Opaque"
+
+  depends_on = [module.eks]
+}
+
+# -----------------------------------------------------------------------------
 # PostgreSQL Secret
 # -----------------------------------------------------------------------------
 resource "kubernetes_secret" "postgres" {

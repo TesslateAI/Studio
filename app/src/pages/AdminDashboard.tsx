@@ -78,7 +78,7 @@ export default function AdminDashboard() {
   const [summary, setSummary] = useState<MetricsSummary | null>(null);
   const [detailedMetrics, setDetailedMetrics] = useState<DetailedMetrics>({});
   const [selectedPeriod, setSelectedPeriod] = useState(7); // Days
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('admin-active-tab') || 'overview');
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -350,7 +350,7 @@ export default function AdminDashboard() {
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => { localStorage.setItem('admin-active-tab', tab.id); setActiveTab(tab.id); }}
                 className={`py-3 px-1 whitespace-nowrap border-b-2 transition-colors ${
                   activeTab === tab.id
                     ? 'border-blue-500 text-blue-500'
