@@ -81,10 +81,10 @@ locals {
     rules = [
       {
         rulePriority = 1
-        description  = "Keep last 30 tagged images"
+        description  = "Protect environment and release tags"
         selection = {
           tagStatus     = "tagged"
-          tagPrefixList = ["v", "release"]
+          tagPrefixList = ["production", "beta", "v", "release"]
           countType     = "imageCountMoreThan"
           countNumber   = 30
         }
@@ -94,25 +94,12 @@ locals {
       },
       {
         rulePriority = 2
-        description  = "Remove untagged images older than 7 days"
+        description  = "Remove untagged images older than 1 day"
         selection = {
           tagStatus   = "untagged"
           countType   = "sinceImagePushed"
           countUnit   = "days"
-          countNumber = 7
-        }
-        action = {
-          type = "expire"
-        }
-      },
-      {
-        # tagStatus=any must have lowest priority (highest number)
-        rulePriority = 3
-        description  = "Keep latest 10 images"
-        selection = {
-          tagStatus   = "any"
-          countType   = "imageCountMoreThan"
-          countNumber = 10
+          countNumber = 1
         }
         action = {
           type = "expire"
