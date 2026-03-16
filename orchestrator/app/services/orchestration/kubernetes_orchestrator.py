@@ -190,8 +190,12 @@ class KubernetesOrchestrator(BaseOrchestrator):
         volume_id: str | None,
         node_name: str | None,
     ) -> bool:
-        """Check if a project uses v2 volume-first storage."""
-        return volume_state not in ("legacy", None) and volume_id is not None and node_name is not None
+        """Check if a project uses v2 volume-first storage.
+
+        node_name may be None for remote_only volumes (evicted to S3).
+        The v2 path handles restore, so we must NOT require node_name.
+        """
+        return volume_state not in ("legacy", None) and volume_id is not None
 
     async def _ensure_volume_accessible(
         self,
@@ -1640,7 +1644,15 @@ fi
                         "container_id": container_id,
                     }
 
-            return {"status": "active", "namespace": namespace, "containers": container_statuses}
+            # Derive overall status from user containers (exclude file-manager)
+            user_containers = {k: v for k, v in container_statuses.items() if k != "file-manager"}
+            if user_containers:
+                all_running = all(info.get("running") for info in user_containers.values())
+                overall_status = "running" if all_running else "partial"
+            else:
+                overall_status = "stopped"
+
+            return {"status": overall_status, "namespace": namespace, "containers": container_statuses}
 
         except ApiException as e:
             if e.status == 404:
@@ -1883,30 +1895,6 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 snapshot_pvcs.add(name)
 
         return sorted(snapshot_pvcs)
-
-    async def hibernate_project(
-        self, project_id: UUID, user_id: UUID, db: AsyncSession | None = None
-    ) -> bool:
-        """
-        Hibernate a project (create snapshot and delete K8s resources).
-
-        Called when user leaves project or project is idle too long.
-
-        Args:
-            project_id: Project UUID
-            user_id: User UUID
-            db: Database session (required for snapshot creation)
-
-        Returns:
-            True if hibernation successful
-        """
-        logger.info(f"[K8S] Hibernating project {project_id}")
-
-        await self.delete_project_environment(
-            project_id=project_id, user_id=user_id, save_snapshot=True, db=db
-        )
-
-        return True
 
     async def restore_project(
         self, project_id: UUID, user_id: UUID, db: AsyncSession | None = None
@@ -2519,202 +2507,6 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 logger.error(f"[K8S] API error streaming logs: {e}")
         except Exception as e:
             logger.error(f"[K8S] Error streaming logs: {e}")
-
-    async def cleanup_idle_environments(self, idle_timeout_minutes: int = None) -> list[str]:
-        """
-        Cleanup idle environments by querying database for inactive projects.
-
-        Called periodically by cleanup cronjob.
-        Projects are considered idle if last_activity is older than threshold.
-        """
-        from datetime import datetime, timedelta
-
-        from sqlalchemy import or_, select
-
-        from ...database import AsyncSessionLocal
-        from ...models import Project
-
-        if idle_timeout_minutes is None:
-            idle_timeout_minutes = self.settings.k8s_hibernation_idle_minutes
-
-        logger.info(
-            f"[K8S:CLEANUP] Checking for idle environments (timeout: {idle_timeout_minutes} min)"
-        )
-
-        hibernated = []
-        cutoff_time = datetime.now(UTC) - timedelta(minutes=idle_timeout_minutes)
-
-        # Also recover projects stuck in 'hibernating' (cronjob killed mid-hibernation,
-        # OOM, deadline exceeded, etc.). If a project has been 'hibernating' for over
-        # 10 minutes, something went wrong — reset it to 'active' so we can retry.
-        stuck_cutoff = datetime.now(UTC) - timedelta(minutes=10)
-
-        try:
-            async with AsyncSessionLocal() as db:
-                # Reset stuck 'hibernating' projects back to 'active'
-                stuck_result = await db.execute(
-                    select(Project).where(
-                        Project.environment_status == "hibernating",
-                        Project.hibernated_at.is_(None),
-                        or_(Project.updated_at < stuck_cutoff, Project.updated_at.is_(None)),
-                    )
-                )
-                stuck_projects = stuck_result.scalars().all()
-                for proj in stuck_projects:
-                    logger.warning(
-                        f"[K8S:CLEANUP] Resetting stuck project {proj.slug} from 'hibernating' to 'active'"
-                    )
-                    proj.environment_status = "active"
-                if stuck_projects:
-                    await db.commit()
-                    logger.info(
-                        f"[K8S:CLEANUP] Reset {len(stuck_projects)} stuck hibernating projects"
-                    )
-
-                # Find projects with running K8s environments that are idle
-                # environment_status='active' means K8s resources exist
-                # Include projects where last_activity is NULL (never tracked) or older than cutoff
-                result = await db.execute(
-                    select(Project).where(
-                        Project.environment_status == "active",
-                        or_(Project.last_activity < cutoff_time, Project.last_activity.is_(None)),
-                    )
-                )
-                idle_projects = result.scalars().all()
-
-                logger.info(f"[K8S:CLEANUP] Found {len(idle_projects)} idle projects")
-
-                # Import WebSocket manager for status updates
-                from ...routers.chat import get_chat_connection_manager
-
-                ws_manager = get_chat_connection_manager()
-
-                for project in idle_projects:
-                    if project.last_activity:
-                        idle_minutes = (
-                            datetime.now(UTC) - project.last_activity
-                        ).total_seconds() / 60
-                        logger.info(
-                            f"[K8S:CLEANUP] Hibernating project {project.slug} (idle {idle_minutes:.1f} min)"
-                        )
-                    else:
-                        logger.info(
-                            f"[K8S:CLEANUP] Hibernating project {project.slug} (no activity tracked)"
-                        )
-
-                    try:
-                        # Mark as hibernating and notify user
-                        project.environment_status = "hibernating"
-                        await db.commit()
-
-                        # Send WebSocket notification to redirect user
-                        try:
-                            await ws_manager.send_status_update(
-                                user_id=project.owner_id,
-                                project_id=project.id,
-                                status={
-                                    "environment_status": "hibernating",
-                                    "message": "Saving project files...",
-                                    "action": "redirect_to_projects",
-                                },
-                            )
-                        except Exception as ws_err:
-                            logger.debug(
-                                f"[K8S:CLEANUP] Could not send WebSocket notification: {ws_err}"
-                            )
-
-                        # Hibernate project (create snapshot + delete namespace)
-                        await self.hibernate_project(project.id, project.owner_id, db=db)
-
-                        # Update database status
-                        project.environment_status = "hibernated"
-                        project.hibernated_at = datetime.now(UTC)
-                        await db.commit()
-
-                        # Send completion notification
-                        try:
-                            await ws_manager.send_status_update(
-                                user_id=project.owner_id,
-                                project_id=project.id,
-                                status={
-                                    "environment_status": "hibernated",
-                                    "message": "Project saved successfully",
-                                },
-                            )
-                        except Exception as ws_err:
-                            logger.debug(
-                                f"[K8S:CLEANUP] Could not send completion notification: {ws_err}"
-                            )
-
-                        hibernated.append(str(project.id))
-                        logger.info(f"[K8S:CLEANUP] ✅ Hibernated {project.slug}")
-
-                    except Exception as e:
-                        logger.error(f"[K8S:CLEANUP] ❌ Error hibernating {project.slug}: {e}")
-                        await db.rollback()
-                        # CRITICAL: Reset status to 'active' so project isn't stuck in 'hibernating'
-                        # The earlier commit set it to 'hibernating', so we need a new commit to fix it
-                        try:
-                            project.environment_status = "active"
-                            await db.commit()
-                            logger.info(
-                                f"[K8S:CLEANUP] Reset {project.slug} status to 'active' after hibernation failure"
-                            )
-                        except Exception as reset_err:
-                            logger.error(
-                                f"[K8S:CLEANUP] Failed to reset status for {project.slug}: {reset_err}"
-                            )
-
-        except Exception as e:
-            logger.error(f"[K8S:CLEANUP] ❌ Database error: {e}")
-
-        # --- Orphan namespace scanner ---
-        # Clean up K8s namespaces that aren't tracked as 'active' in the database.
-        # This catches: failed hibernations, deleted projects with leftover namespaces,
-        # or namespaces created by crashes/bugs that the DB doesn't know about.
-        try:
-            all_ns = await asyncio.to_thread(self.k8s_client.core_v1.list_namespace)
-            proj_namespaces = [
-                ns.metadata.name
-                for ns in all_ns.items
-                if ns.metadata.name.startswith("proj-") and ns.status.phase == "Active"
-            ]
-
-            if proj_namespaces:
-                logger.info(
-                    f"[K8S:CLEANUP] Scanning {len(proj_namespaces)} project namespaces for orphans"
-                )
-
-                async with AsyncSessionLocal() as db:
-                    # Get all project IDs that should have active namespaces
-                    result = await db.execute(
-                        select(Project.id).where(
-                            Project.environment_status.in_(["active", "hibernating", "starting"])
-                        )
-                    )
-                    active_project_ids = {f"proj-{row[0]}" for row in result.all()}
-
-                    for ns_name in proj_namespaces:
-                        if ns_name not in active_project_ids:
-                            logger.warning(
-                                f"[K8S:CLEANUP] Orphan namespace detected: {ns_name} (not active in DB)"
-                            )
-                            try:
-                                await asyncio.to_thread(
-                                    self.k8s_client.core_v1.delete_namespace, name=ns_name
-                                )
-                                logger.info(f"[K8S:CLEANUP] ✅ Deleted orphan namespace {ns_name}")
-                            except ApiException as e:
-                                if e.status != 404:
-                                    logger.error(
-                                        f"[K8S:CLEANUP] ❌ Failed to delete orphan {ns_name}: {e}"
-                                    )
-
-        except Exception as e:
-            logger.error(f"[K8S:CLEANUP] ❌ Orphan scan error: {e}")
-
-        logger.info(f"[K8S:CLEANUP] ✅ Cleanup complete: Hibernated {len(hibernated)} environments")
-        return hibernated
 
     # =========================================================================
     # ADVANCED OPERATIONS

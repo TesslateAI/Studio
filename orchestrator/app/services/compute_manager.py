@@ -472,23 +472,30 @@ class ComputeManager:
                 pass
 
         # 1. Ensure volume is locally accessible
-        if volume_state == "remote_only":
-            await send_progress("restoring_volume", "Restoring project volume...", 5)
-            vm = get_volume_manager()
-            node_name = await vm.restore_volume(volume_id)
-            project.node_name = node_name
-            project.volume_state = "local"
-            await db.commit()
-        elif volume_state in ("restoring", "provisioning"):
-            # Poll until local (max 60s)
-            for _ in range(30):
-                await asyncio.sleep(2)
-                await db.refresh(project)
-                if project.volume_state == "local":
-                    node_name = project.node_name
-                    break
+        if volume_state in ("remote_only", "restoring", "provisioning"):
+            if volume_state == "remote_only":
+                await send_progress("restoring_volume", "Restoring project files...", 5)
+                project.volume_state = "restoring"
+                await db.commit()
+
+                vm = get_volume_manager()
+                node_name, _ = await vm.ensure_volume_local(
+                    volume_id, "remote_only", node_name
+                )
+                project.node_name = node_name
+                project.volume_state = "local"
+                await db.commit()
             else:
-                raise RuntimeError(f"Volume {volume_id} stuck in state '{volume_state}'")
+                # restoring or provisioning — poll until local (max 90s)
+                await send_progress("restoring_volume", "Waiting for volume...", 5)
+                for _ in range(45):
+                    await asyncio.sleep(2)
+                    await db.refresh(project)
+                    if project.volume_state == "local":
+                        node_name = project.node_name
+                        break
+                else:
+                    raise RuntimeError(f"Volume {volume_id} stuck in state '{volume_state}'")
 
         # 2. Separate service and dev containers
         service_containers = [c for c in containers if getattr(c, "container_type", "base") == "service"]
@@ -750,6 +757,8 @@ class ComputeManager:
 
         # 9. Update project state
         project.compute_tier = "environment"
+        project.environment_status = "active"
+        project.hibernated_at = None
         project.last_activity = datetime.now(timezone.utc)
         await db.commit()
 
@@ -767,15 +776,6 @@ class ComputeManager:
         namespace = f"proj-{project.id}"
         k8s = self._k8s_client()
         v1 = self._api()
-
-        # Trigger S3 sync (fire-and-forget)
-        if project.volume_id and project.node_name:
-            try:
-                from .volume_manager import get_volume_manager
-                vm = get_volume_manager()
-                await vm.trigger_sync(project.volume_id, project.node_name)
-            except Exception as e:
-                logger.warning("[COMPUTE-T2] Sync trigger failed (non-fatal): %s", e)
 
         # Delete namespace — cascades all namespace-scoped resources (PVCs, deployments, etc.)
         try:

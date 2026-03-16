@@ -1,6 +1,7 @@
 import React, { type ReactNode } from 'react';
 import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
+import { Dropdown } from './Dropdown';
 import { isV2Project, type VolumeState, type ComputeTier } from '../../types/project';
 
 export type EnvironmentStatus =
@@ -38,6 +39,7 @@ interface ProjectCardProps {
   onOpen: () => void;
   onDelete: () => void;
   onFork?: () => void;
+  onHibernate?: () => void;
   onStatusChange: (status: Status) => void;
   onAddAgent?: () => void;
   isDeleting?: boolean;
@@ -50,6 +52,7 @@ export function ProjectCard({
   onOpen,
   onDelete,
   onFork,
+  onHibernate,
   onStatusChange: _onStatusChange,
   onAddAgent,
   isDeleting = false,
@@ -403,49 +406,66 @@ export function ProjectCard({
             <span className="hidden sm:inline truncate">Open</span>
           </button>
 
-          {onFork && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onFork();
-              }}
-              className="
-                flex-1 min-w-0 bg-white/5 hover:bg-white/10
-                text-[var(--text)] font-semibold py-2.5 px-4 rounded-xl
-                border border-white/10 hover:border-white/20
-                transition-all duration-200
-                flex items-center justify-center gap-2
-                hover:scale-[1.02]
-                text-sm
-              "
-            >
-              <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64ZM144,192a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z" />
-              </svg>
-              <span className="hidden sm:inline truncate">Fork</span>
-            </button>
-          )}
-
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="
-              flex-shrink-0 bg-white/5 hover:bg-[rgba(var(--status-red-rgb),0.1)]
-              text-[var(--status-gray)] hover:text-[var(--status-red)]
-              font-semibold py-2.5 px-4 rounded-xl
-              border border-white/10 hover:border-[rgba(var(--status-red-rgb),0.3)]
-              transition-all duration-200
-              flex items-center justify-center
-              hover:scale-[1.02]
-            "
-            title="Delete project"
-          >
-            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
-              <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
-            </svg>
-          </button>
+          <Dropdown
+            trigger={
+              <button
+                className="
+                  flex-shrink-0 bg-white/5 hover:bg-white/10
+                  text-[var(--text-secondary,#9ca3af)] hover:text-[var(--text)]
+                  font-semibold py-2.5 px-3 rounded-xl
+                  border border-white/10 hover:border-white/20
+                  transition-all duration-200
+                  flex items-center justify-center
+                  hover:scale-[1.02]
+                "
+                title="More actions"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M128,96a32,32,0,1,0,32,32A32,32,0,0,0,128,96Zm0,40a8,8,0,1,1,8-8A8,8,0,0,1,128,136Zm0-72a32,32,0,1,0-32-32A32,32,0,0,0,128,64Zm0-40a8,8,0,1,1-8,8A8,8,0,0,1,128,24Zm0,168a32,32,0,1,0,32,32A32,32,0,0,0,128,192Zm0,40a8,8,0,1,1,8-8A8,8,0,0,1,128,232Z" />
+                </svg>
+              </button>
+            }
+            items={[
+              ...(onFork
+                ? [
+                    {
+                      icon: (
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                          <path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64ZM144,192a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z" />
+                        </svg>
+                      ),
+                      label: 'Fork',
+                      onClick: onFork,
+                    },
+                  ]
+                : []),
+              ...(onHibernate
+                ? [
+                    {
+                      icon: (
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                          <path d="M240,96a8,8,0,0,1-8,8H216v16a8,8,0,0,1-16,0V104H184a8,8,0,0,1,0-16h16V72a8,8,0,0,1,16,0V88h16A8,8,0,0,1,240,96ZM144,56h8v8a8,8,0,0,0,16,0V56h8a8,8,0,0,0,0-16h-8V32a8,8,0,0,0-16,0v8h-8a8,8,0,0,0,0,16Zm-2.16,135.81A88,88,0,0,1,64.19,114.16a8,8,0,0,0-2.08-11.36,8.15,8.15,0,0,0-3.92-1.25A8,8,0,0,0,51.34,104,104.07,104.07,0,0,0,152,204.66a8,8,0,0,0,1.21-15.67A8.15,8.15,0,0,0,141.84,191.81Z" />
+                        </svg>
+                      ),
+                      label: 'Hibernate',
+                      onClick: onHibernate,
+                    },
+                  ]
+                : []),
+              {
+                icon: (
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                    <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
+                  </svg>
+                ),
+                label: 'Delete',
+                onClick: onDelete,
+                variant: 'danger' as const,
+                separator: true,
+              },
+            ]}
+            position="bottom-right"
+          />
         </div>
       </div>
     </div>

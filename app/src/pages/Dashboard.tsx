@@ -371,6 +371,19 @@ export default function Dashboard() {
     }
   };
 
+  const handleHibernateProject = async (slug: string) => {
+    const hibernatingToast = toast.loading('Hibernating project...');
+    try {
+      await projectsApi.hibernateProject(slug);
+      toast.success('Hibernation started', { id: hibernatingToast });
+      await loadProjects();
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      const errorMessage = err?.response?.data?.detail || 'Failed to hibernate project';
+      toast.error(errorMessage, { id: hibernatingToast });
+    }
+  };
+
   const handleForkProject = async (id: string) => {
     const forkingToast = toast.loading('Forking project...');
     try {
@@ -618,6 +631,11 @@ export default function Dashboard() {
                 onDelete={() => deleteProject(project.id)}
                 onStatusChange={(status) => updateProjectStatus(project.id, status)}
                 onFork={() => handleForkProject(project.id)}
+                onHibernate={
+                  project.compute_tier === 'environment' && project.environment_status === 'active'
+                    ? () => handleHibernateProject(project.slug)
+                    : undefined
+                }
                 isDeleting={deletingProjectIds.has(project.id)}
                 isSelected={selectedProjectIds.has(project.id)}
                 onSelectionToggle={() => toggleProjectSelection(project.id)}

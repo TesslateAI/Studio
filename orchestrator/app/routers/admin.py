@@ -45,7 +45,6 @@ from ..models import (
     UserPurchasedBase,
 )
 from ..services.litellm_service import litellm_service
-from ..services.orchestration.kubernetes_orchestrator import get_kubernetes_orchestrator
 from ..users import current_superuser
 
 logger = logging.getLogger(__name__)
@@ -3566,20 +3565,15 @@ async def force_hibernate_project(
                 status_code=400, detail="Hibernation is only available in Kubernetes mode"
             )
 
-        orchestrator = get_kubernetes_orchestrator()
-        project.environment_status = "hibernating"
-        project.hibernated_at = None
+        if project.environment_status in ("stopping", "hibernating"):
+            raise HTTPException(status_code=400, detail="Project is already being stopped")
+
+        project.environment_status = "stopping"
         await db.commit()
 
-        success = await orchestrator.hibernate_project(project.id, project.owner_id, db=db)
-        if not success:
-            project.environment_status = "active"
-            await db.commit()
-            raise HTTPException(status_code=500, detail="Hibernation failed")
+        from ..services.hibernate import hibernate_project_bg
 
-        project.environment_status = "hibernated"
-        project.hibernated_at = datetime.utcnow()
-        await db.commit()
+        asyncio.create_task(hibernate_project_bg(project.id, project.owner_id))
 
         # Log admin action
         await log_admin_action(
@@ -3592,22 +3586,16 @@ async def force_hibernate_project(
             request=request,
         )
 
-        logger.info(f"Admin {admin.username} force-hibernated project {project.name}")
+        logger.info(f"Admin {admin.username} initiated hibernation for project {project.name}")
 
-        return {"success": True, "message": f"Project {project.name} has been hibernated"}
+        return {"success": True, "message": f"Hibernation started for {project.name}"}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error hibernating project {project_id}: {e}")
+        logger.error(f"Error initiating hibernation for project {project_id}: {e}")
         await db.rollback()
-        if "project" in locals() and project is not None:
-            with contextlib.suppress(Exception):
-                project.environment_status = "active"
-                project.hibernated_at = None
-                db.add(project)
-                await db.commit()
-        raise HTTPException(status_code=500, detail="Failed to hibernate project") from e
+        raise HTTPException(status_code=500, detail="Failed to initiate hibernation") from e
 
 
 class TransferProjectRequest(BaseModel):

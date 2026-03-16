@@ -368,26 +368,6 @@ class BaseOrchestrator(ABC):
         raise NotImplementedError
 
     # =========================================================================
-    # CLEANUP
-    # =========================================================================
-
-    @abstractmethod
-    async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> list[str]:
-        """
-        Cleanup idle environments based on deployment mode strategy.
-
-        Docker: Two-tier cleanup (scale to 0, then delete)
-        Kubernetes: Hibernation to S3 or scale to 0
-
-        Args:
-            idle_timeout_minutes: Minutes of inactivity before action
-
-        Returns:
-            List of project keys that were cleaned up
-        """
-        pass
-
-    # =========================================================================
     # UTILITY METHODS (default implementations)
     # =========================================================================
 

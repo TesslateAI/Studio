@@ -15,6 +15,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from .config import get_settings
 from .database import engine
+from .middleware.activity_tracking import ActivityTrackingMiddleware
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
 from .oauth import get_available_oauth_clients
 from .routers import (
@@ -181,6 +182,9 @@ app.add_middleware(DynamicCORSMiddleware)
 
 # Add CSRF protection middleware (must be after CORS)
 app.add_middleware(CSRFProtectionMiddleware)
+
+# Activity tracking — update Project.last_activity for project-scoped requests
+app.add_middleware(ActivityTrackingMiddleware)
 
 
 async def shell_session_cleanup_loop():
@@ -549,6 +553,17 @@ async def startup():
         else:
             asyncio.create_task(_compute_pod_reaper_loop())
         logger.info("Compute pod reaper started")
+
+        # Idle monitor: scale-to-zero for T2 environments after idle timeout
+        from .services.idle_monitor import disk_eviction_loop, idle_monitor_loop
+
+        if redis:
+            asyncio.create_task(dlock.run_with_lock("idle_monitor", idle_monitor_loop))
+            asyncio.create_task(dlock.run_with_lock("disk_eviction", disk_eviction_loop))
+        else:
+            asyncio.create_task(idle_monitor_loop())
+            asyncio.create_task(disk_eviction_loop())
+        logger.info("Idle environment monitor and disk eviction monitor started")
 
     # Initialize base cache (Docker mode only - async - doesn't block startup)
     if is_docker_mode():

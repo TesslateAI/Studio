@@ -39,10 +39,7 @@ async def track_project_activity(
         await db.execute(
             update(Project)
             .where(Project.id == project_id)
-            .values(
-                last_activity=datetime.now(UTC),
-                environment_status="active",  # Ensure status is active
-            )
+            .values(last_activity=datetime.now(UTC))
         )
         await db.commit()
         logger.debug(f"[ACTIVITY] Tracked {activity_type} activity for project {project_id}")

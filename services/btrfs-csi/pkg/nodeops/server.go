@@ -199,6 +199,7 @@ func registerNodeOpsServer(srv *grpc.Server, s *Server) {
 			{MethodName: "UntrackVolume", Handler: s.handleUntrackVolume},
 			{MethodName: "EnsureTemplate", Handler: s.handleEnsureTemplate},
 			{MethodName: "RestoreVolume", Handler: s.handleRestoreVolume},
+			{MethodName: "SyncVolume", Handler: s.handleSyncVolume},
 			{MethodName: "PromoteToTemplate", Handler: s.handlePromoteToTemplate},
 			{MethodName: "SetOwnership", Handler: s.handleSetOwnership},
 		},
@@ -316,6 +317,20 @@ func (s *Server) handleEnsureTemplate(_ interface{}, ctx context.Context, dec fu
 	}
 	if err := s.tmplMgr.EnsureTemplate(ctx, req.Name); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure template: %v", err)
+	}
+	return &Empty{}, nil
+}
+
+func (s *Server) handleSyncVolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req VolumeTrackRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if s.syncer == nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "S3 sync not configured")
+	}
+	if err := s.syncer.SyncVolume(ctx, req.VolumeID); err != nil {
+		return nil, status.Errorf(codes.Internal, "sync volume: %v", err)
 	}
 	return &Empty{}, nil
 }

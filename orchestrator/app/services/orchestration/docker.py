@@ -1304,54 +1304,6 @@ class DockerOrchestrator(BaseOrchestrator):
             docker_client.close()
 
     # =========================================================================
-    # CLEANUP (Database-based, actually stops containers)
-    # =========================================================================
-
-    async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> list[str]:
-        """Stop containers for idle projects (database-based tracking)."""
-        from datetime import datetime, timedelta
-
-        from sqlalchemy import or_, select
-
-        from ...database import AsyncSessionLocal
-        from ...models import Project
-
-        logger.info("[DOCKER] Starting idle environment cleanup...")
-        cleaned = []
-
-        cutoff_time = datetime.now(UTC) - timedelta(minutes=idle_timeout_minutes)
-
-        try:
-            async with AsyncSessionLocal() as db:
-                # Find idle projects with running containers
-                result = await db.execute(
-                    select(Project).where(
-                        Project.environment_status == "active",
-                        or_(Project.last_activity < cutoff_time, Project.last_activity.is_(None)),
-                    )
-                )
-                idle_projects = result.scalars().all()
-
-                for project in idle_projects:
-                    try:
-                        logger.info(f"[DOCKER] Stopping idle project: {project.slug}")
-                        await self.stop_project(project.slug, project.id, project.owner_id)
-
-                        # Update status
-                        project.environment_status = "stopped"
-                        await db.commit()
-
-                        cleaned.append(project.slug)
-                    except Exception as e:
-                        logger.error(f"[DOCKER] Failed to stop {project.slug}: {e}")
-
-        except Exception as e:
-            logger.error(f"[DOCKER] Cleanup error: {e}")
-
-        logger.info(f"[DOCKER] Cleanup completed: {len(cleaned)} projects stopped")
-        return cleaned
-
-    # =========================================================================
     # TRAEFIK INTEGRATION
     # =========================================================================
 

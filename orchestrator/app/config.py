@@ -369,6 +369,7 @@ class Settings(BaseSettings):
         300  # EBS/CSI snapshot readiness can exceed 90s under load; keep hibernation reliable
     )
     k8s_hibernation_idle_minutes: int = 10  # Hibernate pods after X minutes of inactivity
+    k8s_eviction_dormancy_hours: int = 1  # Evict local volumes after X hours of hibernation
 
     # ==========================================================================
     # Kubernetes Storage Settings

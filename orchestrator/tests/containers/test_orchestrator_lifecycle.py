@@ -639,16 +639,6 @@ class TestActivityTracking:
 
         orch.track_activity.assert_called_once_with(user_id, project_id, container_name="frontend")
 
-    @pytest.mark.asyncio
-    async def test_cleanup_idle_environments(self):
-        """Test idle environment cleanup returns cleaned up projects."""
-        orch = AsyncMock()
-        orch.cleanup_idle_environments = AsyncMock(return_value=["proj-abc123", "proj-def456"])
-
-        result = await orch.cleanup_idle_environments(idle_timeout_minutes=30)
-
-        assert len(result) == 2
-        assert "proj-abc123" in result
 
 
 class TestDeploymentMode:

@@ -23,6 +23,7 @@ interface UseContainerStartupOptions {
 const PHASE_MESSAGES: Record<string, string> = {
   queued: 'Preparing environment',
   running: 'Starting container',
+  restoring_volume: 'Restoring project files...',
   creating_namespace: 'Creating project environment',
   creating_deployment: 'Deploying container',
   installing_dependencies: 'Installing dependencies',
@@ -37,7 +38,7 @@ export function useContainerStartup(
   containerId: string | null,
   options: UseContainerStartupOptions = {}
 ) {
-  const { onReady, onError, healthCheckInterval = 2000, healthCheckMaxRetries = 60 } = options;
+  const { onReady, onError, healthCheckInterval = 2000, healthCheckMaxRetries = 90 } = options;
 
   const [state, setState] = useState<ContainerStartupState>({
     status: 'idle',

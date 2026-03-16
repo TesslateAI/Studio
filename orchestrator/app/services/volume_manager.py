@@ -215,6 +215,81 @@ class VolumeManager:
             else:
                 raise
 
+    async def evict_local_data(
+        self, volume_id: str, node_name: str, service_dirs: list[str] | None = None
+    ) -> None:
+        """Delete local btrfs subvolumes to free disk space.
+
+        Caller must ensure S3 sync is confirmed before calling this.
+        Does NOT trigger sync — that is the caller's responsibility.
+
+        Args:
+            volume_id: The project volume ID.
+            node_name: Node hosting the volume.
+            service_dirs: Directory names of service containers (e.g. ["postgres"]).
+        """
+        import contextlib
+
+        address = await self._discovery.get_nodeops_address(node_name)
+        async with NodeOpsClient(address) as client:
+            # Delete service subvolumes
+            for svc_dir in service_dirs or []:
+                svc_vol = f"{volume_id}-{svc_dir}"
+                with contextlib.suppress(grpc.aio.AioRpcError):
+                    await client.delete_subvolume(f"volumes/{svc_vol}")
+
+            # Untrack and delete the main volume
+            with contextlib.suppress(grpc.aio.AioRpcError):
+                await client.untrack_volume(volume_id)
+            with contextlib.suppress(grpc.aio.AioRpcError):
+                await client.delete_subvolume(f"volumes/{volume_id}")
+
+        logger.info(
+            "[VOLUME] Evicted local data for volume %s from node %s",
+            volume_id,
+            node_name,
+        )
+
+    async def ensure_volume_local(
+        self,
+        volume_id: str,
+        current_state: str,
+        current_node: str | None,
+    ) -> tuple[str, str]:
+        """Ensure a project volume is on a local node. Restores from S3 if needed.
+
+        Args:
+            volume_id: The project volume ID.
+            current_state: Current volume_state value.
+            current_node: Current node_name (may be None for remote_only).
+
+        Returns:
+            (node_name, new_volume_state) — the node where the volume is now
+            available and the resulting state ("local").
+
+        Raises:
+            RuntimeError: If volume is in an unrecoverable state.
+        """
+        if current_state == "local" and current_node:
+            return current_node, "local"
+
+        if current_state == "remote_only":
+            logger.info("[VOLUME] Restoring volume %s from S3", volume_id)
+            node_name = await self.restore_volume(volume_id)
+            return node_name, "local"
+
+        if current_state == "restoring":
+            # Another concurrent call already started restore.
+            # Caller should poll volume_state from DB until 'local'.
+            raise RuntimeError(
+                f"Volume {volume_id} is already being restored by another caller; "
+                "poll volume_state from DB until it becomes 'local'."
+            )
+
+        raise RuntimeError(
+            f"Cannot ensure volume local: unexpected state '{current_state}'"
+        )
+
     async def fix_ownership(self, volume_id: str, node_name: str, uid: int = 1000, gid: int = 1000) -> None:
         """Fix ownership of an existing volume (migration for pre-fix volumes)."""
         address = await self._discovery.get_nodeops_address(node_name)

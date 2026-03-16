@@ -57,6 +57,7 @@ import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { type ChatAgent } from '../types/chat';
 import { isV2Project, getV2Features, type VolumeState, type ComputeTier } from '../types/project';
+import IdleWarningBanner from '../components/IdleWarningBanner';
 
 type PanelType = 'github' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
@@ -268,6 +269,11 @@ export default function Project() {
   const [needsContainerStart, setNeedsContainerStart] = useState(false);
   const currentContainerIdRef = useRef<string | null>(null);
 
+  // Idle warning state (set by WebSocket idle_warning event)
+  const [idleWarningMinutes, setIdleWarningMinutes] = useState<number | null>(null);
+  // Restore polling state
+  const restorePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Container startup hook - handles task polling, logs, and health checks
   const containerStartup = useContainerStartup(
     slug,
@@ -326,7 +332,7 @@ export default function Project() {
     () => (v2 ? getV2Features(volumeState, computeTier) : null),
     [v2, volumeState, computeTier]
   );
-  const v2NoPreview  = v2 && !!v2Features && !v2Features.preview;
+  const v2NoPreview  = v2 && !!v2Features && !v2Features.preview && !devServerUrl;
   const v2HasFiles   = v2 && !!v2Features && v2Features.fileBrowser;
 
   const handleStartCompute = useCallback(() => {
@@ -339,6 +345,56 @@ export default function Project() {
     toast.loading('Starting environment...', { id: 'container-start' });
     containerStartup.startContainer(container.id as string);
   }, [container, containerStartup]);
+
+  // ============================================================================
+  // LIFECYCLE EVENT HANDLERS (idle warning, environment stopped, volume restore)
+  // ============================================================================
+
+  const handleIdleWarning = useCallback((minutesLeft: number) => {
+    setIdleWarningMinutes(minutesLeft);
+  }, []);
+
+  const handleEnvironmentStopped = useCallback((reason: string) => {
+    setIdleWarningMinutes(null);
+    // Refresh project to pick up compute_tier=none, volume_state changes
+    if (slug) {
+      projectsApi.get(slug).then((p) => setProject(p)).catch(() => {});
+    }
+    if (reason === 'idle_timeout') {
+      toast('Environment stopped due to inactivity', { icon: '\u23F8\uFE0F', duration: 5000 });
+    }
+  }, [slug]);
+
+  const handleVolumeRestoring = useCallback((_estimatedSeconds: number) => {
+    // Start polling project state until volume_state becomes 'local'
+    if (restorePollRef.current) clearInterval(restorePollRef.current);
+    restorePollRef.current = setInterval(async () => {
+      if (!slug) return;
+      try {
+        const p = await projectsApi.get(slug);
+        setProject(p);
+        if (p.volume_state === 'local') {
+          if (restorePollRef.current) {
+            clearInterval(restorePollRef.current);
+            restorePollRef.current = null;
+          }
+          toast.dismiss('volume-restore');
+          toast.success('Project files restored!', { duration: 3000 });
+        }
+      } catch {
+        // transient error, keep polling
+      }
+    }, 2000);
+  }, [slug]);
+
+  // Cleanup restore polling on unmount
+  useEffect(() => {
+    return () => {
+      if (restorePollRef.current) {
+        clearInterval(restorePollRef.current);
+      }
+    };
+  }, []);
 
   // ============================================================================
   // PROJECT KEYBOARD SHORTCUTS
@@ -863,8 +919,9 @@ export default function Project() {
         }
 
         // Check if container is already running before starting
+        let status: Record<string, unknown> | null = null;
         try {
-          const status = await projectsApi.getContainersStatus(slug);
+          status = await projectsApi.getContainersStatus(slug);
 
           // Match backend's _sanitize_status_key: replace non-[a-z0-9-] with dash,
           // collapse runs, trim leading/trailing dashes.
@@ -929,7 +986,7 @@ export default function Project() {
 
           // If per-container lookup missed but overall environment is running,
           // try to find any running container entry with a URL as a fallback
-          if (status?.status === 'running' || status?.status === 'partial') {
+          if (status?.status === 'running' || status?.status === 'partial' || status?.status === 'active') {
             const containers = status?.containers ?? {};
             const fallback = Object.values(containers).find(
               (c: Record<string, unknown>) => c.running && c.url
@@ -960,15 +1017,21 @@ export default function Project() {
 
         // v2: non-legacy volume state — check compute tier before auto-starting
         if (freshVolumeState !== 'legacy') {
-          const freshComputeTier = (freshProject.compute_tier as string) ?? 'none';
-          if (freshComputeTier !== 'environment') {
+          // Don't interfere with an in-progress startup
+          if (needsContainerStart && containerStartup.isLoading) {
+            return;
+          }
+          // Prefer live compute_state from status endpoint over stale DB
+          const liveComputeState = status?.compute_state as string | undefined;
+          const effectiveComputeTier = liveComputeState ?? ((freshProject.compute_tier as string) ?? 'none');
+          if (effectiveComputeTier !== 'environment') {
             // No environment running — let user decide via Start button
-            console.log('[loadContainer] v2: compute_tier', freshComputeTier, '— skipping container start');
+            console.log('[loadContainer] v2: compute state', effectiveComputeTier, '— skipping container start');
             containerStartup.reset();
             setNeedsContainerStart(false);
             return;
           }
-          // compute_tier is 'environment' — fall through to existing status check
+          // compute state is 'environment' — fall through to existing status check
         }
 
         // Container not running - use the startup hook to start it with real-time logs
@@ -1334,6 +1397,15 @@ export default function Project() {
 
   return (
     <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
+      {/* Idle Warning Banner */}
+      {idleWarningMinutes !== null && slug && (
+        <IdleWarningBanner
+          minutesLeft={idleWarningMinutes}
+          projectSlug={slug}
+          onDismiss={() => setIdleWarningMinutes(null)}
+        />
+      )}
+
       {/* Mobile Warning */}
       <MobileWarning />
 
@@ -1686,6 +1758,9 @@ export default function Project() {
                         isPointerOverPreviewRef={isPointerOverPreviewRef}
                         prefillMessage={prefillChatMessage}
                         onPrefillConsumed={() => setPrefillChatMessage(null)}
+                        onIdleWarning={handleIdleWarning}
+                        onEnvironmentStopped={handleEnvironmentStopped}
+                        onVolumeRestoring={handleVolumeRestoring}
                       />
                     </Panel>
                     <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
@@ -1858,6 +1933,9 @@ export default function Project() {
                         isPointerOverPreviewRef={isPointerOverPreviewRef}
                         prefillMessage={prefillChatMessage}
                         onPrefillConsumed={() => setPrefillChatMessage(null)}
+                        onIdleWarning={handleIdleWarning}
+                        onEnvironmentStopped={handleEnvironmentStopped}
+                        onVolumeRestoring={handleVolumeRestoring}
                       />
                     </Panel>
                   </>
@@ -2119,6 +2197,9 @@ export default function Project() {
             prefillMessage={prefillChatMessage}
             onPrefillConsumed={() => setPrefillChatMessage(null)}
             onExpandedChange={setChatExpanded}
+            onIdleWarning={handleIdleWarning}
+            onEnvironmentStopped={handleEnvironmentStopped}
+            onVolumeRestoring={handleVolumeRestoring}
           />
         </div>
       )}

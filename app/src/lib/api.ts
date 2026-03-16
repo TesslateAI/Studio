@@ -521,6 +521,10 @@ export const projectsApi = {
     const response = await api.post(`/api/projects/${id}/fork`);
     return response.data;
   },
+  hibernateProject: async (slug: string) => {
+    const response = await api.post(`/api/projects/${slug}/hibernate`);
+    return response.data;
+  },
   getContainers: async (slug: string) => {
     const response = await api.get(`/api/projects/${slug}/containers`);
     return response.data;

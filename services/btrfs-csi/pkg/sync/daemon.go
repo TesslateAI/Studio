@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -228,9 +230,12 @@ func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (stri
 	}
 
 	// If a stale sync-new snapshot exists (from a previous failed run), remove it.
+	// If removal fails, fall back to a unique name so the sync can proceed.
 	if d.btrfs.SubvolumeExists(ctx, newSnapPath) {
 		if err := d.btrfs.DeleteSubvolume(ctx, newSnapPath); err != nil {
-			return "", fmt.Errorf("delete stale sync snapshot %q: %w", newSnapPath, err)
+			klog.Warningf("stale sync snapshot %q undeletable, using unique suffix: %v", newSnapPath, err)
+			newSnapName = fmt.Sprintf("%s@sync-%d", volumeID, time.Now().UnixNano())
+			newSnapPath = fmt.Sprintf("snapshots/%s", newSnapName)
 		}
 	}
 
@@ -366,11 +371,10 @@ func (d *Daemon) RestoreFromStorage(ctx context.Context, volumeID, objKey string
 		// Prefer the latest full send; fall back to latest object.
 		objKey = keys[len(keys)-1]
 		for i := len(keys) - 1; i >= 0; i-- {
-			if len(keys[i]) > 5 && keys[i][len(keys[i])-8:] != "full-" {
-				continue
+			if strings.HasPrefix(filepath.Base(keys[i]), "full-") {
+				objKey = keys[i]
+				break
 			}
-			objKey = keys[i]
-			break
 		}
 	}
 
@@ -392,6 +396,29 @@ func (d *Daemon) RestoreFromStorage(ctx context.Context, volumeID, objKey string
 	// Receive into the volumes directory.
 	if err := d.btrfs.Receive(ctx, "volumes", decoder); err != nil {
 		return fmt.Errorf("btrfs receive volume %q: %w", volumeID, err)
+	}
+
+	// btrfs receive creates the subvolume with the snapshot basename from the
+	// send stream (e.g. "{volID}@sync-new"). Rename to the canonical path that
+	// NodePublishVolume expects.
+	receivedPath := fmt.Sprintf("volumes/%s@sync-new", volumeID)
+	canonicalPath := fmt.Sprintf("volumes/%s", volumeID)
+
+	if d.btrfs.SubvolumeExists(ctx, receivedPath) {
+		// Remove any stale subvolume at the target path.
+		if d.btrfs.SubvolumeExists(ctx, canonicalPath) {
+			if err := d.btrfs.DeleteSubvolume(ctx, canonicalPath); err != nil {
+				return fmt.Errorf("delete stale volume %q before rename: %w", canonicalPath, err)
+			}
+		}
+		// Create a writable snapshot (btrfs receive creates read-only snapshots).
+		if err := d.btrfs.SnapshotSubvolume(ctx, receivedPath, canonicalPath, false); err != nil {
+			return fmt.Errorf("snapshot %q -> %q: %w", receivedPath, canonicalPath, err)
+		}
+		// Delete the intermediate read-only snapshot.
+		if err := d.btrfs.DeleteSubvolume(ctx, receivedPath); err != nil {
+			klog.Warningf("Failed to clean up intermediate snapshot %q: %v", receivedPath, err)
+		}
 	}
 
 	klog.Infof("Volume %q restored from storage successfully", volumeID)

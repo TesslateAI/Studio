@@ -75,11 +75,10 @@ from ..services.secret_codec import decode_secret_map, encode_secret_map
 from ..services.secret_manager_env import build_env_overrides, get_injected_env_vars_for_container
 from ..services.service_definitions import get_service
 from ..services.task_manager import Task, get_task_manager
-from ..users import current_active_user, current_optional_user, current_superuser
+from ..users import current_active_user, current_optional_user
 from ..utils.async_fileio import makedirs_async, read_file_async, walk_directory_async
 from ..utils.resource_naming import get_project_path
 from ..utils.slug_generator import generate_project_slug
-from .chat import manager as ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -4360,6 +4359,15 @@ async def get_containers_status(
                 if k8s_key and frontend_key != k8s_key and k8s_key in containers_map:
                     containers_map[frontend_key] = containers_map[k8s_key]
 
+        # Derive live compute state so the frontend doesn't rely on stale DB
+        live_status = status.get("status")
+        if live_status in ("running", "partial"):
+            status["compute_state"] = "environment"
+        elif live_status == "stopped":
+            status["compute_state"] = "ephemeral"
+        else:
+            status["compute_state"] = "none"
+
         return status
 
     except Exception as e:
@@ -5680,29 +5688,38 @@ async def _restart_container_background_task(
 
 
 # =============================================================================
-# Admin Endpoints for Testing
+# Lifecycle: Activity Touch & Hibernate
 # =============================================================================
 
 
-@router.post("/{project_slug}/admin/hibernate")
-async def admin_force_hibernate(
+@router.post("/{project_slug}/activity", status_code=204)
+async def touch_project_activity(
     project_slug: str,
-    current_user: User = Depends(current_superuser),  # Requires admin/superuser
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Lightweight endpoint to reset the idle timer.
+
+    Called by the frontend "Keep Active" button in the idle warning banner.
+    Returns 204 No Content on success.
     """
-    [ADMIN ONLY] Force hibernate a project for testing.
+    from ..services.activity_tracker import track_project_activity as _track
 
-    This endpoint allows admins to immediately hibernate a project without
-    waiting for the idle timeout. Useful for testing hibernation/restore flow.
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    await _track(db, project.id, "keep_active")
 
-    The project will be:
-    1. Marked as 'hibernating'
-    2. Saved to S3 (full zip including node_modules)
-    3. K8s namespace deleted
-    4. Marked as 'hibernated'
 
-    Returns the hibernation result including archive size.
+@router.post("/{project_slug}/hibernate", status_code=202)
+async def hibernate_project(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hibernate a project — stops compute, volume stays local.
+
+    Returns 202 immediately; background task handles K8s cleanup.
+    Volume is NOT evicted — it stays on node for instant wake.
+    Disk eviction happens separately after a configurable dormancy period.
     """
     settings = get_settings()
 
@@ -5711,168 +5728,24 @@ async def admin_force_hibernate(
             status_code=400, detail="Hibernation is only available in Kubernetes mode"
         )
 
-    # Get project (admin can access any project)
-    result = await db.execute(select(Project).where(Project.slug == project_slug))
-    project = result.scalar_one_or_none()
+    project = await get_project_by_slug(db, project_slug, current_user.id)
 
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    if project.environment_status in ("hibernated", "stopping"):
+        raise HTTPException(status_code=400, detail="Already hibernated or stopping")
 
-    if project.environment_status == "hibernated":
+    if project.environment_status not in ("active", "stopped"):
         raise HTTPException(
             status_code=400,
-            detail=f"Project is already hibernated (hibernated_at: {project.hibernated_at})",
+            detail=f"Cannot hibernate from state: {project.environment_status}",
         )
 
-    if project.environment_status == "hibernating":
-        raise HTTPException(status_code=400, detail="Project is currently being hibernated")
+    project.environment_status = "stopping"
+    await db.commit()
 
-    try:
-        from datetime import datetime
+    from ..services.hibernate import hibernate_project_bg
 
-        from ..services.orchestration.kubernetes_orchestrator import get_kubernetes_orchestrator
+    asyncio.create_task(hibernate_project_bg(project.id, current_user.id))
 
-        orchestrator = get_kubernetes_orchestrator()
-
-        logger.info(
-            f"[ADMIN:HIBERNATE] Force hibernating project {project.slug} by admin {current_user.email}"
-        )
-
-        # Mark as hibernating
-        project.environment_status = "hibernating"
-        await db.commit()
-
-        # Send WebSocket notification to redirect user (same as cleanup task)
-        try:
-            await ws_manager.send_status_update(
-                user_id=project.owner_id,
-                project_id=project.id,
-                status={
-                    "environment_status": "hibernating",
-                    "message": "Saving project files...",
-                    "action": "redirect_to_projects",
-                },
-            )
-        except Exception as ws_err:
-            logger.debug(f"[ADMIN:HIBERNATE] Could not send WebSocket notification: {ws_err}")
-
-        # Perform hibernation
-        success = await orchestrator.hibernate_project(project.id, project.owner_id, db=db)
-
-        if not success:
-            project.environment_status = "active"
-            project.hibernated_at = None
-            await db.commit()
-            raise HTTPException(
-                status_code=500,
-                detail="Hibernation failed - snapshot save returned false. Check logs for details.",
-            )
-
-        # Mark as hibernated
-        project.environment_status = "hibernated"
-        project.hibernated_at = datetime.now(UTC)
-        await db.commit()
-
-        # Send completion notification
-        try:
-            await ws_manager.send_status_update(
-                user_id=project.owner_id,
-                project_id=project.id,
-                status={
-                    "environment_status": "hibernated",
-                    "message": "Project saved successfully",
-                },
-            )
-        except Exception as ws_err:
-            logger.debug(f"[ADMIN:HIBERNATE] Could not send completion notification: {ws_err}")
-
-        logger.info(f"[ADMIN:HIBERNATE] ✅ Successfully hibernated project {project.slug}")
-
-        return {
-            "message": f"Project '{project.slug}' hibernated successfully",
-            "project_id": str(project.id),
-            "project_slug": project.slug,
-            "environment_status": project.environment_status,
-            "hibernated_at": project.hibernated_at.isoformat(),
-            "owner_id": str(project.owner_id),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[ADMIN:HIBERNATE] Failed to hibernate project: {e}", exc_info=True)
-        project.environment_status = "active"
-        project.hibernated_at = None
-        await db.commit()
-        raise HTTPException(status_code=500, detail=f"Hibernation failed: {str(e)}") from e
+    return {"status": "stopping", "message": "Hibernation started"}
 
 
-@router.get("/{project_slug}/admin/status")
-async def admin_get_project_status(
-    project_slug: str,
-    current_user: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    [ADMIN ONLY] Get detailed project environment status.
-
-    Returns environment status, hibernation timestamp, namespace info, etc.
-    """
-    settings = get_settings()
-
-    # Get project (admin can access any project)
-    result = await db.execute(select(Project).where(Project.slug == project_slug))
-    project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    response = {
-        "project_id": str(project.id),
-        "project_slug": project.slug,
-        "project_name": project.name,
-        "owner_id": str(project.owner_id),
-        "environment_status": project.environment_status,
-        "hibernated_at": project.hibernated_at.isoformat() if project.hibernated_at else None,
-        "last_activity": project.last_activity.isoformat() if project.last_activity else None,
-        "deployment_mode": settings.deployment_mode,
-        "idle_timeout_minutes": settings.k8s_hibernation_idle_minutes
-        if settings.deployment_mode == "kubernetes"
-        else None,
-    }
-
-    # Check K8s namespace if in kubernetes mode
-    if settings.deployment_mode == "kubernetes":
-        try:
-            from ..services.orchestration.kubernetes_orchestrator import get_kubernetes_orchestrator
-
-            orchestrator = get_kubernetes_orchestrator()
-            namespace = orchestrator._get_namespace(str(project.id))
-            namespace_exists = await orchestrator.k8s_client.namespace_exists(namespace)
-            response["k8s_namespace"] = namespace
-            response["k8s_namespace_exists"] = namespace_exists
-        except Exception as e:
-            response["k8s_namespace_error"] = str(e)
-
-    # Check snapshots if hibernated
-    if project.environment_status == "hibernated":
-        try:
-            from ..services.snapshot_manager import get_snapshot_manager
-
-            snapshot_manager = get_snapshot_manager()
-            snapshots = await snapshot_manager.get_project_snapshots(project.id, db)
-
-            response["snapshot_count"] = len(snapshots)
-            if snapshots:
-                latest = snapshots[0]
-                response["latest_snapshot"] = {
-                    "name": latest.snapshot_name,
-                    "status": latest.status,
-                    "type": latest.snapshot_type,
-                    "created_at": latest.created_at.isoformat() if latest.created_at else None,
-                    "size_bytes": latest.volume_size_bytes,
-                }
-        except Exception as e:
-            response["snapshot_error"] = str(e)
-
-    return response
