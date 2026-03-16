@@ -1,452 +1,653 @@
 """
-Integration tests for full Kubernetes project lifecycle.
+Unit tests for KubernetesOrchestrator v2 (volume-first architecture).
 
-Tests the complete flow from project creation to deletion:
-1. Frontend: User creates project in UI
-2. Backend: API creates namespace, deployments, services, ingress
-3. Networking: Ingress routes traffic, auth validates
-4. Shell: WebSocket connects to pod via PTY broker
-5. Agent: Makes tool calls to modify files in pod
-6. Hibernation: Project scales to 0 or uploads to S3
-7. Wake-up: Project scales up or downloads from S3
-8. Cleanup: All resources deleted
+Tests project environment lifecycle, container start/stop, file initialization,
+hibernation via VolumeSnapshots, project status, and name sanitization.
 
-These are integration tests that verify the entire system works together.
+Mocking strategy: patch at the service layer — get_k8s_client(), get_snapshot_manager(),
+get_compute_manager(), and app.config.get_settings.
 """
 
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
 
+from app.services.orchestration.kubernetes_orchestrator import KubernetesOrchestrator
 
-@pytest.mark.integration
-@pytest.mark.kubernetes
-class TestProjectCreationFlow:
-    """Test complete project creation flow."""
-
-    @pytest.mark.asyncio
-    async def test_create_project_end_to_end(self):
-        """
-        Test complete project creation from API request to running pod.
-
-        Flow:
-        1. POST /projects with template
-        2. Create namespace proj-{uuid}
-        3. Create network policy
-        4. Create deployment with init container (S3 mode) or PVC
-        5. Create service
-        6. Create ingress with auth
-        7. Wait for pod to be ready
-        8. Return project URL to frontend
-        """
-        # Mock user and database
-        uuid4()
-        uuid4()
-
-        # This would be a real integration test with actual K8s cluster
-        # For now, we document the flow
-
-        steps = [
-            "API receives POST /projects",
-            "Create Project in database",
-            "Create Container in database",
-            "Call k8s_manager.create_dev_environment()",
-            "Namespace created: proj-{project_id}",
-            "NetworkPolicy created",
-            "PVC created (or S3 init container configured)",
-            "Deployment created",
-            "Service created",
-            "Ingress created with TLS + auth",
-            "Wait for pod Running status",
-            "Return {project_url: https://{slug}.tesslate.com}",
-        ]
-
-        assert len(steps) == 12
-
-    @pytest.mark.asyncio
-    async def test_multi_container_project_creation(self):
-        """
-        Test multi-container project creation flow.
-
-        Flow:
-        1. POST /projects with multi-container template
-        2. Create namespace
-        3. Create shared ReadWriteMany PVC
-        4. Create service containers (Postgres, Redis)
-        5. Create base containers (frontend, backend)
-        6. Create services for each container
-        7. Create ingress for each exposed container
-        8. Verify all pods running
-        """
-        steps = [
-            "API receives POST /projects",
-            "Create Project + multiple Containers in DB",
-            "Call KubernetesOrchestrator.start_project()",
-            "Namespace proj-{id} created",
-            "Shared PVC created (RWX)",
-            "Service containers deployed (Postgres first)",
-            "Base containers deployed (mount shared PVC)",
-            "Services created: frontend-service, backend-service",
-            "Ingresses created: {slug}.domain, {slug}-backend.domain",
-            "All pods reach Running status",
-            "DNS: backend-service.proj-{id}.svc.cluster.local",
-        ]
-
-        assert len(steps) == 11
+pytestmark = pytest.mark.unit
 
 
-@pytest.mark.integration
-@pytest.mark.kubernetes
-class TestShellSessionFlow:
-    """Test shell session connection flow."""
+# ---------------------------------------------------------------------------
+# Mock ApiException (avoids importing the real kubernetes package)
+# ---------------------------------------------------------------------------
 
-    @pytest.mark.asyncio
-    async def test_websocket_connection_flow(self):
-        """
-        Test WebSocket shell session connection.
 
-        Flow:
-        1. Frontend opens WebSocket to /ws/shell/{project_slug}
-        2. Backend authenticates user
-        3. Get project from database
-        4. PTY broker determines namespace from project_id
-        5. PTY broker finds pod in namespace
-        6. PTY broker creates exec session to pod
-        7. Output buffered and streamed to WebSocket
-        8. User commands sent via WebSocket -> stdin
-        """
-        flow = {
-            "frontend": "WebSocket connect /ws/shell/{slug}",
-            "auth": "Verify JWT token",
-            "db": "Get project by slug",
-            "pty_broker": "Get namespace = proj-{project_id}",
-            "k8s_api": "List pods with label app=dev-{project_id}",
-            "k8s_exec": "stream.exec(pod, /bin/bash, tty=True)",
-            "background_task": "Read stdout/stderr -> buffer",
-            "websocket": "Send buffer to client",
-            "client_input": "User types command",
-            "stdin": "Write to pod exec stdin",
+class MockApiException(Exception):
+    """Stand-in for kubernetes.client.rest.ApiException."""
+
+    def __init__(self, status=404, reason="Not Found"):
+        self.status = status
+        self.reason = reason
+        super().__init__(f"({status}) Reason: {reason}")
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def patch_to_thread(monkeypatch):
+    """Make asyncio.to_thread execute synchronously in tests."""
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
+
+
+@pytest.fixture(autouse=True)
+def patch_api_exception(monkeypatch):
+    """Swap the real ApiException for our mock everywhere the orchestrator catches it."""
+    monkeypatch.setattr(
+        "app.services.orchestration.kubernetes_orchestrator.ApiException",
+        MockApiException,
+    )
+
+
+@pytest.fixture
+def orchestrator(mock_settings):
+    """Create KubernetesOrchestrator with mocked dependencies."""
+    with patch(
+        "app.services.orchestration.kubernetes_orchestrator.get_k8s_client"
+    ) as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.get_project_namespace = Mock(side_effect=lambda pid: f"proj-{pid}")
+        mock_client.create_namespace_if_not_exists = AsyncMock()
+        mock_client.namespace_exists = AsyncMock(return_value=True)
+        mock_client.apply_network_policy = AsyncMock()
+        mock_client.create_pvc = AsyncMock()
+        mock_client.create_deployment = AsyncMock()
+        mock_client.create_service = AsyncMock()
+        mock_client.create_ingress = AsyncMock()
+        mock_client.delete_deployment = AsyncMock()
+        mock_client.delete_service = AsyncMock()
+        mock_client.delete_ingress = AsyncMock()
+        mock_client.wait_for_deployment_ready = AsyncMock()
+        mock_client.get_file_manager_pod = AsyncMock(return_value="file-manager-pod")
+        mock_client.copy_wildcard_tls_secret = AsyncMock()
+        mock_client.is_pod_ready = Mock(return_value=True)
+        mock_client.core_v1 = Mock()
+        mock_client.core_v1.delete_namespace = Mock()
+        mock_client.core_v1.read_namespace = Mock()
+        mock_client.core_v1.list_namespaced_pod = Mock()
+        mock_client.core_v1.list_namespaced_persistent_volume_claim = Mock()
+        mock_client.apps_v1 = Mock()
+        mock_client.apps_v1.read_namespaced_deployment = Mock()
+        mock_client._exec_in_pod = Mock(return_value="EXISTS:5")
+        mock_get_client.return_value = mock_client
+
+        orch = KubernetesOrchestrator()
+        orch._mock_client = mock_client  # expose for assertions
+        yield orch
+
+
+# ===========================================================================
+# TestKubernetesOrchestratorEnvironment
+# ===========================================================================
+
+
+class TestKubernetesOrchestratorEnvironment:
+    """Tests for ensure_project_environment / delete_project_environment."""
+
+    async def test_ensure_project_environment_creates_namespace_pvc_file_manager(
+        self, orchestrator
+    ):
+        """Verify namespace, network policy, PVC, file-manager deploy, and readiness wait."""
+        project_id = uuid4()
+        user_id = uuid4()
+        client = orchestrator._mock_client
+
+        ns = await orchestrator.ensure_project_environment(project_id, user_id)
+
+        assert ns == f"proj-{project_id}"
+        client.create_namespace_if_not_exists.assert_awaited_once()
+        client.apply_network_policy.assert_awaited_once()
+        client.create_pvc.assert_awaited_once()
+        # file-manager deployment created
+        client.create_deployment.assert_awaited_once()
+        client.wait_for_deployment_ready.assert_awaited_once_with(
+            deployment_name="file-manager",
+            namespace=f"proj-{project_id}",
+            timeout=60,
+        )
+
+    async def test_ensure_project_environment_restores_from_snapshot(self, orchestrator):
+        """Hibernated project should restore from snapshot; PVC should NOT be created from scratch."""
+        project_id = uuid4()
+        user_id = uuid4()
+        client = orchestrator._mock_client
+        mock_db = AsyncMock()
+
+        with patch.object(
+            orchestrator, "_restore_from_snapshot", new_callable=AsyncMock, return_value=True
+        ) as mock_restore:
+            await orchestrator.ensure_project_environment(
+                project_id, user_id, is_hibernated=True, db=mock_db
+            )
+
+            mock_restore.assert_awaited_once_with(
+                project_id, user_id, f"proj-{project_id}", mock_db
+            )
+            # PVC should NOT be created from scratch when restore succeeds
+            client.create_pvc.assert_not_awaited()
+
+    async def test_ensure_project_environment_fallback_empty_pvc(self, orchestrator):
+        """If snapshot restore fails, fall back to creating an empty PVC."""
+        project_id = uuid4()
+        user_id = uuid4()
+        client = orchestrator._mock_client
+        mock_db = AsyncMock()
+
+        with patch.object(
+            orchestrator, "_restore_from_snapshot", new_callable=AsyncMock, return_value=False
+        ):
+            await orchestrator.ensure_project_environment(
+                project_id, user_id, is_hibernated=True, db=mock_db
+            )
+
+            # Fallback: PVC created from scratch
+            client.create_pvc.assert_awaited_once()
+
+    async def test_delete_project_environment_saves_snapshot_then_deletes(self, orchestrator):
+        """save_snapshot=True should snapshot first, then delete namespace."""
+        project_id = uuid4()
+        user_id = uuid4()
+        client = orchestrator._mock_client
+        mock_db = AsyncMock()
+
+        with patch.object(
+            orchestrator, "_save_to_snapshot", new_callable=AsyncMock, return_value=True
+        ) as mock_save:
+            await orchestrator.delete_project_environment(
+                project_id, user_id, save_snapshot=True, db=mock_db
+            )
+
+            mock_save.assert_awaited_once_with(project_id, user_id, f"proj-{project_id}", mock_db)
+            client.core_v1.delete_namespace.assert_called_once_with(name=f"proj-{project_id}")
+
+    async def test_delete_project_environment_snapshot_failure_preserves_namespace(
+        self, orchestrator
+    ):
+        """If snapshot fails, raise RuntimeError and do NOT delete namespace."""
+        project_id = uuid4()
+        user_id = uuid4()
+        client = orchestrator._mock_client
+        mock_db = AsyncMock()
+
+        with patch.object(
+            orchestrator, "_save_to_snapshot", new_callable=AsyncMock, return_value=False
+        ):
+            with pytest.raises(RuntimeError, match="Snapshot creation failed"):
+                await orchestrator.delete_project_environment(
+                    project_id, user_id, save_snapshot=True, db=mock_db
+                )
+
+            # Namespace must NOT be deleted
+            client.core_v1.delete_namespace.assert_not_called()
+
+    async def test_delete_project_environment_without_snapshot(self, orchestrator):
+        """save_snapshot=False should delete namespace immediately, no snapshot."""
+        project_id = uuid4()
+        user_id = uuid4()
+        client = orchestrator._mock_client
+
+        with patch.object(orchestrator, "_save_to_snapshot") as mock_save:
+            await orchestrator.delete_project_environment(project_id, user_id, save_snapshot=False)
+
+            mock_save.assert_not_called()
+            client.core_v1.delete_namespace.assert_called_once_with(name=f"proj-{project_id}")
+
+
+# ===========================================================================
+# TestKubernetesOrchestratorFileOps
+# ===========================================================================
+
+
+class TestKubernetesOrchestratorFileOps:
+    """Tests for _build_volume_path (static method — no mocking needed)."""
+
+    def test_build_volume_path_simple(self):
+        result = KubernetesOrchestrator._build_volume_path("src/App.tsx")
+        assert result == "src/App.tsx"
+
+    def test_build_volume_path_with_subdir(self):
+        result = KubernetesOrchestrator._build_volume_path("App.tsx", subdir="frontend")
+        assert result == "frontend/App.tsx"
+
+    def test_build_volume_path_prevents_traversal(self):
+        with pytest.raises(ValueError, match="escapes volume boundary"):
+            KubernetesOrchestrator._build_volume_path("../../etc/passwd")
+
+    def test_build_volume_path_normalizes_dots(self):
+        result = KubernetesOrchestrator._build_volume_path("./src/../lib/file.ts")
+        assert result == "lib/file.ts"
+
+    def test_build_volume_path_root_subdir(self):
+        result = KubernetesOrchestrator._build_volume_path("file.ts", subdir=".")
+        assert result == "file.ts"
+
+
+# ===========================================================================
+# TestKubernetesOrchestratorContainerLifecycle
+# ===========================================================================
+
+
+class TestKubernetesOrchestratorContainerLifecycle:
+    """Tests for start_container, stop_container, get_container_status."""
+
+    async def test_start_container_delegates_to_compute_manager(self, orchestrator):
+        """start_container should delegate to ComputeManager.start_environment."""
+        project = Mock()
+        project.id = uuid4()
+        project.slug = "my-proj"
+        container = Mock()
+        container.name = "frontend"
+        container.directory = "."
+        container.container_type = "base"
+        mock_db = AsyncMock()
+
+        mock_cm = AsyncMock()
+        mock_cm.start_environment = AsyncMock(
+            return_value={"frontend": "https://my-proj-frontend.example.com"}
+        )
+
+        with (
+            patch(
+                "app.services.compute_manager.get_compute_manager",
+                return_value=mock_cm,
+            ),
+            patch(
+                "app.services.compute_manager.resolve_k8s_container_dir",
+                return_value="frontend",
+            ),
+        ):
+            result = await orchestrator.start_container(
+                project, container, [container], [], uuid4(), mock_db
+            )
+
+        assert result["status"] == "running"
+        assert result["url"] == "https://my-proj-frontend.example.com"
+        mock_cm.start_environment.assert_awaited_once()
+
+    async def test_stop_container_base_deletes_k8s_resources(self, orchestrator):
+        """Stopping a base container should delete deployment, service, AND ingress."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        await orchestrator.stop_container(
+            project_slug="proj",
+            project_id=project_id,
+            container_name="frontend",
+            user_id=uuid4(),
+            container_type="base",
+        )
+
+        ns = f"proj-{project_id}"
+        client.delete_deployment.assert_awaited_once_with("dev-frontend", ns)
+        client.delete_service.assert_awaited_once_with("dev-frontend", ns)
+        client.delete_ingress.assert_awaited_once_with("dev-frontend", ns)
+
+    async def test_stop_container_service_deletes_without_ingress(self, orchestrator):
+        """Stopping a service container should delete deployment + service, NOT ingress."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        await orchestrator.stop_container(
+            project_slug="proj",
+            project_id=project_id,
+            container_name="Postgres",
+            user_id=uuid4(),
+            container_type="service",
+            service_slug="postgres",
+        )
+
+        ns = f"proj-{project_id}"
+        client.delete_deployment.assert_awaited_once_with("svc-postgres", ns)
+        client.delete_service.assert_awaited_once_with("svc-postgres", ns)
+        client.delete_ingress.assert_not_awaited()
+
+    async def test_get_container_status_running(self, orchestrator):
+        """Running deployment (ready_replicas=1) should report status 'running'."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        mock_deployment = Mock()
+        mock_deployment.status.ready_replicas = 1
+        mock_deployment.status.replicas = 1
+        client.apps_v1.read_namespaced_deployment.return_value = mock_deployment
+
+        result = await orchestrator.get_container_status(
+            project_slug="proj",
+            project_id=project_id,
+            container_name="frontend",
+            user_id=uuid4(),
+        )
+
+        assert result["status"] == "running"
+        assert result["ready"] is True
+
+    async def test_get_container_status_stopped(self, orchestrator):
+        """404 on all candidate deployments should report status 'stopped'."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        client.apps_v1.read_namespaced_deployment.side_effect = MockApiException(status=404)
+
+        result = await orchestrator.get_container_status(
+            project_slug="proj",
+            project_id=project_id,
+            container_name="frontend",
+            user_id=uuid4(),
+        )
+
+        assert result["status"] == "stopped"
+
+    async def test_get_container_status_file_manager(self, orchestrator):
+        """container_name=None should check file-manager deployment."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        mock_deployment = Mock()
+        mock_deployment.status.ready_replicas = 1
+        mock_deployment.status.replicas = 1
+        client.apps_v1.read_namespaced_deployment.return_value = mock_deployment
+
+        result = await orchestrator.get_container_status(
+            project_slug="proj",
+            project_id=project_id,
+            container_name=None,
+            user_id=uuid4(),
+        )
+
+        assert result["status"] == "running"
+        client.apps_v1.read_namespaced_deployment.assert_called_once_with(
+            name="file-manager",
+            namespace=f"proj-{project_id}",
+        )
+
+
+# ===========================================================================
+# TestContainerFileInitialization
+# ===========================================================================
+
+
+class TestContainerFileInitialization:
+    """Tests for initialize_container_files."""
+
+    async def test_initialize_container_files_with_git_url(self, orchestrator):
+        """With a git_url, should check existence then clone."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        # First exec call: directory check → NOT_EXISTS
+        # Second exec call: git clone → success
+        # Third exec call: verify file count → "10"
+        client._exec_in_pod = Mock(side_effect=["NOT_EXISTS", "Cloning into...", "10"])
+
+        with patch(
+            "app.services.orchestration.kubernetes_orchestrator.generate_git_clone_script",
+            return_value="git clone ...",
+        ) as mock_gen:
+            result = await orchestrator.initialize_container_files(
+                project_id=project_id,
+                user_id=uuid4(),
+                container_id=uuid4(),
+                container_directory="frontend",
+                git_url="https://github.com/example/repo.git",
+                git_branch="main",
+            )
+
+        assert result is True
+        mock_gen.assert_called_once_with(
+            git_url="https://github.com/example/repo.git",
+            branch="main",
+            target_dir="/app/frontend",
+            install_deps=False,
+        )
+
+    async def test_initialize_container_files_without_git_creates_dir(self, orchestrator):
+        """Without git_url, should mkdir -p the target directory."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        # First exec: directory check → NOT_EXISTS
+        # Second exec: mkdir → ""
+        client._exec_in_pod = Mock(side_effect=["NOT_EXISTS", ""])
+
+        result = await orchestrator.initialize_container_files(
+            project_id=project_id,
+            user_id=uuid4(),
+            container_id=uuid4(),
+            container_directory="frontend",
+            git_url=None,
+        )
+
+        assert result is True
+        # The second _exec_in_pod call should be the mkdir
+        mkdir_call = client._exec_in_pod.call_args_list[1]
+        cmd_args = mkdir_call[0][3]  # 4th positional arg is the command list
+        cmd_str = " ".join(cmd_args)
+        assert "mkdir -p" in cmd_str
+
+    async def test_initialize_container_files_skips_existing(self, orchestrator):
+        """If directory exists with >= 3 files, skip clone and return True."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        # Single exec call: directory check → EXISTS with 10 files
+        client._exec_in_pod = Mock(return_value="EXISTS:10")
+
+        result = await orchestrator.initialize_container_files(
+            project_id=project_id,
+            user_id=uuid4(),
+            container_id=uuid4(),
+            container_directory="frontend",
+            git_url="https://github.com/example/repo.git",
+        )
+
+        assert result is True
+        # Only the check call, no clone call
+        assert client._exec_in_pod.call_count == 1
+
+
+# ===========================================================================
+# TestHibernationViaVolumeSnapshots
+# ===========================================================================
+
+
+class TestHibernationViaVolumeSnapshots:
+    """Tests for _save_to_snapshot, _restore_from_snapshot."""
+
+    async def test_save_to_snapshot_creates_and_waits(self, orchestrator):
+        """Should create a snapshot and wait for it to become ready."""
+        project_id = uuid4()
+        user_id = uuid4()
+        namespace = f"proj-{project_id}"
+        mock_db = AsyncMock()
+
+        mock_sm = AsyncMock()
+        mock_snapshot = Mock(id=uuid4(), snapshot_name="snap-123")
+        mock_sm.create_snapshot = AsyncMock(return_value=(mock_snapshot, None))
+        mock_sm.wait_for_snapshot_ready = AsyncMock(return_value=(True, None))
+
+        # Mock PVC listing to return project-storage
+        mock_pvc = Mock()
+        mock_pvc.metadata.name = "project-storage"
+        mock_pvc.metadata.labels = {}
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        orchestrator._mock_client.core_v1.list_namespaced_persistent_volume_claim.return_value = (
+            mock_pvc_list
+        )
+
+        with (
+            patch.object(
+                orchestrator, "_is_project_initialized", new_callable=AsyncMock, return_value=True
+            ),
+            patch(
+                "app.services.orchestration.kubernetes_orchestrator.get_snapshot_manager",
+                return_value=mock_sm,
+            ),
+        ):
+            result = await orchestrator._save_to_snapshot(project_id, user_id, namespace, mock_db)
+
+        assert result is True
+        mock_sm.create_snapshot.assert_awaited_once()
+        mock_sm.wait_for_snapshot_ready.assert_awaited_once()
+
+    async def test_save_to_snapshot_skips_uninitialized(self, orchestrator):
+        """If project is not initialized (no files), skip snapshot, return True."""
+        project_id = uuid4()
+        user_id = uuid4()
+        namespace = f"proj-{project_id}"
+        mock_db = AsyncMock()
+
+        mock_sm = AsyncMock()
+
+        # Mock PVC listing: only project-storage, no service PVCs
+        mock_pvc = Mock()
+        mock_pvc.metadata.name = "project-storage"
+        mock_pvc.metadata.labels = {}
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        orchestrator._mock_client.core_v1.list_namespaced_persistent_volume_claim.return_value = (
+            mock_pvc_list
+        )
+
+        with (
+            patch.object(
+                orchestrator, "_is_project_initialized", new_callable=AsyncMock, return_value=False
+            ),
+            patch(
+                "app.services.orchestration.kubernetes_orchestrator.get_snapshot_manager",
+                return_value=mock_sm,
+            ),
+        ):
+            result = await orchestrator._save_to_snapshot(project_id, user_id, namespace, mock_db)
+
+        # Returns True so namespace can be cleaned up (no data to preserve)
+        assert result is True
+        mock_sm.create_snapshot.assert_not_awaited()
+
+    async def test_restore_from_snapshot_delegates(self, orchestrator):
+        """Restore should delegate to snapshot_manager.restore_from_snapshot."""
+        project_id = uuid4()
+        user_id = uuid4()
+        namespace = f"proj-{project_id}"
+        mock_db = AsyncMock()
+
+        mock_sm = AsyncMock()
+        mock_sm.has_existing_snapshot = AsyncMock(return_value=True)
+        mock_sm.restore_from_snapshot = AsyncMock(return_value=(True, None))
+        mock_sm.get_latest_ready_snapshots_by_pvc = AsyncMock(return_value={})
+
+        with patch(
+            "app.services.orchestration.kubernetes_orchestrator.get_snapshot_manager",
+            return_value=mock_sm,
+        ):
+            result = await orchestrator._restore_from_snapshot(
+                project_id, user_id, namespace, mock_db
+            )
+
+        assert result is True
+        mock_sm.restore_from_snapshot.assert_awaited_once()
+
+
+# ===========================================================================
+# TestProjectStatus
+# ===========================================================================
+
+
+class TestProjectStatus:
+    """Tests for get_project_status."""
+
+    async def test_get_project_status_running(self, orchestrator):
+        """With file-manager and dev-container pods, status should be 'running'."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        fm_pod = Mock()
+        fm_pod.metadata.labels = {
+            "tesslate.io/component": "file-manager",
         }
+        fm_pod.status.phase = "Running"
 
-        assert len(flow) == 10
-
-
-@pytest.mark.integration
-@pytest.mark.kubernetes
-class TestAgentToolCallFlow:
-    """Test agent making tool calls to pod."""
-
-    @pytest.mark.asyncio
-    async def test_agent_read_file_flow(self):
-        """
-        Test agent reading file from pod.
-
-        Flow:
-        1. Agent decides to read file
-        2. Agent calls read_file tool
-        3. Tool determines deployment_mode = kubernetes
-        4. Get K8s manager
-        5. Manager determines namespace from project_id
-        6. Manager finds pod in namespace
-        7. Manager executes: cat /app/{file_path}
-        8. Return stdout to agent
-        9. Agent processes content
-        """
-        flow_steps = [
-            "Agent: <tool_call>read_file</tool_call>",
-            "Tool: Check deployment_mode",
-            "Tool: get_k8s_manager()",
-            "K8s: namespace = proj-{project_id}",
-            "K8s: Find pod by label selector",
-            "K8s: execute_command('cat /app/src/App.tsx')",
-            "K8s API: Returns stdout",
-            "Tool: Return content to agent",
-            "Agent: Process file content",
-        ]
-
-        assert len(flow_steps) == 9
-
-    @pytest.mark.asyncio
-    async def test_agent_write_file_flow(self):
-        """
-        Test agent writing file to pod.
-
-        Flow:
-        1. Agent generates code
-        2. Agent calls write_file tool
-        3. Tool uses heredoc to avoid escaping issues
-        4. K8s manager executes: mkdir -p && cat > file <<EOF
-        5. File written to pod filesystem
-        6. Return success to agent
-        """
-        flow_steps = [
-            "Agent: Generate new component code",
-            "Agent: <tool_call>write_file</tool_call>",
-            "Tool: Validate path (prevent traversal)",
-            "K8s: Build heredoc command",
-            "K8s: execute_command(mkdir -p && cat > ...)",
-            "Pod: File written to /app/...",
-            "Tool: Return success=True",
-            "Agent: Continue with next task",
-        ]
-
-        assert len(flow_steps) == 8
-
-
-@pytest.mark.integration
-@pytest.mark.kubernetes
-class TestHibernationFlow:
-    """Test project hibernation and wake-up."""
-
-    @pytest.mark.asyncio
-    async def test_scale_to_zero_hibernation(self):
-        """
-        Test scale-to-zero hibernation (persistent PVC mode).
-
-        Flow:
-        1. Cleanup job checks last_accessed_at
-        2. Project idle > 15 minutes
-        3. Scale deployment to 0 replicas
-        4. Pod terminates gracefully
-        5. PVC persists data
-        6. User requests project
-        7. Scale deployment to 1 replica
-        8. New pod starts, mounts PVC
-        9. Project accessible again
-        """
-        hibernation_steps = [
-            "Cleanup: Check last_accessed_at",
-            "Idle > 15 min threshold",
-            "Scale deployment replicas: 1 -> 0",
-            "Pod receives SIGTERM",
-            "Pod terminates",
-            "PVC remains (data persists)",
-            "---Wake Up---",
-            "User: Click project",
-            "API: Scale deployment replicas: 0 -> 1",
-            "K8s: Schedule new pod",
-            "Pod: Mount PVC at /app",
-            "Pod: Running",
-            "User: Access project",
-        ]
-
-        assert len(hibernation_steps) == 13
-
-    @pytest.mark.asyncio
-    async def test_s3_hibernation_flow(self):
-        """
-        Test S3 hibernation (ephemeral storage mode).
-
-        Flow:
-        1. Cleanup job checks last_accessed_at
-        2. Project idle > 30 minutes
-        3. Delete deployment (triggers preStop hook)
-        4. preStop: Zip /app directory
-        5. preStop: Upload to S3 bucket
-        6. Pod terminates, PVC deleted
-        7. User requests project
-        8. Create new deployment with init container
-        9. Init: Download from S3
-        10. Init: Extract to /app
-        11. Main container starts
-        12. Project accessible
-        """
-        s3_steps = [
-            "Cleanup: Check last_accessed_at",
-            "Idle > 30 min (S3 threshold)",
-            "Delete deployment",
-            "preStop hook triggered",
-            "preStop: cd /app && zip -r /tmp/project.zip .",
-            "preStop: aws s3 cp /tmp/project.zip s3://.../latest.zip",
-            "Pod: Waits up to 120s for upload",
-            "Pod: Terminates",
-            "PVC: Deleted",
-            "---Wake Up---",
-            "User: Click project",
-            "API: Create deployment with init container",
-            "Init: aws s3 cp s3://.../latest.zip /tmp/",
-            "Init: unzip -q /tmp/latest.zip -d /app",
-            "Init: Complete",
-            "Main container: Starts with /app populated",
-            "Pod: Running",
-            "User: Access project with restored state",
-        ]
-
-        assert len(s3_steps) == 18
-
-
-@pytest.mark.integration
-@pytest.mark.kubernetes
-class TestNetworkingFlow:
-    """Test networking and ingress flow."""
-
-    @pytest.mark.asyncio
-    async def test_ingress_request_flow(self):
-        """
-        Test HTTP request through ingress to pod.
-
-        Flow:
-        1. User browses to https://{slug}.tesslate.com
-        2. DNS resolves to ingress controller IP
-        3. Request hits ingress-nginx
-        4. Nginx checks auth annotation
-        5. Subrequest to auth service: /api/auth/verify-access
-        6. Auth service validates JWT, checks user owns project
-        7. Auth returns 200 OK
-        8. Nginx routes to service: {deployment}-service:80
-        9. Service load-balances to pod
-        10. Pod responds
-        11. Response flows back through nginx to user
-        """
-        request_flow = [
-            "Browser: GET https://my-app.tesslate.com",
-            "DNS: Resolve to LoadBalancer IP",
-            "Ingress: Receive request",
-            "Ingress: Check auth annotation",
-            "Nginx: Subrequest to your-domain.com/api/auth/verify-access",
-            "Auth: Validate token + project ownership",
-            "Auth: Return 200 OK (or 403)",
-            "Nginx: Route to my-app-service.proj-123.svc.cluster.local:80",
-            "Service: Select pod (load balance)",
-            "Pod: Process request on port 5173",
-            "Pod: Return HTML",
-            "Nginx: Add CORS headers",
-            "Browser: Render page",
-        ]
-
-        assert len(request_flow) == 13
-
-    @pytest.mark.asyncio
-    async def test_websocket_upgrade_flow(self):
-        """
-        Test WebSocket upgrade for HMR.
-
-        Flow:
-        1. Browser requests WebSocket upgrade
-        2. Ingress sees Upgrade header
-        3. Nginx configured for WebSocket (proxy_http_version 1.1)
-        4. Upgrade connection to pod
-        5. Bidirectional communication established
-        6. HMR works
-        """
-        ws_flow = [
-            "Browser: Request Upgrade: websocket",
-            "Ingress: Detect Upgrade header",
-            "Nginx: proxy_http_version 1.1",
-            "Nginx: proxy_set_header Upgrade $http_upgrade",
-            "Nginx: Forward to pod",
-            "Pod: Accept WebSocket upgrade",
-            "WebSocket: Established",
-            "Vite HMR: Hot reload works",
-        ]
-
-        assert len(ws_flow) == 8
-
-
-@pytest.mark.integration
-@pytest.mark.kubernetes
-class TestMultiContainerCommunication:
-    """Test inter-container communication."""
-
-    @pytest.mark.asyncio
-    async def test_frontend_calls_backend(self):
-        """
-        Test frontend container calling backend via service DNS.
-
-        Flow:
-        1. Frontend makes API call to backend
-        2. Uses service DNS: http://backend-service.proj-{id}.svc.cluster.local:80
-        3. K8s DNS resolves service
-        4. Request routed to backend pod
-        5. Backend processes request
-        6. Response returned to frontend
-        """
-        communication_flow = [
-            "Frontend pod: fetch('http://backend-service.proj-123.svc.cluster.local/api/data')",
-            "K8s DNS: Resolve backend-service to ClusterIP",
-            "Service: Route to backend pod",
-            "Backend pod: Process GET /api/data",
-            "Backend: Query postgres-service for data",
-            "Postgres: Return data",
-            "Backend: Return JSON",
-            "Frontend: Receive response",
-        ]
-
-        assert len(communication_flow) == 8
-
-    @pytest.mark.asyncio
-    async def test_backend_connects_to_postgres(self):
-        """
-        Test backend connecting to Postgres service.
-
-        Connection string:
-        postgresql://postgres-service.proj-{id}.svc.cluster.local:5432/mydb
-        """
-        db_connection = {
-            "host": "postgres-service.proj-123.svc.cluster.local",
-            "port": 5432,
-            "database": "mydb",
-            "user": "postgres",
-            "password": "from_env_var",
+        dev_pod = Mock()
+        dev_pod.metadata.labels = {
+            "tesslate.io/component": "dev-container",
+            "tesslate.io/container-directory": "frontend",
+            "tesslate.io/container-id": str(uuid4()),
         }
+        dev_pod.status.phase = "Running"
 
-        assert "postgres-service" in db_connection["host"]
-        assert "svc.cluster.local" in db_connection["host"]
+        pod_list = Mock()
+        pod_list.items = [fm_pod, dev_pod]
+        client.core_v1.list_namespaced_pod.return_value = pod_list
 
+        result = await orchestrator.get_project_status("my-proj", project_id)
 
-@pytest.mark.integration
-@pytest.mark.kubernetes
-class TestCleanupFlow:
-    """Test project deletion and cleanup."""
+        assert result["status"] == "running"
+        assert "file-manager" in result["containers"]
+        assert "frontend" in result["containers"]
 
-    @pytest.mark.asyncio
-    async def test_delete_project_flow(self):
-        """
-        Test complete project deletion.
+    async def test_get_project_status_stopped(self, orchestrator):
+        """With only file-manager pod (no dev containers), status should be 'stopped'."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
 
-        Flow:
-        1. User clicks delete project
-        2. API: DELETE /projects/{slug}
-        3. Delete from database
-        4. Delete K8s resources
-        5. Delete namespace (cascades to all resources)
-        6. Confirm deletion
-        """
-        deletion_steps = [
-            "Frontend: Confirm delete",
-            "API: DELETE /projects/{slug}",
-            "DB: Delete project + containers",
-            "K8s: Delete namespace proj-{id}",
-            "K8s: Cascade delete deployments",
-            "K8s: Cascade delete services",
-            "K8s: Cascade delete ingresses",
-            "K8s: Cascade delete PVCs",
-            "K8s: Cascade delete network policy",
-            "Namespace: Terminating -> Deleted",
-            "API: Return 204 No Content",
-            "Frontend: Redirect to projects list",
-        ]
-
-        assert len(deletion_steps) == 12
-
-    @pytest.mark.asyncio
-    async def test_cleanup_orphaned_resources(self):
-        """
-        Test cleanup job removes orphaned resources.
-
-        Tier 1: Scale to 0 after 15 min idle
-        Tier 2: Delete after 24h at 0 replicas
-        """
-        cleanup_logic = {
-            "tier1_threshold": 15,  # minutes
-            "tier1_action": "scale_to_zero",
-            "tier2_threshold": 24,  # hours
-            "tier2_action": "delete_resources",
+        fm_pod = Mock()
+        fm_pod.metadata.labels = {
+            "tesslate.io/component": "file-manager",
         }
+        fm_pod.status.phase = "Running"
 
-        assert cleanup_logic["tier1_action"] == "scale_to_zero"
-        assert cleanup_logic["tier2_action"] == "delete_resources"
+        pod_list = Mock()
+        pod_list.items = [fm_pod]
+        client.core_v1.list_namespaced_pod.return_value = pod_list
+
+        result = await orchestrator.get_project_status("my-proj", project_id)
+
+        assert result["status"] == "stopped"
+
+    async def test_get_project_status_not_found(self, orchestrator):
+        """If namespace doesn't exist (404), status should be 'not_found'."""
+        project_id = uuid4()
+        client = orchestrator._mock_client
+
+        client.core_v1.read_namespace.side_effect = MockApiException(status=404)
+
+        result = await orchestrator.get_project_status("my-proj", project_id)
+
+        assert result["status"] == "not_found"
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+# ===========================================================================
+# TestSanitizeName
+# ===========================================================================
+
+
+class TestSanitizeName:
+    """Tests for _sanitize_name."""
+
+    def test_sanitize_basic(self, orchestrator):
+        assert orchestrator._sanitize_name("My App") == "my-app"
+
+    def test_sanitize_dots(self, orchestrator):
+        assert orchestrator._sanitize_name("my.app") == "my-app"
+
+    def test_sanitize_truncation(self, orchestrator):
+        long_name = "a" * 100
+        result = orchestrator._sanitize_name(long_name)
+        assert len(result) == 59

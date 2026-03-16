@@ -35,32 +35,24 @@ import logging
 import os
 import shlex
 from collections.abc import AsyncIterator
-from datetime import UTC
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
 
-from kubernetes import client
 from kubernetes.client.rest import ApiException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import grpc
 import grpc.aio
 
-from ..secret_manager_env import build_env_overrides
 from ..snapshot_manager import get_snapshot_manager
 from .base import BaseOrchestrator
 from .deployment_mode import DeploymentMode
 from .kubernetes.client import KubernetesClient, get_k8s_client
 from .kubernetes.helpers import (
-    create_container_deployment,
     create_file_manager_deployment,
-    create_ingress_manifest,
     create_network_policy_manifest,
     create_pvc_manifest,
-    create_service_container_deployment,
-    create_service_manifest,
-    create_service_pvc_manifest,
     generate_git_clone_script,
 )
 
@@ -122,7 +114,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         return self.k8s_client.get_project_namespace(project_id)
 
     # =========================================================================
-    # V2 VOLUME-FIRST HELPERS
+    # VOLUME-FIRST HELPERS
     # =========================================================================
 
     async def _get_fileops_client(self, node_name: str):
@@ -138,7 +130,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
     async def _get_project_volume_info(
         self, project_id: UUID
     ) -> tuple[str, str | None, str | None]:
-        """Look up v2 volume fields from DB.
+        """Look up volume fields from DB.
 
         Returns: (volume_state, volume_id, node_name)
         """
@@ -156,7 +148,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
             row = result.one_or_none()
             if row:
                 return row.volume_state, row.volume_id, row.node_name
-            return "legacy", None, None
+            raise ValueError(f"Project {project_id} not found")
 
     @staticmethod
     def _build_volume_path(file_path: str, subdir: str | None = None) -> str:
@@ -183,19 +175,6 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         # Return path relative to the anchor (strip the /vol prefix)
         return str(normalized.relative_to(anchor))
-
-    def _is_v2_project(
-        self,
-        volume_state: str | None,
-        volume_id: str | None,
-        node_name: str | None,
-    ) -> bool:
-        """Check if a project uses v2 volume-first storage.
-
-        node_name may be None for remote_only volumes (evicted to S3).
-        The v2 path handles restore, so we must NOT require node_name.
-        """
-        return volume_state not in ("legacy", None) and volume_id is not None
 
     async def _ensure_volume_accessible(
         self,
@@ -253,7 +232,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
     async def _get_tesslate_config_from_volume(
         self, volume_id: str, node_name: str, container_directory: str
     ) -> Any | None:
-        """Read and parse .tesslate/config.json via FileOps (v2 path)."""
+        """Read and parse .tesslate/config.json via FileOps."""
         from ...services.base_config_parser import parse_tesslate_config
 
         config_path = (
@@ -274,19 +253,17 @@ class KubernetesOrchestrator(BaseOrchestrator):
         project,
         container_directory: str,
         raw_directory: str | None,
-        namespace: str,
+        _namespace: str,
         db: AsyncSession,
-        # v2 routing hints
+        # Volume routing hints
         volume_id: str | None = None,
         node_name: str | None = None,
         volume_state: str | None = None,
     ) -> None:
         """
-        Sync ProjectFile records from the database to the PVC.
+        Sync ProjectFile records from the database to the PVC via FileOps.
 
         Used for forked projects and bases without a git_repo_url.
-        Files are written via the file-manager pod (uid 1000) so
-        ownership is correct for the dev container.
 
         For multi-container projects, only files belonging to this
         container are synced (matched by raw_directory prefix).
@@ -295,7 +272,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
             project: Project model
             container_directory: Sanitized K8s directory name (target on PVC)
             raw_directory: Original container.directory (".", "", None, or "frontend")
-            namespace: K8s namespace
+            _namespace: K8s namespace (unused - volume routing uses FileOps)
             db: Database session
         """
         from sqlalchemy import select
@@ -330,68 +307,27 @@ class KubernetesOrchestrator(BaseOrchestrator):
             )
             return
 
-        # v2: write via FileOps
-        if self._is_v2_project(volume_state, volume_id, node_name):
-            volume_id, node_name = await self._ensure_volume_accessible(
-                project.id, volume_state, volume_id, node_name
-            )
-            async with await self._get_fileops_client(node_name) as client:
-                base_path = container_directory if container_directory != "." else ""
-                if base_path:
-                    await client.mkdir_all(volume_id, base_path)
-                synced = 0
-                for rel_path, content in files_to_sync:
-                    try:
-                        vol_path = f"{base_path}/{rel_path}" if base_path else rel_path
-                        data = content.encode("utf-8") if isinstance(content, str) else content
-                        await client.write_file(volume_id, vol_path, data)
-                        synced += 1
-                    except Exception as e:
-                        logger.warning(f"[K8S] Failed to sync {rel_path} via FileOps: {e}")
-            logger.info(
-                f"[K8S] Synced {synced}/{len(files_to_sync)} files via FileOps "
-                f"for {container_directory}"
-            )
-            return
+        if volume_state is None and volume_id is None:
+            volume_state, volume_id, node_name = await self._get_project_volume_info(project.id)
 
-        # v1: pod-exec path
-        pod_name = await self.k8s_client.get_file_manager_pod(namespace)
-        if not pod_name:
-            logger.error("[K8S] File-manager pod not found — cannot sync DB files to PVC")
-            return
-
-        base_path = "/app" if container_directory in (".", "") else f"/app/{container_directory}"
-
-        # Create the directory first
-        await asyncio.to_thread(
-            self.k8s_client._exec_in_pod,
-            pod_name,
-            namespace,
-            "file-manager",
-            ["/bin/sh", "-c", f"mkdir -p '{base_path}'"],
-            10,
+        volume_id, node_name = await self._ensure_volume_accessible(
+            project.id, volume_state, volume_id, node_name
         )
-
-        synced = 0
-        for rel_path, content in files_to_sync:
-            try:
-                pod_path = f"{base_path}/{rel_path}"
-                data = content.encode("utf-8") if isinstance(content, str) else content
-                await asyncio.to_thread(
-                    self.k8s_client._write_bytes_to_pod,
-                    pod_name,
-                    namespace,
-                    "file-manager",
-                    data,
-                    pod_path,
-                    timeout=30,
-                )
-                synced += 1
-            except Exception as e:
-                logger.warning(f"[K8S] Failed to sync {rel_path}: {e}")
-
+        async with await self._get_fileops_client(node_name) as client:
+            base_path = container_directory if container_directory != "." else ""
+            if base_path:
+                await client.mkdir_all(volume_id, base_path)
+            synced = 0
+            for rel_path, content in files_to_sync:
+                try:
+                    vol_path = f"{base_path}/{rel_path}" if base_path else rel_path
+                    data = content.encode("utf-8") if isinstance(content, str) else content
+                    await client.write_file(volume_id, vol_path, data)
+                    synced += 1
+                except Exception as e:
+                    logger.warning(f"[K8S] Failed to sync {rel_path} via FileOps: {e}")
         logger.info(
-            f"[K8S] Synced {synced}/{len(files_to_sync)} files from DB to PVC "
+            f"[K8S] Synced {synced}/{len(files_to_sync)} files via FileOps "
             f"for {container_directory}"
         )
 
@@ -598,6 +534,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
         Returns:
             True if successful
         """
+        _ = container_id  # Part of interface; unused in K8s mode
+
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
         target_dir = "/app" if container_directory in (".", "") else f"/app/{container_directory}"
@@ -728,206 +666,6 @@ fi
     # CONTAINER LIFECYCLE (START/STOP)
     # =========================================================================
 
-    async def _start_service_container(
-        self,
-        project,
-        container,
-        all_containers: list,
-        user_id: UUID,
-        db: AsyncSession,
-    ) -> dict[str, Any]:
-        """
-        Start a service container (PostgreSQL, Redis, MongoDB, etc.).
-
-        Service containers use their actual Docker images (not devserver),
-        have their own PVC for data, and are internal-only (no Ingress).
-
-        Args:
-            project: Project model
-            container: Container model (container_type == "service")
-            all_containers: All containers in project
-            user_id: User UUID
-            db: Database session
-
-        Returns:
-            Dict with status and internal service hostname
-        """
-        from ...services.service_definitions import ServiceType, get_service
-
-        project_id = str(project.id)
-        namespace = self._get_namespace(project_id)
-        container_directory = self._sanitize_name(container.service_slug or container.name)
-
-        logger.info(
-            f"[K8S] Starting service container '{container_directory}' "
-            f"(slug={container.service_slug}) in namespace {namespace}"
-        )
-
-        # Import WebSocket manager for status updates
-        from ...routers.chat import get_chat_connection_manager
-
-        ws_manager = get_chat_connection_manager()
-
-        async def send_progress(phase: str, message: str, progress: int, **kwargs):
-            try:
-                status = {
-                    "container_status": "starting",
-                    "phase": phase,
-                    "message": message,
-                    "progress": progress,
-                    **kwargs,
-                }
-                await ws_manager.send_status_update(user_id, project.id, status)
-            except Exception:
-                pass
-
-        try:
-            service_def = get_service(container.service_slug)
-            if not service_def:
-                raise RuntimeError(
-                    f"Service definition not found for slug: {container.service_slug}"
-                )
-
-            # Skip external-only services
-            if service_def.service_type == ServiceType.EXTERNAL:
-                logger.info(f"[K8S] Skipping external service '{container.service_slug}'")
-                return {
-                    "status": "connected",
-                    "container_name": container.name,
-                    "container_directory": container_directory,
-                    "url": None,
-                }
-
-            is_external = getattr(container, "deployment_mode", "container") == "external"
-            if is_external:
-                logger.info(
-                    f"[K8S] Skipping externally-deployed service '{container.service_slug}'"
-                )
-                return {
-                    "status": "connected",
-                    "container_name": container.name,
-                    "container_directory": container_directory,
-                    "url": None,
-                }
-
-            await send_progress("creating_environment", "Creating project environment...", 10)
-
-            # Ensure namespace exists
-            namespace_exists = await self.k8s_client.namespace_exists(namespace)
-            if not namespace_exists:
-                is_hibernated = project.environment_status == "hibernated"
-                await self.ensure_project_environment(
-                    project.id,
-                    user_id,
-                    is_hibernated=is_hibernated,
-                    db=db,
-                    storage_class_override=getattr(project, "template_storage_class", None),
-                )
-                if is_hibernated:
-                    project.environment_status = "active"
-                    project.hibernated_at = None
-                    await db.commit()
-
-            await send_progress("creating_storage", "Creating service storage...", 30)
-
-            # Create PVC for service data (separate from project PVC)
-            if service_def.volumes:
-                svc_pvc = create_service_pvc_manifest(
-                    namespace=namespace,
-                    project_id=project.id,
-                    user_id=user_id,
-                    container_directory=container_directory,
-                    storage_class=self.settings.k8s_storage_class,
-                    size="1Gi",
-                )
-                await self.k8s_client.create_pvc(svc_pvc, namespace)
-
-            await send_progress("starting_service", f"Starting {service_def.name}...", 50)
-
-            # Build env overrides from secret manager
-            env_overrides = await build_env_overrides(db, project.id, [container])
-            extra_env = env_overrides.get(container.id, {})
-            merged_env = {**service_def.environment_vars, **extra_env}
-
-            service_port = service_def.internal_port or service_def.default_port or 5432
-
-            # Create Deployment for the service
-            deployment = create_service_container_deployment(
-                namespace=namespace,
-                project_id=project.id,
-                user_id=user_id,
-                container_id=container.id,
-                container_directory=container_directory,
-                image=service_def.docker_image,
-                port=service_port,
-                environment_vars=merged_env,
-                volumes=service_def.volumes,
-                command=service_def.command,
-                health_check=service_def.health_check,
-                enable_pod_affinity=self.settings.k8s_enable_pod_affinity
-                and len(all_containers) > 1,
-                affinity_topology_key=self.settings.k8s_affinity_topology_key,
-            )
-            await self.k8s_client.create_deployment(deployment, namespace)
-
-            await send_progress("creating_service", "Creating internal service...", 70)
-
-            # Create ClusterIP Service for internal DNS discovery (no Ingress needed)
-            svc_name = f"svc-{container_directory}"
-            service = client.V1Service(
-                metadata=client.V1ObjectMeta(
-                    name=svc_name,
-                    namespace=namespace,
-                    labels={
-                        "tesslate.io/project-id": str(project.id),
-                        "tesslate.io/container-id": str(container.id),
-                        "tesslate.io/container-directory": container_directory,
-                        "tesslate.io/component": "service-container",
-                    },
-                ),
-                spec=client.V1ServiceSpec(
-                    selector={"tesslate.io/container-id": str(container.id)},
-                    ports=[
-                        client.V1ServicePort(
-                            port=service_port,
-                            target_port=service_port,
-                            protocol="TCP",
-                        )
-                    ],
-                    type="ClusterIP",
-                ),
-            )
-            await self.k8s_client.create_service(service, namespace)
-
-            # Internal DNS hostname for other containers to connect
-            internal_hostname = f"svc-{container_directory}.{namespace}.svc.cluster.local"
-
-            logger.info(
-                f"[K8S] ✅ Service container started: {service_def.name} "
-                f"at {internal_hostname}:{service_port}"
-            )
-
-            await send_progress(
-                "ready",
-                f"{service_def.name} is ready!",
-                100,
-                container_status="ready",
-            )
-
-            return {
-                "status": "running",
-                "container_name": container.name,
-                "container_directory": container_directory,
-                "url": None,  # Internal services don't have external URLs
-                "internal_hostname": internal_hostname,
-                "internal_port": service_port,
-                "namespace": namespace,
-            }
-
-        except Exception as e:
-            logger.error(f"[K8S] Error starting service container: {e}", exc_info=True)
-            raise
-
     async def start_container(
         self,
         project,
@@ -938,13 +676,10 @@ fi
         db: AsyncSession,
     ) -> dict[str, Any]:
         """
-        Start a single container (create Deployment + Service + Ingress).
+        Start a single container via ComputeManager.
 
-        For service containers (postgres, redis, etc.), delegates to
-        _start_service_container() which uses the actual service image.
-
-        For base containers, files should already exist from initialize_container_files().
-        NO init containers needed - files already exist on PVC!
+        Delegates to ComputeManager which handles all container types
+        (base and service) within the volume-first architecture.
 
         Args:
             project: Project model
@@ -957,324 +692,19 @@ fi
         Returns:
             Dict with status and URL
         """
-        # v2 volume-first → delegate to ComputeManager (starts ALL containers,
-        # since v2 environments share a single namespace and hostPath volume)
-        if self._is_v2_project(project.volume_state, project.volume_id, project.node_name):
-            from ..compute_manager import resolve_k8s_container_dir
-            container_dir = resolve_k8s_container_dir(container)
+        from ..compute_manager import get_compute_manager, resolve_k8s_container_dir
 
-            from ..compute_manager import get_compute_manager
-            urls = await get_compute_manager().start_environment(
-                project, all_containers, connections, user_id, db
-            )
-            return {
-                "status": "running",
-                "container_name": container.name,
-                "container_directory": container_dir,
-                "url": urls.get(container_dir),
-                "namespace": f"proj-{project.id}",
-            }
-
-        # Route service containers to dedicated handler
-        if getattr(container, "container_type", "base") == "service":
-            return await self._start_service_container(
-                project=project,
-                container=container,
-                all_containers=all_containers,
-                user_id=user_id,
-                db=db,
-            )
-
-        project_id = str(project.id)
-        namespace = self._get_namespace(project_id)
-
-        # K8s resource naming: use centralized helper (never falls back to container.name)
-        from ..compute_manager import resolve_k8s_container_dir
-        container_directory = resolve_k8s_container_dir(container)
-        # Working directory: actual filesystem path ("." means project root /app)
-        working_directory = container.directory or "."
-
-        logger.info(f"[K8S] Starting container '{container_directory}' in namespace {namespace}")
-
-        # Import WebSocket manager for status updates
-        from ...routers.chat import get_chat_connection_manager
-
-        ws_manager = get_chat_connection_manager()
-
-        async def send_progress(phase: str, message: str, progress: int, **kwargs):
-            """Helper to send progress updates via WebSocket."""
-            try:
-                status = {
-                    "container_status": "starting",
-                    "phase": phase,
-                    "message": message,
-                    "progress": progress,
-                    **kwargs,
-                }
-                await ws_manager.send_status_update(user_id, project.id, status)
-            except Exception:
-                pass  # Don't fail container start if WebSocket fails
-
-        try:
-            # Check if project was hibernated (needs snapshot restoration)
-            is_hibernated = project.environment_status == "hibernated"
-
-            # Send initial progress
-            await send_progress("creating_environment", "Creating project environment...", 10)
-
-            # Ensure environment exists (check K8s namespace)
-            namespace_exists = await self.k8s_client.namespace_exists(namespace)
-            if not namespace_exists:
-                if is_hibernated:
-                    await send_progress(
-                        "restoring_files", "Restoring project files from snapshot...", 20
-                    )
-
-                await self.ensure_project_environment(
-                    project.id,
-                    user_id,
-                    is_hibernated=is_hibernated,
-                    db=db,
-                    storage_class_override=getattr(project, "template_storage_class", None),
-                )
-
-                # Update environment_status to 'active' after restore
-                if is_hibernated:
-                    project.environment_status = "active"
-                    project.hibernated_at = None
-                    await db.commit()
-                    logger.info(f"[K8S] Restored hibernated project {project.slug} from snapshot")
-                    await send_progress("files_restored", "Project files restored successfully", 40)
-
-            # CRITICAL: Initialize container files BEFORE starting
-            # For hibernated projects and git-imported containers, files should
-            # already exist on the PVC. However, we always verify files are
-            # present — if the snapshot was empty (project hibernated before
-            # files were populated) or files are missing, fall through to
-            # git clone to ensure the container can start.
-            skip_reason = None
-            if is_hibernated:
-                skip_reason = "project restored from snapshot"
-            elif container.base_id is None:
-                skip_reason = "git-imported container (files already on PVC)"
-
-            needs_clone = True
-            # Use working_directory for file checks — the actual filesystem path
-            check_path = "/app" if working_directory == "." else f"/app/{working_directory}"
-            if skip_reason:
-                logger.info(f"[K8S] Checking files after restore ({skip_reason})")
-                # Verify files actually exist on PVC before skipping clone
-                try:
-                    pod_name = await self.k8s_client.get_file_manager_pod(namespace)
-                    if pod_name:
-                        check_result = await asyncio.to_thread(
-                            self.k8s_client._exec_in_pod,
-                            pod_name,
-                            namespace,
-                            "file-manager",
-                            [
-                                "/bin/sh",
-                                "-c",
-                                f"ls -1A {check_path} 2>/dev/null | wc -l",
-                            ],
-                            10,
-                        )
-                        file_count = (
-                            int(check_result.strip()) if check_result.strip().isdigit() else 0
-                        )
-                        if file_count >= 3:
-                            logger.info(
-                                f"[K8S] Skipping git clone - {skip_reason} "
-                                f"({file_count} files found in {check_path})"
-                            )
-                            needs_clone = False
-                        else:
-                            logger.warning(
-                                f"[K8S] Expected files from {skip_reason} but "
-                                f"{check_path} has {file_count} files — will clone"
-                            )
-                except Exception as e:
-                    logger.warning(f"[K8S] Could not verify files after restore: {e} — will clone")
-
-            if needs_clone:
-                # This clones from git or sets up the project directory
-                git_url = None
-                if container.base and hasattr(container.base, "git_repo_url"):
-                    git_url = container.base.git_repo_url
-
-                if git_url:
-                    await send_progress("initializing_files", "Setting up project files...", 50)
-                    logger.info(
-                        f"[K8S] Initializing files for container {container_directory} (git_url={git_url})"
-                    )
-                    await self.initialize_container_files(
-                        project_id=project.id,
-                        user_id=user_id,
-                        container_id=container.id,
-                        container_directory=working_directory,
-                        git_url=git_url,
-                    )
-                else:
-                    # No git_url — sync files from database to PVC
-                    # This handles forked projects and bases without a git repo
-                    await send_progress("initializing_files", "Syncing project files...", 50)
-                    await self._sync_db_files_to_pvc(
-                        project=project,
-                        container_directory=working_directory,
-                        raw_directory=container.directory,
-                        namespace=namespace,
-                        db=db,
-                        volume_id=getattr(project, "volume_id", None),
-                        node_name=getattr(project, "node_name", None),
-                        volume_state=getattr(project, "volume_state", None),
-                    )
-
-            # Get startup command and port
-            # Priority 1: Container DB record (set by setup-config or project creation)
-            startup_command = None
-            port = container.effective_port
-
-            if container.startup_command:
-                startup_command = container.startup_command
-                logger.info(
-                    f"[K8S] ✅ Using startup_command from DB for '{container.name}': "
-                    f"port={port}, cmd={startup_command[:80]}"
-                )
-
-            # Priority 2: .tesslate/config.json from PVC (fallback for older projects)
-            if startup_command is None:
-                try:
-                    pods = self.k8s_client.core_v1.list_namespaced_pod(
-                        namespace=namespace, label_selector="app=file-manager"
-                    )
-                    if pods.items:
-                        fm_pod = pods.items[0].metadata.name
-                        config_result = await asyncio.to_thread(
-                            self.k8s_client._exec_in_pod,
-                            fm_pod,
-                            namespace,
-                            "file-manager",
-                            ["cat", "/app/.tesslate/config.json"],
-                            timeout=10,
-                        )
-                        if config_result and not config_result.startswith("cat:"):
-                            from ...services.base_config_parser import parse_tesslate_config
-                            tesslate_config = parse_tesslate_config(config_result)
-                            app_name = container.name if container.name in tesslate_config.apps else (
-                                tesslate_config.primaryApp if tesslate_config.primaryApp in tesslate_config.apps else None
-                            )
-                            if app_name and app_name in tesslate_config.apps:
-                                app_cfg = tesslate_config.apps[app_name]
-                                port = app_cfg.port or port
-                                if app_cfg.start:
-                                    startup_command = app_cfg.start
-                                    logger.info(f"[K8S] ✅ Using .tesslate/config.json for '{app_name}': port={port}")
-                except Exception as e:
-                    logger.warning(f"[K8S] Could not read .tesslate/config.json: {e}")
-
-            # Fallback: no config found
-            if startup_command is None:
-                startup_command = "sleep infinity"
-                logger.warning(f"[K8S] ⚠️ No config found, using fallback: {startup_command}")
-
-            # Prepend node_modules/.bin permission fix (safety net for all platforms)
-            from ...services.base_config_parser import get_node_modules_fix_prefix
-
-            startup_command = get_node_modules_fix_prefix() + startup_command
-
-            logger.info(f"[K8S] Container config: port={port}, cmd={startup_command}")
-
-            await send_progress("starting_server", "Starting development server...", 70)
-
-            env_overrides = await build_env_overrides(db, project.id, [container])
-            extra_env = env_overrides.get(container.id, {})
-
-            # Auto-inject sibling container URLs for service discovery
-            # e.g. BACKEND_URL=http://dev-backend:8001, FRONTEND_URL=http://dev-frontend:5173
-            for sibling in all_containers:
-                if sibling.id == container.id:
-                    continue
-                if getattr(sibling, "container_type", "base") == "service":
-                    continue
-                sib_name = sibling.name.upper().replace("-", "_")
-                from ..compute_manager import resolve_k8s_container_dir
-                sib_k8s_name = resolve_k8s_container_dir(sibling)
-                sib_port = sibling.effective_port
-                sib_url = f"http://dev-{sib_k8s_name}:{sib_port}"
-                extra_env.setdefault(f"{sib_name}_URL", sib_url)
-                # Also set VITE_ prefixed version for Vite projects
-                extra_env.setdefault(f"VITE_{sib_name}_URL", sib_url)
-
-            # Create Deployment (NO init containers - files already exist!)
-            deployment = create_container_deployment(
-                namespace=namespace,
-                project_id=project.id,
-                user_id=user_id,
-                container_id=container.id,
-                container_directory=container_directory,
-                image=self.settings.k8s_devserver_image,
-                port=port,
-                startup_command=startup_command,
-                working_directory=working_directory,
-                image_pull_policy=self.settings.k8s_image_pull_policy,
-                image_pull_secret=self.settings.k8s_image_pull_secret or None,
-                enable_pod_affinity=self.settings.k8s_enable_pod_affinity
-                and len(all_containers) > 1,
-                affinity_topology_key=self.settings.k8s_affinity_topology_key,
-                extra_env=extra_env,
-            )
-            await self.k8s_client.create_deployment(deployment, namespace)
-
-            # Create Service
-            service = create_service_manifest(
-                namespace=namespace,
-                project_id=project.id,
-                container_id=container.id,
-                container_directory=container_directory,
-                port=port,
-            )
-            await self.k8s_client.create_service(service, namespace)
-
-            # Create Ingress
-            ingress = create_ingress_manifest(
-                namespace=namespace,
-                project_id=project.id,
-                container_id=container.id,
-                container_directory=container_directory,
-                project_slug=project.slug,
-                port=port,
-                domain=self.settings.app_domain,
-                ingress_class=self.settings.k8s_ingress_class,
-                tls_secret=self.settings.k8s_wildcard_tls_secret or None,
-            )
-            await self.k8s_client.create_ingress(ingress, namespace)
-
-            # Build preview URL (single subdomain level for wildcard cert compatibility)
-            hostname = f"{project.slug}-{container_directory}.{self.settings.app_domain}"
-            protocol = "https" if self.settings.k8s_wildcard_tls_secret else "http"
-            preview_url = f"{protocol}://{hostname}"
-
-            # Activity tracking is now database-based (via activity_tracker service)
-
-            logger.info(f"[K8S] ✅ Container started: {preview_url}")
-
-            # Send ready notification with URL
-            await send_progress(
-                "ready", "Container is ready!", 100, container_status="ready", url=preview_url
-            )
-
-            return {
-                "status": "running",
-                "container_name": container.name,
-                "container_directory": container_directory,
-                "url": preview_url,
-                "namespace": namespace,
-                "port": port,
-            }
-
-        except Exception as e:
-            logger.error(f"[K8S] Error starting container: {e}", exc_info=True)
-            raise
+        container_dir = resolve_k8s_container_dir(container)
+        urls = await get_compute_manager().start_environment(
+            project, all_containers, connections, user_id, db
+        )
+        return {
+            "status": "running",
+            "container_name": container.name,
+            "container_directory": container_dir,
+            "url": urls.get(container_dir),
+            "namespace": f"proj-{project.id}",
+        }
 
     async def stop_container(
         self,
@@ -1298,6 +728,8 @@ fi
             container_type: "base" or "service"
             service_slug: Service slug (for service containers)
         """
+        _ = project_slug, user_id  # Part of interface; unused in K8s mode
+
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
 
@@ -1359,6 +791,8 @@ fi
             service_slug: Service slug for service containers (used to find
                           the svc-{slug} deployment instead of sanitizing the name)
         """
+        _ = project_slug, user_id  # Part of interface; unused in K8s mode
+
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
 
@@ -1429,129 +863,31 @@ fi
     async def start_project(
         self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession
     ) -> dict[str, Any]:
-        """Start all containers for a project."""
-        # v2 volume-first → delegate to ComputeManager
-        if self._is_v2_project(project.volume_state, project.volume_id, project.node_name):
-            from ..compute_manager import get_compute_manager
-            urls = await get_compute_manager().start_environment(
-                project, containers, connections, user_id, db
-            )
-            return {
-                "status": "running",
-                "project_slug": project.slug,
-                "namespace": f"proj-{project.id}",
-                "containers": urls,
-            }
+        """Start all containers for a project via ComputeManager."""
+        from ..compute_manager import get_compute_manager
 
-        logger.info(f"[K8S] Starting project {project.slug} with {len(containers)} containers")
-
-        # Check if project was hibernated (needs snapshot restoration)
-        is_hibernated = project.environment_status == "hibernated"
-
-        # Ensure environment exists (with snapshot restoration if hibernated)
-        namespace = await self.ensure_project_environment(
-            project.id,
-            user_id,
-            is_hibernated=is_hibernated,
-            db=db,
-            storage_class_override=getattr(project, "template_storage_class", None),
+        urls = await get_compute_manager().start_environment(
+            project, containers, connections, user_id, db
         )
-
-        # Update environment_status to 'active' after restore
-        if is_hibernated:
-            project.environment_status = "active"
-            project.hibernated_at = None
-            await db.commit()
-            logger.info(f"[K8S] Restored hibernated project {project.slug} from snapshot")
-
-        # Start each container
-        container_urls = {}
-        for container in containers:
-            result = await self.start_container(
-                project=project,
-                container=container,
-                all_containers=containers,
-                connections=connections,
-                user_id=user_id,
-                db=db,
-            )
-            container_urls[container.name] = result.get("url")
-
-        logger.info(f"[K8S] ✅ Project {project.slug} started")
-
         return {
             "status": "running",
             "project_slug": project.slug,
-            "namespace": namespace,
-            "containers": container_urls,
+            "namespace": f"proj-{project.id}",
+            "containers": urls,
         }
 
     async def stop_project(self, project_slug: str, project_id: UUID, user_id: UUID) -> None:
         """Stop all containers for a project (but keep files)."""
-        # v2 volume-first → delegate to ComputeManager
-        vol_state, vol_id, node = await self._get_project_volume_info(project_id)
-        if self._is_v2_project(vol_state, vol_id, node):
-            from ..compute_manager import get_compute_manager
-            from ...database import AsyncSessionLocal
-            from ...models import Project
-            async with AsyncSessionLocal() as db:
-                project = await db.get(Project, project_id)
-                if project:
-                    await get_compute_manager().stop_environment(project, db)
-            return
+        _ = project_slug, user_id  # Part of interface; unused in K8s mode
 
-        project_id_str = str(project_id)
-        namespace = self._get_namespace(project_id_str)
+        from ..compute_manager import get_compute_manager
+        from ...database import AsyncSessionLocal
+        from ...models import Project
 
-        logger.info(f"[K8S] Stopping project {project_slug}")
-
-        try:
-            # Delete all dev container deployments (but keep file-manager)
-            deployments = await asyncio.to_thread(
-                self.k8s_client.apps_v1.list_namespaced_deployment,
-                namespace=namespace,
-                label_selector="tesslate.io/component=dev-container",
-            )
-
-            for deployment in deployments.items:
-                await self.k8s_client.delete_deployment(deployment.metadata.name, namespace)
-
-            # Delete all service container deployments
-            svc_deployments = await asyncio.to_thread(
-                self.k8s_client.apps_v1.list_namespaced_deployment,
-                namespace=namespace,
-                label_selector="tesslate.io/component=service-container",
-            )
-
-            for deployment in svc_deployments.items:
-                await self.k8s_client.delete_deployment(deployment.metadata.name, namespace)
-
-            # Delete all dev and service container services
-            services = await asyncio.to_thread(
-                self.k8s_client.core_v1.list_namespaced_service,
-                namespace=namespace,
-                label_selector="tesslate.io/container-id",
-            )
-
-            for service in services.items:
-                await self.k8s_client.delete_service(service.metadata.name, namespace)
-
-            # Delete all dev container ingresses
-            ingresses = await asyncio.to_thread(
-                self.k8s_client.networking_v1.list_namespaced_ingress,
-                namespace=namespace,
-                label_selector="tesslate.io/container-id",
-            )
-
-            for ingress in ingresses.items:
-                await self.k8s_client.delete_ingress(ingress.metadata.name, namespace)
-
-            logger.info("[K8S] ✅ Project stopped (file-manager and files persist)")
-
-        except ApiException as e:
-            if e.status != 404:
-                logger.error(f"[K8S] Error stopping project: {e}")
-                raise
+        async with AsyncSessionLocal() as db:
+            project = await db.get(Project, project_id)
+            if project:
+                await get_compute_manager().stop_environment(project, db)
 
     async def delete_project_namespace(self, project_id: UUID, user_id: UUID) -> None:
         """
@@ -1560,6 +896,8 @@ fi
         This completely removes all resources (pods, services, ingresses, PVCs)
         and should only be called when permanently deleting a project.
         """
+        _ = user_id  # Retained for interface consistency; unused in K8s mode
+
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
 
@@ -1803,7 +1141,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             return False
 
     async def _restore_from_snapshot(
-        self, project_id: UUID, user_id: UUID, namespace: str, db: AsyncSession
+        self, project_id: UUID, user_id: UUID, _namespace: str, db: AsyncSession
     ) -> bool:
         """
         Create a PVC from a VolumeSnapshot (after hibernation).
@@ -1817,7 +1155,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         Args:
             project_id: Project UUID
             user_id: User UUID
-            namespace: Kubernetes namespace
+            _namespace: Kubernetes namespace (unused - snapshot manager handles namespace)
             db: Database session
 
         Returns:
@@ -1896,33 +1234,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         return sorted(snapshot_pvcs)
 
-    async def restore_project(
-        self, project_id: UUID, user_id: UUID, db: AsyncSession | None = None
-    ) -> str:
-        """
-        Restore a hibernated project (create K8s resources from snapshot).
-
-        Called when user returns to a hibernated project.
-        Creates PVC from VolumeSnapshot (lazy loading - near instant).
-
-        Args:
-            project_id: Project UUID
-            user_id: User UUID
-            db: Database session (required for snapshot restore)
-
-        Returns:
-            Namespace name
-        """
-        logger.info(f"[K8S] Restoring project {project_id}")
-
-        namespace = await self.ensure_project_environment(
-            project_id=project_id, user_id=user_id, is_hibernated=True, db=db
-        )
-
-        return namespace
-
     # =========================================================================
-    # FILE OPERATIONS (via file-manager pod)
+    # FILE OPERATIONS (via FileOps)
     # =========================================================================
 
     @staticmethod
@@ -1959,63 +1272,31 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         file_path: str,
         project_slug: str = None,
         subdir: str = None,
-        # v2 routing hints (optional — avoids DB lookup when provided)
+        # Volume routing hints (optional -- avoids DB lookup when provided)
         volume_id: str | None = None,
         node_name: str | None = None,
         volume_state: str | None = None,
     ) -> str | None:
-        """Read a file from project storage."""
-        # v2 routing: check if this is a v2 project
+        """Read a file from project storage via FileOps."""
+        _ = user_id, container_name, project_slug  # Interface params; FileOps uses volume routing
+
         if volume_state is None and volume_id is None:
             volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
 
-        if self._is_v2_project(volume_state, volume_id, node_name):
-            vol_path = self._build_volume_path(file_path, subdir)
-            try:
-                volume_id, node_name = await self._ensure_volume_accessible(
-                    project_id, volume_state, volume_id, node_name
-                )
-                async with await self._get_fileops_client(node_name) as client:
-                    return await client.read_file_text(volume_id, vol_path)
-            except grpc.aio.AioRpcError as e:
-                if e.code() == grpc.StatusCode.NOT_FOUND:
-                    return None
-                logger.error(f"[K8S] FileOps read_file error: {e}")
-                return None
-            except Exception as e:
-                logger.error(f"[K8S] FileOps read_file error: {e}")
-                return None
-
-        # v1: existing pod-exec path (unchanged)
-        namespace = self._get_namespace(str(project_id))
-
-        # Build full path including subdir for multi-container projects
-        full_path = self._build_pod_path(file_path, subdir)
-
+        vol_path = self._build_volume_path(file_path, subdir)
         try:
-            pod_name = await self.k8s_client.get_file_manager_pod(namespace)
-            if not pod_name:
-                # Fall back to dev container if no file-manager
-                return await self.k8s_client.read_file_from_pod(
-                    user_id=user_id,
-                    project_id=str(project_id),
-                    file_path=file_path,
-                    container_name=container_name,
-                    subdir=subdir,
-                )
-
-            result = await asyncio.to_thread(
-                self.k8s_client._exec_in_pod,
-                pod_name,
-                namespace,
-                "file-manager",
-                ["cat", full_path],
-                timeout=30,
+            volume_id, node_name = await self._ensure_volume_accessible(
+                project_id, volume_state, volume_id, node_name
             )
-            return result
-
+            async with await self._get_fileops_client(node_name) as client:
+                return await client.read_file_text(volume_id, vol_path)
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                return None
+            logger.error(f"[K8S] FileOps read_file error: {e}")
+            return None
         except Exception as e:
-            logger.error(f"[K8S] Error reading file: {e}")
+            logger.error(f"[K8S] FileOps read_file error: {e}")
             return None
 
     async def write_file(
@@ -2027,63 +1308,27 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         content: str,
         project_slug: str = None,
         subdir: str = None,
-        # v2 routing hints
+        # Volume routing hints
         volume_id: str | None = None,
         node_name: str | None = None,
         volume_state: str | None = None,
     ) -> bool:
-        """Write a file to project storage."""
-        # v2 routing
+        """Write a file to project storage via FileOps."""
+        _ = user_id, container_name, project_slug  # Interface params; FileOps uses volume routing
+
         if volume_state is None and volume_id is None:
             volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
 
-        if self._is_v2_project(volume_state, volume_id, node_name):
-            vol_path = self._build_volume_path(file_path, subdir)
-            try:
-                volume_id, node_name = await self._ensure_volume_accessible(
-                    project_id, volume_state, volume_id, node_name
-                )
-                async with await self._get_fileops_client(node_name) as client:
-                    await client.write_file_text(volume_id, vol_path, content)
-                return True
-            except Exception as e:
-                logger.error(f"[K8S] FileOps write_file error: {e}")
-                raise
-
-        # v1: existing pod-exec path (unchanged)
-        namespace = self._get_namespace(str(project_id))
-
-        # Build full path including subdir for multi-container projects
-        full_path = self._build_pod_path(file_path, subdir)
-
+        vol_path = self._build_volume_path(file_path, subdir)
         try:
-            pod_name = await self.k8s_client.get_file_manager_pod(namespace)
-            if not pod_name:
-                return await self.k8s_client.write_file_to_pod(
-                    user_id=user_id,
-                    project_id=str(project_id),
-                    file_path=file_path,
-                    content=content,
-                    container_name=container_name,
-                    subdir=subdir,
-                )
-
-            # Use tar streaming to write file (echo|base64 breaks for files >100KB)
-            data = content.encode("utf-8")
-            await asyncio.to_thread(
-                self.k8s_client._write_bytes_to_pod,
-                pod_name,
-                namespace,
-                "file-manager",
-                data,
-                full_path,
-                timeout=60,
+            volume_id, node_name = await self._ensure_volume_accessible(
+                project_id, volume_state, volume_id, node_name
             )
-
+            async with await self._get_fileops_client(node_name) as client:
+                await client.write_file_text(volume_id, vol_path, content)
             return True
-
         except Exception as e:
-            logger.error(f"[K8S] Error writing file: {e}")
+            logger.error(f"[K8S] FileOps write_file error: {e}")
             raise
 
     async def write_binary_to_container(
@@ -2091,51 +1336,26 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         project_id: UUID,
         file_path: str,
         data: bytes,
-        # v2 routing hints
+        # Volume routing hints
         volume_id: str | None = None,
         node_name: str | None = None,
         volume_state: str | None = None,
     ) -> bool:
-        """Write binary data to a file in the project container using tar streaming.
-
-        Uses tar stdin streaming to avoid ARG_MAX limits that break the
-        echo|base64 approach for files larger than ~100KB.
-        """
-        # v2 routing
+        """Write binary data to a file in the project via FileOps."""
         if volume_state is None and volume_id is None:
             volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
 
-        if self._is_v2_project(volume_state, volume_id, node_name):
-            vol_path = self._build_volume_path(file_path)
-            try:
-                volume_id, node_name = await self._ensure_volume_accessible(
-                    project_id, volume_state, volume_id, node_name
-                )
-                async with await self._get_fileops_client(node_name) as client:
-                    await client.write_file(volume_id, vol_path, data)
-                return True
-            except Exception as e:
-                logger.error(f"[K8S] FileOps write_binary error: {e}")
-                raise
-
-        # v1: existing pod-exec path
-        namespace = self._get_namespace(str(project_id))
-
-        pod_name = await self.k8s_client.get_file_manager_pod(namespace)
-        container = "file-manager"
-
-        if not pod_name:
-            raise RuntimeError(f"No file-manager pod found in namespace {namespace}")
-
-        return await asyncio.to_thread(
-            self.k8s_client._write_bytes_to_pod,
-            pod_name,
-            namespace,
-            container,
-            data,
-            self._build_pod_path(file_path),
-            timeout=120,
-        )
+        vol_path = self._build_volume_path(file_path)
+        try:
+            volume_id, node_name = await self._ensure_volume_accessible(
+                project_id, volume_state, volume_id, node_name
+            )
+            async with await self._get_fileops_client(node_name) as client:
+                await client.write_file(volume_id, vol_path, data)
+            return True
+        except Exception as e:
+            logger.error(f"[K8S] FileOps write_binary error: {e}")
+            raise
 
     async def delete_file(
         self,
@@ -2143,60 +1363,32 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         project_id: UUID,
         container_name: str,
         file_path: str,
-        # v2 routing hints
+        # Volume routing hints
         volume_id: str | None = None,
         node_name: str | None = None,
         volume_state: str | None = None,
     ) -> bool:
-        """Delete a file from project storage."""
-        # v2 routing
+        """Delete a file from project storage via FileOps."""
+        _ = user_id, container_name  # Interface params; FileOps uses volume routing
+
         if volume_state is None and volume_id is None:
             volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
 
-        if self._is_v2_project(volume_state, volume_id, node_name):
-            vol_path = self._build_volume_path(file_path)
-            try:
-                volume_id, node_name = await self._ensure_volume_accessible(
-                    project_id, volume_state, volume_id, node_name
-                )
-                async with await self._get_fileops_client(node_name) as client:
-                    await client.delete_path(volume_id, vol_path)
-                return True
-            except grpc.aio.AioRpcError as e:
-                if e.code() == grpc.StatusCode.NOT_FOUND:
-                    return True  # Already gone
-                logger.error(f"[K8S] FileOps delete_file error: {e}")
-                return False
-            except Exception as e:
-                logger.error(f"[K8S] FileOps delete_file error: {e}")
-                return False
-
-        # v1: existing pod-exec path
-        namespace = self._get_namespace(str(project_id))
-
+        vol_path = self._build_volume_path(file_path)
         try:
-            pod_name = await self.k8s_client.get_file_manager_pod(namespace)
-            if not pod_name:
-                return await self.k8s_client.delete_file_from_pod(
-                    user_id=user_id,
-                    project_id=str(project_id),
-                    file_path=file_path,
-                    container_name=container_name,
-                )
-
-            await asyncio.to_thread(
-                self.k8s_client._exec_in_pod,
-                pod_name,
-                namespace,
-                "file-manager",
-                ["rm", "-f", self._build_pod_path(file_path)],
-                timeout=10,
+            volume_id, node_name = await self._ensure_volume_accessible(
+                project_id, volume_state, volume_id, node_name
             )
-
+            async with await self._get_fileops_client(node_name) as client:
+                await client.delete_path(volume_id, vol_path)
             return True
-
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                return True  # Already gone
+            logger.error(f"[K8S] FileOps delete_file error: {e}")
+            return False
         except Exception as e:
-            logger.error(f"[K8S] Error deleting file: {e}")
+            logger.error(f"[K8S] FileOps delete_file error: {e}")
             return False
 
     async def list_files(
@@ -2205,89 +1397,40 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         project_id: UUID,
         container_name: str,
         directory: str = ".",
-        # v2 routing hints
+        # Volume routing hints
         volume_id: str | None = None,
         node_name: str | None = None,
         volume_state: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List files in project storage."""
-        # v2 routing
+        """List files in project storage via FileOps."""
+        _ = user_id, container_name  # Interface params; FileOps uses volume routing
+
         if volume_state is None and volume_id is None:
             volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
 
-        if self._is_v2_project(volume_state, volume_id, node_name):
-            vol_path = self._build_volume_path(directory) if directory != "." else "."
-            try:
-                volume_id, node_name = await self._ensure_volume_accessible(
-                    project_id, volume_state, volume_id, node_name
-                )
-                async with await self._get_fileops_client(node_name) as client:
-                    entries = await client.list_dir(volume_id, vol_path)
-                    return [
-                        {
-                            "name": entry.name,
-                            "type": "directory" if entry.is_dir else "file",
-                            "size": entry.size,
-                            "permissions": "",
-                        }
-                        for entry in entries
-                    ]
-            except grpc.aio.AioRpcError as e:
-                if e.code() == grpc.StatusCode.NOT_FOUND:
-                    return []
-                logger.error(f"[K8S] FileOps list_files error: {e}")
-                return []
-            except Exception as e:
-                logger.error(f"[K8S] FileOps list_files error: {e}")
-                return []
-
-        # v1: existing pod-exec path
-        namespace = self._get_namespace(str(project_id))
-
+        vol_path = self._build_volume_path(directory) if directory != "." else "."
         try:
-            pod_name = await self.k8s_client.get_file_manager_pod(namespace)
-            if not pod_name:
-                return await self.k8s_client.list_files_in_pod(
-                    user_id=user_id,
-                    project_id=str(project_id),
-                    directory=directory,
-                    container_name=container_name,
-                )
-
-            # Use ls with JSON-friendly output
-            full_path = self._build_pod_path(directory)
-            result = await asyncio.to_thread(
-                self.k8s_client._exec_in_pod,
-                pod_name,
-                namespace,
-                "file-manager",
-                ["sh", "-c", f"ls -la {full_path} 2>/dev/null || echo 'EMPTY'"],
-                timeout=30,
+            volume_id, node_name = await self._ensure_volume_accessible(
+                project_id, volume_state, volume_id, node_name
             )
-
-            # Parse ls output into file list
-            files = []
-            for line in result.strip().split("\n"):
-                if line.startswith("total") or line == "EMPTY" or not line:
-                    continue
-                parts = line.split()
-                if len(parts) >= 9:
-                    name = " ".join(parts[8:])
-                    if name in [".", ".."]:
-                        continue
-                    files.append(
-                        {
-                            "name": name,
-                            "type": "directory" if parts[0].startswith("d") else "file",
-                            "size": int(parts[4]) if parts[4].isdigit() else 0,
-                            "permissions": parts[0],
-                        }
-                    )
-
-            return files
-
+            async with await self._get_fileops_client(node_name) as client:
+                entries = await client.list_dir(volume_id, vol_path)
+                return [
+                    {
+                        "name": entry.name,
+                        "type": "directory" if entry.is_dir else "file",
+                        "size": entry.size,
+                        "permissions": "",
+                    }
+                    for entry in entries
+                ]
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                return []
+            logger.error(f"[K8S] FileOps list_files error: {e}")
+            return []
         except Exception as e:
-            logger.error(f"[K8S] Error listing files: {e}")
+            logger.error(f"[K8S] FileOps list_files error: {e}")
             return []
 
     # =========================================================================
@@ -2376,6 +1519,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         Activity tracking is now database-based. Use track_project_activity()
         from orchestrator/app/services/activity_tracker.py instead.
         """
+        _ = user_id, project_id, container_name  # No-op; all params unused
+
         # Log warning on first call to help identify callers that need updating
         logger.debug(
             "[K8S] track_activity() called but is a no-op. "
@@ -2393,6 +1538,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         container_id: UUID | None = None,
         tail_lines: int = 100,
     ) -> AsyncIterator[str]:
+        _ = user_id  # Part of interface; unused in K8s mode
+
         namespace = self._get_namespace(str(project_id))
 
         try:
@@ -2519,48 +1666,39 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         container_name: str,
         pattern: str,
         directory: str = ".",
-        # v2 routing hints
+        # Volume routing hints
         volume_id: str | None = None,
         node_name: str | None = None,
         volume_state: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Find files matching a glob pattern."""
-        # v2 routing
+        """Find files matching a glob pattern via FileOps."""
+        _ = user_id, container_name  # Interface params; FileOps uses volume routing
+
+        import fnmatch
+
         if volume_state is None and volume_id is None:
             volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
 
-        if self._is_v2_project(volume_state, volume_id, node_name):
-            import fnmatch
-
-            vol_path = self._build_volume_path(directory) if directory != "." else "."
-            try:
-                volume_id, node_name = await self._ensure_volume_accessible(
-                    project_id, volume_state, volume_id, node_name
-                )
-                async with await self._get_fileops_client(node_name) as client:
-                    entries = await client.list_dir(volume_id, vol_path, recursive=True)
-                    return [
-                        {
-                            "name": entry.name,
-                            "path": entry.path,
-                            "type": "directory" if entry.is_dir else "file",
-                            "size": entry.size,
-                        }
-                        for entry in entries
-                        if not entry.is_dir and fnmatch.fnmatch(entry.name, pattern)
-                    ]
-            except Exception as e:
-                logger.error(f"[K8S] FileOps glob_files error: {e}")
-                return []
-
-        # v1: pod-exec path
-        return await self.k8s_client.glob_files_in_pod(
-            user_id=user_id,
-            project_id=str(project_id),
-            pattern=pattern,
-            directory=directory,
-            container_name=container_name,
-        )
+        vol_path = self._build_volume_path(directory) if directory != "." else "."
+        try:
+            volume_id, node_name = await self._ensure_volume_accessible(
+                project_id, volume_state, volume_id, node_name
+            )
+            async with await self._get_fileops_client(node_name) as client:
+                entries = await client.list_dir(volume_id, vol_path, recursive=True)
+                return [
+                    {
+                        "name": entry.name,
+                        "path": entry.path,
+                        "type": "directory" if entry.is_dir else "file",
+                        "size": entry.size,
+                    }
+                    for entry in entries
+                    if not entry.is_dir and fnmatch.fnmatch(entry.name, pattern)
+                ]
+        except Exception as e:
+            logger.error(f"[K8S] FileOps glob_files error: {e}")
+            return []
 
     async def grep_files(
         self,
@@ -2572,67 +1710,53 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         file_pattern: str = "*",
         case_sensitive: bool = True,
         max_results: int = 100,
-        # v2 routing hints
+        # Volume routing hints
         volume_id: str | None = None,
         node_name: str | None = None,
         volume_state: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Search file contents for a pattern."""
-        # v2 routing — grep requires reading files individually, so for now
-        # delegate to pod-exec if a compute pod is available. The v2 path only
-        # kicks in when we truly have no pods running.
+        """Search file contents for a pattern via FileOps."""
+        _ = user_id, container_name  # Interface params; FileOps uses volume routing
+
+        import fnmatch
+        import re
+
         if volume_state is None and volume_id is None:
             volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
 
-        if self._is_v2_project(volume_state, volume_id, node_name):
-            import fnmatch
-            import re
-
-            vol_path = self._build_volume_path(directory) if directory != "." else "."
-            try:
-                volume_id, node_name = await self._ensure_volume_accessible(
-                    project_id, volume_state, volume_id, node_name
-                )
-                regex = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
-                async with await self._get_fileops_client(node_name) as client:
-                    entries = await client.list_dir(volume_id, vol_path, recursive=True)
-                    results = []
-                    for entry in entries:
-                        if entry.is_dir:
-                            continue
-                        if file_pattern != "*" and not fnmatch.fnmatch(entry.name, file_pattern):
-                            continue
-                        try:
-                            content = await client.read_file_text(volume_id, entry.path)
-                            for line_no, line in enumerate(content.splitlines(), 1):
-                                if regex.search(line):
-                                    results.append(
-                                        {
-                                            "file": entry.path,
-                                            "line": line_no,
-                                            "content": line.rstrip(),
-                                        }
-                                    )
-                                    if len(results) >= max_results:
-                                        return results
-                        except Exception:
-                            continue
-                    return results
-            except Exception as e:
-                logger.error(f"[K8S] FileOps grep_files error: {e}")
-                return []
-
-        # v1: pod-exec path
-        return await self.k8s_client.grep_in_pod(
-            user_id=user_id,
-            project_id=str(project_id),
-            pattern=pattern,
-            directory=directory,
-            file_pattern=file_pattern,
-            case_sensitive=case_sensitive,
-            max_results=max_results,
-            container_name=container_name,
-        )
+        vol_path = self._build_volume_path(directory) if directory != "." else "."
+        try:
+            volume_id, node_name = await self._ensure_volume_accessible(
+                project_id, volume_state, volume_id, node_name
+            )
+            regex = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
+            async with await self._get_fileops_client(node_name) as client:
+                entries = await client.list_dir(volume_id, vol_path, recursive=True)
+                results = []
+                for entry in entries:
+                    if entry.is_dir:
+                        continue
+                    if file_pattern != "*" and not fnmatch.fnmatch(entry.name, file_pattern):
+                        continue
+                    try:
+                        content = await client.read_file_text(volume_id, entry.path)
+                        for line_no, line in enumerate(content.splitlines(), 1):
+                            if regex.search(line):
+                                results.append(
+                                    {
+                                        "file": entry.path,
+                                        "line": line_no,
+                                        "content": line.rstrip(),
+                                    }
+                                )
+                                if len(results) >= max_results:
+                                    return results
+                    except Exception:
+                        continue
+                return results
+        except Exception as e:
+            logger.error(f"[K8S] FileOps grep_files error: {e}")
+            return []
 
 
 # Singleton instance

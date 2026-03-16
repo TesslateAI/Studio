@@ -272,15 +272,93 @@ THOUGHT: First, I should check what files exist in the project.
 
 
 @pytest.fixture
-def mock_k8s_manager():
-    """Create a mock Kubernetes manager for testing."""
-    manager = AsyncMock()
-    manager.read_file_from_pod = AsyncMock(return_value="File content")
-    manager.write_file_to_pod = AsyncMock(return_value=True)
-    manager.execute_command_in_pod = AsyncMock(
-        return_value={"stdout": "Command output", "stderr": "", "exit_code": 0}
+def mock_k8s_client():
+    """Mock KubernetesClient for v2 tests."""
+    client = AsyncMock()
+    client.create_namespace_if_not_exists = AsyncMock()
+    client.namespace_exists = AsyncMock(return_value=True)
+    client.delete_namespace = AsyncMock()
+    client.apply_network_policy = AsyncMock()
+    client.create_pvc = AsyncMock()
+    client.create_deployment = AsyncMock()
+    client.create_service = AsyncMock()
+    client.create_ingress = AsyncMock()
+    client.delete_deployment = AsyncMock()
+    client.delete_service = AsyncMock()
+    client.delete_ingress = AsyncMock()
+    client.wait_for_deployment_ready = AsyncMock()
+    client.get_file_manager_pod = AsyncMock(return_value="file-manager-abc123")
+    client.copy_wildcard_tls_secret = AsyncMock()
+    client.is_pod_ready = Mock(return_value=True)
+    client.get_project_namespace = Mock(side_effect=lambda pid: f"proj-{pid}")
+
+    # Underlying K8s APIs (used by orchestrator for direct calls)
+    client.core_v1 = Mock()
+    client.core_v1.delete_namespace = Mock()
+    client.core_v1.read_namespace = Mock()
+    client.core_v1.list_namespaced_pod = Mock()
+    client.apps_v1 = Mock()
+    client.apps_v1.read_namespaced_deployment = Mock()
+    client._exec_in_pod = Mock(return_value="")
+    return client
+
+
+@pytest.fixture
+def mock_fileops_client():
+    """Mock FileOpsClient (async context manager)."""
+    client = AsyncMock()
+    client.read_file_text = AsyncMock(return_value="file content")
+    client.write_file_text = AsyncMock()
+    client.read_file = AsyncMock(return_value=b"file content")
+    client.write_file = AsyncMock()
+    client.delete_path = AsyncMock()
+    client.list_dir = AsyncMock(return_value=[])
+    client.mkdir_all = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    return client
+
+
+@pytest.fixture
+def mock_compute_manager():
+    """Mock ComputeManager for v2 tests."""
+    cm = AsyncMock()
+    cm.run_command = AsyncMock(return_value=("output", 0, "t1-abc-xyz"))
+    cm.start_environment = AsyncMock(return_value={"frontend": "https://proj.example.com"})
+    cm.stop_environment = AsyncMock()
+    cm.reap_orphaned_pods = AsyncMock(return_value=0)
+    return cm
+
+
+@pytest.fixture
+def mock_snapshot_manager():
+    """Mock SnapshotManager for hibernation tests."""
+    sm = AsyncMock()
+    sm.create_snapshot = AsyncMock(
+        return_value=(Mock(id=uuid4(), snapshot_name="snap-abc123"), None)
     )
-    return manager
+    sm.wait_for_snapshot_ready = AsyncMock(return_value=(True, None))
+    sm.has_existing_snapshot = AsyncMock(return_value=True)
+    sm.get_latest_ready_snapshot = AsyncMock(return_value=None)
+    sm.get_latest_ready_snapshots_by_pvc = AsyncMock(return_value={})
+    sm.restore_from_snapshot = AsyncMock(return_value=(True, None))
+    sm.soft_delete_project_snapshots = AsyncMock(return_value=0)
+    return sm
+
+
+@pytest.fixture
+def mock_project_with_volume(mock_project):
+    """Mock project with v2 volume fields."""
+    mock_project.volume_id = "vol-test123"
+    mock_project.node_name = "node-1"
+    mock_project.volume_state = "local"
+    mock_project.compute_tier = "none"
+    mock_project.environment_status = "hibernated"
+    mock_project.hibernated_at = None
+    mock_project.last_activity = None
+    mock_project.latest_snapshot_id = None
+    mock_project.owner_id = mock_project.id  # Set to a UUID
+    return mock_project
 
 
 # ============================================================================
@@ -345,48 +423,6 @@ class DockerContainerBackend:
         }
 
 
-class MinikubeContainerBackend:
-    """Minikube container backend for Kubernetes integration tests."""
-
-    def __init__(self):
-        from kubernetes import client, config
-
-        config.load_kube_config(context="tesslate")
-        self.core_v1 = client.CoreV1Api()
-
-    async def read_file(self, namespace: str, pod_name: str, path: str) -> str:
-        from kubernetes.stream import stream
-
-        exec_command = ["cat", path]
-        resp = stream(
-            self.core_v1.connect_get_namespaced_pod_exec,
-            pod_name,
-            namespace,
-            command=exec_command,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-        )
-        return resp
-
-    async def execute_command(self, namespace: str, pod_name: str, command: str) -> dict[str, Any]:
-        from kubernetes.stream import stream
-
-        exec_command = ["sh", "-c", command]
-        resp = stream(
-            self.core_v1.connect_get_namespaced_pod_exec,
-            pod_name,
-            namespace,
-            command=exec_command,
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-        )
-        return {"stdout": resp, "stderr": "", "exit_code": 0}
-
-
 @pytest.fixture
 def container_backend(request):
     """
@@ -407,8 +443,6 @@ def container_backend(request):
         return MockContainerBackend()
     elif "docker" in markers:
         return DockerContainerBackend()
-    elif "minikube" in markers:
-        return MinikubeContainerBackend()
     else:
         # Default to mocked for safety
         return MockContainerBackend()

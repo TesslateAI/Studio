@@ -56,13 +56,13 @@ import { fileEvents } from '../utils/fileEvents';
 import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { type ChatAgent } from '../types/chat';
-import { isV2Project, getV2Features, type VolumeState, type ComputeTier } from '../types/project';
+import { getFeatures, type VolumeState, type ComputeTier } from '../types/project';
 import IdleWarningBanner from '../components/IdleWarningBanner';
 
 type PanelType = 'github' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
 
-// V2 placeholder for views that require compute (preview, terminal)
+// Placeholder for views that require compute (preview, terminal)
 interface NoComputePlaceholderProps {
   onStart?: () => void;
   variant: 'terminal' | 'preview';
@@ -323,17 +323,16 @@ export default function Project() {
   );
 
   // ============================================================================
-  // V2 TWO-AXIS STATE MODEL
+  // TWO-AXIS STATE MODEL
   // ============================================================================
-  const volumeState = (project?.volume_state as VolumeState) ?? 'legacy';
+  const volumeState = (project?.volume_state as VolumeState) ?? 'local';
   const computeTier = (project?.compute_tier as ComputeTier) ?? 'none';
-  const v2 = isV2Project(volumeState);
-  const v2Features = useMemo(
-    () => (v2 ? getV2Features(volumeState, computeTier) : null),
-    [v2, volumeState, computeTier]
+  const features = useMemo(
+    () => getFeatures(volumeState, computeTier),
+    [volumeState, computeTier]
   );
-  const v2NoPreview  = v2 && !!v2Features && !v2Features.preview && !devServerUrl;
-  const v2HasFiles   = v2 && !!v2Features && v2Features.fileBrowser;
+  const noPreview  = !features.preview && !devServerUrl;
+  const hasFiles   = features.fileBrowser;
 
   const handleStartCompute = useCallback(() => {
     if (!container) {
@@ -552,8 +551,8 @@ export default function Project() {
   useEffect(() => {
     if (container) {
       const vs = project?.volume_state as string;
-      if (vs && vs !== 'legacy') return; // v2: files already loaded via loadProject
-      // v1: Cancel any in-flight retry sequence before starting a new one
+      if (vs && vs !== 'legacy') return; // files already loaded via loadProject
+      // Cancel any in-flight retry sequence before starting a new one
       fileRetryCancelledRef.current = true;
       if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
       fileRetryCountRef.current = 0;
@@ -723,23 +722,12 @@ export default function Project() {
       const projectData = await projectsApi.get(slug);
       setProject(projectData);
 
-      const vs = (projectData.volume_state as string) ?? 'legacy';
-      if (vs !== 'legacy') {
-        // v2 project — only load files if volume is locally mounted
-        if (vs === 'local') {
-          loadFilesWithRetry();
-        }
-        // provisioning/restoring/remote_only: no files available yet
-        return;
+      const vs = (projectData.volume_state as string) ?? 'local';
+      // Only load files if volume is locally mounted
+      if (vs === 'local') {
+        loadFilesWithRetry();
       }
-
-      // v1 legacy: Only load files here if NOT viewing a specific container
-      // When viewing a container, loadFiles() will be called after container loads
-      // to properly filter files for that container's directory
-      if (!containerId) {
-        const filesData = await projectsApi.getFiles(slug);
-        setFiles(filesData);
-      }
+      // provisioning/restoring/remote_only: no files available yet
     } catch (error) {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
@@ -894,7 +882,6 @@ export default function Project() {
       // Fetch fresh project data to avoid stale closure on `project` state
       // (loadProject and loadContainer fire in the same render cycle on mount)
       const freshProject = await projectsApi.get(slug);
-      const freshVolumeState = (freshProject.volume_state as string) ?? 'legacy';
 
       const allContainers = await projectsApi.getContainers(slug);
       setContainers(allContainers);
@@ -1015,24 +1002,22 @@ export default function Project() {
           console.warn('Failed to check container status, will attempt start:', statusError);
         }
 
-        // v2: non-legacy volume state — check compute tier before auto-starting
-        if (freshVolumeState !== 'legacy') {
-          // Don't interfere with an in-progress startup
-          if (needsContainerStart && containerStartup.isLoading) {
-            return;
-          }
-          // Prefer live compute_state from status endpoint over stale DB
-          const liveComputeState = status?.compute_state as string | undefined;
-          const effectiveComputeTier = liveComputeState ?? ((freshProject.compute_tier as string) ?? 'none');
-          if (effectiveComputeTier !== 'environment') {
-            // No environment running — let user decide via Start button
-            console.log('[loadContainer] v2: compute state', effectiveComputeTier, '— skipping container start');
-            containerStartup.reset();
-            setNeedsContainerStart(false);
-            return;
-          }
-          // compute state is 'environment' — fall through to existing status check
+        // Check compute tier before auto-starting
+        // Don't interfere with an in-progress startup
+        if (needsContainerStart && containerStartup.isLoading) {
+          return;
         }
+        // Prefer live compute_state from status endpoint over stale DB
+        const liveComputeState = status?.compute_state as string | undefined;
+        const effectiveComputeTier = liveComputeState ?? ((freshProject.compute_tier as string) ?? 'none');
+        if (effectiveComputeTier !== 'environment') {
+          // No environment running — let user decide via Start button
+          console.log('[loadContainer] compute state', effectiveComputeTier, '— skipping container start');
+          containerStartup.reset();
+          setNeedsContainerStart(false);
+          return;
+        }
+        // compute state is 'environment' — fall through to existing status check
 
         // Container not running - use the startup hook to start it with real-time logs
         console.log('[loadContainer] Starting container via startup hook');
@@ -1100,9 +1085,9 @@ export default function Project() {
   const previewPlaceholder = (
     <NoComputePlaceholder
       variant="preview"
-      volumeState={v2 ? volumeState : undefined}
-      computeTier={v2 ? computeTier : undefined}
-      onStart={v2Features?.startButton && container ? handleStartCompute : undefined}
+      volumeState={volumeState}
+      computeTier={computeTier}
+      onStart={features.startButton && container ? handleStartCompute : undefined}
       isStarting={needsContainerStart && containerStartup.isLoading}
       startupProgress={containerStartup.progress}
       startupMessage={containerStartup.message}
@@ -1128,7 +1113,7 @@ export default function Project() {
       />
     ) : null;
 
-  const codeEditorOverlay = v2HasFiles ? undefined : loadingOverlay ?? undefined;
+  const codeEditorOverlay = hasFiles ? undefined : loadingOverlay ?? undefined;
 
   const handleFileUpdate = useCallback(
     async (filePath: string, content: string) => {
@@ -1771,7 +1756,7 @@ export default function Project() {
                 <Panel id="content" minSize="30" className="overflow-hidden">
                   {/* Preview View */}
                   <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-                    {v2NoPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
+                    {noPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
                       previewMode === 'browser-tabs' ? (
                         <BrowserPreview
                           devServerUrl={devServerUrl}
@@ -1895,8 +1880,8 @@ export default function Project() {
                   >
                     <TerminalPanel
                       projectId={slug!}
-                      computeTier={v2 ? computeTier : undefined}
-                      onStartCompute={v2Features?.startButton && container ? handleStartCompute : undefined}
+                      computeTier={computeTier}
+                      onStartCompute={features.startButton && container ? handleStartCompute : undefined}
                       isStartingCompute={needsContainerStart && containerStartup.isLoading}
                       startupProgress={containerStartup.progress}
                       startupMessage={containerStartup.message}
@@ -1946,7 +1931,7 @@ export default function Project() {
               <div className="w-full h-full overflow-hidden">
                 {/* Preview View */}
                 <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-                  {v2NoPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
+                  {noPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
                     previewMode === 'browser-tabs' ? (
                       <BrowserPreview
                         devServerUrl={devServerUrl}
@@ -2066,8 +2051,8 @@ export default function Project() {
                 <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
                   <TerminalPanel
                     projectId={slug!}
-                    computeTier={v2 ? computeTier : undefined}
-                    onStartCompute={v2Features?.startButton && container ? handleStartCompute : undefined}
+                    computeTier={computeTier}
+                    onStartCompute={features.startButton && container ? handleStartCompute : undefined}
                     isStartingCompute={needsContainerStart && containerStartup.isLoading}
                     startupProgress={containerStartup.progress}
                     startupMessage={containerStartup.message}
@@ -2084,7 +2069,7 @@ export default function Project() {
           <div className="md:hidden w-full h-full overflow-hidden">
             {/* Preview View */}
             <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-              {v2NoPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
+              {noPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
                 <div className="w-full h-full bg-white">
                   <iframe
                     src={devServerUrlWithAuth || devServerUrl}
@@ -2132,8 +2117,8 @@ export default function Project() {
             <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
               <TerminalPanel
                 projectId={slug!}
-                computeTier={v2 ? computeTier : undefined}
-                onStartCompute={v2Features?.startButton && container ? handleStartCompute : undefined}
+                computeTier={computeTier}
+                onStartCompute={features.startButton && container ? handleStartCompute : undefined}
                 isStartingCompute={needsContainerStart && containerStartup.isLoading}
                 startupProgress={containerStartup.progress}
                 startupMessage={containerStartup.message}

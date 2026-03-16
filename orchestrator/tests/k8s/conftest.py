@@ -1,14 +1,13 @@
 """
-Pytest configuration and fixtures for Kubernetes integration tests.
+Pytest configuration and fixtures for Kubernetes tests.
 
-These fixtures provide:
-- HTTP client for API calls
-- Environment variable configuration
-- Timing observer instances
-- Cleanup utilities
+Provides:
+- E2E fixtures (HTTP client, env vars, timing observer)
+- V2 unit test fixtures (mock_settings for K8s config)
 """
 
 import os
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -19,6 +18,41 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "kubernetes: requires Kubernetes cluster")
     config.addinivalue_line("markers", "e2e: end-to-end integration test")
     config.addinivalue_line("markers", "slow: marks tests as slow running")
+
+
+# ============================================================================
+# V2 Unit Test Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_settings(monkeypatch):
+    """Patch get_settings for K8s unit tests."""
+    settings = Mock()
+    settings.k8s_devserver_image = "tesslate-devserver:latest"
+    settings.k8s_storage_class = "tesslate-block-storage"
+    settings.k8s_snapshot_class = "tesslate-ebs-snapshots"
+    settings.k8s_enable_pod_affinity = True
+    settings.k8s_pvc_size = "5Gi"
+    settings.k8s_pvc_access_mode = "ReadWriteOnce"
+    settings.k8s_image_pull_policy = "IfNotPresent"
+    settings.k8s_image_pull_secret = ""
+    settings.k8s_ingress_class = "nginx"
+    settings.k8s_wildcard_tls_secret = ""
+    settings.k8s_default_namespace = "tesslate"
+    settings.k8s_affinity_topology_key = "kubernetes.io/hostname"
+    settings.k8s_snapshot_ready_timeout_seconds = 300
+    settings.k8s_max_snapshots_per_project = 5
+    settings.app_domain = "example.com"
+    settings.compute_max_concurrent_pods = 10
+    settings.deployment_mode = "kubernetes"
+    monkeypatch.setattr("app.config.get_settings", lambda: settings)
+    return settings
+
+
+# ============================================================================
+# E2E Fixtures
+# ============================================================================
 
 
 @pytest.fixture(scope="session")

@@ -1396,8 +1396,8 @@ async def get_setup_config(
         from ..services.orchestration import get_orchestrator
         orchestrator = get_orchestrator()
 
-        # v2 routing hints for FileOps
-        v2_hints = {
+        # Volume routing hints for FileOps
+        volume_hints = {
             "volume_id": project.volume_id,
             "node_name": project.node_name,
             "volume_state": project.volume_state,
@@ -1410,7 +1410,7 @@ async def get_setup_config(
                 container_name=None,
                 file_path=".tesslate/config.json",
                 project_slug=project.slug,
-                **v2_hints,
+                **volume_hints,
             )
             if config_json:
                 from ..services.base_config_parser import parse_tesslate_config
@@ -1516,36 +1516,18 @@ async def save_setup_config(
         project_path = f"/projects/{project.slug}"
         write_tesslate_config(project_path, config)
     else:
-        # K8s: write config via orchestrator (v2 uses FileOps, v1 uses pod-exec)
+        # K8s: write config via orchestrator (FileOps)
         import json as json_mod
         from ..services.orchestration import get_orchestrator
 
         orchestrator = get_orchestrator()
 
-        # v2 routing hints
-        v2_hints = {
+        # Volume routing hints
+        volume_hints = {
             "volume_id": project.volume_id,
             "node_name": project.node_name,
             "volume_state": project.volume_state,
         }
-
-        is_v2 = project.volume_state not in ("legacy", None) and project.volume_id and project.node_name
-
-        if not is_v2:
-            # v1: ensure environment exists (namespace + PVC + file-manager pod)
-            await orchestrator.ensure_project_environment(
-                project_id=project.id,
-                user_id=current_user.id,
-                storage_class_override=getattr(project, "template_storage_class", None),
-            )
-
-            # Wait for file-manager pod to be ready
-            namespace = orchestrator._get_namespace(str(project.id))
-            for attempt in range(15):
-                pod_name = await orchestrator.k8s_client.get_file_manager_pod(namespace)
-                if pod_name:
-                    break
-                await asyncio.sleep(2)
 
         config_json = json_mod.dumps({
             "apps": {
@@ -1566,7 +1548,7 @@ async def save_setup_config(
             file_path=".tesslate/config.json",
             content=config_json,
             project_slug=project.slug,
-            **v2_hints,
+            **volume_hints,
         )
 
     # Sync Container records

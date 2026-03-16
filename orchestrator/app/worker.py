@@ -353,7 +353,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "agent_id": agent_model.id,
                 "_active_plan": active_plan,
                 "available_skills": available_skills,
-                # v2 volume-first routing hints
+                # Volume routing hints
                 "volume_id": project.volume_id,
                 "node_name": project.node_name,
                 "volume_state": project.volume_state,

@@ -462,28 +462,33 @@ class TestBashExecToolOracle:
 
         expected = test_case["expected"]
 
-        # Mock the orchestrator used by bash_exec_tool
-        mock_orchestrator = MagicMock()
+        # Volume routing hints required by v2 architecture
+        test_context["volume_id"] = "vol-test123"
+        test_context["node_name"] = "node-1"
+        test_context["volume_state"] = "local"
+        test_context["compute_tier"] = "environment"
+        test_context["container_name"] = "frontend"
 
-        # Setup mock output based on expected behavior
+        # Build the mock return value for _run_environment
         if expected.get("success"):
             mock_output = test_case.get("mock_output", "")
             if "output_contains" in expected:
                 mock_output = expected["output_contains"]
-            mock_orchestrator.execute_command = AsyncMock(return_value=mock_output)
+            mock_return = {
+                "success": True,
+                "output": mock_output,
+                "details": expected.get("details", {"exit_code": 0}),
+            }
         else:
-            mock_orchestrator.execute_command = AsyncMock(
-                side_effect=RuntimeError("command not found")
-            )
-
-        # Mock get_project_status so bash_exec can resolve container_name
-        mock_orchestrator.get_project_status = AsyncMock(
-            return_value={"containers": {"frontend": {"running": True}}}
-        )
+            mock_return = {
+                "success": False,
+                "message": "Command execution failed: command not found",
+                "details": {"command": test_case["input"]["command"], "tier": "environment"},
+            }
 
         with patch(
-            "app.services.orchestration.get_orchestrator",
-            return_value=mock_orchestrator,
+            "app.agent.tools.shell_ops.bash._run_environment",
+            return_value=mock_return,
         ):
             # Execute tool
             result = await bash_exec_tool(test_case["input"], test_context)

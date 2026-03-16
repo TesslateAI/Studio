@@ -76,7 +76,7 @@ class Project(Base):
         String(200), nullable=True
     )  # StorageClass name for template PVC (e.g., tesslate-btrfs-nextjs)
 
-    # v2 Volume-First Architecture
+    # Volume-First Architecture
     volume_id = Column(String(255), nullable=True, index=True)
     node_name = Column(String(255), nullable=True)
     volume_state = Column(

@@ -1,17 +1,16 @@
 """
 Bash Convenience Tool
 
-One-shot command execution using the orchestrator's execute_command method.
+One-shot command execution for volume-first projects.
 Returns immediately when the command exits — no PTY session, no sleep.
 
-v1 (legacy) projects use the orchestrator (Docker exec / K8s exec).
-v2 (volume-first) projects use ComputeManager ephemeral pods.
+Tier 1 (ephemeral): ComputeManager ephemeral pods for quick commands.
+Tier 2 (environment): kubectl exec into running dev containers.
 """
 
 import logging
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
 
 from ..output_formatter import error_output, strip_ansi_codes, success_output
 from ..registry import Tool, ToolCategory
@@ -19,8 +18,8 @@ from ..registry import Tool, ToolCategory
 logger = logging.getLogger(__name__)
 
 
-def _is_v2_project(context: dict[str, Any]) -> bool:
-    """Detect v2 volume-first project from context hints."""
+def _has_volume_hints(context: dict[str, Any]) -> bool:
+    """Check if the context includes volume routing hints (required for K8s execution)."""
     volume_state = context.get("volume_state")
     volume_id = context.get("volume_id")
     node_name = context.get("node_name")
@@ -31,7 +30,7 @@ def _is_v2_project(context: dict[str, Any]) -> bool:
     )
 
 
-async def _run_v2_ephemeral(
+async def _run_ephemeral(
     context: dict[str, Any], command: str, timeout: int
 ) -> dict[str, Any]:
     """Execute a command via ComputeManager ephemeral pod (Tier 1)."""
@@ -105,20 +104,20 @@ async def _run_v2_ephemeral(
         await _set_compute_state("none")
 
 
-def _get_v2_k8s_api():
+def _get_k8s_api():
     """Get or create a cached CoreV1Api for Tier 2 exec (matches T1 lazy-init pattern)."""
-    if not hasattr(_get_v2_k8s_api, "_v1"):
+    if not hasattr(_get_k8s_api, "_v1"):
         from kubernetes import config as k8s_config
         try:
             k8s_config.load_incluster_config()
         except k8s_config.ConfigException:
             k8s_config.load_kube_config()
         from kubernetes import client as k8s_client
-        _get_v2_k8s_api._v1 = k8s_client.CoreV1Api()
-    return _get_v2_k8s_api._v1
+        _get_k8s_api._v1 = k8s_client.CoreV1Api()
+    return _get_k8s_api._v1
 
 
-async def _run_v2_environment(
+async def _run_environment(
     context: dict[str, Any], command: str, timeout: int
 ) -> dict[str, Any]:
     """Execute a command in a running Tier 2 dev container via kubectl exec.
@@ -134,7 +133,7 @@ async def _run_v2_environment(
     namespace = f"proj-{project_id}"
     container_name = context.get("container_name")
 
-    v1 = _get_v2_k8s_api()
+    v1 = _get_k8s_api()
 
     # Build label selector — target specific container if context provides one
     labels = "tesslate.io/tier=2,tesslate.io/component=dev-container"
@@ -243,7 +242,7 @@ async def _run_v2_environment(
             },
         )
 
-    logger.info("[BASH-V2-ENV] Command completed in %s, output_length=%d", pod_name, len(clean_output))
+    logger.info("[BASH-ENV] Command completed in %s, output_length=%d", pod_name, len(clean_output))
     return success_output(
         message=f"Executed '{command}'",
         output=clean_output,
@@ -276,85 +275,16 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
 
     logger.info(f"[BASH] Executing (one-shot): {command[:100]}...")
 
-    # v2 volume-first projects
-    if _is_v2_project(context):
-        if context.get("compute_tier") == "environment":
-            return await _run_v2_environment(context, command, timeout)
-        return await _run_v2_ephemeral(context, command, timeout)
-
-    # v1 legacy path — orchestrator exec
-    from ....services.orchestration import get_orchestrator
-
-    user_id = context["user_id"]
-    project_id = context["project_id"]
-    project_slug = context.get("project_slug", "")
-    container_name = context.get("container_name")
-
-    try:
-        orchestrator = get_orchestrator()
-
-        # orchestrator.execute_command expects a raw service/directory name
-        # (e.g. "next-js-15") — it builds the full container name internally.
-        # When container_name is None (single-container project), resolve the
-        # default service name from the running project status.
-        if not container_name:
-            status = await orchestrator.get_project_status(project_slug, str(project_id))
-            containers = status.get("containers", {})
-            # Pick the first running service, or first service if none running
-            for svc_name, info in containers.items():
-                if info.get("running"):
-                    container_name = svc_name
-                    break
-            if not container_name and containers:
-                container_name = next(iter(containers.keys()))
-            if not container_name:
-                raise RuntimeError("No containers found. Please start the project first.")
-
-        logger.info(f"[BASH] Resolved container: {container_name}")
-
-        # The orchestrator's execute_command expects command as a list.
-        # Wrap in /bin/sh -c so the shell interprets pipes, redirects, etc.
-        cmd_list = ["/bin/sh", "-c", command]
-
-        output = await orchestrator.execute_command(
-            user_id=user_id,
-            project_id=UUID(str(project_id)) if not isinstance(project_id, UUID) else project_id,
-            container_name=container_name,
-            command=cmd_list,
-            timeout=timeout,
-        )
-
-        # Strip ANSI control codes from output
-        clean_output = strip_ansi_codes(output) if output else ""
-
-        logger.info(f"[BASH] Command completed, output_length={len(clean_output)}")
-
-        return success_output(
-            message=f"Executed '{command}'",
-            output=clean_output,
-            details={
-                "command": command,
-                "exit_code": 0,
-            },
-        )
-
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"[BASH] Command failed: {error_msg}")
-
-        # Distinguish timeout from other errors
-        if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
-            return error_output(
-                message=f"Command timed out after {timeout}s: {command}",
-                suggestion="Try a shorter command or increase the timeout parameter",
-                details={"command": command, "timeout": timeout, "error": error_msg},
-            )
-
+    if not _has_volume_hints(context):
         return error_output(
-            message=f"Command execution failed: {error_msg}",
-            suggestion="Check your command syntax and ensure the dev container is running",
-            details={"command": command, "error": error_msg},
+            message="Missing volume routing hints — cannot execute command",
+            suggestion="Ensure the project has a valid volume_state, volume_id, and node_name",
+            details={"command": command},
         )
+
+    if context.get("compute_tier") == "environment":
+        return await _run_environment(context, command, timeout)
+    return await _run_ephemeral(context, command, timeout)
 
 
 def register_bash_tools(registry):

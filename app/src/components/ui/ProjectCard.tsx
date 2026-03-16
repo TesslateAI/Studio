@@ -2,7 +2,7 @@ import React, { type ReactNode } from 'react';
 import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
 import { Dropdown } from './Dropdown';
-import { isV2Project, type VolumeState, type ComputeTier } from '../../types/project';
+import { type VolumeState, type ComputeTier } from '../../types/project';
 
 export type EnvironmentStatus =
   | 'active'
@@ -78,79 +78,8 @@ export function ProjectCard({
     },
   };
 
-  // Environment status badge configuration
-  const envStatusConfig: Record<
-    EnvironmentStatus,
-    { label: string; icon: string; className: string }
-  > = {
-    active: {
-      label: 'Active',
-      icon: '🟢',
-      className: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
-    },
-    hibernated: {
-      label: 'Hibernated',
-      icon: '💤',
-      className: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
-    },
-    hibernating: {
-      label: 'Saving...',
-      icon: '⏳',
-      className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
-    },
-    corrupted: {
-      label: 'Corrupted',
-      icon: '❌',
-      className: 'bg-red-500/10 text-red-400 border border-red-500/20',
-    },
-    creating: {
-      label: 'Creating...',
-      icon: '⏳',
-      className: 'bg-purple-500/10 text-purple-400 border border-purple-500/20',
-    },
-    starting: {
-      label: 'Starting...',
-      icon: '🚀',
-      className: 'bg-orange-500/10 text-orange-400 border border-orange-500/20',
-    },
-    stopping: {
-      label: 'Stopping...',
-      icon: '⏳',
-      className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
-    },
-    stopped: {
-      label: 'Stopped',
-      icon: '⏹️',
-      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20',
-    },
-    waking: {
-      label: 'Waking up...',
-      icon: '☀️',
-      className: 'bg-orange-500/10 text-orange-400 border border-orange-500/20',
-    },
-    restoring: {
-      label: 'Restoring...',
-      icon: '🔄',
-      className: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20',
-    },
-  };
-
-  // Fallback for unknown statuses
-  const getEnvStatusConfig = (status: string | undefined) => {
-    if (!status) return null;
-    if (status in envStatusConfig) {
-      return envStatusConfig[status as EnvironmentStatus];
-    }
-    // Return a generic fallback for unknown statuses
-    return {
-      label: status.charAt(0).toUpperCase() + status.slice(1),
-      icon: '⚙️',
-      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20',
-    };
-  };
-
-  // V2 two-axis status badge: volumeState × computeTier
-  const getV2StatusBadge = (
+  // Two-axis status badge: volumeState x computeTier
+  const getStatusBadge = (
     volumeState: VolumeState,
     computeTier: ComputeTier,
   ): { label: string; icon: React.ReactNode; className: string } | null => {
@@ -297,33 +226,18 @@ export function ProjectCard({
               </h3>
               {/* Environment Status Badge */}
               {(() => {
-                // V2 projects: two-axis badge
-                if (isV2Project(project.volume_state)) {
-                  const v2Badge = getV2StatusBadge(
-                    project.volume_state as VolumeState,
-                    (project.compute_tier ?? 'none') as ComputeTier,
-                  );
-                  if (!v2Badge) return null;
-                  return (
-                    <div
-                      className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs flex-shrink-0 ${v2Badge.className}`}
-                      title={v2Badge.label}
-                    >
-                      {v2Badge.icon}
-                      <span className="font-medium text-[10px]">{v2Badge.label}</span>
-                    </div>
-                  );
-                }
-                // V1 legacy: existing badge
-                const statusConfig = getEnvStatusConfig(project.environmentStatus);
-                if (!statusConfig || project.environmentStatus === 'active') return null;
+                const badge = getStatusBadge(
+                  (project.volume_state ?? 'local') as VolumeState,
+                  (project.compute_tier ?? 'none') as ComputeTier,
+                );
+                if (!badge) return null;
                 return (
                   <div
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs flex-shrink-0 ${statusConfig.className}`}
-                    title={`Environment: ${statusConfig.label}`}
+                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs flex-shrink-0 ${badge.className}`}
+                    title={badge.label}
                   >
-                    <span>{statusConfig.icon}</span>
-                    <span className="font-medium text-[10px]">{statusConfig.label}</span>
+                    {badge.icon}
+                    <span className="font-medium text-[10px]">{badge.label}</span>
                   </div>
                 );
               })()}

@@ -66,7 +66,7 @@ async def read_file_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
             file_path=file_path,
             project_slug=project_slug,
             subdir=container_directory,
-            # v2 routing hints
+            # Volume routing hints
             volume_id=context.get("volume_id"),
             node_name=context.get("node_name"),
             volume_state=context.get("volume_state"),
@@ -151,7 +151,7 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
             content=content,
             project_slug=project_slug,
             subdir=container_directory,
-            # v2 routing hints
+            # Volume routing hints
             volume_id=context.get("volume_id"),
             node_name=context.get("node_name"),
             volume_state=context.get("volume_state"),

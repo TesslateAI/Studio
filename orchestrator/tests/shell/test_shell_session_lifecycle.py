@@ -315,41 +315,56 @@ class TestShellToolSessionIntegration:
         """Test that bash_exec executes commands via the orchestrator."""
         from app.agent.tools.shell_ops.bash import bash_exec_tool
 
+        # Volume routing hints required by v2 architecture
+        test_context["volume_id"] = "vol-test123"
+        test_context["node_name"] = "node-1"
+        test_context["volume_state"] = "local"
+        test_context["compute_tier"] = "environment"
+        test_context["container_name"] = "frontend"
+
         mock_orchestrator = MagicMock()
         mock_orchestrator.execute_command = AsyncMock(return_value="hello world")
-        mock_orchestrator.get_project_status = AsyncMock(
-            return_value={"containers": {"frontend": {"running": True}}}
-        )
 
-        with patch(
-            "app.services.orchestration.get_orchestrator",
-            return_value=mock_orchestrator,
+        with (
+            patch(
+                "app.services.orchestration.get_orchestrator",
+                return_value=mock_orchestrator,
+            ),
+            patch(
+                "app.agent.tools.shell_ops.bash._run_environment",
+                return_value={
+                    "success": True,
+                    "output": "hello world",
+                    "details": {"exit_code": 0},
+                },
+            ) as mock_run_env,
         ):
             result = await bash_exec_tool({"command": "echo hello"}, test_context)
 
             assert result["success"] is True
             assert "hello" in result.get("output", "")
-            mock_orchestrator.execute_command.assert_called_once()
+            mock_run_env.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_bash_exec_reuses_container(self, test_context):
         """Test that bash_exec uses container_name from context when available."""
         from app.agent.tools.shell_ops.bash import bash_exec_tool
 
+        # Volume routing hints required by v2 architecture
+        test_context["volume_id"] = "vol-test123"
+        test_context["node_name"] = "node-1"
+        test_context["volume_state"] = "local"
+        test_context["compute_tier"] = "environment"
         test_context["container_name"] = "frontend"
 
-        mock_orchestrator = MagicMock()
-        mock_orchestrator.execute_command = AsyncMock(return_value="reused")
-
         with patch(
-            "app.services.orchestration.get_orchestrator",
-            return_value=mock_orchestrator,
-        ):
+            "app.agent.tools.shell_ops.bash._run_environment",
+            return_value={"success": True, "output": "reused", "details": {"exit_code": 0}},
+        ) as mock_run_env:
             result = await bash_exec_tool({"command": "echo reused"}, test_context)
 
             assert result["success"] is True
-            # Should NOT have called get_project_status since container_name was in context
-            mock_orchestrator.get_project_status.assert_not_called()
+            mock_run_env.assert_called_once()
 
 
 # ============================================================================
@@ -398,17 +413,22 @@ class TestSessionErrorHandling:
         """Test handling of command execution failure."""
         from app.agent.tools.shell_ops.bash import bash_exec_tool
 
-        mock_orchestrator = MagicMock()
-        mock_orchestrator.execute_command = AsyncMock(
-            side_effect=RuntimeError("Container not running")
-        )
-        mock_orchestrator.get_project_status = AsyncMock(
-            return_value={"containers": {"frontend": {"running": True}}}
-        )
+        # Volume routing hints required by v2 architecture
+        test_context["volume_id"] = "vol-test123"
+        test_context["node_name"] = "node-1"
+        test_context["volume_state"] = "local"
+        test_context["compute_tier"] = "environment"
+
+        # _run_environment returns error_output dict when exec fails
+        error_result = {
+            "success": False,
+            "message": "Command execution failed: Container not running",
+            "details": {"command": "echo test", "tier": "environment"},
+        }
 
         with patch(
-            "app.services.orchestration.get_orchestrator",
-            return_value=mock_orchestrator,
+            "app.agent.tools.shell_ops.bash._run_environment",
+            return_value=error_result,
         ):
             result = await bash_exec_tool({"command": "echo test"}, test_context)
 

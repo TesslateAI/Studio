@@ -161,7 +161,7 @@ export function TerminalPanel({
     // Reset tab counter for new project
     nextTabNumber.current = 2;
 
-    // v2: don't connect if no environment running
+    // Don't connect if no environment running
     if (computeTier !== undefined && computeTier !== 'environment') {
       return cleanupTabs;
     }
@@ -421,7 +421,7 @@ export function TerminalPanel({
     }
   };
 
-  // v2: show inline placeholder when no environment is running
+  // Show inline placeholder when no environment is running
   if (computeTier !== undefined && computeTier !== 'environment') {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
