@@ -5459,6 +5459,28 @@ async def check_container_health(
                 response = await client.get(health_check_url, follow_redirects=True)
             is_healthy = response.status_code < 400
 
+            # For K8s: verify external path through NGINX Ingress is also routable.
+            # The Ingress Controller may take 1-5s to sync after Service endpoints update.
+            if is_healthy and settings.deployment_mode == "kubernetes":
+                ingress_host = f"{project.slug}-{container_dir}.{settings.app_domain}"
+                ingress_svc = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local"
+                try:
+                    ingress_resp = await client.get(
+                        ingress_svc,
+                        headers={"Host": ingress_host},
+                        follow_redirects=True,
+                        timeout=3.0,
+                    )
+                    if ingress_resp.status_code >= 500:
+                        return {
+                            "healthy": False,
+                            "url": external_url,
+                            "error": "Ingress routing not ready yet",
+                        }
+                except (httpx.TimeoutException, httpx.ConnectError):
+                    # Ingress controller not reachable (minikube / local dev) — skip
+                    pass
+
             return {
                 "healthy": is_healthy,
                 "status_code": response.status_code,

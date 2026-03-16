@@ -12,7 +12,7 @@ export function getV2Features(volumeState: VolumeState, computeTier: ComputeTier
     agentChat:     volumeState === 'local',
     terminal:      computeTier === 'environment',
     preview:       computeTier === 'environment',
-    startButton:   volumeState === 'local' && computeTier === 'none',
+    startButton:   (volumeState === 'local' || volumeState === 'remote_only') && computeTier === 'none',
     stopButton:    computeTier === 'environment',
     restoreNotice: volumeState === 'remote_only' || volumeState === 'restoring',
   };

@@ -181,6 +181,15 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
           ) : (
             <XCircle size={14} className="text-red-500" />
           ))}
+        {(() => {
+          const tier = (result?.result as Record<string, unknown>)?.tier;
+          if (!tier) return null;
+          return (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 ml-1">
+              {tier === 'environment' ? 'Dev env' : 'Container'}
+            </span>
+          );
+        })()}
       </div>
 
       {/* Main Parameter */}

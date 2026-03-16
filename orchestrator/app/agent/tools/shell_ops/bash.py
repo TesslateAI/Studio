@@ -70,7 +70,7 @@ async def _run_v2_ephemeral(
             return error_output(
                 message="Compute pool quota exceeded — too many concurrent commands",
                 suggestion="Wait a moment and retry, or start a full environment with project start",
-                details={"command": command},
+                details={"command": command, "tier": "ephemeral"},
             )
 
         clean_output = strip_ansi_codes(output) if output else ""
@@ -79,7 +79,7 @@ async def _run_v2_ephemeral(
             return error_output(
                 message=f"Command timed out after {timeout}s: {command}",
                 suggestion="Try a shorter command or increase the timeout parameter",
-                details={"command": command, "timeout": timeout, "exit_code": 124},
+                details={"command": command, "timeout": timeout, "exit_code": 124, "tier": "ephemeral"},
             )
 
         if exit_code != 0:
@@ -90,6 +90,7 @@ async def _run_v2_ephemeral(
                     "command": command,
                     "exit_code": exit_code,
                     "output": clean_output,
+                    "tier": "ephemeral",
                 },
             )
 
@@ -97,7 +98,7 @@ async def _run_v2_ephemeral(
         return success_output(
             message=f"Executed '{command}'",
             output=clean_output,
-            details={"command": command, "exit_code": 0},
+            details={"command": command, "exit_code": 0, "tier": "ephemeral"},
         )
 
     finally:
@@ -155,7 +156,7 @@ async def _run_v2_environment(
             return error_output(
                 message="Project namespace not found — environment may not be started",
                 suggestion="Start the project environment first",
-                details={"namespace": namespace},
+                details={"namespace": namespace, "tier": "environment"},
             )
         raise
 
@@ -178,7 +179,7 @@ async def _run_v2_environment(
             return error_output(
                 message="No running dev container found in the environment",
                 suggestion="Start the project environment or wait for pods to be ready",
-                details={"namespace": namespace},
+                details={"namespace": namespace, "tier": "environment"},
             )
 
     pod_name = pods[0].metadata.name
@@ -206,13 +207,13 @@ async def _run_v2_environment(
         return error_output(
             message=f"Failed to exec in pod {pod_name}: {exc.reason}",
             suggestion="Check if the dev container is running and ready",
-            details={"pod": pod_name, "namespace": namespace, "error": str(exc)},
+            details={"pod": pod_name, "namespace": namespace, "error": str(exc), "tier": "environment"},
         )
     except Exception as exc:
         return error_output(
             message=f"Command execution failed: {exc}",
             suggestion="Check if the environment is healthy",
-            details={"pod": pod_name, "command": command, "error": str(exc)},
+            details={"pod": pod_name, "command": command, "error": str(exc), "tier": "environment"},
         )
 
     # Parse exit code from sentinel
@@ -238,6 +239,7 @@ async def _run_v2_environment(
                 "exit_code": exit_code,
                 "output": clean_output,
                 "pod": pod_name,
+                "tier": "environment",
             },
         )
 
@@ -245,7 +247,7 @@ async def _run_v2_environment(
     return success_output(
         message=f"Executed '{command}'",
         output=clean_output,
-        details={"command": command, "exit_code": 0, "pod": pod_name},
+        details={"command": command, "exit_code": 0, "pod": pod_name, "tier": "environment"},
     )
 
 

@@ -32,6 +32,7 @@ import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
 import { BrowserPreview } from '../components/BrowserPreview';
 import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
+import { StartupLogViewer } from '../components/StartupLogViewer';
 import { DiscordSupport } from '../components/DiscordSupport';
 import { useContainerStartup } from '../hooks/useContainerStartup';
 import {
@@ -61,20 +62,153 @@ type PanelType = 'github' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
 
 // V2 placeholder for views that require compute (preview, terminal)
-function NoComputePlaceholder({ onStart }: { onStart?: () => void }) {
+interface NoComputePlaceholderProps {
+  onStart?: () => void;
+  variant: 'terminal' | 'preview';
+  volumeState?: VolumeState;
+  computeTier?: ComputeTier;
+  isStarting?: boolean;
+  startupProgress?: number;
+  startupMessage?: string;
+  startupLogs?: string[];
+  startupError?: string;
+  onRetry?: () => void;
+  onAskAgent?: (msg: string) => void;
+  containerPort?: number;
+}
+
+function NoComputePlaceholder({
+  onStart,
+  variant,
+  volumeState,
+  computeTier,
+  isStarting,
+  startupProgress,
+  startupMessage,
+  startupLogs,
+  startupError,
+  onRetry,
+  onAskAgent,
+  containerPort = 3000,
+}: NoComputePlaceholderProps) {
+  const accessLabel = variant === 'terminal' ? 'terminal access' : 'live preview';
+
+  // Starting state — show progress + logs
+  if (isStarting) {
+    // Error during startup
+    if (startupError) {
+      const isHealthCheck = startupError.startsWith('HEALTH_CHECK_TIMEOUT:');
+      const displayError = isHealthCheck ? startupError.replace('HEALTH_CHECK_TIMEOUT:', '') : startupError;
+      return (
+        <div className="h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
+          <div className="flex flex-col items-center gap-4 max-w-lg text-center">
+            <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center">
+              <Terminal size={32} className="text-red-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-[var(--text)]">
+              {isHealthCheck ? 'Container needs setup' : 'Failed to Start'}
+            </h3>
+            <p className="text-[var(--text)]/60 text-sm">{displayError}</p>
+
+            <div className="flex items-center gap-3">
+              {onAskAgent && isHealthCheck && (
+                <button
+                  onClick={() => onAskAgent(`Use the running tmux process to get this up and running. The port for the preview url is ${containerPort}.`)}
+                  className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary)]/80 transition-colors text-sm font-medium"
+                >
+                  Ask Agent
+                </button>
+              )}
+              {onRetry && (
+                <button
+                  onClick={onRetry}
+                  className="flex items-center gap-2 px-4 py-2 text-[var(--text)]/60 hover:text-[var(--text)] transition-colors text-sm"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+
+            {startupLogs && startupLogs.length > 0 && (
+              <StartupLogViewer logs={startupLogs.slice(-10)} maxHeight="h-32" />
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
+        <div className="flex flex-col items-center gap-3 max-w-lg text-center">
+          <div className="w-12 h-12 rounded-full bg-[var(--primary)]/10 flex items-center justify-center animate-pulse">
+            <Terminal size={24} className="text-[var(--primary)]" />
+          </div>
+          <p className="text-sm font-medium text-[var(--text)]">Starting compute environment...</p>
+          {startupProgress !== undefined && (
+            <div className="w-48 h-1.5 bg-[var(--text)]/10 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-[var(--primary)] rounded-full transition-all"
+                style={{ width: `${startupProgress}%` }}
+              />
+            </div>
+          )}
+          {startupMessage && <p className="text-xs text-[var(--text)]/50">{startupMessage}</p>}
+
+          {startupLogs && startupLogs.length > 0 && (
+            <StartupLogViewer logs={startupLogs} maxHeight="h-36" className="mt-2" />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Determine icon, title, description, and button label based on state
+  let icon = <Monitor size={32} className="text-emerald-400" />;
+  let iconBg = 'bg-emerald-500/10';
+  let title = 'Files available';
+  let description = `Start the environment for ${accessLabel}.`;
+  let buttonLabel = 'Start Environment';
+
+  if (volumeState === 'remote_only') {
+    icon = <ArrowsClockwise size={32} className="text-[var(--primary)]" />;
+    iconBg = 'bg-[var(--primary)]/10';
+    title = 'Project hibernated';
+    description = `Wake project to access files and ${accessLabel}.`;
+    buttonLabel = 'Wake Project';
+  } else if (volumeState === 'restoring') {
+    icon = <ArrowsClockwise size={32} className="text-amber-400 animate-spin" />;
+    iconBg = 'bg-amber-500/10';
+    title = 'Restoring files...';
+    description = 'Volume is being restored from snapshot.';
+    buttonLabel = '';
+  } else if (volumeState === 'provisioning') {
+    icon = <ArrowsClockwise size={32} className="text-amber-400 animate-spin" />;
+    iconBg = 'bg-amber-500/10';
+    title = 'Setting up project...';
+    description = 'Volume is being provisioned.';
+    buttonLabel = '';
+  } else if (computeTier === 'ephemeral') {
+    icon = <Terminal size={32} className="text-[var(--primary)]" />;
+    iconBg = 'bg-[var(--primary)]/10';
+    title = 'Agent commands running';
+    description = `Start full environment for ${accessLabel}.`;
+    buttonLabel = 'Start Environment';
+  }
+
   return (
     <div className="h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
       <div className="flex flex-col items-center gap-4 max-w-md text-center">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center">
-          <Monitor size={32} className="text-emerald-400" />
+        <div className={`w-16 h-16 rounded-full ${iconBg} flex items-center justify-center`}>
+          {icon}
         </div>
-        <h3 className="text-lg font-semibold text-[var(--text)]">Files available</h3>
-        <p className="text-[var(--text)]/60 text-sm">
-          No compute running. Start the environment for preview and terminal.
-        </p>
-        {onStart && (
-          <button onClick={onStart} className="px-5 py-2.5 bg-[var(--primary)] text-white rounded-lg hover:opacity-80 transition font-medium">
-            Start Environment
+        <h3 className="text-lg font-semibold text-[var(--text)]">{title}</h3>
+        <p className="text-[var(--text)]/60 text-sm">{description}</p>
+        {onStart && buttonLabel && (
+          <button
+            onClick={onStart}
+            className="px-5 py-2.5 bg-[var(--primary)] text-white rounded-lg hover:opacity-80 transition font-medium"
+          >
+            {buttonLabel}
           </button>
         )}
       </div>
@@ -193,7 +327,6 @@ export default function Project() {
     [v2, volumeState, computeTier]
   );
   const v2NoPreview  = v2 && !!v2Features && !v2Features.preview;
-  const v2NoTerminal = v2 && !!v2Features && !v2Features.terminal;
   const v2HasFiles   = v2 && !!v2Features && v2Features.fileBrowser;
 
   const handleStartCompute = useCallback(() => {
@@ -825,12 +958,17 @@ export default function Project() {
           console.warn('Failed to check container status, will attempt start:', statusError);
         }
 
-        // v2: non-legacy volume state — don't auto-start container
+        // v2: non-legacy volume state — check compute tier before auto-starting
         if (freshVolumeState !== 'legacy') {
-          console.log('[loadContainer] v2: volume state', freshVolumeState, '— skipping container start');
-          containerStartup.reset();
-          setNeedsContainerStart(false);
-          return;
+          const freshComputeTier = (freshProject.compute_tier as string) ?? 'none';
+          if (freshComputeTier !== 'environment') {
+            // No environment running — let user decide via Start button
+            console.log('[loadContainer] v2: compute_tier', freshComputeTier, '— skipping container start');
+            containerStartup.reset();
+            setNeedsContainerStart(false);
+            return;
+          }
+          // compute_tier is 'environment' — fall through to existing status check
         }
 
         // Container not running - use the startup hook to start it with real-time logs
@@ -896,9 +1034,20 @@ export default function Project() {
     setPrefillChatMessage(message);
   }, []);
 
-  const noComputePlaceholder = (
+  const previewPlaceholder = (
     <NoComputePlaceholder
+      variant="preview"
+      volumeState={v2 ? volumeState : undefined}
+      computeTier={v2 ? computeTier : undefined}
       onStart={v2Features?.startButton && container ? handleStartCompute : undefined}
+      isStarting={needsContainerStart && containerStartup.isLoading}
+      startupProgress={containerStartup.progress}
+      startupMessage={containerStartup.message}
+      startupLogs={containerStartup.logs}
+      startupError={containerStartup.error || undefined}
+      onRetry={containerStartup.retry}
+      onAskAgent={handleAskAgent}
+      containerPort={(container?.internal_port as number) || 3000}
     />
   );
 
@@ -1547,7 +1696,7 @@ export default function Project() {
                 <Panel id="content" minSize="30" className="overflow-hidden">
                   {/* Preview View */}
                   <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-                    {v2NoPreview ? noComputePlaceholder : loadingOverlay ?? (devServerUrl ? (
+                    {v2NoPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
                       previewMode === 'browser-tabs' ? (
                         <BrowserPreview
                           devServerUrl={devServerUrl}
@@ -1669,9 +1818,17 @@ export default function Project() {
                   <div
                     className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}
                   >
-                    {v2NoTerminal ? noComputePlaceholder : (
-                      <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
-                    )}
+                    <TerminalPanel
+                      projectId={slug!}
+                      computeTier={v2 ? computeTier : undefined}
+                      onStartCompute={v2Features?.startButton && container ? handleStartCompute : undefined}
+                      isStartingCompute={needsContainerStart && containerStartup.isLoading}
+                      startupProgress={containerStartup.progress}
+                      startupMessage={containerStartup.message}
+                      startupLogs={containerStartup.logs}
+                      startupError={containerStartup.error || undefined}
+                      onRetryStart={containerStartup.retry}
+                    />
                   </div>
                 </Panel>
 
@@ -1711,7 +1868,7 @@ export default function Project() {
               <div className="w-full h-full overflow-hidden">
                 {/* Preview View */}
                 <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-                  {v2NoPreview ? noComputePlaceholder : loadingOverlay ?? (devServerUrl ? (
+                  {v2NoPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
                     previewMode === 'browser-tabs' ? (
                       <BrowserPreview
                         devServerUrl={devServerUrl}
@@ -1829,9 +1986,17 @@ export default function Project() {
 
                 {/* Terminal View */}
                 <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-                  {v2NoTerminal ? noComputePlaceholder : (
-                    <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
-                  )}
+                  <TerminalPanel
+                    projectId={slug!}
+                    computeTier={v2 ? computeTier : undefined}
+                    onStartCompute={v2Features?.startButton && container ? handleStartCompute : undefined}
+                    isStartingCompute={needsContainerStart && containerStartup.isLoading}
+                    startupProgress={containerStartup.progress}
+                    startupMessage={containerStartup.message}
+                    startupLogs={containerStartup.logs}
+                    startupError={containerStartup.error || undefined}
+                    onRetryStart={containerStartup.retry}
+                  />
                 </div>
               </div>
             )}
@@ -1841,7 +2006,7 @@ export default function Project() {
           <div className="md:hidden w-full h-full overflow-hidden">
             {/* Preview View */}
             <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-              {v2NoPreview ? noComputePlaceholder : loadingOverlay ?? (devServerUrl ? (
+              {v2NoPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
                 <div className="w-full h-full bg-white">
                   <iframe
                     src={devServerUrlWithAuth || devServerUrl}
@@ -1887,9 +2052,17 @@ export default function Project() {
 
             {/* Terminal View */}
             <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-              {v2NoTerminal ? noComputePlaceholder : (
-                <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
-              )}
+              <TerminalPanel
+                projectId={slug!}
+                computeTier={v2 ? computeTier : undefined}
+                onStartCompute={v2Features?.startButton && container ? handleStartCompute : undefined}
+                isStartingCompute={needsContainerStart && containerStartup.isLoading}
+                startupProgress={containerStartup.progress}
+                startupMessage={containerStartup.message}
+                startupLogs={containerStartup.logs}
+                startupError={containerStartup.error || undefined}
+                onRetryStart={containerStartup.retry}
+              />
             </div>
           </div>
         </div>

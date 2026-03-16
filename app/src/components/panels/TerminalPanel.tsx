@@ -3,13 +3,23 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Terminal as TerminalIcon } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { createTerminalWebSocket } from '../../lib/api';
 import { useTheme } from '../../theme/ThemeContext';
+import { StartupLogViewer } from '../StartupLogViewer';
+import type { ComputeTier } from '../../types/project';
 
 interface TerminalPanelProps {
   projectId: string;
+  computeTier?: ComputeTier;
+  onStartCompute?: () => void;
+  isStartingCompute?: boolean;
+  startupProgress?: number;
+  startupMessage?: string;
+  startupLogs?: string[];
+  startupError?: string;
+  onRetryStart?: () => void;
 }
 
 interface TerminalTab {
@@ -25,7 +35,17 @@ interface TerminalTab {
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
 }
 
-export function TerminalPanel({ projectId }: TerminalPanelProps) {
+export function TerminalPanel({
+  projectId,
+  computeTier,
+  onStartCompute,
+  isStartingCompute,
+  startupProgress,
+  startupMessage,
+  startupLogs,
+  startupError,
+  onRetryStart,
+}: TerminalPanelProps) {
   const { theme } = useTheme();
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -114,7 +134,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
   const currentProjectIdRef = useRef(projectId);
   currentProjectIdRef.current = projectId;
 
-  // Initialize first (main) tab on mount, cleanup on projectId change
+  // Initialize first (main) tab on mount, cleanup on projectId/computeTier change
   useEffect(() => {
     // Cleanup function that runs BEFORE effect and on unmount
     // This ensures old tabs are fully cleaned up before creating new ones
@@ -141,11 +161,16 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     // Reset tab counter for new project
     nextTabNumber.current = 2;
 
+    // v2: don't connect if no environment running
+    if (computeTier !== undefined && computeTier !== 'environment') {
+      return cleanupTabs;
+    }
+
     // Create main tab for new project
     createTab(true);
 
     return cleanupTabs;
-  }, [projectId]);
+  }, [projectId, computeTier]);
 
   // Handle terminal rendering when active tab changes
   useEffect(() => {
@@ -395,6 +420,65 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       setActiveTabId(newTabs[0]?.id || null);
     }
   };
+
+  // v2: show inline placeholder when no environment is running
+  if (computeTier !== undefined && computeTier !== 'environment') {
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
+        {isStartingCompute ? (
+          <div className="flex flex-col items-center gap-3 max-w-lg text-center">
+            <div className="w-12 h-12 rounded-full bg-[var(--primary)]/10 flex items-center justify-center animate-pulse">
+              <TerminalIcon size={24} className="text-[var(--primary)]" />
+            </div>
+            <p className="text-sm font-medium text-[var(--text)]">Starting compute environment...</p>
+            {startupProgress !== undefined && (
+              <div className="w-48 h-1.5 bg-[var(--text)]/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[var(--primary)] rounded-full transition-all"
+                  style={{ width: `${startupProgress}%` }}
+                />
+              </div>
+            )}
+            {startupMessage && <p className="text-xs text-[var(--text)]/50">{startupMessage}</p>}
+
+            {startupError && (
+              <div className="flex flex-col items-center gap-2 mt-2">
+                <p className="text-sm text-red-400">{startupError}</p>
+                {onRetryStart && (
+                  <button
+                    onClick={onRetryStart}
+                    className="px-4 py-1.5 text-[var(--text)]/60 hover:text-[var(--text)] transition-colors text-sm"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
+
+            {startupLogs && startupLogs.length > 0 && (
+              <StartupLogViewer logs={startupLogs} maxHeight="h-36" className="mt-2" />
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-4 max-w-md text-center">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center">
+              <TerminalIcon size={32} className="text-emerald-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-[var(--text)]">Terminal</h3>
+            <p className="text-[var(--text)]/60 text-sm">Start the environment for terminal access.</p>
+            {onStartCompute && (
+              <button
+                onClick={onStartCompute}
+                className="px-5 py-2.5 bg-[var(--primary)] text-white rounded-lg hover:opacity-80 transition font-medium"
+              >
+                Start Environment
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-[var(--surface)] rounded-lg overflow-hidden shadow-xl border border-[var(--sidebar-border)]">

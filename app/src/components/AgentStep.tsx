@@ -2,7 +2,14 @@ import { Brain, CheckCircle, XCircle } from 'lucide-react';
 import ToolCallDisplay from './ToolCallDisplay';
 import { getToolIcon, getToolLabel } from './toolCallHelpers';
 import AgentDebugPanel from './AgentDebugPanel';
-import { type AgentStep as AgentStepType } from '../types/agent';
+import { type AgentStep as AgentStepType, type ToolCallDetail } from '../types/agent';
+
+function getTierBadge(toolCall: ToolCallDetail): string | null {
+  const tier = (toolCall.result?.result as Record<string, unknown>)?.tier;
+  if (tier === 'ephemeral') return 'Container';
+  if (tier === 'environment') return 'Dev env';
+  return null;
+}
 
 interface AgentStepProps {
   step: AgentStepType;
@@ -35,6 +42,12 @@ export default function AgentStep({ step, toolCallsCollapsed }: AgentStepProps) 
                   ) : (
                     <XCircle size={12} className="text-red-500" />
                   ))}
+                {(() => {
+                  const badge = getTierBadge(toolCall);
+                  return badge ? (
+                    <span className="text-[10px] text-[var(--text)]/40 ml-0.5">{badge}</span>
+                  ) : null;
+                })()}
               </span>
             );
           })
