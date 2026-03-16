@@ -184,13 +184,13 @@ async def graph_stop_container_executor(
             )
 
         # Stop the container
+        from .shell import _resolve_k8s_container_name
+
         orchestrator = get_orchestrator()
         stop_kwargs: dict = {
             "project_slug": project_slug,
             "project_id": project_id,
-            "container_name": (
-                container.name if container.directory in (".", "", None) else container.directory
-            ).lower().replace(" ", "-").replace("_", "-").replace(".", "-"),
+            "container_name": await _resolve_k8s_container_name(project_id, container),
             "user_id": user_id,
         }
         if is_kubernetes_mode() and getattr(container, "container_type", "base") == "service":
@@ -386,17 +386,13 @@ async def graph_container_status_executor(
         container_list = []
         status_map = status.get("containers", {})
         for container in containers:
-            # K8s keys status by sanitized service_slug (service) or directory (base)
-            if getattr(container, "container_type", "base") == "service":
-                container_key = (container.service_slug or container.name).lower()
-            else:
-                dir_for_k8s = (
-                    container.name
-                    if container.directory in (".", "", None)
-                    else container.directory
-                )
-                container_key = dir_for_k8s
-            container_status = status_map.get(container_key, {})
+            # Match container to status entry by container_id label (source of truth)
+            cid = str(container.id)
+            container_status = {}
+            for _dir_key, info in status_map.items():
+                if info.get("container_id") == cid:
+                    container_status = info
+                    break
 
             container_list.append(
                 {

@@ -146,6 +146,10 @@ export default function Project() {
         setCurrentPreviewUrl(url);
         setNeedsContainerStart(false);
         toast.success('Development server ready!', { id: 'container-start', duration: 2000 });
+        // Re-fetch project to pick up updated compute_tier (enables preview/terminal gates)
+        if (slug) {
+          projectsApi.get(slug).then((p) => setProject(p)).catch(() => {});
+        }
         // Container just became ready - load files with retry (pod may still be warming up)
         fileRetryCancelledRef.current = true;
         if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
@@ -193,9 +197,13 @@ export default function Project() {
   const v2HasFiles   = v2 && !!v2Features && v2Features.fileBrowser;
 
   const handleStartCompute = useCallback(() => {
-    if (!container) return;
+    if (!container) {
+      toast.error('No container found — project may still be loading');
+      return;
+    }
     currentContainerIdRef.current = container.id as string;
     setNeedsContainerStart(true);
+    toast.loading('Starting environment...', { id: 'container-start' });
     containerStartup.startContainer(container.id as string);
   }, [container, containerStartup]);
 
@@ -890,7 +898,7 @@ export default function Project() {
 
   const noComputePlaceholder = (
     <NoComputePlaceholder
-      onStart={v2Features?.startButton ? handleStartCompute : undefined}
+      onStart={v2Features?.startButton && container ? handleStartCompute : undefined}
     />
   );
 

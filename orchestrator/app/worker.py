@@ -357,6 +357,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "volume_id": project.volume_id,
                 "node_name": project.node_name,
                 "volume_state": project.volume_state,
+                "compute_tier": project.compute_tier,
             }
 
             # Inject MCP server configs so bridge executors can reconnect

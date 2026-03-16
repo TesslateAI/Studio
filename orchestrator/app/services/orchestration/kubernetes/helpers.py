@@ -202,7 +202,7 @@ def create_file_manager_deployment(
         volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],
         resources=client.V1ResourceRequirements(
             # File-manager needs enough memory for npm install (Next.js needs ~1GB)
-            requests={"memory": "256Mi", "cpu": "100m"},
+            requests={"memory": "256Mi", "cpu": "50m"},
             limits={"memory": "1536Mi", "cpu": "1000m"},
         ),
     )
@@ -352,7 +352,7 @@ def create_container_deployment(
         volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],
         env=env_vars,
         resources=client.V1ResourceRequirements(
-            requests={"memory": "256Mi", "cpu": "100m"}, limits={"memory": "1Gi", "cpu": "1000m"}
+            requests={"memory": "256Mi", "cpu": "50m"}, limits={"memory": "1Gi", "cpu": "1000m"}
         ),
         # Startup probe - check tmux session exists (passes fast, doesn't require dev server)
         # Uses exec instead of HTTP so containers stay alive even if dev server never starts
@@ -859,7 +859,7 @@ def create_service_container_deployment(
         ports=[client.V1ContainerPort(container_port=port, name="service")],
         volume_mounts=volume_mounts if volume_mounts else None,
         resources=client.V1ResourceRequirements(
-            requests={"memory": "256Mi", "cpu": "100m"},
+            requests={"memory": "256Mi", "cpu": "50m"},
             limits={"memory": "512Mi", "cpu": "500m"},
         ),
     )
@@ -1094,7 +1094,7 @@ echo "TEMPLATE_BUILD_COMPLETE"'''
                                 ),
                             ],
                             resources=client.V1ResourceRequirements(
-                                requests={"memory": "256Mi", "cpu": "100m"},
+                                requests={"memory": "256Mi", "cpu": "50m"},
                                 limits={"memory": "1536Mi", "cpu": "1000m"},
                             ),
                         ),
@@ -1127,5 +1127,469 @@ def create_builder_network_policy(namespace: str) -> client.V1NetworkPolicy:
             policy_types=["Ingress", "Egress"],
             ingress=[],  # deny all ingress
             egress=[client.V1NetworkPolicyEgressRule()],  # allow all egress
+        ),
+    )
+
+
+# =============================================================================
+# Tier 2: CSI-backed PV/PVC + Deployments
+# =============================================================================
+
+
+def create_v2_project_pv(
+    volume_id: str,
+    node_name: str,
+    project_id: UUID,
+    size: str = "10Gi",
+) -> client.V1PersistentVolume:
+    """Create a static PV referencing an existing btrfs subvolume via CSI.
+
+    The btrfs CSI driver's NodePublishVolume resolves volume_handle to
+    /mnt/tesslate-pool/volumes/{volume_handle} and bind-mounts it into the pod.
+    Node affinity ensures the scheduler places pods on the correct node.
+
+    Args:
+        volume_id: btrfs subvolume ID (used as CSI volume handle)
+        node_name: Node where the subvolume lives
+        project_id: Project UUID
+        size: Capacity (informational — btrfs has no per-subvolume quota)
+    """
+    pv_name = f"pv-{volume_id}"
+    return client.V1PersistentVolume(
+        metadata=client.V1ObjectMeta(
+            name=pv_name,
+            labels={
+                "tesslate.io/volume-id": volume_id,
+                "tesslate.io/project-id": str(project_id),
+            },
+        ),
+        spec=client.V1PersistentVolumeSpec(
+            capacity={"storage": size},
+            access_modes=["ReadWriteOnce"],
+            persistent_volume_reclaim_policy="Retain",
+            storage_class_name="",
+            csi=client.V1CSIPersistentVolumeSource(
+                driver="btrfs.csi.tesslate.io",
+                volume_handle=volume_id,
+            ),
+            node_affinity=client.V1VolumeNodeAffinity(
+                required=client.V1NodeSelector(
+                    node_selector_terms=[
+                        client.V1NodeSelectorTerm(
+                            match_expressions=[
+                                client.V1NodeSelectorRequirement(
+                                    key="kubernetes.io/hostname",
+                                    operator="In",
+                                    values=[node_name],
+                                )
+                            ]
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+
+
+def create_v2_project_pvc(
+    namespace: str,
+    volume_id: str,
+    project_id: UUID,
+    user_id: UUID,
+    size: str = "10Gi",
+) -> client.V1PersistentVolumeClaim:
+    """Create a PVC that binds to a specific static PV for the project volume.
+
+    Args:
+        namespace: Project namespace (proj-{uuid})
+        volume_id: btrfs subvolume ID (matches PV name pv-{volume_id})
+        project_id: Project UUID
+        user_id: User UUID
+        size: Must match the PV capacity
+    """
+    pv_name = f"pv-{volume_id}"
+    return client.V1PersistentVolumeClaim(
+        metadata=client.V1ObjectMeta(
+            name="project-source",
+            namespace=namespace,
+            labels=get_standard_labels(str(project_id), str(user_id), "storage"),
+        ),
+        spec=client.V1PersistentVolumeClaimSpec(
+            access_modes=["ReadWriteOnce"],
+            storage_class_name="",
+            volume_name=pv_name,
+            resources=client.V1ResourceRequirements(requests={"storage": size}),
+        ),
+    )
+
+
+def create_v2_service_pv(
+    service_volume_id: str,
+    node_name: str,
+    project_id: UUID,
+    service_dir: str,
+    size: str = "10Gi",
+) -> client.V1PersistentVolume:
+    """Create a static PV for a service container's btrfs subvolume.
+
+    Args:
+        service_volume_id: btrfs service subvolume ID
+        node_name: Node where the subvolume lives
+        project_id: Project UUID
+        service_dir: Sanitized service directory name (for labeling)
+        size: Capacity (informational)
+    """
+    pv_name = f"pv-{service_volume_id}"
+    return client.V1PersistentVolume(
+        metadata=client.V1ObjectMeta(
+            name=pv_name,
+            labels={
+                "tesslate.io/volume-id": service_volume_id,
+                "tesslate.io/project-id": str(project_id),
+                "tesslate.io/service-dir": service_dir,
+            },
+        ),
+        spec=client.V1PersistentVolumeSpec(
+            capacity={"storage": size},
+            access_modes=["ReadWriteOnce"],
+            persistent_volume_reclaim_policy="Retain",
+            storage_class_name="",
+            csi=client.V1CSIPersistentVolumeSource(
+                driver="btrfs.csi.tesslate.io",
+                volume_handle=service_volume_id,
+            ),
+            node_affinity=client.V1VolumeNodeAffinity(
+                required=client.V1NodeSelector(
+                    node_selector_terms=[
+                        client.V1NodeSelectorTerm(
+                            match_expressions=[
+                                client.V1NodeSelectorRequirement(
+                                    key="kubernetes.io/hostname",
+                                    operator="In",
+                                    values=[node_name],
+                                )
+                            ]
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+
+
+def create_v2_service_pvc(
+    namespace: str,
+    service_volume_id: str,
+    project_id: UUID,
+    user_id: UUID,
+    service_dir: str,
+    size: str = "10Gi",
+) -> client.V1PersistentVolumeClaim:
+    """Create a PVC that binds to a specific static PV for a service volume.
+
+    Args:
+        namespace: Project namespace (proj-{uuid})
+        service_volume_id: btrfs service subvolume ID
+        project_id: Project UUID
+        user_id: User UUID
+        service_dir: Sanitized service directory name (used in PVC name)
+        size: Must match the PV capacity
+    """
+    pv_name = f"pv-{service_volume_id}"
+    pvc_name = f"svc-{service_dir}-data"
+    return client.V1PersistentVolumeClaim(
+        metadata=client.V1ObjectMeta(
+            name=pvc_name,
+            namespace=namespace,
+            labels=get_standard_labels(str(project_id), str(user_id), "storage"),
+        ),
+        spec=client.V1PersistentVolumeClaimSpec(
+            access_modes=["ReadWriteOnce"],
+            storage_class_name="",
+            volume_name=pv_name,
+            resources=client.V1ResourceRequirements(requests={"storage": size}),
+        ),
+    )
+
+
+def create_v2_dev_deployment(
+    namespace: str,
+    project_id: UUID,
+    user_id: UUID,
+    container_id: UUID,
+    container_directory: str,
+    image: str,
+    port: int,
+    startup_command: str,
+    pvc_name: str = "project-source",
+    working_directory: str = "",
+    image_pull_policy: str = "IfNotPresent",
+    image_pull_secret: str = None,
+    extra_env: dict[str, str] | None = None,
+) -> client.V1Deployment:
+    """
+    Create a v2 dev container deployment using CSI-backed PVC volumes.
+
+    Uses a PVC (bound to a static PV with CSI node affinity) instead of
+    hostPath + nodeName. The scheduler places pods on the correct node
+    via the PV's node affinity — no explicit nodeName needed.
+
+    Args:
+        namespace: Kubernetes namespace
+        project_id: Project UUID
+        user_id: User UUID
+        container_id: Container UUID
+        container_directory: Container directory name for K8s resource naming (DNS-safe)
+        image: Container image (tesslate-devserver)
+        port: Port the dev server listens on
+        startup_command: Command to start the dev server
+        pvc_name: PVC claim name (default "project-source")
+        working_directory: Actual filesystem path ("." for root, "frontend", etc.)
+        image_pull_policy: Image pull policy
+        image_pull_secret: Optional image pull secret
+        extra_env: Additional environment variables
+
+    Returns:
+        V1Deployment manifest
+    """
+    deployment_name = _k8s_name("dev-", container_directory)
+
+    labels = get_standard_labels(
+        project_id=str(project_id),
+        user_id=str(user_id),
+        component="dev-container",
+        container_id=str(container_id),
+        container_directory=container_directory,
+    )
+    labels["app"] = "dev-container"
+    labels["tesslate.io/tier"] = "2"
+
+    selector_labels = {"tesslate.io/container-id": str(container_id)}
+
+    # Working directory inside container
+    effective_dir = working_directory or container_directory
+    if effective_dir in (".", ""):
+        working_dir = "/app"
+    else:
+        working_dir = f"/app/{effective_dir}"
+
+    # Environment variables
+    env_vars = [
+        client.V1EnvVar(name="HOST", value="0.0.0.0"),
+        client.V1EnvVar(name="PORT", value=str(port)),
+        client.V1EnvVar(name="NODE_ENV", value="development"),
+    ]
+    for key, value in (extra_env or {}).items():
+        if key in {"HOST", "PORT", "NODE_ENV"}:
+            continue
+        env_vars.append(client.V1EnvVar(name=key, value=str(value)))
+
+    dev_container = client.V1Container(
+        name="dev-server",
+        image=image,
+        image_pull_policy=image_pull_policy,
+        command=["sh", "-c"],
+        # Same tmux pattern as v1 — PID 1 is immortal tail -f, dev server in tmux
+        args=[
+            f"mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && "
+            f"tmux new-session -d -s main '{startup_command}' && "
+            f"tmux pipe-pane -o -t main 'cat > /proc/1/fd/1' 2>/dev/null; "
+            f"exec tail -f /dev/null"
+        ],
+        ports=[client.V1ContainerPort(container_port=port, name="http")],
+        volume_mounts=[client.V1VolumeMount(name="project-source", mount_path="/app")],
+        env=env_vars,
+        resources=client.V1ResourceRequirements(
+            requests={"memory": "256Mi", "cpu": "50m"},
+            limits={"memory": "1Gi", "cpu": "1000m"},
+        ),
+        startup_probe=client.V1Probe(
+            _exec=client.V1ExecAction(command=["sh", "-c", "tmux has-session -t main 2>/dev/null"]),
+            initial_delay_seconds=5,
+            period_seconds=3,
+            timeout_seconds=5,
+            failure_threshold=30,
+        ),
+        readiness_probe=client.V1Probe(
+            http_get=client.V1HTTPGetAction(path="/", port=port),
+            initial_delay_seconds=5,
+            period_seconds=5,
+            timeout_seconds=3,
+            failure_threshold=3,
+        ),
+        liveness_probe=client.V1Probe(
+            _exec=client.V1ExecAction(command=["sh", "-c", "tmux has-session -t main 2>/dev/null"]),
+            initial_delay_seconds=30,
+            period_seconds=10,
+            timeout_seconds=5,
+            failure_threshold=3,
+        ),
+    )
+
+    # Pod spec — PVC volume, scheduler uses PV node affinity for placement
+    pod_spec = client.V1PodSpec(
+        containers=[dev_container],
+        automount_service_account_token=False,
+        volumes=[
+            client.V1Volume(
+                name="project-source",
+                persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                    claim_name=pvc_name,
+                ),
+            )
+        ],
+        security_context=client.V1PodSecurityContext(
+            run_as_non_root=True, run_as_user=1000, fs_group=1000
+        ),
+    )
+
+    if image_pull_secret:
+        pod_spec.image_pull_secrets = [client.V1LocalObjectReference(name=image_pull_secret)]
+
+    return client.V1Deployment(
+        metadata=client.V1ObjectMeta(name=deployment_name, namespace=namespace, labels=labels),
+        spec=client.V1DeploymentSpec(
+            replicas=1,
+            selector=client.V1LabelSelector(match_labels=selector_labels),
+            template=client.V1PodTemplateSpec(
+                metadata=client.V1ObjectMeta(labels={**labels, **selector_labels}),
+                spec=pod_spec,
+            ),
+        ),
+    )
+
+
+def create_v2_service_deployment(
+    namespace: str,
+    project_id: UUID,
+    user_id: UUID,
+    container_id: UUID,
+    container_directory: str,
+    image: str,
+    port: int,
+    environment_vars: dict[str, str],
+    volumes: list[str],
+    service_pvc_name: str | None = None,
+    command: list[str] | None = None,
+    health_check: dict | None = None,
+) -> client.V1Deployment:
+    """
+    Create a v2 service container deployment using CSI-backed PVC volumes.
+
+    Uses a PVC (bound to a static PV with CSI node affinity) instead of
+    hostPath + nodeName. The scheduler places pods on the correct node
+    via the PV's node affinity.
+
+    Args:
+        namespace: Kubernetes namespace
+        project_id: Project UUID
+        user_id: User UUID
+        container_id: Container UUID
+        container_directory: Sanitized container name
+        image: Docker image (e.g., "postgres:16-alpine")
+        port: Service port
+        environment_vars: Environment variables
+        volumes: Volume mount paths (e.g., ["/var/lib/postgresql/data"])
+        service_pvc_name: PVC claim name for the service volume
+        command: Optional command override
+        health_check: Optional health check config (Docker format)
+
+    Returns:
+        V1Deployment manifest
+    """
+    deployment_name = _k8s_name("svc-", container_directory)
+
+    labels = get_standard_labels(
+        project_id=str(project_id),
+        user_id=str(user_id),
+        component="service-container",
+        container_id=str(container_id),
+        container_directory=container_directory,
+    )
+    labels["app"] = _k8s_name("svc-", container_directory)
+    labels["tesslate.io/tier"] = "2"
+
+    selector_labels = {"tesslate.io/container-id": str(container_id)}
+
+    env_vars = [client.V1EnvVar(name=k, value=v) for k, v in environment_vars.items()]
+
+    # All mount paths backed by the same PVC (CSI-backed service volume)
+    volume_mounts = []
+    for idx, vol_path in enumerate(volumes):
+        vol_name = "service-data" if idx == 0 else f"service-data-{idx}"
+        volume_mounts.append(client.V1VolumeMount(name=vol_name, mount_path=vol_path))
+
+    # Single PVC, referenced by all volume mount names
+    volume_specs = []
+    for idx, _ in enumerate(volumes):
+        vol_name = "service-data" if idx == 0 else f"service-data-{idx}"
+        volume_specs.append(
+            client.V1Volume(
+                name=vol_name,
+                persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                    claim_name=service_pvc_name,
+                ),
+            )
+        )
+
+    container_spec = client.V1Container(
+        name="service",
+        image=image,
+        env=env_vars,
+        ports=[client.V1ContainerPort(container_port=port, name="service")],
+        volume_mounts=volume_mounts if volume_mounts else None,
+        resources=client.V1ResourceRequirements(
+            requests={"memory": "256Mi", "cpu": "50m"},
+            limits={"memory": "512Mi", "cpu": "500m"},
+        ),
+    )
+
+    if command:
+        container_spec.command = command
+
+    # Convert Docker-format health check to K8s probes
+    if health_check and "test" in health_check:
+        test_cmd = health_check["test"]
+        if isinstance(test_cmd, list):
+            if test_cmd[0] == "CMD-SHELL":
+                exec_command = ["/bin/sh", "-c", test_cmd[1]]
+            elif test_cmd[0] == "CMD":
+                exec_command = test_cmd[1:]
+            else:
+                exec_command = test_cmd
+        else:
+            exec_command = ["/bin/sh", "-c", test_cmd]
+
+        container_spec.readiness_probe = client.V1Probe(
+            _exec=client.V1ExecAction(command=exec_command),
+            initial_delay_seconds=10,
+            period_seconds=10,
+            timeout_seconds=5,
+            failure_threshold=5,
+        )
+        container_spec.liveness_probe = client.V1Probe(
+            _exec=client.V1ExecAction(command=exec_command),
+            initial_delay_seconds=30,
+            period_seconds=10,
+            timeout_seconds=5,
+            failure_threshold=3,
+        )
+
+    # Pod spec — scheduler uses PV node affinity for placement
+    pod_spec = client.V1PodSpec(
+        containers=[container_spec],
+        automount_service_account_token=False,
+        volumes=volume_specs if volume_specs else None,
+    )
+
+    return client.V1Deployment(
+        metadata=client.V1ObjectMeta(name=deployment_name, namespace=namespace, labels=labels),
+        spec=client.V1DeploymentSpec(
+            replicas=1,
+            selector=client.V1LabelSelector(match_labels=selector_labels),
+            template=client.V1PodTemplateSpec(
+                metadata=client.V1ObjectMeta(labels={**labels, **selector_labels}),
+                spec=pod_spec,
+            ),
         ),
     )

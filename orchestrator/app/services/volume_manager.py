@@ -236,7 +236,10 @@ class VolumeManager:
     async def _select_target_node(
         self, *, exclude: set[str] | None = None
     ) -> str:
-        """Pick the node with the most available btrfs capacity.
+        """Pick the best node considering both btrfs capacity and CPU headroom.
+
+        Prefers nodes with enough CPU headroom to actually schedule a pod.
+        Among schedulable nodes, picks the one with the most disk space.
 
         Args:
             exclude: Node names to skip (e.g. nodes that already failed).
@@ -253,34 +256,48 @@ class VolumeManager:
         if not ready:
             raise RuntimeError("No ready CSI nodes available")
 
-        # Query capacity concurrently
-        async def _get_cap(node):
+        # Query disk capacity and CPU headroom concurrently
+        async def _score_node(node):
             try:
                 addr = await self._discovery.get_nodeops_address(node.node_name)
                 async with NodeOpsClient(addr) as client:
                     cap = await client.get_capacity()
-                return node.node_name, cap.get("available", 0)
+                disk_avail = cap.get("available", 0)
             except Exception:
-                logger.warning(
-                    "[VOLUME] Failed to get capacity for node %s",
-                    node.node_name,
-                )
-                return node.node_name, 0
+                logger.warning("[VOLUME] Failed to get capacity for node %s", node.node_name)
+                disk_avail = 0
 
-        results = await asyncio.gather(*[_get_cap(n) for n in ready])
+            try:
+                cpu_headroom = await self._discovery.get_node_cpu_headroom(node.node_name)
+            except Exception:
+                logger.warning("[VOLUME] Failed to get CPU headroom for node %s", node.node_name)
+                cpu_headroom = 0
 
-        best_node, best_avail = max(results, key=lambda r: r[1])
-        if best_avail == 0:
-            logger.warning(
-                "[VOLUME] All capacity probes returned 0 — selecting %s anyway",
-                best_node,
-            )
+            return node.node_name, disk_avail, cpu_headroom
+
+        results = await asyncio.gather(*[_score_node(n) for n in ready])
+
+        # Minimum CPU headroom to schedule a project pod (50m request + margin)
+        MIN_CPU_HEADROOM_M = 100
+
+        schedulable = [(name, disk, cpu) for name, disk, cpu in results if cpu >= MIN_CPU_HEADROOM_M]
+
+        if schedulable:
+            best = max(schedulable, key=lambda r: r[1])
         else:
-            logger.info(
-                "[VOLUME] Selected node %s (available: %d bytes)",
-                best_node,
-                best_avail,
+            logger.warning(
+                "[VOLUME] No nodes have >= %dm CPU headroom, falling back to most disk",
+                MIN_CPU_HEADROOM_M,
             )
+            best = max(results, key=lambda r: r[1])
+
+        best_node, best_disk, best_cpu = best
+        logger.info(
+            "[VOLUME] Selected node %s (disk: %d bytes, cpu headroom: %dm)",
+            best_node,
+            best_disk,
+            best_cpu,
+        )
         return best_node
 
     # ------------------------------------------------------------------

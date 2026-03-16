@@ -18,6 +18,17 @@ from kubernetes.client.rest import ApiException
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_cpu_millicores(cpu_str: str) -> int:
+    """Parse K8s CPU string (e.g. '1930m', '2', '500m') to millicores."""
+    cpu_str = str(cpu_str).strip()
+    if not cpu_str or cpu_str == "0":
+        return 0
+    if cpu_str.endswith("m"):
+        return int(float(cpu_str[:-1]))
+    return int(float(cpu_str) * 1000)
+
+
 _CACHE_TTL_SECONDS = 60
 _CSI_LABEL = "app=tesslate-btrfs-csi-node"
 _CSI_NAMESPACE = "kube-system"
@@ -175,6 +186,42 @@ class NodeDiscovery:
                 f"CSI node pod on '{node_name}' is not ready"
             )
         return f"{info.pod_ip}:{_NODEOPS_PORT}"
+
+    def _get_node_cpu_headroom_sync(self, node_name: str) -> int:
+        """Return available CPU headroom in millicores for a K8s node.
+
+        Calculates: allocatable_cpu - sum(pod_cpu_requests) for all
+        non-terminated pods on the node.
+        """
+        api = self._init_client()
+
+        node = api.read_node(node_name)
+        alloc_cpu = _parse_cpu_millicores(node.status.allocatable.get("cpu", "0"))
+
+        pods = api.list_pod_for_all_namespaces(
+            field_selector=f"spec.nodeName={node_name},status.phase!=Succeeded,status.phase!=Failed"
+        )
+        total_requested = 0
+        for pod in pods.items:
+            # Regular containers: sum of requests
+            regular_cpu = 0
+            for container in pod.spec.containers or []:
+                requests = (container.resources.requests or {}) if container.resources else {}
+                regular_cpu += _parse_cpu_millicores(requests.get("cpu", "0"))
+
+            # Init containers: max of requests (run sequentially, not concurrently)
+            init_cpu = 0
+            for container in pod.spec.init_containers or []:
+                requests = (container.resources.requests or {}) if container.resources else {}
+                init_cpu = max(init_cpu, _parse_cpu_millicores(requests.get("cpu", "0")))
+
+            total_requested += max(regular_cpu, init_cpu)
+
+        return max(0, alloc_cpu - total_requested)
+
+    async def get_node_cpu_headroom(self, node_name: str) -> int:
+        """Async wrapper for CPU headroom query. Returns millicores available."""
+        return await asyncio.to_thread(self._get_node_cpu_headroom_sync, node_name)
 
     async def get_all_csi_nodes(self) -> list[CSINodeInfo]:
         """Get all known CSI nodes, refreshing cache if empty or all expired."""

@@ -11,7 +11,28 @@ The ECR IS <AWS_ACCOUNT_ID> not <AWS_ACCOUNT_ID>
 
 CRITICAL -- ENSURE ALL CHANGES ARE NON-BLOCKING
 
-Everything u do or write should be non-blocking so certain actions don't hold up other people on our software. 
+Everything u do or write should be non-blocking so certain actions don't hold up other people on our software.
+
+## Commit Messages
+
+**BANNED:** Writing commit messages that describe the development flow (what you added/removed during the session). A commit message is about the final diff state — what a reader of `git show` would see.
+
+**BANNED:** Writing commit messages that only describe YOUR changes when the staged diff includes OTHER pre-staged files. Always `git diff --cached --stat` and inspect ALL files in the diff before writing the message. The message must cover every file in the commit, not just the ones you touched in this session.
+
+**Good pattern:** Describe the net effect. If you added something and removed something else in the same commit, only mention what's in the final diff.
+**Bad pattern:** "Remove fast path from X" when the fast path was added and removed in the same commit — it never existed from the diff's perspective.
+
+```
+# BANNED - describes development steps, not the diff
+feat: add fast path, then remove it, refactor health check
+
+# BANNED - only describes your changes, ignores pre-staged files
+feat: fix loading screen colors
+# (when the staged diff also includes bash tool changes, health checks, etc.)
+
+# GOOD - describes what the FULL diff actually contains
+feat: add compute manager with quota enforcement and container-id status lookup
+```
 
 # Tesslate Studio
 

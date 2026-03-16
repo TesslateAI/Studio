@@ -1,22 +1,56 @@
 """
-Compute Manager — ephemeral pod lifecycle for Tier 1 one-off commands.
+Compute Manager — compute lifecycle for Tier 1 (ephemeral) and Tier 2 (environment).
 
-Creates short-lived pods in the tesslate namespace that mount a project's
+Tier 1: Short-lived pods in the tesslate namespace that mount a project's
 btrfs subvolume via hostPath, run a single command, and self-destruct.
-No database access — callers manage Project model state.
+
+Tier 2: Full persistent environments (dev servers, service containers, ingress)
+using CSI-backed PV+PVC in per-project namespaces. ~5-10s startup.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from uuid import uuid4
+from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID, uuid4
 
 from kubernetes import client as k8s_client
 from kubernetes import config as k8s_config
 from kubernetes.client.rest import ApiException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_k8s_name(name: str) -> str:
+    """Sanitize a name for K8s (DNS-1123 compliant).
+
+    Mirrors KubernetesOrchestrator._sanitize_name(): lowercase, replace
+    non-alphanumeric with hyphens, collapse double hyphens, strip, truncate
+    to 59 chars (leaves room for 4-char prefixes like 'dev-' or 'svc-').
+    """
+    safe = name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
+    safe = "".join(c for c in safe if c.isalnum() or c == "-")
+    while "--" in safe:
+        safe = safe.replace("--", "-")
+    safe = safe.strip("-")
+    return safe[:59]
+
+
+def resolve_k8s_container_dir(container) -> str:
+    """Resolve a container's K8s resource identifier from its directory.
+
+    Uses container.directory directly. When directory is "." (root),
+    uses a stable identifier derived from container.id.
+    NEVER falls back to container.name — that pattern is banned.
+    """
+    sanitized = _sanitize_k8s_name(container.directory or ".")
+    if not sanitized:
+        # Root directory (".") → use container UUID prefix as stable identifier
+        return _sanitize_k8s_name(str(container.id).replace("-", "")[:12])
+    return sanitized
 
 
 class ComputeQuotaExceeded(Exception):
@@ -24,14 +58,22 @@ class ComputeQuotaExceeded(Exception):
 
 
 class ComputeManager:
-    """Manages ephemeral pods for one-off command execution (Tier 1 compute)."""
+    """Manages ephemeral pods (Tier 1) and full environments (Tier 2)."""
 
     def __init__(self) -> None:
         self._v1: k8s_client.CoreV1Api | None = None
+        self._k8s = None  # KubernetesClient wrapper for T2
 
     # ------------------------------------------------------------------
-    # K8s client (lazy init, matches kubernetes/client.py pattern)
+    # K8s clients (lazy init)
     # ------------------------------------------------------------------
+
+    def _k8s_client(self):
+        """KubernetesClient wrapper for T2 (namespaces, deployments, services, ingress)."""
+        if self._k8s is None:
+            from .orchestration.kubernetes.client import get_k8s_client
+            self._k8s = get_k8s_client()
+        return self._k8s
 
     def _api(self) -> k8s_client.CoreV1Api:
         if self._v1 is None:
@@ -263,7 +305,7 @@ class ComputeManager:
                             ),
                         ],
                         resources=k8s_client.V1ResourceRequirements(
-                            requests={"cpu": "100m", "memory": "256Mi"},
+                            requests={"cpu": "50m", "memory": "256Mi"},
                             limits={"cpu": "2000m", "memory": "4Gi"},
                         ),
                         security_context=k8s_client.V1SecurityContext(
@@ -371,6 +413,399 @@ class ComputeManager:
 
         # Timeout — return 124 (Unix `timeout` convention)
         return "", 124
+
+
+    # ------------------------------------------------------------------
+    # Tier 2: Full Environment Lifecycle
+    # ------------------------------------------------------------------
+
+    async def start_environment(
+        self,
+        project,
+        containers: list,
+        connections: list,
+        user_id: UUID,
+        db: AsyncSession,
+    ) -> dict[str, str]:
+        """Create namespace + deployments + services + ingress for a v2 project.
+
+        Returns: {container_directory: preview_url}
+        """
+        from ..config import get_settings
+        from .orchestration.kubernetes.helpers import (
+            create_ingress_manifest,
+            create_network_policy_manifest,
+            create_service_manifest,
+            create_v2_dev_deployment,
+            create_v2_project_pv,
+            create_v2_project_pvc,
+            create_v2_service_deployment,
+            create_v2_service_pv,
+            create_v2_service_pvc,
+        )
+        from .secret_manager_env import build_env_overrides
+        from .service_definitions import ServiceType, get_service
+        from .volume_manager import get_volume_manager
+
+        settings = get_settings()
+        k8s = self._k8s_client()
+        volume_id = project.volume_id
+        node_name = project.node_name
+        volume_state = project.volume_state
+        namespace = f"proj-{project.id}"
+
+        # WebSocket progress
+        from ..routers.chat import get_chat_connection_manager
+        ws_manager = get_chat_connection_manager()
+
+        async def send_progress(phase: str, message: str, progress: int, **kwargs):
+            try:
+                status = {
+                    "container_status": "starting",
+                    "phase": phase,
+                    "message": message,
+                    "progress": progress,
+                    **kwargs,
+                }
+                await ws_manager.send_status_update(user_id, project.id, status)
+            except Exception:
+                pass
+
+        # 1. Ensure volume is locally accessible
+        if volume_state == "remote_only":
+            await send_progress("restoring_volume", "Restoring project volume...", 5)
+            vm = get_volume_manager()
+            node_name = await vm.restore_volume(volume_id)
+            project.node_name = node_name
+            project.volume_state = "local"
+            await db.commit()
+        elif volume_state in ("restoring", "provisioning"):
+            # Poll until local (max 60s)
+            for _ in range(30):
+                await asyncio.sleep(2)
+                await db.refresh(project)
+                if project.volume_state == "local":
+                    node_name = project.node_name
+                    break
+            else:
+                raise RuntimeError(f"Volume {volume_id} stuck in state '{volume_state}'")
+
+        # 2. Separate service and dev containers
+        service_containers = [c for c in containers if getattr(c, "container_type", "base") == "service"]
+        dev_containers = [c for c in containers if getattr(c, "container_type", "base") != "service"]
+
+        await send_progress("creating_namespace", "Creating project namespace...", 10)
+
+        # 3. Create namespace — "baseline" PSA is fine since we use CSI PVCs (not hostPath)
+        await k8s.create_namespace_if_not_exists(
+            namespace=namespace,
+            project_id=str(project.id),
+            user_id=user_id,
+            extra_labels={"pod-security.kubernetes.io/enforce": "baseline"},
+        )
+
+        # 4. NetworkPolicy for isolation
+        net_policy = create_network_policy_manifest(namespace=namespace, project_id=project.id)
+        await k8s.apply_network_policy(net_policy, namespace)
+
+        # 5. Copy TLS secret if configured
+        if settings.k8s_wildcard_tls_secret:
+            await k8s.copy_wildcard_tls_secret(namespace)
+
+        # 5b. Create project PV + PVC (CSI-backed)
+        if not node_name:
+            raise RuntimeError(
+                f"Project {project.id} has volume_state='{volume_state}' but node_name is not set. "
+                "Cannot create node-affinity PV."
+            )
+        v1 = self._api()
+        project_pv = create_v2_project_pv(volume_id, node_name, project.id)
+        project_pvc = create_v2_project_pvc(namespace, volume_id, project.id, user_id)
+        try:
+            await asyncio.to_thread(v1.create_persistent_volume, body=project_pv)
+            logger.info("[COMPUTE-T2] Created PV pv-%s", volume_id)
+        except ApiException as e:
+            if e.status != 409:  # Already exists — fine on restart
+                raise
+            logger.debug("[COMPUTE-T2] PV pv-%s already exists", volume_id)
+        await k8s.create_pvc(project_pvc, namespace)
+
+        container_urls: dict[str, str] = {}
+
+        # 6. Deploy service containers first
+        if service_containers:
+            await send_progress("starting_services", "Starting service containers...", 20)
+
+        for svc_container in service_containers:
+            service_def = get_service(svc_container.service_slug)
+            if not service_def:
+                logger.warning(
+                    "[COMPUTE-T2] No service definition for slug=%s, skipping",
+                    svc_container.service_slug,
+                )
+                continue
+
+            if service_def.service_type == ServiceType.EXTERNAL:
+                continue
+            if getattr(svc_container, "deployment_mode", "container") == "external":
+                continue
+
+            svc_dir = _sanitize_k8s_name(svc_container.service_slug or svc_container.name)
+
+            # Create service subvolume + PV/PVC only if service needs persistent storage
+            svc_pvc_name = None
+            if service_def.volumes:
+                vm = get_volume_manager()
+                svc_volume_id = await vm.create_service_volume(volume_id, svc_dir, node_name)
+
+                svc_pvc_name = f"svc-{svc_dir}-data"
+                svc_pv = create_v2_service_pv(svc_volume_id, node_name, project.id, svc_dir)
+                svc_pvc = create_v2_service_pvc(namespace, svc_volume_id, project.id, user_id, svc_dir)
+                try:
+                    await asyncio.to_thread(v1.create_persistent_volume, body=svc_pv)
+                    logger.info("[COMPUTE-T2] Created PV pv-%s for service %s", svc_volume_id, svc_dir)
+                except ApiException as e:
+                    if e.status != 409:
+                        raise
+                    logger.debug("[COMPUTE-T2] PV pv-%s already exists", svc_volume_id)
+                await k8s.create_pvc(svc_pvc, namespace)
+
+            # Build env
+            env_overrides = await build_env_overrides(db, project.id, [svc_container])
+            extra_env = env_overrides.get(svc_container.id, {})
+            merged_env = {**service_def.environment_vars, **extra_env}
+            svc_port = service_def.internal_port or service_def.default_port or 5432
+
+            deployment = create_v2_service_deployment(
+                namespace=namespace,
+                project_id=project.id,
+                user_id=user_id,
+                container_id=svc_container.id,
+                container_directory=svc_dir,
+                image=service_def.docker_image,
+                port=svc_port,
+                environment_vars=merged_env,
+                volumes=service_def.volumes,
+                service_pvc_name=svc_pvc_name,
+                command=service_def.command,
+                health_check=service_def.health_check,
+            )
+            await k8s.create_deployment(deployment, namespace)
+
+            # ClusterIP service for internal DNS
+            svc_k8s_name = f"svc-{svc_dir}"
+            svc = k8s_client.V1Service(
+                metadata=k8s_client.V1ObjectMeta(
+                    name=svc_k8s_name,
+                    namespace=namespace,
+                    labels={
+                        "tesslate.io/project-id": str(project.id),
+                        "tesslate.io/container-id": str(svc_container.id),
+                        "tesslate.io/container-directory": svc_dir,
+                        "tesslate.io/component": "service-container",
+                    },
+                ),
+                spec=k8s_client.V1ServiceSpec(
+                    selector={"tesslate.io/container-id": str(svc_container.id)},
+                    ports=[k8s_client.V1ServicePort(port=svc_port, target_port=svc_port, protocol="TCP")],
+                    type="ClusterIP",
+                ),
+            )
+            await k8s.create_service(svc, namespace)
+            logger.info("[COMPUTE-T2] Service %s deployed in %s", svc_dir, namespace)
+
+        # 7. Deploy dev containers
+        from .base_config_parser import get_node_modules_fix_prefix
+        node_modules_prefix = get_node_modules_fix_prefix()
+
+        if dev_containers:
+            await send_progress("starting_dev_servers", "Starting development servers...", 50)
+
+        for container in dev_containers:
+            container_directory = resolve_k8s_container_dir(container)
+            working_directory = container.directory or "."
+
+            startup_command = container.startup_command or "sleep infinity"
+            port = container.effective_port
+
+            # Prepend node_modules/.bin permission fix
+            startup_command = node_modules_prefix + startup_command
+
+            # Build env overrides
+            env_overrides = await build_env_overrides(db, project.id, [container])
+            extra_env = env_overrides.get(container.id, {})
+
+            # Inject sibling container URLs for service discovery
+            for sibling in containers:
+                if sibling.id == container.id:
+                    continue
+                if getattr(sibling, "container_type", "base") == "service":
+                    continue
+                sib_name = sibling.name.upper().replace("-", "_")
+                sib_k8s_name = resolve_k8s_container_dir(sibling)
+                sib_port = sibling.effective_port
+                sib_url = f"http://dev-{sib_k8s_name}:{sib_port}"
+                extra_env.setdefault(f"{sib_name}_URL", sib_url)
+                extra_env.setdefault(f"VITE_{sib_name}_URL", sib_url)
+
+            deployment = create_v2_dev_deployment(
+                namespace=namespace,
+                project_id=project.id,
+                user_id=user_id,
+                container_id=container.id,
+                container_directory=container_directory,
+                image=settings.k8s_devserver_image,
+                port=port,
+                startup_command=startup_command,
+                pvc_name="project-source",
+                working_directory=working_directory,
+                image_pull_policy=settings.k8s_image_pull_policy,
+                image_pull_secret=settings.k8s_image_pull_secret or None,
+                extra_env=extra_env,
+            )
+            await k8s.create_deployment(deployment, namespace)
+
+            # Service + Ingress
+            service = create_service_manifest(
+                namespace=namespace,
+                project_id=project.id,
+                container_id=container.id,
+                container_directory=container_directory,
+                port=port,
+            )
+            await k8s.create_service(service, namespace)
+
+            ingress = create_ingress_manifest(
+                namespace=namespace,
+                project_id=project.id,
+                container_id=container.id,
+                container_directory=container_directory,
+                project_slug=project.slug,
+                port=port,
+                domain=settings.app_domain,
+                ingress_class=settings.k8s_ingress_class,
+                tls_secret=settings.k8s_wildcard_tls_secret or None,
+            )
+            await k8s.create_ingress(ingress, namespace)
+
+            protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+            hostname = f"{project.slug}-{container_directory}.{settings.app_domain}"
+            preview_url = f"{protocol}://{hostname}"
+            container_urls[container_directory] = preview_url
+
+            logger.info("[COMPUTE-T2] Dev container %s → %s", container_directory, preview_url)
+
+        # 8. Verify at least one dev pod is schedulable (catch PSA / image pull failures early)
+        if dev_containers:
+            await send_progress("verifying_pods", "Verifying pods are starting...", 80)
+            v1 = self._api()
+            for attempt in range(15):
+                await asyncio.sleep(2)
+                pod_list = await asyncio.to_thread(
+                    v1.list_namespaced_pod,
+                    namespace,
+                    label_selector="tesslate.io/tier=2,tesslate.io/component=dev-container",
+                )
+                pods = pod_list.items or []
+                if any(
+                    (p.status.phase or "").lower() in ("running", "pending")
+                    and not any(
+                        cs.state and cs.state.waiting and cs.state.waiting.reason
+                        in ("ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff")
+                        for cs in (p.status.container_statuses or [])
+                    )
+                    for p in pods
+                ):
+                    break
+
+                # Check for ReplicaSet events that indicate permanent failures
+                if pods:
+                    # Pods exist but may be stuck — keep waiting
+                    continue
+
+                # No pods at all — check ReplicaSet for creation errors
+                try:
+                    apps_v1 = k8s_client.AppsV1Api(v1.api_client)
+                    rs_list = await asyncio.to_thread(
+                        apps_v1.list_namespaced_replica_set,
+                        namespace,
+                        label_selector="tesslate.io/tier=2,tesslate.io/component=dev-container",
+                    )
+                    for rs in (rs_list.items or []):
+                        for cond in (rs.status.conditions or []):
+                            if cond.type == "ReplicaFailure" and cond.status == "True":
+                                raise RuntimeError(
+                                    f"Pod creation failed: {cond.message}"
+                                )
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass  # Non-fatal — keep polling
+            else:
+                logger.error("[COMPUTE-T2] No pods started in %s after 30s", namespace)
+                raise RuntimeError(
+                    f"No dev pods started in namespace {namespace} — "
+                    f"check events: kubectl get events -n {namespace}"
+                )
+
+        # 9. Update project state
+        project.compute_tier = "environment"
+        project.last_activity = datetime.now(timezone.utc)
+        await db.commit()
+
+        await send_progress("ready", "Environment is ready!", 100, container_status="ready")
+
+        logger.info(
+            "[COMPUTE-T2] Environment started for project %s (%d containers)",
+            project.slug,
+            len(containers),
+        )
+        return container_urls
+
+    async def stop_environment(self, project, db: AsyncSession) -> None:
+        """Delete namespace + PVs for a v2 project. btrfs subvolumes stay on node."""
+        namespace = f"proj-{project.id}"
+        k8s = self._k8s_client()
+        v1 = self._api()
+
+        # Trigger S3 sync (fire-and-forget)
+        if project.volume_id and project.node_name:
+            try:
+                from .volume_manager import get_volume_manager
+                vm = get_volume_manager()
+                await vm.trigger_sync(project.volume_id, project.node_name)
+            except Exception as e:
+                logger.warning("[COMPUTE-T2] Sync trigger failed (non-fatal): %s", e)
+
+        # Delete namespace — cascades all namespace-scoped resources (PVCs, deployments, etc.)
+        try:
+            await asyncio.to_thread(k8s.core_v1.delete_namespace, name=namespace)
+            logger.info("[COMPUTE-T2] Namespace %s deleted", namespace)
+        except ApiException as exc:
+            if exc.status != 404:
+                logger.error("[COMPUTE-T2] Failed to delete namespace %s: %s", namespace, exc.reason)
+                raise
+            logger.debug("[COMPUTE-T2] Namespace %s already gone", namespace)
+
+        # Delete cluster-scoped PVs (Retain policy keeps btrfs subvolumes intact)
+        try:
+            pv_list = await asyncio.to_thread(
+                v1.list_persistent_volume,
+                label_selector=f"tesslate.io/project-id={project.id}",
+            )
+            for pv in (pv_list.items or []):
+                pv_name = pv.metadata.name
+                try:
+                    await asyncio.to_thread(v1.delete_persistent_volume, name=pv_name)
+                    logger.info("[COMPUTE-T2] Deleted PV %s", pv_name)
+                except ApiException as e:
+                    if e.status != 404:
+                        logger.warning("[COMPUTE-T2] Failed to delete PV %s: %s", pv_name, e.reason)
+        except ApiException as e:
+            logger.warning("[COMPUTE-T2] Failed to list PVs for project %s: %s", project.id, e.reason)
+
+        project.compute_tier = "none"
+        await db.commit()
 
 
 # ------------------------------------------------------------------

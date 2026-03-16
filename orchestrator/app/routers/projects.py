@@ -4345,14 +4345,19 @@ async def get_containers_status(
             for c in containers_result.scalars().all():
                 # Frontend sanitises: name.lower(), keep [a-z0-9-], collapse dashes
                 frontend_key = _sanitize_status_key(c.name)
-                # K8s key depends on container type
-                if c.container_type == "service":
-                    k8s_key = _sanitize_status_key(c.service_slug or c.name)
-                else:
-                    dir_for_k8s = c.name if c.directory in (".", "", None) else c.directory
-                    k8s_key = _sanitize_status_key(dir_for_k8s)
+                # Find the K8s key by matching container_id from pod labels
+                cid = str(c.id)
+                k8s_key = None
+                for key, info in containers_map.items():
+                    if info.get("container_id") == cid:
+                        k8s_key = key
+                        break
+                if not k8s_key:
+                    # Fallback for service containers keyed by service_slug
+                    if c.container_type == "service":
+                        k8s_key = _sanitize_status_key(c.service_slug or c.name)
                 # Add alias if the keys differ and the K8s entry exists
-                if frontend_key != k8s_key and k8s_key in containers_map:
+                if k8s_key and frontend_key != k8s_key and k8s_key in containers_map:
                     containers_map[frontend_key] = containers_map[k8s_key]
 
         return status
@@ -5039,17 +5044,13 @@ async def _start_container_background_task(
             logger.warning(f"[ORCHESTRATOR] get_project_status timed out or failed: {e}")
             status = {"status": "unknown", "containers": {}}
 
-        # Build the lookup key matching what K8s uses for the pod label:
-        # service containers key by service_slug, base containers by directory
-        if getattr(container, "container_type", "base") == "service":
-            service_name = _sanitize_status_key(container.service_slug or container.name)
-        else:
-            dir_for_k8s = (
-                container.name if container.directory in (".", "", None) else container.directory
-            )
-            service_name = _sanitize_status_key(dir_for_k8s)
-
-        container_info = status.get("containers", {}).get(service_name)
+        # Find this container's status by matching container_id from pod labels
+        container_info = None
+        cid = str(container.id)
+        for _dir, info in status.get("containers", {}).items():
+            if info.get("container_id") == cid:
+                container_info = info
+                break
         if container_info and container_info.get("running"):
             # Container is already running - return immediately!
             task.update_progress(100, 100, "Container already running")
@@ -5428,15 +5429,8 @@ async def check_container_health(
     settings = get_settings()
 
     # Get container directory (sanitized for K8s naming)
-    container_dir = container.directory or container.name
-    if container_dir in (".", "", None):
-        container_dir = container.name
-    # Sanitize for DNS compliance
-    container_dir = container_dir.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-    container_dir = "".join(c for c in container_dir if c.isalnum() or c == "-")
-    while "--" in container_dir:
-        container_dir = container_dir.replace("--", "-")
-    container_dir = container_dir.strip("-")[:63]
+    from ..services.compute_manager import resolve_k8s_container_dir
+    container_dir = resolve_k8s_container_dir(container)
 
     # Build container URL based on deployment mode
     if settings.deployment_mode == "kubernetes":

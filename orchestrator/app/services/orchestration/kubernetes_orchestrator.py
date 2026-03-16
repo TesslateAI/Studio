@@ -953,6 +953,24 @@ fi
         Returns:
             Dict with status and URL
         """
+        # v2 volume-first → delegate to ComputeManager (starts ALL containers,
+        # since v2 environments share a single namespace and hostPath volume)
+        if self._is_v2_project(project.volume_state, project.volume_id, project.node_name):
+            from ..compute_manager import resolve_k8s_container_dir
+            container_dir = resolve_k8s_container_dir(container)
+
+            from ..compute_manager import get_compute_manager
+            urls = await get_compute_manager().start_environment(
+                project, all_containers, connections, user_id, db
+            )
+            return {
+                "status": "running",
+                "container_name": container.name,
+                "container_directory": container_dir,
+                "url": urls.get(container_dir),
+                "namespace": f"proj-{project.id}",
+            }
+
         # Route service containers to dedicated handler
         if getattr(container, "container_type", "base") == "service":
             return await self._start_service_container(
@@ -966,16 +984,11 @@ fi
         project_id = str(project.id)
         namespace = self._get_namespace(project_id)
 
-        # directory is the actual filesystem path — no remapping to container name
-        raw_dir = container.directory if container.directory not in (".", "", None) else "."
-        # For K8s resource naming, we need a DNS-safe identifier
-        # When directory=".", use a sanitized version of the container name for resource naming only
-        if raw_dir == ".":
-            container_directory = self._sanitize_name(str(container.name))
-        else:
-            container_directory = self._sanitize_name(raw_dir)
+        # K8s resource naming: use centralized helper (never falls back to container.name)
+        from ..compute_manager import resolve_k8s_container_dir
+        container_directory = resolve_k8s_container_dir(container)
         # Working directory: actual filesystem path ("." means project root /app)
-        working_directory = raw_dir
+        working_directory = container.directory or "."
 
         logger.info(f"[K8S] Starting container '{container_directory}' in namespace {namespace}")
 
@@ -1180,9 +1193,8 @@ fi
                 if getattr(sibling, "container_type", "base") == "service":
                     continue
                 sib_name = sibling.name.upper().replace("-", "_")
-                sib_k8s_name = self._sanitize_name(
-                    sibling.name if sibling.directory in (".", "", None) else sibling.directory
-                )
+                from ..compute_manager import resolve_k8s_container_dir
+                sib_k8s_name = resolve_k8s_container_dir(sibling)
                 sib_port = sibling.effective_port
                 sib_url = f"http://dev-{sib_k8s_name}:{sib_port}"
                 extra_env.setdefault(f"{sib_name}_URL", sib_url)
@@ -1414,6 +1426,19 @@ fi
         self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession
     ) -> dict[str, Any]:
         """Start all containers for a project."""
+        # v2 volume-first → delegate to ComputeManager
+        if self._is_v2_project(project.volume_state, project.volume_id, project.node_name):
+            from ..compute_manager import get_compute_manager
+            urls = await get_compute_manager().start_environment(
+                project, containers, connections, user_id, db
+            )
+            return {
+                "status": "running",
+                "project_slug": project.slug,
+                "namespace": f"proj-{project.id}",
+                "containers": urls,
+            }
+
         logger.info(f"[K8S] Starting project {project.slug} with {len(containers)} containers")
 
         # Check if project was hibernated (needs snapshot restoration)
@@ -1459,6 +1484,18 @@ fi
 
     async def stop_project(self, project_slug: str, project_id: UUID, user_id: UUID) -> None:
         """Stop all containers for a project (but keep files)."""
+        # v2 volume-first → delegate to ComputeManager
+        vol_state, vol_id, node = await self._get_project_volume_info(project_id)
+        if self._is_v2_project(vol_state, vol_id, node):
+            from ..compute_manager import get_compute_manager
+            from ...database import AsyncSessionLocal
+            from ...models import Project
+            async with AsyncSessionLocal() as db:
+                project = await db.get(Project, project_id)
+                if project:
+                    await get_compute_manager().stop_environment(project, db)
+            return
+
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
 
@@ -1573,6 +1610,8 @@ fi
                 component = pod.metadata.labels.get("tesslate.io/component", "unknown")
                 container_dir = pod.metadata.labels.get("tesslate.io/container-directory")
 
+                container_id = pod.metadata.labels.get("tesslate.io/container-id")
+
                 if component == "file-manager":
                     container_statuses["file-manager"] = {
                         "phase": pod.status.phase,
@@ -1587,6 +1626,7 @@ fi
                         "running": is_ready,
                         "url": None,  # Service containers are internal only
                         "service": True,
+                        "container_id": container_id,
                     }
                 elif container_dir:
                     is_ready = self.k8s_client.is_pod_ready(pod)
@@ -1597,6 +1637,7 @@ fi
                         "ready": is_ready,
                         "running": is_ready,
                         "url": url,
+                        "container_id": container_id,
                     }
 
             return {"status": "active", "namespace": namespace, "containers": container_statuses}

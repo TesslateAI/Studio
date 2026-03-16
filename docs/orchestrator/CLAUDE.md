@@ -155,6 +155,47 @@ Load this CLAUDE.md when:
 4. **Mode-agnostic**: Code should work in both Docker and K8s modes
 5. **Error handling**: Use HTTPException with appropriate status codes
 
+## BANNED: Deriving K8s Resource Names from Container Names
+
+**NEVER** fall back to `container.name` when `container.directory` is `"."`, empty, or `None`. This pattern is **strictly banned**:
+
+```python
+# BAD — BANNED — DO NOT USE
+raw_dir = container.directory if container.directory not in (".", "", None) else container.name
+container_dir = _sanitize_k8s_name(raw_dir)
+
+# Also banned in any form:
+dir_for_name = container.name if container.directory in (".", "", None) else container.directory
+sib_dir = sibling.directory if sibling.directory not in (".", "", None) else sibling.name
+```
+
+**Why**: `container.name` and `container.directory` are independent fields set by the config file (`.tesslate/config.json`). Computing one from the other creates a fragile, implicit coupling that breaks when names or directories are renamed independently. The config file is the **sole source of truth**.
+
+**Recommended: Read URLs from live K8s state**
+
+When you need a container's URL (e.g., fast paths, status checks), read it from the actual K8s pods via `get_project_status()`. The pod labels (`tesslate.io/container-directory`) are the ground truth for what identifiers were used during deployment:
+
+```python
+# GOOD — Read from K8s state, no recomputation
+orchestrator = get_orchestrator()
+status = await orchestrator.get_project_status(project.slug, project.id)
+if status.get("status") == "active":
+    for _dir, info in status.get("containers", {}).items():
+        if info.get("container_id") == str(container.id):
+            url = info["url"]  # Built from actual pod labels
+            break
+```
+
+**When you must resolve directory → K8s name** (e.g., inside `start_environment()` during initial creation), use `container.directory` directly — never substitute `container.name`:
+
+```python
+# ACCEPTABLE — Uses directory directly, handles "." explicitly
+container_directory = _sanitize_k8s_name(container.directory)
+if not container_directory:  # "." sanitizes to ""
+    # Handle root-directory containers explicitly — do NOT fall back to container.name
+    ...
+```
+
 ## Common Gotchas
 
 1. **Image caching**: Use `--no-cache` when building Docker images

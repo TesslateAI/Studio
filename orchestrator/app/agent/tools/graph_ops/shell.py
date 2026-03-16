@@ -15,6 +15,38 @@ from ..registry import Tool, ToolCategory
 logger = logging.getLogger(__name__)
 
 
+async def _resolve_k8s_container_name(project_id, container) -> str:
+    """Resolve the K8s deployment name for a container from live pod labels.
+
+    Avoids deriving K8s names from container.name when container.directory
+    is '.'. Instead reads the actual tesslate.io/container-directory label
+    from K8s pods, which is the source of truth set at deploy time.
+
+    For Docker mode (or when the K8s lookup fails), falls back to the
+    directory-based sanitisation that Docker Compose uses for service names.
+    """
+    from ....services.orchestration import get_orchestrator, is_kubernetes_mode
+
+    if is_kubernetes_mode():
+        try:
+            orchestrator = get_orchestrator()
+            status = await orchestrator.get_project_status("", project_id)
+            cid = str(container.id)
+            for dir_key, info in status.get("containers", {}).items():
+                if info.get("container_id") == cid:
+                    return dir_key  # The K8s container-directory label value
+        except Exception:
+            logger.debug(
+                "K8s status lookup failed for container %s, using fallback",
+                container.id,
+                exc_info=True,
+            )
+
+    # Docker mode or K8s lookup failed: use centralized helper
+    from ....services.compute_manager import resolve_k8s_container_dir
+    return resolve_k8s_container_dir(container)
+
+
 async def graph_shell_open_executor(
     params: dict[str, Any], context: dict[str, Any]
 ) -> dict[str, Any]:
@@ -68,10 +100,8 @@ async def graph_shell_open_executor(
             )
 
         command = params.get("command", "/bin/sh")
-        # Resolve name using same logic as K8s orchestrator (handles directory=".")
-        dir_for_name = container.name if container.directory in (".", "", None) else container.directory
-        container_name = dir_for_name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-        container_name = "".join(c for c in container_name if c.isalnum() or c == "-")
+        # Resolve container name from K8s pod labels (source of truth)
+        container_name = await _resolve_k8s_container_name(project_id, container)
 
         # Create shell session
         session_manager = get_shell_session_manager()
@@ -168,10 +198,8 @@ async def graph_shell_exec_executor(
             )
 
         timeout = params.get("timeout", 120)
-        # Resolve name using same logic as K8s orchestrator (handles directory=".")
-        dir_for_name = container.name if container.directory in (".", "", None) else container.directory
-        container_name = dir_for_name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-        container_name = "".join(c for c in container_name if c.isalnum() or c == "-")
+        # Resolve container name from K8s pod labels (source of truth)
+        container_name = await _resolve_k8s_container_name(project_id, container)
 
         # Use orchestrator to execute command
         orchestrator = get_orchestrator()

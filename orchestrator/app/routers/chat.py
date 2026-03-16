@@ -687,6 +687,7 @@ async def agent_chat(
             "volume_id": project.volume_id,
             "node_name": project.node_name,
             "volume_state": project.volume_state,
+            "compute_tier": project.compute_tier,
         }
 
         # Get project context
@@ -1207,6 +1208,7 @@ async def agent_chat_stream(
                 "volume_id": project.volume_id,
                 "node_name": project.node_name,
                 "volume_state": project.volume_state,
+                "compute_tier": project.compute_tier,
             }
 
             # ================================================================
@@ -2125,6 +2127,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         "volume_id": project.volume_id if project else None,
         "node_name": project.node_name if project else None,
         "volume_state": project.volume_state if project else None,
+        "compute_tier": project.compute_tier if project else None,
     }
 
     # Add project context if available

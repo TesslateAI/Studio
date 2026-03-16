@@ -114,7 +114,11 @@ class KubernetesClient:
             return "being terminated" in str(e.body)
 
     async def create_namespace_if_not_exists(
-        self, namespace: str, project_id: str, user_id: UUID
+        self,
+        namespace: str,
+        project_id: str,
+        user_id: UUID,
+        extra_labels: dict[str, str] | None = None,
     ) -> None:
         """
         Create a Kubernetes namespace if it doesn't exist.
@@ -125,6 +129,7 @@ class KubernetesClient:
             namespace: Namespace name
             project_id: Project ID (for labels)
             user_id: User ID (for labels)
+            extra_labels: Additional labels to merge (e.g. PSA enforcement)
         """
         max_wait_seconds = 60
         wait_interval = 2
@@ -145,15 +150,18 @@ class KubernetesClient:
             except ApiException as e:
                 if e.status == 404:
                     # Namespace doesn't exist, create it
+                    labels = {
+                        "app": "tesslate",
+                        "managed-by": "tesslate-backend",
+                        "project-id": project_id,
+                        "user-id": str(user_id),
+                    }
+                    if extra_labels:
+                        labels.update(extra_labels)
                     namespace_manifest = client.V1Namespace(
                         metadata=client.V1ObjectMeta(
                             name=namespace,
-                            labels={
-                                "app": "tesslate",
-                                "managed-by": "tesslate-backend",
-                                "project-id": project_id,
-                                "user-id": str(user_id),
-                            },
+                            labels=labels,
                         )
                     )
                     await asyncio.to_thread(self.core_v1.create_namespace, body=namespace_manifest)

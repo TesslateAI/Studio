@@ -104,6 +104,151 @@ async def _run_v2_ephemeral(
         await _set_compute_state("none")
 
 
+def _get_v2_k8s_api():
+    """Get or create a cached CoreV1Api for Tier 2 exec (matches T1 lazy-init pattern)."""
+    if not hasattr(_get_v2_k8s_api, "_v1"):
+        from kubernetes import config as k8s_config
+        try:
+            k8s_config.load_incluster_config()
+        except k8s_config.ConfigException:
+            k8s_config.load_kube_config()
+        from kubernetes import client as k8s_client
+        _get_v2_k8s_api._v1 = k8s_client.CoreV1Api()
+    return _get_v2_k8s_api._v1
+
+
+async def _run_v2_environment(
+    context: dict[str, Any], command: str, timeout: int
+) -> dict[str, Any]:
+    """Execute a command in a running Tier 2 dev container via kubectl exec.
+
+    Targets the correct pod using container_name/container_directory from context.
+    Captures exit codes via sentinel pattern (k8s_stream doesn't expose them).
+    """
+    import asyncio
+    from kubernetes.client.rest import ApiException as K8sApiException
+    from kubernetes.stream import stream as k8s_stream
+
+    project_id = context["project_id"]
+    namespace = f"proj-{project_id}"
+    container_name = context.get("container_name")
+
+    v1 = _get_v2_k8s_api()
+
+    # Build label selector — target specific container if context provides one
+    labels = "tesslate.io/tier=2,tesslate.io/component=dev-container"
+    if container_name:
+        # Sanitize to match the label value set during deployment
+        safe_name = container_name.lower().replace(" ", "-").replace("_", "-")
+        labels += f",tesslate.io/container-directory={safe_name}"
+
+    # Find running dev container pod
+    try:
+        pod_list = await asyncio.to_thread(
+            v1.list_namespaced_pod,
+            namespace,
+            label_selector=labels,
+            field_selector="status.phase=Running",
+        )
+    except K8sApiException as exc:
+        if exc.status == 404:
+            return error_output(
+                message="Project namespace not found — environment may not be started",
+                suggestion="Start the project environment first",
+                details={"namespace": namespace},
+            )
+        raise
+
+    pods = pod_list.items or []
+    if not pods:
+        # If targeting a specific container found nothing, fall back to any dev pod
+        if container_name:
+            try:
+                pod_list = await asyncio.to_thread(
+                    v1.list_namespaced_pod,
+                    namespace,
+                    label_selector="tesslate.io/tier=2,tesslate.io/component=dev-container",
+                    field_selector="status.phase=Running",
+                )
+                pods = pod_list.items or []
+            except K8sApiException:
+                pass
+
+        if not pods:
+            return error_output(
+                message="No running dev container found in the environment",
+                suggestion="Start the project environment or wait for pods to be ready",
+                details={"namespace": namespace},
+            )
+
+    pod_name = pods[0].metadata.name
+
+    # Wrap command with exit code capture — k8s_stream returns combined stdout+stderr
+    # but doesn't expose the process exit code. Use a sentinel to extract it.
+    wrapped_command = f'{command}\n__EXIT_CODE__=$?\necho "__TESSLATE_EXIT:$__EXIT_CODE__"'
+    exec_command = ["/bin/sh", "-c", wrapped_command]
+
+    try:
+        output = await asyncio.to_thread(
+            k8s_stream,
+            v1.connect_get_namespaced_pod_exec,
+            pod_name,
+            namespace,
+            container="dev-server",
+            command=exec_command,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+            _request_timeout=timeout,
+        )
+    except K8sApiException as exc:
+        return error_output(
+            message=f"Failed to exec in pod {pod_name}: {exc.reason}",
+            suggestion="Check if the dev container is running and ready",
+            details={"pod": pod_name, "namespace": namespace, "error": str(exc)},
+        )
+    except Exception as exc:
+        return error_output(
+            message=f"Command execution failed: {exc}",
+            suggestion="Check if the environment is healthy",
+            details={"pod": pod_name, "command": command, "error": str(exc)},
+        )
+
+    # Parse exit code from sentinel
+    raw_output = output or ""
+    exit_code = 0
+    sentinel = "__TESSLATE_EXIT:"
+    if sentinel in raw_output:
+        parts = raw_output.rsplit(sentinel, 1)
+        raw_output = parts[0]
+        try:
+            exit_code = int(parts[1].strip())
+        except (ValueError, IndexError):
+            pass
+
+    clean_output = strip_ansi_codes(raw_output) if raw_output else ""
+
+    if exit_code != 0:
+        return error_output(
+            message=f"Command failed (exit code {exit_code}): {command}",
+            suggestion="Check the output for errors",
+            details={
+                "command": command,
+                "exit_code": exit_code,
+                "output": clean_output,
+                "pod": pod_name,
+            },
+        )
+
+    logger.info("[BASH-V2-ENV] Command completed in %s, output_length=%d", pod_name, len(clean_output))
+    return success_output(
+        message=f"Executed '{command}'",
+        output=clean_output,
+        details={"command": command, "exit_code": 0, "pod": pod_name},
+    )
+
+
 async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
     Execute a single command via the orchestrator's one-shot execute_command.
@@ -129,8 +274,10 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
 
     logger.info(f"[BASH] Executing (one-shot): {command[:100]}...")
 
-    # v2 volume-first projects → ephemeral compute pod
+    # v2 volume-first projects
     if _is_v2_project(context):
+        if context.get("compute_tier") == "environment":
+            return await _run_v2_environment(context, command, timeout)
         return await _run_v2_ephemeral(context, command, timeout)
 
     # v1 legacy path — orchestrator exec
