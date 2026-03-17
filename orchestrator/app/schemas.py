@@ -1415,6 +1415,7 @@ class McpConfigResponse(BaseModel):
     server_slug: str | None = None
     enabled_capabilities: list[str] | None = None
     is_active: bool
+    env_vars: list[str] | None = None
     created_at: datetime
     updated_at: datetime | None = None
 

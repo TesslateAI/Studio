@@ -76,6 +76,8 @@ import { ImageUpload } from '../components/ImageUpload';
 import { marketplaceApi, secretsApi, billingApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
+import { motion } from 'framer-motion';
+import { Badge, CardSurface, CardHeader, CardActions, StatusDot, StatCard, staggerContainer, staggerItem } from '../components/cards';
 
 /** Convert USD per 1M tokens to credits (1 credit = $0.01) */
 function formatCreditsPerMillion(usdPer1M: number): string {
@@ -245,6 +247,7 @@ interface InstalledMcpServer {
   is_active: boolean;
   marketplace_agent_id: string;
   enabled_capabilities: string[] | null;
+  env_vars: string[] | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -787,6 +790,7 @@ export default function Library() {
           {activeTab === 'mcp_servers' && (
             <McpServersTab
               servers={mcpServers}
+              agents={agents}
               loading={loading}
               onReload={loadMcpServers}
               onBrowse={() => navigate('/marketplace/browse/mcp_server')}
@@ -1183,49 +1187,30 @@ function LibraryThemeCard({
   const isDefault = t.id === 'default-dark' || t.id === 'default-light';
 
   return (
-    <div
+    <CardSurface
+      isActive={isActive}
+      isDisabled={!t.is_enabled}
+      disableHoverLift={!t.is_enabled}
       role="article"
       aria-label={`${t.name} theme${isActive ? ' (active)' : ''}${!t.is_enabled ? ' (disabled)' : ''}`}
-      className={`group relative flex flex-col bg-[var(--surface)] border rounded-[var(--radius-large)] p-4 sm:p-5 transition-all duration-200 ease-out ${
-        isActive
-          ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/20 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]'
-          : t.is_enabled
-            ? 'border-[var(--border)] hover:border-[rgba(var(--primary-rgb),0.3)] hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]'
-            : 'border-[var(--border)] opacity-60 hover:opacity-70'
-      }`}
     >
-      {/* Header: swatches + title + badge */}
-      <div className="flex items-start gap-3 mb-3 pr-16">
-        {/* Color swatches as icon area */}
-        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] grid grid-cols-2 gap-0.5 p-1 shrink-0 transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
-          {(['primary', 'background', 'surface', 'accent'] as const).map((key) => (
-            <div
-              key={key}
-              className="rounded-sm"
-              style={{ backgroundColor: (colors as Record<string, string>)[key] || '#333' }}
-            />
-          ))}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-semibold text-[var(--text)] line-clamp-1 group-hover:text-[var(--primary)] transition-colors">
-            {t.name}
-          </h4>
-          <span className="text-xs text-[var(--text-muted)]">
-            {t.creator_username ? `@${t.creator_username}` : t.author || 'Tesslate'}
-          </span>
-        </div>
-      </div>
-
-      {/* Status indicator — top-right */}
-      <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
-        {isActive ? (
-          <div className="w-4 h-4 rounded-full border-2 border-[var(--status-success)] flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-[var(--status-success)]" />
+      {/* Header: swatches + title + status */}
+      <CardHeader
+        icon={
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] grid grid-cols-2 gap-0.5 p-1 shrink-0 transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
+            {(['primary', 'background', 'surface', 'accent'] as const).map((key) => (
+              <div
+                key={key}
+                className="rounded-sm"
+                style={{ backgroundColor: (colors as Record<string, string>)[key] || '#333' }}
+              />
+            ))}
           </div>
-        ) : (
-          <div className="w-4 h-4 rounded-full border-2 border-[var(--text)]/20" />
-        )}
-      </div>
+        }
+        title={t.name}
+        subtitle={t.creator_username ? `@${t.creator_username}` : t.author || 'Tesslate'}
+        trailing={<StatusDot active={isActive} />}
+      />
 
       {/* Description */}
       <p className="text-xs sm:text-[13px] leading-relaxed text-[var(--text-muted)] line-clamp-2 mb-3 min-h-[32px]">
@@ -1234,39 +1219,22 @@ function LibraryThemeCard({
 
       {/* Badges row */}
       <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-        <span className="px-2 py-0.5 text-[11px] rounded font-medium bg-[var(--surface)] border border-[var(--border)] text-[var(--text-muted)]">
-          {t.mode === 'dark' ? (
-            <span className="inline-flex items-center gap-1">
-              <Moon size={11} /> Dark
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1">
-              <Sun size={11} /> Light
-            </span>
-          )}
-        </span>
+        <Badge intent="muted" icon={t.mode === 'dark' ? <Moon size={11} /> : <Sun size={11} />}>
+          {t.mode === 'dark' ? 'Dark' : 'Light'}
+        </Badge>
         {t.source_type === 'open' && (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-success)]/15 text-[var(--status-success)] text-[11px] rounded font-medium">
-            <LockSimpleOpen size={11} />
-            Open
-          </span>
+          <Badge intent="success" icon={<LockSimpleOpen size={11} />}>Open</Badge>
         )}
         {t.is_custom && (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--primary)]/15 text-[var(--primary)] text-[11px] rounded font-medium">
-            <GitFork size={11} />
-            Custom
-          </span>
+          <Badge intent="primary" icon={<GitFork size={11} />}>Custom</Badge>
         )}
         {t.is_published && t.is_custom && (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-success)]/15 text-[var(--status-success)] text-[11px] rounded font-medium">
-            <CheckCircle size={11} />
-            Published
-          </span>
+          <Badge intent="success" icon={<CheckCircle size={11} />}>Published</Badge>
         )}
       </div>
 
-      {/* Actions — grid on mobile for larger tap targets, flex on desktop */}
-      <div className="mt-auto pt-3 border-t border-[var(--border)] grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2">
+      {/* Actions */}
+      <CardActions>
         {/* Apply */}
         {!isActive && t.is_enabled && (
           <button
@@ -1341,8 +1309,8 @@ function LibraryThemeCard({
             Remove
           </button>
         ) : null}
-      </div>
-    </div>
+      </CardActions>
+    </CardSurface>
   );
 }
 
@@ -1860,22 +1828,9 @@ function AgentsTab({
     <>
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-          <div className="text-2xl font-bold text-[var(--text)] mb-1">{agents.length}</div>
-          <div className="text-sm text-[var(--text-muted)]">Total Agents</div>
-        </div>
-        <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-          <div className="text-2xl font-bold text-[var(--text)] mb-1">
-            {agents.filter((a) => a.is_enabled).length}
-          </div>
-          <div className="text-sm text-[var(--text-muted)]">Active</div>
-        </div>
-        <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-          <div className="text-2xl font-bold text-[var(--text)] mb-1">
-            {agents.filter((a) => a.is_custom).length}
-          </div>
-          <div className="text-sm text-[var(--text-muted)]">Custom</div>
-        </div>
+        <StatCard value={agents.length} label="Total Agents" index={0} />
+        <StatCard value={agents.filter((a) => a.is_enabled).length} label="Active" index={1} />
+        <StatCard value={agents.filter((a) => a.is_custom).length} label="Custom" index={2} />
       </div>
 
       {/* Create New Agent Button */}
@@ -1919,7 +1874,7 @@ function AgentsTab({
       </div>
 
       {/* Agents Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <motion.div variants={staggerContainer} initial="initial" animate="animate" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {agents.map((agent) => (
           <AgentCard
             key={agent.id}
@@ -1931,7 +1886,7 @@ function AgentsTab({
             onDelete={() => handleDelete(agent)}
           />
         ))}
-      </div>
+      </motion.div>
 
       {/* Delete/Remove Confirmation Dialog */}
       <ConfirmDialog
@@ -2929,48 +2884,30 @@ function AgentCard({
   const canEdit = agent.source_type === 'open' || agent.is_custom;
 
   return (
-    <div
+    <CardSurface
+      isDisabled={!agent.is_enabled}
       role="article"
       aria-label={`${agent.name} agent${agent.is_enabled ? '' : ' (disabled)'}`}
-      className={`group relative flex flex-col bg-[var(--surface)] border rounded-[var(--radius-large)] p-4 sm:p-5 transition-all duration-200 ease-out ${
-        agent.is_enabled
-          ? 'border-[var(--border)] hover:border-[rgba(var(--primary-rgb),0.3)] hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]'
-          : 'border-[var(--border)] opacity-60 hover:opacity-70'
-      }`}
     >
-      {/* Status indicator — top-right */}
-      <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
-        {agent.is_enabled ? (
-          <div className="w-4 h-4 rounded-full border-2 border-[var(--status-success)] flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-[var(--status-success)]" />
-          </div>
-        ) : (
-          <div className="w-4 h-4 rounded-full border-2 border-[var(--text)]/20" />
-        )}
-      </div>
-
-      {/* Header: avatar + title */}
-      <div className="flex items-start gap-3 mb-3 pr-16">
-        {agent.avatar_url ? (
-          <img
-            src={agent.avatar_url}
-            alt=""
-            className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl object-cover border border-[var(--border)] shrink-0 transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]"
-          />
-        ) : (
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center p-2.5 shrink-0 transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
-            <img src="/favicon.svg" alt="" className="w-full h-full" />
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-semibold text-[var(--text)] line-clamp-1 group-hover:text-[var(--primary)] transition-colors">
-            {agent.name}
-          </h4>
-          <span className="text-xs text-[var(--text-muted)]">
-            {agent.creator_username ? `@${agent.creator_username}` : agent.category}
-          </span>
-        </div>
-      </div>
+      {/* Header: avatar + title + status */}
+      <CardHeader
+        icon={
+          agent.avatar_url ? (
+            <img
+              src={agent.avatar_url}
+              alt=""
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl object-cover border border-[var(--border)] shrink-0 transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]"
+            />
+          ) : (
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center p-2.5 shrink-0 transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
+              <img src="/favicon.svg" alt="" className="w-full h-full" />
+            </div>
+          )
+        }
+        title={agent.name}
+        subtitle={agent.creator_username ? `@${agent.creator_username}` : agent.category}
+        trailing={<StatusDot active={agent.is_enabled} />}
+      />
 
       {/* Description */}
       <p className="text-xs sm:text-[13px] leading-relaxed text-[var(--text-muted)] line-clamp-2 mb-3 min-h-[32px]">
@@ -2980,31 +2917,18 @@ function AgentCard({
       {/* Badges, model & tools row */}
       <div className="flex flex-wrap items-center gap-1.5 mb-0">
         {agent.source_type === 'open' ? (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-success)]/15 text-[var(--status-success)] text-[11px] rounded font-medium">
-            <LockSimpleOpen size={11} />
-            Open
-          </span>
+          <Badge intent="success" icon={<LockSimpleOpen size={11} />}>Open</Badge>
         ) : (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent)]/15 text-[var(--accent)] text-[11px] rounded font-medium">
-            <LockKey size={11} />
-            Closed
-          </span>
+          <Badge intent="accent" icon={<LockKey size={11} />}>Closed</Badge>
         )}
         {agent.is_custom && (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--primary)]/15 text-[var(--primary)] text-[11px] rounded font-medium">
-            <GitFork size={11} />
-            Custom
-          </span>
+          <Badge intent="primary" icon={<GitFork size={11} />}>Custom</Badge>
         )}
         {agent.parent_agent_id && (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-info)]/15 text-[var(--status-info)] text-[11px] rounded font-medium">
-            <GitFork size={11} />
-            Forked
-          </span>
+          <Badge intent="info" icon={<GitFork size={11} />}>Forked</Badge>
         )}
         {/* Compact model display */}
-        <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--surface-hover)] text-[var(--text-muted)] text-[11px] rounded font-medium">
-          <Cpu size={11} />
+        <Badge intent="muted" icon={<Cpu size={11} />}>
           <span className="truncate max-w-[80px]">{agent.selected_model || agent.model}</span>
           {canEdit && (
             <button
@@ -3015,33 +2939,25 @@ function AgentCard({
               <Pencil size={10} />
             </button>
           )}
-        </span>
+        </Badge>
         {/* Tools */}
         {!agent.tools || agent.tools.length === 0 ? (
-          <div className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 text-[var(--status-info)] text-[11px] rounded-md font-medium">
-            <Wrench size={11} />
-            <span>All Tools</span>
-          </div>
+          <Badge intent="info" icon={<Wrench size={11} />}>All Tools</Badge>
         ) : (
           agent.tools.map((toolName, idx) => {
             const tool = getToolIcon(toolName);
             if (!tool) return null;
             return (
-              <div
-                key={idx}
-                className="flex items-center gap-1 px-2 py-0.5 bg-[var(--primary)]/10 border border-[var(--primary)]/20 text-[var(--primary)] text-[11px] rounded-md font-medium"
-                title={tool.label}
-              >
-                {tool.icon}
-                <span>{tool.label}</span>
-              </div>
+              <Badge key={idx} intent="primary" icon={tool.icon}>
+                {tool.label}
+              </Badge>
             );
           })
         )}
       </div>
 
-      {/* Actions — grid on mobile, flex on desktop */}
-      <div className="mt-auto pt-3 border-t border-[var(--border)] grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2">
+      {/* Actions */}
+      <CardActions>
         {canEdit && (
           <button
             onClick={onEdit}
@@ -3099,8 +3015,8 @@ function AgentCard({
             Remove
           </button>
         )}
-      </div>
-    </div>
+      </CardActions>
+    </CardSurface>
   );
 }
 
@@ -3145,18 +3061,17 @@ function getSkillCategoryIcon(category: string): React.ReactNode {
 // MCP Servers Tab Component
 function McpServersTab({
   servers,
+  agents,
   loading,
   onReload,
   onBrowse,
 }: {
   servers: InstalledMcpServer[];
+  agents: LibraryAgent[];
   loading: boolean;
   onReload: () => void;
   onBrowse: () => void;
 }) {
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [uninstallingId, setUninstallingId] = useState<string | null>(null);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -3167,37 +3082,6 @@ function McpServersTab({
 
   const activeCount = servers.filter((s) => s.is_active).length;
   const inactiveCount = servers.filter((s) => !s.is_active).length;
-
-  const handleUninstall = async (configId: string) => {
-    setUninstallingId(configId);
-    try {
-      await marketplaceApi.uninstallMcpServer(configId);
-      toast.success('MCP server uninstalled');
-      onReload();
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to uninstall MCP server');
-    } finally {
-      setUninstallingId(null);
-    }
-  };
-
-  const handleTestConnection = async (configId: string) => {
-    setTestingId(configId);
-    try {
-      const result = await marketplaceApi.testMcpServer(configId);
-      if (result.success) {
-        toast.success('Connection successful');
-      } else {
-        toast.error(result.error || 'Connection failed');
-      }
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Connection test failed');
-    } finally {
-      setTestingId(null);
-    }
-  };
 
   return (
     <>
@@ -3240,85 +3124,320 @@ function McpServersTab({
         <>
           {/* Stats */}
           <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-              <div className="text-2xl font-bold text-[var(--text)] mb-1">{servers.length}</div>
-              <div className="text-sm text-[var(--text-muted)]">Total Servers</div>
-            </div>
-            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-              <div className="text-2xl font-bold text-[var(--text)] mb-1">{activeCount}</div>
-              <div className="text-sm text-[var(--text-muted)]">Active</div>
-            </div>
-            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-              <div className="text-2xl font-bold text-[var(--text)] mb-1">{inactiveCount}</div>
-              <div className="text-sm text-[var(--text-muted)]">Inactive</div>
-            </div>
+            <StatCard value={servers.length} label="Total Servers" index={0} />
+            <StatCard value={activeCount} label="Active" index={1} />
+            <StatCard value={inactiveCount} label="Inactive" index={2} />
           </div>
 
           {/* Servers Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <motion.div variants={staggerContainer} initial="initial" animate="animate" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {servers.map((server) => (
-              <div
-                key={server.id}
-                role="article"
-                aria-label={`${server.server_name || server.server_slug || 'MCP'} MCP server`}
-                className="group relative flex flex-col bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-large)] p-4 sm:p-5 hover:border-[rgba(var(--primary-rgb),0.3)] hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] transition-all duration-200 ease-out"
-              >
-                {/* Header: icon + title */}
-                <div className="flex items-start gap-3 mb-3">
-                  <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)] transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
-                    <Plugs size={20} weight="duotone" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-semibold text-[var(--text)] line-clamp-1 group-hover:text-[var(--primary)] transition-colors">
-                      {server.server_name || server.server_slug || 'MCP Server'}
-                    </h4>
-                    <span className="text-xs text-[var(--text-muted)] font-mono">{server.server_slug}</span>
-                  </div>
-                </div>
-
-                {/* Status badge */}
-                <div className="flex items-center gap-2 mb-4">
-                  <span
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                      server.is_active
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        : 'bg-[var(--text-subtle)]/10 text-[var(--text-muted)] border border-[var(--border)]'
-                    }`}
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        server.is_active ? 'bg-emerald-400' : 'bg-[var(--text-subtle)]'
-                      }`}
-                    />
-                    {server.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-2 mt-auto pt-2 border-t border-[var(--border)]">
-                  <button
-                    onClick={() => handleTestConnection(server.id)}
-                    disabled={testingId === server.id}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--surface-hover)] rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    <TestTube size={14} />
-                    {testingId === server.id ? 'Testing...' : 'Test Connection'}
-                  </button>
-                  <button
-                    onClick={() => handleUninstall(server.id)}
-                    disabled={uninstallingId === server.id}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    <Trash size={14} />
-                    {uninstallingId === server.id ? 'Removing...' : 'Uninstall'}
-                  </button>
-                </div>
-              </div>
+              <McpServerCard key={server.id} server={server} agents={agents} onReload={onReload} />
             ))}
-          </div>
+          </motion.div>
         </>
       )}
     </>
+  );
+}
+
+// Individual MCP server card — matches SkillCard design
+function McpServerCard({ server, agents, onReload }: { server: InstalledMcpServer; agents: LibraryAgent[]; onReload: () => void }) {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [showCredentials, setShowCredentials] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
+  const [savingCredentials, setSavingCredentials] = useState(false);
+  const [discoveryResult, setDiscoveryResult] = useState<{ tools?: { name: string; description: string }[]; resources?: { uri: string; name: string; description?: string }[]; prompts?: { name: string; description: string }[] } | null>(null);
+  const [discovering, setDiscovering] = useState(false);
+  const [testingId, setTestingId] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showDropdown) return;
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showDropdown]);
+
+  const handleAssign = async (agentId: string, agentName: string) => {
+    setAssigning(true);
+    try {
+      await marketplaceApi.assignMcpToAgent(server.id, agentId);
+      toast.success(`${server.server_name || server.server_slug} added to ${agentName}`);
+      setShowDropdown(false);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to assign MCP server');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const handleSaveCredentials = async () => {
+    setSavingCredentials(true);
+    try {
+      await marketplaceApi.updateMcpServer(server.id, { credentials: credentialValues });
+      toast.success('Credentials saved');
+      setShowCredentials(false);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to save credentials');
+    } finally {
+      setSavingCredentials(false);
+    }
+  };
+
+  const handleDiscover = async () => {
+    if (discoveryResult) { setShowDetails(!showDetails); return; }
+    setShowDetails(true);
+    setDiscovering(true);
+    try {
+      const result = await marketplaceApi.discoverMcpServer(server.id);
+      setDiscoveryResult(result);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Discovery failed');
+      setShowDetails(false);
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setTestingId(true);
+    try {
+      const result = await marketplaceApi.testMcpServer(server.id);
+      if (result.success) {
+        toast.success('Connection successful');
+      } else {
+        toast.error(result.error || 'Connection failed');
+      }
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Connection test failed');
+    } finally {
+      setTestingId(false);
+    }
+  };
+
+  const handleUninstall = async () => {
+    setUninstalling(true);
+    try {
+      await marketplaceApi.uninstallMcpServer(server.id);
+      toast.success('MCP server uninstalled');
+      onReload();
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to uninstall MCP server');
+    } finally {
+      setUninstalling(false);
+    }
+  };
+
+  const enabledAgents = agents.filter(a => a.is_enabled !== false);
+  const hasEnvVars = server.env_vars && server.env_vars.length > 0;
+
+  return (
+    <CardSurface
+      role="article"
+      aria-label={`${server.server_name || server.server_slug || 'MCP'} MCP server`}
+    >
+      {/* Header: icon + title */}
+      <CardHeader
+        icon={
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)] transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
+            <Plugs size={20} weight="duotone" />
+          </div>
+        }
+        title={server.server_name || server.server_slug || 'MCP Server'}
+        subtitle={<span className="font-mono">{server.server_slug}</span>}
+      />
+
+      {/* Status badge */}
+      <div className="flex items-center gap-2 mb-3">
+        {server.is_active ? (
+          <Badge intent="success" icon={<span className="w-1.5 h-1.5 rounded-full bg-[var(--status-success)]" />}>Active</Badge>
+        ) : (
+          <Badge intent="muted" icon={<span className="w-1.5 h-1.5 rounded-full bg-[var(--text-subtle)]" />}>Inactive</Badge>
+        )}
+      </div>
+
+      {/* Actions bar */}
+      <div className="flex items-center gap-1 mb-3">
+        <button
+          onClick={() => handleTestConnection()}
+          disabled={testingId}
+          className="flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--surface-hover)] rounded-lg transition-colors disabled:opacity-50"
+        >
+          <TestTube size={13} />
+          {testingId ? 'Testing...' : 'Test'}
+        </button>
+        {hasEnvVars && (
+          <button
+            onClick={() => setShowCredentials(!showCredentials)}
+            className={`flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-lg transition-colors ${showCredentials ? 'text-[var(--primary)] bg-[var(--primary)]/10' : 'text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--surface-hover)]'}`}
+          >
+            <Key size={13} />
+            Credentials
+          </button>
+        )}
+        <button
+          onClick={handleDiscover}
+          className={`flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-lg transition-colors ${showDetails ? 'text-[var(--primary)] bg-[var(--primary)]/10' : 'text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--surface-hover)]'}`}
+        >
+          <Info size={13} />
+          Details
+        </button>
+        <button
+          onClick={handleUninstall}
+          disabled={uninstalling}
+          className="flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 ml-auto"
+        >
+          <Trash size={13} />
+          {uninstalling ? 'Removing...' : 'Uninstall'}
+        </button>
+      </div>
+
+      {/* Credentials section */}
+      {showCredentials && hasEnvVars && (
+        <div className="mb-3 p-3 bg-[var(--bg)] rounded-lg border border-[var(--border)]">
+          <p className="text-[11px] text-[var(--text-muted)] mb-2 font-medium">Server Credentials</p>
+          {server.env_vars!.map((key) => (
+            <div key={key} className="mb-2">
+              <label className="text-[10px] text-[var(--text-subtle)] font-mono">{key}</label>
+              <input
+                type="password"
+                placeholder={`Enter ${key}`}
+                value={credentialValues[key] || ''}
+                onChange={(e) => setCredentialValues(prev => ({ ...prev, [key]: e.target.value }))}
+                className="w-full mt-0.5 px-2 py-1.5 text-xs bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:outline-none focus:border-[var(--primary)]"
+              />
+            </div>
+          ))}
+          <button
+            onClick={handleSaveCredentials}
+            disabled={savingCredentials}
+            className="w-full mt-1 px-3 py-1.5 text-xs font-medium bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50"
+          >
+            {savingCredentials ? 'Saving...' : 'Save Credentials'}
+          </button>
+        </div>
+      )}
+
+      {/* Details / Discovery section */}
+      {showDetails && (
+        <div className="mb-3 p-3 bg-[var(--bg)] rounded-lg border border-[var(--border)]">
+          {discovering ? (
+            <div className="flex items-center justify-center py-4">
+              <LoadingSpinner />
+            </div>
+          ) : discoveryResult ? (
+            <div className="space-y-2">
+              {discoveryResult.tools && discoveryResult.tools.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-medium text-[var(--text-muted)] mb-1">Tools ({discoveryResult.tools.length})</p>
+                  {discoveryResult.tools.map((t) => (
+                    <div key={t.name} className="flex items-start gap-1.5 py-1">
+                      <Wrench size={11} className="text-[var(--text-subtle)] mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-[11px] font-medium text-[var(--text)] font-mono">{t.name}</p>
+                        {t.description && <p className="text-[10px] text-[var(--text-muted)]">{t.description}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {discoveryResult.resources && discoveryResult.resources.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-medium text-[var(--text-muted)] mb-1">Resources ({discoveryResult.resources.length})</p>
+                  {discoveryResult.resources.map((r) => (
+                    <div key={r.uri} className="flex items-start gap-1.5 py-1">
+                      <Database size={11} className="text-[var(--text-subtle)] mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-[11px] font-medium text-[var(--text)] font-mono">{r.name}</p>
+                        <p className="text-[10px] text-[var(--text-subtle)] font-mono">{r.uri}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {discoveryResult.prompts && discoveryResult.prompts.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-medium text-[var(--text-muted)] mb-1">Prompts ({discoveryResult.prompts.length})</p>
+                  {discoveryResult.prompts.map((p) => (
+                    <div key={p.name} className="flex items-start gap-1.5 py-1">
+                      <ChatCircleDots size={11} className="text-[var(--text-subtle)] mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-[11px] font-medium text-[var(--text)]">{p.name}</p>
+                        {p.description && <p className="text-[10px] text-[var(--text-muted)]">{p.description}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(!discoveryResult.tools || discoveryResult.tools.length === 0) && (!discoveryResult.resources || discoveryResult.resources.length === 0) && (!discoveryResult.prompts || discoveryResult.prompts.length === 0) && (
+                <p className="text-[11px] text-[var(--text-muted)] text-center py-2">No capabilities discovered</p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* Add to Agent action */}
+      <div ref={dropdownRef} className="relative mt-1">
+        <button
+          onClick={() => setShowDropdown(!showDropdown)}
+          disabled={assigning}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20 transition-colors disabled:opacity-50"
+        >
+          {assigning ? (
+            <LoadingSpinner />
+          ) : (
+            <>
+              <Plugs size={14} />
+              Add to Agent
+            </>
+          )}
+        </button>
+        {showDropdown && (
+          <div className="absolute left-0 right-0 bottom-full mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl z-20 py-1.5 max-h-52 overflow-y-auto">
+            {enabledAgents.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-[var(--text-muted)] text-center">
+                No active agents. Enable an agent first.
+              </p>
+            ) : (
+              enabledAgents.map((agent) => (
+                <button
+                  key={agent.id}
+                  onClick={() => handleAssign(agent.id, agent.name)}
+                  className="w-full text-left px-3 py-2 text-xs text-[var(--text)] hover:bg-[var(--primary)]/5 transition-colors flex items-center gap-2.5"
+                >
+                  {agent.avatar_url ? (
+                    <img src={agent.avatar_url} alt="" className="w-6 h-6 rounded-lg object-cover border border-[var(--border)]" />
+                  ) : (
+                    <div className="w-6 h-6 rounded-lg bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center">
+                      <img src="/favicon.svg" alt="" className="w-4 h-4" />
+                    </div>
+                  )}
+                  <span className="truncate font-medium">{agent.name}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </CardSurface>
   );
 }
 
@@ -3388,26 +3507,17 @@ function SkillsTab({
         <>
           {/* Stats */}
           <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-              <div className="text-2xl font-bold text-[var(--text)] mb-1">{skills.length}</div>
-              <div className="text-sm text-[var(--text-muted)]">Total Skills</div>
-            </div>
-            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-              <div className="text-2xl font-bold text-[var(--text)] mb-1">{openSourceCount}</div>
-              <div className="text-sm text-[var(--text-muted)]">Open Source</div>
-            </div>
-            <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-              <div className="text-2xl font-bold text-[var(--text)] mb-1">{categoryCount}</div>
-              <div className="text-sm text-[var(--text-muted)]">Categories</div>
-            </div>
+            <StatCard value={skills.length} label="Total Skills" index={0} />
+            <StatCard value={openSourceCount} label="Open Source" index={1} />
+            <StatCard value={categoryCount} label="Categories" index={2} />
           </div>
 
           {/* Skills Grid */}
-          <div ref={dropdownRef} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <motion.div ref={dropdownRef} variants={staggerContainer} initial="initial" animate="animate" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {skills.map((skill) => (
               <SkillCard key={skill.id} skill={skill} agents={agents} />
             ))}
-          </div>
+          </motion.div>
         </>
       )}
     </>
@@ -3449,23 +3559,20 @@ function SkillCard({ skill, agents }: { skill: LibrarySkill; agents: LibraryAgen
   const enabledAgents = agents.filter(a => a.is_enabled !== false);
 
   return (
-    <div
+    <CardSurface
       role="article"
       aria-label={`${skill.name} skill`}
-      className="group relative flex flex-col bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-large)] p-4 sm:p-5 hover:border-[rgba(var(--primary-rgb),0.3)] hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] transition-all duration-200 ease-out"
     >
       {/* Header: icon + title */}
-      <div className="flex items-start gap-3 mb-3">
-        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)] transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
-          {getSkillCategoryIcon(skill.category)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-semibold text-[var(--text)] line-clamp-1 group-hover:text-[var(--primary)] transition-colors">
-            {skill.name}
-          </h4>
-          <span className="text-xs text-[var(--text-muted)] capitalize">{skill.category}</span>
-        </div>
-      </div>
+      <CardHeader
+        icon={
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)] transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]">
+            {getSkillCategoryIcon(skill.category)}
+          </div>
+        }
+        title={skill.name}
+        subtitle={<span className="capitalize">{skill.category}</span>}
+      />
 
       {/* Description */}
       <p className="text-xs sm:text-[13px] leading-relaxed text-[var(--text-muted)] line-clamp-2 mb-3 min-h-[32px]">
@@ -3475,30 +3582,17 @@ function SkillCard({ skill, agents }: { skill: LibrarySkill; agents: LibraryAgen
       {/* Badges row */}
       <div className="flex flex-wrap items-center gap-1.5 mb-3">
         {skill.source_type === 'open' ? (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-success)]/15 text-[var(--status-success)] text-[11px] rounded font-medium">
-            <LockSimpleOpen size={11} />
-            Open
-          </span>
+          <Badge intent="success" icon={<LockSimpleOpen size={11} />}>Open</Badge>
         ) : (
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent)]/15 text-[var(--accent)] text-[11px] rounded font-medium">
-            <LockKey size={11} />
-            Closed
-          </span>
+          <Badge intent="accent" icon={<LockKey size={11} />}>Closed</Badge>
         )}
         {skill.pricing_type === 'free' && (
-          <span className="px-2 py-0.5 bg-[var(--status-success)]/10 text-[var(--status-success)] text-[11px] rounded font-medium">
-            Free
-          </span>
+          <Badge intent="success">Free</Badge>
         )}
         {skill.features && skill.features.length > 0 && (
           <>
             {skill.features.slice(0, 2).map((feature, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 bg-[var(--surface-hover)] text-[var(--text-muted)] text-[11px] rounded font-medium truncate max-w-[120px]"
-              >
-                {feature}
-              </span>
+              <Badge key={i} intent="muted">{feature}</Badge>
             ))}
             {skill.features.length > 2 && (
               <span className="px-1.5 py-0.5 text-[var(--text-subtle)] text-[11px] font-medium">
@@ -3570,7 +3664,7 @@ function SkillCard({ skill, agents }: { skill: LibrarySkill; agents: LibraryAgen
           </div>
         )}
       </div>
-    </div>
+    </CardSurface>
   );
 }
 

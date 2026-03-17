@@ -1363,6 +1363,20 @@ export const marketplaceApi = {
     return response.data;
   },
 
+  updateMcpServer: async (configId: string, data: {
+    credentials?: Record<string, string>;
+    enabled_capabilities?: string[];
+    is_active?: boolean;
+  }) => {
+    const response = await api.patch(`/api/mcp/installed/${configId}`, data);
+    return response.data;
+  },
+
+  discoverMcpServer: async (configId: string) => {
+    const response = await api.post(`/api/mcp/installed/${configId}/discover`);
+    return response.data;
+  },
+
   getSkillDetails: async (slug: string) => {
     const response = await api.get(`/api/marketplace/skills/${slug}`);
     return response.data;
@@ -1675,6 +1689,8 @@ export interface ThemeColors {
     warningRgb: string;
     info: string;
     infoRgb: string;
+    purple?: string;
+    purpleRgb?: string;
   };
   shadow: {
     small: string;
@@ -1688,6 +1704,7 @@ export interface ThemeTypography {
   fontFamilyMono: string;
   fontSizeBase: string;
   lineHeight: string;
+  fontFamilyHeading?: string;
 }
 
 export interface ThemeSpacing {

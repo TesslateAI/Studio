@@ -197,7 +197,50 @@ wait_for_pods "tesslate" 300
 log_success "Application deployed"
 
 # =============================================================================
-# Step 8: Setup Ingress
+# Step 8: Seed Database
+# =============================================================================
+
+log_info "Seeding database..."
+
+REPO_ROOT="$(cd "$K8S_DIR/../.." 2>/dev/null && pwd)" || REPO_ROOT="$(cd "$K8S_DIR/.." && pwd)"
+# Find repo root by looking for scripts/seed directory
+if [ ! -d "$REPO_ROOT/scripts/seed" ]; then
+    REPO_ROOT="$(cd "$K8S_DIR/.." && pwd)"
+fi
+
+# Wait for backend to be fully ready before seeding
+kubectl rollout status deployment/tesslate-backend -n tesslate --timeout=120s
+
+BACKEND_POD=$(kubectl get pods -n tesslate -l app=tesslate-backend -o jsonpath='{.items[0].metadata.name}')
+
+if [ -n "$BACKEND_POD" ] && [ -d "$REPO_ROOT/scripts/seed" ]; then
+    SEED_SCRIPTS=(
+        "seed_marketplace_bases.py"
+        "seed_marketplace_agents.py"
+        "seed_opensource_agents.py"
+        "seed_skills.py"
+        "seed_themes.py"
+        "seed_mcp_servers.py"
+        "seed_community_bases.py"
+    )
+
+    for script in "${SEED_SCRIPTS[@]}"; do
+        if [ -f "$REPO_ROOT/scripts/seed/$script" ]; then
+            log_info "Running $script..."
+            kubectl cp "$REPO_ROOT/scripts/seed/$script" "tesslate/${BACKEND_POD}:/tmp/$script"
+            kubectl exec -n tesslate "$BACKEND_POD" -- python "/tmp/$script" 2>&1 || {
+                log_warning "Seed script $script failed (non-fatal), continuing..."
+            }
+        fi
+    done
+
+    log_success "Database seeded"
+else
+    log_warning "Could not find backend pod or seed scripts, skipping seeding"
+fi
+
+# =============================================================================
+# Step 9: Setup Ingress (port-forward)
 # =============================================================================
 
 log_info "Configuring ingress..."
@@ -216,7 +259,7 @@ echo "  $MINIKUBE_IP minio.tesslate.local"
 echo ""
 
 # =============================================================================
-# Step 9: Print Status
+# Step 10: Print Status
 # =============================================================================
 
 echo ""

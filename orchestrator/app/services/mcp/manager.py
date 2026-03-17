@@ -74,7 +74,7 @@ class McpManager:
                 resources_list = getattr(resources_resp, "resources", [])
                 result["resources"] = [
                     {
-                        "uri": getattr(r, "uri", ""),
+                        "uri": str(getattr(r, "uri", "")),
                         "name": getattr(r, "name", ""),
                         "description": getattr(r, "description", ""),
                         "mimeType": getattr(r, "mimeType", None),
@@ -144,8 +144,8 @@ class McpManager:
             Active database session.
         agent_id:
             Optional — when set, only MCP servers explicitly assigned to this
-            agent via :class:`AgentMcpAssignment` are returned.  When ``None``,
-            all active user MCP configs are returned (backward-compatible).
+            agent via :class:`AgentMcpAssignment` are loaded.  When ``None``,
+            all active user MCP configs are returned directly.
 
         Returns
         -------
@@ -163,9 +163,13 @@ class McpManager:
         settings = get_settings()
         cache_ttl = settings.mcp_tool_cache_ttl
 
-        # 1. Query active UserMcpConfig rows with joined MarketplaceAgent
+        # 1. Query active UserMcpConfig rows with joined MarketplaceAgent.
+        #    When agent_id is set, only explicitly assigned servers are loaded.
+        logger.debug(
+            "MCP context query: user_id=%s, agent_id=%s",
+            user_id, agent_id,
+        )
         if agent_id:
-            # Filter to only MCP servers assigned to this specific agent
             stmt = (
                 select(UserMcpConfig)
                 .options(selectinload(UserMcpConfig.marketplace_agent))
@@ -190,6 +194,7 @@ class McpManager:
                     UserMcpConfig.is_active.is_(True),
                 )
             )
+
         result = await db.execute(stmt)
         configs: list[UserMcpConfig] = list(result.scalars().all())
 

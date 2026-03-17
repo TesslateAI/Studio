@@ -50,6 +50,7 @@ def _build_config_response(
         server_slug=agent.slug if agent else None,
         enabled_capabilities=config.enabled_capabilities,
         is_active=config.is_active,
+        env_vars=(agent.config or {}).get("env_vars") if agent else None,
         created_at=config.created_at,
         updated_at=config.updated_at,
     )

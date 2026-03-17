@@ -2,7 +2,13 @@
 Seed popular MCP servers into the marketplace.
 
 Creates MarketplaceAgent entries with item_type='mcp_server' for well-known
-MCP servers from the official Model Context Protocol repository.
+MCP servers that support streamable-http transport.
+
+TRANSPORT POLICY: Tesslate only supports streamable-http MCP transport.
+Stdio transport spawns a process per tool call per user on orchestrator pods,
+which doesn't scale for multi-tenant SaaS. Streamable-http makes stateless
+HTTP calls to remote MCP servers, with per-user rate limits via their own
+API keys. See docs/orchestrator/services/mcp.md for details.
 
 HOW TO RUN:
 -----------
@@ -35,212 +41,105 @@ from app.models import MarketplaceAgent
 
 MCP_SERVERS = [
     {
-        "name": "GitHub Tools",
-        "slug": "mcp-github",
-        "description": "Interact with GitHub repositories, issues, pull requests, and more via the GitHub API.",
+        "name": "Context7",
+        "slug": "mcp-context7",
+        "description": "Up-to-date, version-specific library documentation and code examples pulled straight from the source.",
         "long_description": (
-            "The GitHub MCP server provides comprehensive access to the GitHub API through "
-            "the Model Context Protocol. Create and manage repositories, file issues, review "
-            "pull requests, search code, manage branches, and automate workflows — all through "
-            "natural language. Requires a GitHub personal access token for authentication."
+            "Context7 pulls up-to-date, version-specific documentation and code examples "
+            "directly from library source — and places them right into your prompt. No more "
+            "hallucinated APIs, outdated code examples, or generic answers for old package "
+            "versions. Resolve a library name to its Context7 ID, then query for relevant "
+            "docs and code snippets. Supports thousands of libraries across all major ecosystems."
         ),
         "item_type": "mcp_server",
         "category": "developer-tools",
         "config": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-github"],
-            "env_vars": ["GITHUB_TOKEN"],
+            "transport": "streamable-http",
+            "url": "https://context7.liam.sh/mcp",
+            "auth_type": "none",
+            "env_vars": [],
             "capabilities": ["tools"],
         },
         "features": [
-            "create_or_update_file",
-            "search_repositories",
-            "create_issue",
-            "create_pull_request",
-            "push_files",
-            "list_commits",
-            "get_file_contents",
-            "fork_repository",
-            "create_branch",
-            "search_code",
+            "resolve-library-id",
+            "query-docs",
         ],
-        "tags": ["github", "git", "version-control", "ci-cd", "developer-tools"],
+        "tags": ["documentation", "libraries", "code-examples", "developer-tools", "context"],
         "is_active": True,
         "is_featured": True,
         "pricing_type": "free",
         "price": 0,
-        "icon": "GithubLogo",
+        "icon": "BookOpen",
         "source_type": "open",
-    },
-    {
-        "name": "Brave Search",
-        "slug": "mcp-brave-search",
-        "description": "Web and local search powered by the Brave Search API with privacy-focused results.",
-        "long_description": (
-            "The Brave Search MCP server enables web and local search through the Brave Search "
-            "API. Get privacy-respecting search results, local business information, and web "
-            "content without tracking. Supports both general web search and location-based "
-            "local search queries. Requires a Brave Search API key."
-        ),
-        "item_type": "mcp_server",
-        "category": "search",
-        "config": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-            "env_vars": ["BRAVE_API_KEY"],
-            "capabilities": ["tools"],
-        },
-        "features": [
-            "brave_web_search",
-            "brave_local_search",
-        ],
-        "tags": ["search", "web", "privacy", "brave", "local-search"],
-        "is_active": True,
-        "is_featured": False,
-        "pricing_type": "free",
-        "price": 0,
-        "icon": "MagnifyingGlass",
-        "source_type": "open",
-    },
-    {
-        "name": "Slack",
-        "slug": "mcp-slack",
-        "description": "Send messages, manage channels, and interact with your Slack workspace programmatically.",
-        "long_description": (
-            "The Slack MCP server connects to your Slack workspace, enabling you to send "
-            "messages, read channel history, manage channels, and search conversations. "
-            "Automate team notifications, gather context from discussions, and integrate "
-            "Slack workflows into your development process. Requires a Slack Bot Token "
-            "and Team ID."
-        ),
-        "item_type": "mcp_server",
-        "category": "integrations",
-        "config": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-slack"],
-            "env_vars": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
-            "capabilities": ["tools"],
-        },
-        "features": [
-            "send_message",
-            "list_channels",
-            "read_channel_history",
-            "search_messages",
-            "get_channel_info",
-            "add_reaction",
-            "get_thread_replies",
-        ],
-        "tags": ["slack", "messaging", "team", "communication", "integrations"],
-        "is_active": True,
-        "is_featured": False,
-        "pricing_type": "free",
-        "price": 0,
-        "icon": "ChatCircle",
-        "source_type": "open",
-    },
-    {
-        "name": "PostgreSQL",
-        "slug": "mcp-postgresql",
-        "description": "Query and inspect PostgreSQL databases with read-only access and schema introspection.",
-        "long_description": (
-            "The PostgreSQL MCP server provides safe, read-only access to PostgreSQL databases. "
-            "Run SELECT queries, inspect table schemas, list databases and tables, and explore "
-            "relationships between entities. Ideal for data exploration, debugging, and building "
-            "data-driven features. All queries run in read-only transactions for safety."
-        ),
-        "item_type": "mcp_server",
-        "category": "databases",
-        "config": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-postgres"],
-            "env_vars": ["DATABASE_URL"],
-            "capabilities": ["tools", "resources"],
-        },
-        "features": [
-            "query",
-            "list_tables",
-            "describe_table",
-            "list_databases",
-            "get_table_schema",
-        ],
-        "tags": ["postgresql", "database", "sql", "data", "schema"],
-        "is_active": True,
-        "is_featured": False,
-        "pricing_type": "free",
-        "price": 0,
-        "icon": "Database",
-        "source_type": "open",
-    },
-    {
-        "name": "Filesystem",
-        "slug": "mcp-filesystem",
-        "description": "Secure file operations with configurable access controls for reading, writing, and managing files.",
-        "long_description": (
-            "The Filesystem MCP server provides controlled access to the local filesystem. "
-            "Read, write, move, and search files within designated directories. Supports "
-            "directory listing, file search by pattern, and metadata retrieval. Access is "
-            "restricted to explicitly allowed directories for security."
-        ),
-        "item_type": "mcp_server",
-        "category": "developer-tools",
-        "config": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
-            "env_vars": [],
-            "capabilities": ["tools", "resources"],
-        },
-        "features": [
-            "read_file",
-            "write_file",
-            "list_directory",
-            "move_file",
-            "search_files",
-            "get_file_info",
-            "create_directory",
-            "read_multiple_files",
-        ],
-        "tags": ["filesystem", "files", "storage", "local", "developer-tools"],
-        "is_active": True,
-        "is_featured": False,
-        "pricing_type": "free",
-        "price": 0,
-        "icon": "FolderOpen",
-        "source_type": "open",
+        "git_repo_url": "https://github.com/upstash/context7",
     },
 ]
 
+# Servers removed (stdio-only, no streamable-http endpoint available):
+# - GitHub Tools (@modelcontextprotocol/server-github) — stdio only
+# - Brave Search (@modelcontextprotocol/server-brave-search) — stdio only
+# - Slack (@modelcontextprotocol/server-slack) — stdio only
+# - PostgreSQL (@modelcontextprotocol/server-postgres) — stdio only, inherently local
+# - Filesystem (@modelcontextprotocol/server-filesystem) — stdio only, inherently local
+#
+# These can be re-added when their maintainers publish streamable-http endpoints.
 
-async def seed_mcp_servers() -> int:
-    """Seed MCP servers into the marketplace. Returns count of newly created entries."""
+# Stdio-only slugs to deactivate in the DB (prevent install of broken servers).
+STDIO_ONLY_SLUGS = [
+    "mcp-github",
+    "mcp-brave-search",
+    "mcp-slack",
+    "mcp-postgresql",
+    "mcp-filesystem",
+]
+
+
+async def seed_mcp_servers() -> tuple[int, int, int]:
+    """Seed MCP servers into the marketplace. Returns (created, updated, deactivated) counts."""
     created = 0
+    updated = 0
+    deactivated = 0
     async with AsyncSessionLocal() as db:
+        # Upsert streamable-http servers
         for server_data in MCP_SERVERS:
+            slug = server_data["slug"]
             result = await db.execute(
-                select(MarketplaceAgent).where(MarketplaceAgent.slug == server_data["slug"])
+                select(MarketplaceAgent).where(MarketplaceAgent.slug == slug)
             )
             existing = result.scalar_one_or_none()
             if existing:
-                print(f"  [skip] {server_data['slug']} already exists")
-                continue
+                for key, value in server_data.items():
+                    if key != "slug":
+                        setattr(existing, key, value)
+                updated += 1
+                print(f"  [update] {slug}")
+            else:
+                agent = MarketplaceAgent(**server_data)
+                db.add(agent)
+                created += 1
+                print(f"  [create] {slug}")
 
-            agent = MarketplaceAgent(**server_data)
-            db.add(agent)
-            created += 1
-            print(f"  [create] {server_data['slug']}")
+        # Deactivate old stdio-only servers so they don't appear in marketplace
+        for slug in STDIO_ONLY_SLUGS:
+            result = await db.execute(
+                select(MarketplaceAgent).where(MarketplaceAgent.slug == slug)
+            )
+            existing = result.scalar_one_or_none()
+            if existing and existing.is_active:
+                existing.is_active = False
+                deactivated += 1
+                print(f"  [deactivate] {slug} (stdio-only, no HTTP endpoint)")
+            elif existing:
+                print(f"  [skip] {slug} already inactive")
 
         await db.commit()
-    return created
+    return created, updated, deactivated
 
 
 async def main():
-    print("Seeding MCP servers...")
-    count = await seed_mcp_servers()
-    print(f"Done. Created {count} new MCP server entries.")
+    print("Seeding MCP servers (streamable-http only)...")
+    created, updated, deactivated = await seed_mcp_servers()
+    print(f"Done. Created {created}, updated {updated}, deactivated {deactivated} MCP server entries.")
 
 
 if __name__ == "__main__":

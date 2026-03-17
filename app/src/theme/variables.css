@@ -30,6 +30,7 @@
   --hue2: 240;
   --radius: 22px;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --font-family-heading: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 * {
@@ -37,7 +38,7 @@
 }
 
 body {
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'Instrument Sans', 'Inter', -apple-system, sans-serif;
   margin: 0;
   overflow-x: hidden; /* Prevent horizontal scroll */
   overflow-y: auto; /* Allow vertical scroll */
@@ -51,7 +52,7 @@ body {
  */
 
 .font-heading {
-  font-family: 'DM Sans', sans-serif;
+  font-family: var(--font-family-heading, 'Instrument Sans', -apple-system, sans-serif);
 }
 
 /* Custom scrollbar */

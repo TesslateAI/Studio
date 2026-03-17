@@ -1,23 +1,16 @@
-import { useTheme } from '../../theme/ThemeContext';
+import { CardSurface } from '../cards';
 
 interface SkeletonCardProps {
   variant?: 'card' | 'featured';
 }
 
 export function SkeletonCard({ variant = 'card' }: SkeletonCardProps) {
-  const { theme } = useTheme();
-
-  const bgBase = theme === 'light' ? 'bg-black/5' : 'bg-white/5';
-  const bgPulse = theme === 'light' ? 'bg-black/10' : 'bg-white/10';
+  const bgBase = 'bg-[var(--surface-hover)]/50';
+  const bgPulse = 'bg-[var(--surface-hover)]';
 
   if (variant === 'featured') {
     return (
-      <div
-        className={`
-          animate-pulse rounded-2xl border overflow-hidden p-4 md:p-6
-          ${theme === 'light' ? 'bg-white border-black/10' : 'bg-[#1a1a1c] border-white/10'}
-        `}
-      >
+      <CardSurface variant="featured" disableHoverLift className="animate-pulse">
         <div className="flex flex-col md:flex-row gap-4 md:gap-6">
           {/* Icon */}
           <div className={`w-20 h-20 md:w-24 md:h-24 rounded-2xl flex-shrink-0 ${bgBase}`} />
@@ -46,17 +39,12 @@ export function SkeletonCard({ variant = 'card' }: SkeletonCardProps) {
             <div className={`h-9 w-24 rounded-xl ${bgPulse}`} />
           </div>
         </div>
-      </div>
+      </CardSurface>
     );
   }
 
   return (
-    <div
-      className={`
-        animate-pulse flex flex-col p-4 rounded-xl border
-        ${theme === 'light' ? 'bg-white border-black/10' : 'bg-[#1a1a1c] border-white/10'}
-      `}
-    >
+    <CardSurface disableHoverLift className="animate-pulse">
       {/* Header: Icon + Name + Creator */}
       <div className="flex items-start gap-3 mb-2">
         <div className={`w-10 h-10 rounded-xl flex-shrink-0 ${bgBase}`} />
@@ -80,12 +68,12 @@ export function SkeletonCard({ variant = 'card' }: SkeletonCardProps) {
       </div>
 
       {/* Footer */}
-      <div className="mt-auto pt-3 border-t border-white/5">
+      <div className="mt-auto pt-3 border-t border-[var(--border)]">
         <div className="flex items-center justify-end">
           <div className={`h-7 w-16 rounded-lg ${bgPulse}`} />
         </div>
       </div>
-    </div>
+    </CardSurface>
   );
 }
 

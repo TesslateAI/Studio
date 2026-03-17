@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, FileCode, X, List, Plus } from 'lucide-react';
+import { Loader2, FileCode, X, List, Plus, Plug } from 'lucide-react';
 import { PencilSimple, Storefront } from '@phosphor-icons/react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
@@ -109,9 +109,8 @@ export function ChatContainer({
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
   const [toolCallsCollapsed, setToolCallsCollapsed] = useState(false);
-  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>(
-    []
-  );
+  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
+  const [activeMcpServers, setActiveMcpServers] = useState<{ name: string; slug: string }[]>([]);
   const [editMode, setEditMode] = useState<EditMode>(() => {
     const stored = localStorage.getItem(`editMode:${projectId}`);
     return stored === 'ask' || stored === 'allow' || stored === 'plan' ? stored : 'ask';
@@ -557,6 +556,23 @@ export function ChatContainer({
     return () => {
       cancelled = true;
     };
+  }, [currentAgent.backendId]);
+
+  // Fetch active MCP servers for current agent
+  useEffect(() => {
+    if (!currentAgent.backendId) { setActiveMcpServers([]); return; }
+    let cancelled = false;
+    marketplaceApi.getAgentMcpServers(currentAgent.backendId.toString())
+      .then((data) => {
+        if (!cancelled) {
+          setActiveMcpServers((data || []).map((s: { server_name?: string; server_slug?: string }) => ({
+            name: s.server_name || s.server_slug || 'MCP',
+            slug: s.server_slug || '',
+          })));
+        }
+      })
+      .catch(() => { if (!cancelled) setActiveMcpServers([]); });
+    return () => { cancelled = true; };
   }, [currentAgent.backendId]);
 
   // WebSocket connection with auto-reconnect and heartbeat
@@ -1731,6 +1747,22 @@ export function ChatContainer({
               >
                 {currentSessionTitle}
               </span>
+            )}
+
+            {activeMcpServers.length > 0 && (
+              <div className="flex items-center gap-1 mx-1">
+                {activeMcpServers.slice(0, 3).map((s) => (
+                  <span key={s.slug}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                    title={s.name}>
+                    <Plug size={10} />
+                    {s.slug}
+                  </span>
+                ))}
+                {activeMcpServers.length > 3 && (
+                  <span className="text-[10px] text-[var(--text-muted)]">+{activeMcpServers.length - 3}</span>
+                )}
+              </div>
             )}
 
             <button

@@ -79,6 +79,8 @@ const DEFAULT_FALLBACK_THEME: Theme = {
       warningRgb: '245, 158, 11',
       info: '#3b82f6',
       infoRgb: '59, 130, 246',
+      purple: '#a855f7',
+      purpleRgb: '168, 85, 247',
     },
     shadow: {
       small: '0 1px 2px rgba(0, 0, 0, 0.3)',
@@ -87,7 +89,8 @@ const DEFAULT_FALLBACK_THEME: Theme = {
     },
   },
   typography: {
-    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    fontFamily: "'Instrument Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    fontFamilyHeading: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
     fontFamilyMono: "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
     fontSizeBase: '14px',
     lineHeight: '1.5',
@@ -323,6 +326,8 @@ export function applyThemePreset(theme: Theme): void {
     safeSetProperty(root, '--status-green', colors.status.success);
     safeSetProperty(root, '--status-yellow', colors.status.warning);
     safeSetProperty(root, '--status-blue', colors.status.info);
+    safeSetProperty(root, '--status-purple', colors.status.purple);
+    safeSetProperty(root, '--status-purple-rgb', colors.status.purpleRgb);
   }
 
   // === SHADOWS ===
@@ -337,6 +342,7 @@ export function applyThemePreset(theme: Theme): void {
   safeSetProperty(root, '--font-family-mono', typography.fontFamilyMono);
   safeSetProperty(root, '--font-size-base', typography.fontSizeBase);
   safeSetProperty(root, '--line-height', typography.lineHeight);
+  safeSetProperty(root, '--font-family-heading', typography.fontFamilyHeading);
 
   // === SPACING / RADIUS ===
   safeSetProperty(root, '--radius-small', spacing.radiusSmall);

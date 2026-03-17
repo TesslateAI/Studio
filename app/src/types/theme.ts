@@ -330,6 +330,8 @@ export const DEFAULT_FALLBACK_THEME: Theme = {
       warningRgb: '245, 158, 11',
       info: '#3b82f6',
       infoRgb: '59, 130, 246',
+      purple: '#a855f7',
+      purpleRgb: '168, 85, 247',
     },
     shadow: {
       small: '0 1px 2px rgba(0, 0, 0, 0.3)',
@@ -339,7 +341,8 @@ export const DEFAULT_FALLBACK_THEME: Theme = {
   },
   typography: {
     fontFamily:
-      "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      "'Instrument Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    fontFamilyHeading: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
     fontFamilyMono: "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
     fontSizeBase: '14px',
     lineHeight: '1.5',
