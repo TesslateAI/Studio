@@ -16,7 +16,11 @@ import type {
   CustomerPortalResponse,
   StripeConnectResponse,
 } from '../types/billing';
-import type { TesslateConfig, TesslateConfigResponse, SetupConfigSyncResponse } from '../types/tesslateConfig';
+import type {
+  TesslateConfig,
+  TesslateConfigResponse,
+  SetupConfigSyncResponse,
+} from '../types/tesslateConfig';
 import { config } from '../config';
 
 const API_URL = config.API_URL;
@@ -2602,20 +2606,30 @@ export const createWebSocket = (token: string) => {
 };
 
 /**
- * Create a WebSocket connection for interactive terminal access
- * @param projectId - The project ID or slug
- * @returns WebSocket instance connected to the terminal endpoint
+ * Fetch available terminal targets for a project
  */
-export const createTerminalWebSocket = (projectId: string): WebSocket => {
+export const getTerminalTargets = async (projectSlug: string) => {
+  const response = await api.get(`/api/terminal/${projectSlug}/targets`);
+  return response.data;
+};
+
+/**
+ * Create an authenticated WebSocket connection for terminal v2
+ */
+export const createTerminalWebSocket = (
+  projectSlug: string,
+  targetId: string,
+  token: string
+): WebSocket => {
   let wsUrl: string;
   if (API_URL) {
     wsUrl = API_URL.replace('http', 'ws');
   } else {
-    // Use current location for WebSocket when no API_URL is set
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     wsUrl = `${protocol}//${window.location.host}`;
   }
-  return new WebSocket(`${wsUrl}/api/projects/${projectId}/terminal`);
+  const params = new URLSearchParams({ token, target: targetId });
+  return new WebSocket(`${wsUrl}/api/terminal/${projectSlug}/connect?${params}`);
 };
 
 /**

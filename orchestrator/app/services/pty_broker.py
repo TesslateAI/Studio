@@ -7,6 +7,7 @@ Buffers output for asynchronous agent reads.
 
 import asyncio
 import contextlib
+import json
 import logging
 import uuid
 from abc import ABC, abstractmethod
@@ -104,6 +105,11 @@ class BasePTYBroker(ABC):
     @abstractmethod
     async def write_to_pty(self, session_id: str, data: bytes) -> None:
         """Write data to PTY stdin."""
+        pass
+
+    @abstractmethod
+    async def resize(self, session_id: str, cols: int, rows: int) -> None:
+        """Resize a PTY session."""
         pass
 
     @abstractmethod
@@ -262,6 +268,19 @@ class DockerPTYBroker(BasePTYBroker):
         session.bytes_written += len(data)
         session.last_activity = datetime.utcnow()
 
+    async def resize(self, session_id: str, cols: int, rows: int) -> None:
+        """Resize Docker PTY."""
+        session = self.sessions.get(session_id)
+        if not session or session.is_closed or not session.exec_id:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(
+                None, lambda: self.client.api.exec_resize(session.exec_id, height=rows, width=cols)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to resize Docker PTY {session_id}: {e}")
+
     async def close_session(self, session_id: str) -> None:
         """Close Docker exec session."""
         session = self.sessions.get(session_id)
@@ -355,6 +374,7 @@ class KubernetesPTYBroker(BasePTYBroker):
         cols: int = 80,
         namespace: str = None,
         container: str = "dev-server",
+        pod_name: str | None = None,
     ) -> PTYSession:
         """
         Create K8s exec with PTY and start output buffering.
@@ -368,6 +388,7 @@ class KubernetesPTYBroker(BasePTYBroker):
             cols: Terminal columns
             namespace: Namespace (optional - will be determined from project_id if not provided)
             container: Container name within pod (K8s container)
+            pod_name: Direct pod name (optional - skips pod discovery when set)
 
         Returns:
             PTYSession object
@@ -380,7 +401,7 @@ class KubernetesPTYBroker(BasePTYBroker):
         )
 
         logger.info(
-            f"[K8S-PTY] create_session called: project_id={project_id}, container_name={container_name}"
+            f"[K8S-PTY] create_session called: project_id={project_id}, container_name={container_name}, pod_name={pod_name}"
         )
 
         # Determine namespace if not provided
@@ -388,48 +409,51 @@ class KubernetesPTYBroker(BasePTYBroker):
             namespace = self._get_namespace_for_project(project_id)
             logger.info(f"[K8S-PTY] Using namespace: {namespace}")
 
-        # Always look up actual pod name - deployment_name is not the pod name
-        # Pods have suffix like "dev-next-js-15-f8d496f89-fpqsk"
-        pod_name = None
-        try:
-            if deployment_name:
-                # Look up pod by app label (matches deployment name)
-                logger.info(
-                    f"[K8S-PTY] Looking up pod by label app={deployment_name} in namespace {namespace}..."
-                )
-                pods = await asyncio.to_thread(
-                    self.core_v1.list_namespaced_pod,
-                    namespace=namespace,
-                    label_selector=f"app={deployment_name}",
-                )
-                logger.info(f"[K8S-PTY] Found {len(pods.items)} pods matching label")
-                if pods.items:
-                    # Get first running pod
-                    for pod in pods.items:
-                        if pod.status.phase == "Running":
-                            pod_name = pod.metadata.name
-                            break
-                    if not pod_name and pods.items:
-                        pod_name = pods.items[0].metadata.name
-                    logger.info(f"[K8S-PTY] Selected pod: {pod_name}")
+        # If pod_name provided directly, skip discovery
+        if pod_name:
+            logger.info(f"[K8S-PTY] Using provided pod_name directly: {pod_name}")
+        else:
+            # Look up actual pod name - deployment_name is not the pod name
+            # Pods have suffix like "dev-next-js-15-f8d496f89-fpqsk"
+            try:
+                if deployment_name:
+                    # Look up pod by app label (matches deployment name)
+                    logger.info(
+                        f"[K8S-PTY] Looking up pod by label app={deployment_name} in namespace {namespace}..."
+                    )
+                    pods = await asyncio.to_thread(
+                        self.core_v1.list_namespaced_pod,
+                        namespace=namespace,
+                        label_selector=f"app={deployment_name}",
+                    )
+                    logger.info(f"[K8S-PTY] Found {len(pods.items)} pods matching label")
+                    if pods.items:
+                        # Get first running pod
+                        for pod in pods.items:
+                            if pod.status.phase == "Running":
+                                pod_name = pod.metadata.name
+                                break
+                        if not pod_name and pods.items:
+                            pod_name = pods.items[0].metadata.name
+                        logger.info(f"[K8S-PTY] Selected pod: {pod_name}")
 
-            if not pod_name:
-                # Fallback: List all dev container pods in the namespace
-                # Use correct label selector with tesslate.io prefix
-                pods = await asyncio.to_thread(
-                    self.core_v1.list_namespaced_pod,
-                    namespace=namespace,
-                    label_selector="tesslate.io/component=dev-container",
-                )
+                if not pod_name:
+                    # Fallback: List all dev container pods in the namespace
+                    # Use correct label selector with tesslate.io prefix
+                    pods = await asyncio.to_thread(
+                        self.core_v1.list_namespaced_pod,
+                        namespace=namespace,
+                        label_selector="tesslate.io/component=dev-container",
+                    )
 
-                if not pods.items:
-                    raise RuntimeError(f"No dev container pod found in namespace {namespace}")
+                    if not pods.items:
+                        raise RuntimeError(f"No dev container pod found in namespace {namespace}")
 
-                pod_name = pods.items[0].metadata.name
-                logger.info(f"[PTY] Auto-detected pod name: {pod_name}")
-        except Exception as e:
-            logger.error(f"[PTY] Failed to lookup pod for project {project_id}: {e}")
-            raise RuntimeError(f"Failed to find pod for project: {str(e)}") from e
+                    pod_name = pods.items[0].metadata.name
+                    logger.info(f"[PTY] Auto-detected pod name: {pod_name}")
+            except Exception as e:
+                logger.error(f"[PTY] Failed to lookup pod for project {project_id}: {e}")
+                raise RuntimeError(f"Failed to find pod for project: {str(e)}") from e
 
         # Run command directly - pods already start in /app
         # Agent can use 'cd' commands if they need to change directories
@@ -555,6 +579,17 @@ class KubernetesPTYBroker(BasePTYBroker):
         await loop.run_in_executor(None, session.socket.write_stdin, data.decode("utf-8"))
         session.bytes_written += len(data)
         session.last_activity = datetime.utcnow()
+
+    async def resize(self, session_id: str, cols: int, rows: int) -> None:
+        """Resize K8s PTY via WebSocket channel 4."""
+        session = self.sessions.get(session_id)
+        if not session or session.is_closed or not session.socket:
+            return
+        try:
+            payload = json.dumps({"Width": cols, "Height": rows})
+            await asyncio.to_thread(session.socket.write_channel, 4, payload)
+        except Exception as e:
+            logger.warning(f"Failed to resize K8s PTY {session_id}: {e}")
 
     async def close_session(self, session_id: str) -> None:
         """Close K8s exec session."""

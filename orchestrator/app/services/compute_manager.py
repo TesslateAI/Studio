@@ -11,9 +11,9 @@ using CSI-backed PV+PVC in per-project namespaces. ~5-10s startup.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from kubernetes import client as k8s_client
@@ -72,6 +72,7 @@ class ComputeManager:
         """KubernetesClient wrapper for T2 (namespaces, deployments, services, ingress)."""
         if self._k8s is None:
             from .orchestration.kubernetes.client import get_k8s_client
+
             self._k8s = get_k8s_client()
         return self._k8s
 
@@ -87,6 +88,7 @@ class ComputeManager:
     def _namespace(self) -> str:
         """Return the namespace for compute pods (always tesslate)."""
         from ..config import get_settings
+
         return get_settings().k8s_default_namespace
 
     # ------------------------------------------------------------------
@@ -98,7 +100,8 @@ class ComputeManager:
         v1 = self._api()
         ns = self._namespace()
         pod_list = await asyncio.to_thread(
-            v1.list_namespaced_pod, ns,
+            v1.list_namespaced_pod,
+            ns,
             label_selector="tesslate.io/tier=1",
             field_selector="status.phase!=Succeeded,status.phase!=Failed",
         )
@@ -155,9 +158,7 @@ class ComputeManager:
         v1 = self._api()
 
         try:
-            await asyncio.to_thread(
-                v1.create_namespaced_pod, ns, manifest
-            )
+            await asyncio.to_thread(v1.create_namespaced_pod, ns, manifest)
 
             logger.info(
                 "[COMPUTE] Pod %s created for volume %s on node %s",
@@ -167,9 +168,7 @@ class ComputeManager:
             )
 
             # Wait for completion
-            output, exit_code = await self._wait_for_completion(
-                pod_name, ns, timeout
-            )
+            output, exit_code = await self._wait_for_completion(pod_name, ns, timeout)
             return output, exit_code, pod_name
 
         finally:
@@ -190,14 +189,107 @@ class ComputeManager:
                         exc.reason,
                     )
 
+    async def create_ephemeral_pod(
+        self,
+        volume_id: str,
+        node_name: str,
+        project_id: str,
+        image: str | None = None,
+    ) -> tuple[str, str]:
+        """Create a long-lived ephemeral pod for interactive use (e.g. terminal).
+
+        Unlike run_command(), the pod stays alive until explicitly deleted.
+        Caller is responsible for cleanup via delete_pod().
+
+        Returns:
+            (pod_name, namespace)
+        """
+        from ..config import get_settings
+
+        settings = get_settings()
+
+        count = await self._count_active_compute_pods()
+        if count >= settings.compute_max_concurrent_pods:
+            raise ComputeQuotaExceeded(
+                f"Compute pod limit reached ({count}/{settings.compute_max_concurrent_pods})"
+            )
+
+        pod_name = f"eph-{volume_id[:8]}-{uuid4().hex[:6]}"
+        ns = self._namespace()
+        devserver_image = image or settings.k8s_devserver_image
+
+        manifest = self._build_pod_manifest(
+            pod_name=pod_name,
+            namespace=ns,
+            volume_id=volume_id,
+            node_name=node_name,
+            command=["sleep", "infinity"],
+            image=devserver_image,
+            timeout=1800,
+        )
+        # Add ephemeral-specific labels
+        manifest.metadata.labels["tesslate.io/component"] = "ephemeral-shell"
+        manifest.metadata.labels["tesslate.io/project-id"] = project_id
+
+        v1 = self._api()
+        await asyncio.to_thread(v1.create_namespaced_pod, ns, manifest)
+
+        logger.info(
+            "[COMPUTE] Ephemeral pod %s created for volume %s on node %s",
+            pod_name,
+            volume_id,
+            node_name,
+        )
+        return pod_name, ns
+
+    async def delete_pod(self, pod_name: str, namespace: str | None = None) -> None:
+        """Best-effort delete a pod by name. Swallows 404."""
+        ns = namespace or self._namespace()
+        v1 = self._api()
+        try:
+            await asyncio.to_thread(
+                v1.delete_namespaced_pod,
+                pod_name,
+                ns,
+                grace_period_seconds=0,
+            )
+            logger.info("[COMPUTE] Deleted pod %s in %s", pod_name, ns)
+        except ApiException as exc:
+            if exc.status != 404:
+                logger.warning("[COMPUTE] Failed to delete pod %s: %s", pod_name, exc.reason)
+
+    async def wait_for_pod_running(
+        self,
+        pod_name: str,
+        namespace: str | None = None,
+        timeout: int = 15,
+    ) -> None:
+        """Poll until pod reaches Running phase. Raises RuntimeError on failure/timeout."""
+        ns = namespace or self._namespace()
+        v1 = self._api()
+        for _ in range(timeout):
+            await asyncio.sleep(1)
+            try:
+                pod = await asyncio.to_thread(v1.read_namespaced_pod, pod_name, ns)
+                phase = (pod.status.phase or "").lower()
+                if phase == "running":
+                    return
+                if phase in ("failed", "unknown"):
+                    raise RuntimeError(f"Pod {pod_name} failed: {phase}")
+            except ApiException as exc:
+                if exc.status == 404:
+                    raise RuntimeError(f"Pod {pod_name} disappeared") from exc
+                raise
+        raise RuntimeError(f"Pod {pod_name} did not become Running within {timeout}s")
+
     async def reap_orphaned_pods(self, max_age_seconds: int = 900) -> int:
         """Delete pods older than max_age_seconds. Returns count deleted."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         ns = self._namespace()
         v1 = self._api()
-        now = datetime.now(timezone.utc)
-        reaped = 0
+        now = datetime.now(UTC)
+        reaped = 0  # noqa: F841
 
         def _list_pods() -> k8s_client.V1PodList:
             return v1.list_namespaced_pod(
@@ -249,9 +341,7 @@ class ComputeManager:
                     )
                 return False
 
-        results = await asyncio.gather(
-            *[_delete_pod(name, age) for name, age in to_reap]
-        )
+        results = await asyncio.gather(*[_delete_pod(name, age) for name, age in to_reap])
         return sum(1 for r in results if r)
 
     # ------------------------------------------------------------------
@@ -332,15 +422,19 @@ class ComputeManager:
         parts: list[str] = []
 
         # Check container statuses for waiting/terminated reasons
-        for cs in (pod.status.container_statuses or []):
+        for cs in pod.status.container_statuses or []:
             if cs.state:
                 if cs.state.waiting and cs.state.waiting.reason:
-                    parts.append(f"{cs.name}: {cs.state.waiting.reason} — {cs.state.waiting.message or ''}")
+                    parts.append(
+                        f"{cs.name}: {cs.state.waiting.reason} — {cs.state.waiting.message or ''}"
+                    )
                 if cs.state.terminated and cs.state.terminated.reason:
-                    parts.append(f"{cs.name}: {cs.state.terminated.reason} — {cs.state.terminated.message or ''}")
+                    parts.append(
+                        f"{cs.name}: {cs.state.terminated.reason} — {cs.state.terminated.message or ''}"
+                    )
 
         # Check pod-level conditions (e.g., Unschedulable, volume mount failures)
-        for cond in (pod.status.conditions or []):
+        for cond in pod.status.conditions or []:
             if cond.status == "False" and cond.message:
                 parts.append(f"{cond.type}: {cond.message}")
 
@@ -380,9 +474,7 @@ class ComputeManager:
 
         while asyncio.get_event_loop().time() < deadline:
             try:
-                pod = await asyncio.to_thread(
-                    v1.read_namespaced_pod, pod_name, namespace
-                )
+                pod = await asyncio.to_thread(v1.read_namespaced_pod, pod_name, namespace)
                 phase = pod.status.phase if pod.status else "Unknown"
 
                 if phase == "Succeeded":
@@ -395,7 +487,9 @@ class ComputeManager:
                     if not logs and reason:
                         logs = f"Pod failed before container started: {reason}"
                     logger.warning(
-                        "[COMPUTE] Pod %s failed: %s", pod_name, reason,
+                        "[COMPUTE] Pod %s failed: %s",
+                        pod_name,
+                        reason,
                     )
                     exit_code = 1
                     if pod.status and pod.status.container_statuses:
@@ -414,7 +508,6 @@ class ComputeManager:
         # Timeout — return 124 (Unix `timeout` convention)
         return "", 124
 
-
     # ------------------------------------------------------------------
     # Tier 2: Full Environment Lifecycle
     # ------------------------------------------------------------------
@@ -426,6 +519,7 @@ class ComputeManager:
         connections: list,
         user_id: UUID,
         db: AsyncSession,
+        progress_queue: asyncio.Queue | None = None,
     ) -> dict[str, str]:
         """Create namespace + deployments + services + ingress for a v2 project.
 
@@ -456,6 +550,7 @@ class ComputeManager:
 
         # WebSocket progress
         from ..routers.chat import get_chat_connection_manager
+
         ws_manager = get_chat_connection_manager()
 
         async def send_progress(phase: str, message: str, progress: int, **kwargs):
@@ -470,6 +565,11 @@ class ComputeManager:
                 await ws_manager.send_status_update(user_id, project.id, status)
             except Exception:
                 pass
+            if progress_queue is not None:
+                with contextlib.suppress(Exception):
+                    await progress_queue.put(
+                        {"phase": phase, "message": message, "progress": progress}
+                    )
 
         # 1. Ensure volume is locally accessible
         if volume_state in ("remote_only", "restoring", "provisioning"):
@@ -479,9 +579,7 @@ class ComputeManager:
                 await db.commit()
 
                 vm = get_volume_manager()
-                node_name, _ = await vm.ensure_volume_local(
-                    volume_id, "remote_only", node_name
-                )
+                node_name, _ = await vm.ensure_volume_local(volume_id, "remote_only", node_name)
                 project.node_name = node_name
                 project.volume_state = "local"
                 await db.commit()
@@ -498,8 +596,12 @@ class ComputeManager:
                     raise RuntimeError(f"Volume {volume_id} stuck in state '{volume_state}'")
 
         # 2. Separate service and dev containers
-        service_containers = [c for c in containers if getattr(c, "container_type", "base") == "service"]
-        dev_containers = [c for c in containers if getattr(c, "container_type", "base") != "service"]
+        service_containers = [
+            c for c in containers if getattr(c, "container_type", "base") == "service"
+        ]
+        dev_containers = [
+            c for c in containers if getattr(c, "container_type", "base") != "service"
+        ]
 
         await send_progress("creating_namespace", "Creating project namespace...", 10)
 
@@ -567,10 +669,14 @@ class ComputeManager:
 
                 svc_pvc_name = f"svc-{svc_dir}-data"
                 svc_pv = create_v2_service_pv(svc_volume_id, node_name, project.id, svc_dir)
-                svc_pvc = create_v2_service_pvc(namespace, svc_volume_id, project.id, user_id, svc_dir)
+                svc_pvc = create_v2_service_pvc(
+                    namespace, svc_volume_id, project.id, user_id, svc_dir
+                )
                 try:
                     await asyncio.to_thread(v1.create_persistent_volume, body=svc_pv)
-                    logger.info("[COMPUTE-T2] Created PV pv-%s for service %s", svc_volume_id, svc_dir)
+                    logger.info(
+                        "[COMPUTE-T2] Created PV pv-%s for service %s", svc_volume_id, svc_dir
+                    )
                 except ApiException as e:
                     if e.status != 409:
                         raise
@@ -614,7 +720,11 @@ class ComputeManager:
                 ),
                 spec=k8s_client.V1ServiceSpec(
                     selector={"tesslate.io/container-id": str(svc_container.id)},
-                    ports=[k8s_client.V1ServicePort(port=svc_port, target_port=svc_port, protocol="TCP")],
+                    ports=[
+                        k8s_client.V1ServicePort(
+                            port=svc_port, target_port=svc_port, protocol="TCP"
+                        )
+                    ],
                     type="ClusterIP",
                 ),
             )
@@ -623,6 +733,7 @@ class ComputeManager:
 
         # 7. Deploy dev containers
         from .base_config_parser import get_node_modules_fix_prefix
+
         node_modules_prefix = get_node_modules_fix_prefix()
 
         if dev_containers:
@@ -706,7 +817,7 @@ class ComputeManager:
         if dev_containers:
             await send_progress("verifying_pods", "Verifying pods are starting...", 80)
             v1 = self._api()
-            for attempt in range(15):
+            for _attempt in range(15):
                 await asyncio.sleep(2)
                 pod_list = await asyncio.to_thread(
                     v1.list_namespaced_pod,
@@ -717,7 +828,9 @@ class ComputeManager:
                 if any(
                     (p.status.phase or "").lower() in ("running", "pending")
                     and not any(
-                        cs.state and cs.state.waiting and cs.state.waiting.reason
+                        cs.state
+                        and cs.state.waiting
+                        and cs.state.waiting.reason
                         in ("ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff")
                         for cs in (p.status.container_statuses or [])
                     )
@@ -738,12 +851,10 @@ class ComputeManager:
                         namespace,
                         label_selector="tesslate.io/tier=2,tesslate.io/component=dev-container",
                     )
-                    for rs in (rs_list.items or []):
-                        for cond in (rs.status.conditions or []):
+                    for rs in rs_list.items or []:
+                        for cond in rs.status.conditions or []:
                             if cond.type == "ReplicaFailure" and cond.status == "True":
-                                raise RuntimeError(
-                                    f"Pod creation failed: {cond.message}"
-                                )
+                                raise RuntimeError(f"Pod creation failed: {cond.message}")
                 except RuntimeError:
                     raise
                 except Exception:
@@ -759,7 +870,7 @@ class ComputeManager:
         project.compute_tier = "environment"
         project.environment_status = "active"
         project.hibernated_at = None
-        project.last_activity = datetime.now(timezone.utc)
+        project.last_activity = datetime.now(UTC)
         await db.commit()
 
         await send_progress("ready", "Environment is ready!", 100, container_status="ready")
@@ -783,7 +894,9 @@ class ComputeManager:
             logger.info("[COMPUTE-T2] Namespace %s deleted", namespace)
         except ApiException as exc:
             if exc.status != 404:
-                logger.error("[COMPUTE-T2] Failed to delete namespace %s: %s", namespace, exc.reason)
+                logger.error(
+                    "[COMPUTE-T2] Failed to delete namespace %s: %s", namespace, exc.reason
+                )
                 raise
             logger.debug("[COMPUTE-T2] Namespace %s already gone", namespace)
 
@@ -793,7 +906,7 @@ class ComputeManager:
                 v1.list_persistent_volume,
                 label_selector=f"tesslate.io/project-id={project.id}",
             )
-            for pv in (pv_list.items or []):
+            for pv in pv_list.items or []:
                 pv_name = pv.metadata.name
                 try:
                     await asyncio.to_thread(v1.delete_persistent_volume, name=pv_name)
@@ -802,7 +915,9 @@ class ComputeManager:
                     if e.status != 404:
                         logger.warning("[COMPUTE-T2] Failed to delete PV %s: %s", pv_name, e.reason)
         except ApiException as e:
-            logger.warning("[COMPUTE-T2] Failed to list PVs for project %s: %s", project.id, e.reason)
+            logger.warning(
+                "[COMPUTE-T2] Failed to list PVs for project %s: %s", project.id, e.reason
+            )
 
         project.compute_tier = "none"
         await db.commit()

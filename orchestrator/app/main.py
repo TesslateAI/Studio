@@ -46,6 +46,7 @@ from .routers import (
     shell,
     snapshots,
     tasks,
+    terminal,
     themes,
     two_fa,
     users,
@@ -335,9 +336,11 @@ async def _compute_pod_reaper_loop():
 
     from .services.compute_manager import get_compute_manager
 
-    logger.info("[COMPUTE-REAPER] Started — interval=%ds, max_age=%ds",
-                settings.compute_reaper_interval_seconds,
-                settings.compute_reaper_max_age_seconds)
+    logger.info(
+        "[COMPUTE-REAPER] Started — interval=%ds, max_age=%ds",
+        settings.compute_reaper_interval_seconds,
+        settings.compute_reaper_max_age_seconds,
+    )
 
     while True:
         await asyncio.sleep(settings.compute_reaper_interval_seconds)
@@ -547,9 +550,7 @@ async def startup():
     # Tier 1 compute: start reaper (K8s only, pods run in tesslate namespace)
     if settings.is_kubernetes_mode:
         if redis:
-            asyncio.create_task(
-                dlock.run_with_lock("compute_reaper", _compute_pod_reaper_loop)
-            )
+            asyncio.create_task(dlock.run_with_lock("compute_reaper", _compute_pod_reaper_loop))
         else:
             asyncio.create_task(_compute_pod_reaper_loop())
         logger.info("Compute pod reaper started")
@@ -581,6 +582,7 @@ async def startup():
         and settings.template_build_enabled
         and settings.template_build_eager_official
     ):
+
         async def _build_official_templates():
             from .database import AsyncSessionLocal
 
@@ -592,9 +594,7 @@ async def startup():
                     builder = TemplateBuilderService()
                     builds = await builder.build_all_official(db)
                     if builds:
-                        logger.info(
-                            "Built %d official templates on startup", len(builds)
-                        )
+                        logger.info("Built %d official templates on startup", len(builds))
             except Exception:
                 logger.exception("Failed to build official templates on startup")
 
@@ -1100,6 +1100,7 @@ app.include_router(external_agent.router)  # /api/external - External agent API 
 app.include_router(channels.router, tags=["channels"])  # /api/channels - Messaging channels
 app.include_router(mcp.router, tags=["mcp"])  # /api/mcp - MCP server management
 app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoint
+app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 
 # Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
 try:

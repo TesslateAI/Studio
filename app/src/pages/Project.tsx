@@ -1937,19 +1937,7 @@ export default function Project() {
                   <div
                     className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}
                   >
-                    <TerminalPanel
-                      projectId={slug!}
-                      computeTier={computeTier}
-                      onStartCompute={
-                        features.startButton && container ? handleStartCompute : undefined
-                      }
-                      isStartingCompute={needsContainerStart && containerStartup.isLoading}
-                      startupProgress={containerStartup.progress}
-                      startupMessage={containerStartup.message}
-                      startupLogs={containerStartup.logs}
-                      startupError={containerStartup.error || undefined}
-                      onRetryStart={containerStartup.retry}
-                    />
+                    <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
                   </div>
                 </Panel>
 
@@ -2114,19 +2102,7 @@ export default function Project() {
 
                 {/* Terminal View */}
                 <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-                  <TerminalPanel
-                    projectId={slug!}
-                    computeTier={computeTier}
-                    onStartCompute={
-                      features.startButton && container ? handleStartCompute : undefined
-                    }
-                    isStartingCompute={needsContainerStart && containerStartup.isLoading}
-                    startupProgress={containerStartup.progress}
-                    startupMessage={containerStartup.message}
-                    startupLogs={containerStartup.logs}
-                    startupError={containerStartup.error || undefined}
-                    onRetryStart={containerStartup.retry}
-                  />
+                  <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
                 </div>
               </div>
             )}
@@ -2185,17 +2161,7 @@ export default function Project() {
 
             {/* Terminal View */}
             <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-              <TerminalPanel
-                projectId={slug!}
-                computeTier={computeTier}
-                onStartCompute={features.startButton && container ? handleStartCompute : undefined}
-                isStartingCompute={needsContainerStart && containerStartup.isLoading}
-                startupProgress={containerStartup.progress}
-                startupMessage={containerStartup.message}
-                startupLogs={containerStartup.logs}
-                startupError={containerStartup.error || undefined}
-                onRetryStart={containerStartup.retry}
-              />
+              <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
             </div>
           </div>
         </div>

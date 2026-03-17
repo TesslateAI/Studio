@@ -1,25 +1,33 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
-import { Plus, X, Terminal as TerminalIcon } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
-import { createTerminalWebSocket } from '../../lib/api';
+import { getTerminalTargets, createTerminalWebSocket } from '../../lib/api';
 import { useTheme } from '../../theme/ThemeContext';
-import { StartupLogViewer } from '../StartupLogViewer';
-import type { ComputeTier } from '../../types/project';
 
 interface TerminalPanelProps {
-  projectId: string;
-  computeTier?: ComputeTier;
-  onStartCompute?: () => void;
-  isStartingCompute?: boolean;
-  startupProgress?: number;
-  startupMessage?: string;
-  startupLogs?: string[];
-  startupError?: string;
-  onRetryStart?: () => void;
+  projectId: string; // project slug (used for API calls)
+  projectUuid?: string; // stable UUID (used for localStorage key)
+}
+
+type TabState = 'selecting' | 'provisioning' | 'select_container' | 'connected' | 'disconnected';
+
+interface TerminalTarget {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  port: number | null;
+  container_directory: string;
+}
+
+interface TerminalAction {
+  id: string;
+  name: string;
+  description: string;
 }
 
 interface TerminalTab {
@@ -29,532 +37,648 @@ interface TerminalTab {
   fitAddon: FitAddon;
   searchAddon: SearchAddon;
   ws: WebSocket | null;
-  isMain: boolean;
+  state: TabState;
+  targetId: string | null;
   reconnectAttempts: number;
-  reconnectTimer: NodeJS.Timeout | null;
-  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  inputBuffer: string;
+  targets: TerminalTarget[];
+  actions: TerminalAction[];
+  needsInitialMenu: boolean;
 }
 
-export function TerminalPanel({
-  projectId,
-  computeTier,
-  onStartCompute,
-  isStartingCompute,
-  startupProgress,
-  startupMessage,
-  startupLogs,
-  startupError,
-  onRetryStart,
-}: TerminalPanelProps) {
+const MAX_RECONNECT = 3;
+const RECONNECT_DELAY = 2000;
+const RECONNECT_STABLE_MS = 3000;
+
+function persistTabs(projectId: string, currentTabs: TerminalTab[]) {
+  const key = `tesslate-terminals-${projectId}`;
+  const data = currentTabs
+    .filter((t) => t.targetId && !t.targetId.startsWith('ephemeral'))
+    .map((t) => ({ targetId: t.targetId!, title: t.title }));
+  if (data.length > 0) {
+    localStorage.setItem(key, JSON.stringify(data));
+  } else {
+    localStorage.removeItem(key);
+  }
+}
+
+export function TerminalPanel({ projectId, projectUuid }: TerminalPanelProps) {
   const { theme } = useTheme();
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
-  const nextTabNumber = useRef(2);
+  const nextTabNumber = useRef(1);
+  const currentProjectIdRef = useRef(projectId);
+  currentProjectIdRef.current = projectId;
+  const storageKey = projectUuid ?? projectId;
+  const storageKeyRef = useRef(storageKey);
+  storageKeyRef.current = storageKey;
+  const tabsRef = useRef<TerminalTab[]>([]);
+  tabsRef.current = tabs;
 
-  // Create a new terminal tab
-  const createTab = (isMain: boolean = false) => {
-    const tabId = isMain ? 'main' : `shell-${Date.now()}`;
-    const tabTitle = isMain ? 'Main' : `Shell ${nextTabNumber.current++}`;
+  // -----------------------------------------------------------------------
+  // Terminal theme
+  // -----------------------------------------------------------------------
+  const termTheme = {
+    background: theme === 'dark' ? '#0a0a0a' : '#ffffff',
+    foreground: theme === 'dark' ? '#e5e7eb' : '#1f2937',
+    cursor: theme === 'dark' ? '#f97316' : '#ea580c',
+    cursorAccent: theme === 'dark' ? '#000000' : '#ffffff',
+    selectionBackground: theme === 'dark' ? 'rgba(249,115,22,0.25)' : 'rgba(234,88,12,0.25)',
+    selectionForeground: theme === 'dark' ? '#ffffff' : '#000000',
+    black: '#1f2937',
+    red: '#ef4444',
+    green: '#10b981',
+    yellow: '#f59e0b',
+    blue: '#3b82f6',
+    magenta: '#a855f7',
+    cyan: '#06b6d4',
+    white: '#e5e7eb',
+    brightBlack: '#6b7280',
+    brightRed: '#f87171',
+    brightGreen: '#34d399',
+    brightYellow: '#fbbf24',
+    brightBlue: '#60a5fa',
+    brightMagenta: '#c084fc',
+    brightCyan: '#22d3ee',
+    brightWhite: '#f9fafb',
+  };
+
+  // -----------------------------------------------------------------------
+  // Menu rendering
+  // -----------------------------------------------------------------------
+  function renderMenu(
+    term: Terminal,
+    options: { label: string; detail?: string }[],
+    defaultIdx: number,
+    header?: string
+  ) {
+    term.write('\x1b[2J\x1b[H'); // clear
+    if (header) {
+      term.write(`\x1b[38;5;208m╔${'═'.repeat(38)}╗\x1b[0m\r\n`);
+      term.write(`\x1b[38;5;208m║   ${header.padEnd(35)}║\x1b[0m\r\n`);
+      term.write(`\x1b[38;5;208m╚${'═'.repeat(38)}╝\x1b[0m\r\n\r\n`);
+    }
+    term.write('Select a terminal target:\r\n\r\n');
+    options.forEach((opt, i) => {
+      const num = i + 1;
+      const def = i === defaultIdx ? ' \x1b[2m(default)\x1b[0m' : '';
+      const detail = opt.detail ? ` \x1b[2m— ${opt.detail}\x1b[0m` : '';
+      term.write(`  [\x1b[1m${num}\x1b[0m] ${opt.label}${detail}${def}\r\n`);
+    });
+    term.write(`\r\nEnter selection [default: ${defaultIdx + 1}]: `);
+  }
+
+  function renderDisconnectMenu(term: Terminal, reason: string) {
+    term.write('\r\n\r\n');
+    term.write(`\x1b[31m✗ ${reason}\x1b[0m\r\n\r\n`);
+    term.write('What would you like to do?\r\n');
+    term.write('  [\x1b[1m1\x1b[0m] Reconnect — same target \x1b[2m(default)\x1b[0m\r\n');
+    term.write('  [\x1b[1m2\x1b[0m] New session — pick a target\r\n');
+    term.write('  [\x1b[1m3\x1b[0m] Close tab\r\n');
+    term.write('\r\nEnter selection [default: 1]: ');
+  }
+
+  function renderSelectContainerMenu(term: Terminal, targets: TerminalTarget[], elapsed: string) {
+    term.write('\r\n\r\n');
+    term.write(`\x1b[32m✓ Environment ready (${elapsed})\x1b[0m\r\n\r\n`);
+    term.write('Connect to:\r\n');
+    targets.forEach((t, i) => {
+      const portStr = t.port ? `port ${t.port}` : '';
+      term.write(`  [\x1b[1m${i + 1}\x1b[0m] ${t.name} \x1b[2m— ${portStr}\x1b[0m\r\n`);
+    });
+    term.write(`\r\nEnter selection [default: 1]: `);
+  }
+
+  // -----------------------------------------------------------------------
+  // Tab creation
+  // -----------------------------------------------------------------------
+  const createTab = useCallback(() => {
+    const tabId = `term-${Date.now()}`;
+    const tabNum = nextTabNumber.current++;
+    const tabTitle = tabNum === 1 ? 'Terminal' : `Terminal ${tabNum}`;
 
     const terminal = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
-      cursorWidth: 2,
       fontSize: 14,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace",
-      fontWeight: '400',
-      fontWeightBold: '700',
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
       lineHeight: 1.2,
-      letterSpacing: 0,
-      theme: {
-        background: theme === 'dark' ? '#0a0a0a' : '#ffffff',
-        foreground: theme === 'dark' ? '#e5e7eb' : '#1f2937',
-        cursor: theme === 'dark' ? '#f97316' : '#ea580c',
-        cursorAccent: theme === 'dark' ? '#000000' : '#ffffff',
-        selectionBackground:
-          theme === 'dark' ? 'rgba(249, 115, 22, 0.25)' : 'rgba(234, 88, 12, 0.25)',
-        selectionForeground: theme === 'dark' ? '#ffffff' : '#000000',
-        // Modern color palette
-        black: '#1f2937',
-        red: '#ef4444',
-        green: '#10b981',
-        yellow: '#f59e0b',
-        blue: '#3b82f6',
-        magenta: '#a855f7',
-        cyan: '#06b6d4',
-        white: '#e5e7eb',
-        brightBlack: '#6b7280',
-        brightRed: '#f87171',
-        brightGreen: '#34d399',
-        brightYellow: '#fbbf24',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#c084fc',
-        brightCyan: '#22d3ee',
-        brightWhite: '#f9fafb',
-      },
-      scrollback: 50000, // Increased for better history
+      theme: termTheme,
+      scrollback: 50000,
       convertEol: true,
       allowProposedApi: true,
-      smoothScrollDuration: 100,
-      fastScrollModifier: 'shift',
-      fastScrollSensitivity: 5,
-      scrollSensitivity: 3,
     });
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
-
-    const webLinksAddon = new WebLinksAddon();
-    terminal.loadAddon(webLinksAddon);
-
+    terminal.loadAddon(new WebLinksAddon());
     const searchAddon = new SearchAddon();
     terminal.loadAddon(searchAddon);
 
-    const newTab: TerminalTab = {
+    const tab: TerminalTab = {
       id: tabId,
       title: tabTitle,
       terminal,
       fitAddon,
       searchAddon,
       ws: null,
-      isMain,
+      state: 'selecting',
+      targetId: null,
       reconnectAttempts: 0,
       reconnectTimer: null,
-      connectionStatus: 'connecting',
+      inputBuffer: '',
+      targets: [],
+      actions: [],
+      needsInitialMenu: true,
     };
 
-    setTabs((prev) => [...prev, newTab]);
+    setTabs((prev) => [...prev, tab]);
     setActiveTabId(tabId);
 
-    return newTab;
-  };
+    return tab;
+  }, [theme]);
 
-  // Track current projectId to detect stale connections
-  const currentProjectIdRef = useRef(projectId);
-  currentProjectIdRef.current = projectId;
+  // -----------------------------------------------------------------------
+  // Tab restoration (from localStorage)
+  // -----------------------------------------------------------------------
+  const restoreTab = useCallback(
+    (targetId: string, title: string) => {
+      const tabId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const tabNum = nextTabNumber.current++;
+      const tabTitle = title || (tabNum === 1 ? 'Terminal' : `Terminal ${tabNum}`);
 
-  // Initialize first (main) tab on mount, cleanup on projectId/computeTier change
-  useEffect(() => {
-    // Cleanup function that runs BEFORE effect and on unmount
-    // This ensures old tabs are fully cleaned up before creating new ones
-    const cleanupTabs = () => {
-      setTabs((currentTabs) => {
-        currentTabs.forEach((tab) => {
-          if (tab.reconnectTimer) {
-            clearTimeout(tab.reconnectTimer);
-            tab.reconnectTimer = null;
-          }
-          if (tab.ws) {
-            tab.ws.close();
-            tab.ws = null;
-          }
-          tab.terminal.dispose();
-        });
-        return []; // Clear tabs array
+      const terminal = new Terminal({
+        cursorBlink: true,
+        cursorStyle: 'block',
+        fontSize: 14,
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+        lineHeight: 1.2,
+        theme: termTheme,
+        scrollback: 50000,
+        convertEol: true,
+        allowProposedApi: true,
       });
-    };
 
-    // Clean up any existing tabs from previous projectId
-    cleanupTabs();
+      const fitAddon = new FitAddon();
+      terminal.loadAddon(fitAddon);
+      terminal.loadAddon(new WebLinksAddon());
+      const searchAddon = new SearchAddon();
+      terminal.loadAddon(searchAddon);
 
-    // Reset tab counter for new project
-    nextTabNumber.current = 2;
+      const tab: TerminalTab = {
+        id: tabId,
+        title: tabTitle,
+        terminal,
+        fitAddon,
+        searchAddon,
+        ws: null,
+        state: 'provisioning',
+        targetId,
+        reconnectAttempts: 0,
+        reconnectTimer: null,
+        inputBuffer: '',
+        targets: [],
+        actions: [],
+        needsInitialMenu: false,
+      };
 
-    // Don't connect if no environment running
-    if (computeTier !== undefined && computeTier !== 'environment') {
-      return cleanupTabs;
+      setTabs((prev) => [...prev, tab]);
+      setActiveTabId((prev) => prev ?? tabId);
+
+      // Auto-connect after terminal mounts
+      setTimeout(() => connectToTarget(tab, targetId), 50);
+      return tab;
+    },
+    [theme]
+  );
+
+  // -----------------------------------------------------------------------
+  // Fetch targets & show selection menu
+  // -----------------------------------------------------------------------
+  async function fetchAndShowMenu(tab: TerminalTab) {
+    tab.state = 'selecting';
+    tab.inputBuffer = '';
+    try {
+      const data = await getTerminalTargets(currentProjectIdRef.current);
+      tab.targets = data.targets || [];
+      tab.actions = data.actions || [];
+    } catch {
+      tab.targets = [];
+      tab.actions = [
+        { id: 'ephemeral', name: 'Ephemeral Shell', description: 'lightweight pod, ~2s' },
+        { id: 'environment', name: 'Start Environment', description: 'full dev server, ~10s' },
+      ];
     }
 
-    // Create main tab for new project
-    createTab(true);
+    const options = [
+      ...tab.targets.map((t) => ({
+        label: `${t.name} \x1b[32m●\x1b[0m running`,
+        detail: t.port ? `port ${t.port}` : undefined,
+      })),
+      ...tab.actions.map((a) => ({
+        label: a.name,
+        detail: a.description,
+      })),
+    ];
 
-    return cleanupTabs;
-  }, [projectId, computeTier]);
-
-  // Handle terminal rendering when active tab changes
-  useEffect(() => {
-    if (!terminalContainerRef.current || !activeTabId) return;
-
-    const activeTab = tabs.find((tab) => tab.id === activeTabId);
-    if (!activeTab) return;
-
-    // Hide all terminal divs
-    Array.from(terminalContainerRef.current.children).forEach((child) => {
-      (child as HTMLElement).style.display = 'none';
-    });
-
-    // Find or create terminal div for this tab
-    let terminalDiv = terminalContainerRef.current.querySelector(
-      `[data-terminal-id="${activeTab.id}"]`
-    ) as HTMLDivElement;
-
-    if (!terminalDiv) {
-      // Create new div for this terminal
-      terminalDiv = document.createElement('div');
-      terminalDiv.setAttribute('data-terminal-id', activeTab.id);
-      terminalDiv.style.width = '100%';
-      terminalDiv.style.height = '100%';
-      terminalContainerRef.current.appendChild(terminalDiv);
-
-      // Open terminal in this div (only once)
-      activeTab.terminal.open(terminalDiv);
-
-      // Connect WebSocket if not already connected
-      if (!activeTab.ws) {
-        connectTerminal(activeTab);
-      }
-    }
-
-    // Show this terminal
-    terminalDiv.style.display = 'block';
-
-    // Fit terminal to container
-    setTimeout(() => {
-      try {
-        activeTab.fitAddon.fit();
-      } catch {
-        // Ignore fit errors
-      }
-    }, 0);
-
-    // Handle resize - debounced to avoid spam during panel resize
-    let resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
-    const resizeObserver = new ResizeObserver(() => {
-      if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
-      resizeTimeoutId = setTimeout(() => {
-        try {
-          activeTab.fitAddon.fit();
-        } catch {
-          // Ignore resize errors
-        }
-      }, 50); // 50ms debounce
-    });
-
-    resizeObserver.observe(terminalDiv);
-
-    return () => {
-      if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
-      resizeObserver.disconnect();
-    };
-  }, [activeTabId, tabs]);
-
-  // Connect WebSocket for a terminal tab with auto-reconnect
-  const connectTerminal = (tab: TerminalTab, isReconnect: boolean = false) => {
-    void isReconnect; // Mark as intentionally unused
-    // Check if projectId is still valid (not stale from previous project)
-    if (currentProjectIdRef.current !== projectId) {
-      console.warn('[Terminal] Skipping connection for stale projectId');
+    if (options.length === 0) {
+      tab.terminal.write('\r\nNo targets available.\r\n');
       return;
     }
 
-    // Clear any existing reconnect timer
-    if (tab.reconnectTimer) {
-      clearTimeout(tab.reconnectTimer);
-      tab.reconnectTimer = null;
-    }
+    renderMenu(tab.terminal, options, 0, 'Tesslate Terminal');
+    setTabs((prev) => [...prev]);
+  }
 
-    // Close existing connection if any
+  // -----------------------------------------------------------------------
+  // Handle local keystroke during SELECTING / SELECT_CONTAINER / DISCONNECTED
+  // -----------------------------------------------------------------------
+  function handleLocalInput(tab: TerminalTab, data: string) {
+    for (const ch of data) {
+      if (ch === '\r' || ch === '\n') {
+        const input = tab.inputBuffer.trim();
+        tab.terminal.write('\r\n');
+
+        if (tab.state === 'selecting') {
+          const allOptions = [...tab.targets, ...tab.actions];
+          const idx = input === '' ? 0 : parseInt(input, 10) - 1;
+          if (isNaN(idx) || idx < 0 || idx >= allOptions.length) {
+            tab.terminal.write('\x1b[31mInvalid selection.\x1b[0m\r\n');
+            tab.inputBuffer = '';
+            return;
+          }
+          const selected = allOptions[idx];
+          const targetId = selected.id;
+          tab.targetId = targetId;
+          tab.title = 'name' in selected ? selected.name : 'Terminal';
+          setTabs((prev) => [...prev]);
+          connectToTarget(tab, targetId);
+        } else if (tab.state === 'select_container') {
+          const idx = input === '' ? 0 : parseInt(input, 10) - 1;
+          if (isNaN(idx) || idx < 0 || idx >= tab.targets.length) {
+            tab.terminal.write('\x1b[31mInvalid selection.\x1b[0m\r\n');
+            tab.inputBuffer = '';
+            return;
+          }
+          const selected = tab.targets[idx];
+          tab.targetId = selected.id;
+          tab.title = selected.name;
+          setTabs((prev) => [...prev]);
+          if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+            tab.ws.send(JSON.stringify({ type: 'select', target_id: selected.id }));
+          }
+        } else if (tab.state === 'disconnected') {
+          const choice = input === '' ? 1 : parseInt(input, 10);
+          if (choice === 1 && tab.targetId) {
+            connectToTarget(tab, tab.targetId);
+          } else if (choice === 2) {
+            fetchAndShowMenu(tab);
+          } else if (choice === 3) {
+            closeTab(tab.id);
+          }
+        }
+        tab.inputBuffer = '';
+      } else if (ch === '\x7f' || ch === '\b') {
+        if (tab.inputBuffer.length > 0) {
+          tab.inputBuffer = tab.inputBuffer.slice(0, -1);
+          tab.terminal.write('\b \b');
+        }
+      } else if (ch >= ' ') {
+        tab.inputBuffer += ch;
+        tab.terminal.write(ch);
+      }
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Connect to a target via WebSocket
+  // -----------------------------------------------------------------------
+  function connectToTarget(tab: TerminalTab, targetId: string) {
     if (tab.ws) {
       tab.ws.close();
       tab.ws = null;
     }
 
-    try {
-      // Use the current projectId from ref to avoid stale closures
-      const currentProjectId = currentProjectIdRef.current;
-      const ws = createTerminalWebSocket(currentProjectId);
-      tab.ws = ws;
+    tab.state = 'provisioning';
+    tab.inputBuffer = '';
+    setTabs((prev) => [...prev]);
 
-      ws.onopen = () => {
-        // Reset reconnect attempts on successful connection
+    const token = localStorage.getItem('token') || '';
+    const ws = createTerminalWebSocket(currentProjectIdRef.current, targetId, token);
+    tab.ws = ws;
+
+    let connectedAt = 0;
+    let gotOutput = false;
+    const provisionStartTime = Date.now();
+
+    ws.onopen = () => {
+      // Wait for ready/provisioning messages
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'provisioning') {
+          tab.state = 'provisioning';
+          tab.terminal.write(`\r\x1b[K\x1b[33m⟳ ${msg.message}\x1b[0m`);
+          setTabs((prev) => [...prev]);
+        } else if (msg.type === 'select_container') {
+          tab.state = 'select_container';
+          tab.targets = msg.targets || [];
+          const elapsed = ((Date.now() - provisionStartTime) / 1000).toFixed(1);
+          renderSelectContainerMenu(tab.terminal, tab.targets, `${elapsed}s`);
+          setTabs((prev) => [...prev]);
+        } else if (msg.type === 'ready') {
+          tab.terminal.write('\r\n');
+          tab.state = 'connected';
+          connectedAt = Date.now();
+          gotOutput = false; // reset per-connection
+          setTabs((prev) => [...prev]);
+          persistTabs(storageKeyRef.current, tabsRef.current);
+        } else if (msg.type === 'output') {
+          gotOutput = true;
+          tab.terminal.write(msg.data);
+        } else if (msg.type === 'error') {
+          tab.terminal.write(`\r\n\x1b[31m[ERROR] ${msg.message}\x1b[0m\r\n`);
+        }
+      } catch {
+        tab.terminal.write(event.data);
+      }
+    };
+
+    ws.onclose = () => {
+      tab.ws = null;
+      const wasConnected = tab.state === 'connected';
+      const wasStable =
+        wasConnected &&
+        connectedAt > 0 &&
+        Date.now() - connectedAt >= RECONNECT_STABLE_MS &&
+        gotOutput;
+
+      // Stable connection means a real session was active — reset retry counter
+      if (wasStable) {
         tab.reconnectAttempts = 0;
-        tab.connectionStatus = 'connected';
-        setTabs((prev) => [...prev]); // Trigger re-render for status indicator
+      }
 
-        // Connection established - backend will send scrollback history automatically
-        // No need to write connection message, let the shell output speak for itself
+      if (tab.state === 'provisioning' || tab.state === 'select_container') {
+        tab.state = 'disconnected';
+        renderDisconnectMenu(tab.terminal, 'Connection lost during provisioning.');
+        setTabs((prev) => [...prev]);
+        return;
+      }
 
-        // Send initial terminal size for proper rendering
-        const dims = tab.fitAddon.proposeDimensions();
-        if (dims) {
-          ws.send(
-            JSON.stringify({
-              type: 'resize',
-              cols: dims.cols,
-              rows: dims.rows,
-            })
-          );
-        }
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'output') {
-            // Write incremental output - DO NOT clear the terminal
-            // The backend sends only new data, not the full buffer
-            tab.terminal.write(data.data);
-          } else if (data.type === 'attached') {
-            tab.terminal.writeln(`\x1b[36m[+] Attached to pane: ${data.pane_id}\x1b[0m\r\n`);
-          } else if (data.type === 'window_created') {
-            tab.terminal.writeln(`\x1b[32m[OK] Created new shell: ${data.window_name}\x1b[0m\r\n`);
-          } else if (data.type === 'error') {
-            tab.terminal.writeln(`\r\n\x1b[31m[ERROR] ${data.message}\x1b[0m\r\n`);
-          } else if (data.type === 'status') {
-            tab.terminal.writeln(`\x1b[36m[~] ${data.message}\x1b[0m`);
-          }
-        } catch (e) {
-          console.error('Failed to parse message:', e);
-          // If parsing fails, write raw data
-          tab.terminal.write(event.data);
-        }
-      };
-
-      ws.onerror = () => {
-        tab.connectionStatus = 'error';
-        setTabs((prev) => [...prev]); // Trigger re-render for status indicator
-        tab.terminal.writeln('\r\n\x1b[31m[ERROR] Connection error\x1b[0m\r\n');
-      };
-
-      ws.onclose = () => {
-        tab.ws = null;
-        tab.connectionStatus = 'disconnected';
-        setTabs((prev) => [...prev]); // Trigger re-render for status indicator
-
-        // Attempt to reconnect with fixed delay
-        const maxAttempts = 10;
-        const delay = 10000;
-
-        if (tab.reconnectAttempts < maxAttempts) {
-          tab.reconnectAttempts++;
-
-          tab.terminal.writeln('');
-          tab.terminal.writeln(
-            `\x1b[33m[WARN] Connection lost. Reconnecting in ${delay / 1000}s... (${tab.reconnectAttempts}/${maxAttempts})\x1b[0m`
-          );
-
-          tab.connectionStatus = 'connecting';
-          setTabs((prev) => [...prev]); // Update status
-
-          tab.reconnectTimer = setTimeout(() => {
-            connectTerminal(tab, true);
-          }, delay);
-        } else {
-          tab.connectionStatus = 'error';
-          setTabs((prev) => [...prev]); // Update status
-
-          tab.terminal.writeln('');
-          tab.terminal.writeln(
-            '\x1b[31m[ERROR] Unable to reconnect. Please refresh the page.\x1b[0m'
-          );
-        }
-      };
-
-      // Handle user input
-      tab.terminal.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: 'input',
-              data: data,
-            })
-          );
-        }
-      });
-
-      // Handle terminal resize
-      tab.terminal.onResize((dimensions) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: 'resize',
-              cols: dimensions.cols,
-              rows: dimensions.rows,
-            })
-          );
-        }
-      });
-    } catch (err) {
-      console.error('Failed to connect WebSocket:', err);
-      tab.terminal.writeln('\x1b[31m[ERROR] Failed to establish connection\x1b[0m');
-
-      // Retry connection
-      if (tab.reconnectAttempts < 10) {
+      // Silent reconnect attempts
+      if (wasConnected && tab.reconnectAttempts < MAX_RECONNECT) {
         tab.reconnectAttempts++;
         tab.reconnectTimer = setTimeout(() => {
-          connectTerminal(tab, true);
-        }, 2000);
+          if (tab.targetId) {
+            connectToTarget(tab, tab.targetId);
+          }
+        }, RECONNECT_DELAY);
+        return;
+      }
+
+      tab.state = 'disconnected';
+      const reason = wasConnected ? 'Session ended — connection lost.' : 'Connection failed.';
+      renderDisconnectMenu(tab.terminal, reason);
+      setTabs((prev) => [...prev]);
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // Close tab
+  // -----------------------------------------------------------------------
+  function closeTab(tabId: string) {
+    setTabs((prev) => {
+      const tab = prev.find((t) => t.id === tabId);
+      if (tab) {
+        if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+        if (tab.ws) tab.ws.close();
+        tab.terminal.dispose();
+      }
+      const next = prev.filter((t) => t.id !== tabId);
+      if (activeTabId === tabId) {
+        setActiveTabId(next[0]?.id || null);
+      }
+      // Persist after updater returns via microtask (updaters must be pure)
+      queueMicrotask(() => persistTabs(storageKeyRef.current, next));
+      return next;
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Lifecycle: create first tab on mount / projectId change
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    const cleanup = () => {
+      setTabs((current) => {
+        current.forEach((tab) => {
+          if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+          if (tab.ws) tab.ws.close();
+          tab.terminal.dispose();
+        });
+        return [];
+      });
+      setActiveTabId(null);
+    };
+    cleanup();
+    nextTabNumber.current = 1;
+
+    // Try restoring tabs from localStorage
+    const saved = localStorage.getItem(`tesslate-terminals-${storageKey}`);
+    if (saved) {
+      try {
+        const entries = JSON.parse(saved) as { targetId: string; title: string }[];
+        if (entries.length > 0) {
+          entries.forEach((entry) => restoreTab(entry.targetId, entry.title));
+          return cleanup;
+        }
+      } catch {
+        /* fall through to default */
       }
     }
+
+    createTab();
+    return cleanup;
+  }, [projectId]);
+
+  // -----------------------------------------------------------------------
+  // Terminal rendering when active tab changes
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (!terminalContainerRef.current || !activeTabId) return;
+    const activeTab = tabs.find((t) => t.id === activeTabId);
+    if (!activeTab) return;
+
+    Array.from(terminalContainerRef.current.children).forEach((child) => {
+      (child as HTMLElement).style.display = 'none';
+    });
+
+    let termDiv = terminalContainerRef.current.querySelector(
+      `[data-terminal-id="${activeTab.id}"]`
+    ) as HTMLDivElement | null;
+
+    if (!termDiv) {
+      termDiv = document.createElement('div');
+      termDiv.setAttribute('data-terminal-id', activeTab.id);
+      termDiv.style.width = '100%';
+      termDiv.style.height = '100%';
+      terminalContainerRef.current.appendChild(termDiv);
+      activeTab.terminal.open(termDiv);
+
+      // Wire up onData for local input capture + connected passthrough
+      activeTab.terminal.onData((data) => {
+        if (
+          activeTab.state === 'selecting' ||
+          activeTab.state === 'select_container' ||
+          activeTab.state === 'disconnected'
+        ) {
+          handleLocalInput(activeTab, data);
+        } else if (activeTab.state === 'connected' && activeTab.ws?.readyState === WebSocket.OPEN) {
+          activeTab.ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+
+      activeTab.terminal.onResize(({ cols, rows }) => {
+        if (activeTab.ws?.readyState === WebSocket.OPEN) {
+          activeTab.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+    }
+
+    termDiv.style.display = 'block';
+    requestAnimationFrame(() => {
+      try {
+        activeTab.fitAddon.fit();
+      } catch {
+        /* ignore */
+      }
+      if (activeTab.needsInitialMenu) {
+        activeTab.needsInitialMenu = false;
+        fetchAndShowMenu(activeTab);
+      }
+    });
+
+    let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+    const observer = new ResizeObserver(() => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        try {
+          activeTab.fitAddon.fit();
+        } catch {
+          /* ignore */
+        }
+        if (
+          activeTab.state === 'selecting' &&
+          (activeTab.targets.length > 0 || activeTab.actions.length > 0)
+        ) {
+          const opts = [
+            ...activeTab.targets.map((t) => ({
+              label: `${t.name} \x1b[32m●\x1b[0m running`,
+              detail: t.port ? `port ${t.port}` : undefined,
+            })),
+            ...activeTab.actions.map((a) => ({
+              label: a.name,
+              detail: a.description,
+            })),
+          ];
+          renderMenu(activeTab.terminal, opts, 0, 'Tesslate Terminal');
+          if (activeTab.inputBuffer) {
+            activeTab.terminal.write(activeTab.inputBuffer);
+          }
+        }
+      }, 50);
+    });
+    observer.observe(termDiv);
+
+    return () => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      observer.disconnect();
+    };
+  }, [activeTabId, tabs]);
+
+  // -----------------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------------
+  const getStatusDot = (state: TabState) => {
+    switch (state) {
+      case 'connected':
+        return <span className="w-2 h-2 rounded-full bg-green-500" />;
+      case 'provisioning':
+      case 'selecting':
+      case 'select_container':
+        return <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />;
+      case 'disconnected':
+        return <span className="w-2 h-2 rounded-full bg-red-500" />;
+    }
   };
-
-  // Close a tab
-  const closeTab = (tabId: string) => {
-    const tab = tabs.find((t) => t.id === tabId);
-    if (!tab) return;
-
-    // Don't allow closing the main tab
-    if (tab.isMain) return;
-
-    // Clear reconnect timer
-    if (tab.reconnectTimer) {
-      clearTimeout(tab.reconnectTimer);
-    }
-
-    // Close WebSocket connection
-    if (tab.ws) {
-      tab.ws.close();
-    }
-
-    // Dispose terminal
-    tab.terminal.dispose();
-
-    // Remove from tabs array
-    const newTabs = tabs.filter((t) => t.id !== tabId);
-    setTabs(newTabs);
-
-    // Switch to main tab if closing active tab
-    if (activeTabId === tabId) {
-      setActiveTabId(newTabs[0]?.id || null);
-    }
-  };
-
-  // Show inline placeholder when no environment is running
-  if (computeTier !== undefined && computeTier !== 'environment') {
-    return (
-      <div className="h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
-        {isStartingCompute ? (
-          <div className="flex flex-col items-center gap-3 max-w-lg text-center">
-            <div className="w-12 h-12 rounded-full bg-[var(--primary)]/10 flex items-center justify-center animate-pulse">
-              <TerminalIcon size={24} className="text-[var(--primary)]" />
-            </div>
-            <p className="text-sm font-medium text-[var(--text)]">Starting compute environment...</p>
-            {startupProgress !== undefined && (
-              <div className="w-48 h-1.5 bg-[var(--text)]/10 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[var(--primary)] rounded-full transition-all"
-                  style={{ width: `${startupProgress}%` }}
-                />
-              </div>
-            )}
-            {startupMessage && <p className="text-xs text-[var(--text)]/50">{startupMessage}</p>}
-
-            {startupError && (
-              <div className="flex flex-col items-center gap-2 mt-2">
-                <p className="text-sm text-red-400">{startupError}</p>
-                {onRetryStart && (
-                  <button
-                    onClick={onRetryStart}
-                    className="px-4 py-1.5 text-[var(--text)]/60 hover:text-[var(--text)] transition-colors text-sm"
-                  >
-                    Retry
-                  </button>
-                )}
-              </div>
-            )}
-
-            {startupLogs && startupLogs.length > 0 && (
-              <StartupLogViewer logs={startupLogs} maxHeight="h-36" className="mt-2" />
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-4 max-w-md text-center">
-            <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center">
-              <TerminalIcon size={32} className="text-emerald-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-[var(--text)]">Terminal</h3>
-            <p className="text-[var(--text)]/60 text-sm">Start the environment for terminal access.</p>
-            {onStartCompute && (
-              <button
-                onClick={onStartCompute}
-                className="px-5 py-2.5 bg-[var(--primary)] text-white rounded-lg hover:opacity-80 transition font-medium"
-              >
-                Start Environment
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col h-full bg-[var(--surface)] rounded-lg overflow-hidden shadow-xl border border-[var(--sidebar-border)]">
-      {/* Tab Bar - Improved with better mobile support */}
+      {/* Tab Bar */}
       <div className="flex items-center gap-1 px-2 py-2 bg-[var(--bg-dark)] border-b border-[var(--sidebar-border)] overflow-x-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
         <div className="flex items-center gap-1 min-w-0">
-          {tabs.map((tab) => {
-            const getStatusIndicator = () => {
-              switch (tab.connectionStatus) {
-                case 'connected':
-                  return <span className="w-2 h-2 rounded-full bg-green-500" />;
-                case 'connecting':
-                  return <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />;
-                case 'disconnected':
-                case 'error':
-                  return <span className="w-2 h-2 rounded-full bg-red-500" />;
-              }
-            };
-
-            return (
-              <div
-                key={tab.id}
-                className={`
-                  group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer
-                  transition-all duration-200 min-w-fit
-                  ${
-                    activeTabId === tab.id
-                      ? 'bg-gradient-to-r from-orange-500/20 to-orange-600/20 text-orange-500 shadow-md border border-orange-500/30'
-                      : 'bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)] border border-transparent'
-                  }
-                `}
-                onClick={() => setActiveTabId(tab.id)}
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={`
+                group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer
+                transition-all duration-200 min-w-fit
+                ${
+                  activeTabId === tab.id
+                    ? 'bg-gradient-to-r from-orange-500/20 to-orange-600/20 text-orange-500 shadow-md border border-orange-500/30'
+                    : 'bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)] border border-transparent'
+                }
+              `}
+              onClick={() => setActiveTabId(tab.id)}
+            >
+              {getStatusDot(tab.state)}
+              <span
+                className={`text-sm font-medium whitespace-nowrap ${activeTabId === tab.id ? 'font-semibold' : ''}`}
               >
-                {getStatusIndicator()}
-                <span
-                  className={`text-sm font-medium whitespace-nowrap ${activeTabId === tab.id ? 'font-semibold' : ''}`}
+                {tab.state === 'selecting' ? 'Select...' : tab.title}
+              </span>
+              {tabs.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                  className="p-1 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 rounded transition-all duration-150"
+                  aria-label="Close tab"
                 >
-                  {tab.title}
-                </span>
-                {!tab.isMain && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeTab(tab.id);
-                    }}
-                    className="p-1 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 rounded transition-all duration-150"
-                    aria-label="Close tab"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-            );
-          })}
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          ))}
         </div>
 
-        {/* New Shell Button - Mobile friendly */}
         <button
-          onClick={() => createTab(false)}
+          onClick={() => createTab()}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg ml-auto
                    bg-[var(--surface)] text-[var(--text)]/70 hover:bg-orange-500/10 hover:text-orange-500
                    transition-all duration-200 min-w-fit border border-[var(--sidebar-border)] hover:border-orange-500/30"
-          aria-label="New shell"
+          aria-label="New terminal"
         >
           <Plus size={16} className="flex-shrink-0" />
-          <span className="text-sm font-medium hidden sm:inline">New Shell</span>
+          <span className="text-sm font-medium hidden sm:inline">New</span>
         </button>
       </div>
 
-      {/* Terminal Content - Better padding and overflow handling */}
+      {/* Terminal Content */}
       <div
         ref={terminalContainerRef}
         className="flex-1 p-3 overflow-hidden"
         style={{ minHeight: 0, minWidth: 0 }}
       />
-
     </div>
   );
 }

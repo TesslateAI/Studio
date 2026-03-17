@@ -26,6 +26,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -43,6 +44,7 @@ from ..models import (
     ProjectAsset,
     ProjectAssetDirectory,
     ProjectFile,
+    ShellSession,
     User,
     UserPurchasedBase,
 )
@@ -60,12 +62,10 @@ from ..schemas import (
     FileDeleteRequest,
     FileRenameRequest,
     ProjectCreate,
+    SetupConfigSyncResponse,
     TemplateExportRequest,
     TesslateConfigCreate,
     TesslateConfigResponse,
-    SetupConfigSyncResponse,
-    AppConfigSchema,
-    InfraConfigSchema,
 )
 from ..schemas import Container as ContainerSchema
 from ..schemas import ContainerConnection as ContainerConnectionSchema
@@ -261,9 +261,7 @@ async def track_project_activity(project_id: UUID, db: AsyncSession) -> None:
     from sqlalchemy import update as sa_update
 
     await db.execute(
-        sa_update(Project)
-        .where(Project.id == project_id)
-        .values(last_activity=func.now())
+        sa_update(Project).where(Project.id == project_id).values(last_activity=func.now())
     )
     await db.commit()
 
@@ -306,6 +304,7 @@ async def _perform_project_setup(
     async with AsyncSessionLocal() as db:
         try:
             from sqlalchemy import select
+
             result = await db.execute(select(Project).where(Project.id == db_project_id))
             db_project = result.scalar_one()
 
@@ -319,6 +318,7 @@ async def _perform_project_setup(
                 except Exception as e:
                     logger.warning(f"[CREATE] mkdir failed: {e}, trying subprocess")
                     import subprocess
+
                     await asyncio.to_thread(
                         subprocess.run,
                         ["mkdir", "-p", project_path],
@@ -328,7 +328,7 @@ async def _perform_project_setup(
                 await asyncio.sleep(0.1)
 
             # Run the unified pipeline
-            setup_result = await setup_project(
+            await setup_project(
                 project_data=project_data,
                 db_project=db_project,
                 user_id=user_id,
@@ -1258,6 +1258,16 @@ async def _perform_project_deletion(
 
         logger.info(f"[DELETE] Deleted {len(project_chats)} chats and their messages")
 
+        task.update_progress(45, 100, "Closing shell sessions...")
+
+        # 2b. Close any active shell sessions before deletion
+        await db.execute(
+            sql_update(ShellSession)
+            .where(ShellSession.project_id == project_id, ShellSession.status == "active")
+            .values(status="closed", closed_at=func.now())
+        )
+        await db.commit()
+
         task.update_progress(50, 100, "Removing project from database...")
 
         # 3. Delete project from database (files will cascade automatically)
@@ -1394,6 +1404,7 @@ async def get_setup_config(
     else:
         # K8s: read from PVC via orchestrator
         from ..services.orchestration import get_orchestrator
+
         orchestrator = get_orchestrator()
 
         # Volume routing hints for FileOps
@@ -1414,6 +1425,7 @@ async def get_setup_config(
             )
             if config_json:
                 from ..services.base_config_parser import parse_tesslate_config
+
                 config_data = parse_tesslate_config(config_json)
         except Exception as e:
             logger.debug(f"[SETUP-CONFIG] Could not read config from K8s: {e}")
@@ -1469,11 +1481,11 @@ async def save_setup_config(
     settings = get_settings()
 
     from ..services.base_config_parser import (
-        TesslateProjectConfig,
         AppConfig,
         InfraConfig,
-        write_tesslate_config,
+        TesslateProjectConfig,
         validate_startup_command,
+        write_tesslate_config,
     )
 
     # Validate all start commands
@@ -1518,6 +1530,7 @@ async def save_setup_config(
     else:
         # K8s: write config via orchestrator (FileOps)
         import json as json_mod
+
         from ..services.orchestration import get_orchestrator
 
         orchestrator = get_orchestrator()
@@ -1529,17 +1542,27 @@ async def save_setup_config(
             "volume_state": project.volume_state,
         }
 
-        config_json = json_mod.dumps({
-            "apps": {
-                name: {"directory": a.directory, "port": a.port, "start": a.start, "env": a.env, "x": a.x, "y": a.y}
-                for name, a in config.apps.items()
+        config_json = json_mod.dumps(
+            {
+                "apps": {
+                    name: {
+                        "directory": a.directory,
+                        "port": a.port,
+                        "start": a.start,
+                        "env": a.env,
+                        "x": a.x,
+                        "y": a.y,
+                    }
+                    for name, a in config.apps.items()
+                },
+                "infrastructure": {
+                    name: {"image": i.image, "port": i.port, "x": i.x, "y": i.y}
+                    for name, i in config.infrastructure.items()
+                },
+                "primaryApp": config.primaryApp,
             },
-            "infrastructure": {
-                name: {"image": i.image, "port": i.port, "x": i.x, "y": i.y}
-                for name, i in config.infrastructure.items()
-            },
-            "primaryApp": config.primaryApp,
-        }, indent=2)
+            indent=2,
+        )
 
         await orchestrator.write_file(
             user_id=current_user.id,
@@ -1556,9 +1579,7 @@ async def save_setup_config(
     primary_container_id = None
 
     # Get existing containers for this project
-    existing_result = await db.execute(
-        select(Container).where(Container.project_id == project.id)
-    )
+    existing_result = await db.execute(select(Container).where(Container.project_id == project.id))
     existing_containers = {c.name: c for c in existing_result.scalars().all()}
 
     # Create/update app containers
@@ -1651,7 +1672,6 @@ async def analyze_project(
     Analyze project files and generate .tesslate/config.json using LLM.
     Returns a TesslateConfigResponse with the generated configuration.
     """
-    from fastapi.responses import JSONResponse
 
     project = await get_project_by_slug(db, project_slug, current_user.id)
     settings = get_settings()
@@ -1661,23 +1681,42 @@ async def analyze_project(
     config_files_content = {}
 
     CONFIG_FILENAMES = {
-        "package.json", "requirements.txt", "go.mod", "Cargo.toml",
-        "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
-        "Makefile", "pyproject.toml", "pubspec.yaml", "Gemfile",
-        "composer.json", "pom.xml", "build.gradle", "mix.exs",
+        "package.json",
+        "requirements.txt",
+        "go.mod",
+        "Cargo.toml",
+        "Dockerfile",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "Makefile",
+        "pyproject.toml",
+        "pubspec.yaml",
+        "Gemfile",
+        "composer.json",
+        "pom.xml",
+        "build.gradle",
+        "mix.exs",
         ".tesslate/config.json",
     }
-    SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv", "vendor", "target"}
+    SKIP_DIRS = {
+        "node_modules",
+        ".git",
+        "dist",
+        "build",
+        ".next",
+        "__pycache__",
+        ".venv",
+        "vendor",
+        "target",
+    }
     COMMON_SUBDIRS = ["", "frontend", "backend", "client", "server", "api", "web", "app", "src"]
 
     if settings.deployment_mode == "docker":
         project_path = f"/projects/{project.slug}"
         # Walk directory for file tree
         try:
-            walk_results = await walk_directory_async(
-                project_path, exclude_dirs=list(SKIP_DIRS)
-            )
-            for root, dirs, files in walk_results:
+            walk_results = await walk_directory_async(project_path, exclude_dirs=list(SKIP_DIRS))
+            for root, _dirs, files in walk_results:
                 for f in files:
                     rel = os.path.relpath(os.path.join(root, f), project_path).replace("\\", "/")
                     file_tree.append(rel)
@@ -1695,6 +1734,7 @@ async def analyze_project(
     else:
         # K8s: try reading from PVC first, fall back to DB (ProjectFile records)
         from ..services.orchestration import get_orchestrator
+
         orchestrator = get_orchestrator()
         k8s_success = False
         try:
@@ -1704,7 +1744,9 @@ async def analyze_project(
                 container_name=".",
             )
             if files_list:
-                file_tree = [f.get("path", f.get("name", "")) for f in files_list if isinstance(f, dict)]
+                file_tree = [
+                    f.get("path", f.get("name", "")) for f in files_list if isinstance(f, dict)
+                ]
                 k8s_success = True
 
             # Read config files from PVC
@@ -1730,9 +1772,8 @@ async def analyze_project(
         if not k8s_success:
             logger.info("[ANALYZE] Falling back to ProjectFile records from DB")
             from ..models import ProjectFile as PF
-            db_files_result = await db.execute(
-                select(PF).where(PF.project_id == project.id)
-            )
+
+            db_files_result = await db.execute(select(PF).where(PF.project_id == project.id))
             for pf in db_files_result.scalars().all():
                 fp = pf.file_path
                 # Skip dirs we don't care about
@@ -1740,9 +1781,12 @@ async def analyze_project(
                     continue
                 file_tree.append(fp)
                 basename = os.path.basename(fp)
-                if basename in CONFIG_FILENAMES or fp in CONFIG_FILENAMES:
-                    if pf.content and len(pf.content) < 20000:
-                        config_files_content[fp] = pf.content
+                if (
+                    (basename in CONFIG_FILENAMES or fp in CONFIG_FILENAMES)
+                    and pf.content
+                    and len(pf.content) < 20000
+                ):
+                    config_files_content[fp] = pf.content
 
     if not file_tree:
         raise HTTPException(status_code=400, detail="No files found in project to analyze")
@@ -1760,7 +1804,9 @@ async def analyze_project(
         )
 
         if not config:
-            raise HTTPException(status_code=500, detail="Failed to generate config. Please try again.")
+            raise HTTPException(
+                status_code=500, detail="Failed to generate config. Please try again."
+            )
 
         # Convert to response format
         return {
@@ -1788,14 +1834,24 @@ async def analyze_project(
         raise
     except Exception as e:
         error_str = str(e).lower()
-        if "429" in str(e) or "rate" in error_str or "resource_exhausted" in error_str or "throttl" in error_str:
+        if (
+            "429" in str(e)
+            or "rate" in error_str
+            or "resource_exhausted" in error_str
+            or "throttl" in error_str
+        ):
             logger.warning(f"[ANALYZE] Rate limited by LLM provider: {e}")
-            raise HTTPException(status_code=429, detail="AI model is temporarily rate-limited. Please try again in a moment.")
+            raise HTTPException(
+                status_code=429,
+                detail="AI model is temporarily rate-limited. Please try again in a moment.",
+            ) from e
         if "400" in str(e) or "invalid model" in error_str:
             logger.warning(f"[ANALYZE] Invalid model: {e}")
-            raise HTTPException(status_code=400, detail=f"Invalid model. Please select a different model.")
+            raise HTTPException(
+                status_code=400, detail="Invalid model. Please select a different model."
+            ) from e
         logger.error(f"[ANALYZE] Failed to analyze project: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to analyze project: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze project: {str(e)}") from e
 
 
 @router.get("/{project_slug}/settings")
@@ -3306,228 +3362,6 @@ async def stream_container_logs(
             await websocket.close()
 
 
-@router.websocket("/{project_slug}/terminal")
-async def interactive_terminal(
-    websocket: WebSocket, project_slug: str, db: AsyncSession = Depends(get_db)
-):
-    """
-    WebSocket endpoint for interactive terminal with PTY support.
-    Provides full bidirectional shell access to the project's dev container.
-
-    Message format:
-    - Client -> Server: {"type": "input", "data": "command text"} or {"type": "resize", "cols": 80, "rows": 24}
-    - Server -> Client: {"type": "output", "data": "terminal output"} or {"type": "error", "message": "error text"}
-    """
-    import json
-
-    from fastapi import WebSocketDisconnect
-
-    from ..services.pty_broker import get_pty_broker
-    from ..services.shell_session_manager import ShellSessionManager
-
-    await websocket.accept()
-    session_id = None
-    shell_manager = ShellSessionManager()
-    output_task = None
-
-    try:
-        # Get project and verify ownership
-        result = await db.execute(select(Project).where(Project.slug == project_slug))
-        project = result.scalar_one_or_none()
-
-        if not project:
-            await websocket.send_json({"type": "error", "message": "Project not found"})
-            await websocket.close()
-            return
-
-        # For now, we'll get user from project owner (in production, extract from JWT token)
-        user_id = project.owner_id
-
-        # Create shell session
-        await websocket.send_json({"type": "status", "message": "Starting shell session..."})
-
-        try:
-            # Start a regular shell
-            # Tmux runs the dev server in the background, but we don't attach to it
-            # This avoids tmux's display layer conflicting with xterm.js
-            # Users can run "tmux attach -t main" manually if they want full tmux features
-            # Use 'exec' to replace the wrapper shell with an interactive shell
-            session_info = await shell_manager.create_session(
-                user_id=user_id, project_id=str(project.id), db=db, command="exec /bin/sh"
-            )
-            session_id = session_info["session_id"]
-
-            # Track activity for idle cleanup (database-based)
-            from ..services.activity_tracker import track_project_activity
-
-            await track_project_activity(db, project.id, "terminal")
-
-            await websocket.send_json(
-                {"type": "status", "message": f"Shell session created: {session_id}"}
-            )
-
-        except HTTPException as e:
-            await websocket.send_json({"type": "error", "message": e.detail})
-            await websocket.close()
-            return
-        except Exception as e:
-            logger.error(f"Failed to create shell session: {e}")
-            await websocket.send_json(
-                {"type": "error", "message": f"Failed to create shell: {str(e)}"}
-            )
-            await websocket.close()
-            return
-
-        # Get PTY session for direct access
-        pty_broker = get_pty_broker()
-        pty_session = pty_broker.sessions.get(session_id)
-
-        if not pty_session:
-            await websocket.send_json({"type": "error", "message": "PTY session not found"})
-            await websocket.close()
-            return
-
-        # Send initial prompt
-        await websocket.send_json(
-            {
-                "type": "output",
-                "data": "\r\n\x1b[38;5;208m╔═══════════════════════════════════════╗\x1b[0m\r\n",
-            }
-        )
-        await websocket.send_json(
-            {
-                "type": "output",
-                "data": "\x1b[38;5;208m║   Tesslate Studio - Interactive Shell ║\x1b[0m\r\n",
-            }
-        )
-        await websocket.send_json(
-            {
-                "type": "output",
-                "data": "\x1b[38;5;208m╚═══════════════════════════════════════╝\x1b[0m\r\n\r\n",
-            }
-        )
-
-        # Send any existing output history (scrollback) from the PTY buffer
-        # This ensures clients see the full history, not just new output
-        try:
-            if pty_session and hasattr(pty_session, "output_buffer"):
-                async with pty_session.buffer_lock:
-                    if len(pty_session.output_buffer) > 0:
-                        # Send existing buffer contents
-                        existing_output = bytes(pty_session.output_buffer)
-                        if existing_output:
-                            await websocket.send_json(
-                                {
-                                    "type": "output",
-                                    "data": existing_output.decode("utf-8", errors="replace"),
-                                }
-                            )
-                            logger.info(
-                                f"Sent {len(existing_output)} bytes of scrollback history to client"
-                            )
-        except Exception as e:
-            logger.warning(f"Failed to send scrollback history: {e}")
-
-        # Start background task to stream PTY output to WebSocket
-        async def stream_output():
-            """Stream PTY output to WebSocket"""
-            try:
-                while True:
-                    # Read new output from PTY session
-                    new_data, is_eof = await pty_session.read_new_output()
-
-                    if new_data:
-                        # Send raw output to client
-                        await websocket.send_json(
-                            {"type": "output", "data": new_data.decode("utf-8", errors="replace")}
-                        )
-
-                    if is_eof:
-                        await websocket.send_json(
-                            {"type": "status", "message": "Shell session ended"}
-                        )
-                        break
-
-                    # Increased delay from 50ms to 100ms to reduce CPU usage
-                    # This reduces polling from 20x/sec to 10x/sec per terminal
-                    # while still maintaining responsive terminal feel
-                    await asyncio.sleep(0.1)
-
-            except WebSocketDisconnect:
-                logger.info("WebSocket disconnected during output streaming")
-            except Exception as e:
-                logger.error(f"Error streaming output: {e}")
-                with contextlib.suppress(builtins.BaseException):
-                    await websocket.send_json(
-                        {"type": "error", "message": f"Stream error: {str(e)}"}
-                    )
-
-        # Start output streaming task
-        output_task = asyncio.create_task(stream_output())
-
-        # Handle incoming messages from client
-        while True:
-            try:
-                message = await websocket.receive_text()
-                data = json.loads(message)
-
-                if data.get("type") == "input":
-                    # User input - send to PTY stdin
-                    input_data = data.get("data", "")
-                    await shell_manager.write_to_session(
-                        session_id=session_id,
-                        data=input_data.encode("utf-8"),
-                        db=db,
-                        user_id=user_id,
-                    )
-
-                elif data.get("type") == "resize":
-                    # Terminal resize event
-                    cols = data.get("cols", 80)
-                    rows = data.get("rows", 24)
-
-                    # Resize PTY
-                    if pty_session and hasattr(pty_session, "resize"):
-                        try:
-                            await pty_session.resize(cols, rows)
-                        except Exception as e:
-                            logger.error(f"Failed to resize terminal: {e}")
-
-            except WebSocketDisconnect:
-                logger.info(f"Client disconnected from terminal {session_id}")
-                break
-            except json.JSONDecodeError:
-                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
-            except Exception as e:
-                logger.error(f"Error handling client message: {e}")
-                await websocket.send_json({"type": "error", "message": str(e)})
-                break
-
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for project {project_slug}")
-    except Exception as e:
-        logger.error(f"Terminal WebSocket error for project {project_slug}: {e}")
-        with contextlib.suppress(builtins.BaseException):
-            await websocket.send_json({"type": "error", "message": str(e)})
-    finally:
-        # Clean up output streaming task
-        if output_task:
-            output_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await output_task
-
-        # Close shell session
-        if session_id:
-            try:
-                await shell_manager.close_session(session_id=session_id, db=db)
-                logger.info(f"Closed shell session {session_id}")
-            except Exception as e:
-                logger.error(f"Error closing session {session_id}: {e}")
-
-        with contextlib.suppress(builtins.BaseException):
-            await websocket.close()
-
-
 # ============================================================================
 # Container Management Endpoints (Node Graph / Monorepo)
 # ============================================================================
@@ -4333,10 +4167,9 @@ async def get_containers_status(
                     if info.get("container_id") == cid:
                         k8s_key = key
                         break
-                if not k8s_key:
+                if not k8s_key and c.container_type == "service":
                     # Fallback for service containers keyed by service_slug
-                    if c.container_type == "service":
-                        k8s_key = _sanitize_status_key(c.service_slug or c.name)
+                    k8s_key = _sanitize_status_key(c.service_slug or c.name)
                 # Add alias if the keys differ and the K8s entry exists
                 if k8s_key and frontend_key != k8s_key and k8s_key in containers_map:
                     containers_map[frontend_key] = containers_map[k8s_key]
@@ -4395,9 +4228,7 @@ async def get_container(
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     result = await db.execute(
-        select(Container)
-        .where(Container.id == container_id)
-        .options(selectinload(Container.base))
+        select(Container).where(Container.id == container_id).options(selectinload(Container.base))
     )
     container = result.scalar_one_or_none()
     if not container or container.project_id != project.id:
@@ -4562,9 +4393,7 @@ async def rename_container(
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     result = await db.execute(
-        select(Container)
-        .where(Container.id == container_id)
-        .options(selectinload(Container.base))
+        select(Container).where(Container.id == container_id).options(selectinload(Container.base))
     )
     container = result.scalar_one_or_none()
     if not container or container.project_id != project.id:
@@ -4951,6 +4780,14 @@ async def stop_all_containers(
         orchestrator = get_orchestrator()
         deployment_mode = get_deployment_mode()
 
+        # Close any active shell sessions before tearing down pods
+        await db.execute(
+            sql_update(ShellSession)
+            .where(ShellSession.project_id == project.id, ShellSession.status == "active")
+            .values(status="closed", closed_at=func.now())
+        )
+        await db.commit()
+
         await orchestrator.stop_project(project.slug, project.id, current_user.id)
 
         logger.info(
@@ -5048,14 +4885,13 @@ async def _start_container_background_task(
             container_url = container_info.get("url")
             if not container_url:
                 settings = get_settings()
+                svc = container.container_directory or container.name
                 if settings.deployment_mode == "docker":
                     # Docker mode always uses HTTP on localhost
-                    container_url = f"http://{project.slug}-{service_name}.{settings.app_domain}"
+                    container_url = f"http://{project.slug}-{svc}.{settings.app_domain}"
                 else:
                     protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
-                    container_url = (
-                        f"{protocol}://{project.slug}-{service_name}.{settings.app_domain}"
-                    )
+                    container_url = f"{protocol}://{project.slug}-{svc}.{settings.app_domain}"
             task.add_log(f"Container '{container.name}' is already running at {container_url}")
             logger.info(f"[COMPOSE] Container {container.name} already running, skipping startup")
 
@@ -5420,6 +5256,7 @@ async def check_container_health(
 
     # Get container directory (sanitized for K8s naming)
     from ..services.compute_manager import resolve_k8s_container_dir
+
     container_dir = resolve_k8s_container_dir(container)
 
     # Build container URL based on deployment mode
@@ -5729,5 +5566,3 @@ async def hibernate_project(
     asyncio.create_task(hibernate_project_bg(project.id, current_user.id))
 
     return {"status": "stopping", "message": "Hibernation started"}
-
-
