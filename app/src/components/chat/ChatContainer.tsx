@@ -80,6 +80,7 @@ interface ChatContainerProps {
   onExpandedChange?: (expanded: boolean) => void;
   // Lifecycle event callbacks
   onIdleWarning?: (minutesLeft: number) => void;
+  onEnvironmentStopping?: () => void;
   onEnvironmentStopped?: (reason: string) => void;
   onVolumeRestoring?: (estimatedSeconds: number) => void;
 }
@@ -102,6 +103,7 @@ export function ChatContainer({
   onPrefillConsumed,
   onExpandedChange,
   onIdleWarning,
+  onEnvironmentStopping,
   onEnvironmentStopped,
   onVolumeRestoring,
 }: ChatContainerProps) {
@@ -114,7 +116,9 @@ export function ChatContainer({
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
   const [toolCallsCollapsed, setToolCallsCollapsed] = useState(false);
-  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>(
+    []
+  );
   const [editMode, setEditMode] = useState<EditMode>(() => {
     const stored = localStorage.getItem(`editMode:${projectId}`);
     return stored === 'ask' || stored === 'allow' || stored === 'plan' ? stored : 'ask';
@@ -730,15 +734,22 @@ export function ChatContainer({
             if (eventType === 'idle_warning') {
               onIdleWarning?.(payload?.minutes_until_shutdown ?? 5);
             } else if (eventType === 'environment_stopping') {
-              toast.loading(message || 'Stopping environment...', { id: 'env-stopping', duration: 10000 });
+              onEnvironmentStopping?.();
+              toast.loading(message || 'Stopping environment...', {
+                id: 'env-stopping',
+                duration: 10000,
+              });
             } else if (eventType === 'environment_stopped') {
               toast.dismiss('env-stopping');
               onEnvironmentStopped?.(payload?.reason || 'unknown');
               toast(message || 'Environment stopped', { icon: '\u23F8\uFE0F', duration: 5000 });
             } else if (eventType === 'volume_restoring') {
               onVolumeRestoring?.(payload?.estimated_seconds ?? 20);
-              toast.loading(message || 'Restoring project files...', { id: 'volume-restore', duration: 30000 });
-            // Legacy status-based events
+              toast.loading(message || 'Restoring project files...', {
+                id: 'volume-restore',
+                duration: 30000,
+              });
+              // Legacy status-based events
             } else if (status === 'hibernating') {
               toast.loading(message || 'Project is being saved...', { duration: 5000 });
               setTimeout(() => {

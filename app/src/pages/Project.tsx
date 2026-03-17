@@ -57,6 +57,8 @@ import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { type ChatAgent } from '../types/chat';
 import { getFeatures, type VolumeState, type ComputeTier } from '../types/project';
+import { getEnvironmentStatus } from '../components/ui/environmentStatus';
+import { EnvironmentStatusBadge } from '../components/ui/EnvironmentStatusBadge';
 import IdleWarningBanner from '../components/IdleWarningBanner';
 
 type PanelType = 'github' | 'notes' | 'settings' | 'marketplace' | null;
@@ -99,7 +101,9 @@ function NoComputePlaceholder({
     // Error during startup
     if (startupError) {
       const isHealthCheck = startupError.startsWith('HEALTH_CHECK_TIMEOUT:');
-      const displayError = isHealthCheck ? startupError.replace('HEALTH_CHECK_TIMEOUT:', '') : startupError;
+      const displayError = isHealthCheck
+        ? startupError.replace('HEALTH_CHECK_TIMEOUT:', '')
+        : startupError;
       return (
         <div className="h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
           <div className="flex flex-col items-center gap-4 max-w-lg text-center">
@@ -114,7 +118,11 @@ function NoComputePlaceholder({
             <div className="flex items-center gap-3">
               {onAskAgent && isHealthCheck && (
                 <button
-                  onClick={() => onAskAgent(`Use the running tmux process to get this up and running. The port for the preview url is ${containerPort}.`)}
+                  onClick={() =>
+                    onAskAgent(
+                      `Use the running tmux process to get this up and running. The port for the preview url is ${containerPort}.`
+                    )
+                  }
                   className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary)]/80 transition-colors text-sm font-medium"
                 >
                   Ask Agent
@@ -271,6 +279,8 @@ export default function Project() {
 
   // Idle warning state (set by WebSocket idle_warning event)
   const [idleWarningMinutes, setIdleWarningMinutes] = useState<number | null>(null);
+  // Environment stopping state (set by WebSocket environment_stopping event)
+  const [environmentStopping, setEnvironmentStopping] = useState(false);
   // Restore polling state
   const restorePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -288,7 +298,10 @@ export default function Project() {
         toast.success('Development server ready!', { id: 'container-start', duration: 2000 });
         // Re-fetch project to pick up updated compute_tier (enables preview/terminal gates)
         if (slug) {
-          projectsApi.get(slug).then((p) => setProject(p)).catch(() => {});
+          projectsApi
+            .get(slug)
+            .then((p) => setProject(p))
+            .catch(() => {});
         }
         // Container just became ready - load files with retry (pod may still be warming up)
         fileRetryCancelledRef.current = true;
@@ -297,22 +310,23 @@ export default function Project() {
         loadFilesWithRetry();
         // Refresh previewable containers now that container(s) are running
         if (slug) {
-          Promise.all([
-            projectsApi.getContainers(slug),
-            projectsApi.getContainersStatus(slug),
-          ]).then(([allContainers, status]) => {
-            const statusContainers = status?.containers ?? null;
-            const primaryId = currentContainerIdRef.current;
-            const previewable = buildPreviewableContainers(
-              allContainers,
-              statusContainers,
-              primaryId,
-            );
-            setPreviewableContainers(previewable);
-            if (previewable.length > 0) {
-              setSelectedPreviewContainerId((prev) => prev || previewable[0].id);
-            }
-          }).catch(() => { /* non-blocking */ });
+          Promise.all([projectsApi.getContainers(slug), projectsApi.getContainersStatus(slug)])
+            .then(([allContainers, status]) => {
+              const statusContainers = status?.containers ?? null;
+              const primaryId = currentContainerIdRef.current;
+              const previewable = buildPreviewableContainers(
+                allContainers,
+                statusContainers,
+                primaryId
+              );
+              setPreviewableContainers(previewable);
+              if (previewable.length > 0) {
+                setSelectedPreviewContainerId((prev) => prev || previewable[0].id);
+              }
+            })
+            .catch(() => {
+              /* non-blocking */
+            });
         }
       },
       onError: (error) => {
@@ -327,12 +341,18 @@ export default function Project() {
   // ============================================================================
   const volumeState = (project?.volume_state as VolumeState) ?? 'local';
   const computeTier = (project?.compute_tier as ComputeTier) ?? 'none';
-  const features = useMemo(
-    () => getFeatures(volumeState, computeTier),
-    [volumeState, computeTier]
+  const features = useMemo(() => getFeatures(volumeState, computeTier), [volumeState, computeTier]);
+  const noPreview = !features.preview && !devServerUrl;
+  const hasFiles = features.fileBrowser;
+
+  const environmentStatus = useMemo(
+    () =>
+      getEnvironmentStatus(volumeState, computeTier, {
+        stopping: environmentStopping,
+        starting: needsContainerStart && containerStartup.isLoading,
+      }),
+    [volumeState, computeTier, environmentStopping, needsContainerStart, containerStartup.isLoading]
   );
-  const noPreview  = !features.preview && !devServerUrl;
-  const hasFiles   = features.fileBrowser;
 
   const handleStartCompute = useCallback(() => {
     if (!container) {
@@ -353,38 +373,52 @@ export default function Project() {
     setIdleWarningMinutes(minutesLeft);
   }, []);
 
-  const handleEnvironmentStopped = useCallback((reason: string) => {
-    setIdleWarningMinutes(null);
-    // Refresh project to pick up compute_tier=none, volume_state changes
-    if (slug) {
-      projectsApi.get(slug).then((p) => setProject(p)).catch(() => {});
-    }
-    if (reason === 'idle_timeout') {
-      toast('Environment stopped due to inactivity', { icon: '\u23F8\uFE0F', duration: 5000 });
-    }
-  }, [slug]);
+  const handleEnvironmentStopping = useCallback(() => {
+    setEnvironmentStopping(true);
+  }, []);
 
-  const handleVolumeRestoring = useCallback((_estimatedSeconds: number) => {
-    // Start polling project state until volume_state becomes 'local'
-    if (restorePollRef.current) clearInterval(restorePollRef.current);
-    restorePollRef.current = setInterval(async () => {
-      if (!slug) return;
-      try {
-        const p = await projectsApi.get(slug);
-        setProject(p);
-        if (p.volume_state === 'local') {
-          if (restorePollRef.current) {
-            clearInterval(restorePollRef.current);
-            restorePollRef.current = null;
-          }
-          toast.dismiss('volume-restore');
-          toast.success('Project files restored!', { duration: 3000 });
-        }
-      } catch {
-        // transient error, keep polling
+  const handleEnvironmentStopped = useCallback(
+    (reason: string) => {
+      setEnvironmentStopping(false);
+      setIdleWarningMinutes(null);
+      // Refresh project to pick up compute_tier=none, volume_state changes
+      if (slug) {
+        projectsApi
+          .get(slug)
+          .then((p) => setProject(p))
+          .catch(() => {});
       }
-    }, 2000);
-  }, [slug]);
+      if (reason === 'idle_timeout') {
+        toast('Environment stopped due to inactivity', { icon: '\u23F8\uFE0F', duration: 5000 });
+      }
+    },
+    [slug]
+  );
+
+  const handleVolumeRestoring = useCallback(
+    (_estimatedSeconds: number) => {
+      // Start polling project state until volume_state becomes 'local'
+      if (restorePollRef.current) clearInterval(restorePollRef.current);
+      restorePollRef.current = setInterval(async () => {
+        if (!slug) return;
+        try {
+          const p = await projectsApi.get(slug);
+          setProject(p);
+          if (p.volume_state === 'local') {
+            if (restorePollRef.current) {
+              clearInterval(restorePollRef.current);
+              restorePollRef.current = null;
+            }
+            toast.dismiss('volume-restore');
+            toast.success('Project files restored!', { duration: 3000 });
+          }
+        } catch {
+          // transient error, keep polling
+        }
+      }, 2000);
+    },
+    [slug]
+  );
 
   // Cleanup restore polling on unmount
   useEffect(() => {
@@ -741,7 +775,7 @@ export default function Project() {
       setFiles((prev) => {
         // Skip update if file paths haven't changed — Monaco owns content,
         // the tree only cares about paths. Prevents re-renders from 30s polling.
-        const prevPaths = prev.map(f => f.file_path).join('\0');
+        const prevPaths = prev.map((f) => f.file_path).join('\0');
         const newPaths = filesData.map((f: { file_path: string }) => f.file_path).join('\0');
         if (prevPaths === newPaths) return prev;
         return filesData;
@@ -811,7 +845,7 @@ export default function Project() {
   const buildPreviewableContainers = (
     allContainers: Array<Record<string, unknown>>,
     statusContainers: Record<string, Record<string, unknown>> | null,
-    primaryContainerId: string | null,
+    primaryContainerId: string | null
   ): PreviewableContainer[] => {
     const sanitizeKey = (s: string) =>
       s
@@ -835,8 +869,7 @@ export default function Project() {
       const rawDir = c.directory as string;
       const dirKey = rawDir && rawDir !== '.' ? sanitizeKey(rawDir) : null;
       const nameKey = c.name ? sanitizeKey(c.name as string) : null;
-      const runtimeStatus =
-        statusContainers?.[dirKey!] ?? statusContainers?.[nameKey!] ?? null;
+      const runtimeStatus = statusContainers?.[dirKey!] ?? statusContainers?.[nameKey!] ?? null;
 
       // Only include containers that are running and have a URL
       if (!runtimeStatus?.running || !runtimeStatus?.url) continue;
@@ -856,25 +889,22 @@ export default function Project() {
     return previewable;
   };
 
-  const handlePreviewContainerSwitch = useCallback(
-    (target: PreviewableContainer) => {
-      const token = localStorage.getItem('token');
-      const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
+  const handlePreviewContainerSwitch = useCallback((target: PreviewableContainer) => {
+    const token = localStorage.getItem('token');
+    const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
 
-      setSelectedPreviewContainerId(target.id);
-      setDevServerUrl(target.url);
+    setSelectedPreviewContainerId(target.id);
+    setDevServerUrl(target.url);
 
-      if (token && deploymentMode === 'kubernetes') {
-        const urlWithAuth =
-          target.url + (target.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
-        setDevServerUrlWithAuth(urlWithAuth);
-      } else {
-        setDevServerUrlWithAuth(target.url);
-      }
-      setCurrentPreviewUrl(target.url);
-    },
-    []
-  );
+    if (token && deploymentMode === 'kubernetes') {
+      const urlWithAuth =
+        target.url + (target.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
+      setDevServerUrlWithAuth(urlWithAuth);
+    } else {
+      setDevServerUrlWithAuth(target.url);
+    }
+    setCurrentPreviewUrl(target.url);
+  }, []);
 
   const loadContainer = async () => {
     if (!slug) return;
@@ -936,12 +966,21 @@ export default function Project() {
           const previewable = buildPreviewableContainers(
             allContainers,
             statusContainers,
-            foundContainer.id as string,
+            foundContainer.id as string
           );
           setPreviewableContainers(previewable);
           // Default to the current/primary container
           if (!selectedPreviewContainerId && previewable.length > 0) {
             setSelectedPreviewContainerId(previewable[0].id);
+          }
+
+          // Check for stopping — show badge but don't auto-start
+          if (
+            status?.environment_status === 'stopping' ||
+            freshProject.environment_status === 'stopping'
+          ) {
+            setEnvironmentStopping(true);
+            return;
           }
 
           // Check for hibernation - only explicit hibernated status, not just stopped
@@ -973,7 +1012,11 @@ export default function Project() {
 
           // If per-container lookup missed but overall environment is running,
           // try to find any running container entry with a URL as a fallback
-          if (status?.status === 'running' || status?.status === 'partial' || status?.status === 'active') {
+          if (
+            status?.status === 'running' ||
+            status?.status === 'partial' ||
+            status?.status === 'active'
+          ) {
             const containers = status?.containers ?? {};
             const fallback = Object.values(containers).find(
               (c: Record<string, unknown>) => c.running && c.url
@@ -1009,10 +1052,15 @@ export default function Project() {
         }
         // Prefer live compute_state from status endpoint over stale DB
         const liveComputeState = status?.compute_state as string | undefined;
-        const effectiveComputeTier = liveComputeState ?? ((freshProject.compute_tier as string) ?? 'none');
+        const effectiveComputeTier =
+          liveComputeState ?? (freshProject.compute_tier as string) ?? 'none';
         if (effectiveComputeTier !== 'environment') {
           // No environment running — let user decide via Start button
-          console.log('[loadContainer] compute state', effectiveComputeTier, '— skipping container start');
+          console.log(
+            '[loadContainer] compute state',
+            effectiveComputeTier,
+            '— skipping container start'
+          );
           containerStartup.reset();
           setNeedsContainerStart(false);
           return;
@@ -1113,7 +1161,7 @@ export default function Project() {
       />
     ) : null;
 
-  const codeEditorOverlay = hasFiles ? undefined : loadingOverlay ?? undefined;
+  const codeEditorOverlay = hasFiles ? undefined : (loadingOverlay ?? undefined);
 
   const handleFileUpdate = useCallback(
     async (filePath: string, content: string) => {
@@ -1659,6 +1707,13 @@ export default function Project() {
               </div>
             )}
 
+            {/* Environment Status Badge */}
+            {environmentStatus && (
+              <div className="hidden md:flex">
+                <EnvironmentStatusBadge status={environmentStatus} showTooltip />
+              </div>
+            )}
+
             {/* Deploy Button with Dropdown */}
             <div className="relative hidden md:block">
               <button
@@ -1744,6 +1799,7 @@ export default function Project() {
                         prefillMessage={prefillChatMessage}
                         onPrefillConsumed={() => setPrefillChatMessage(null)}
                         onIdleWarning={handleIdleWarning}
+                        onEnvironmentStopping={handleEnvironmentStopping}
                         onEnvironmentStopped={handleEnvironmentStopped}
                         onVolumeRestoring={handleVolumeRestoring}
                       />
@@ -1756,91 +1812,94 @@ export default function Project() {
                 <Panel id="content" minSize="30" className="overflow-hidden">
                   {/* Preview View */}
                   <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-                    {noPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
-                      previewMode === 'browser-tabs' ? (
-                        <BrowserPreview
-                          devServerUrl={devServerUrl}
-                          devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
-                          currentPreviewUrl={currentPreviewUrl}
-                          onNavigateBack={navigateBack}
-                          onNavigateForward={navigateForward}
-                          onRefresh={refreshPreview}
-                          onUrlChange={setCurrentPreviewUrl}
-                          containerStatus={containerStartup.status}
-                          startupPhase={containerStartup.phase}
-                          startupProgress={containerStartup.progress}
-                          startupMessage={containerStartup.message}
-                          startupLogs={containerStartup.logs}
-                          startupError={containerStartup.error || undefined}
-                          onRetryStart={containerStartup.retry}
-                          previewableContainers={previewableContainers}
-                          selectedPreviewContainerId={selectedPreviewContainerId}
-                          onPreviewContainerSwitch={handlePreviewContainerSwitch}
-                        />
-                      ) : (
-                        <>
-                          <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={navigateBack}
-                                className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                                title="Go back"
-                              >
-                                <CaretLeft size={18} weight="bold" />
-                              </button>
-                              <button
-                                onClick={navigateForward}
-                                className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                                title="Go forward"
-                              >
-                                <CaretRight size={18} weight="bold" />
-                              </button>
-                            </div>
-                            <div className="hidden md:block flex-1">
-                              <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
-                                <span className="text-yellow-500 mr-2">🔒</span>
-                                <span className="text-[var(--text)]/80 truncate">
-                                  {currentPreviewUrl || devServerUrl}
-                                </span>
+                    {noPreview
+                      ? previewPlaceholder
+                      : (loadingOverlay ??
+                        (devServerUrl ? (
+                          previewMode === 'browser-tabs' ? (
+                            <BrowserPreview
+                              devServerUrl={devServerUrl}
+                              devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
+                              currentPreviewUrl={currentPreviewUrl}
+                              onNavigateBack={navigateBack}
+                              onNavigateForward={navigateForward}
+                              onRefresh={refreshPreview}
+                              onUrlChange={setCurrentPreviewUrl}
+                              containerStatus={containerStartup.status}
+                              startupPhase={containerStartup.phase}
+                              startupProgress={containerStartup.progress}
+                              startupMessage={containerStartup.message}
+                              startupLogs={containerStartup.logs}
+                              startupError={containerStartup.error || undefined}
+                              onRetryStart={containerStartup.retry}
+                              previewableContainers={previewableContainers}
+                              selectedPreviewContainerId={selectedPreviewContainerId}
+                              onPreviewContainerSwitch={handlePreviewContainerSwitch}
+                            />
+                          ) : (
+                            <>
+                              <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={navigateBack}
+                                    className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                    title="Go back"
+                                  >
+                                    <CaretLeft size={18} weight="bold" />
+                                  </button>
+                                  <button
+                                    onClick={navigateForward}
+                                    className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                    title="Go forward"
+                                  >
+                                    <CaretRight size={18} weight="bold" />
+                                  </button>
+                                </div>
+                                <div className="hidden md:block flex-1">
+                                  <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
+                                    <span className="text-yellow-500 mr-2">🔒</span>
+                                    <span className="text-[var(--text)]/80 truncate">
+                                      {currentPreviewUrl || devServerUrl}
+                                    </span>
+                                  </div>
+                                </div>
+                                <PreviewPortPicker
+                                  containers={previewableContainers}
+                                  selectedContainerId={selectedPreviewContainerId}
+                                  onSelect={handlePreviewContainerSwitch}
+                                />
+                                <button
+                                  onClick={refreshPreview}
+                                  className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
+                                  title="Refresh"
+                                >
+                                  <ArrowsClockwise size={16} />
+                                </button>
                               </div>
-                            </div>
-                            <PreviewPortPicker
-                              containers={previewableContainers}
-                              selectedContainerId={selectedPreviewContainerId}
-                              onSelect={handlePreviewContainerSwitch}
-                            />
-                            <button
-                              onClick={refreshPreview}
-                              className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
-                              title="Refresh"
-                            >
-                              <ArrowsClockwise size={16} />
-                            </button>
+                              <div
+                                className="w-full h-[calc(100%-50px)] bg-white"
+                                onMouseEnter={() => {
+                                  isPointerOverPreviewRef.current = true;
+                                }}
+                                onMouseLeave={() => {
+                                  isPointerOverPreviewRef.current = false;
+                                }}
+                              >
+                                <iframe
+                                  ref={iframeRef}
+                                  id="preview-iframe"
+                                  src={devServerUrlWithAuth || devServerUrl}
+                                  className="w-full h-full"
+                                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                                />
+                              </div>
+                            </>
+                          )
+                        ) : (
+                          <div className="h-full flex items-center justify-center text-[var(--text)]/60">
+                            <LoadingSpinner message="Loading project..." size={60} />
                           </div>
-                          <div
-                            className="w-full h-[calc(100%-50px)] bg-white"
-                            onMouseEnter={() => {
-                              isPointerOverPreviewRef.current = true;
-                            }}
-                            onMouseLeave={() => {
-                              isPointerOverPreviewRef.current = false;
-                            }}
-                          >
-                            <iframe
-                              ref={iframeRef}
-                              id="preview-iframe"
-                              src={devServerUrlWithAuth || devServerUrl}
-                              className="w-full h-full"
-                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                            />
-                          </div>
-                        </>
-                      )
-                    ) : (
-                      <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-                        <LoadingSpinner message="Loading project..." size={60} />
-                      </div>
-                    ))}
+                        )))}
                   </div>
 
                   {/* Code View */}
@@ -1881,7 +1940,9 @@ export default function Project() {
                     <TerminalPanel
                       projectId={slug!}
                       computeTier={computeTier}
-                      onStartCompute={features.startButton && container ? handleStartCompute : undefined}
+                      onStartCompute={
+                        features.startButton && container ? handleStartCompute : undefined
+                      }
                       isStartingCompute={needsContainerStart && containerStartup.isLoading}
                       startupProgress={containerStartup.progress}
                       startupMessage={containerStartup.message}
@@ -1919,6 +1980,7 @@ export default function Project() {
                         prefillMessage={prefillChatMessage}
                         onPrefillConsumed={() => setPrefillChatMessage(null)}
                         onIdleWarning={handleIdleWarning}
+                        onEnvironmentStopping={handleEnvironmentStopping}
                         onEnvironmentStopped={handleEnvironmentStopped}
                         onVolumeRestoring={handleVolumeRestoring}
                       />
@@ -1931,91 +1993,94 @@ export default function Project() {
               <div className="w-full h-full overflow-hidden">
                 {/* Preview View */}
                 <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-                  {noPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
-                    previewMode === 'browser-tabs' ? (
-                      <BrowserPreview
-                        devServerUrl={devServerUrl}
-                        devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
-                        currentPreviewUrl={currentPreviewUrl}
-                        onNavigateBack={navigateBack}
-                        onNavigateForward={navigateForward}
-                        onRefresh={refreshPreview}
-                        onUrlChange={setCurrentPreviewUrl}
-                        containerStatus={containerStartup.status}
-                        startupPhase={containerStartup.phase}
-                        startupProgress={containerStartup.progress}
-                        startupMessage={containerStartup.message}
-                        startupLogs={containerStartup.logs}
-                        startupError={containerStartup.error || undefined}
-                        onRetryStart={containerStartup.retry}
-                        previewableContainers={previewableContainers}
-                        selectedPreviewContainerId={selectedPreviewContainerId}
-                        onPreviewContainerSwitch={handlePreviewContainerSwitch}
-                      />
-                    ) : (
-                      <>
-                        <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={navigateBack}
-                              className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                              title="Go back"
-                            >
-                              <CaretLeft size={18} weight="bold" />
-                            </button>
-                            <button
-                              onClick={navigateForward}
-                              className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                              title="Go forward"
-                            >
-                              <CaretRight size={18} weight="bold" />
-                            </button>
-                          </div>
-                          <div className="hidden md:block flex-1">
-                            <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
-                              <span className="text-yellow-500 mr-2">🔒</span>
-                              <span className="text-[var(--text)]/80 truncate">
-                                {currentPreviewUrl || devServerUrl}
-                              </span>
+                  {noPreview
+                    ? previewPlaceholder
+                    : (loadingOverlay ??
+                      (devServerUrl ? (
+                        previewMode === 'browser-tabs' ? (
+                          <BrowserPreview
+                            devServerUrl={devServerUrl}
+                            devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
+                            currentPreviewUrl={currentPreviewUrl}
+                            onNavigateBack={navigateBack}
+                            onNavigateForward={navigateForward}
+                            onRefresh={refreshPreview}
+                            onUrlChange={setCurrentPreviewUrl}
+                            containerStatus={containerStartup.status}
+                            startupPhase={containerStartup.phase}
+                            startupProgress={containerStartup.progress}
+                            startupMessage={containerStartup.message}
+                            startupLogs={containerStartup.logs}
+                            startupError={containerStartup.error || undefined}
+                            onRetryStart={containerStartup.retry}
+                            previewableContainers={previewableContainers}
+                            selectedPreviewContainerId={selectedPreviewContainerId}
+                            onPreviewContainerSwitch={handlePreviewContainerSwitch}
+                          />
+                        ) : (
+                          <>
+                            <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={navigateBack}
+                                  className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                  title="Go back"
+                                >
+                                  <CaretLeft size={18} weight="bold" />
+                                </button>
+                                <button
+                                  onClick={navigateForward}
+                                  className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                  title="Go forward"
+                                >
+                                  <CaretRight size={18} weight="bold" />
+                                </button>
+                              </div>
+                              <div className="hidden md:block flex-1">
+                                <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
+                                  <span className="text-yellow-500 mr-2">🔒</span>
+                                  <span className="text-[var(--text)]/80 truncate">
+                                    {currentPreviewUrl || devServerUrl}
+                                  </span>
+                                </div>
+                              </div>
+                              <PreviewPortPicker
+                                containers={previewableContainers}
+                                selectedContainerId={selectedPreviewContainerId}
+                                onSelect={handlePreviewContainerSwitch}
+                              />
+                              <button
+                                onClick={refreshPreview}
+                                className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
+                                title="Refresh"
+                              >
+                                <ArrowsClockwise size={16} />
+                              </button>
                             </div>
-                          </div>
-                          <PreviewPortPicker
-                            containers={previewableContainers}
-                            selectedContainerId={selectedPreviewContainerId}
-                            onSelect={handlePreviewContainerSwitch}
-                          />
-                          <button
-                            onClick={refreshPreview}
-                            className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
-                            title="Refresh"
-                          >
-                            <ArrowsClockwise size={16} />
-                          </button>
+                            <div
+                              className="w-full h-[calc(100%-50px)] bg-white"
+                              onMouseEnter={() => {
+                                isPointerOverPreviewRef.current = true;
+                              }}
+                              onMouseLeave={() => {
+                                isPointerOverPreviewRef.current = false;
+                              }}
+                            >
+                              <iframe
+                                ref={iframeRef}
+                                id="preview-iframe"
+                                src={devServerUrlWithAuth || devServerUrl}
+                                className="w-full h-full"
+                                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                              />
+                            </div>
+                          </>
+                        )
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-[var(--text)]/60">
+                          <LoadingSpinner message="Loading project..." size={60} />
                         </div>
-                        <div
-                          className="w-full h-[calc(100%-50px)] bg-white"
-                          onMouseEnter={() => {
-                            isPointerOverPreviewRef.current = true;
-                          }}
-                          onMouseLeave={() => {
-                            isPointerOverPreviewRef.current = false;
-                          }}
-                        >
-                          <iframe
-                            ref={iframeRef}
-                            id="preview-iframe"
-                            src={devServerUrlWithAuth || devServerUrl}
-                            className="w-full h-full"
-                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                          />
-                        </div>
-                      </>
-                    )
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-                      <LoadingSpinner message="Loading project..." size={60} />
-                    </div>
-                  ))}
+                      )))}
                 </div>
 
                 {/* Code View */}
@@ -2052,7 +2117,9 @@ export default function Project() {
                   <TerminalPanel
                     projectId={slug!}
                     computeTier={computeTier}
-                    onStartCompute={features.startButton && container ? handleStartCompute : undefined}
+                    onStartCompute={
+                      features.startButton && container ? handleStartCompute : undefined
+                    }
                     isStartingCompute={needsContainerStart && containerStartup.isLoading}
                     startupProgress={containerStartup.progress}
                     startupMessage={containerStartup.message}
@@ -2069,19 +2136,22 @@ export default function Project() {
           <div className="md:hidden w-full h-full overflow-hidden">
             {/* Preview View */}
             <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-              {noPreview ? previewPlaceholder : loadingOverlay ?? (devServerUrl ? (
-                <div className="w-full h-full bg-white">
-                  <iframe
-                    src={devServerUrlWithAuth || devServerUrl}
-                    className="w-full h-full"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                  />
-                </div>
-              ) : (
-                <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-                  <LoadingSpinner message="Loading project..." size={60} />
-                </div>
-              ))}
+              {noPreview
+                ? previewPlaceholder
+                : (loadingOverlay ??
+                  (devServerUrl ? (
+                    <div className="w-full h-full bg-white">
+                      <iframe
+                        src={devServerUrlWithAuth || devServerUrl}
+                        className="w-full h-full"
+                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[var(--text)]/60">
+                      <LoadingSpinner message="Loading project..." size={60} />
+                    </div>
+                  )))}
             </div>
 
             {/* Code View */}
@@ -2183,6 +2253,7 @@ export default function Project() {
             onPrefillConsumed={() => setPrefillChatMessage(null)}
             onExpandedChange={setChatExpanded}
             onIdleWarning={handleIdleWarning}
+            onEnvironmentStopping={handleEnvironmentStopping}
             onEnvironmentStopped={handleEnvironmentStopped}
             onVolumeRestoring={handleVolumeRestoring}
           />

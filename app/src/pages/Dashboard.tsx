@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { projectsApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { MobileMenu, ProjectCard, UserDropdown } from '../components/ui';
-import type { Status, EnvironmentStatus } from '../components/ui';
+import type { Status } from '../components/ui';
 import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
@@ -32,7 +32,7 @@ interface Project {
   updated_at: string;
   status?: Status;
   agents?: Array<{ icon: string; name: string }>;
-  environment_status?: EnvironmentStatus;
+  environment_status?: string;
   volume_state?: string;
   compute_tier?: string;
 }
@@ -623,7 +623,6 @@ export default function Dashboard() {
                   lastUpdated: formatDate(project.updated_at),
                   isLive: project.status === 'launch',
                   slug: project.slug,
-                  environmentStatus: project.environment_status,
                   volume_state: project.volume_state,
                   compute_tier: project.compute_tier,
                 }}
