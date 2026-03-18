@@ -284,7 +284,7 @@ func (d *Driver) runHub(ctx context.Context) error {
 	}
 
 	// Start VolumeHub gRPC server with CAS store for manifest reads.
-	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory)
+	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory, resolver.Resolve)
 
 	// Initial discovery + periodic refresh (30s) of node endpoints.
 	go func() {

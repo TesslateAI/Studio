@@ -31,22 +31,28 @@ func init() {
 // The Hub uses this to delegate operations to compute nodes.
 type NodeClientFactory func(nodeName string) (*nodeops.Client, error)
 
+// NodeAddrResolver resolves a K8s node name to a gRPC address (podIP:port).
+// Returns empty string if the node is unknown.
+type NodeAddrResolver func(nodeName string) string
+
 // Server implements the VolumeHub gRPC service as a storageless orchestrator.
 // It holds zero storage, zero btrfs — nodes handle all data. The Hub only
 // coordinates: volume→owner_node mapping, template→cached_nodes, node→capacity.
 type Server struct {
-	registry   *NodeRegistry
-	cas        *cas.Store // for manifest reads (ListSnapshots, EnsureCached)
-	nodeClient NodeClientFactory
-	srv        *grpc.Server
+	registry    *NodeRegistry
+	cas         *cas.Store // for manifest reads (ListSnapshots, EnsureCached)
+	nodeClient  NodeClientFactory
+	resolveAddr NodeAddrResolver
+	srv         *grpc.Server
 }
 
 // NewServer creates a VolumeHub Server.
-func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClientFactory) *Server {
+func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClientFactory, resolveAddr NodeAddrResolver) *Server {
 	return &Server{
-		registry:   registry,
-		cas:        casStore,
-		nodeClient: nodeClient,
+		registry:    registry,
+		cas:         casStore,
+		nodeClient:  nodeClient,
+		resolveAddr: resolveAddr,
 	}
 }
 
@@ -401,9 +407,10 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 			klog.Warningf("EnsureCached: owner %s unavailable (%v), trying CAS restore", ownerNode, err)
 		} else {
 			defer ownerClient.Close()
-			// NodeOps gRPC port matches NodeResolver's configured port (9741).
-			targetAddr := targetNode + ":9741"
-			if err := ownerClient.SendVolumeTo(ctx, req.VolumeID, targetAddr); err != nil {
+			targetAddr := s.resolveAddr(targetNode)
+			if targetAddr == "" {
+				klog.Warningf("EnsureCached: cannot resolve address for target %s, trying CAS restore", targetNode)
+			} else if err := ownerClient.SendVolumeTo(ctx, req.VolumeID, targetAddr); err != nil {
 				klog.Warningf("EnsureCached: peer transfer from %s to %s failed: %v, trying CAS restore", ownerNode, targetNode, err)
 			} else {
 				s.registry.SetCached(req.VolumeID, targetNode)
