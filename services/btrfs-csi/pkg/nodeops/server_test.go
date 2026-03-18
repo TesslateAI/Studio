@@ -10,7 +10,7 @@ import (
 
 func TestNewServer(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
-	s := NewServer(bm, nil, nil)
+	s := NewServer(bm, nil, nil, nil)
 
 	if s.btrfs != bm {
 		t.Error("btrfs manager not stored correctly")
@@ -82,7 +82,7 @@ func TestJsonCodec_Unmarshal(t *testing.T) {
 
 func TestRestoreVolumeFromS3_NilSyncer(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
-	s := NewServer(bm, nil, nil)
+	s := NewServer(bm, nil, nil, nil)
 
 	err := s.restoreVolumeFromS3(context.Background(), "vol-1")
 	if err == nil {
@@ -94,7 +94,7 @@ func TestRestoreVolumeFromS3_NilSyncer(t *testing.T) {
 }
 
 func TestServerStop_NilGrpc(t *testing.T) {
-	s := NewServer(btrfs.NewManager("/pool"), nil, nil)
+	s := NewServer(btrfs.NewManager("/pool"), nil, nil, nil)
 
 	// Stop should not panic when srv is nil (before Start is called).
 	s.Stop()
@@ -155,7 +155,7 @@ func TestPromoteToTemplate_NilTmplMgr(t *testing.T) {
 	// This verifies the server constructor stores the manager correctly
 	// so callers know they must provide it.
 	bm := btrfs.NewManager("/pool")
-	s := NewServer(bm, nil, nil)
+	s := NewServer(bm, nil, nil, nil)
 
 	if s.tmplMgr != nil {
 		t.Error("expected nil tmplMgr")

@@ -464,8 +464,7 @@ class TestBashExecToolOracle:
 
         # Volume routing hints required by v2 architecture
         test_context["volume_id"] = "vol-test123"
-        test_context["node_name"] = "node-1"
-        test_context["volume_state"] = "local"
+        test_context["cache_node"] = "node-1"
         test_context["compute_tier"] = "environment"
         test_context["container_name"] = "frontend"
 

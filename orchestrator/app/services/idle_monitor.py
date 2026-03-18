@@ -1,18 +1,12 @@
 """
-Idle Monitor — background loops for compute idle shutdown and disk eviction.
+Idle Monitor — background loop for compute idle shutdown.
 
-Two independent loops:
+Finds active T2 environments past the idle threshold:
+- Warning: publishes `idle_warning` WebSocket event.
+- Shutdown: transitions to 'stopping' and dispatches hibernate_project_bg().
 
-1. **idle_monitor_loop** (every 60s): Finds active T2 environments past the idle
-   threshold. Two phases:
-   - Warning: publishes `idle_warning` WebSocket event.
-   - Shutdown: transitions to 'stopping' and dispatches hibernate_project_bg().
-
-2. **disk_eviction_loop** (every 300s): Evicts local btrfs volumes for projects
-   that have been hibernated longer than the eviction threshold. Syncs to S3
-   first, then deletes local data.
-
-Both loops are registered under distributed locks so only one pod runs each.
+Disk eviction is no longer handled here — the Volume Hub manages cache
+lifecycle autonomously.
 """
 
 from __future__ import annotations
@@ -22,7 +16,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import selectinload
 
 from ..config import get_settings
 from ..database import AsyncSessionLocal
@@ -79,7 +72,7 @@ async def _check_idle_environments() -> None:
         projects = result.scalars().all()
 
         if not projects:
-            # Also recover stuck "stopping" projects (>10 min)
+            # Also recover stuck "stopping" projects
             await _recover_stuck_stopping(db, now)
             return
 
@@ -89,17 +82,9 @@ async def _check_idle_environments() -> None:
 
         for project in projects:
             try:
-                if (
-                    project.last_activity is not None
-                    and project.last_activity > shutdown_cutoff
-                ):
+                if project.last_activity is not None and project.last_activity > shutdown_cutoff:
                     # Warning phase — still within grace period
-                    remaining = (
-                        project.last_activity
-                        + idle_timeout
-                        + grace
-                        - now
-                    )
+                    remaining = project.last_activity + idle_timeout + grace - now
                     minutes_left = max(0, int(remaining.total_seconds() / 60))
 
                     if pubsub:
@@ -110,8 +95,7 @@ async def _check_idle_environments() -> None:
                                 "type": "idle_warning",
                                 "minutes_until_shutdown": minutes_left,
                                 "message": (
-                                    f"Environment will stop in {minutes_left} min"
-                                    " due to inactivity"
+                                    f"Environment will stop in {minutes_left} min due to inactivity"
                                 ),
                             },
                         )
@@ -132,14 +116,10 @@ async def _check_idle_environments() -> None:
 
                     from .hibernate import hibernate_project_bg
 
-                    asyncio.create_task(
-                        hibernate_project_bg(project.id, project.owner_id)
-                    )
+                    asyncio.create_task(hibernate_project_bg(project.id, project.owner_id))
 
             except Exception:
-                logger.exception(
-                    "[IDLE] Failed to process idle project %s", project.slug
-                )
+                logger.exception("[IDLE] Failed to process idle project %s", project.slug)
 
         # Recover stuck "stopping" projects
         await _recover_stuck_stopping(db, now)
@@ -165,79 +145,3 @@ async def _recover_stuck_stopping(db, now: datetime) -> None:
         p.environment_status = "stopped"
     if stuck_projects:
         await db.commit()
-
-
-# =========================================================================
-# Disk Eviction — separate loop for freeing local volumes
-# =========================================================================
-
-_EVICTION_INTERVAL_SECONDS = 300  # 5 min
-
-
-async def disk_eviction_loop() -> None:
-    """Evict local volumes for projects hibernated > threshold. Runs every 5 min."""
-    logger.info("[EVICT] Disk eviction monitor started")
-
-    while True:
-        try:
-            await _evict_dormant_volumes()
-        except asyncio.CancelledError:
-            logger.info("[EVICT] Disk eviction monitor cancelled")
-            raise
-        except Exception:
-            logger.exception("[EVICT] Error in eviction loop")
-
-        try:
-            await asyncio.sleep(_EVICTION_INTERVAL_SECONDS)
-        except asyncio.CancelledError:
-            logger.info("[EVICT] Disk eviction monitor cancelled during sleep")
-            raise
-
-
-async def _evict_dormant_volumes() -> None:
-    """Find hibernated projects with local volumes past the dormancy threshold. Evict to free disk."""
-    settings = get_settings()
-    eviction_threshold = timedelta(hours=settings.k8s_eviction_dormancy_hours)
-    now = datetime.now(UTC)
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Project)
-            .options(selectinload(Project.containers))
-            .where(Project.environment_status == "hibernated")
-            .where(Project.volume_state == "local")
-            .where(Project.hibernated_at < now - eviction_threshold)
-        )
-        projects = result.scalars().all()
-
-        if not projects:
-            return
-
-        from .volume_manager import get_volume_manager
-
-        vm = get_volume_manager()
-
-        for project in projects:
-            if not project.volume_id or not project.node_name:
-                continue
-            try:
-                # Sync first, then evict
-                await vm.trigger_sync(project.volume_id, project.node_name)
-
-                service_dirs = [
-                    c.directory
-                    for c in (project.containers or [])
-                    if getattr(c, "container_type", "base") == "service"
-                    and c.directory
-                ]
-                await vm.evict_local_data(
-                    project.volume_id, project.node_name, service_dirs
-                )
-
-                project.volume_state = "remote_only"
-                project.node_name = None
-                await db.commit()
-
-                logger.info("[EVICT] Evicted volume for %s", project.slug)
-            except Exception:
-                logger.exception("[EVICT] Failed to evict %s", project.slug)

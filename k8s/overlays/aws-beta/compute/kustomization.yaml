@@ -1,13 +1,15 @@
-# AWS EKS Production Overlay for btrfs CSI Driver
-# Deploy with: ./scripts/aws-deploy.sh deploy-csi production
+# AWS EKS Beta Overlay for Compute Infrastructure
+# Includes: btrfs CSI driver (controller + node) + Volume Hub
+# Deploy with: ./scripts/aws-deploy.sh deploy-compute beta
 # SA + config Secret are created by terraform (kubernetes.tf) — not kustomize
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
   - ../../../../services/btrfs-csi/deploy
+  - ../../../../k8s/base/volume-hub
 
 images:
   - name: tesslate-btrfs-csi
     newName: <ECR_REGISTRY>/tesslate-btrfs-csi
-    newTag: production
+    newTag: beta

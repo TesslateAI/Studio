@@ -2,7 +2,7 @@ import { type ReactNode } from 'react';
 import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
 import { Dropdown } from './Dropdown';
-import { type VolumeState, type ComputeTier } from '../../types/project';
+import { type ComputeTier } from '../../types/project';
 import { getEnvironmentStatus } from './environmentStatus';
 import { EnvironmentStatusBadge } from './EnvironmentStatusBadge';
 
@@ -19,7 +19,6 @@ interface Project {
   gitRepoName?: string;
   gitSyncStatus?: 'synced' | 'ahead' | 'behind' | 'diverged' | 'error';
   slug?: string;
-  volume_state?: string;
   compute_tier?: string;
 }
 
@@ -147,7 +146,6 @@ export function ProjectCard({
               {/* Environment Status Badge */}
               {(() => {
                 const status = getEnvironmentStatus(
-                  (project.volume_state ?? 'local') as VolumeState,
                   (project.compute_tier ?? 'none') as ComputeTier
                 );
                 if (!status) return null;

@@ -556,15 +556,13 @@ async def startup():
         logger.info("Compute pod reaper started")
 
         # Idle monitor: scale-to-zero for T2 environments after idle timeout
-        from .services.idle_monitor import disk_eviction_loop, idle_monitor_loop
+        from .services.idle_monitor import idle_monitor_loop
 
         if redis:
             asyncio.create_task(dlock.run_with_lock("idle_monitor", idle_monitor_loop))
-            asyncio.create_task(dlock.run_with_lock("disk_eviction", disk_eviction_loop))
         else:
             asyncio.create_task(idle_monitor_loop())
-            asyncio.create_task(disk_eviction_loop())
-        logger.info("Idle environment monitor and disk eviction monitor started")
+        logger.info("Idle environment monitor started")
 
     # Initialize base cache (Docker mode only - async - doesn't block startup)
     if is_docker_mode():

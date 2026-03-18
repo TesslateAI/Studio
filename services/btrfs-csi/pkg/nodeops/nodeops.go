@@ -49,6 +49,23 @@ type NodeOps interface {
 
 	// SetOwnership recursively chowns a subvolume to the given uid:gid.
 	SetOwnership(ctx context.Context, name string, uid, gid int) error
+
+	// SyncVolume triggers an immediate S3 sync for a single volume.
+	SyncVolume(ctx context.Context, volumeID string) error
+
+	// DeleteFromS3 deletes all S3 objects under the volume's prefix.
+	DeleteFromS3(ctx context.Context, volumeID string) error
+
+	// GetSyncState returns the sync tracking state of all volumes on this node.
+	GetSyncState(ctx context.Context) ([]TrackedVolumeState, error)
+
+	// SendVolumeTo sends a volume to a target node via btrfs send | zstd stream.
+	// targetAddr is the target node's NodeOps gRPC address (host:port).
+	SendVolumeTo(ctx context.Context, volumeID, targetAddr string) error
+
+	// SendTemplateTo sends a template to a target node via btrfs send | zstd stream.
+	// targetAddr is the target node's NodeOps gRPC address (host:port).
+	SendTemplateTo(ctx context.Context, templateName, targetAddr string) error
 }
 
 // SubvolumeInfo mirrors btrfs.SubvolumeInfo for the nodeops API boundary.
@@ -57,4 +74,10 @@ type SubvolumeInfo struct {
 	Name     string `json:"name"`
 	Path     string `json:"path"`
 	ReadOnly bool   `json:"read_only"`
+}
+
+// TrackedVolumeState reports the sync daemon state for a tracked volume.
+type TrackedVolumeState struct {
+	VolumeID   string `json:"volume_id"`
+	LastSyncAt string `json:"last_sync_at,omitempty"` // ISO 8601 or empty
 }

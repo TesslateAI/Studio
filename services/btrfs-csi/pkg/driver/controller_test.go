@@ -268,6 +268,26 @@ func (m *mockNodeOps) SetOwnership(_ context.Context, _ string, _, _ int) error 
 	return nil
 }
 
+func (m *mockNodeOps) SyncVolume(_ context.Context, _ string) error {
+	return nil
+}
+
+func (m *mockNodeOps) DeleteFromS3(_ context.Context, _ string) error {
+	return nil
+}
+
+func (m *mockNodeOps) GetSyncState(_ context.Context) ([]nodeops.TrackedVolumeState, error) {
+	return nil, nil
+}
+
+func (m *mockNodeOps) SendVolumeTo(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (m *mockNodeOps) SendTemplateTo(_ context.Context, _, _ string) error {
+	return nil
+}
+
 // newTestControllerServer builds a ControllerServer backed by the given mock.
 func newTestControllerServer(mock *mockNodeOps) *ControllerServer {
 	d := &Driver{

@@ -1,12 +1,9 @@
-import type { VolumeState, ComputeTier } from '../../types/project';
+import type { ComputeTier } from '../../types/project';
 
 export type EnvironmentStatus =
   | 'running'
   | 'agent_active'
   | 'files_ready'
-  | 'provisioning'
-  | 'restoring'
-  | 'hibernated'
   | 'stopping'
   | 'starting';
 
@@ -41,27 +38,6 @@ export const STATUS_MAP: Record<EnvironmentStatus, StatusConfig> = {
     textColor: 'text-cyan-400',
     dotColor: 'bg-cyan-400',
   },
-  provisioning: {
-    label: 'Provisioning...',
-    tooltip: 'Project storage is being set up.',
-    className: 'bg-purple-500/10 border-purple-500/20',
-    textColor: 'text-purple-400',
-    spin: true,
-  },
-  restoring: {
-    label: 'Restoring...',
-    tooltip: 'Project files are being restored from storage.',
-    className: 'bg-cyan-500/10 border-cyan-500/20',
-    textColor: 'text-cyan-400',
-    spin: true,
-  },
-  hibernated: {
-    label: 'Hibernated',
-    tooltip: 'Environment is hibernated. Start it to access preview and terminal.',
-    className: 'bg-blue-500/10 border-blue-500/20',
-    textColor: 'text-blue-400',
-    dotColor: 'bg-blue-400',
-  },
   stopping: {
     label: 'Hibernating',
     tooltip: 'Environment is shutting down. Preview may show errors until hibernation completes.',
@@ -78,9 +54,8 @@ export const STATUS_MAP: Record<EnvironmentStatus, StatusConfig> = {
   },
 };
 
-/** Derive environment status from the two-axis model + optional transient flags. */
+/** Derive environment status from compute tier + optional transient flags. */
 export function getEnvironmentStatus(
-  volumeState: VolumeState,
   computeTier: ComputeTier,
   options?: { stopping?: boolean; starting?: boolean }
 ): EnvironmentStatus | null {
@@ -88,21 +63,10 @@ export function getEnvironmentStatus(
   if (options?.stopping) return 'stopping';
   if (options?.starting) return 'starting';
 
-  // Two-axis model
+  // Compute tier based
   if (computeTier === 'environment') return 'running';
   if (computeTier === 'ephemeral') return 'agent_active';
 
   // computeTier === 'none'
-  switch (volumeState) {
-    case 'restoring':
-      return 'restoring';
-    case 'provisioning':
-      return 'provisioning';
-    case 'remote_only':
-      return 'hibernated';
-    case 'local':
-      return 'files_ready';
-    default:
-      return null; // 'legacy' — no badge
-  }
+  return 'files_ready';
 }

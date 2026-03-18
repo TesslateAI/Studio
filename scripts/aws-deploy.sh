@@ -24,8 +24,8 @@
 #   ./scripts/aws-deploy.sh build production backend         # Build only backend
 #   ./scripts/aws-deploy.sh build beta frontend backend      # Build multiple images
 #   ./scripts/aws-deploy.sh build beta --cached              # Build with Docker cache
-#   ./scripts/aws-deploy.sh build beta btrfs-csi             # Build only btrfs CSI driver
-#   ./scripts/aws-deploy.sh deploy-csi beta                  # Apply CSI driver kustomize manifests
+#   ./scripts/aws-deploy.sh build beta compute               # Build compute image, deploy + restart
+#   ./scripts/aws-deploy.sh deploy-compute beta              # Apply compute manifests (CSI + Volume Hub)
 #   ./scripts/aws-deploy.sh build beta backend --cached      # Build only backend with cache
 # =============================================================================
 
@@ -141,6 +141,7 @@ resolve_deployment_name() {
         redis)            echo "redis" ;;
         pg|postgres)      echo "postgres" ;;
         litellm-pg|litellm-postgres) echo "litellm-postgres" ;;
+        volume-hub)       echo "tesslate-volume-hub" ;;
         *)                echo "$1" ;;
     esac
 }
@@ -171,10 +172,10 @@ ENVIRONMENT="${2:-}"
 
 # Validate command
 case "$COMMAND" in
-    init|plan|apply|destroy|output|state|terraform|deploy-k8s|deploy-csi|build|reload)
+    init|plan|apply|destroy|output|state|terraform|deploy-k8s|deploy-compute|build|reload)
         ;;
     *)
-        error "Invalid command: $COMMAND\n\nUsage: ./scripts/aws-deploy.sh {init|plan|apply|terraform|destroy|output|state|deploy-k8s|deploy-csi|build|reload} {production|beta|shared}"
+        error "Invalid command: $COMMAND\n\nUsage: ./scripts/aws-deploy.sh {init|plan|apply|terraform|destroy|output|state|deploy-k8s|deploy-compute|build|reload} {production|beta|shared}"
         ;;
 esac
 
@@ -206,12 +207,12 @@ case "$ENVIRONMENT" in
 esac
 
 # Only cd to terraform dir for terraform commands
-if [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-csi" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
+if [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-compute" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
     cd "$TF_DIR"
 fi
 
 # Skip terraform file checks for commands that don't use terraform
-if [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-csi" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
+if [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-compute" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
     # Check if backend config exists
     if [ ! -f "$BACKEND_CONFIG" ]; then
         error "Backend config not found: $TF_DIR/$BACKEND_CONFIG"
@@ -219,7 +220,7 @@ if [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-csi" ] && [ "$COMMA
 fi
 
 # Check if tfvars file exists (except for state/output/deploy-k8s commands)
-if [ "$COMMAND" != "state" ] && [ "$COMMAND" != "output" ] && [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-csi" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
+if [ "$COMMAND" != "state" ] && [ "$COMMAND" != "output" ] && [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-compute" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
     if [ ! -f "$TFVARS_FILE" ]; then
         warning "tfvars file not found: $TFVARS_FILE"
         info "Download from AWS Secrets Manager with:"
@@ -229,7 +230,7 @@ if [ "$COMMAND" != "state" ] && [ "$COMMAND" != "output" ] && [ "$COMMAND" != "d
 fi
 
 # Verify correct backend is loaded (skip for init, all, and deploy-k8s which don't need terraform)
-if [ "$COMMAND" != "init" ] && [ "$COMMAND" != "terraform" ] && [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-csi" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
+if [ "$COMMAND" != "init" ] && [ "$COMMAND" != "terraform" ] && [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-compute" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
     EXPECTED_KEY="${ENVIRONMENT}/terraform.tfstate"
     TF_STATE_FILE=".terraform/terraform.tfstate"
     if [ -f "$TF_STATE_FILE" ]; then
@@ -249,7 +250,7 @@ if [ "$COMMAND" != "init" ] && [ "$COMMAND" != "terraform" ] && [ "$COMMAND" != 
 fi
 
 # Display environment info (build/reload/deploy-k8s show their own or minimal summary)
-if [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ] && [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-csi" ]; then
+if [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ] && [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "deploy-compute" ]; then
     info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     info "Environment: $ENVIRONMENT"
     info "Command:     $COMMAND"
@@ -332,29 +333,31 @@ case "$COMMAND" in
         info "Verify with: kubectl get pods -n tesslate"
         ;;
 
-    deploy-csi)
+    deploy-compute)
         if [ "$ENVIRONMENT" = "shared" ]; then
-            error "deploy-csi is not available for $ENVIRONMENT environment"
+            error "deploy-compute is not available for $ENVIRONMENT environment"
         fi
 
-        CSI_OVERLAY="$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/csi"
-        if [ ! -d "$CSI_OVERLAY" ]; then
-            error "CSI overlay not found: $CSI_OVERLAY"
+        COMPUTE_OVERLAY="$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/compute"
+        if [ ! -d "$COMPUTE_OVERLAY" ]; then
+            error "Compute overlay not found: $COMPUTE_OVERLAY"
         fi
 
         ensure_kubectl_context
-        info "Applying btrfs CSI driver manifests from aws-${ENVIRONMENT}/csi..."
-        kubectl apply -k "$CSI_OVERLAY"
-        success "✓ CSI manifests applied"
+        info "Applying compute manifests (CSI driver + Volume Hub) from aws-${ENVIRONMENT}/compute..."
+        kubectl apply -k "$COMPUTE_OVERLAY"
+        success "✓ Compute manifests applied"
         echo
 
         info "Waiting for CSI controller..."
         kubectl rollout status deployment/tesslate-btrfs-csi-controller -n kube-system --timeout=120s
         info "Waiting for CSI node daemonset..."
         kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
-        success "✓ CSI driver deployed"
+        info "Waiting for Volume Hub..."
+        kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+        success "✓ Compute infrastructure deployed"
         echo
-        info "Verify with: kubectl get pods -n kube-system -l 'app in (tesslate-btrfs-csi-controller,tesslate-btrfs-csi-node)'"
+        info "Verify with: kubectl get pods -n kube-system -l 'app in (tesslate-btrfs-csi-controller,tesslate-btrfs-csi-node,tesslate-volume-hub)'"
         ;;
 
     build)
@@ -390,13 +393,13 @@ case "$COMMAND" in
             [backend]="orchestrator/Dockerfile"
             [frontend]="app/Dockerfile.prod"
             [devserver]="orchestrator/Dockerfile.devserver"
-            [btrfs-csi]="services/btrfs-csi/Dockerfile"
+            [compute]="services/btrfs-csi/Dockerfile"
         )
         declare -A BUILD_CONTEXTS=(
             [backend]="orchestrator/"
             [frontend]="app/"
             [devserver]="orchestrator/"
-            [btrfs-csi]="services/btrfs-csi/"
+            [compute]="services/btrfs-csi/"
         )
         declare -A K8S_LABELS=(
             [backend]="app=tesslate-backend"
@@ -407,16 +410,20 @@ case "$COMMAND" in
         declare -A ALSO_RESTART=(
             [backend]="tesslate-worker"
         )
-        # CSI driver uses a different namespace and resource types
-        declare -A CSI_RESTART=(
-            [btrfs-csi]="1"
+        # Compute image uses kube-system namespace (CSI driver + Volume Hub)
+        declare -A COMPUTE_RESTART=(
+            [compute]="1"
+        )
+        # ECR repo name override (compute image pushes to tesslate-btrfs-csi repo)
+        declare -A ECR_REPO_NAME=(
+            [compute]="tesslate-btrfs-csi"
         )
 
         # Validate image names
         for img in $IMAGES; do
             case "$img" in
-                backend|frontend|devserver|btrfs-csi) ;;
-                *) error "Unknown image: $img. Valid: backend, frontend, devserver, btrfs-csi" ;;
+                backend|frontend|devserver|compute) ;;
+                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute" ;;
             esac
         done
 
@@ -454,7 +461,8 @@ case "$COMMAND" in
             BUILD_TMPDIR=$(mktemp -d)
 
             for img in $IMAGES; do
-                FULL_TAG="${ECR_REGISTRY}/tesslate-${img}:${ENVIRONMENT}"
+                REPO_NAME="${ECR_REPO_NAME[$img]:-tesslate-${img}}"
+                FULL_TAG="${ECR_REGISTRY}/${REPO_NAME}:${ENVIRONMENT}"
                 DOCKERFILE="${DOCKERFILES[$img]}"
                 CONTEXT="${BUILD_CONTEXTS[$img]}"
                 LOG_FILE="$BUILD_TMPDIR/${img}.log"
@@ -497,7 +505,8 @@ case "$COMMAND" in
         else
             # Single image — build inline with live output
             for img in $IMAGES; do
-                FULL_TAG="${ECR_REGISTRY}/tesslate-${img}:${ENVIRONMENT}"
+                REPO_NAME="${ECR_REPO_NAME[$img]:-tesslate-${img}}"
+                FULL_TAG="${ECR_REGISTRY}/${REPO_NAME}:${ENVIRONMENT}"
                 DOCKERFILE="${DOCKERFILES[$img]}"
                 CONTEXT="${BUILD_CONTEXTS[$img]}"
 
@@ -527,8 +536,8 @@ case "$COMMAND" in
         RESTART_DEPLOYMENTS=()
         RESTART_NAMES=()
         for img in $IMAGES; do
-            # CSI driver restarts are in kube-system, not tesslate
-            if [ -n "${CSI_RESTART[$img]:-}" ]; then
+            # Compute image restarts are in kube-system, not tesslate
+            if [ -n "${COMPUTE_RESTART[$img]:-}" ]; then
                 continue
             fi
             LABEL="${K8S_LABELS[$img]:-}"
@@ -558,21 +567,26 @@ case "$COMMAND" in
             ROLLOUT_IMGS+=("${RESTART_NAMES[$i]}")
         done
 
-        # Handle CSI driver restarts (kube-system namespace, deployment + daemonset)
+        # Handle compute image restarts (kube-system: CSI controller + node + Volume Hub)
         for img in $IMAGES; do
-            if [ -n "${CSI_RESTART[$img]:-}" ]; then
-                info "[btrfs-csi] Applying CSI manifests..."
-                kubectl apply -k "$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/csi"
-                info "[btrfs-csi] Rolling restart controller..."
+            if [ -n "${COMPUTE_RESTART[$img]:-}" ]; then
+                info "[compute] Applying compute manifests..."
+                kubectl apply -k "$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/compute"
+                info "[compute] Rolling restart CSI controller..."
                 kubectl rollout restart deployment/tesslate-btrfs-csi-controller -n kube-system
-                info "[btrfs-csi] Rolling restart node daemonset..."
+                info "[compute] Rolling restart CSI node daemonset..."
                 kubectl rollout restart daemonset/tesslate-btrfs-csi-node -n kube-system
+                info "[compute] Rolling restart Volume Hub..."
+                kubectl rollout restart deployment/tesslate-volume-hub -n kube-system
                 kubectl rollout status deployment/tesslate-btrfs-csi-controller -n kube-system --timeout=120s &
                 ROLLOUT_PIDS+=($!)
-                ROLLOUT_IMGS+=("btrfs-csi-controller")
+                ROLLOUT_IMGS+=("csi-controller")
                 kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s &
                 ROLLOUT_PIDS+=($!)
-                ROLLOUT_IMGS+=("btrfs-csi-node")
+                ROLLOUT_IMGS+=("csi-node")
+                kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s &
+                ROLLOUT_PIDS+=($!)
+                ROLLOUT_IMGS+=("volume-hub")
             fi
         done
 
@@ -610,6 +624,7 @@ case "$COMMAND" in
 
         # Resolve short names to deployment names
         DEPLOYMENTS=()
+        KUBE_SYSTEM_TARGETS=()
         SYNC_LITELLM=false
         if [ -z "$TARGETS" ]; then
             # No specific targets — reload all (apply manifests + restart backend/frontend/worker)
@@ -618,6 +633,10 @@ case "$COMMAND" in
         else
             APPLY_MANIFESTS=false
             for target in $TARGETS; do
+                if [ "$target" = "volume-hub" ]; then
+                    KUBE_SYSTEM_TARGETS+=("deployment/tesslate-volume-hub")
+                    continue
+                fi
                 dep=$(resolve_deployment_name "$target")
                 DEPLOYMENTS+=("$dep")
                 if [ "$target" = "litellm" ]; then
@@ -659,7 +678,16 @@ case "$COMMAND" in
         fi
 
         info "Step ${STEP}/${TOTAL_STEPS}: Restarting pods..."
-        restart_pods "${DEPLOYMENTS[@]}"
+        if [ ${#DEPLOYMENTS[@]} -gt 0 ]; then
+            restart_pods "${DEPLOYMENTS[@]}"
+        fi
+        # Handle kube-system targets (Volume Hub, etc.)
+        for ks_target in "${KUBE_SYSTEM_TARGETS[@]}"; do
+            info "Restarting ${ks_target} in kube-system..."
+            kubectl rollout restart "${ks_target}" -n kube-system
+            kubectl rollout status "${ks_target}" -n kube-system --timeout=120s
+            success "[${ks_target##*/}] ✓ Ready"
+        done
         verify_pods
         success "✓ Reload complete for $ENVIRONMENT!"
         ;;

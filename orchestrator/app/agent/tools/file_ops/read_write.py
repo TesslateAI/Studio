@@ -68,8 +68,7 @@ async def read_file_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
             subdir=container_directory,
             # Volume routing hints
             volume_id=context.get("volume_id"),
-            node_name=context.get("node_name"),
-            volume_state=context.get("volume_state"),
+            cache_node=context.get("cache_node"),
         )
 
         if content is not None:
@@ -153,8 +152,7 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
             subdir=container_directory,
             # Volume routing hints
             volume_id=context.get("volume_id"),
-            node_name=context.get("node_name"),
-            volume_state=context.get("volume_state"),
+            cache_node=context.get("cache_node"),
         )
 
         if success:
@@ -209,9 +207,7 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
                                     await sync_db.delete(orphan)
 
                             await sync_db.commit()
-                            logger.info(
-                                "[AGENT] Auto-synced containers from .tesslate/config.json"
-                            )
+                            logger.info("[AGENT] Auto-synced containers from .tesslate/config.json")
                 except Exception as e:
                     logger.warning(f"[AGENT] Failed to auto-sync containers: {e}")
 

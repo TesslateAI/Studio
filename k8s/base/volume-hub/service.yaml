@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tesslate-volume-hub
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: tesslate-volume-hub
+    app.kubernetes.io/component: volume-hub
+spec:
+  type: ClusterIP
+  selector:
+    app: tesslate-volume-hub
+  ports:
+  - name: hub-grpc
+    port: 9750
+    targetPort: 9750
+    protocol: TCP

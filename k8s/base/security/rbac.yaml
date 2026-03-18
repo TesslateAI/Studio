@@ -27,7 +27,7 @@ rules:
   resources: ["namespaces"]
   verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
-# Core resources (pods, services, PVCs, PVs, secrets, configmaps)
+# Core resources (pods, services, PVCs, PVs, secrets, configmaps, quotas)
 - apiGroups: [""]
   resources:
     - pods
@@ -38,6 +38,7 @@ rules:
     - persistentvolumes
     - secrets
     - configmaps
+    - resourcequotas
   verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
 # App resources (deployments, replicasets)
@@ -75,6 +76,11 @@ rules:
     - volumesnapshotcontents
     - volumesnapshotclasses
   verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+
+# Node discovery (for scheduling-aware volume placement)
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
 
 # Events (for troubleshooting)
 - apiGroups: [""]

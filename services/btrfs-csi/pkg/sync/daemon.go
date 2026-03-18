@@ -136,6 +136,50 @@ func (d *Daemon) UntrackVolume(volumeID string) {
 	klog.V(2).Infof("Untracked volume %s from sync", volumeID)
 }
 
+// GetTrackedState returns the current sync state for all tracked volumes.
+// Used by the Hub to rebuild its registry on startup.
+func (d *Daemon) GetTrackedState() []TrackedVolumeState {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	states := make([]TrackedVolumeState, 0, len(d.tracked))
+	for _, tv := range d.tracked {
+		s := TrackedVolumeState{VolumeID: tv.volumeID}
+		if !tv.lastSyncAt.IsZero() {
+			s.LastSyncAt = tv.lastSyncAt.UTC().Format(time.RFC3339)
+		}
+		states = append(states, s)
+	}
+	return states
+}
+
+// DeleteS3Prefix deletes all objects under the volume's S3 prefix.
+func (d *Daemon) DeleteS3Prefix(ctx context.Context, volumeID string) error {
+	if d.store == nil {
+		return nil
+	}
+	prefix := fmt.Sprintf("volumes/%s/", volumeID)
+	objects, err := d.store.List(ctx, prefix)
+	if err != nil {
+		return fmt.Errorf("list objects for %q: %w", prefix, err)
+	}
+	for _, obj := range objects {
+		if delErr := d.store.Delete(ctx, obj.Key); delErr != nil {
+			klog.Warningf("DeleteS3Prefix: failed to delete %q: %v", obj.Key, delErr)
+		}
+	}
+	if len(objects) > 0 {
+		klog.V(2).Infof("DeleteS3Prefix: deleted %d objects for volume %s", len(objects), volumeID)
+	}
+	return nil
+}
+
+// TrackedVolumeState reports the sync state for a tracked volume.
+type TrackedVolumeState struct {
+	VolumeID   string `json:"volume_id"`
+	LastSyncAt string `json:"last_sync_at,omitempty"`
+}
+
 // SyncVolume performs an immediate sync of a single volume to S3.
 func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
 	d.mu.Lock()

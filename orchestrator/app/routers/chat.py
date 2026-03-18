@@ -685,8 +685,7 @@ async def agent_chat(
             "agent_id": agent_model.id if agent_model else None,
             # v2 volume-first routing hints
             "volume_id": project.volume_id,
-            "node_name": project.node_name,
-            "volume_state": project.volume_state,
+            "cache_node": project.cache_node,
             "compute_tier": project.compute_tier,
         }
 
@@ -1206,8 +1205,7 @@ async def agent_chat_stream(
                 "agent_id": agent_model.id if agent_model else None,
                 # v2 volume-first routing hints
                 "volume_id": project.volume_id,
-                "node_name": project.node_name,
-                "volume_state": project.volume_state,
+                "cache_node": project.cache_node,
                 "compute_tier": project.compute_tier,
             }
 
@@ -2125,8 +2123,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         "edit_mode": edit_mode,
         # v2 volume-first routing hints
         "volume_id": project.volume_id if project else None,
-        "node_name": project.node_name if project else None,
-        "volume_state": project.volume_state if project else None,
+        "cache_node": project.cache_node if project else None,
         "compute_tier": project.compute_tier if project else None,
     }
 

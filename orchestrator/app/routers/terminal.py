@@ -338,7 +338,7 @@ async def _handle_ephemeral_target(
     """Create an ephemeral pod via ComputeManager. Returns (pod_name, namespace)."""
     from ..services.compute_manager import get_compute_manager
 
-    if not project.volume_id or not project.node_name:
+    if not project.volume_id or not project.cache_node:
         raise RuntimeError("Project has no volume — start the environment first")
 
     await websocket.send_json({"type": "provisioning", "message": "Creating ephemeral pod..."})
@@ -346,7 +346,7 @@ async def _handle_ephemeral_target(
     cm = get_compute_manager()
     pod_name, ns = await cm.create_ephemeral_pod(
         volume_id=project.volume_id,
-        node_name=project.node_name,
+        node_name=project.cache_node,
         project_id=str(project.id),
     )
 

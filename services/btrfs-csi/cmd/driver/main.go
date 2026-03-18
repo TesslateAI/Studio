@@ -38,8 +38,9 @@ func main() {
 		s3AccessKey = flag.String("s3-access-key", "", "(deprecated) S3 access key")
 		s3SecretKey = flag.String("s3-secret-key", "", "(deprecated) S3 secret key")
 		s3Region    = flag.String("s3-region", "us-east-1", "(deprecated) S3 region")
-		syncInterval = flag.Duration("sync-interval", 60*time.Second, "Interval between sync daemon runs")
-		showVersion  = flag.Bool("version", false, "Print version and exit")
+		syncInterval   = flag.Duration("sync-interval", 60*time.Second, "Interval between sync daemon runs")
+		hubGRPCPort = flag.Int("hub-grpc-port", 9750, "VolumeHub gRPC listen port (hub mode)")
+		showVersion    = flag.Bool("version", false, "Print version and exit")
 	)
 
 	flag.Parse()
@@ -112,6 +113,7 @@ func main() {
 		driver.WithNodeOpsPort(*nodeOpsPort),
 		driver.WithStorageConfig(*storageProvider, *storageBucket, storageEnvMap),
 		driver.WithSyncInterval(*syncInterval),
+		driver.WithHubGRPCPort(*hubGRPCPort),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())

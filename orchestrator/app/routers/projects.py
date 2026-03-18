@@ -1410,8 +1410,7 @@ async def get_setup_config(
         # Volume routing hints for FileOps
         volume_hints = {
             "volume_id": project.volume_id,
-            "node_name": project.node_name,
-            "volume_state": project.volume_state,
+            "cache_node": project.cache_node,
         }
 
         try:
@@ -1538,8 +1537,7 @@ async def save_setup_config(
         # Volume routing hints
         volume_hints = {
             "volume_id": project.volume_id,
-            "node_name": project.node_name,
-            "volume_state": project.volume_state,
+            "cache_node": project.cache_node,
         }
 
         config_json = json_mod.dumps(

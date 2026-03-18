@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-volume-hub
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: tesslate-volume-hub
+    app.kubernetes.io/component: volume-hub
+    app.kubernetes.io/part-of: tesslate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tesslate-volume-hub
+  template:
+    metadata:
+      labels:
+        app: tesslate-volume-hub
+        app.kubernetes.io/name: tesslate-volume-hub
+        app.kubernetes.io/component: volume-hub
+    spec:
+      serviceAccountName: tesslate-volume-hub
+      containers:
+      - name: hub
+        image: tesslate-btrfs-csi:latest
+        args:
+        - "--mode=hub"
+        - "--hub-grpc-port=9750"
+        ports:
+        - name: hub-grpc
+          containerPort: 9750
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        readinessProbe:
+          tcpSocket:
+            port: 9750
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 9750
+          initialDelaySeconds: 15
+          periodSeconds: 20

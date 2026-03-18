@@ -98,22 +98,6 @@ spec:
       port: 53
 
 ---
-# Allow compute pods (tier-1) full egress for npm install, pip install, git clone
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-compute-egress
-  namespace: tesslate
-spec:
-  podSelector:
-    matchLabels:
-      tesslate.io/tier: "1"
-  policyTypes:
-  - Egress
-  egress:
-  - {}
-
----
 # Allow backend egress to project namespaces and external services
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

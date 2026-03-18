@@ -273,16 +273,13 @@ async def setup_project(
         elif source.volume_id and source.node_name:
             config = await resolve_config_from_volume(source.volume_id, source.node_name)
 
-        if not config:
+        if not config and source.local_path:  # noqa: SIM102
             # No config.json found — try LLM analysis
-            if source.local_path:
-                logger.info("[PIPELINE] No config.json found, trying LLM analysis...")
-                task.update_progress(60, 100, "Analyzing project with AI...")
-                file_tree, config_files = await collect_project_files(source.local_path)
-                if file_tree:
-                    config = await generate_config_via_llm(
-                        file_tree, config_files, user_id, db
-                    )
+            logger.info("[PIPELINE] No config.json found, trying LLM analysis...")
+            task.update_progress(60, 100, "Analyzing project with AI...")
+            file_tree, config_files = await collect_project_files(source.local_path)
+            if file_tree:
+                config = await generate_config_via_llm(file_tree, config_files, user_id, db)
 
         if not config:
             # LLM failed or no files — use fallback
@@ -290,16 +287,13 @@ async def setup_project(
             config = fallback_config(db_project.name)
 
         logger.info(
-            f"[PIPELINE] Config resolved: {len(config.apps)} apps, "
-            f"primary={config.primaryApp}"
+            f"[PIPELINE] Config resolved: {len(config.apps)} apps, primary={config.primaryApp}"
         )
 
         # Step 4: Place files (skip for template snapshots — files already in place)
         placed: PlacedFiles
         if spec.kind == "template_snapshot":
-            placed = PlacedFiles(
-                volume_id=source.volume_id, node_name=source.node_name
-            )
+            placed = PlacedFiles(volume_id=source.volume_id, node_name=source.node_name)
         else:
             if source.local_path:
                 task.update_progress(65, 100, "Placing files...")
@@ -312,9 +306,7 @@ async def setup_project(
                 )
             else:
                 # Volume already created (shouldn't happen except template_snapshot above)
-                placed = PlacedFiles(
-                    volume_id=source.volume_id, node_name=source.node_name
-                )
+                placed = PlacedFiles(volume_id=source.volume_id, node_name=source.node_name)
 
         # Step 5: Create containers
         task.update_progress(90, 100, "Creating containers...")
@@ -325,15 +317,12 @@ async def setup_project(
             base_id=spec.base_id,
             db=db,
         )
-        logger.info(
-            f"[PIPELINE] Created {len(all_ids)} containers, primary={primary_id}"
-        )
+        logger.info(f"[PIPELINE] Created {len(all_ids)} containers, primary={primary_id}")
 
         # Update project metadata
         if placed.volume_id:
             db_project.volume_id = placed.volume_id
-            db_project.node_name = placed.node_name
-            db_project.volume_state = "local"
+            db_project.cache_node = placed.node_name
         if spec.kind == "template_snapshot":
             db_project.compute_tier = "none"
         if spec.git_url:

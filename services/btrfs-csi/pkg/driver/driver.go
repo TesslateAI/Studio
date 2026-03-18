@@ -20,6 +20,7 @@ import (
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/template"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/volumehub"
 )
 
 // Mode determines which CSI services the driver registers.
@@ -29,6 +30,7 @@ const (
 	ModeController Mode = "controller"
 	ModeNode       Mode = "node"
 	ModeAll        Mode = "all" // For single-node testing (e.g., minikube)
+	ModeHub        Mode = "hub" // Volume Hub — canonical store, S3 gateway, cache orchestrator
 )
 
 // Driver is the top-level CSI driver struct that ties together all subsystems.
@@ -44,9 +46,10 @@ type Driver struct {
 	storageBucket   string
 	storageEnv      map[string]string
 
-	syncInterval time.Duration
-	nodeOpsAddr  string // Address of nodeops gRPC server (for controller mode)
-	nodeOpsPort  int    // Port for nodeops gRPC server (for node mode)
+	syncInterval   time.Duration
+	nodeOpsAddr    string // Address of nodeops gRPC server (for controller mode)
+	nodeOpsPort    int    // Port for nodeops gRPC server (for node mode)
+	hubGRPCPort int // VolumeHub gRPC listen port (hub mode)
 
 	// Node-mode subsystems (nil in controller mode).
 	btrfs   *btrfs.Manager
@@ -101,14 +104,21 @@ func WithSyncInterval(interval time.Duration) Option {
 	return func(d *Driver) { d.syncInterval = interval }
 }
 
+func WithHubGRPCPort(grpcPort int) Option {
+	return func(d *Driver) {
+		d.hubGRPCPort = grpcPort
+	}
+}
+
 // NewDriver creates a new Driver with the given options applied.
 func NewDriver(opts ...Option) *Driver {
 	d := &Driver{
-		name:         "btrfs.csi.tesslate.io",
-		version:      "0.1.0",
-		syncInterval: 60 * time.Second,
-		mode:         ModeAll,
-		nodeOpsPort:  9741,
+		name:           "btrfs.csi.tesslate.io",
+		version:        "0.1.0",
+		syncInterval:   60 * time.Second,
+		mode:           ModeAll,
+		nodeOpsPort:    9741,
+		hubGRPCPort: 9750,
 	}
 
 	for _, opt := range opts {
@@ -125,6 +135,8 @@ func (d *Driver) Run(ctx context.Context) error {
 		return d.runNode(ctx)
 	case ModeController:
 		return d.runController(ctx)
+	case ModeHub:
+		return d.runHub(ctx)
 	default:
 		return fmt.Errorf("unknown mode: %s", d.mode)
 	}
@@ -164,7 +176,7 @@ func (d *Driver) runNode(ctx context.Context) error {
 	d.tmplMgr = template.NewManager(d.btrfs, d.store, d.poolPath)
 
 	// Start nodeops gRPC server for controller delegation.
-	d.nodeOpsSrv = nodeops.NewServer(d.btrfs, d.syncer, d.tmplMgr)
+	d.nodeOpsSrv = nodeops.NewServer(d.btrfs, d.syncer, d.tmplMgr, d.store)
 	go func() {
 		addr := fmt.Sprintf(":%d", d.nodeOpsPort)
 		if err := d.nodeOpsSrv.Start(addr, nil); err != nil {
@@ -220,6 +232,76 @@ func (d *Driver) runController(ctx context.Context) error {
 	klog.Infof("Controller connected to nodeops at %s", d.nodeOpsAddr)
 
 	return d.startCSIServer(ctx)
+}
+
+// runHub initializes the Volume Hub — a storageless orchestrator that
+// coordinates nodes for volume lifecycle, cache placement, and S3 sync.
+// Hub mode has ZERO storage, ZERO btrfs — it only serves VolumeHub gRPC.
+func (d *Driver) runHub(ctx context.Context) error {
+	// Build the node registry and populate with known CSI nodes.
+	registry := volumehub.NewNodeRegistry()
+
+	// NodeResolver discovers CSI node pods via K8s Endpoints API and maps
+	// stable K8s node names → current pod IPs.
+	resolver, err := volumehub.NewNodeResolver("tesslate-btrfs-csi-node-svc", "kube-system", 9741)
+	if err != nil {
+		return fmt.Errorf("create node resolver: %w", err)
+	}
+
+	// nodeClientFactory resolves K8s node name → pod IP at connection time.
+	nodeClientFactory := func(nodeName string) (*nodeops.Client, error) {
+		addr := resolver.Resolve(nodeName)
+		if addr == "" {
+			// Stale mapping — try a refresh and resolve again.
+			if refreshErr := resolver.Refresh(ctx); refreshErr != nil {
+				return nil, fmt.Errorf("resolve node %s (refresh failed: %w)", nodeName, refreshErr)
+			}
+			addr = resolver.Resolve(nodeName)
+			if addr == "" {
+				return nil, fmt.Errorf("node %s not found in endpoints", nodeName)
+			}
+		}
+		return nodeops.NewClient(addr, nil)
+	}
+
+	// Start VolumeHub gRPC server.
+	hubSrv := volumehub.NewServer(registry, nodeClientFactory)
+
+	// Initial discovery + periodic refresh (30s) of node endpoints.
+	go func() {
+		for i := 0; i < 10; i++ {
+			if refreshErr := resolver.Refresh(ctx); refreshErr != nil {
+				klog.Warningf("Node discovery attempt %d: %v", i+1, refreshErr)
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			break
+		}
+		if discoverErr := hubSrv.DiscoverNodes(resolver); discoverErr != nil {
+			klog.Warningf("DiscoverNodes: %v", discoverErr)
+		}
+		if rebuildErr := hubSrv.RebuildRegistry(ctx); rebuildErr != nil {
+			klog.Warningf("Registry rebuild: %v", rebuildErr)
+		}
+	}()
+	resolver.StartPeriodicRefresh(ctx, 30*time.Second)
+
+	go func() {
+		addr := fmt.Sprintf(":%d", d.hubGRPCPort)
+		if err := hubSrv.Start(addr, nil); err != nil {
+			klog.Errorf("VolumeHub gRPC server failed: %v", err)
+		}
+	}()
+	klog.Infof("VolumeHub gRPC server on :%d", d.hubGRPCPort)
+
+	// Start Prometheus metrics server.
+	go metrics.StartMetricsServer(":9090", "", "")
+
+	// Block until context is cancelled (signal handler in main.go).
+	<-ctx.Done()
+	hubSrv.Stop()
+	klog.Info("Hub mode stopped")
+	return nil
 }
 
 // startCSIServer starts the gRPC server with the appropriate CSI services.
@@ -411,4 +493,41 @@ func (l *localNodeOps) PromoteToTemplate(ctx context.Context, volumeID, template
 
 func (l *localNodeOps) SetOwnership(ctx context.Context, name string, uid, gid int) error {
 	return l.btrfs.SetOwnership(ctx, name, uid, gid)
+}
+
+func (l *localNodeOps) SyncVolume(ctx context.Context, volumeID string) error {
+	if l.syncer == nil {
+		return fmt.Errorf("S3 sync not configured")
+	}
+	return l.syncer.SyncVolume(ctx, volumeID)
+}
+
+func (l *localNodeOps) DeleteFromS3(ctx context.Context, volumeID string) error {
+	if l.syncer == nil {
+		return nil
+	}
+	return l.syncer.DeleteS3Prefix(ctx, volumeID)
+}
+
+func (l *localNodeOps) GetSyncState(ctx context.Context) ([]nodeops.TrackedVolumeState, error) {
+	if l.syncer == nil {
+		return nil, nil
+	}
+	daemonStates := l.syncer.GetTrackedState()
+	result := make([]nodeops.TrackedVolumeState, len(daemonStates))
+	for i, s := range daemonStates {
+		result[i] = nodeops.TrackedVolumeState{
+			VolumeID:   s.VolumeID,
+			LastSyncAt: s.LastSyncAt,
+		}
+	}
+	return result, nil
+}
+
+func (l *localNodeOps) SendVolumeTo(_ context.Context, _, _ string) error {
+	return fmt.Errorf("SendVolumeTo not supported in all-in-one mode")
+}
+
+func (l *localNodeOps) SendTemplateTo(_ context.Context, _, _ string) error {
+	return fmt.Errorf("SendTemplateTo not supported in all-in-one mode")
 }

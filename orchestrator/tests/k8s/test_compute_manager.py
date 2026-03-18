@@ -195,6 +195,9 @@ class TestComputeManagerTier1:
         mock_v1.delete_namespaced_pod.return_value = None
         mock_v1.list_namespaced_pod.return_value = _make_pod_list([])
 
+        # Mock _ensure_compute_pv_pvc to return a PVC name (reusable per-volume)
+        cm._ensure_compute_pv_pvc = AsyncMock(return_value="vol-pvc-vol-abc123def456")
+
         with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
             output, exit_code, pod_name = await cm.run_command(
                 volume_id="vol-abc123def456",
@@ -207,9 +210,12 @@ class TestComputeManagerTier1:
         assert output == "build output here"
         assert pod_name.startswith("t1-")
 
+        # PV/PVC ensured via reusable helper
+        cm._ensure_compute_pv_pvc.assert_awaited_once_with("vol-abc123def456", "node-1")
+
         # Pod was created
         mock_v1.create_namespaced_pod.assert_called_once()
-        # Pod was deleted in finally block
+        # Pod was deleted in finally block (but PV/PVC are NOT deleted — reusable)
         mock_v1.delete_namespaced_pod.assert_called_once()
 
     async def test_run_command_quota_exceeded(self, cm, mock_v1, mock_settings):
@@ -231,30 +237,28 @@ class TestComputeManagerTier1:
             )
 
     async def test_build_pod_manifest_structure(self, cm, mock_settings):
-        """_build_pod_manifest produces correct labels, volumes, security context."""
+        """_build_pod_manifest produces correct labels, PVC volume, security context."""
         manifest = cm._build_pod_manifest(
             pod_name="t1-test-abcdef",
-            namespace="tesslate",
-            volume_id="vol-abc123def456",
-            node_name="node-1",
+            namespace="tesslate-compute-pool",
             command=["/bin/sh", "-c", "npm install"],
             image="tesslate-devserver:latest",
             timeout=120,
+            pvc_name="vol-pvc-vol-abc123def456",
         )
 
         # Labels
         labels = manifest.metadata.labels
         assert labels["tesslate.io/tier"] == "1"
-        assert labels["tesslate.io/volume-id"] == "vol-abc123def456"
         assert labels["app.kubernetes.io/part-of"] == "tesslate"
 
-        # Volume hostPath
+        # Volume uses PVC (not hostPath) — reusable across pods
         volume = manifest.spec.volumes[0]
         assert volume.name == "project-source"
-        assert volume.host_path.path == "/mnt/tesslate-pool/volumes/vol-abc123def456"
+        assert volume.persistent_volume_claim.claim_name == "vol-pvc-vol-abc123def456"
 
-        # Node name (bypasses scheduler for volume locality)
-        assert manifest.spec.node_name == "node-1"
+        # No node_name on pod (scheduling is driven by PV node affinity)
+        assert manifest.spec.node_name is None
 
         # Pod-level security context
         pod_sc = manifest.spec.security_context
@@ -269,8 +273,21 @@ class TestComputeManagerTier1:
         # Restart policy
         assert manifest.spec.restart_policy == "Never"
 
+    async def test_build_pod_manifest_default_pvc_name(self, cm, mock_settings):
+        """_build_pod_manifest uses a default PVC name when pvc_name is None."""
+        manifest = cm._build_pod_manifest(
+            pod_name="t1-test-abcdef",
+            namespace="tesslate-compute-pool",
+            command=["/bin/sh", "-c", "echo hello"],
+            image="tesslate-devserver:latest",
+            timeout=60,
+        )
+
+        volume = manifest.spec.volumes[0]
+        assert volume.persistent_volume_claim.claim_name == "compute-pvc-t1-test-abcdef"
+
     async def test_reap_orphaned_pods_deletes_old(self, cm, mock_v1, mock_settings):
-        """reap_orphaned_pods deletes pods older than max_age_seconds."""
+        """reap_orphaned_pods deletes pods older than max_age_seconds (no PV/PVC cleanup)."""
         old_time = datetime.now(UTC) - timedelta(hours=2)
         old_pod = _make_pod("t1-old-pod", phase="Running", creation_timestamp=old_time)
 
@@ -282,8 +299,10 @@ class TestComputeManagerTier1:
 
         assert reaped == 1
         mock_v1.delete_namespaced_pod.assert_called_once_with(
-            "t1-old-pod", "tesslate", grace_period_seconds=0
+            "t1-old-pod", mock_settings.compute_pool_namespace, grace_period_seconds=0
         )
+        # PV/PVC are NOT deleted — reusable across pods
+        mock_v1.delete_persistent_volume.assert_not_called()
 
     async def test_reap_orphaned_pods_skips_recent(self, cm, mock_v1, mock_settings):
         """reap_orphaned_pods does NOT delete pods younger than max_age_seconds."""
@@ -297,6 +316,26 @@ class TestComputeManagerTier1:
 
         assert reaped == 0
         mock_v1.delete_namespaced_pod.assert_not_called()
+
+    async def test_delete_pod_does_not_clean_up_pv_pvc(self, cm, mock_v1, mock_settings):
+        """delete_pod only deletes the pod — PV/PVC are reusable and not deleted."""
+        mock_v1.delete_namespaced_pod.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            await cm.delete_pod("eph-vol-abc-xyz123")
+
+        mock_v1.delete_namespaced_pod.assert_called_once()
+        # No PV/PVC cleanup
+        mock_v1.delete_persistent_volume.assert_not_called()
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_not_called()
+
+    async def test_delete_pod_swallows_404(self, cm, mock_v1, mock_settings):
+        """delete_pod does not raise when pod is already gone (404)."""
+        mock_v1.delete_namespaced_pod.side_effect = _api_exception(404, "Not Found")
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            # Should not raise
+            await cm.delete_pod("eph-vol-gone-123456")
 
     async def test_run_command_returns_exit_code(self, cm, mock_v1, mock_settings):
         """run_command returns (output, exit_code, pod_name) tuple."""
@@ -322,6 +361,8 @@ class TestComputeManagerTier1:
         mock_v1.delete_namespaced_pod.return_value = None
         mock_v1.list_namespaced_pod.return_value = _make_pod_list([])
 
+        cm._ensure_compute_pv_pvc = AsyncMock(return_value="vol-pvc-vol-abc123def456")
+
         with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
             output, exit_code, pod_name = await cm.run_command(
                 volume_id="vol-abc123def456",
@@ -342,6 +383,8 @@ class TestComputeManagerTier1:
         mock_v1.read_namespaced_pod.return_value = pending_pod
         mock_v1.delete_namespaced_pod.return_value = None
         mock_v1.list_namespaced_pod.return_value = _make_pod_list([])
+
+        cm._ensure_compute_pv_pvc = AsyncMock(return_value="vol-pvc-vol-abc123def456")
 
         # Patch asyncio.sleep to be instant and patch the event loop time
         # to simulate immediate timeout
@@ -384,6 +427,67 @@ class TestComputeManagerTier1:
         assert output == ""
         # Pod should still be cleaned up in finally block
         mock_v1.delete_namespaced_pod.assert_called_once()
+
+
+# ===========================================================================
+# ComputeManager — _ensure_compute_pv_pvc
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestEnsureComputePvPvc:
+    """_ensure_compute_pv_pvc() — reusable per-volume PV+PVC."""
+
+    @pytest.fixture(autouse=True)
+    def reset_singleton(self):
+        import app.services.compute_manager as cm_module
+
+        cm_module._instance = None
+        yield
+        cm_module._instance = None
+
+    @pytest.fixture
+    def mock_v1(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def cm(self, mock_v1, mock_settings):
+        manager = ComputeManager()
+        manager._v1 = mock_v1
+        return manager
+
+    @staticmethod
+    def _sync_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    async def test_returns_pvc_name(self, cm, mock_v1, mock_settings):
+        """Returns the pvc_name keyed by volume_id."""
+        # PVC does not exist yet (404)
+        mock_v1.read_namespaced_persistent_volume_claim.side_effect = _api_exception(404)
+        # PV does not exist yet (404)
+        mock_v1.read_persistent_volume.side_effect = _api_exception(404)
+        mock_v1.create_persistent_volume.return_value = None
+        mock_v1.create_namespaced_persistent_volume_claim.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            pvc_name = await cm._ensure_compute_pv_pvc("vol-test123", "node-1")
+
+        assert pvc_name == "vol-pvc-vol-test123"
+
+    async def test_reuses_existing_bound_pvc(self, cm, mock_v1, mock_settings):
+        """Returns immediately if PVC already exists and is Bound."""
+        existing_pvc = Mock()
+        existing_pvc.status = Mock()
+        existing_pvc.status.phase = "Bound"
+        mock_v1.read_namespaced_persistent_volume_claim.return_value = existing_pvc
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            pvc_name = await cm._ensure_compute_pv_pvc("vol-test123", "node-1")
+
+        assert pvc_name == "vol-pvc-vol-test123"
+        # Should not create PV or PVC
+        mock_v1.create_persistent_volume.assert_not_called()
+        mock_v1.create_namespaced_persistent_volume_claim.assert_not_called()
 
 
 # ===========================================================================

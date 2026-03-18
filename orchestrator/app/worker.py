@@ -288,7 +288,9 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 db=db,
             )
 
-            chat_history = payload.chat_history or await _get_chat_history(UUID(payload.chat_id), db, limit=10)
+            chat_history = payload.chat_history or await _get_chat_history(
+                UUID(payload.chat_id), db, limit=10
+            )
 
             project_context = payload.project_context or {
                 "project_name": project.name,
@@ -355,8 +357,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "available_skills": available_skills,
                 # Volume routing hints
                 "volume_id": project.volume_id,
-                "node_name": project.node_name,
-                "volume_state": project.volume_state,
+                "cache_node": project.cache_node,
                 "compute_tier": project.compute_tier,
             }
 
@@ -700,7 +701,10 @@ async def refresh_templates(ctx: dict):
             try:
                 # Get latest remote SHA via git ls-remote
                 proc = await asyncio.create_subprocess_exec(
-                    "git", "ls-remote", base.git_repo_url, "HEAD",
+                    "git",
+                    "ls-remote",
+                    base.git_repo_url,
+                    "HEAD",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -732,9 +736,7 @@ async def refresh_templates(ctx: dict):
                 await builder.build_template(base, db)
                 rebuilt += 1
             except Exception:
-                logger.exception(
-                    "[WORKER] Failed to refresh template for %s", base.slug
-                )
+                logger.exception("[WORKER] Failed to refresh template for %s", base.slug)
 
         if rebuilt:
             logger.info("[WORKER] Refreshed %d templates", rebuilt)

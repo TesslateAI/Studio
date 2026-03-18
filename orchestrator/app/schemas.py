@@ -149,8 +149,7 @@ class Project(ProjectBase):
     updated_at: datetime | None
     environment_status: str | None = None  # 'active', 'hibernated', 'hibernating', 'corrupted'
     hibernated_at: datetime | None = None
-    volume_state: str = "legacy"   # legacy | provisioning | local | remote_only | restoring
-    compute_tier: str = "none"     # none | ephemeral | environment
+    compute_tier: str = "none"  # none | ephemeral | environment
 
     class Config:
         from_attributes = True
@@ -259,6 +258,7 @@ class Container(ContainerBase):
 
 class AppConfigSchema(BaseModel):
     """Schema for a single app in .tesslate/config.json."""
+
     directory: str = "."
     port: int | None = 3000
     start: str
@@ -269,6 +269,7 @@ class AppConfigSchema(BaseModel):
 
 class InfraConfigSchema(BaseModel):
     """Schema for an infrastructure service in .tesslate/config.json."""
+
     image: str
     port: int
     x: float | None = None
@@ -277,6 +278,7 @@ class InfraConfigSchema(BaseModel):
 
 class TesslateConfigCreate(BaseModel):
     """Request schema for creating/updating .tesslate/config.json."""
+
     apps: dict[str, AppConfigSchema]
     infrastructure: dict[str, InfraConfigSchema] = {}
     primaryApp: str
@@ -292,11 +294,13 @@ class TesslateConfigCreate(BaseModel):
 
 class TesslateConfigResponse(TesslateConfigCreate):
     """Response schema for .tesslate/config.json."""
+
     exists: bool = True
 
 
 class SetupConfigSyncResponse(BaseModel):
     """Response from POST /setup-config after syncing containers."""
+
     container_ids: list[str]
     primary_container_id: str | None = None
 
@@ -948,6 +952,7 @@ class CreateGitHubRepoRequest(BaseModel):
 
 class MarketplaceSkillResponse(BaseModel):
     """Response schema for marketplace skill."""
+
     id: UUID
     name: str
     slug: str
@@ -968,6 +973,7 @@ class MarketplaceSkillResponse(BaseModel):
 
 class SkillInstallRequest(BaseModel):
     """Request for installing a skill on an agent."""
+
     agent_id: UUID
 
 

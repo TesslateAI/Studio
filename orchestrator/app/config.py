@@ -369,7 +369,6 @@ class Settings(BaseSettings):
         300  # EBS/CSI snapshot readiness can exceed 90s under load; keep hibernation reliable
     )
     k8s_hibernation_idle_minutes: int = 10  # Hibernate pods after X minutes of inactivity
-    k8s_eviction_dormancy_hours: int = 1  # Evict local volumes after X hours of hibernation
 
     # ==========================================================================
     # Kubernetes Storage Settings
@@ -417,6 +416,7 @@ class Settings(BaseSettings):
     # Kubernetes Namespace Configuration
     k8s_default_namespace: str = "tesslate"
     k8s_user_environments_namespace: str = "tesslate-user-environments"
+    compute_pool_namespace: str = "tesslate-compute-pool"
 
     # ==========================================================================
     # Template Builder ─────────────────────────────────────────────────
@@ -429,16 +429,25 @@ class Settings(BaseSettings):
     template_build_namespace_prefix: str = "tmpl-build-"
     template_build_storage_class: str = "tesslate-btrfs"  # Must be btrfs CSI (not EBS)
     template_refresh_interval_hours: int = 24
-    template_build_eager_official: bool = False  # Admin-triggered only via /api/admin/templates/build
+    template_build_eager_official: bool = (
+        False  # Admin-triggered only via /api/admin/templates/build
+    )
     template_build_lazy_community: bool = True  # Build community bases on first use
     template_build_nodeops_address: str = "tesslate-btrfs-csi-node-svc.kube-system.svc:9741"
 
     # ==========================================================================
-    # Volume-First Architecture
+    # Volume Hub Architecture
     # ==========================================================================
+    # Volume Hub — canonical volume store, S3 gateway, cache orchestrator
+    volume_hub_address: str = (
+        "tesslate-volume-hub.kube-system.svc:9750"  # Hub gRPC (storageless orchestrator)
+    )
+
     fileops_enabled: bool = True  # Feature flag for v2 file operations via CSI
     fileops_timeout: int = 30  # Default gRPC timeout for file operations (seconds)
-    compute_max_concurrent_pods: int = 5  # Max concurrent compute pods (env-var driven per environment)
+    compute_max_concurrent_pods: int = (
+        5  # Max concurrent compute pods (env-var driven per environment)
+    )
     compute_pod_timeout: int = 600  # Seconds to wait for compute pod readiness
     compute_reaper_interval_seconds: int = 60  # How often the orphaned-pod reaper runs
     compute_reaper_max_age_seconds: int = 900  # 15 min — max pod age before reaping
@@ -485,7 +494,9 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Messaging Channel Configuration
     # ==========================================================================
-    channel_encryption_key: str = ""  # Fernet key for channel credentials. Uses deployment_encryption_key if empty
+    channel_encryption_key: str = (
+        ""  # Fernet key for channel credentials. Uses deployment_encryption_key if empty
+    )
     channel_webhook_rate_limit: int = 60  # Max webhook calls per config per minute
 
     @property

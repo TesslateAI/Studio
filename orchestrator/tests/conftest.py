@@ -350,8 +350,7 @@ def mock_snapshot_manager():
 def mock_project_with_volume(mock_project):
     """Mock project with v2 volume fields."""
     mock_project.volume_id = "vol-test123"
-    mock_project.node_name = "node-1"
-    mock_project.volume_state = "local"
+    mock_project.cache_node = "node-1"
     mock_project.compute_tier = "none"
     mock_project.environment_status = "hibernated"
     mock_project.hibernated_at = None

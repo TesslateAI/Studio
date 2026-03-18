@@ -62,8 +62,7 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     # Volume routing hints
     volume_hints = {
         "volume_id": context.get("volume_id"),
-        "node_name": context.get("node_name"),
-        "volume_state": context.get("volume_state"),
+        "cache_node": context.get("cache_node"),
     }
 
     # 1. Read current file content
@@ -211,8 +210,7 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     # Volume routing hints
     volume_hints = {
         "volume_id": context.get("volume_id"),
-        "node_name": context.get("node_name"),
-        "volume_state": context.get("volume_state"),
+        "cache_node": context.get("cache_node"),
     }
 
     # 1. Read current file content

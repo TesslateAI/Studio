@@ -33,7 +33,6 @@ interface Project {
   status?: Status;
   agents?: Array<{ icon: string; name: string }>;
   environment_status?: string;
-  volume_state?: string;
   compute_tier?: string;
 }
 
@@ -623,7 +622,6 @@ export default function Dashboard() {
                   lastUpdated: formatDate(project.updated_at),
                   isLive: project.status === 'launch',
                   slug: project.slug,
-                  volume_state: project.volume_state,
                   compute_tier: project.compute_tier,
                 }}
                 onOpen={() => navigate(`/project/${project.slug}/builder`)}

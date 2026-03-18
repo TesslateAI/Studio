@@ -36,14 +36,16 @@ import os
 import shlex
 from collections.abc import AsyncIterator
 from pathlib import PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
-
-from kubernetes.client.rest import ApiException
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import grpc
 import grpc.aio
+from kubernetes.client.rest import ApiException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from ..fileops_client import FileOpsClient
 
 from ..snapshot_manager import get_snapshot_manager
 from .base import BaseOrchestrator
@@ -75,7 +77,6 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         self.settings = get_settings()
         self._k8s_client: KubernetesClient | None = None
-        self._node_discovery = None  # Lazy-loaded, cached across calls
 
         # Note: Activity tracking is now database-based (Project.last_activity)
         # No in-memory tracking - supports horizontal scaling of backend
@@ -117,37 +118,62 @@ class KubernetesOrchestrator(BaseOrchestrator):
     # VOLUME-FIRST HELPERS
     # =========================================================================
 
-    async def _get_fileops_client(self, node_name: str):
-        """Get a FileOpsClient connected to the CSI node hosting this volume."""
+    async def _get_fileops_client(
+        self, cache_node: str | None = None, volume_id: str | None = None
+    ) -> "FileOpsClient":
+        """Get a FileOps client routed to a compute node.
+
+        Connects to the compute node's FileOps :9742 (local btrfs, ~0.01ms).
+        If the node is unavailable and a volume_id is provided, calls
+        ensure_cached to migrate the volume to an available node and retries.
+        """
         from ..fileops_client import FileOpsClient
-        from ..node_discovery import NodeDiscovery
 
-        if self._node_discovery is None:
-            self._node_discovery = NodeDiscovery()
-        address = await self._node_discovery.get_fileops_address(node_name)
-        return FileOpsClient(address)
+        # Try node fast path first
+        if cache_node:
+            try:
+                from ..node_discovery import NodeDiscovery
 
-    async def _get_project_volume_info(
-        self, project_id: UUID
-    ) -> tuple[str, str | None, str | None]:
+                discovery = NodeDiscovery()
+                address = await discovery.get_fileops_address(cache_node)
+                return FileOpsClient(address)
+            except Exception:
+                logger.debug(
+                    "[K8S] Node %s FileOps unavailable, attempting re-cache",
+                    cache_node,
+                )
+
+        # Re-cache the volume onto an available node and retry
+        if volume_id:
+            from ..volume_manager import get_volume_manager
+
+            vm = get_volume_manager()
+            new_node = await vm.ensure_cached(volume_id)
+            from ..node_discovery import NodeDiscovery
+
+            discovery = NodeDiscovery()
+            address = await discovery.get_fileops_address(new_node)
+            return FileOpsClient(address)
+
+        raise RuntimeError("No cache_node available and no volume_id for re-cache")
+
+    async def _get_project_volume_info(self, project_id: UUID) -> tuple[str | None, str | None]:
         """Look up volume fields from DB.
 
-        Returns: (volume_state, volume_id, node_name)
+        Returns: (volume_id, cache_node)
         """
+        from sqlalchemy import select as sa_select
+
         from ...database import AsyncSessionLocal
         from ...models import Project
 
-        from sqlalchemy import select as sa_select
-
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                sa_select(Project.volume_state, Project.volume_id, Project.node_name).where(
-                    Project.id == project_id
-                )
+                sa_select(Project.volume_id, Project.cache_node).where(Project.id == project_id)
             )
             row = result.one_or_none()
             if row:
-                return row.volume_state, row.volume_id, row.node_name
+                return row.volume_id, row.cache_node
             raise ValueError(f"Project {project_id} not found")
 
     @staticmethod
@@ -176,61 +202,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
         # Return path relative to the anchor (strip the /vol prefix)
         return str(normalized.relative_to(anchor))
 
-    async def _ensure_volume_accessible(
-        self,
-        project_id: UUID,
-        volume_state: str,
-        volume_id: str,
-        node_name: str,
-    ) -> tuple[str, str]:
-        """Ensure volume is locally accessible. Restores from S3 if needed.
-
-        Returns: (volume_id, possibly-updated node_name)
-        """
-        if volume_state == "local":
-            return volume_id, node_name
-
-        if volume_state == "remote_only":
-            from ..volume_manager import get_volume_manager
-
-            vm = get_volume_manager()
-            new_node = await vm.restore_volume(volume_id)
-
-            from ...database import AsyncSessionLocal
-            from ...models import Project
-
-            from sqlalchemy import update as sa_update
-
-            try:
-                async with AsyncSessionLocal() as db:
-                    await db.execute(
-                        sa_update(Project)
-                        .where(Project.id == project_id)
-                        .values(volume_state="local", node_name=new_node)
-                    )
-                    await db.commit()
-            except Exception as e:
-                logger.error(
-                    f"[K8S] Failed to update volume state after restore "
-                    f"(volume={volume_id}, node={new_node}): {e}"
-                )
-                # Volume is restored — proceed even if DB update fails.
-                # Next access will re-trigger restore (idempotent).
-            return volume_id, new_node
-
-        if volume_state in ("restoring", "provisioning"):
-            # Poll until local (max 60s)
-            for _ in range(30):
-                await asyncio.sleep(2)
-                vs, _, nn = await self._get_project_volume_info(project_id)
-                if vs == "local":
-                    return volume_id, nn or node_name
-            raise RuntimeError(f"Volume {volume_id} stuck in state '{volume_state}'")
-
-        raise ValueError(f"Unexpected volume_state: {volume_state}")
-
     async def _get_tesslate_config_from_volume(
-        self, volume_id: str, node_name: str, container_directory: str
+        self, volume_id: str, cache_node: str | None, container_directory: str
     ) -> Any | None:
         """Read and parse .tesslate/config.json via FileOps."""
         from ...services.base_config_parser import parse_tesslate_config
@@ -241,7 +214,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
             else ".tesslate/config.json"
         )
         try:
-            async with await self._get_fileops_client(node_name) as client:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
                 content = await client.read_file_text(volume_id, config_path)
                 return parse_tesslate_config(content)
         except Exception as e:
@@ -257,8 +230,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         db: AsyncSession,
         # Volume routing hints
         volume_id: str | None = None,
-        node_name: str | None = None,
-        volume_state: str | None = None,
+        cache_node: str | None = None,
     ) -> None:
         """
         Sync ProjectFile records from the database to the PVC via FileOps.
@@ -307,13 +279,10 @@ class KubernetesOrchestrator(BaseOrchestrator):
             )
             return
 
-        if volume_state is None and volume_id is None:
-            volume_state, volume_id, node_name = await self._get_project_volume_info(project.id)
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project.id)
 
-        volume_id, node_name = await self._ensure_volume_accessible(
-            project.id, volume_state, volume_id, node_name
-        )
-        async with await self._get_fileops_client(node_name) as client:
+        async with await self._get_fileops_client(cache_node, volume_id) as client:
             base_path = container_directory if container_directory != "." else ""
             if base_path:
                 await client.mkdir_all(volume_id, base_path)
@@ -880,9 +849,9 @@ fi
         """Stop all containers for a project (but keep files)."""
         _ = project_slug, user_id  # Part of interface; unused in K8s mode
 
-        from ..compute_manager import get_compute_manager
         from ...database import AsyncSessionLocal
         from ...models import Project
+        from ..compute_manager import get_compute_manager
 
         async with AsyncSessionLocal() as db:
             project = await db.get(Project, project_id)
@@ -990,7 +959,11 @@ fi
             else:
                 overall_status = "stopped"
 
-            return {"status": overall_status, "namespace": namespace, "containers": container_statuses}
+            return {
+                "status": overall_status,
+                "namespace": namespace,
+                "containers": container_statuses,
+            }
 
         except ApiException as e:
             if e.status == 404:
@@ -1274,21 +1247,17 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         subdir: str = None,
         # Volume routing hints (optional -- avoids DB lookup when provided)
         volume_id: str | None = None,
-        node_name: str | None = None,
-        volume_state: str | None = None,
+        cache_node: str | None = None,
     ) -> str | None:
         """Read a file from project storage via FileOps."""
         _ = user_id, container_name, project_slug  # Interface params; FileOps uses volume routing
 
-        if volume_state is None and volume_id is None:
-            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
 
         vol_path = self._build_volume_path(file_path, subdir)
         try:
-            volume_id, node_name = await self._ensure_volume_accessible(
-                project_id, volume_state, volume_id, node_name
-            )
-            async with await self._get_fileops_client(node_name) as client:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
                 return await client.read_file_text(volume_id, vol_path)
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
@@ -1310,21 +1279,17 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         subdir: str = None,
         # Volume routing hints
         volume_id: str | None = None,
-        node_name: str | None = None,
-        volume_state: str | None = None,
+        cache_node: str | None = None,
     ) -> bool:
         """Write a file to project storage via FileOps."""
         _ = user_id, container_name, project_slug  # Interface params; FileOps uses volume routing
 
-        if volume_state is None and volume_id is None:
-            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
 
         vol_path = self._build_volume_path(file_path, subdir)
         try:
-            volume_id, node_name = await self._ensure_volume_accessible(
-                project_id, volume_state, volume_id, node_name
-            )
-            async with await self._get_fileops_client(node_name) as client:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
                 await client.write_file_text(volume_id, vol_path, content)
             return True
         except Exception as e:
@@ -1338,19 +1303,15 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         data: bytes,
         # Volume routing hints
         volume_id: str | None = None,
-        node_name: str | None = None,
-        volume_state: str | None = None,
+        cache_node: str | None = None,
     ) -> bool:
         """Write binary data to a file in the project via FileOps."""
-        if volume_state is None and volume_id is None:
-            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
 
         vol_path = self._build_volume_path(file_path)
         try:
-            volume_id, node_name = await self._ensure_volume_accessible(
-                project_id, volume_state, volume_id, node_name
-            )
-            async with await self._get_fileops_client(node_name) as client:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
                 await client.write_file(volume_id, vol_path, data)
             return True
         except Exception as e:
@@ -1365,21 +1326,17 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         file_path: str,
         # Volume routing hints
         volume_id: str | None = None,
-        node_name: str | None = None,
-        volume_state: str | None = None,
+        cache_node: str | None = None,
     ) -> bool:
         """Delete a file from project storage via FileOps."""
         _ = user_id, container_name  # Interface params; FileOps uses volume routing
 
-        if volume_state is None and volume_id is None:
-            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
 
         vol_path = self._build_volume_path(file_path)
         try:
-            volume_id, node_name = await self._ensure_volume_accessible(
-                project_id, volume_state, volume_id, node_name
-            )
-            async with await self._get_fileops_client(node_name) as client:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
                 await client.delete_path(volume_id, vol_path)
             return True
         except grpc.aio.AioRpcError as e:
@@ -1399,21 +1356,17 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         directory: str = ".",
         # Volume routing hints
         volume_id: str | None = None,
-        node_name: str | None = None,
-        volume_state: str | None = None,
+        cache_node: str | None = None,
     ) -> list[dict[str, Any]]:
         """List files in project storage via FileOps."""
         _ = user_id, container_name  # Interface params; FileOps uses volume routing
 
-        if volume_state is None and volume_id is None:
-            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
 
         vol_path = self._build_volume_path(directory) if directory != "." else "."
         try:
-            volume_id, node_name = await self._ensure_volume_accessible(
-                project_id, volume_state, volume_id, node_name
-            )
-            async with await self._get_fileops_client(node_name) as client:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
                 entries = await client.list_dir(volume_id, vol_path)
                 return [
                     {
@@ -1668,23 +1621,19 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         directory: str = ".",
         # Volume routing hints
         volume_id: str | None = None,
-        node_name: str | None = None,
-        volume_state: str | None = None,
+        cache_node: str | None = None,
     ) -> list[dict[str, Any]]:
         """Find files matching a glob pattern via FileOps."""
         _ = user_id, container_name  # Interface params; FileOps uses volume routing
 
         import fnmatch
 
-        if volume_state is None and volume_id is None:
-            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
 
         vol_path = self._build_volume_path(directory) if directory != "." else "."
         try:
-            volume_id, node_name = await self._ensure_volume_accessible(
-                project_id, volume_state, volume_id, node_name
-            )
-            async with await self._get_fileops_client(node_name) as client:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
                 entries = await client.list_dir(volume_id, vol_path, recursive=True)
                 return [
                     {
@@ -1712,8 +1661,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         max_results: int = 100,
         # Volume routing hints
         volume_id: str | None = None,
-        node_name: str | None = None,
-        volume_state: str | None = None,
+        cache_node: str | None = None,
     ) -> list[dict[str, Any]]:
         """Search file contents for a pattern via FileOps."""
         _ = user_id, container_name  # Interface params; FileOps uses volume routing
@@ -1721,16 +1669,13 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         import fnmatch
         import re
 
-        if volume_state is None and volume_id is None:
-            volume_state, volume_id, node_name = await self._get_project_volume_info(project_id)
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
 
         vol_path = self._build_volume_path(directory) if directory != "." else "."
         try:
-            volume_id, node_name = await self._ensure_volume_accessible(
-                project_id, volume_state, volume_id, node_name
-            )
             regex = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
-            async with await self._get_fileops_client(node_name) as client:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
                 entries = await client.list_dir(volume_id, vol_path, recursive=True)
                 results = []
                 for entry in entries:

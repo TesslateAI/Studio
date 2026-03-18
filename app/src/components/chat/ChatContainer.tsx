@@ -82,7 +82,6 @@ interface ChatContainerProps {
   onIdleWarning?: (minutesLeft: number) => void;
   onEnvironmentStopping?: () => void;
   onEnvironmentStopped?: (reason: string) => void;
-  onVolumeRestoring?: (estimatedSeconds: number) => void;
 }
 
 export function ChatContainer({
@@ -105,7 +104,6 @@ export function ChatContainer({
   onIdleWarning,
   onEnvironmentStopping,
   onEnvironmentStopped,
-  onVolumeRestoring,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -744,7 +742,6 @@ export function ChatContainer({
               onEnvironmentStopped?.(payload?.reason || 'unknown');
               toast(message || 'Environment stopped', { icon: '\u23F8\uFE0F', duration: 5000 });
             } else if (eventType === 'volume_restoring') {
-              onVolumeRestoring?.(payload?.estimated_seconds ?? 20);
               toast.loading(message || 'Restoring project files...', {
                 id: 'volume-restore',
                 duration: 30000,

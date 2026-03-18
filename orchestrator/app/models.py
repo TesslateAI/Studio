@@ -76,12 +76,9 @@ class Project(Base):
         String(200), nullable=True
     )  # StorageClass name for template PVC (e.g., tesslate-btrfs-nextjs)
 
-    # Volume-First Architecture
+    # Volume Hub Architecture
     volume_id = Column(String(255), nullable=True, index=True)
-    node_name = Column(String(255), nullable=True)
-    volume_state = Column(
-        String(50), default="legacy", server_default="legacy", nullable=False
-    )  # legacy, provisioning, local, remote_only, restoring
+    cache_node = Column(String(255), nullable=True)  # Hint: last-known compute node (Hub is truth)
     compute_tier = Column(
         String(50), default="none", server_default="none", nullable=False
     )  # none, ephemeral, environment
@@ -1006,16 +1003,16 @@ class AgentSkillAssignment(Base):
     skill_id = Column(
         UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     enabled = Column(Boolean, default=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (UniqueConstraint("agent_id", "skill_id", "user_id"),)
 
     # Relationships
-    agent = relationship("MarketplaceAgent", back_populates="skill_assignments", foreign_keys=[agent_id])
+    agent = relationship(
+        "MarketplaceAgent", back_populates="skill_assignments", foreign_keys=[agent_id]
+    )
     skill = relationship("MarketplaceAgent", foreign_keys=[skill_id])
     user = relationship("User")
 
@@ -1762,8 +1759,15 @@ class ChannelConfig(Base):
     __tablename__ = "channel_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     channel_type = Column(String(20), nullable=False)  # telegram, slack, discord, whatsapp
     name = Column(String(100), nullable=False)
     credentials = Column(Text, nullable=False)  # Fernet-encrypted JSON
@@ -1788,7 +1792,10 @@ class ChannelMessage(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     channel_config_id = Column(
-        UUID(as_uuid=True), ForeignKey("channel_configs.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("channel_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     direction = Column(String(10), nullable=False)  # inbound / outbound
     jid = Column(String(255), nullable=False)  # canonical address
@@ -1796,9 +1803,7 @@ class ChannelMessage(Base):
     content = Column(Text, nullable=False)
     platform_message_id = Column(String(255), nullable=True)
     task_id = Column(String, nullable=True)
-    status = Column(
-        String(20), nullable=False, default="delivered"
-    )  # delivered, failed, pending
+    status = Column(String(20), nullable=False, default="delivered")  # delivered, failed, pending
     created_at = Column(DateTime, server_default=func.now(), index=True)
 
     # Relationships
@@ -1811,7 +1816,9 @@ class UserMcpConfig(Base):
     __tablename__ = "user_mcp_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     marketplace_agent_id = Column(
         UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
@@ -1838,9 +1845,7 @@ class AgentMcpAssignment(Base):
     mcp_config_id = Column(
         UUID(as_uuid=True), ForeignKey("user_mcp_configs.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     enabled = Column(Boolean, default=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 

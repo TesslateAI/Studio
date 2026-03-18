@@ -1,8 +1,9 @@
 """
 Compute Manager — compute lifecycle for Tier 1 (ephemeral) and Tier 2 (environment).
 
-Tier 1: Short-lived pods in the tesslate namespace that mount a project's
-btrfs subvolume via hostPath, run a single command, and self-destruct.
+Tier 1: Short-lived pods in the dedicated ``tesslate-compute-pool`` namespace
+that mount a project's btrfs subvolume via CSI PV+PVC, run a single command,
+and self-destruct.  PSA ``restricted`` is enforced on the namespace.
 
 Tier 2: Full persistent environments (dev servers, service containers, ingress)
 using CSI-backed PV+PVC in per-project namespaces. ~5-10s startup.
@@ -63,6 +64,7 @@ class ComputeManager:
     def __init__(self) -> None:
         self._v1: k8s_client.CoreV1Api | None = None
         self._k8s = None  # KubernetesClient wrapper for T2
+        self._ns_ready = False  # Lazy-init flag for compute namespace
 
     # ------------------------------------------------------------------
     # K8s clients (lazy init)
@@ -86,10 +88,289 @@ class ComputeManager:
         return self._v1
 
     def _namespace(self) -> str:
-        """Return the namespace for compute pods (always tesslate)."""
+        """Return the namespace for compute pods."""
         from ..config import get_settings
 
-        return get_settings().k8s_default_namespace
+        return get_settings().compute_pool_namespace
+
+    async def _is_node_schedulable(self, node_name: str) -> bool:
+        """Check if a K8s node accepts new pods (Ready + not cordoned)."""
+        v1 = self._api()
+        try:
+            node = await asyncio.to_thread(v1.read_node, node_name)
+        except Exception:
+            logger.debug("[COMPUTE] Cannot read node %s, assuming unschedulable", node_name)
+            return False
+
+        # Cordoned nodes have spec.unschedulable = True
+        if node.spec and node.spec.unschedulable:
+            return False
+
+        # Check Ready condition
+        for cond in node.status.conditions or []:
+            if cond.type == "Ready":
+                return cond.status == "True"
+
+        return False
+
+    async def _find_schedulable_node(self, exclude: str = "") -> str | None:
+        """Return the name of a schedulable node, excluding the given one."""
+        v1 = self._api()
+        try:
+            node_list = await asyncio.to_thread(v1.list_node)
+        except Exception:
+            return None
+
+        for node in node_list.items or []:
+            name = node.metadata.name
+            if name == exclude:
+                continue
+            if node.spec and node.spec.unschedulable:
+                continue
+            # Check Ready condition
+            ready = False
+            for cond in node.status.conditions or []:
+                if cond.type == "Ready" and cond.status == "True":
+                    ready = True
+                    break
+            if ready:
+                return name
+        return None
+
+    # ------------------------------------------------------------------
+    # Compute namespace lifecycle (lazy init)
+    # ------------------------------------------------------------------
+
+    async def _ensure_compute_namespace(self) -> None:
+        """Ensure compute pool namespace exists with NetworkPolicy. Idempotent."""
+        if self._ns_ready:
+            return
+
+        ns = self._namespace()
+        v1 = self._api()
+
+        try:
+            await asyncio.to_thread(v1.read_namespace, ns)
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+            body = k8s_client.V1Namespace(
+                metadata=k8s_client.V1ObjectMeta(
+                    name=ns,
+                    labels={
+                        "app.kubernetes.io/name": "tesslate-studio",
+                        "app.kubernetes.io/component": "compute-pool",
+                        "pod-security.kubernetes.io/enforce": "restricted",
+                    },
+                ),
+            )
+            await asyncio.to_thread(v1.create_namespace, body)
+            logger.info("[COMPUTE] Created namespace %s", ns)
+
+        await self._apply_compute_network_policy(ns)
+        await self._apply_compute_resource_quota(ns)
+        self._ns_ready = True
+
+    async def _apply_compute_network_policy(self, namespace: str) -> None:
+        """Apply the compute-pool NetworkPolicy (deny ingress, allow DNS + HTTP/HTTPS egress)."""
+        policy = k8s_client.V1NetworkPolicy(
+            metadata=k8s_client.V1ObjectMeta(
+                name="compute-pool-isolation",
+                namespace=namespace,
+            ),
+            spec=k8s_client.V1NetworkPolicySpec(
+                pod_selector=k8s_client.V1LabelSelector(),
+                policy_types=["Ingress", "Egress"],
+                ingress=[],
+                egress=[
+                    # DNS to kube-system
+                    k8s_client.V1NetworkPolicyEgressRule(
+                        to=[
+                            k8s_client.V1NetworkPolicyPeer(
+                                namespace_selector=k8s_client.V1LabelSelector(
+                                    match_labels={"kubernetes.io/metadata.name": "kube-system"}
+                                )
+                            )
+                        ],
+                        ports=[
+                            k8s_client.V1NetworkPolicyPort(protocol="UDP", port=53),
+                            k8s_client.V1NetworkPolicyPort(protocol="TCP", port=53),
+                        ],
+                    ),
+                    # HTTP/HTTPS to external
+                    k8s_client.V1NetworkPolicyEgressRule(
+                        ports=[
+                            k8s_client.V1NetworkPolicyPort(protocol="TCP", port=443),
+                            k8s_client.V1NetworkPolicyPort(protocol="TCP", port=80),
+                        ],
+                    ),
+                ],
+            ),
+        )
+
+        net_api = k8s_client.NetworkingV1Api(api_client=self._api().api_client)
+        try:
+            await asyncio.to_thread(net_api.create_namespaced_network_policy, namespace, policy)
+        except ApiException as exc:
+            if exc.status == 409:
+                await asyncio.to_thread(
+                    net_api.patch_namespaced_network_policy,
+                    "compute-pool-isolation",
+                    namespace,
+                    policy,
+                )
+            else:
+                raise
+
+    async def _apply_compute_resource_quota(self, namespace: str) -> None:
+        """Apply the compute-pool ResourceQuota. Idempotent (create or patch)."""
+        quota = k8s_client.V1ResourceQuota(
+            metadata=k8s_client.V1ObjectMeta(
+                name="compute-pool-quota",
+                namespace=namespace,
+            ),
+            spec=k8s_client.V1ResourceQuotaSpec(
+                hard={
+                    "pods": "10",
+                    "requests.cpu": "500m",
+                    "requests.memory": "2560Mi",
+                    "limits.cpu": "20",
+                    "limits.memory": "40Gi",
+                    "persistentvolumeclaims": "10",
+                }
+            ),
+        )
+
+        v1 = self._api()
+        try:
+            await asyncio.to_thread(v1.create_namespaced_resource_quota, namespace, quota)
+        except ApiException as exc:
+            if exc.status == 409:
+                await asyncio.to_thread(
+                    v1.patch_namespaced_resource_quota,
+                    "compute-pool-quota",
+                    namespace,
+                    quota,
+                )
+            else:
+                raise
+
+    # ------------------------------------------------------------------
+    # Compute PV/PVC lifecycle (reusable per-volume)
+    # ------------------------------------------------------------------
+
+    async def _ensure_compute_pv_pvc(self, volume_id: str, node_name: str) -> str:
+        """Ensure a reusable PV+PVC exists for a volume. Returns PVC name.
+
+        PV/PVC are keyed by volume_id (not pod_name) so they can be reused
+        across multiple ephemeral pods for the same project. Uses claimRef
+        pre-binding for fast PVC bind (~1s instead of ~14s).
+        """
+        ns = self._namespace()
+        v1 = self._api()
+        pv_name = f"vol-pv-{volume_id}"
+        pvc_name = f"vol-pvc-{volume_id}"
+
+        # Check if PVC already exists and is bound
+        try:
+            existing_pvc = await asyncio.to_thread(
+                v1.read_namespaced_persistent_volume_claim, pvc_name, ns
+            )
+            if existing_pvc.status.phase == "Bound":
+                return pvc_name
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+
+        # Check if PV exists (might exist from a previous PVC that was deleted)
+        pv_exists = False
+        try:
+            existing_pv = await asyncio.to_thread(v1.read_persistent_volume, pv_name)
+            pv_exists = True
+            # If PV exists but references a different node, delete and recreate
+            terms = (
+                existing_pv.spec.node_affinity
+                and existing_pv.spec.node_affinity.required
+                and existing_pv.spec.node_affinity.required.node_selector_terms
+            ) or []
+            current_node = None
+            for term in terms:
+                for expr in term.match_expressions or []:
+                    if expr.key == "kubernetes.io/hostname" and expr.values:
+                        current_node = expr.values[0]
+            pv_phase = (existing_pv.status.phase or "") if existing_pv.status else ""
+            if current_node != node_name or pv_phase == "Released":
+                await asyncio.to_thread(v1.delete_persistent_volume, pv_name)
+                pv_exists = False
+                logger.info(
+                    "[COMPUTE] Recreating PV %s (node=%s→%s, phase=%s)",
+                    pv_name,
+                    current_node,
+                    node_name,
+                    pv_phase,
+                )
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+
+        if not pv_exists:
+            pv = k8s_client.V1PersistentVolume(
+                metadata=k8s_client.V1ObjectMeta(
+                    name=pv_name,
+                    labels={
+                        "tesslate.io/tier": "1",
+                        "tesslate.io/volume-id": volume_id,
+                    },
+                ),
+                spec=k8s_client.V1PersistentVolumeSpec(
+                    capacity={"storage": "10Gi"},
+                    access_modes=["ReadWriteOnce"],
+                    persistent_volume_reclaim_policy="Retain",
+                    storage_class_name="",
+                    csi=k8s_client.V1CSIPersistentVolumeSource(
+                        driver="btrfs.csi.tesslate.io",
+                        volume_handle=volume_id,
+                    ),
+                    claim_ref=k8s_client.V1ObjectReference(
+                        name=pvc_name,
+                        namespace=ns,
+                    ),
+                    node_affinity=k8s_client.V1VolumeNodeAffinity(
+                        required=k8s_client.V1NodeSelector(
+                            node_selector_terms=[
+                                k8s_client.V1NodeSelectorTerm(
+                                    match_expressions=[
+                                        k8s_client.V1NodeSelectorRequirement(
+                                            key="kubernetes.io/hostname",
+                                            operator="In",
+                                            values=[node_name],
+                                        )
+                                    ]
+                                )
+                            ]
+                        )
+                    ),
+                ),
+            )
+            await asyncio.to_thread(v1.create_persistent_volume, body=pv)
+
+        # Create PVC
+        pvc = k8s_client.V1PersistentVolumeClaim(
+            metadata=k8s_client.V1ObjectMeta(name=pvc_name, namespace=ns),
+            spec=k8s_client.V1PersistentVolumeClaimSpec(
+                access_modes=["ReadWriteOnce"],
+                storage_class_name="",
+                volume_name=pv_name,
+                resources=k8s_client.V1ResourceRequirements(requests={"storage": "10Gi"}),
+            ),
+        )
+        try:
+            await asyncio.to_thread(v1.create_namespaced_persistent_volume_claim, ns, pvc)
+        except ApiException as exc:
+            if exc.status != 409:  # Already exists
+                raise
+
+        return pvc_name
 
     # ------------------------------------------------------------------
     # Public API
@@ -119,7 +400,7 @@ class ComputeManager:
 
         Args:
             volume_id: btrfs subvolume ID for the project.
-            node_name: Target node (volume locality — bypasses scheduler).
+            node_name: Target node (volume locality — PV node affinity drives scheduling).
             command: Command to execute (e.g. ["/bin/sh", "-c", "npm install"]).
             timeout: Maximum seconds to wait for completion.
             image: Container image override (defaults to k8s_devserver_image).
@@ -141,28 +422,32 @@ class ComputeManager:
                 f"Compute pod limit reached ({count}/{settings.compute_max_concurrent_pods})"
             )
 
+        await self._ensure_compute_namespace()
+
         pod_name = f"t1-{volume_id[:8]}-{uuid4().hex[:6]}"
         ns = self._namespace()
         devserver_image = image or settings.k8s_devserver_image
+        v1 = self._api()
+
+        # Use reusable per-volume PV/PVC (not per-pod)
+        pvc_name = await self._ensure_compute_pv_pvc(volume_id, node_name)
 
         manifest = self._build_pod_manifest(
             pod_name=pod_name,
             namespace=ns,
-            volume_id=volume_id,
-            node_name=node_name,
             command=command,
             image=devserver_image,
             timeout=timeout,
+            pvc_name=pvc_name,
         )
-
-        v1 = self._api()
 
         try:
             await asyncio.to_thread(v1.create_namespaced_pod, ns, manifest)
 
             logger.info(
-                "[COMPUTE] Pod %s created for volume %s on node %s",
+                "[COMPUTE] Pod %s created (PVC %s) for volume %s on node %s",
                 pod_name,
+                pvc_name,
                 volume_id,
                 node_name,
             )
@@ -172,7 +457,7 @@ class ComputeManager:
             return output, exit_code, pod_name
 
         finally:
-            # Always clean up — fire-and-forget, swallow 404
+            # Clean up pod only — PV/PVC are reusable across pods
             try:
                 await asyncio.to_thread(
                     v1.delete_namespaced_pod,
@@ -214,36 +499,40 @@ class ComputeManager:
                 f"Compute pod limit reached ({count}/{settings.compute_max_concurrent_pods})"
             )
 
+        await self._ensure_compute_namespace()
+
         pod_name = f"eph-{volume_id[:8]}-{uuid4().hex[:6]}"
         ns = self._namespace()
         devserver_image = image or settings.k8s_devserver_image
+        v1 = self._api()
+
+        # Use reusable per-volume PV/PVC (not per-pod)
+        pvc_name = await self._ensure_compute_pv_pvc(volume_id, node_name)
 
         manifest = self._build_pod_manifest(
             pod_name=pod_name,
             namespace=ns,
-            volume_id=volume_id,
-            node_name=node_name,
             command=["sleep", "infinity"],
             image=devserver_image,
             timeout=1800,
+            pvc_name=pvc_name,
         )
         # Add ephemeral-specific labels
         manifest.metadata.labels["tesslate.io/component"] = "ephemeral-shell"
         manifest.metadata.labels["tesslate.io/project-id"] = project_id
 
-        v1 = self._api()
         await asyncio.to_thread(v1.create_namespaced_pod, ns, manifest)
 
         logger.info(
-            "[COMPUTE] Ephemeral pod %s created for volume %s on node %s",
+            "[COMPUTE] Ephemeral pod %s created (PVC %s) on node %s",
             pod_name,
-            volume_id,
+            pvc_name,
             node_name,
         )
         return pod_name, ns
 
     async def delete_pod(self, pod_name: str, namespace: str | None = None) -> None:
-        """Best-effort delete a pod by name. Swallows 404."""
+        """Best-effort delete a pod. Swallows 404. PV/PVC are reusable and not deleted."""
         ns = namespace or self._namespace()
         v1 = self._api()
         try:
@@ -326,6 +615,7 @@ class ComputeManager:
                     ns,
                     grace_period_seconds=0,
                 )
+                # PV/PVC are reusable — do NOT delete them when reaping pods
                 logger.warning(
                     "[COMPUTE] Reaped orphaned pod %s (age: %.0fs)",
                     pod_name,
@@ -353,20 +643,19 @@ class ComputeManager:
         *,
         pod_name: str,
         namespace: str,
-        volume_id: str,
-        node_name: str,
         command: list[str],
         image: str,
         timeout: int = 120,
+        pvc_name: str | None = None,
     ) -> k8s_client.V1Pod:
-        """Build the ephemeral pod manifest."""
+        """Build the ephemeral pod manifest (CSI PVC volume, PSA restricted)."""
+        pvc_name = pvc_name or f"compute-pvc-{pod_name}"
         return k8s_client.V1Pod(
             metadata=k8s_client.V1ObjectMeta(
                 name=pod_name,
                 namespace=namespace,
                 labels={
                     "tesslate.io/tier": "1",
-                    "tesslate.io/volume-id": volume_id[:63],
                     "app.kubernetes.io/part-of": "tesslate",
                 },
             ),
@@ -374,12 +663,13 @@ class ComputeManager:
                 restart_policy="Never",
                 active_deadline_seconds=timeout + 30,  # K8s safety net slightly after app timeout
                 termination_grace_period_seconds=5,
-                node_name=node_name,
                 automount_service_account_token=False,
                 security_context=k8s_client.V1PodSecurityContext(
                     run_as_user=1000,
                     run_as_group=1000,
                     run_as_non_root=True,
+                    fs_group=1000,
+                    seccomp_profile=k8s_client.V1SeccompProfile(type="RuntimeDefault"),
                 ),
                 containers=[
                     k8s_client.V1Container(
@@ -402,15 +692,16 @@ class ComputeManager:
                             run_as_user=1000,
                             run_as_group=1000,
                             allow_privilege_escalation=False,
+                            capabilities=k8s_client.V1Capabilities(drop=["ALL"]),
+                            seccomp_profile=k8s_client.V1SeccompProfile(type="RuntimeDefault"),
                         ),
                     ),
                 ],
                 volumes=[
                     k8s_client.V1Volume(
                         name="project-source",
-                        host_path=k8s_client.V1HostPathVolumeSource(
-                            path=f"/mnt/tesslate-pool/volumes/{volume_id}",
-                            type="Directory",
+                        persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
+                            claim_name=pvc_name,
                         ),
                     ),
                 ],
@@ -544,8 +835,7 @@ class ComputeManager:
         settings = get_settings()
         k8s = self._k8s_client()
         volume_id = project.volume_id
-        node_name = project.node_name
-        volume_state = project.volume_state
+        node_name = project.cache_node  # Hint only — ensure_cached resolves the real node
         namespace = f"proj-{project.id}"
 
         # WebSocket progress
@@ -571,29 +861,28 @@ class ComputeManager:
                         {"phase": phase, "message": message, "progress": progress}
                     )
 
-        # 1. Ensure volume is locally accessible
-        if volume_state in ("remote_only", "restoring", "provisioning"):
-            if volume_state == "remote_only":
-                await send_progress("restoring_volume", "Restoring project files...", 5)
-                project.volume_state = "restoring"
-                await db.commit()
+        # 1. Ensure volume is cached on a schedulable compute node
+        vm = get_volume_manager()
+        node_name = await vm.ensure_cached(volume_id, hint_node=project.cache_node)
 
-                vm = get_volume_manager()
-                node_name, _ = await vm.ensure_volume_local(volume_id, "remote_only", node_name)
-                project.node_name = node_name
-                project.volume_state = "local"
-                await db.commit()
+        # Verify the node is schedulable. If cordoned/NotReady, find a
+        # schedulable node and ask the Hub to place the volume there
+        # (triggers S3 restore or peer transfer).
+        if node_name and not await self._is_node_schedulable(node_name):
+            logger.warning(
+                "[COMPUTE-T2] Node %s is unschedulable, finding alternative",
+                node_name,
+            )
+            alt_node = await self._find_schedulable_node(exclude=node_name)
+            if alt_node:
+                node_name = await vm.ensure_cached(volume_id, hint_node=alt_node)
             else:
-                # restoring or provisioning — poll until local (max 90s)
-                await send_progress("restoring_volume", "Waiting for volume...", 5)
-                for _ in range(45):
-                    await asyncio.sleep(2)
-                    await db.refresh(project)
-                    if project.volume_state == "local":
-                        node_name = project.node_name
-                        break
-                else:
-                    raise RuntimeError(f"Volume {volume_id} stuck in state '{volume_state}'")
+                logger.error("[COMPUTE-T2] No schedulable nodes available")
+                raise RuntimeError("No schedulable compute nodes available")
+
+        if node_name != project.cache_node:
+            project.cache_node = node_name
+            await db.commit()
 
         # 2. Separate service and dev containers
         service_containers = [
@@ -624,7 +913,7 @@ class ComputeManager:
         # 5b. Create project PV + PVC (CSI-backed)
         if not node_name:
             raise RuntimeError(
-                f"Project {project.id} has volume_state='{volume_state}' but node_name is not set. "
+                f"Project {project.id} has no cache_node after ensure_cached. "
                 "Cannot create node-affinity PV."
             )
         v1 = self._api()
@@ -665,7 +954,7 @@ class ComputeManager:
             svc_pvc_name = None
             if service_def.volumes:
                 vm = get_volume_manager()
-                svc_volume_id = await vm.create_service_volume(volume_id, svc_dir, node_name)
+                svc_volume_id = await vm.create_service_volume(volume_id, svc_dir)
 
                 svc_pvc_name = f"svc-{svc_dir}-data"
                 svc_pv = create_v2_service_pv(svc_volume_id, node_name, project.id, svc_dir)

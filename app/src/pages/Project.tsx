@@ -56,7 +56,7 @@ import { fileEvents } from '../utils/fileEvents';
 import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { type ChatAgent } from '../types/chat';
-import { getFeatures, type VolumeState, type ComputeTier } from '../types/project';
+import { getFeatures, type ComputeTier } from '../types/project';
 import { getEnvironmentStatus } from '../components/ui/environmentStatus';
 import { EnvironmentStatusBadge } from '../components/ui/EnvironmentStatusBadge';
 import IdleWarningBanner from '../components/IdleWarningBanner';
@@ -68,7 +68,6 @@ type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
 interface NoComputePlaceholderProps {
   onStart?: () => void;
   variant: 'terminal' | 'preview';
-  volumeState?: VolumeState;
   computeTier?: ComputeTier;
   isStarting?: boolean;
   startupProgress?: number;
@@ -83,7 +82,6 @@ interface NoComputePlaceholderProps {
 function NoComputePlaceholder({
   onStart,
   variant,
-  volumeState,
   computeTier,
   isStarting,
   startupProgress,
@@ -178,25 +176,7 @@ function NoComputePlaceholder({
   let description = `Start the environment for ${accessLabel}.`;
   let buttonLabel = 'Start Environment';
 
-  if (volumeState === 'remote_only') {
-    icon = <ArrowsClockwise size={32} className="text-[var(--primary)]" />;
-    iconBg = 'bg-[var(--primary)]/10';
-    title = 'Project hibernated';
-    description = `Wake project to access files and ${accessLabel}.`;
-    buttonLabel = 'Wake Project';
-  } else if (volumeState === 'restoring') {
-    icon = <ArrowsClockwise size={32} className="text-amber-400 animate-spin" />;
-    iconBg = 'bg-amber-500/10';
-    title = 'Restoring files...';
-    description = 'Volume is being restored from snapshot.';
-    buttonLabel = '';
-  } else if (volumeState === 'provisioning') {
-    icon = <ArrowsClockwise size={32} className="text-amber-400 animate-spin" />;
-    iconBg = 'bg-amber-500/10';
-    title = 'Setting up project...';
-    description = 'Volume is being provisioned.';
-    buttonLabel = '';
-  } else if (computeTier === 'ephemeral') {
+  if (computeTier === 'ephemeral') {
     icon = <Terminal size={32} className="text-[var(--primary)]" />;
     iconBg = 'bg-[var(--primary)]/10';
     title = 'Agent commands running';
@@ -281,8 +261,6 @@ export default function Project() {
   const [idleWarningMinutes, setIdleWarningMinutes] = useState<number | null>(null);
   // Environment stopping state (set by WebSocket environment_stopping event)
   const [environmentStopping, setEnvironmentStopping] = useState(false);
-  // Restore polling state
-  const restorePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Container startup hook - handles task polling, logs, and health checks
   const containerStartup = useContainerStartup(
@@ -339,19 +317,18 @@ export default function Project() {
   // ============================================================================
   // TWO-AXIS STATE MODEL
   // ============================================================================
-  const volumeState = (project?.volume_state as VolumeState) ?? 'local';
   const computeTier = (project?.compute_tier as ComputeTier) ?? 'none';
-  const features = useMemo(() => getFeatures(volumeState, computeTier), [volumeState, computeTier]);
+  const features = useMemo(() => getFeatures(computeTier), [computeTier]);
   const noPreview = !features.preview && !devServerUrl;
   const hasFiles = features.fileBrowser;
 
   const environmentStatus = useMemo(
     () =>
-      getEnvironmentStatus(volumeState, computeTier, {
+      getEnvironmentStatus(computeTier, {
         stopping: environmentStopping,
         starting: needsContainerStart && containerStartup.isLoading,
       }),
-    [volumeState, computeTier, environmentStopping, needsContainerStart, containerStartup.isLoading]
+    [computeTier, environmentStopping, needsContainerStart, containerStartup.isLoading]
   );
 
   const handleStartCompute = useCallback(() => {
@@ -381,7 +358,7 @@ export default function Project() {
     (reason: string) => {
       setEnvironmentStopping(false);
       setIdleWarningMinutes(null);
-      // Refresh project to pick up compute_tier=none, volume_state changes
+      // Refresh project to pick up compute_tier=none changes
       if (slug) {
         projectsApi
           .get(slug)
@@ -394,40 +371,6 @@ export default function Project() {
     },
     [slug]
   );
-
-  const handleVolumeRestoring = useCallback(
-    (_estimatedSeconds: number) => {
-      // Start polling project state until volume_state becomes 'local'
-      if (restorePollRef.current) clearInterval(restorePollRef.current);
-      restorePollRef.current = setInterval(async () => {
-        if (!slug) return;
-        try {
-          const p = await projectsApi.get(slug);
-          setProject(p);
-          if (p.volume_state === 'local') {
-            if (restorePollRef.current) {
-              clearInterval(restorePollRef.current);
-              restorePollRef.current = null;
-            }
-            toast.dismiss('volume-restore');
-            toast.success('Project files restored!', { duration: 3000 });
-          }
-        } catch {
-          // transient error, keep polling
-        }
-      }, 2000);
-    },
-    [slug]
-  );
-
-  // Cleanup restore polling on unmount
-  useEffect(() => {
-    return () => {
-      if (restorePollRef.current) {
-        clearInterval(restorePollRef.current);
-      }
-    };
-  }, []);
 
   // ============================================================================
   // PROJECT KEYBOARD SHORTCUTS
@@ -584,8 +527,7 @@ export default function Project() {
   // Reload files when container changes (to apply filtering)
   useEffect(() => {
     if (container) {
-      const vs = project?.volume_state as string;
-      if (vs && vs !== 'legacy') return; // files already loaded via loadProject
+      if (project?.volume_id) return; // v2 project — files already loaded via loadProject
       // Cancel any in-flight retry sequence before starting a new one
       fileRetryCancelledRef.current = true;
       if (fileRetryRef.current) clearTimeout(fileRetryRef.current);
@@ -594,7 +536,7 @@ export default function Project() {
       loadFilesWithRetry();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [container, project?.volume_state]);
+  }, [container, project?.volume_id]);
 
   useEffect(() => {
     localStorage.setItem('projectSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
@@ -756,12 +698,8 @@ export default function Project() {
       const projectData = await projectsApi.get(slug);
       setProject(projectData);
 
-      const vs = (projectData.volume_state as string) ?? 'local';
-      // Only load files if volume is locally mounted
-      if (vs === 'local') {
-        loadFilesWithRetry();
-      }
-      // provisioning/restoring/remote_only: no files available yet
+      // Hub always has canonical data — files are always loadable
+      loadFilesWithRetry();
     } catch (error) {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
@@ -1133,7 +1071,6 @@ export default function Project() {
   const previewPlaceholder = (
     <NoComputePlaceholder
       variant="preview"
-      volumeState={volumeState}
       computeTier={computeTier}
       onStart={features.startButton && container ? handleStartCompute : undefined}
       isStarting={needsContainerStart && containerStartup.isLoading}
@@ -1801,7 +1738,6 @@ export default function Project() {
                         onIdleWarning={handleIdleWarning}
                         onEnvironmentStopping={handleEnvironmentStopping}
                         onEnvironmentStopped={handleEnvironmentStopped}
-                        onVolumeRestoring={handleVolumeRestoring}
                       />
                     </Panel>
                     <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
@@ -1970,7 +1906,6 @@ export default function Project() {
                         onIdleWarning={handleIdleWarning}
                         onEnvironmentStopping={handleEnvironmentStopping}
                         onEnvironmentStopped={handleEnvironmentStopped}
-                        onVolumeRestoring={handleVolumeRestoring}
                       />
                     </Panel>
                   </>
@@ -2221,7 +2156,6 @@ export default function Project() {
             onIdleWarning={handleIdleWarning}
             onEnvironmentStopping={handleEnvironmentStopping}
             onEnvironmentStopped={handleEnvironmentStopped}
-            onVolumeRestoring={handleVolumeRestoring}
           />
         </div>
       )}

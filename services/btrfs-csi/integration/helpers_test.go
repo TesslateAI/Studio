@@ -132,7 +132,7 @@ func startNodeOpsServer(t *testing.T, bm *btrfs.Manager, syncer *bsync.Daemon, t
 	addr := lis.Addr().String()
 	lis.Close()
 
-	srv := nodeops.NewServer(bm, syncer, tmplMgr)
+	srv := nodeops.NewServer(bm, syncer, tmplMgr, nil)
 	go func() {
 		// Start blocks; ignore "use of closed" errors on shutdown.
 		_ = srv.Start(addr, nil)

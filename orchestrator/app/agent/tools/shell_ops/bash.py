@@ -9,7 +9,7 @@ Tier 2 (environment): kubectl exec into running dev containers.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..output_formatter import error_output, strip_ansi_codes, success_output
@@ -20,26 +20,19 @@ logger = logging.getLogger(__name__)
 
 def _has_volume_hints(context: dict[str, Any]) -> bool:
     """Check if the context includes volume routing hints (required for K8s execution)."""
-    volume_state = context.get("volume_state")
     volume_id = context.get("volume_id")
-    node_name = context.get("node_name")
-    return (
-        volume_state not in ("legacy", None)
-        and volume_id is not None
-        and node_name is not None
-    )
+    cache_node = context.get("cache_node")
+    return volume_id is not None and cache_node is not None
 
 
-async def _run_ephemeral(
-    context: dict[str, Any], command: str, timeout: int
-) -> dict[str, Any]:
+async def _run_ephemeral(context: dict[str, Any], command: str, timeout: int) -> dict[str, Any]:
     """Execute a command via ComputeManager ephemeral pod (Tier 1)."""
     from ....database import AsyncSessionLocal
     from ....models import Project
     from ....services.compute_manager import ComputeQuotaExceeded, get_compute_manager
 
     volume_id = context["volume_id"]
-    node_name = context["node_name"]
+    node_name = context["cache_node"]
     project_id = context["project_id"]
 
     compute = get_compute_manager()
@@ -52,7 +45,7 @@ async def _run_ephemeral(
                 project.compute_tier = tier
                 project.active_compute_pod = pod
                 if tier != "none":
-                    project.last_activity = datetime.now(timezone.utc)
+                    project.last_activity = datetime.now(UTC)
                 await db.commit()
 
     await _set_compute_state("ephemeral")
@@ -78,7 +71,12 @@ async def _run_ephemeral(
             return error_output(
                 message=f"Command timed out after {timeout}s: {command}",
                 suggestion="Try a shorter command or increase the timeout parameter",
-                details={"command": command, "timeout": timeout, "exit_code": 124, "tier": "ephemeral"},
+                details={
+                    "command": command,
+                    "timeout": timeout,
+                    "exit_code": 124,
+                    "tier": "ephemeral",
+                },
             )
 
         if exit_code != 0:
@@ -108,24 +106,25 @@ def _get_k8s_api():
     """Get or create a cached CoreV1Api for Tier 2 exec (matches T1 lazy-init pattern)."""
     if not hasattr(_get_k8s_api, "_v1"):
         from kubernetes import config as k8s_config
+
         try:
             k8s_config.load_incluster_config()
         except k8s_config.ConfigException:
             k8s_config.load_kube_config()
         from kubernetes import client as k8s_client
+
         _get_k8s_api._v1 = k8s_client.CoreV1Api()
     return _get_k8s_api._v1
 
 
-async def _run_environment(
-    context: dict[str, Any], command: str, timeout: int
-) -> dict[str, Any]:
+async def _run_environment(context: dict[str, Any], command: str, timeout: int) -> dict[str, Any]:
     """Execute a command in a running Tier 2 dev container via kubectl exec.
 
     Targets the correct pod using container_name/container_directory from context.
     Captures exit codes via sentinel pattern (k8s_stream doesn't expose them).
     """
     import asyncio
+
     from kubernetes.client.rest import ApiException as K8sApiException
     from kubernetes.stream import stream as k8s_stream
 
@@ -206,7 +205,12 @@ async def _run_environment(
         return error_output(
             message=f"Failed to exec in pod {pod_name}: {exc.reason}",
             suggestion="Check if the dev container is running and ready",
-            details={"pod": pod_name, "namespace": namespace, "error": str(exc), "tier": "environment"},
+            details={
+                "pod": pod_name,
+                "namespace": namespace,
+                "error": str(exc),
+                "tier": "environment",
+            },
         )
     except Exception as exc:
         return error_output(
@@ -222,7 +226,7 @@ async def _run_environment(
     if sentinel in raw_output:
         parts = raw_output.rsplit(sentinel, 1)
         raw_output = parts[0]
-        try:
+        try:  # noqa: SIM105
             exit_code = int(parts[1].strip())
         except (ValueError, IndexError):
             pass
@@ -278,7 +282,7 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
     if not _has_volume_hints(context):
         return error_output(
             message="Missing volume routing hints — cannot execute command",
-            suggestion="Ensure the project has a valid volume_state, volume_id, and node_name",
+            suggestion="Ensure the project has a valid volume_id and cache_node",
             details={"command": command},
         )
 

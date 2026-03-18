@@ -28,7 +28,11 @@ func NewClient(addr string, tlsCfg *TLSConfig) (*Client, error) {
 
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(creds),
-		grpc.WithDefaultCallOptions(grpc.ForceCodec(jsonCodec{})),
+		grpc.WithDefaultCallOptions(
+			grpc.ForceCodec(jsonCodec{}),
+			grpc.MaxCallRecvMsgSize(64*1024*1024),
+			grpc.MaxCallSendMsgSize(64*1024*1024),
+		),
 	}
 
 	klog.V(2).Infof("NodeOps client connecting to %s", addr)
@@ -163,4 +167,28 @@ func (c *Client) PromoteToTemplate(ctx context.Context, volumeID, templateName s
 
 func (c *Client) SetOwnership(ctx context.Context, name string, uid, gid int) error {
 	return c.invoke(ctx, "SetOwnership", &SetOwnershipRequest{Name: name, Uid: uid, Gid: gid}, &Empty{})
+}
+
+func (c *Client) SyncVolume(ctx context.Context, volumeID string) error {
+	return c.invoke(ctx, "SyncVolume", &VolumeTrackRequest{VolumeID: volumeID}, &Empty{})
+}
+
+func (c *Client) DeleteFromS3(ctx context.Context, volumeID string) error {
+	return c.invoke(ctx, "DeleteFromS3", &DeleteFromS3Request{VolumeID: volumeID}, &Empty{})
+}
+
+func (c *Client) GetSyncState(ctx context.Context) ([]TrackedVolumeState, error) {
+	var resp GetSyncStateResponse
+	if err := c.invoke(ctx, "GetSyncState", &Empty{}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Volumes, nil
+}
+
+func (c *Client) SendVolumeTo(ctx context.Context, volumeID, targetAddr string) error {
+	return c.invoke(ctx, "SendVolumeTo", &SendVolumeToRequest{VolumeID: volumeID, TargetAddr: targetAddr}, &Empty{})
+}
+
+func (c *Client) SendTemplateTo(ctx context.Context, templateName, targetAddr string) error {
+	return c.invoke(ctx, "SendTemplateTo", &SendTemplateToRequest{TemplateName: templateName, TargetAddr: targetAddr}, &Empty{})
 }
