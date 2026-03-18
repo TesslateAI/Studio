@@ -15,7 +15,16 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("containers", sa.Column("startup_command", sa.String(), nullable=True))
+    # Idempotent: skip if column already exists (may have been added outside migrations)
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'containers' AND column_name = 'startup_command'"
+        )
+    )
+    if not result.fetchone():
+        op.add_column("containers", sa.Column("startup_command", sa.String(), nullable=True))
 
 
 def downgrade():

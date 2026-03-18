@@ -1613,26 +1613,24 @@ export function ChatContainer({
         </div>
       )}
 
-      {/* Chat container - 60-30-10: 60% bg-dark (dominant), 30% surface/borders (secondary), 10% orange accents */}
-      {/* When docked: fills parent, no fixed positioning, no glow effects */}
-      {/* When floating: fixed position, centered, with glow effects */}
+      {/* Chat container */}
+      {/* When docked: fills parent with rounded corners */}
+      {/* When floating: fixed position, centered, same design language */}
       <div
         ref={containerRef}
         className={`
           chat-container
           flex flex-col min-h-0
-          bg-[var(--bg-dark)]
+          bg-[var(--bg)]
           ${
             isDocked
-              ? 'w-full h-full'
+              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border)] overflow-hidden'
               : `
               fixed
               z-40
-              backdrop-blur-xl saturate-180
-              border-2 border-[var(--surface)]
-              shadow-2xl
+              border border-[var(--border)]
               transition-all duration-400 ease-[var(--ease)]
-              rounded-3xl
+              rounded-[var(--radius)]
               max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-b-none max-md:w-full
               md:bottom-6 md:-translate-x-1/2
               ${
@@ -1646,66 +1644,33 @@ export function ChatContainer({
         `}
         style={containerStyle}
       >
-        {/* Glow effects - only shown when floating (not docked) */}
-        {!isDocked && (
-          <>
-            <div
-              className={`
-              chat-glow glow-top
-              absolute -top-0.5 -right-0.5
-              w-3/5 h-3/5
-              bg-[radial-gradient(circle_at_top_right,hsl(var(--hue1)_80%_60%_/_0.3)_0%,transparent_70%)]
-              blur-xl
-              pointer-events-none
-              rounded-inherit
-              transition-opacity duration-400
-              ${isExpanded ? 'opacity-100' : 'opacity-0'}
-            `}
-              style={{ zIndex: -1 }}
-            />
-            <div
-              className={`
-              chat-glow glow-bottom
-              absolute -bottom-0.5 -left-0.5
-              w-3/5 h-3/5
-              bg-[radial-gradient(circle_at_bottom_left,hsl(var(--hue2)_80%_60%_/_0.3)_0%,transparent_70%)]
-              blur-xl
-              pointer-events-none
-              rounded-inherit
-              transition-opacity duration-400
-              ${isExpanded ? 'opacity-100' : 'opacity-0'}
-            `}
-              style={{ zIndex: -1 }}
-            />
-          </>
-        )}
 
         {/* Mobile header with close button - only shown when floating (not docked) */}
         {!isDocked && (
-          <div className="md:hidden flex items-center justify-between px-4 py-3 border-b-2 border-[var(--surface)] bg-[var(--surface)]/30">
-            <h3 className="text-sm font-semibold text-[var(--text)]">Chat</h3>
+          <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+            <h3 className="text-xs font-semibold text-[var(--text)]">Chat</h3>
             <button
               onClick={() => setIsExpanded(false)}
-              className="p-2 hover:bg-[var(--primary)]/10 rounded-lg transition-colors -mr-2"
+              className="btn btn-icon btn-sm"
               aria-label="Close chat"
             >
-              <X size={20} className="text-[var(--text)]/60 hover:text-[var(--primary)]" />
+              <X size={16} />
             </button>
           </div>
         )}
 
         {/* Session header bar */}
         {effectiveIsExpanded && (
-          <div className="relative flex items-center gap-2 px-3 py-2 bg-white/[0.03] border-b border-white/[0.06]">
+          <div className="relative flex items-center gap-2 px-3 py-2 border-b border-[var(--border)]">
             <button
               ref={sessionsButtonRef}
               onClick={() => setShowSessionPopover((v) => !v)}
-              className="relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[var(--text)]/50 hover:text-[var(--text)] hover:bg-white/[0.06] transition-all"
+              className="relative flex items-center gap-1.5 rounded-full px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
               aria-label="Chat sessions"
             >
               <List size={16} />
               {sessions.length > 1 && (
-                <span className="text-[10px] font-semibold text-[var(--text)]/40">
+                <span className="text-[10px] font-semibold text-[var(--text-subtle)]">
                   {sessions.length}
                 </span>
               )}
@@ -1743,7 +1708,7 @@ export function ChatContainer({
                   setRenameTitleValue(currentSessionTitle);
                   setIsRenamingTitle(true);
                 }}
-                className="flex-1 truncate text-sm text-[var(--text)]/50 hover:text-[var(--text)] transition-colors cursor-text"
+                className="flex-1 truncate text-xs text-[var(--text-muted)] hover:text-[var(--text)] transition-colors cursor-text"
               >
                 {currentSessionTitle}
               </span>
@@ -1767,10 +1732,10 @@ export function ChatContainer({
 
             <button
               onClick={handleNewSession}
-              className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-all"
+              className="btn btn-icon btn-sm"
               aria-label="New chat session"
             >
-              <Plus size={16} />
+              <Plus size={14} />
             </button>
 
             <ChatSessionPopover
@@ -1804,9 +1769,9 @@ export function ChatContainer({
         `}
         >
           {isLoadingHistory && (
-            <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
-              <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mx-auto border-2 border-[var(--primary)]/20">
-                <Loader2 className="animate-spin text-[var(--primary)]" size={32} />
+            <div className="text-center text-[var(--text-muted)] mt-8 space-y-4">
+              <div className="w-14 h-14 bg-[var(--surface)] rounded-[var(--radius)] flex items-center justify-center mx-auto border border-[var(--border)]">
+                <Loader2 className="animate-spin text-[var(--text-muted)]" size={28} />
               </div>
               <div className="space-y-2">
                 <p className="text-sm max-w-xs mx-auto leading-relaxed">Loading chat history...</p>
@@ -1815,14 +1780,14 @@ export function ChatContainer({
           )}
 
           {!isLoadingHistory && messages.length === 0 && !isStreaming && (
-            <div className="text-center text-[var(--text)]/60 mt-8 space-y-6 max-w-md mx-auto px-4">
-              <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mx-auto border-2 border-[var(--primary)]/20">
+            <div className="text-center text-[var(--text-muted)] mt-8 space-y-6 max-w-md mx-auto px-4">
+              <div className="w-14 h-14 bg-[var(--surface)] rounded-[var(--radius)] flex items-center justify-center mx-auto border border-[var(--border)]">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  width="32"
-                  height="25"
+                  width="28"
+                  height="22"
                   viewBox="0 0 161.9 126.66"
-                  className="text-[var(--primary)]"
+                  className="text-[var(--text-muted)]"
                 >
                   <g>
                     <path
@@ -1844,22 +1809,22 @@ export function ChatContainer({
                 </svg>
               </div>
               <div className="space-y-2">
-                <p className="text-lg font-semibold text-[var(--text)]">Let's start building</p>
-                <p className="text-sm leading-relaxed">
+                <p className="text-sm font-semibold text-[var(--text)]">Let's start building</p>
+                <p className="text-xs leading-relaxed text-[var(--text-muted)]">
                   Describe what you'd like to create and I'll help you build it step by step
                 </p>
               </div>
 
-              {/* Discovery Cards - 30% secondary background with 10% accent borders */}
-              <div className="space-y-3 text-left">
-                <div className="bg-[var(--surface)] rounded-lg p-3 border-2 border-[var(--border-color)]">
+              {/* Discovery Cards */}
+              <div className="space-y-2 text-left">
+                <div className="bg-[var(--surface)] rounded-[var(--radius-medium)] p-3 border border-[var(--border)]">
                   <div className="flex items-center gap-2 mb-2">
-                    <PencilSimple size={16} weight="bold" className="text-[var(--text)]/80" />
-                    <span className="font-semibold text-sm text-[var(--text)]">
+                    <PencilSimple size={14} weight="bold" className="text-[var(--text-muted)]" />
+                    <span className="font-medium text-xs text-[var(--text)]">
                       Customize Your Agent
                     </span>
                   </div>
-                  <p className="text-xs text-[var(--text)]/70 mb-3">
+                  <p className="text-xs text-[var(--text-muted)] mb-3">
                     Edit system prompts, behaviors, and settings to tailor {currentAgent.name} to
                     your needs.
                   </p>
@@ -1867,27 +1832,27 @@ export function ChatContainer({
                     onClick={() => {
                       navigate('/library', { state: { selectedAgentId: currentAgent.backendId } });
                     }}
-                    className="w-full py-2 bg-[var(--text)]/5 hover:bg-[var(--text)]/10 border-2 border-[var(--border-color)] hover:border-[var(--text)]/20 rounded-lg text-[var(--text)] text-xs font-semibold transition-all"
+                    className="btn btn-tab w-full"
                   >
                     Open in Library
                   </button>
                 </div>
 
-                <div className="bg-[var(--surface)] rounded-lg p-3 border-2 border-[var(--primary)]/30">
+                <div className="bg-[var(--surface)] rounded-[var(--radius-medium)] p-3 border border-[var(--border)]">
                   <div className="flex items-center gap-2 mb-2">
-                    <Storefront size={16} weight="fill" className="text-[var(--primary)]" />
-                    <span className="font-semibold text-sm text-[var(--text)]">
+                    <Storefront size={14} weight="fill" className="text-[var(--text-muted)]" />
+                    <span className="font-medium text-xs text-[var(--text)]">
                       Discover More Agents
                     </span>
                   </div>
-                  <p className="text-xs text-[var(--text)]/70 mb-3">
+                  <p className="text-xs text-[var(--text-muted)] mb-3">
                     Browse specialized agents for React, Vue, Python, DevOps, and more!
                   </p>
                   <button
                     onClick={() => {
                       navigate('/marketplace');
                     }}
-                    className="w-full py-2 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 rounded-lg text-[var(--primary)] text-xs font-semibold transition-all border-2 border-[var(--primary)]/40 hover:border-[var(--primary)]/60"
+                    className="btn btn-primary w-full"
                   >
                     Browse Marketplace
                   </button>

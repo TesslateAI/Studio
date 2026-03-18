@@ -26,35 +26,29 @@ type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
  */
 export function MarketplaceLayout() {
   const location = useLocation();
-  const [authState, setAuthState] = useState<AuthState>('loading');
+  // Fast synchronous check: if a JWT token exists, render authenticated immediately
+  // This avoids the public marketplace flash for logged-in users
+  const [authState, setAuthState] = useState<AuthState>(
+    () => localStorage.getItem('token') ? 'authenticated' : 'loading'
+  );
 
-  // Check auth on mount - non-blocking
-  // Matches PrivateRoute pattern for consistency
-  // IMPORTANT: Uses raw axios to bypass the api interceptor that redirects 401 to /login
+  // Slow path: for cookie-based OAuth users without a token
   useEffect(() => {
+    // Already authenticated via token — nothing to do
+    if (authState === 'authenticated') return;
+
     let mounted = true;
 
     const checkAuth = async () => {
       try {
-        // Fast path: If token exists in localStorage, trust it (same as PrivateRoute)
-        // This is fast, synchronous, and avoids network latency
-        const token = localStorage.getItem('token');
-        if (token) {
-          if (mounted) setAuthState('authenticated');
-          return;
-        }
-
-        // Slow path: No token, check cookie-based auth (OAuth users)
         // Uses raw axios to avoid the 401 redirect interceptor in api.ts
-        // We want to handle 401 ourselves (show public view), not redirect to /login
         const response = await axios.get(`${API_URL}/api/users/me`, {
-          withCredentials: true, // Send cookies for OAuth session
+          withCredentials: true,
         });
         if (mounted) {
           setAuthState(response.status === 200 ? 'authenticated' : 'unauthenticated');
         }
       } catch {
-        // 401 or any error = not authenticated = show public view
         if (mounted) setAuthState('unauthenticated');
       }
     };
@@ -84,12 +78,22 @@ export function MarketplaceLayout() {
     [authState]
   );
 
+  // Loading state: show a neutral shell that won't flash the wrong layout
+  // This only applies to cookie-based OAuth users (token users skip loading entirely)
+  if (authState === 'loading') {
+    return (
+      <MarketplaceAuthContext.Provider value={authContextValue}>
+        <div className="h-screen bg-[var(--sidebar-bg)]" />
+      </MarketplaceAuthContext.Provider>
+    );
+  }
+
   // Authenticated view: Full DashboardLayout with sidebar
   if (authState === 'authenticated') {
     return (
       <MarketplaceAuthContext.Provider value={authContextValue}>
         <motion.div
-          className="h-screen flex overflow-hidden bg-[var(--bg)]"
+          className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]"
           initial={{ opacity: 0.95 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.15 }}
@@ -101,8 +105,17 @@ export function MarketplaceLayout() {
             <NavigationSidebar activePage={activePage} showContent={true} />
           </div>
 
-          {/* Main Content */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Main Content — floating panel */}
+          <div
+            className="flex-1 flex flex-col overflow-hidden"
+            style={{
+              borderRadius: 'var(--radius)',
+              margin: 'var(--app-margin)',
+              marginLeft: '0',
+              border: 'var(--border-width) solid var(--border)',
+              backgroundColor: 'var(--bg)',
+            }}
+          >
             <Outlet />
           </div>
         </motion.div>
@@ -110,23 +123,19 @@ export function MarketplaceLayout() {
     );
   }
 
-  // Public view (default during loading + unauthenticated)
-  // This is intentional: showing public view during loading is better for:
-  // 1. SEO (crawlers see public content immediately)
-  // 2. Performance (no blocking render)
-  // 3. UX (content appears instantly)
+  // Public view (unauthenticated only — loading is handled above)
   return (
     <MarketplaceAuthContext.Provider value={authContextValue}>
-      <div className="min-h-screen flex flex-col bg-[var(--bg)]">
-        {/* Public Header with auth-aware CTAs */}
-        <PublicMarketplaceHeader isLoading={authState === 'loading'} />
+      <div className="min-h-screen flex flex-col bg-[var(--sidebar-bg)]">
+        {/* Public Header */}
+        <PublicMarketplaceHeader isLoading={false} />
 
-        {/* Main Content - always renders immediately */}
-        <main className="flex-1">
+        {/* Main Content */}
+        <main className="flex-1 bg-[var(--bg)]">
           <Outlet />
         </main>
 
-        {/* SEO-friendly Footer */}
+        {/* Footer */}
         <PublicMarketplaceFooter />
       </div>
     </MarketplaceAuthContext.Provider>

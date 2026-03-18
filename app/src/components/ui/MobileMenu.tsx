@@ -1,8 +1,10 @@
 import { type ReactNode, useState, useEffect } from 'react';
-import { X } from '@phosphor-icons/react';
+import { useLocation } from 'react-router-dom';
+import { NavigationSidebar } from './NavigationSidebar';
 
+// Props kept for backwards compatibility — pages still pass items
 interface MobileMenuProps {
-  leftItems: Array<{
+  leftItems?: Array<{
     icon: ReactNode;
     title: string;
     onClick: () => void;
@@ -10,7 +12,7 @@ interface MobileMenuProps {
     disabled?: boolean;
     dataTour?: string;
   }>;
-  rightItems: Array<{
+  rightItems?: Array<{
     icon: ReactNode;
     title: string;
     onClick: () => void;
@@ -20,109 +22,64 @@ interface MobileMenuProps {
   }>;
 }
 
-export function MobileMenu({ leftItems, rightItems }: MobileMenuProps) {
+export function MobileMenu(_props: MobileMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const location = useLocation();
 
-  const handleItemClick = (onClick: () => void) => {
-    onClick();
-    setIsOpen(false);
-  };
-
-  // Listen for toggle events from the top bar
+  // Listen for toggle events from hamburger buttons
   useEffect(() => {
     const handleToggle = () => setIsOpen(prev => !prev);
     window.addEventListener('toggleMobileMenu', handleToggle);
     return () => window.removeEventListener('toggleMobileMenu', handleToggle);
   }, []);
 
+  // Close on escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isOpen]);
+
+  // Close on navigation
+  useEffect(() => {
+    setIsOpen(false);
+  }, [location.pathname, location.search]);
+
+  // Determine active page from current route
+  const getActivePage = (): 'dashboard' | 'marketplace' | 'library' | 'feedback' => {
+    const path = location.pathname;
+    if (path.includes('/marketplace')) return 'marketplace';
+    if (path.includes('/library')) return 'library';
+    if (path.includes('/feedback')) return 'feedback';
+    return 'dashboard';
+  };
+
   return (
     <>
-      {/* Mobile Menu Overlay */}
-      <div className={`mobile-menu-overlay ${isOpen ? '' : 'hidden'}`}>
-        {/* Backdrop */}
-        <div
-          className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
-          onClick={() => setIsOpen(false)}
+      {/* Backdrop */}
+      <div
+        className={`md:hidden fixed inset-0 bg-black/50 z-[60] transition-opacity duration-150 ${
+          isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={() => setIsOpen(false)}
+      />
+
+      {/* Sidebar drawer — the real NavigationSidebar, forced visible + expanded */}
+      <div
+        className={`md:hidden fixed top-0 left-0 h-full z-[70] transition-transform duration-150 ease-out ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+        style={{ width: 244 }}
+      >
+        <NavigationSidebar
+          activePage={getActivePage()}
+          showContent={true}
+          forceVisible
         />
-
-        {/* Menu Panel */}
-        <div className="md:hidden fixed top-0 right-0 h-full w-80 max-w-[85vw] bg-[var(--surface)] border-l border-white/10 z-[70] shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-300">
-            {/* Header */}
-            <div className="sticky top-0 bg-[var(--surface)] border-b border-white/10 p-4 flex items-center justify-between">
-              <h2 className="font-heading text-lg font-bold text-[var(--text)]">Menu</h2>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors text-[var(--text)]"
-              >
-                <X size={24} weight="bold" />
-              </button>
-            </div>
-
-            {/* Menu Items */}
-            <div className="p-4 space-y-6">
-              {/* Left Section Items */}
-              {leftItems.length > 0 && (
-                <div>
-                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Navigation</h3>
-                  <div className="space-y-2">
-                    {leftItems.map((item, index) => (
-                      <button
-                        key={index}
-                        onClick={() => handleItemClick(item.onClick)}
-                        data-tour={item.dataTour}
-                        className={`
-                          w-full flex items-center gap-3 px-4 py-3 rounded-xl
-                          transition-all duration-200
-                          ${item.active
-                            ? 'bg-gradient-to-r from-[rgba(255,107,0,0.2)] to-[rgba(255,107,0,0.1)] text-[var(--primary)] border border-[rgba(255,107,0,0.3)]'
-                            : 'bg-white/5 text-[var(--text)] hover:bg-white/10 border border-transparent'
-                          }
-                        `}
-                      >
-                        <div className={`${item.active ? 'text-[var(--primary)]' : 'text-gray-500'}`}>
-                          {item.icon}
-                        </div>
-                        <span className="font-medium">{item.title}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Right Section Items */}
-              {rightItems.length > 0 && (
-                <div>
-                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Actions</h3>
-                  <div className="space-y-2">
-                    {rightItems.map((item, index) => (
-                      <button
-                        key={index}
-                        onClick={item.disabled ? undefined : () => handleItemClick(item.onClick)}
-                        disabled={item.disabled}
-                        data-tour={item.dataTour}
-                        className={`
-                          w-full flex items-center gap-3 px-4 py-3 rounded-xl
-                          transition-all duration-200
-                          ${item.disabled
-                            ? 'opacity-40 cursor-not-allowed bg-white/5 text-[var(--text)] border border-transparent'
-                            : item.active
-                              ? 'bg-gradient-to-r from-[rgba(255,107,0,0.2)] to-[rgba(255,107,0,0.1)] text-[var(--primary)] border border-[rgba(255,107,0,0.3)]'
-                              : 'bg-white/5 text-[var(--text)] hover:bg-white/10 border border-transparent'
-                          }
-                        `}
-                      >
-                        <div className={`${item.disabled ? 'text-gray-500' : item.active ? 'text-[var(--primary)]' : 'text-gray-500'}`}>
-                          {item.icon}
-                        </div>
-                        <span className="font-medium">{item.title}{item.disabled ? ' (Coming soon)' : ''}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </>
-    );
+      </div>
+    </>
+  );
 }

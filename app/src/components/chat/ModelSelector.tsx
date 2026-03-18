@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Cpu, MagnifyingGlass, CaretDown, Check, Lightning } from '@phosphor-icons/react';
+import { Cpu, MagnifyingGlass, CaretDown, Check, Lightning, X } from '@phosphor-icons/react';
 import { marketplaceApi } from '../../lib/api';
 import { type ChatAgent } from '../../types/chat';
 
@@ -90,7 +90,7 @@ export function ModelSelector({
   const isReadOnly = currentAgent ? (currentAgent.sourceType === 'closed' && !currentAgent.isCustom) : false;
 
   // Position state for portal-based dropdown
-  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   // Recalculate position when open
   useEffect(() => {
@@ -98,10 +98,18 @@ export function ModelSelector({
 
     const updatePos = () => {
       const rect = triggerRef.current!.getBoundingClientRect();
+      // Clamp horizontal position so dropdown doesn't overflow viewport
+      const dropdownWidth = Math.min(480, window.innerWidth - 16);
+      let left = rect.left;
+      if (left + dropdownWidth > window.innerWidth - 8) {
+        left = window.innerWidth - 8 - dropdownWidth;
+      }
+      if (left < 8) left = 8;
+
       if (dropUp) {
-        setDropdownPos({ top: rect.top - 8, left: rect.left });
+        setDropdownPos({ top: rect.top - 8, left, width: dropdownWidth });
       } else {
-        setDropdownPos({ top: rect.bottom + 8, left: rect.left });
+        setDropdownPos({ top: rect.bottom + 8, left, width: dropdownWidth });
       }
     };
 
@@ -255,16 +263,29 @@ export function ModelSelector({
     return filtered;
   }, [allModels, activeTab, search]);
 
+  // Group filtered models by provider for display
+  const groupedModels = useMemo(() => {
+    if (activeTab) return null; // Don't group when a specific tab is selected
+    const groups = new Map<string, { label: string; models: ModelInfo[] }>();
+    for (const m of filteredModels) {
+      const p = m.provider || 'internal';
+      if (!groups.has(p)) {
+        groups.set(p, { label: getProviderLabel(p, m.provider_name), models: [] });
+      }
+      groups.get(p)!.models.push(m);
+    }
+    // Sort groups by provider order
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => providerOrder(a) - providerOrder(b))
+      .map(([id, g]) => ({ id, ...g }));
+  }, [filteredModels, activeTab]);
+
   // Find the active model's info for button label
   const activeModelInfo = useMemo(() => {
     if (allModels.length > 0) {
       const found = allModels.find((m) => m.id === activeModel);
       if (found) return found;
     }
-    // Derive provider from model ID prefix
-    // "custom/my-ollama/neural-7b" → provider "my-ollama"
-    // "openrouter/gpt-4o" → provider "openrouter"
-    // "builtin/gpt-4o" → provider "internal"
     let fallbackProvider: string;
     if (activeModel.startsWith('custom/')) {
       const rest = activeModel.slice('custom/'.length);
@@ -274,13 +295,22 @@ export function ModelSelector({
       const slashIdx = activeModel.indexOf('/');
       fallbackProvider = slashIdx > 0 ? activeModel.substring(0, slashIdx) : 'internal';
     }
-    // Map "builtin" to "internal" for display consistency (builtin/ prefix = system models)
     const normalizedProvider = fallbackProvider === 'builtin' ? 'internal' : fallbackProvider;
     return { id: activeModel, pricing: null, provider: normalizedProvider } as ModelInfo;
   }, [allModels, activeModel]);
 
   // No model info at all — hide the selector
   if (!activeModel) return null;
+
+  // Count models per provider for tab badges
+  const providerCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of allModels) {
+      const p = m.provider || 'internal';
+      counts.set(p, (counts.get(p) || 0) + 1);
+    }
+    return counts;
+  }, [allModels]);
 
   // Dropdown rendered via portal to escape overflow:auto ancestors
   const dropdownContent =
@@ -293,15 +323,16 @@ export function ModelSelector({
               top: dropUp ? undefined : dropdownPos.top,
               bottom: dropUp ? window.innerHeight - dropdownPos.top : undefined,
               left: dropdownPos.left,
+              width: dropdownPos.width,
             }}
-            className="bg-[rgba(16,16,18,0.98)] backdrop-blur-xl border border-white/[0.08] rounded-xl w-[460px] h-[400px] z-[10000] shadow-2xl shadow-black/40 flex flex-col overflow-hidden"
+            className="bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius)] max-h-[420px] z-[10000] flex flex-col overflow-hidden"
           >
-            {/* Search bar */}
-            <div className="px-3 pt-3 pb-2 flex-shrink-0">
+            {/* Search + provider filter pills */}
+            <div className="px-3 pt-3 pb-2 flex-shrink-0 space-y-2">
               <div className="relative">
                 <MagnifyingGlass
-                  size={15}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30"
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]"
                 />
                 <input
                   ref={searchRef}
@@ -309,93 +340,131 @@ export function ModelSelector({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search models..."
-                  className="w-full pl-8 pr-3 py-2 bg-white/[0.06] border border-white/[0.08] rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-[var(--primary)]/40 transition-colors"
+                  className="w-full pl-8 pr-8 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)] transition-colors"
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') setIsOpen(false);
                   }}
                 />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
-            </div>
 
-            {/* Divider */}
-            <div className="h-px bg-white/[0.06] flex-shrink-0" />
-
-            {/* Main content: tabs on the left, models on the right */}
-            <div className="flex flex-1 min-h-0">
-              {/* Provider tabs — vertical sidebar */}
+              {/* Provider filter pills — horizontal scrollable */}
               {providers.length > 1 && (
-                <div className="w-[130px] flex-shrink-0 border-r border-white/[0.06] overflow-y-auto py-1">
+                <div className="flex items-center gap-1 overflow-x-auto scrollbar-none" style={{ maskImage: 'linear-gradient(to right, black calc(100% - 12px), transparent)', WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 12px), transparent)' }}>
                   <button
                     type="button"
                     onClick={() => setActiveTab(null)}
-                    className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors ${
-                      activeTab === null
-                        ? 'bg-[var(--primary)]/15 text-[var(--primary)] border-r-2 border-[var(--primary)]'
-                        : 'text-white/50 hover:bg-white/[0.04] hover:text-white/70'
-                    }`}
+                    className={`btn btn-sm shrink-0 ${activeTab === null ? 'btn-tab-active' : 'btn-tab'}`}
                   >
-                    All Models
+                    All
+                    <span className="text-[10px] opacity-50 ml-0.5">{allModels.length}</span>
                   </button>
                   {providers.map((p) => (
                     <button
                       type="button"
                       key={p.id}
                       onClick={() => setActiveTab(activeTab === p.id ? null : p.id)}
-                      className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors ${
-                        activeTab === p.id
-                          ? 'bg-[var(--primary)]/15 text-[var(--primary)] border-r-2 border-[var(--primary)]'
-                          : 'text-white/50 hover:bg-white/[0.04] hover:text-white/70'
-                      }`}
+                      className={`btn btn-sm shrink-0 ${activeTab === p.id ? 'btn-tab-active' : 'btn-tab'}`}
                     >
                       {p.label}
+                      <span className="text-[10px] opacity-50 ml-0.5">{providerCounts.get(p.id) || 0}</span>
                     </button>
                   ))}
                 </div>
               )}
-
-              {/* Model list */}
-              <div className="flex-1 overflow-y-auto overscroll-contain min-h-0">
-                {isLoading ? (
-                  <div className="px-4 py-8 text-center">
-                    <div className="inline-block w-5 h-5 border-2 border-white/20 border-t-[var(--primary)] rounded-full animate-spin mb-2" />
-                    <div className="text-xs text-white/40">Loading models...</div>
-                  </div>
-                ) : fetchError ? (
-                  <div className="px-4 py-8 text-center">
-                    <div className="text-sm text-white/40 mb-2">Failed to load models</div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setHasFetched(false);
-                        handleToggle();
-                      }}
-                      className="text-xs text-[var(--primary)] hover:underline"
-                    >
-                      Retry
-                    </button>
-                  </div>
-                ) : filteredModels.length === 0 ? (
-                  <div className="px-4 py-8 text-center">
-                    <MagnifyingGlass size={24} className="mx-auto mb-2 text-white/20" />
-                    <div className="text-sm text-white/40">
-                      {search.trim() ? 'No models match your search' : 'No models available'}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="py-1">
-                    {filteredModels.map((model) => (
-                      <ModelRow
-                        key={model.id}
-                        model={model}
-                        isActive={model.id === activeModel}
-                        onSelect={handleSelect}
-                        showProvider={!activeTab}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
+
+            {/* Divider */}
+            <div className="h-px bg-[var(--border)] flex-shrink-0" />
+
+            {/* Model list */}
+            <div className="flex-1 overflow-y-auto overscroll-contain min-h-0">
+              {isLoading ? (
+                <div className="px-4 py-8 text-center">
+                  <div className="inline-block w-4 h-4 border-2 border-[var(--border)] border-t-[var(--primary)] rounded-full animate-spin mb-2" />
+                  <div className="text-[11px] text-[var(--text-subtle)]">Loading models...</div>
+                </div>
+              ) : fetchError ? (
+                <div className="px-4 py-8 text-center">
+                  <div className="text-xs text-[var(--text-muted)] mb-2">Failed to load models</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasFetched(false);
+                      handleToggle();
+                    }}
+                    className="text-xs text-[var(--primary)] hover:underline"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : filteredModels.length === 0 ? (
+                <div className="px-4 py-8 text-center">
+                  <MagnifyingGlass size={20} className="mx-auto mb-2 text-[var(--text-subtle)]" />
+                  <div className="text-xs text-[var(--text-muted)]">
+                    {search.trim() ? 'No models match your search' : 'No models available'}
+                  </div>
+                </div>
+              ) : groupedModels && !search.trim() ? (
+                /* Grouped by provider when showing all */
+                <div className="py-1">
+                  {groupedModels.map((group) => (
+                    <div key={group.id}>
+                      <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                        {group.label}
+                      </div>
+                      {group.models.map((model) => (
+                        <ModelRow
+                          key={model.id}
+                          model={model}
+                          isActive={model.id === activeModel}
+                          onSelect={handleSelect}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                /* Flat list when filtered by tab or search */
+                <div className="py-1">
+                  {filteredModels.map((model) => (
+                    <ModelRow
+                      key={model.id}
+                      model={model}
+                      isActive={model.id === activeModel}
+                      onSelect={handleSelect}
+                      showProvider={!activeTab}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer — active model indicator */}
+            {activeModel && (
+              <>
+                <div className="h-px bg-[var(--border)] flex-shrink-0" />
+                <div className="px-3 py-2 flex items-center gap-2 flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] flex-shrink-0" />
+                  <span className="text-[10px] text-[var(--text-muted)] truncate">
+                    Active: {formatButtonLabel(activeModelInfo)}
+                  </span>
+                  {activeModelInfo.provider && (
+                    <span className="text-[10px] text-[var(--text-subtle)] ml-auto flex-shrink-0">
+                      {getProviderLabel(activeModelInfo.provider, activeModelInfo.provider_name)}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
           </div>,
           document.body
         )
@@ -415,18 +484,18 @@ export function ModelSelector({
           flex items-center gap-1.5
           transition-all
           text-xs font-medium
-          h-8
-          rounded-xl
-          border-2 border-[var(--border-color)]
+          h-7
+          rounded-full
+          border border-[var(--border)]
           overflow-hidden
           max-w-[220px]
           ${compact ? 'px-2' : 'px-3'}
           ${
             isReadOnly
-              ? 'text-[var(--text)]/40 cursor-default bg-[var(--text)]/5'
+              ? 'text-[var(--text-subtle)] cursor-default bg-[var(--surface)]'
               : isOpen
-                ? 'text-[var(--text)] bg-[var(--primary)]/15 border-[var(--primary)]/30'
-                : 'text-[var(--text)] bg-[var(--text)]/10 hover:bg-[var(--text)]/20 active:bg-[var(--text)]/30'
+                ? 'text-[var(--text)] bg-[var(--surface-hover)] border-[var(--border-hover)]'
+                : 'text-[var(--text-muted)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
           }
         `}
         title={isReadOnly ? `Model: ${activeModel} (not changeable)` : `Model: ${activeModel}`}
@@ -470,36 +539,37 @@ function ModelRow({
       onClick={() => onSelect(model.id)}
       className={`
         w-full px-3 py-2 flex items-center gap-2.5
-        text-sm transition-colors group
-        ${isActive ? 'bg-[var(--primary)]/10 text-white' : 'text-white/80 hover:bg-white/[0.06]'}
+        text-xs transition-colors group rounded-[var(--radius-small)] mx-0
+        ${isActive ? 'bg-[var(--surface-hover)] text-[var(--text)]' : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'}
       `}
     >
-      <div
+      {/* Health / active dot */}
+      <span
         className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
           model.health === 'unhealthy' || model.health === 'timeout'
-            ? 'bg-red-400/70'
+            ? 'bg-[var(--status-error)]'
             : model.health === 'healthy'
-              ? 'bg-emerald-400/70'
+              ? 'bg-[var(--status-success)]'
               : isActive
                 ? 'bg-[var(--primary)]'
-                : 'bg-white/15 group-hover:bg-white/25'
+                : 'bg-[var(--text-subtle)] group-hover:bg-[var(--text-muted)]'
         }`}
       />
 
       <div className="flex-1 text-left min-w-0">
-        <div className="truncate text-[13px] leading-tight">
-          {showProvider && <span className="text-white/40">{providerLabel} / </span>}
+        <div className="truncate text-xs leading-tight">
+          {showProvider && <span className="text-[var(--text-subtle)]">{providerLabel} / </span>}
           {modelName}
         </div>
         {model.pricing != null && (
           <div className="text-[10px] mt-0.5 leading-tight">
             {isFree ? (
-              <span className="text-green-400/70 inline-flex items-center gap-0.5">
+              <span className="text-[var(--status-success)] inline-flex items-center gap-0.5">
                 <Lightning size={9} weight="fill" />
                 Free
               </span>
             ) : (
-              <span className="text-white/30">
+              <span className="text-[var(--text-subtle)]">
                 {formatCredits(model.pricing.input)} / {formatCredits(model.pricing.output)} credits per 1M
               </span>
             )}

@@ -16,10 +16,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "marketplace_agents",
-        sa.Column("git_repo_url", sa.String(500), nullable=True),
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'marketplace_agents' AND column_name = 'git_repo_url'"
+        )
     )
+    if not result.fetchone():
+        op.add_column(
+            "marketplace_agents",
+            sa.Column("git_repo_url", sa.String(500), nullable=True),
+        )
 
 
 def downgrade() -> None:

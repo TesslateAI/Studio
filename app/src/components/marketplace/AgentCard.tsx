@@ -173,7 +173,7 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
       />
 
       {/* Description */}
-      <p className="text-xs sm:text-sm leading-relaxed line-clamp-2 mb-3 text-[var(--text-muted)]">
+      <p className="text-xs leading-relaxed line-clamp-2 mb-3 text-[var(--text-muted)]">
         {item.description}
       </p>
 
@@ -223,7 +223,7 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
       </div>
 
       {/* Footer: Action Buttons */}
-      <CardActions className="sm:flex sm:items-center sm:justify-between">
+      <CardActions className="flex items-center justify-between">
         <div>
           {item.pricing_type === 'free' && !item.is_purchased && (
             <span className="text-xs text-[var(--text-subtle)]">
@@ -241,21 +241,21 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
                 onClick={handleFork}
                 disabled={forking}
                 title="Fork & Customize"
-                className="flex items-center gap-1 px-2 py-1 bg-purple-500/15 text-purple-400 hover:bg-purple-500/25 rounded-lg text-xs font-medium transition-colors"
+                className="btn"
               >
-                <GitFork size={12} weight="bold" />
+                <GitFork size={14} weight="bold" />
                 {forking ? '...' : 'Fork'}
               </button>
             )}
           {item.is_purchased && isAuthenticated ? (
-            <span className="flex items-center gap-1 px-2.5 py-1 bg-green-500/15 text-green-500 rounded-lg text-xs font-medium">
-              <Check size={12} weight="bold" />
+            <span className="btn" style={{ color: 'var(--status-success)', background: 'rgba(var(--status-green-rgb), 0.1)', borderColor: 'rgba(var(--status-green-rgb), 0.3)' }}>
+              <Check size={14} weight="bold" />
               Installed
             </span>
           ) : !isAuthenticated ? (
             <button
               onClick={handleInstall}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md"
+              className="btn btn-filled"
             >
               Sign Up
             </button>
@@ -263,14 +263,7 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
             <button
               onClick={handleInstall}
               disabled={!item.is_active}
-              className={`
-                px-3 py-1.5 rounded-lg text-xs font-semibold transition-all
-                ${
-                  item.is_active
-                    ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md'
-                    : 'bg-[var(--surface-hover)] text-[var(--text-subtle)] cursor-not-allowed'
-                }
-              `}
+              className={`btn ${item.is_active ? 'btn-filled' : ''}`}
             >
               {item.is_active
                 ? item.pricing_type === 'free'

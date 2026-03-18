@@ -14,7 +14,6 @@ import {
   X,
   Question,
   TreeStructure,
-  Sliders,
   Rocket,
 } from '@phosphor-icons/react';
 import api from '../lib/api';
@@ -49,6 +48,8 @@ interface MarketplaceItem {
 
 interface MarketplaceSidebarProps {
   onSelectItem?: (item: MarketplaceItem) => void;
+  onAutoLayout?: () => void;
+  autoLayoutDisabled?: boolean;
 }
 
 // Helper to render item type badge
@@ -114,17 +115,15 @@ const CATEGORIES = [
   { id: 'workflow', label: 'Workflows', icon: <FlowArrow size={16} weight="fill" /> },
 ];
 
-export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) => {
+export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisabled }: MarketplaceSidebarProps) => {
   const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(true);
-  const [isAutoOpen, setIsAutoOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set(['base', 'service', 'deployment', 'workflow'])
   );
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const autoRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchMarketplaceItems();
@@ -135,9 +134,6 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
-      }
-      if (autoRef.current && !autoRef.current.contains(event.target as Node)) {
-        setIsAutoOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -436,49 +432,18 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
         )}
       </div>
 
-      {/* Auto Layout Dropdown */}
-      <div ref={autoRef} className="relative">
+      {/* Auto Layout Button */}
+      {onAutoLayout && (
         <button
-          onClick={() => setIsAutoOpen(!isAutoOpen)}
-          className="flex items-center gap-2 px-3 py-2 bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-lg shadow-lg hover:bg-[var(--sidebar-hover)] transition-colors"
+          onClick={onAutoLayout}
+          disabled={autoLayoutDisabled}
+          className="btn disabled:opacity-40"
+          title="Automatically arrange nodes"
         >
-          <TreeStructure size={16} className="text-[var(--text)]/70" />
-          <span className="text-sm font-medium text-[var(--text)]">Auto</span>
-          <CaretDown
-            size={14}
-            className={`text-[var(--text)]/60 transition-transform ${isAutoOpen ? 'rotate-180' : ''}`}
-          />
+          <TreeStructure size={16} />
+          <span className="hidden sm:inline">Auto Layout</span>
         </button>
-
-        {/* Auto Layout Dropdown Panel */}
-        {isAutoOpen && (
-          <div className="absolute top-full left-0 mt-2 w-56 bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-xl shadow-2xl overflow-hidden">
-            <div className="p-3 border-b border-[var(--sidebar-border)]">
-              <div className="flex items-center gap-2">
-                <Sliders size={16} className="text-[var(--primary)]" />
-                <span className="text-sm font-medium text-[var(--text)]">Auto Layout</span>
-              </div>
-            </div>
-            <div className="p-2 space-y-1">
-              <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--sidebar-hover)] transition-colors text-left">
-                <span className="text-sm text-[var(--text)]">Horizontal</span>
-              </button>
-              <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--sidebar-hover)] transition-colors text-left">
-                <span className="text-sm text-[var(--text)]">Vertical</span>
-              </button>
-              <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--sidebar-hover)] transition-colors text-left">
-                <span className="text-sm text-[var(--text)]">Grid</span>
-              </button>
-              <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--sidebar-hover)] transition-colors text-left">
-                <span className="text-sm text-[var(--text)]">Radial</span>
-              </button>
-            </div>
-            <div className="px-3 py-2 border-t border-[var(--sidebar-border)] bg-[var(--bg)]">
-              <p className="text-[10px] text-[var(--text)]/50">Arrange nodes automatically</p>
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };

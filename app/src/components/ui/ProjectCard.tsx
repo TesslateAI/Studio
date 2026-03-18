@@ -51,13 +51,16 @@ export function ProjectCard({
     <div
       className={`
         project-card relative group
-        bg-[var(--surface)] rounded-2xl
-        border transition-all duration-300 ease-[var(--ease)]
-        hover:transform hover:-translate-y-1
-        hover:shadow-[0_12px_40px_rgba(0,0,0,0.2)]
-        ${isSelected ? 'border-[var(--primary)]' : 'border-white/8 hover:border-[rgba(var(--primary-rgb),0.3)]'}
+        bg-[var(--surface-hover)] rounded-[var(--radius)]
+        transition-all duration-300 ease-[var(--ease)]
+        hover:transform hover:-translate-y-0.5
       `}
-      style={{ overflow: isDeleting ? 'hidden' : 'visible' }}
+      style={{
+        overflow: isDeleting ? 'hidden' : 'visible',
+        border: `var(--border-width) solid ${isSelected ? 'var(--primary)' : 'var(--border)'}`,
+      }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
+      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--border)'; }}
     >
       {/* Selection Checkbox */}
       {onSelectionToggle && (
@@ -98,7 +101,7 @@ export function ProjectCard({
 
       {/* Deleting Overlay */}
       {isDeleting && (
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center z-10 overflow-hidden">
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm rounded-[var(--radius)] flex flex-col items-center justify-center z-10 overflow-hidden">
           <svg
             className="w-12 h-12 mb-3"
             viewBox="0 0 50 50"
@@ -125,8 +128,8 @@ export function ProjectCard({
               strokeLinecap="round"
             />
           </svg>
-          <p className="text-white font-medium text-sm">Deleting project...</p>
-          <p className="text-gray-400 text-xs mt-1">This may take a few seconds</p>
+          <p className="text-white font-medium text-xs">Deleting project...</p>
+          <p className="text-[var(--text-muted)] text-xs mt-1">This may take a few seconds</p>
         </div>
       )}
 
@@ -138,7 +141,7 @@ export function ProjectCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
               <h3
-                className="font-heading text-lg sm:text-xl font-bold text-[var(--text)] truncate cursor-pointer hover:text-[var(--primary)] transition-colors"
+                className="font-heading text-sm font-semibold text-[var(--text)] truncate cursor-pointer hover:text-[var(--primary)] transition-colors"
                 onClick={onOpen}
               >
                 {project.name}
@@ -174,7 +177,7 @@ export function ProjectCard({
         </div>
 
         {/* Description */}
-        <p className="text-gray-400 text-xs sm:text-sm mb-3 sm:mb-4 line-clamp-2 leading-relaxed">
+        <p className="text-[var(--text-muted)] text-xs mb-3 line-clamp-2 leading-relaxed">
           {project.description}
         </p>
 
@@ -205,91 +208,34 @@ export function ProjectCard({
         <div className="flex-1"></div>
 
         {/* Updated timestamp */}
-        <div className="text-xs text-gray-500 mb-3">
+        <div className="text-xs text-[var(--text-subtle)] mb-3">
           {project.isLive ? `Live • ${project.userCount} users` : `Updated ${project.lastUpdated}`}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-2">
-          <button
-            onClick={onOpen}
-            className="
-              flex-1 min-w-0 bg-[var(--primary)] hover:bg-[var(--primary-hover)]
-              text-white font-semibold py-2.5 px-4 rounded-xl
-              transition-all duration-200
-              flex items-center justify-center gap-2
-              shadow-lg shadow-[rgba(var(--primary-rgb),0.2)]
-              hover:shadow-xl hover:shadow-[rgba(var(--primary-rgb),0.3)]
-              hover:scale-[1.02]
-              text-sm
-            "
-          >
-            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
+        {/* Action Buttons — pill buttons, hug text */}
+        <div className="flex gap-1 flex-wrap">
+          <button onClick={onOpen} className="btn btn-primary">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
               <path d="M224.49,136.49l-72,72a12,12,0,0,1-17,0l-72-72a12,12,0,0,1,17-17L116,155V40a12,12,0,0,1,24,0V155l35.51-35.52a12,12,0,0,1,17,17ZM216,204H40a12,12,0,0,0,0,24H216a12,12,0,0,0,0-24Z" />
             </svg>
-            <span className="hidden sm:inline truncate">Open</span>
+            Open
           </button>
 
-          <Dropdown
-            trigger={
-              <button
-                className="
-                  flex-shrink-0 bg-white/5 hover:bg-white/10
-                  text-[var(--text-secondary,#9ca3af)] hover:text-[var(--text)]
-                  font-semibold py-2.5 px-3 rounded-xl
-                  border border-white/10 hover:border-white/20
-                  transition-all duration-200
-                  flex items-center justify-center
-                  hover:scale-[1.02]
-                "
-                title="More actions"
-              >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                  <path d="M128,96a32,32,0,1,0,32,32A32,32,0,0,0,128,96Zm0,40a8,8,0,1,1,8-8A8,8,0,0,1,128,136Zm0-72a32,32,0,1,0-32-32A32,32,0,0,0,128,64Zm0-40a8,8,0,1,1-8,8A8,8,0,0,1,128,24Zm0,168a32,32,0,1,0,32,32A32,32,0,0,0,128,192Zm0,40a8,8,0,1,1,8-8A8,8,0,0,1,128,232Z" />
-                </svg>
-              </button>
-            }
-            items={[
-              ...(onFork
-                ? [
-                    {
-                      icon: (
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                          <path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64ZM144,192a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z" />
-                        </svg>
-                      ),
-                      label: 'Fork',
-                      onClick: onFork,
-                    },
-                  ]
-                : []),
-              ...(onHibernate
-                ? [
-                    {
-                      icon: (
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                          <path d="M240,96a8,8,0,0,1-8,8H216v16a8,8,0,0,1-16,0V104H184a8,8,0,0,1,0-16h16V72a8,8,0,0,1,16,0V88h16A8,8,0,0,1,240,96ZM144,56h8v8a8,8,0,0,0,16,0V56h8a8,8,0,0,0,0-16h-8V32a8,8,0,0,0-16,0v8h-8a8,8,0,0,0,0,16Zm-2.16,135.81A88,88,0,0,1,64.19,114.16a8,8,0,0,0-2.08-11.36,8.15,8.15,0,0,0-3.92-1.25A8,8,0,0,0,51.34,104,104.07,104.07,0,0,0,152,204.66a8,8,0,0,0,1.21-15.67A8.15,8.15,0,0,0,141.84,191.81Z" />
-                        </svg>
-                      ),
-                      label: 'Hibernate',
-                      onClick: onHibernate,
-                    },
-                  ]
-                : []),
-              {
-                icon: (
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                    <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
-                  </svg>
-                ),
-                label: 'Delete',
-                onClick: onDelete,
-                variant: 'danger' as const,
-                separator: true,
-              },
-            ]}
-            position="bottom-right"
-          />
+          {onFork && (
+            <button onClick={(e) => { e.stopPropagation(); onFork(); }} className="btn">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                <path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64ZM144,192a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z" />
+              </svg>
+              Fork
+            </button>
+          )}
+
+          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="btn btn-danger" title="Delete project">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+              <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
+            </svg>
+            Delete
+          </button>
         </div>
       </div>
     </div>

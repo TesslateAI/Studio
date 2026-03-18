@@ -139,8 +139,12 @@ export const ContainerPropertiesPanel = ({
 
   const isExternalService = deploymentMode === 'external' && !!serviceSlug;
 
+  // --- Collapsible sections ---
+  const [isEnvExpanded, setIsEnvExpanded] = useState(false);
+  const [isAddingInline, setIsAddingInline] = useState(false);
+
   // --- Container Logs ---
-  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(true);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [isLogsPaused, setIsLogsPaused] = useState(false);
   const [isLogsAutoScroll, setIsLogsAutoScroll] = useState(true);
@@ -524,146 +528,172 @@ export const ContainerPropertiesPanel = ({
       {/* Mobile backdrop */}
       <div className="md:hidden fixed inset-0 bg-black/50 z-40" onClick={onClose} />
 
-      {/* Panel */}
+      {/* Panel — no outer container, cards float directly */}
       <div
-        className="fixed md:absolute inset-y-4 md:inset-y-auto md:top-4 md:bottom-4 right-4 w-[calc(100%-2rem)] max-w-sm md:w-[var(--panel-w)] md:max-w-none bg-[#1a1a1a] rounded-xl border border-[#2a2a2a] flex flex-col overflow-hidden z-50 shadow-2xl"
+        className="fixed md:absolute inset-y-4 md:inset-y-auto md:top-4 md:bottom-4 right-4 w-[calc(100%-2rem)] max-w-sm md:w-[var(--panel-w)] md:max-w-none flex flex-col overflow-hidden z-50"
         style={{ '--panel-w': `${panelWidth}px` } as React.CSSProperties}
       >
         {/* Left resize handle */}
         <div
           onMouseDown={onResizeStart}
-          className="hidden md:block absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-[var(--primary)]/30 active:bg-[var(--primary)]/50 transition-colors"
+          className="hidden md:block absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-[var(--border-hover)] active:bg-[var(--border)] transition-colors"
         />
 
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-[#2a2a2a] flex items-center justify-between flex-shrink-0">
-          <div className="min-w-0 flex-1">
-            {isEditingName ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={editedName}
-                  onChange={(e) => setEditedName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRenameContainer();
-                    if (e.key === 'Escape') {
-                      setEditedName(containerName);
-                      setIsEditingName(false);
-                    }
-                  }}
-                  className="flex-1 px-2 py-1 bg-[var(--bg)] border border-[var(--primary)] text-[var(--text)] rounded text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-                  autoFocus
-                  disabled={isRenamingContainer}
-                />
-                <button
-                  onClick={handleRenameContainer}
-                  disabled={isRenamingContainer}
-                  className="p-1 hover:bg-green-500/20 rounded transition-colors"
-                  title="Save name"
-                >
-                  <Check size={16} className="text-green-400" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-[var(--text)] truncate">
-                  {containerName}
-                </h2>
-                <button
-                  onClick={() => setIsEditingName(true)}
-                  className="p-1 hover:bg-[var(--sidebar-hover)] rounded transition-colors flex-shrink-0"
-                  title="Rename container"
-                >
-                  <PencilSimple size={14} className="text-[var(--text)]/60" />
-                </button>
-              </div>
-            )}
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span
-                className={`px-2 py-0.5 text-xs font-medium rounded flex-shrink-0 ${
-                  containerStatus === 'running'
-                    ? 'bg-green-500/20 text-green-400'
-                    : containerStatus === 'starting'
-                      ? 'bg-yellow-500/20 text-yellow-400'
-                      : containerStatus === 'stopped'
-                        ? 'bg-gray-500/20 text-gray-400'
-                        : containerStatus === 'failed'
-                          ? 'bg-red-500/20 text-red-400'
-                          : containerStatus === 'connected'
-                            ? 'bg-purple-500/20 text-purple-400'
-                            : 'bg-gray-500/20 text-gray-400'
-                }`}
-              >
-                {containerStatus}
-              </span>
-              {port && (
-                <span className="px-2 py-0.5 text-xs font-medium rounded bg-blue-500/20 text-blue-400 flex-shrink-0">
-                  Port: {port}
-                </span>
+        {/* Scrollable card stack */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-1 space-y-2">
+
+          {/* Identity card — name + status + close */}
+          <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
+            <div className="flex items-center justify-between h-10 px-4 border-b border-[var(--border)]">
+              {isEditingName ? (
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <input
+                    type="text"
+                    value={editedName}
+                    onChange={(e) => setEditedName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleRenameContainer();
+                      if (e.key === 'Escape') {
+                        setEditedName(containerName);
+                        setIsEditingName(false);
+                      }
+                    }}
+                    className="flex-1 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-semibold focus:outline-none focus:border-[var(--border-hover)]"
+                    autoFocus
+                    disabled={isRenamingContainer}
+                  />
+                  <button
+                    onClick={handleRenameContainer}
+                    disabled={isRenamingContainer}
+                    className="btn btn-icon btn-sm"
+                    title="Save name"
+                  >
+                    <Check size={14} className="text-[var(--status-success)]" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      containerStatus === 'running'
+                        ? 'bg-[var(--status-success)]'
+                        : containerStatus === 'starting'
+                          ? 'bg-[var(--status-warning)]'
+                          : containerStatus === 'failed'
+                            ? 'bg-[var(--status-error)]'
+                            : containerStatus === 'connected'
+                              ? 'bg-purple-400'
+                              : 'bg-[var(--text-subtle)]'
+                    }`}
+                  />
+                  <span className="text-xs font-semibold text-[var(--text)] truncate">{containerName}</span>
+                  <button
+                    onClick={() => setIsEditingName(true)}
+                    className="btn btn-icon btn-sm"
+                    title="Rename container"
+                  >
+                    <PencilSimple size={12} />
+                  </button>
+                </div>
               )}
+              <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                {port && (
+                  <span className="text-[10px] text-[var(--text-subtle)] font-mono">:{port}</span>
+                )}
+                <button
+                  onClick={onClose}
+                  className="btn btn-icon btn-sm"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* Container Controls */}
+            <div className="px-4 py-3">
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => handleContainerAction('start')}
+                  disabled={
+                    isLoading || containerStatus === 'running' || containerStatus === 'starting'
+                  }
+                  className="btn flex-1"
+                  style={containerStatus !== 'running' && containerStatus !== 'starting' && !isLoading ? { background: 'rgba(var(--status-green-rgb), 0.1)', borderColor: 'rgba(var(--status-green-rgb), 0.3)', color: 'var(--status-success)' } : undefined}
+                >
+                  <Play size={12} weight="fill" />
+                  {containerStatus === 'starting' ? 'Starting...' : 'Start'}
+                </button>
+                <button
+                  onClick={() => handleContainerAction('stop')}
+                  disabled={
+                    isLoading || containerStatus === 'stopped' || containerStatus === 'connected'
+                  }
+                  className="btn btn-danger flex-1"
+                >
+                  <Square size={12} weight="fill" />
+                  Stop
+                </button>
+                <button
+                  onClick={() => handleContainerAction('restart')}
+                  disabled={
+                    isLoading || containerStatus === 'starting' || containerStatus === 'connected'
+                  }
+                  className="btn flex-1"
+                >
+                  <ArrowClockwise size={12} />
+                  Restart
+                </button>
+              </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 hover:bg-[var(--sidebar-hover)] rounded-lg transition-colors flex-shrink-0 ml-2"
-          >
-            <X size={16} className="text-[var(--text)]" />
-          </button>
-        </div>
 
-        {/* Container Controls */}
-        <div className="px-3 py-2 border-b border-[var(--border-color)] flex-shrink-0">
-          <p className="text-xs font-medium text-[var(--text)] mb-2">Container Controls</p>
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => handleContainerAction('start')}
-              disabled={
-                isLoading || containerStatus === 'running' || containerStatus === 'starting'
-              }
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors text-xs font-medium"
-            >
-              <Play size={12} weight="fill" />
-              {containerStatus === 'starting' ? 'Starting...' : 'Start'}
-            </button>
-            <button
-              onClick={() => handleContainerAction('stop')}
-              disabled={
-                isLoading || containerStatus === 'stopped' || containerStatus === 'connected'
-              }
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors text-xs font-medium"
-            >
-              <Square size={12} weight="fill" />
-              Stop
-            </button>
-            <button
-              onClick={() => handleContainerAction('restart')}
-              disabled={
-                isLoading || containerStatus === 'starting' || containerStatus === 'connected'
-              }
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors text-xs font-medium"
-            >
-              <ArrowClockwise size={12} />
-              Restart
-            </button>
-          </div>
-        </div>
+          {/* Edit Credentials card (external services only) */}
+          {isExternalService && (
+            <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
+              <div className="px-4 py-3">
+                <button
+                  onClick={handleEditCredentials}
+                  className="btn w-full"
+                >
+                  <Key size={14} />
+                  Edit Credentials
+                </button>
+              </div>
+            </div>
+          )}
 
-        {/* Edit Credentials (external services only) */}
-        {isExternalService && (
-          <div className="px-3 py-2 border-b border-[var(--border-color)] flex-shrink-0">
-            <button
-              onClick={handleEditCredentials}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[var(--sidebar-hover)] hover:bg-[var(--border-color)] text-[var(--text)] rounded-lg text-xs font-medium transition-colors"
-            >
-              <Key size={14} />
-              Edit Credentials
-            </button>
-          </div>
-        )}
-
-        {/* Environment Variables */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-2">
-          <p className="text-xs font-medium text-[var(--text)] mb-2">Environment Variables</p>
+          {/* Environment Variables card */}
+          <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => setIsEnvExpanded((v) => !v)}
+                className="flex-1 flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface-hover)] transition-colors group"
+              >
+                <span className="text-[11px] font-medium text-[var(--text-muted)] group-hover:text-[var(--text)]">Environment Variables</span>
+                {savedEnvVars.length > 0 && (
+                  <span className="text-[10px] text-[var(--text-subtle)]">{savedEnvVars.length}</span>
+                )}
+                <span className={`transition-transform duration-200 text-[var(--text-subtle)] ${isEnvExpanded ? 'rotate-0' : '-rotate-90'}`}>
+                  <CaretDown size={10} />
+                </span>
+              </button>
+              <div className="pr-3 flex-shrink-0">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEnvExpanded(true);
+                    setIsAddingInline(true);
+                  }}
+                  className="btn btn-icon btn-sm"
+                  title="Add variable"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+            </div>
+            {isEnvExpanded && (
+            <div className="px-4 pb-4 space-y-2">
 
           {isLoading ? (
             <div className="flex items-center justify-center py-6">
@@ -692,7 +722,7 @@ export const ContainerPropertiesPanel = ({
                       </span>
                     </div>
                   ))}
-                  <div className="border-b border-[var(--border-color)] mt-2" />
+                  <div className="border-b border-[var(--border)] mt-2" />
                 </div>
               )}
 
@@ -717,7 +747,7 @@ export const ContainerPropertiesPanel = ({
                             )
                           }
                           placeholder="new value"
-                          className="w-24 px-2 py-1 bg-[var(--bg)] border border-[var(--border-color)] text-[var(--text)] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                          className="w-24 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
                           autoFocus
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') handleSaveEdit(envVar.key);
@@ -763,71 +793,100 @@ export const ContainerPropertiesPanel = ({
                 );
               })}
 
-              {/* Add new environment variable */}
-              <div className="pt-2 border-t border-[var(--border-color)]">
-                <p className="text-xs font-medium text-[var(--text)]/60 mb-2">Add New Variable</p>
-                <div className="space-y-1.5">
-                  <input
-                    type="text"
-                    value={newEnvKey}
-                    onChange={(e) =>
-                      setNewEnvKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))
-                    }
-                    placeholder="KEY_NAME"
-                    className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border-color)] text-[var(--text)] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-                  />
-                  <input
-                    type="text"
-                    value={newEnvValue}
-                    onChange={(e) => setNewEnvValue(e.target.value)}
-                    placeholder="value"
-                    className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border-color)] text-[var(--text)] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-                  />
-                  <button
-                    onClick={handleAddEnvVar}
-                    disabled={isAdding}
-                    className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-[var(--sidebar-hover)] hover:bg-[var(--border-color)] disabled:opacity-50 text-[var(--text)] rounded text-xs font-medium transition-colors"
-                  >
-                    <Plus size={12} />
-                    {isAdding ? 'Adding...' : 'Add Variable'}
-                  </button>
+              {/* Add new environment variable — toggled by + button */}
+              {isAddingInline && (
+                <div className="pt-2 border-t border-[var(--border)]">
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      value={newEnvKey}
+                      onChange={(e) =>
+                        setNewEnvKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))
+                      }
+                      placeholder="KEY_NAME"
+                      className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setIsAddingInline(false);
+                          setNewEnvKey('');
+                          setNewEnvValue('');
+                        }
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={newEnvValue}
+                      onChange={(e) => setNewEnvValue(e.target.value)}
+                      placeholder="value"
+                      className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddEnvVar();
+                        if (e.key === 'Escape') {
+                          setIsAddingInline(false);
+                          setNewEnvKey('');
+                          setNewEnvValue('');
+                        }
+                      }}
+                    />
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={handleAddEnvVar}
+                        disabled={isAdding}
+                        className="btn btn-sm flex-1"
+                      >
+                        <Plus size={12} />
+                        {isAdding ? 'Adding...' : 'Add'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsAddingInline(false);
+                          setNewEnvKey('');
+                          setNewEnvValue('');
+                        }}
+                        className="btn btn-sm"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
+            </div>
+            )}
+            </div>
 
-          {/* Container Logs */}
-          <div className="pt-3 mt-3 border-t border-[var(--border-color)]">
+          {/* Container Logs card */}
+          <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
             <button
+              type="button"
               onClick={() => setIsLogsOpen((prev) => !prev)}
-              className="flex items-center gap-1.5 w-full text-left mb-2"
+              className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface-hover)] transition-colors group w-full"
             >
-              {isLogsOpen ? (
-                <CaretDown size={12} className="text-[var(--text)]/60" />
-              ) : (
-                <CaretRight size={12} className="text-[var(--text)]/60" />
-              )}
-              <span className="text-xs font-medium text-[var(--text)]">Container Logs</span>
+              <span className="text-[11px] font-medium text-[var(--text-muted)] group-hover:text-[var(--text)]">Container Logs</span>
               {isLogsOpen && (containerStatus === 'running' || containerStatus === 'starting') && (
-                <span className="ml-auto flex items-center gap-1">
+                <span className="flex items-center gap-1">
                   <span
-                    className={`w-1.5 h-1.5 rounded-full animate-pulse ${containerStatus === 'running' ? 'bg-green-500' : 'bg-yellow-500'}`}
+                    className={`w-1.5 h-1.5 rounded-full animate-pulse ${containerStatus === 'running' ? 'bg-[var(--status-success)]' : 'bg-[var(--status-warning)]'}`}
                   />
-                  <span
-                    className={`text-[10px] ${containerStatus === 'running' ? 'text-green-400' : 'text-yellow-400'}`}
-                  >
+                  <span className="text-[10px] text-[var(--text-subtle)]">
                     {containerStatus === 'running' ? 'live' : 'starting'}
                   </span>
                 </span>
               )}
+              <span className={`transition-transform duration-200 text-[var(--text-subtle)] ${isLogsOpen ? 'rotate-0' : '-rotate-90'}`}>
+                <CaretDown size={10} />
+              </span>
             </button>
 
             {isLogsOpen && (
-              <div>
+              <div className="px-4 pb-4">
                 {containerStatus !== 'running' &&
                 containerStatus !== 'starting' &&
                 containerStatus !== 'failed' ? (
-                  <p className="text-xs text-[var(--text)]/40 py-4 text-center">
+                  <p className="text-xs text-[var(--text-subtle)] py-4 text-center">
                     Start the container to view logs
                   </p>
                 ) : (
@@ -836,7 +895,7 @@ export const ContainerPropertiesPanel = ({
                     <div className="flex items-center gap-1 mb-1.5">
                       <button
                         onClick={toggleLogsPause}
-                        className="p-1 rounded text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--sidebar-hover)] transition-colors"
+                        className="btn btn-icon btn-sm"
                         title={isLogsPaused ? 'Resume' : 'Pause'}
                       >
                         {isLogsPaused ? <Play size={12} /> : <Pause size={12} />}
@@ -846,34 +905,30 @@ export const ContainerPropertiesPanel = ({
                           setLogLines([]);
                           pauseBufferRef.current = [];
                         }}
-                        className="p-1 rounded text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--sidebar-hover)] transition-colors"
+                        className="btn btn-icon btn-sm"
                         title="Clear"
                       >
                         <Trash size={12} />
                       </button>
                       <button
                         onClick={() => setIsLogsAutoScroll((prev) => !prev)}
-                        className={`p-1 rounded transition-colors ${
-                          isLogsAutoScroll
-                            ? 'text-green-400 hover:bg-green-500/10'
-                            : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--sidebar-hover)]'
-                        }`}
+                        className={`btn btn-icon btn-sm ${isLogsAutoScroll ? 'btn-active' : ''}`}
                         title={isLogsAutoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
                       >
                         <ArrowLineDown size={12} />
                       </button>
                       {isLogsPaused && (
-                        <span className="text-[10px] text-yellow-400 ml-auto">paused</span>
+                        <span className="text-[10px] text-[var(--status-warning)] ml-auto">paused</span>
                       )}
                     </div>
 
                     {/* Log output */}
                     <div
                       ref={logContainerRef}
-                      className="h-48 overflow-y-auto overflow-x-auto bg-[#0a0a0a] rounded border border-[var(--border-color)] p-1.5 font-mono text-[10px] leading-relaxed text-[#d4d4d4] select-text"
+                      className="h-48 overflow-y-auto overflow-x-auto bg-[var(--bg)] rounded-[var(--radius-small)] border border-[var(--border)] p-1.5 font-mono text-[10px] leading-relaxed text-[#d4d4d4] select-text"
                     >
                       {logLines.length === 0 ? (
-                        <span className="text-[var(--text)]/30">Waiting for logs...</span>
+                        <span className="text-[var(--text-subtle)]">Waiting for logs...</span>
                       ) : (
                         logLines.map((line, i) => (
                           <div key={i} className="whitespace-pre">
@@ -887,6 +942,7 @@ export const ContainerPropertiesPanel = ({
               </div>
             )}
           </div>
+
         </div>
       </div>
 

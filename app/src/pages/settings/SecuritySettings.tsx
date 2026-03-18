@@ -35,7 +35,7 @@ export default function SecuritySettings() {
             <button
               onClick={handleChangePassword}
               disabled={loading}
-              className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm font-medium text-[var(--text)] hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-h-[44px]"
+              className="btn"
             >
               {loading ? (
                 <div className="flex items-center gap-2">
@@ -55,7 +55,7 @@ export default function SecuritySettings() {
           label="Email verification is active"
           description="A 6-digit verification code is sent to your email on every email/password login"
           control={
-            <span className="flex items-center gap-1.5 text-green-400 text-sm font-medium">
+            <span className="flex items-center gap-1.5 text-[var(--status-success)] text-xs font-medium">
               <CheckCircle size={16} />
               Active
             </span>
@@ -70,7 +70,7 @@ export default function SecuritySettings() {
           control={
             <button
               onClick={() => toast('Session management coming soon!')}
-              className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm font-medium text-[var(--text)] hover:bg-white/10 transition-colors min-h-[44px]"
+              className="btn"
             >
               View
             </button>
@@ -79,12 +79,12 @@ export default function SecuritySettings() {
       </SettingsGroup>
 
       {/* Info */}
-      <div className="p-4 bg-[var(--surface)] border border-white/10 rounded-xl">
+      <div className="p-4 bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius)]">
         <div className="flex items-start gap-3">
-          <Shield size={20} className="text-[var(--text)]/60 mt-0.5 flex-shrink-0" />
-          <div className="text-sm text-[var(--text)]/60">
-            <p className="font-medium mb-1">Your account is protected</p>
-            <p className="text-xs">
+          <Shield size={18} className="text-[var(--text-muted)] mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs font-medium text-[var(--text-muted)] mb-1">Your account is protected</p>
+            <p className="text-[11px] text-[var(--text-subtle)]">
               A verification code is sent to your email each time you sign in with email and
               password. OAuth logins (Google, GitHub) are not affected.
             </p>

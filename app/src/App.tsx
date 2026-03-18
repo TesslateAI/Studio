@@ -132,122 +132,42 @@ function AppContent() {
 
       <Toaster
         position="top-right"
-        containerStyle={{
-          top: 80, // Clear the header + some margin, works on all screen sizes
-        }}
+        containerStyle={{ top: 12, right: 12 }}
         toastOptions={{
-          // Default options
           duration: 4000,
-          className: 'custom-toast',
           style: {
             background: 'var(--surface)',
             color: 'var(--text)',
-            border: '1px solid rgba(255, 107, 0, 0.2)',
-            borderRadius: '16px',
-            padding: '16px',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-            backdropFilter: 'blur(12px)',
-            fontSize: '14px',
+            border: 'var(--border-width) solid var(--border-hover)',
+            borderRadius: 'var(--radius-medium)',
+            padding: '10px 12px',
+            fontSize: '12px',
             fontWeight: '500',
+            maxWidth: '360px',
           },
-          // Success toast
           success: {
             duration: 3000,
             icon: (
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <circle cx="10" cy="10" r="10" fill="#10b981" />
-                <path
-                  d="M6 10L8.5 12.5L14 7"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--status-success)', flexShrink: 0 }} />
             ),
-            style: {
-              background: 'var(--surface)',
-              color: 'var(--text)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              borderRadius: '16px',
-              padding: '16px',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-            },
           },
-          // Error toast
           error: {
             duration: 5000,
             icon: (
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <circle cx="10" cy="10" r="10" fill="#ef4444" />
-                <path
-                  d="M7 7L13 13M13 7L7 13"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--status-error)', flexShrink: 0 }} />
             ),
-            style: {
-              background: 'var(--surface)',
-              color: 'var(--text)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: '16px',
-              padding: '16px',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-            },
           },
-          // Loading toast - custom spinner
           loading: {
             icon: (
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 50 50"
-                style={{
-                  animation: 'spin 1s linear infinite',
-                }}
-              >
-                <circle
-                  cx="25"
-                  cy="25"
-                  r="20"
-                  fill="none"
-                  stroke="rgba(255, 107, 0, 0.3)"
-                  strokeWidth="5"
-                />
-                <circle
-                  cx="25"
-                  cy="25"
-                  r="20"
-                  fill="none"
-                  stroke="#ff6b00"
-                  strokeWidth="5"
-                  strokeDasharray="31.4 94.2"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <span style={{ width: 14, height: 14, border: '2px solid var(--border)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', flexShrink: 0 }} />
             ),
-            style: {
-              background: 'var(--surface)',
-              color: 'var(--text)',
-              border: '1px solid rgba(255, 107, 0, 0.3)',
-              borderRadius: '16px',
-              padding: '16px',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-            },
           },
         }}
       >
         {(t) => (
           <ToastBar
             toast={t}
-            style={{
-              padding: 0,
-              background: 'none',
-              border: 'none',
-              boxShadow: 'none',
-            }}
+            style={{ padding: 0, background: 'none', border: 'none', boxShadow: 'none' }}
           >
             {({ icon, message }) => (
               <>
@@ -256,36 +176,11 @@ function AppContent() {
                 {t.type !== 'loading' && (
                   <button
                     onClick={() => toast.dismiss(t.id)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-secondary, #999)',
-                      cursor: 'pointer',
-                      padding: '2px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: '4px',
-                      flexShrink: 0,
-                      transition: 'color 0.15s, background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = 'var(--text)';
-                      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = 'var(--text-secondary, #999)';
-                      e.currentTarget.style.background = 'none';
-                    }}
+                    className="shrink-0 p-0.5 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text-muted)] hover:bg-[var(--surface-hover)] transition-colors"
                     aria-label="Dismiss notification"
                   >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path
-                        d="M3 3L11 11M11 3L3 11"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                      />
+                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                      <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                     </svg>
                   </button>
                 )}

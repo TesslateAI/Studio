@@ -10,7 +10,7 @@ const surfaceVariants = cva(
     variants: {
       variant: {
         standard:
-          'bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 sm:p-5 hover:border-[rgba(var(--primary-rgb),0.25)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]',
+          'bg-[var(--surface-hover)] border border-[var(--border)] rounded-2xl p-4 sm:p-5 hover:border-[rgba(var(--primary-rgb),0.25)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]',
         featured:
           'bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 sm:p-6 hover:border-[rgba(var(--primary-rgb),0.25)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]',
         stat:

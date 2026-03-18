@@ -15,39 +15,65 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
-    op.add_column("marketplace_agents", sa.Column("skill_body", sa.Text(), nullable=True))
-
-    op.create_table(
-        "agent_skill_assignments",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column(
-            "agent_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("marketplace_agents.id", ondelete="CASCADE"),
-            nullable=False,
+def _column_exists(table: str, column: str) -> bool:
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :table AND column_name = :column"
         ),
-        sa.Column(
-            "skill_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("marketplace_agents.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column(
-            "user_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("users.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("enabled", sa.Boolean(), server_default="true", nullable=False),
-        sa.Column(
-            "added_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.UniqueConstraint("agent_id", "skill_id", "user_id", name="uq_agent_skill_user"),
+        {"table": table, "column": column},
     )
+    return result.fetchone() is not None
+
+
+def _table_exists(table: str) -> bool:
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_name = :table AND table_schema = 'public'"
+        ),
+        {"table": table},
+    )
+    return result.fetchone() is not None
+
+
+def upgrade():
+    if not _column_exists("marketplace_agents", "skill_body"):
+        op.add_column("marketplace_agents", sa.Column("skill_body", sa.Text(), nullable=True))
+
+    if not _table_exists("agent_skill_assignments"):
+        op.create_table(
+            "agent_skill_assignments",
+            sa.Column("id", UUID(as_uuid=True), primary_key=True),
+            sa.Column(
+                "agent_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("marketplace_agents.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column(
+                "skill_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("marketplace_agents.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column(
+                "user_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("enabled", sa.Boolean(), server_default="true", nullable=False),
+            sa.Column(
+                "added_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
+            sa.UniqueConstraint("agent_id", "skill_id", "user_id", name="uq_agent_skill_user"),
+        )
 
 
 def downgrade():

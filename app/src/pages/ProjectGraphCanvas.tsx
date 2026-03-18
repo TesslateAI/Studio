@@ -18,7 +18,6 @@ import {
   Stop,
   Code,
   FlowArrow,
-  List,
   Storefront,
   BookOpen,
   GitBranch,
@@ -27,7 +26,6 @@ import {
   Kanban,
   TreeStructure,
 } from '@phosphor-icons/react';
-import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
 import { BrowserPreviewNode } from '../components/BrowserPreviewNode';
 import { DeploymentTargetNode } from '../components/DeploymentTargetNode';
@@ -36,12 +34,13 @@ import { MarketplaceSidebar } from '../components/MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../components/ContainerPropertiesPanel';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { Tooltip } from '../components/ui/Tooltip';
+import { NavigationSidebar } from '../components/ui/NavigationSidebar';
 import { MobileWarning } from '../components/MobileWarning';
 import { MobileMenu } from '../components/ui/MobileMenu';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { GitHubPanel, NotesPanel, SettingsPanel, KanbanPanel } from '../components/panels';
 import { ChatContainer } from '../components/chat/ChatContainer';
-import { DiscordSupport } from '../components/DiscordSupport';
+
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
 import api, { projectsApi, configApi, deploymentTargetsApi, marketplaceApi } from '../lib/api';
@@ -130,7 +129,7 @@ const ProjectGraphCanvasInner = () => {
   const [kanbanMounted, setKanbanMounted] = useState(false);
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(() => {
-    const saved = localStorage.getItem('graphCanvasSidebarExpanded');
+    const saved = localStorage.getItem('navigationSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
   });
   const [agents, setAgents] = useState<ChatAgent[]>([]);
@@ -266,8 +265,8 @@ const ProjectGraphCanvasInner = () => {
   }, [slug, setNodes]); // Removed nodes.length - use ref instead
 
   useEffect(() => {
-    localStorage.setItem('graphCanvasSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
-  }, [isLeftSidebarExpanded]);
+    // Sidebar expanded state managed by NavigationSidebar via onExpandedChange
+  }, []);
 
   // Listen for file events - PRIMARY real-time update mechanism
   useEffect(() => {
@@ -392,7 +391,7 @@ const ProjectGraphCanvasInner = () => {
           name: container.name,
           status: container.status,
           port: container.port,
-          baseIcon: container.icon || '📦',
+          baseIcon: undefined,
           techStack: container.tech_stack || [],
           containerType: container.container_type || 'base',
           serviceType: container.service_type || undefined,
@@ -517,15 +516,15 @@ const ProjectGraphCanvasInner = () => {
     }
   };
 
-  const loadFiles = async () => {
-    if (!slug) return;
+  const loadFiles = useCallback(async () => {
+    if (!slugRef.current) return;
     try {
-      const filesData = await projectsApi.getFiles(slug);
+      const filesData = await projectsApi.getFiles(slugRef.current);
       setFiles(filesData);
     } catch (error) {
       console.error('Failed to load files:', error);
     }
-  };
+  }, []);
 
   const loadAgents = async () => {
     try {
@@ -1169,7 +1168,7 @@ const ProjectGraphCanvasInner = () => {
             data: {
               name: nodeTemplate.name,
               status: 'starting',
-              baseIcon: '📦',
+              baseIcon: undefined,
               techStack: [],
               containerType: nodeTemplate.type,
               onDelete: handleDeleteContainer,
@@ -1312,7 +1311,7 @@ const ProjectGraphCanvasInner = () => {
         data: {
           name: item.name,
           status: initialStatus,
-          baseIcon: item.icon,
+          baseIcon: undefined,
           techStack: item.tech_stack || [],
           containerType: item.type || 'base',
           serviceType: item.service_type,
@@ -1806,16 +1805,6 @@ const ProjectGraphCanvasInner = () => {
       title: 'Open Builder',
       onClick: () => navigate(`/project/${slug}/builder`),
     },
-    // Auto Layout - only shows when on graph view
-    ...(activeView === 'graph'
-      ? [
-          {
-            icon: <FlowArrow size={18} />,
-            title: 'Auto Layout',
-            onClick: handleAutoLayout,
-          },
-        ]
-      : []),
   ];
 
   const rightSidebarItems = [
@@ -1844,196 +1833,118 @@ const ProjectGraphCanvasInner = () => {
   ];
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
+    <div className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]">
       {/* Mobile Warning */}
       <MobileWarning />
 
       {/* Mobile Menu - Shows on mobile only */}
       <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
 
-      {/* Fixed Left Sidebar */}
-      <motion.div
-        initial={false}
-        animate={{ width: isLeftSidebarExpanded ? 192 : 48 }}
-        transition={{
-          type: 'spring',
-          stiffness: 700,
-          damping: 28,
-          mass: 0.4,
-        }}
-        className="hidden md:flex flex-col bg-[var(--surface)] border-r border-[var(--sidebar-border)] overflow-x-hidden"
-      >
-        {/* Tesslate Logo */}
-        <div
-          className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-[var(--sidebar-border)]`}
-        >
-          <svg className="w-5 h-5 text-[var(--primary)] flex-shrink-0" viewBox="0 0 161.9 126.66">
-            <path
-              d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"
-              fill="currentColor"
-            />
-            <path
-              d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"
-              fill="currentColor"
-            />
-            <path
-              d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"
-              fill="currentColor"
-            />
-          </svg>
-          {isLeftSidebarExpanded && (
-            <span className="text-lg font-bold text-[var(--text)]">Tesslate</span>
-          )}
-        </div>
-
-        <div className="py-3 gap-1 flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
-          {/* Back Button */}
-          {isLeftSidebarExpanded ? (
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
-            >
-              <ArrowLeft
-                size={18}
-                className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
-              />
-              <span className="text-sm font-medium text-[var(--text)]">Back to Projects</span>
-            </button>
-          ) : (
-            <Tooltip content="Back to Projects" side="right" delay={200}>
+      {/* Navigation Sidebar — same as Dashboard/Builder, with architecture-specific section */}
+      <NavigationSidebar
+        activePage="builder"
+        onExpandedChange={setIsLeftSidebarExpanded}
+        builderSection={({ isExpanded, navButtonClass, navButtonClassCollapsed, iconClass, labelClass, inactiveNavButton, inactiveNavButtonCollapsed, inactiveIconClass, inactiveLabelClass }) => (
+          <>
+            {/* Project name / back to projects */}
+            {isExpanded ? (
               <button
                 onClick={() => navigate('/dashboard')}
-                className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
+                className={navButtonClass(false)}
               >
-                <ArrowLeft
-                  size={18}
-                  className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
-                />
-              </button>
-            </Tooltip>
-          )}
-
-          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
-
-          {/* Main View Toggles */}
-          {leftSidebarItems.map((item, index) =>
-            isLeftSidebarExpanded ? (
-              <button
-                key={index}
-                onClick={item.onClick}
-                className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                  item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
-                }`}
-              >
-                {React.cloneElement(item.icon, {
-                  className: `transition-colors ${
-                    item.active
-                      ? 'text-[var(--text)]'
-                      : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                  }`,
-                })}
-                <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
+                <ArrowLeft size={16} className={inactiveIconClass} />
+                <span className={`${inactiveLabelClass} truncate`}>{project?.name || 'Project'}</span>
               </button>
             ) : (
-              <Tooltip key={index} content={item.title} side="right" delay={200}>
+              <Tooltip content={project?.name || 'Back to Projects'} side="right" delay={200}>
                 <button
-                  onClick={item.onClick}
-                  className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                    item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
-                  }`}
+                  onClick={() => navigate('/dashboard')}
+                  className={navButtonClassCollapsed(false)}
                 >
-                  {React.cloneElement(item.icon, {
-                    className: `transition-colors ${
-                      item.active
-                        ? 'text-[var(--text)]'
-                        : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                    }`,
-                  })}
+                  <ArrowLeft size={16} className={inactiveIconClass} />
                 </button>
               </Tooltip>
-            )
-          )}
+            )}
 
-          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
+            <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
 
-          {/* Settings & Tools */}
-          {rightSidebarItems.map((item, index) =>
-            isLeftSidebarExpanded ? (
-              <button
-                key={index}
-                onClick={item.onClick}
-                className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                  item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
-                }`}
-              >
-                {React.cloneElement(item.icon, {
-                  className: `transition-colors ${
-                    item.active
-                      ? 'text-[var(--text)]'
-                      : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                  }`,
-                })}
-                <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
-              </button>
-            ) : (
-              <Tooltip key={index} content={item.title} side="right" delay={200}>
+            {/* View Toggles */}
+            {leftSidebarItems.map((item, index) =>
+              isExpanded ? (
                 <button
+                  key={index}
                   onClick={item.onClick}
-                  className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                    item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
-                  }`}
+                  className={navButtonClass(item.active || false)}
                 >
                   {React.cloneElement(item.icon, {
-                    className: `transition-colors ${
-                      item.active
-                        ? 'text-[var(--text)]'
-                        : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                    }`,
+                    size: 16,
+                    className: iconClass(item.active || false),
                   })}
+                  <span className={labelClass(item.active || false)}>{item.title}</span>
                 </button>
-              </Tooltip>
-            )
-          )}
+              ) : (
+                <Tooltip key={index} content={item.title} side="right" delay={200}>
+                  <button
+                    onClick={item.onClick}
+                    className={navButtonClassCollapsed(item.active || false)}
+                  >
+                    {React.cloneElement(item.icon, {
+                      size: 16,
+                      className: iconClass(item.active || false),
+                    })}
+                  </button>
+                </Tooltip>
+              )
+            )}
 
-          {/* Spacer to push collapse button to bottom */}
-          <div className="flex-1" />
+            <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
 
-          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
+            {/* Panel Toggles — Notes, Settings */}
+            {[
+              { icon: <BookOpen size={16} />, title: 'Notes', onClick: () => togglePanel('notes'), active: activePanel === 'notes' },
+              { icon: <Gear size={16} />, title: 'Project Settings', onClick: () => togglePanel('settings'), active: activePanel === 'settings' },
+            ].map((item, index) =>
+              isExpanded ? (
+                <button
+                  key={index}
+                  onClick={item.onClick}
+                  className={navButtonClass(item.active)}
+                >
+                  {React.cloneElement(item.icon, {
+                    className: iconClass(item.active),
+                  })}
+                  <span className={labelClass(item.active)}>{item.title}</span>
+                </button>
+              ) : (
+                <Tooltip key={index} content={item.title} side="right" delay={200}>
+                  <button
+                    onClick={item.onClick}
+                    className={navButtonClassCollapsed(item.active)}
+                  >
+                    {React.cloneElement(item.icon, {
+                      className: iconClass(item.active),
+                    })}
+                  </button>
+                </Tooltip>
+              )
+            )}
+          </>
+        )}
+      />
 
-          {/* Collapse/Expand Toggle */}
-          {isLeftSidebarExpanded ? (
-            <button
-              onClick={() => setIsLeftSidebarExpanded(false)}
-              className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
-            >
-              <List
-                size={18}
-                weight="bold"
-                className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
-              />
-              <span className="text-sm font-medium text-[var(--text)]">Collapse</span>
-            </button>
-          ) : (
-            <Tooltip content="Expand" side="right" delay={200}>
-              <button
-                onClick={() => setIsLeftSidebarExpanded(true)}
-                className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
-              >
-                <List
-                  size={18}
-                  weight="bold"
-                  className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
-                />
-              </button>
-            </Tooltip>
-          )}
-        </div>
-      </motion.div>
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Main Content Area — floating panel with margin & radius */}
+      <div
+        className="flex-1 flex flex-col overflow-hidden"
+        style={{
+          borderRadius: 'var(--radius)',
+          margin: 'var(--app-margin)',
+          marginLeft: '0',
+          border: 'var(--border-width) solid var(--border)',
+          backgroundColor: 'var(--bg)',
+        }}
+      >
         {/* Top Bar with Breadcrumbs */}
-        <div className="h-12 bg-[var(--surface)] flex items-center justify-between px-4 md:px-6">
+        <div className="h-12 border-b border-[var(--border)] flex items-center justify-between px-4 md:px-6">
           <Breadcrumbs
             items={[
               { label: 'Projects', href: '/dashboard' },
@@ -2043,31 +1954,21 @@ const ProjectGraphCanvasInner = () => {
           />
 
           {/* Control buttons */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-[2px]">
             {/* Builder Button */}
             <button
               onClick={() => navigate(`/project/${slug}/builder`)}
-              className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors"
+              className="hidden md:flex btn"
             >
-              <Code size={18} className="text-[var(--text)]" />
-              <span className="text-sm font-medium text-[var(--text)]">Builder</span>
-            </button>
-
-            {/* Auto Layout Button */}
-            <button
-              onClick={handleAutoLayout}
-              disabled={nodes.length < 2}
-              className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Automatically arrange nodes"
-            >
-              <FlowArrow size={18} className="text-[var(--text)]" />
-              <span className="text-sm font-medium text-[var(--text)]">Auto Layout</span>
+              <Code size={16} />
+              Builder
             </button>
 
             {isRunning ? (
               <button
                 onClick={handleStopAll}
-                className="flex items-center gap-2 px-3 md:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                className="btn btn-danger"
+                style={{ background: 'rgba(var(--status-red-rgb), 0.1)', borderColor: 'rgba(var(--status-red-rgb), 0.3)', color: 'var(--status-error)' }}
               >
                 <Stop size={16} weight="fill" />
                 <span className="hidden md:inline">Stop All</span>
@@ -2075,7 +1976,8 @@ const ProjectGraphCanvasInner = () => {
             ) : (
               <button
                 onClick={handleStartAll}
-                className="flex items-center gap-2 px-3 md:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                className="btn"
+                style={{ background: 'rgba(var(--status-green-rgb), 0.1)', borderColor: 'rgba(var(--status-green-rgb), 0.3)', color: 'var(--status-success)' }}
               >
                 <Play size={16} weight="fill" />
                 <span className="hidden md:inline">Start All</span>
@@ -2112,7 +2014,7 @@ const ProjectGraphCanvasInner = () => {
             {/* React Flow canvas */}
             <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform">
               {/* Floating component drawer */}
-              <MarketplaceSidebar />
+              <MarketplaceSidebar onAutoLayout={handleAutoLayout} autoLayoutDisabled={nodes.length < 2} />
 
               <GraphCanvas
                 nodes={nodes}
@@ -2235,8 +2137,6 @@ const ProjectGraphCanvasInner = () => {
         />
       )}
 
-      {/* Discord Support */}
-      <DiscordSupport />
 
       {/* External Service Credential Modal */}
       {externalServiceModal.item && (

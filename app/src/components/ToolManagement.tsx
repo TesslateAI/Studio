@@ -23,14 +23,15 @@ interface ToolManagementProps {
   toolConfigs: Record<string, ToolConfig>;
   onToolsChange: (tools: string[], configs: Record<string, ToolConfig>) => void;
   availableModels?: string[];
+  defaultCollapsed?: boolean;
 }
 
-export function ToolManagement({ selectedTools, toolConfigs, onToolsChange }: ToolManagementProps) {
+export function ToolManagement({ selectedTools, toolConfigs, onToolsChange, defaultCollapsed }: ToolManagementProps) {
   const [availableTools, setAvailableTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingTool, setEditingTool] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['file_operations', 'shell_commands'])
+    defaultCollapsed ? new Set() : new Set(['file_operations', 'shell_commands'])
   );
   const [searchQuery, setSearchQuery] = useState('');
 

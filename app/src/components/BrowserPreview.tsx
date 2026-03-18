@@ -7,6 +7,7 @@ import {
   ArrowsClockwise,
   DeviceMobile,
   Monitor,
+  LockSimple,
 } from '@phosphor-icons/react';
 import { ContainerLoadingOverlay } from './ContainerLoadingOverlay';
 import { PreviewPortPicker, type PreviewableContainer } from './PreviewPortPicker';
@@ -127,103 +128,102 @@ export function BrowserPreview({
   return (
     <div className="w-full h-full flex flex-col">
       {/* Tab Bar */}
-      <div className="bg-[var(--surface)] border-b border-white/10 flex items-center px-2">
-        <div className="flex items-center gap-1 flex-1 overflow-x-auto">
+      <div className="h-9 bg-[var(--surface)] border-b border-[var(--border)] flex items-center px-1.5 flex-shrink-0">
+        <div className="flex items-center gap-0.5 flex-1 overflow-x-auto scrollbar-none">
           {tabs.map((tab) => (
             <div
               key={tab.id}
+              onClick={() => setActiveTabId(tab.id)}
               className={`
-                group flex items-center gap-2 px-4 py-2 min-w-[150px] max-w-[200px] rounded-t-lg transition-colors cursor-pointer
+                group flex items-center gap-1.5 px-3 h-7 min-w-[120px] max-w-[180px] rounded-[var(--radius-small)] transition-colors cursor-pointer
                 ${
                   activeTabId === tab.id
-                    ? 'bg-[var(--text)]/5 border-b-2 border-orange-500'
-                    : 'hover:bg-[var(--text)]/5'
+                    ? 'bg-[var(--surface-hover)] text-[var(--text)]'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                 }
               `}
             >
-              <span
-                className="text-xs truncate flex-1 text-[var(--text)]/80"
-                onClick={() => setActiveTabId(tab.id)}
-              >
+              <span className="text-[11px] truncate flex-1">
                 {tab.title}
               </span>
               {tabs.length > 1 && (
                 <button
                   onClick={(e) => closeTab(tab.id, e)}
-                  className="hover:bg-[var(--text)]/10 rounded p-0.5 transition-colors"
+                  className="opacity-0 group-hover:opacity-100 hover:bg-[var(--surface)] rounded p-0.5 transition-all flex-shrink-0"
                   aria-label="Close tab"
                 >
-                  <X size={14} className="text-[var(--text)]/60 hover:text-[var(--text)]" />
+                  <X size={11} className="text-[var(--text-subtle)]" />
                 </button>
               )}
             </div>
           ))}
           <button
             onClick={addTab}
-            className="p-2 hover:bg-[var(--text)]/10 rounded transition-colors"
+            className="btn btn-icon btn-sm"
             title="New tab"
           >
-            <Plus size={16} className="text-[var(--text)]/60" />
+            <Plus size={14} />
           </button>
         </div>
       </div>
 
       {/* Browser Chrome */}
-      <div className="bg-[var(--surface)] border-b border-white/10 p-2 md:p-3 flex items-center gap-2 md:gap-3">
-        <div className="flex items-center gap-1">
+      <div className="h-10 bg-[var(--surface)] border-b border-[var(--border)] px-2 flex items-center gap-1.5 flex-shrink-0">
+        {/* Navigation */}
+        <div className="flex items-center gap-0.5">
           <button
             onClick={onNavigateBack}
-            className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+            className="btn btn-icon btn-sm"
             title="Go back"
           >
-            <CaretLeft size={18} weight="bold" />
+            <CaretLeft size={14} weight="bold" />
           </button>
           <button
             onClick={onNavigateForward}
-            className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+            className="btn btn-icon btn-sm"
             title="Go forward"
           >
-            <CaretRight size={18} weight="bold" />
+            <CaretRight size={14} weight="bold" />
           </button>
         </div>
-        <div className="hidden md:block flex-1">
-          <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
-            <span className="text-yellow-500 mr-2">🔒</span>
-            <span className="text-[var(--text)]/80 truncate">
-              {currentPreviewUrl || devServerUrl}
-            </span>
-          </div>
+
+        {/* URL bar */}
+        <div className="hidden md:flex flex-1 items-center gap-1.5 h-7 bg-[var(--bg)] border border-[var(--border)] rounded-full px-3 min-w-0">
+          <LockSimple size={11} weight="bold" className="text-[var(--text-subtle)] flex-shrink-0" />
+          <span className="text-[11px] text-[var(--text-muted)] font-mono truncate">
+            {currentPreviewUrl || devServerUrl}
+          </span>
         </div>
-        {onPreviewContainerSwitch && (
-          <PreviewPortPicker
-            containers={previewableContainers}
-            selectedContainerId={selectedPreviewContainerId}
-            onSelect={onPreviewContainerSwitch}
-          />
-        )}
-        <button
-          onClick={onRefresh}
-          className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
-          title="Refresh"
-        >
-          <ArrowsClockwise size={16} />
-        </button>
-        <button
-          onClick={() => setViewportMode(viewportMode === 'desktop' ? 'mobile' : 'desktop')}
-          className={`p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors ${
-            viewportMode === 'mobile'
-              ? 'text-orange-500'
-              : 'text-[var(--text)]/60 hover:text-[var(--text)]'
-          }`}
-          title={viewportMode === 'desktop' ? 'Switch to mobile view' : 'Switch to desktop view'}
-        >
-          {viewportMode === 'desktop' ? <DeviceMobile size={16} /> : <Monitor size={16} />}
-        </button>
+
+        {/* Right controls */}
+        <div className="flex items-center gap-0.5 ml-auto">
+          {onPreviewContainerSwitch && (
+            <PreviewPortPicker
+              containers={previewableContainers}
+              selectedContainerId={selectedPreviewContainerId}
+              onSelect={onPreviewContainerSwitch}
+            />
+          )}
+          <button
+            onClick={onRefresh}
+            className="btn btn-icon btn-sm"
+            title="Refresh"
+          >
+            <ArrowsClockwise size={14} />
+          </button>
+          <button
+            onClick={() => setViewportMode(viewportMode === 'desktop' ? 'mobile' : 'desktop')}
+            className={`btn btn-icon btn-sm ${viewportMode === 'mobile' ? 'btn-active text-[var(--primary)]' : ''}`}
+            title={viewportMode === 'desktop' ? 'Switch to mobile view' : 'Switch to desktop view'}
+          >
+            {viewportMode === 'desktop' ? <DeviceMobile size={14} /> : <Monitor size={14} />}
+          </button>
+        </div>
       </div>
 
       {/* Preview area - either loading overlay or iframes */}
       <div
-        className={`flex-1 relative overflow-auto ${viewportMode === 'mobile' ? 'bg-gray-100 flex items-center justify-center' : 'bg-white'}`}
+        className={`flex-1 relative overflow-auto ${viewportMode === 'mobile' ? 'bg-[var(--bg)] flex items-center justify-center' : 'bg-white'}`}
       >
         {showLoadingOverlay ? (
           <ContainerLoadingOverlay
@@ -238,7 +238,7 @@ export function BrowserPreview({
           <div
             className={
               viewportMode === 'mobile'
-                ? 'w-[375px] h-[667px] border border-gray-300 rounded-lg shadow-lg overflow-hidden flex-shrink-0 bg-white'
+                ? 'w-[375px] h-[667px] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden flex-shrink-0 bg-white'
                 : 'w-full h-full'
             }
           >

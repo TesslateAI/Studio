@@ -12,6 +12,7 @@ import {
   Smartphone,
   Activity,
 } from 'lucide-react';
+import { DiscordLogo } from '@phosphor-icons/react';
 import { modKey } from '../../lib/keyboard-registry';
 
 interface HelpMenuProps {
@@ -125,6 +126,14 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
     },
   ];
 
+  const discordItem = {
+    label: 'Discord Support',
+    onClick: () => {
+      window.open('https://discord.gg/WgXabcN2r2', '_blank');
+      onClose();
+    },
+  };
+
   const moreMenuItems = [
     {
       icon: Keyboard,
@@ -140,7 +149,7 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       label: 'Community',
       external: true,
       onClick: () => {
-        window.open('https://discord.gg/tesslate', '_blank');
+        window.open('https://discord.gg/WgXabcN2r2', '_blank');
         onClose();
       },
     },
@@ -201,6 +210,18 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
               )}
             </button>
           ))}
+        </div>
+
+        {/* Discord Support */}
+        <div className="border-t border-[var(--sidebar-border)] p-1">
+          <button
+            onClick={discordItem.onClick}
+            className="w-full flex items-center gap-3 px-3 py-2 text-sm text-[#5865F2] hover:text-white hover:bg-[#5865F2]/20 rounded-md transition-colors"
+          >
+            <DiscordLogo size={16} weight="fill" />
+            <span className="flex-1 text-left">{discordItem.label}</span>
+            <ExternalLink size={12} className="text-[var(--text)]/40" />
+          </button>
         </div>
 
         {/* More Section */}

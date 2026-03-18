@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { projectsApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
-import { MobileMenu, ProjectCard, UserDropdown } from '../components/ui';
+import { MobileMenu, ProjectCard } from '../components/ui';
 import type { Status } from '../components/ui';
 import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
@@ -21,7 +21,16 @@ import {
   Article,
   Trash,
   X,
+  FunnelSimple,
+  SortAscending,
+  SortDescending,
+  CaretDown,
 } from '@phosphor-icons/react';
+
+type SortField = 'updated_at' | 'created_at' | 'name';
+type SortDirection = 'asc' | 'desc';
+type FilterStatus = Status | 'all';
+type FilterEnvStatus = EnvironmentStatus | 'all';
 
 interface Project {
   id: string;
@@ -49,6 +58,15 @@ export default function Dashboard() {
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
+  const [sortField, setSortField] = useState<SortField>('updated_at');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [filterEnvStatus, setFilterEnvStatus] = useState<FilterEnvStatus>('all');
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const autoCreateTriggered = useRef(false);
   const [createBaseId, setCreateBaseId] = useState<string | undefined>();
@@ -134,14 +152,12 @@ export default function Dashboard() {
           setShowCreateDialog(false);
           setIsCreating(false);
 
-          // Navigate based on setup result
+          // Navigate to builder with container if available
           const taskResult = result?.result as { container_id?: string } | undefined;
-          if (taskResult?.container_id === 'needs_setup') {
-            // Project needs setup - redirect to setup screen
-            navigate(`/project/${project.slug}/setup`);
-          } else if (taskResult?.container_id) {
+          if (taskResult?.container_id) {
             navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
           } else {
+            // Fallback to builder without container param
             navigate(`/project/${project.slug}/builder`);
           }
         } catch (taskError) {
@@ -168,8 +184,49 @@ export default function Dashboard() {
     }
   };
 
-  // Show all projects (no filtering)
-  const filteredProjects = projects;
+  // Close menus on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (filterMenuRef.current && !filterMenuRef.current.contains(e.target as Node)) {
+        setShowFilterMenu(false);
+      }
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+        setShowSortMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filter and sort projects
+  const filteredProjects = projects
+    .filter((p) => {
+      if (filterStatus !== 'all' && (p.status || 'build') !== filterStatus) return false;
+      if (filterEnvStatus !== 'all' && p.environment_status !== filterEnvStatus) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const dir = sortDirection === 'asc' ? 1 : -1;
+      if (sortField === 'name') {
+        return dir * a.name.localeCompare(b.name);
+      }
+      const dateA = new Date(a[sortField] || 0).getTime();
+      const dateB = new Date(b[sortField] || 0).getTime();
+      return dir * (dateA - dateB);
+    });
+
+  const hasActiveFilters = filterStatus !== 'all' || filterEnvStatus !== 'all';
+
+  const clearFilters = () => {
+    setFilterStatus('all');
+    setFilterEnvStatus('all');
+  };
+
+  const sortLabels: Record<SortField, string> = {
+    updated_at: 'Last updated',
+    created_at: 'Date created',
+    name: 'Name',
+  };
 
   // Prune selection when projects reload (remove IDs for projects that no longer exist)
   useEffect(() => {
@@ -511,103 +568,310 @@ export default function Dashboard() {
       {/* Mobile Menu - Shows on mobile only */}
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
 
-      {/* Top Bar */}
-      <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
-        <div className="flex items-center gap-4 md:gap-6">
-          <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Projects</h1>
-        </div>
-
-        {/* Right side - User Profile */}
-        <div className="flex items-center gap-3">
-          {/* User Dropdown */}
-          <UserDropdown />
-
-          {/* Mobile hamburger menu */}
+      {/* Header */}
+      <div className="flex-shrink-0">
+        {/* Title Row — with border below */}
+        <div className="h-10 flex items-center justify-between gap-[6px]" style={{ paddingLeft: '18px', paddingRight: '4px', borderBottom: 'var(--border-width) solid var(--border)' }}>
+          {/* Mobile hamburger — hidden on md+ */}
           <button
             onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-            className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+            className="mobile-only btn btn-icon mr-1"
           >
-            <svg
-              className="w-6 h-6 text-[var(--text)]"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
+
+          <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Projects</h2>
+
+          <button
+            onClick={() => setShowCreateDialog(true)}
+            disabled={isCreating}
+            className="btn btn-icon"
+            aria-label="New project"
+          >
+            <FilePlus className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Tab Bar — views left, filter/sort/display right */}
+        <div className="h-10 flex items-center justify-between" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
+          {/* Left: View tabs */}
+          <div className="flex items-center gap-1 flex-1 min-w-0">
+            <button
+              onClick={() => { setFilterStatus('all'); setFilterEnvStatus('all'); }}
+              className={`btn ${!hasActiveFilters ? 'btn-tab-active' : 'btn-tab'}`}
+            >
+              All projects
+            </button>
+
+            {/* Active filter pills */}
+            {filterStatus !== 'all' && (
+              <button
+                onClick={() => setFilterStatus('all')}
+                className="btn btn-tab-active btn-sm"
+              >
+                {filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)}
+                <X className="w-3 h-3 ml-0.5 opacity-60" />
+              </button>
+            )}
+            {filterEnvStatus !== 'all' && (
+              <button
+                onClick={() => setFilterEnvStatus('all')}
+                className="btn btn-tab-active btn-sm"
+              >
+                {filterEnvStatus.charAt(0).toUpperCase() + filterEnvStatus.slice(1)}
+                <X className="w-3 h-3 ml-0.5 opacity-60" />
+              </button>
+            )}
+          </div>
+
+          {/* Right: Filter, Sort, Display */}
+          <div className="flex items-center gap-[2px]">
+            {/* Filter button */}
+            <div ref={filterMenuRef} className="relative">
+              <button
+                onClick={() => { setShowFilterMenu((v) => !v); setShowSortMenu(false); }}
+                className={`btn btn-icon ${hasActiveFilters ? 'btn-active' : ''}`}
+                aria-label="Filter"
+              >
+                <FunnelSimple className="w-4 h-4" weight={hasActiveFilters ? 'fill' : 'regular'} />
+              </button>
+
+              {showFilterMenu && (
+                <div
+                  className="absolute right-0 top-full mt-1 z-50 min-w-[200px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
+                  style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+                >
+                  {/* Status filter */}
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Status</div>
+                  {(['all', 'idea', 'build', 'launch'] as const).map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => { setFilterStatus(status); setShowFilterMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                        filterStatus === status
+                          ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                          : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      {status === 'all' ? (
+                        'All statuses'
+                      ) : (
+                        <>
+                          <span className={`w-2 h-2 rounded-full ${
+                            status === 'idea' ? 'bg-purple-500' : status === 'build' ? 'bg-yellow-500' : 'bg-emerald-500'
+                          }`} />
+                          {status.charAt(0).toUpperCase() + status.slice(1)}
+                        </>
+                      )}
+                      {filterStatus === status && (
+                        <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+
+                  {/* Divider */}
+                  <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
+
+                  {/* Environment filter */}
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Environment</div>
+                  {(['all', 'active', 'hibernated', 'stopped', 'creating'] as const).map((envStatus) => (
+                    <button
+                      key={envStatus}
+                      onClick={() => { setFilterEnvStatus(envStatus); setShowFilterMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                        filterEnvStatus === envStatus
+                          ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                          : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      {envStatus === 'all' ? 'All environments' : envStatus.charAt(0).toUpperCase() + envStatus.slice(1)}
+                      {filterEnvStatus === envStatus && (
+                        <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+
+                  {/* Clear all filters */}
+                  {hasActiveFilters && (
+                    <>
+                      <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
+                      <button
+                        onClick={() => { clearFilters(); setShowFilterMenu(false); }}
+                        className="w-full text-left px-3 py-1.5 text-xs text-[var(--status-error)] hover:bg-[var(--surface-hover)] transition-colors"
+                      >
+                        Clear all filters
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Sort button */}
+            <div ref={sortMenuRef} className="relative">
+              <button
+                onClick={() => { setShowSortMenu((v) => !v); setShowFilterMenu(false); }}
+                className={`btn ${sortField !== 'updated_at' || sortDirection !== 'desc' ? 'btn-active' : ''}`}
+                aria-label="Sort"
+                style={{ gap: '4px' }}
+              >
+                {sortDirection === 'desc' ? (
+                  <SortDescending className="w-4 h-4" />
+                ) : (
+                  <SortAscending className="w-4 h-4" />
+                )}
+                <span className="hidden sm:inline text-xs">{sortLabels[sortField]}</span>
+                <CaretDown className="w-3 h-3 opacity-50" />
+              </button>
+
+              {showSortMenu && (
+                <div
+                  className="absolute right-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
+                  style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+                >
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Sort by</div>
+                  {(['updated_at', 'created_at', 'name'] as SortField[]).map((field) => (
+                    <button
+                      key={field}
+                      onClick={() => {
+                        if (sortField === field) {
+                          setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+                        } else {
+                          setSortField(field);
+                          setSortDirection(field === 'name' ? 'asc' : 'desc');
+                        }
+                        setShowSortMenu(false);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                        sortField === field
+                          ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                          : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      {sortLabels[field]}
+                      {sortField === field && (
+                        <span className="ml-auto text-[var(--text-subtle)]">
+                          {sortDirection === 'asc' ? (
+                            <SortAscending className="w-3.5 h-3.5" />
+                          ) : (
+                            <SortDescending className="w-3.5 h-3.5" />
+                          )}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+
+                  <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
+
+                  {/* Direction toggle */}
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Direction</div>
+                  {(['desc', 'asc'] as SortDirection[]).map((dir) => (
+                    <button
+                      key={dir}
+                      onClick={() => { setSortDirection(dir); setShowSortMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                        sortDirection === dir
+                          ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                          : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      {dir === 'desc' ? (
+                        <><SortDescending className="w-3.5 h-3.5" /> Descending</>
+                      ) : (
+                        <><SortAscending className="w-3.5 h-3.5" /> Ascending</>
+                      )}
+                      {sortDirection === dir && (
+                        <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Display mode toggle */}
+            <button
+              onClick={() => setViewMode((v) => (v === 'cards' ? 'list' : 'cards'))}
+              className={`btn btn-icon ${viewMode === 'list' ? 'btn-active' : ''}`}
+              aria-label={viewMode === 'cards' ? 'Switch to list view' : 'Switch to card view'}
+            >
+              {viewMode === 'cards' ? (
+                /* Grid icon */
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+                  <path d="M1 2.5A1.5 1.5 0 012.5 1h3A1.5 1.5 0 017 2.5v3A1.5 1.5 0 015.5 7h-3A1.5 1.5 0 011 5.5v-3zm8 0A1.5 1.5 0 0110.5 1h3A1.5 1.5 0 0115 2.5v3A1.5 1.5 0 0113.5 7h-3A1.5 1.5 0 019 5.5v-3zm-8 8A1.5 1.5 0 012.5 9h3A1.5 1.5 0 017 10.5v3A1.5 1.5 0 015.5 15h-3A1.5 1.5 0 011 13.5v-3zm8 0A1.5 1.5 0 0110.5 9h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3A1.5 1.5 0 019 13.5v-3z" />
+                </svg>
+              ) : (
+                /* List icon */
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+                  <path d="M2 4a1 1 0 011-1h10a1 1 0 110 2H3a1 1 0 01-1-1zm0 4a1 1 0 011-1h10a1 1 0 110 2H3a1 1 0 01-1-1zm1 3a1 1 0 100 2h10a1 1 0 100-2H3z" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Tab Filters - Mobile */}
-
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto bg-[var(--bg)]">
-        <div className="p-4 md:p-6">
-          {/* Projects Grid */}
-          <div
-            className={
+      <div className="flex-1 overflow-auto">
+        {viewMode === 'cards' ? (
+          /* ===== CARDS VIEW ===== */
+          <div className="p-4 md:p-5">
+            <div className={
               filteredProjects.length === 0
                 ? 'flex flex-wrap justify-center gap-4'
                 : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-            }
-          >
-            {/* Create New Project Card */}
-            <button
-              onClick={() => setShowCreateDialog(true)}
-              disabled={isCreating}
-              className={`
-                  group bg-white/[0.01] rounded-2xl p-6
+            }>
+              {/* Create New Project Card */}
+              <button
+                onClick={() => setShowCreateDialog(true)}
+                disabled={isCreating}
+                className={`
+                  group bg-white/[0.01] rounded-[var(--radius)] p-6
                   border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
                   hover:border-[rgba(var(--primary-rgb),0.6)]
                   transition-all duration-300
-                  hover:transform hover:-translate-y-1
                   flex flex-col items-center justify-center gap-3
                   ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
                   ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
-            >
-              <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
-                <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
-              </div>
-              <div className="text-center">
-                <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
-                  Create New Project
-                </h3>
-                <p className="text-sm text-gray-500">Start building something amazing</p>
-              </div>
-            </button>
+              >
+                <div className="w-14 h-14 bg-[rgba(var(--primary-rgb),0.2)] rounded-[var(--radius)] flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
+                  <FilePlus className="w-7 h-7 text-[var(--primary)]" weight="fill" />
+                </div>
+                <div className="text-center">
+                  <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">Create New Project</h3>
+                  <p className="text-xs text-[var(--text-muted)]">Start building something amazing</p>
+                </div>
+              </button>
 
-            {/* Import from Repository Card */}
-            <button
-              onClick={() => setShowImportDialog(true)}
-              disabled={isCreating}
-              className={`
-                  group bg-white/[0.01] rounded-2xl p-6
+              {/* Import from Repository Card */}
+              <button
+                onClick={() => setShowImportDialog(true)}
+                className={`
+                  group bg-white/[0.01] rounded-[var(--radius)] p-6
                   border-2 border-dashed border-emerald-500/30
                   hover:border-emerald-500/60
                   transition-all duration-300
-                  hover:transform hover:-translate-y-1
                   flex flex-col items-center justify-center gap-3
-                  ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                   ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
                 `}
-            >
-              <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center">
-                <GitBranch className="w-8 h-8 text-emerald-500" weight="fill" />
-              </div>
-              <div className="text-center">
-                <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
-                  Import from Repository
-                </h3>
-                <p className="text-sm text-gray-500">Import from GitHub, GitLab, or Bitbucket</p>
-              </div>
-            </button>
+              >
+                <div className="w-14 h-14 bg-emerald-500/20 rounded-[var(--radius)] flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
+                  <GitBranch className="w-7 h-7 text-emerald-500" weight="fill" />
+                </div>
+                <div className="text-center">
+                  <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">Import from Repository</h3>
+                  <p className="text-xs text-[var(--text-muted)]">Connect a GitHub, GitLab, or Bitbucket repo</p>
+                </div>
+              </button>
 
             {/* Project Cards */}
             {filteredProjects.map((project) => (
@@ -638,58 +902,138 @@ export default function Dashboard() {
                 onSelectionToggle={() => toggleProjectSelection(project.id)}
               />
             ))}
-          </div>
-
-          {/* Empty State */}
-          {filteredProjects.length === 0 && (
-            <div className="text-center py-16">
-              <p className="text-[var(--text)]/40 text-sm">
-                No projects found. Create one to get started!
-              </p>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          /* ===== LIST VIEW ===== */
+          <div className="w-full">
+            {filteredProjects.length > 0 ? (
+              <>
+                {/* List Header */}
+                <div className="h-8 flex items-center px-4 md:px-5 text-[var(--text-subtle)]">
+                  <div className="w-8 flex-shrink-0" />
+                  <div className="flex-1 min-w-0 text-xs font-medium">Name</div>
+                  <div className="hidden md:block w-28 text-xs font-medium text-right">Status</div>
+                  <div className="hidden lg:block w-32 text-xs font-medium text-right">Updated</div>
+                  <div className="w-24 flex-shrink-0" />
+                </div>
+
+                {/* Project Rows */}
+                {filteredProjects.map((project) => (
+                  <div
+                    key={project.id}
+                    className={`group h-12 flex items-center px-4 md:px-5 transition-colors cursor-pointer ${
+                      selectedProjectIds.has(project.id) ? 'bg-[var(--surface)]' : 'hover:bg-[var(--surface)]'
+                    } ${deletingProjectIds.has(project.id) ? 'opacity-40 pointer-events-none' : ''}`}
+                    onClick={() => navigate(`/project/${project.slug}/builder`)}
+                  >
+                    {/* Checkbox */}
+                    <div className="w-8 flex-shrink-0 flex items-center">
+                      <button
+                        role="checkbox"
+                        aria-checked={selectedProjectIds.has(project.id)}
+                        onClick={(e) => { e.stopPropagation(); toggleProjectSelection(project.id); }}
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                          selectedProjectIds.has(project.id)
+                            ? 'bg-[var(--primary)] border-[var(--primary)]'
+                            : 'border-[var(--border-hover)] opacity-0 group-hover:opacity-100'
+                        }`}
+                      >
+                        {selectedProjectIds.has(project.id) && (
+                          <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Project icon + name + description */}
+                    <div className="flex-1 min-w-0 flex items-center gap-3">
+                      <svg className="w-4 h-4 text-[var(--text-subtle)] flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
+                        <path d="M216,64H176V56a24,24,0,0,0-24-24H104A24,24,0,0,0,80,56v8H40A16,16,0,0,0,24,80V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V80A16,16,0,0,0,216,64ZM96,56a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Z" />
+                      </svg>
+                      <span className="text-xs font-medium text-[var(--text)] truncate">{project.name}</span>
+                      {project.description && (
+                        <span className="hidden xl:inline text-xs text-[var(--text-subtle)] truncate max-w-[200px]">{project.description}</span>
+                      )}
+                      {project.environment_status && project.environment_status !== 'active' && (
+                        <span className="text-[10px] text-[var(--text-subtle)] flex-shrink-0">{project.environment_status}</span>
+                      )}
+                    </div>
+
+                    {/* Status */}
+                    <div className="hidden md:flex w-28 justify-end">
+                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                        project.status === 'launch'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : project.status === 'build'
+                            ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                            : 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                      }`}>
+                        {(project.status || 'build').charAt(0).toUpperCase() + (project.status || 'build').slice(1)}
+                      </span>
+                    </div>
+
+                    {/* Updated */}
+                    <div className="hidden lg:block w-32 text-right">
+                      <span className="text-xs text-[var(--text-subtle)]">{formatDate(project.updated_at)}</span>
+                    </div>
+
+                    {/* Row Actions */}
+                    <div className="w-24 flex-shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={(e) => { e.stopPropagation(); handleForkProject(project.id); }} className="btn btn-icon btn-sm" title="Fork">
+                        <GitBranch className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteProject(project.id); }} className="btn btn-icon btn-sm btn-danger" title="Delete">
+                        <Trash className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="text-center py-16 flex flex-col items-center gap-4">
+                <p className="text-[var(--text-muted)] text-xs">No projects yet</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowCreateDialog(true)} disabled={isCreating} className="btn">
+                    <FilePlus className="w-4 h-4" />
+                    Create project
+                  </button>
+                  <button onClick={() => setShowImportDialog(true)} className="btn">
+                    <GitBranch className="w-4 h-4" />
+                    Import repo
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Floating Bulk Action Bar */}
+      {/* Floating Action Bar — Linear-style: "N selected" + clear + divider + actions */}
       {selectedProjectIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200">
-          <div className="flex items-center gap-3 bg-[var(--surface)] border border-white/10 rounded-2xl px-5 py-3 shadow-2xl shadow-black/40 backdrop-blur-xl">
-            <span className="text-sm font-medium text-[var(--text)] whitespace-nowrap">
-              {selectedProjectIds.size} project{selectedProjectIds.size > 1 ? 's' : ''} selected
-            </span>
-
-            <div className="w-px h-5 bg-white/10" />
-
-            <button
-              onClick={
-                selectedProjectIds.size === filteredProjects.length
-                  ? clearSelection
-                  : selectAllProjects
-              }
-              className="text-xs text-[var(--primary)] hover:text-[var(--primary-hover)] font-medium transition-colors whitespace-nowrap"
-            >
-              {selectedProjectIds.size === filteredProjects.length ? 'Deselect all' : 'Select all'}
-            </button>
-
-            <div className="w-px h-5 bg-white/10" />
-
-            <button
-              onClick={() => setShowBulkDeleteDialog(true)}
-              className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold px-4 py-1.5 rounded-xl transition-colors"
-            >
-              <Trash className="w-4 h-4" weight="bold" />
-              Delete selected
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200 flex items-center gap-[2px]">
+            <button className="btn" style={{ fontVariantNumeric: 'tabular-nums' }} tabIndex={-1}>
+              <span>{selectedProjectIds.size}</span>&nbsp;selected
             </button>
 
             <button
               onClick={clearSelection}
-              className="p-1.5 text-gray-400 hover:text-white transition-colors rounded-lg hover:bg-white/10"
-              aria-label="Clear selection"
+              className="btn btn-icon"
+              aria-label="Clear selected"
+              tabIndex={-1}
             >
-              <X className="w-4 h-4" weight="bold" />
+              <X className="w-4 h-4" />
             </button>
-          </div>
+
+            <button
+              onClick={() => setShowBulkDeleteDialog(true)}
+              className="btn btn-danger"
+              tabIndex={-1}
+            >
+              <Trash className="w-4 h-4" />
+              Delete
+            </button>
         </div>
       )}
 
@@ -786,11 +1130,9 @@ export default function Dashboard() {
                 setShowImportDialog(false);
                 setIsCreating(false);
 
-                // Navigate based on setup result
+                // Navigate to builder with container if available
                 const taskResult = result?.result as { container_id?: string } | undefined;
-                if (taskResult?.container_id === 'needs_setup') {
-                  navigate(`/project/${project.slug}/setup`);
-                } else if (taskResult?.container_id) {
+                if (taskResult?.container_id) {
                   navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
                 } else {
                   navigate(`/project/${project.slug}/builder`);

@@ -1,5 +1,5 @@
 import { CaretLeft, CaretRight } from '@phosphor-icons/react';
-import { useTheme } from '../../theme/ThemeContext';
+
 
 interface PaginationProps {
   currentPage: number;
@@ -8,7 +8,7 @@ interface PaginationProps {
 }
 
 export function Pagination({ currentPage, totalPages, onPageChange }: PaginationProps) {
-  const { theme } = useTheme();
+
 
   if (totalPages <= 1) return null;
 
@@ -47,15 +47,10 @@ export function Pagination({ currentPage, totalPages, onPageChange }: Pagination
 
   const pageNumbers = getPageNumbers();
 
-  const baseBtn = `flex items-center justify-center rounded-lg text-sm font-medium transition-colors`;
-  const inactiveBtn =
-    theme === 'light'
-      ? 'text-black/60 hover:bg-black/5 hover:text-black'
-      : 'text-white/60 hover:bg-white/5 hover:text-white';
-  const activeBtn =
-    'bg-[var(--primary)] text-white';
-  const disabledBtn =
-    theme === 'light' ? 'text-black/20 cursor-not-allowed' : 'text-white/20 cursor-not-allowed';
+  const baseBtn = `flex items-center justify-center rounded-full text-xs font-medium transition-colors border border-[var(--border)]`;
+  const inactiveBtn = 'text-[var(--text-muted)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]';
+  const activeBtn = 'bg-[var(--surface-hover)] border-[var(--border-hover)] text-[var(--text)]';
+  const disabledBtn = 'text-[var(--text-subtle)] cursor-not-allowed opacity-40';
 
   return (
     <nav className="flex items-center justify-center gap-1 mt-8" aria-label="Pagination">
@@ -74,7 +69,7 @@ export function Pagination({ currentPage, totalPages, onPageChange }: Pagination
         page === 'ellipsis' ? (
           <span
             key={`ellipsis-${i}`}
-            className={`w-9 h-9 flex items-center justify-center text-sm ${theme === 'light' ? 'text-black/30' : 'text-white/30'}`}
+            className="w-9 h-9 flex items-center justify-center text-xs text-[var(--text-subtle)]"
           >
             ...
           </span>

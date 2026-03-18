@@ -1,7 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { NavigationSidebar } from './ui';
 import { MobileWarning } from './MobileWarning';
-import { DiscordSupport } from './DiscordSupport';
+
 import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
 
@@ -43,7 +43,7 @@ export function DashboardLayout() {
 
   return (
     <motion.div
-      className="h-screen flex overflow-hidden bg-[var(--bg)]"
+      className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]"
       initial={fromLogin ? { opacity: 0 } : { opacity: 1 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
@@ -58,8 +58,8 @@ export function DashboardLayout() {
           initial={fromLogin ? { x: -300, width: 320 } : false}
           animate={{ x: 0, width: "auto" }}
           transition={fromLogin ? {
-            duration: 0.6,
-            ease: [0.25, 0.1, 0.25, 1]
+            duration: 0.45,
+            ease: [0.45, 0, 0.55, 1]
           } : { duration: 0 }}
           className="flex-shrink-0 h-full"
         >
@@ -71,9 +71,17 @@ export function DashboardLayout() {
         </motion.div>
       )}
 
-      {/* Main Content Area - Only this changes when navigating */}
+      {/* Main Content Area — floating panel with 8px margin, 12px radius */}
+      {/* Sidebar bg shows through the margin gap — content "glows" relative to sidebar */}
       <motion.div
-        className="flex-1 flex flex-col overflow-hidden"
+        className="flex-1 flex flex-col overflow-hidden app-panel"
+        style={{
+          borderRadius: 'var(--radius)',
+          margin: 'var(--app-margin)',
+          marginLeft: '0',
+          border: 'var(--border-width) solid var(--border)',
+          backgroundColor: 'var(--bg)',
+        }}
         initial={fromLogin ? { opacity: 0 } : { opacity: 1 }}
         animate={{ opacity: 1 }}
         transition={fromLogin ? { delay: 0.5, duration: 0.4 } : { duration: 0 }}
@@ -81,8 +89,6 @@ export function DashboardLayout() {
         <Outlet />
       </motion.div>
 
-      {/* Discord Support */}
-      <DiscordSupport />
     </motion.div>
   );
 }

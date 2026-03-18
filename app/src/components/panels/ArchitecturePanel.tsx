@@ -13,12 +13,12 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
       <div className="panel-section p-6 flex-1 flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 bg-orange-500/20 rounded-lg">
-            <GitBranch size={20} className="text-orange-400" />
+          <div className="p-2 bg-[var(--surface-hover)] rounded-[var(--radius-medium)] border border-[var(--border)]">
+            <GitBranch size={18} className="text-[var(--primary)]" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text)]">Architecture</h2>
-            <p className="text-xs text-[var(--text)]/60">
+            <h2 className="text-xs font-semibold text-[var(--text)]">Architecture</h2>
+            <p className="text-[11px] text-[var(--text-muted)]">
               Visual canvas of your project services
             </p>
           </div>
@@ -27,20 +27,20 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
         {/* Canvas Link */}
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <div className="w-20 h-20 bg-[rgba(var(--primary-rgb),0.1)] rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <GitBranch size={36} className="text-[var(--primary)]" />
+            <div className="w-16 h-16 bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius)] flex items-center justify-center mx-auto mb-4">
+              <GitBranch size={28} className="text-[var(--primary)]" />
             </div>
-            <h3 className="text-lg font-bold text-[var(--text)] mb-2">
+            <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">
               Architecture Canvas
             </h3>
-            <p className="text-sm text-[var(--text)]/50 mb-6 max-w-xs">
+            <p className="text-[11px] text-[var(--text-muted)] mb-5 max-w-xs leading-relaxed">
               View and edit your project's service architecture, connections, and infrastructure on the visual canvas.
             </p>
             <button
               onClick={() => navigate(`/project/${projectSlug}`)}
-              className="px-6 py-3 bg-[var(--primary)] text-white rounded-xl font-medium hover:opacity-90 transition-opacity flex items-center gap-2 mx-auto"
+              className="btn btn-filled"
             >
-              <ArrowSquareOut size={18} />
+              <ArrowSquareOut size={15} />
               Open Canvas
             </button>
           </div>

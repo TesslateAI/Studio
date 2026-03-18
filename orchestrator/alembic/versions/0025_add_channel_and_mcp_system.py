@@ -16,88 +16,100 @@ branch_labels = None
 depends_on = None
 
 
+def _table_exists(table: str) -> bool:
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_name = :table AND table_schema = 'public'"
+        ),
+        {"table": table},
+    )
+    return result.fetchone() is not None
+
+
 def upgrade() -> None:
-    # channel_configs table
-    op.create_table(
-        "channel_configs",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column(
-            "user_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("users.id"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column(
-            "project_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("projects.id"),
-            nullable=True,
-            index=True,
-        ),
-        sa.Column("channel_type", sa.String(20), nullable=False),
-        sa.Column("name", sa.String(100), nullable=False),
-        sa.Column("credentials", sa.Text, nullable=False),
-        sa.Column("webhook_secret", sa.String(64), nullable=False),
-        sa.Column(
-            "default_agent_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("marketplace_agents.id"),
-            nullable=True,
-        ),
-        sa.Column("is_active", sa.Boolean, default=True),
-        sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
-    )
+    if not _table_exists("channel_configs"):
+        op.create_table(
+            "channel_configs",
+            sa.Column("id", UUID(as_uuid=True), primary_key=True),
+            sa.Column(
+                "user_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("users.id"),
+                nullable=False,
+                index=True,
+            ),
+            sa.Column(
+                "project_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("projects.id"),
+                nullable=True,
+                index=True,
+            ),
+            sa.Column("channel_type", sa.String(20), nullable=False),
+            sa.Column("name", sa.String(100), nullable=False),
+            sa.Column("credentials", sa.Text, nullable=False),
+            sa.Column("webhook_secret", sa.String(64), nullable=False),
+            sa.Column(
+                "default_agent_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("marketplace_agents.id"),
+                nullable=True,
+            ),
+            sa.Column("is_active", sa.Boolean, default=True),
+            sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
+            sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
+        )
 
-    # channel_messages table
-    op.create_table(
-        "channel_messages",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column(
-            "channel_config_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("channel_configs.id"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column("direction", sa.String(10), nullable=False),
-        sa.Column("jid", sa.String(255), nullable=False),
-        sa.Column("sender_name", sa.String(100), nullable=True),
-        sa.Column("content", sa.Text, nullable=False),
-        sa.Column("platform_message_id", sa.String(255), nullable=True),
-        sa.Column("task_id", sa.String, nullable=True),
-        sa.Column(
-            "status", sa.String(20), nullable=False, server_default="delivered"
-        ),
-        sa.Column(
-            "created_at", sa.DateTime, server_default=sa.func.now(), index=True
-        ),
-    )
+    if not _table_exists("channel_messages"):
+        op.create_table(
+            "channel_messages",
+            sa.Column("id", UUID(as_uuid=True), primary_key=True),
+            sa.Column(
+                "channel_config_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("channel_configs.id"),
+                nullable=False,
+                index=True,
+            ),
+            sa.Column("direction", sa.String(10), nullable=False),
+            sa.Column("jid", sa.String(255), nullable=False),
+            sa.Column("sender_name", sa.String(100), nullable=True),
+            sa.Column("content", sa.Text, nullable=False),
+            sa.Column("platform_message_id", sa.String(255), nullable=True),
+            sa.Column("task_id", sa.String, nullable=True),
+            sa.Column(
+                "status", sa.String(20), nullable=False, server_default="delivered"
+            ),
+            sa.Column(
+                "created_at", sa.DateTime, server_default=sa.func.now(), index=True
+            ),
+        )
 
-    # user_mcp_configs table
-    op.create_table(
-        "user_mcp_configs",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column(
-            "user_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("users.id"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column(
-            "marketplace_agent_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("marketplace_agents.id"),
-            nullable=False,
-        ),
-        sa.Column("credentials", sa.Text, nullable=True),
-        sa.Column("enabled_capabilities", sa.JSON, nullable=True),
-        sa.Column("is_active", sa.Boolean, default=True),
-        sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
-    )
+    if not _table_exists("user_mcp_configs"):
+        op.create_table(
+            "user_mcp_configs",
+            sa.Column("id", UUID(as_uuid=True), primary_key=True),
+            sa.Column(
+                "user_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("users.id"),
+                nullable=False,
+                index=True,
+            ),
+            sa.Column(
+                "marketplace_agent_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("marketplace_agents.id"),
+                nullable=False,
+            ),
+            sa.Column("credentials", sa.Text, nullable=True),
+            sa.Column("enabled_capabilities", sa.JSON, nullable=True),
+            sa.Column("is_active", sa.Boolean, default=True),
+            sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
+            sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
+        )
 
 
 def downgrade() -> None:

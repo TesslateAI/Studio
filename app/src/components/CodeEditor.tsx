@@ -4,7 +4,6 @@ import {
   Folder,
   ChevronRight,
   ChevronDown,
-  FileText,
   Code,
   PanelLeftClose,
   PanelLeft,
@@ -12,6 +11,9 @@ import {
   FolderPlus,
   Pencil,
   Trash2,
+  X,
+  Search,
+  Save,
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '../theme/ThemeContext';
@@ -35,14 +37,19 @@ interface FileTreeEntry {
 interface ContextMenuState {
   x: number;
   y: number;
-  node: FileNode | null; // null = right-clicked on empty space
+  node: FileNode | null;
 }
 
 interface InlineInputState {
-  parentPath: string; // '' for root
+  parentPath: string;
   kind: 'file' | 'folder' | 'rename';
   initialValue?: string;
-  originalPath?: string; // for rename
+  originalPath?: string;
+}
+
+interface OpenTab {
+  path: string;
+  name: string;
 }
 
 interface CodeEditorProps {
@@ -80,173 +87,227 @@ function CodeEditor({
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const editorRef = useRef<unknown>(null);
 
-  // ── Zero-render stats: ref + direct DOM mutation instead of useState ──
-  const statsRef = useRef<{ lines: number; chars: number } | null>(null);
-  const statsElementRef = useRef<HTMLParagraphElement>(null);
-
-  function updateStatsDisplay(lines: number, chars: number) {
-    statsRef.current = { lines, chars };
-    if (statsElementRef.current) {
-      statsElementRef.current.textContent = `${lines} lines \u2022 ${chars} characters`;
-    }
-  }
-
-  // Local content cache: tracks what the user has typed so server refreshes
-  // don't overwrite in-progress edits and cause cursor jumps.
-  const localContentRef = useRef<Map<string, string>>(new Map());
-
-  // Debounced save: only call onFileUpdate after 500ms of idle
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingFileRef = useRef<string | null>(null);
-
-  // Stable ref to onFileUpdate to avoid re-creating callbacks when prop changes
-  const onFileUpdateRef = useRef(onFileUpdate);
-  onFileUpdateRef.current = onFileUpdate;
-
-  // Stable ref to selectedFile for callbacks that must not re-create on selection change
-  const selectedFileRef = useRef(selectedFile);
-  selectedFileRef.current = selectedFile;
+  // VS Code-style tabs
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
+  // Dirty (unsaved) file buffers: path → modified content
+  const [dirtyBuffers, setDirtyBuffers] = useState<Map<string, string>>(new Map());
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  // Inline input state (create file/folder or rename)
   const [inlineInput, setInlineInput] = useState<InlineInputState | null>(null);
-  // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<FileNode | null>(null);
   // Loading state for lazy content fetch
   const [loadingContent, setLoadingContent] = useState(false);
 
-  const menuRef = useRef<HTMLDivElement>(null);
-  const inlineInputRef = useRef<HTMLInputElement>(null);
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Memoized Monaco options — same reference across all renders ──────
-  const editorOptions = useMemo(
-    () => ({
-      fontSize: 14,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
-      lineNumbers: 'on' as const,
-      minimap: { enabled: true },
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      tabSize: 2,
-      wordWrap: 'on' as const,
-      padding: { top: 16, bottom: 16 },
-      smoothScrolling: true,
-      cursorBlinking: 'smooth' as const,
-      cursorSmoothCaretAnimation: 'on' as const,
-      renderLineHighlight: 'all' as const,
-      bracketPairColorization: { enabled: true },
-      guides: { bracketPairs: true, indentation: true },
-      suggestOnTriggerCharacters: true,
-      quickSuggestions: true,
-      formatOnPaste: true,
-      formatOnType: true,
-    }),
-    []
-  );
-
-  // Flush any pending debounced save immediately
-  const flushPendingSave = useCallback(() => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    const file = pendingFileRef.current;
-    if (file) {
-      const content = localContentRef.current.get(file);
-      if (content !== undefined) {
-        onFileUpdateRef.current(file, content);
-      }
-      pendingFileRef.current = null;
-    }
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
   }, []);
 
-  // Flush pending save before switching files
-  const switchToFile = useCallback(
-    (path: string) => {
-      flushPendingSave();
-      setSelectedFile(path);
-    },
-    [flushPendingSave]
-  );
+  // Auto-collapse sidebar on mobile
+  useEffect(() => { if (isMobile) setIsSidebarCollapsed(true); }, [isMobile]);
 
-  // Flush on unmount
-  useEffect(() => {
-    return () => flushPendingSave();
-  }, [flushPendingSave]);
+  // Mobile explorer overlay
+  const [mobileExplorerOpen, setMobileExplorerOpen] = useState(false);
+
+  const menuRef = useRef<HTMLDivElement>(null);
+  const inlineInputRef = useRef<HTMLInputElement>(null);
+  const saveRef = useRef<() => void>(() => {});
+  const closeTabRef = useRef<(path: string) => void>(() => {});
+  const selectedFileRef = useRef<string | null>(null);
+  useEffect(() => { selectedFileRef.current = selectedFile; }, [selectedFile]);
+
+  // Lazy-loaded content cache: path → server content (baseline for dirty tracking)
+  const localContentRef = useRef<Map<string, string>>(new Map());
+
+  // ── Language detection ─────────────────────────────────────────────
 
   const getLanguage = (fileName: string): string => {
     const ext = fileName.split('.').pop()?.toLowerCase();
     switch (ext) {
-      case 'js':
-        return 'javascript';
-      case 'jsx':
-        return 'javascript';
-      case 'ts':
-        return 'typescript';
-      case 'tsx':
-        return 'typescript';
-      case 'html':
-        return 'html';
-      case 'css':
-        return 'css';
-      case 'json':
-        return 'json';
-      case 'md':
-        return 'markdown';
-      case 'py':
-        return 'python';
-      case 'yml':
-      case 'yaml':
-        return 'yaml';
-      default:
-        return 'plaintext';
+      case 'js': case 'jsx': return 'javascript';
+      case 'ts': case 'tsx': return 'typescript';
+      case 'html': return 'html';
+      case 'css': case 'scss': case 'less': return 'css';
+      case 'json': return 'json';
+      case 'md': return 'markdown';
+      case 'py': return 'python';
+      case 'yml': case 'yaml': return 'yaml';
+      case 'sh': case 'bash': return 'shell';
+      case 'sql': return 'sql';
+      case 'xml': case 'svg': return 'xml';
+      default: return 'plaintext';
     }
   };
 
-  // ── Memoized Monaco callbacks — stable refs, zero re-renders on typing ──
+  // ── File icon (VS Code style — no gradients) ──────────────────────
+
+  const getFileIcon = (fileName: string, size = 14) => {
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    switch (ext) {
+      case 'js': case 'jsx':
+        return <Code size={size} className="text-yellow-500 shrink-0" />;
+      case 'ts': case 'tsx':
+        return <Code size={size} className="text-blue-400 shrink-0" />;
+      case 'html':
+        return <File size={size} className="text-orange-400 shrink-0" />;
+      case 'css': case 'scss': case 'less':
+        return <File size={size} className="text-blue-400 shrink-0" />;
+      case 'json':
+        return <File size={size} className="text-yellow-300 shrink-0" />;
+      case 'md':
+        return <File size={size} className="text-[var(--text-muted)] shrink-0" />;
+      case 'py':
+        return <Code size={size} className="text-green-400 shrink-0" />;
+      case 'yml': case 'yaml':
+        return <File size={size} className="text-red-400 shrink-0" />;
+      case 'svg': case 'png': case 'jpg': case 'gif':
+        return <File size={size} className="text-purple-400 shrink-0" />;
+      default:
+        return <File size={size} className="text-[var(--text-subtle)] shrink-0" />;
+    }
+  };
+
+  // ── Editor mount + Ctrl+S binding ─────────────────────────────────
 
   const handleEditorDidMount = useCallback((editor: unknown) => {
     editorRef.current = editor;
-    const file = selectedFileRef.current;
-    if (file) {
-      const model = (editor as { getModel(): { getValue(): string } | null })?.getModel();
-      if (model) {
-        const content = model.getValue();
-        localContentRef.current.set(file, content);
-        updateStatsDisplay(content.split('\n').length, content.length);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const monacoEditor = editor as any;
+    // Bind Ctrl+S / Cmd+S to save (uses ref to avoid stale closure)
+    monacoEditor.addCommand(
+      2048 | 49, // CtrlCmd = 2048, KeyS = 49
+      () => { saveRef.current(); }
+    );
+    // Bind Ctrl+W / Cmd+W to close tab
+    monacoEditor.addCommand(
+      2048 | 53, // CtrlCmd = 2048, KeyW = 53
+      () => { if (selectedFileRef.current) closeTabRef.current(selectedFileRef.current); }
+    );
+  }, []);
+
+  // ── Save logic ────────────────────────────────────────────────────
+
+  const saveCurrentFile = useCallback(() => {
+    if (!selectedFile) return;
+    const buffer = dirtyBuffers.get(selectedFile);
+    if (buffer !== undefined) {
+      onFileUpdate(selectedFile, buffer);
+      // Update baseline so the buffer is now "clean"
+      localContentRef.current.set(selectedFile, buffer);
+      setDirtyBuffers(prev => {
+        const next = new Map(prev);
+        next.delete(selectedFile);
+        return next;
+      });
+    }
+  }, [selectedFile, dirtyBuffers, onFileUpdate]);
+
+  // Keep ref current for Monaco command binding (avoids stale closure)
+  useEffect(() => { saveRef.current = saveCurrentFile; }, [saveCurrentFile]);
+
+  const saveAllFiles = useCallback(() => {
+    dirtyBuffers.forEach((content, path) => {
+      onFileUpdate(path, content);
+      localContentRef.current.set(path, content);
+    });
+    setDirtyBuffers(new Map());
+  }, [dirtyBuffers, onFileUpdate]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          saveAllFiles();
+        } else {
+          saveCurrentFile();
+        }
+      }
+      // Ctrl+W closes active tab
+      if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+        e.preventDefault();
+        if (selectedFile) closeTabRef.current(selectedFile);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [saveCurrentFile, saveAllFiles, selectedFile]);
+
+  // ── Editor change — buffer locally, don't save ────────────────────
+
+  const handleEditorChange = (value: string | undefined) => {
+    if (selectedFile && value !== undefined) {
+      const original = localContentRef.current.get(selectedFile);
+      if (value === original) {
+        // Content matches saved version — mark clean
+        setDirtyBuffers(prev => {
+          const next = new Map(prev);
+          next.delete(selectedFile);
+          return next;
+        });
+      } else {
+        setDirtyBuffers(prev => new Map(prev).set(selectedFile, value));
       }
     }
-  }, []);
-
-  const handleEditorChange = useCallback((value: string | undefined) => {
-    const file = selectedFileRef.current;
-    if (!file || value === undefined) return;
-
-    // Update local cache immediately — Monaco owns the content
-    localContentRef.current.set(file, value);
-
-    // Update stats via direct DOM mutation — NO React re-render
-    updateStatsDisplay(value.split('\n').length, value.length);
-
-    // Debounced save: fire onFileUpdate after 500ms of idle
-    pendingFileRef.current = file;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      const pendingFile = pendingFileRef.current;
-      if (pendingFile) {
-        const latest = localContentRef.current.get(pendingFile);
-        if (latest !== undefined) {
-          onFileUpdateRef.current(pendingFile, latest);
-        }
-        pendingFileRef.current = null;
-      }
-      saveTimerRef.current = null;
-    }, 500);
-  }, []);
+  };
 
   // Memoize file paths so the tree only rebuilds when paths change
   const filePathsKey = useMemo(() => fileTreeProp.map((f) => f.path).join('\0'), [fileTreeProp]);
+
+  const isFileDirty = (path: string) => dirtyBuffers.has(path);
+
+  // ── Tab management ────────────────────────────────────────────────
+
+  const openFile = useCallback((path: string) => {
+    setSelectedFile(path);
+    setSelectedDir(null);
+    setMobileExplorerOpen(false);
+    setOpenTabs(prev => {
+      if (prev.some(t => t.path === path)) return prev;
+      const name = path.split('/').pop() || path;
+      return [...prev, { path, name }];
+    });
+  }, []);
+
+  const closeTab = useCallback((path: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    // If dirty, save before closing
+    const buffer = dirtyBuffers.get(path);
+    if (buffer !== undefined) {
+      onFileUpdate(path, buffer);
+      localContentRef.current.set(path, buffer);
+      setDirtyBuffers(prev => {
+        const next = new Map(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+    setOpenTabs(prev => {
+      const next = prev.filter(t => t.path !== path);
+      if (selectedFile === path) {
+        const idx = prev.findIndex(t => t.path === path);
+        const newSelected = next[Math.min(idx, next.length - 1)]?.path || null;
+        setSelectedFile(newSelected);
+      }
+      return next;
+    });
+  }, [selectedFile, dirtyBuffers, onFileUpdate]);
+
+  // Keep ref current for keyboard shortcut (avoids stale closure)
+  useEffect(() => { closeTabRef.current = (p) => closeTab(p); }, [closeTab]);
+
+  // ── Build file tree ───────────────────────────────────────────────
 
   useEffect(() => {
     // Build hierarchical FileNode[] tree from flat fileTreeProp entries
@@ -273,45 +334,36 @@ function CodeEditor({
             isDirectory: isLeaf ? entry.is_dir : true,
             children: (isLeaf ? entry.is_dir : true) ? [] : undefined,
           };
-
           pathMap.set(fullPath, node);
-
           if (currentPath === '') {
             tree.push(node);
           } else {
             const parent = pathMap.get(currentPath);
-            if (parent && parent.children) {
-              parent.children.push(node);
-            }
+            if (parent && parent.children) parent.children.push(node);
           }
         }
-
         currentPath = fullPath;
       });
     });
 
-    // Sort: folders first (alphabetically), then files (alphabetically)
     const sortNodes = (nodes: FileNode[]) => {
       nodes.sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
       });
-      nodes.forEach((n) => {
-        if (n.children) sortNodes(n.children);
-      });
+      nodes.forEach((n) => { if (n.children) sortNodes(n.children); });
     };
     sortNodes(tree);
-
     setFileTree(tree);
 
     // Auto-select the first actual file if none selected
     if (!selectedFile && sorted.length > 0) {
       const firstFile = sorted.find((e) => !e.is_dir);
       if (firstFile) {
-        switchToFile(firstFile.path);
+        openFile(firstFile.path);
       }
     }
-  }, [filePathsKey]);
+  }, [filePathsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lazy-load file content when selectedFile changes
   useEffect(() => {
@@ -333,38 +385,18 @@ function CodeEditor({
     };
   }, [selectedFile, slug, containerDir]);
 
+  // ── Directory toggle ──────────────────────────────────────────────
+
   const toggleDirectory = (path: string) => {
     setExpandedDirs((prev) => {
       const newSet = new Set(prev);
-      if (newSet.has(path)) {
-        newSet.delete(path);
-      } else {
-        newSet.add(path);
-      }
+      if (newSet.has(path)) newSet.delete(path);
+      else newSet.add(path);
       return newSet;
     });
   };
 
-  const getFileIcon = (fileName: string) => {
-    const ext = fileName.split('.').pop()?.toLowerCase();
-    switch (ext) {
-      case 'js':
-      case 'jsx':
-      case 'ts':
-      case 'tsx':
-        return <Code size={14} className="text-yellow-400" />;
-      case 'html':
-        return <File size={14} className="text-orange-400" />;
-      case 'css':
-        return <File size={14} className="text-blue-400" />;
-      case 'json':
-        return <File size={14} className="text-green-400" />;
-      default:
-        return <File size={14} className="text-gray-400" />;
-    }
-  };
-
-  // ── Context menu handlers ──────────────────────────────────────────
+  // ── Context menu ──────────────────────────────────────────────────
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: FileNode | null) => {
     e.preventDefault();
@@ -374,17 +406,12 @@ function CodeEditor({
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
-  // Close context menu on outside click or Escape
   useEffect(() => {
     if (!contextMenu) return;
     const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        closeContextMenu();
-      }
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeContextMenu();
     };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeContextMenu();
-    };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeContextMenu(); };
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
     return () => {
@@ -398,7 +425,6 @@ function CodeEditor({
     if (inlineInput && inlineInputRef.current) {
       inlineInputRef.current.focus();
       if (inlineInput.kind === 'rename' && inlineInput.initialValue) {
-        // Select the name part (without extension for files)
         const val = inlineInput.initialValue;
         const dotIdx = val.lastIndexOf('.');
         inlineInputRef.current.setSelectionRange(0, dotIdx > 0 ? dotIdx : val.length);
@@ -408,37 +434,31 @@ function CodeEditor({
     }
   }, [inlineInput]);
 
-  // ── Inline input submission ────────────────────────────────────────
+  // ── Inline input submission ───────────────────────────────────────
 
   const handleInlineSubmit = useCallback(
     (value: string) => {
       if (!inlineInput) return;
-      // Clear state first to prevent double-submission from blur after Enter
       const current = inlineInput;
       setInlineInput(null);
-
       const trimmed = value.trim();
-      if (!trimmed) return;
-
-      // Validate name
-      if (trimmed.includes('/') || trimmed.includes('\\')) {
-        return;
-      }
+      if (!trimmed || trimmed.includes('/') || trimmed.includes('\\')) return;
 
       if (current.kind === 'rename' && current.originalPath) {
         const parentDir = current.originalPath.includes('/')
           ? current.originalPath.substring(0, current.originalPath.lastIndexOf('/'))
           : '';
         const newPath = parentDir ? `${parentDir}/${trimmed}` : trimmed;
-
         if (newPath !== current.originalPath) {
           onFileRename?.(current.originalPath, newPath);
-          // If the renamed item was selected, update selection
-          if (selectedFile === current.originalPath) {
-            setSelectedFile(newPath);
-          } else if (selectedFile?.startsWith(current.originalPath + '/')) {
+          if (selectedFile === current.originalPath) setSelectedFile(newPath);
+          else if (selectedFile?.startsWith(current.originalPath + '/'))
             setSelectedFile(newPath + selectedFile.substring(current.originalPath.length));
-          }
+          // Update tab
+          setOpenTabs(prev => prev.map(t =>
+            t.path === current.originalPath ? { path: newPath, name: trimmed } :
+            t.path.startsWith(current.originalPath! + '/') ? { ...t, path: newPath + t.path.substring(current.originalPath!.length) } : t
+          ));
         }
       } else if (current.kind === 'file') {
         const fullPath = current.parentPath ? `${current.parentPath}/${trimmed}` : trimmed;
@@ -451,94 +471,99 @@ function CodeEditor({
     [inlineInput, onFileRename, onFileCreate, onDirectoryCreate, selectedFile]
   );
 
-  // ── Context menu actions ───────────────────────────────────────────
+  // ── Context menu actions ──────────────────────────────────────────
 
-  const startNewFile = useCallback(
-    (parentPath: string) => {
-      closeContextMenu();
-      // Expand parent directory so the input is visible
-      if (parentPath) {
-        setExpandedDirs((prev) => new Set([...prev, parentPath]));
-      }
-      setInlineInput({ parentPath, kind: 'file' });
-    },
-    [closeContextMenu]
-  );
+  const startNewFile = useCallback((parentPath: string) => {
+    closeContextMenu();
+    if (parentPath) setExpandedDirs(prev => new Set([...prev, parentPath]));
+    setInlineInput({ parentPath, kind: 'file' });
+  }, [closeContextMenu]);
 
-  const startNewFolder = useCallback(
-    (parentPath: string) => {
-      closeContextMenu();
-      if (parentPath) {
-        setExpandedDirs((prev) => new Set([...prev, parentPath]));
-      }
-      setInlineInput({ parentPath, kind: 'folder' });
-    },
-    [closeContextMenu]
-  );
+  const startNewFolder = useCallback((parentPath: string) => {
+    closeContextMenu();
+    if (parentPath) setExpandedDirs(prev => new Set([...prev, parentPath]));
+    setInlineInput({ parentPath, kind: 'folder' });
+  }, [closeContextMenu]);
 
-  const startRename = useCallback(
-    (node: FileNode) => {
-      closeContextMenu();
-      const parentPath = node.path.includes('/')
-        ? node.path.substring(0, node.path.lastIndexOf('/'))
-        : '';
-      setInlineInput({
-        parentPath,
-        kind: 'rename',
-        initialValue: node.name,
-        originalPath: node.path,
-      });
-    },
-    [closeContextMenu]
-  );
+  const startRename = useCallback((node: FileNode) => {
+    closeContextMenu();
+    const parentPath = node.path.includes('/')
+      ? node.path.substring(0, node.path.lastIndexOf('/'))
+      : '';
+    setInlineInput({ parentPath, kind: 'rename', initialValue: node.name, originalPath: node.path });
+  }, [closeContextMenu]);
 
-  const confirmDelete = useCallback(
-    (node: FileNode) => {
-      closeContextMenu();
-      setDeleteConfirm(node);
-    },
-    [closeContextMenu]
-  );
+  const confirmDelete = useCallback((node: FileNode) => {
+    closeContextMenu();
+    setDeleteConfirm(node);
+  }, [closeContextMenu]);
 
   const executeDelete = useCallback(() => {
     if (!deleteConfirm) return;
     onFileDelete?.(deleteConfirm.path, deleteConfirm.isDirectory);
-    // If the deleted item was the selected file, clear selection
-    if (
-      selectedFile === deleteConfirm.path ||
-      (deleteConfirm.isDirectory && selectedFile?.startsWith(deleteConfirm.path + '/'))
-    ) {
+    if (selectedFile === deleteConfirm.path ||
+        (deleteConfirm.isDirectory && selectedFile?.startsWith(deleteConfirm.path + '/'))) {
       setSelectedFile(null);
     }
+    // Remove from tabs
+    setOpenTabs(prev => prev.filter(t =>
+      t.path !== deleteConfirm.path &&
+      !(deleteConfirm.isDirectory && t.path.startsWith(deleteConfirm.path + '/'))
+    ));
+    // Clean dirty buffers
+    setDirtyBuffers(prev => {
+      const next = new Map(prev);
+      next.delete(deleteConfirm.path);
+      if (deleteConfirm.isDirectory) {
+        for (const key of next.keys()) {
+          if (key.startsWith(deleteConfirm.path + '/')) next.delete(key);
+        }
+      }
+      return next;
+    });
     setDeleteConfirm(null);
   }, [deleteConfirm, onFileDelete, selectedFile]);
 
-  // ── Render inline input row ────────────────────────────────────────
+  // ── Search filtering ──────────────────────────────────────────────
+
+  const filterTree = useCallback((nodes: FileNode[], query: string): FileNode[] => {
+    if (!query) return nodes;
+    const lower = query.toLowerCase();
+    return nodes.reduce<FileNode[]>((acc, node) => {
+      if (node.isDirectory) {
+        const filtered = filterTree(node.children || [], query);
+        if (filtered.length > 0) {
+          acc.push({ ...node, children: filtered });
+        }
+      } else if (node.name.toLowerCase().includes(lower)) {
+        acc.push(node);
+      }
+      return acc;
+    }, []);
+  }, []);
+
+  const displayTree = searchQuery ? filterTree(fileTree, searchQuery) : fileTree;
+
+  // ── Render inline input row ───────────────────────────────────────
 
   const renderInlineInput = (depth: number) => {
     if (!inlineInput) return null;
-
-    const icon =
-      inlineInput.kind === 'folder' ? (
-        <Folder size={14} className="mr-2 text-blue-400" />
-      ) : inlineInput.kind === 'rename' ? null : (
-        <File size={14} className="mr-2 text-gray-400" />
-      );
+    const icon = inlineInput.kind === 'folder'
+      ? <Folder size={14} className="mr-1.5 text-[var(--text-muted)] shrink-0" />
+      : inlineInput.kind === 'rename' ? null
+      : <File size={14} className="mr-1.5 text-[var(--text-subtle)] shrink-0" />;
 
     return (
-      <div className="flex items-center py-1 px-3" style={{ paddingLeft: `${depth * 16 + 12}px` }}>
-        {inlineInput.kind !== 'rename' && <div className="w-4 mr-2" />}
+      <div className={`flex items-center ${isMobile ? 'h-9' : 'h-[22px]'} px-2`} style={{ paddingLeft: `${depth * 12 + 16}px` }}>
+        {inlineInput.kind !== 'rename' && <div className="w-4 mr-1" />}
         {icon}
         <input
           ref={inlineInputRef}
-          className="flex-1 text-sm bg-[var(--surface)] text-[var(--text)] border border-[var(--primary)] rounded px-1.5 py-0.5 outline-none"
+          className="flex-1 text-xs bg-[var(--bg)] text-[var(--text)] border border-[var(--primary)] rounded-[var(--radius-small)] px-1.5 py-0.5 outline-none"
           defaultValue={inlineInput.initialValue || ''}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              handleInlineSubmit((e.target as HTMLInputElement).value);
-            } else if (e.key === 'Escape') {
-              setInlineInput(null);
-            }
+            if (e.key === 'Enter') handleInlineSubmit((e.target as HTMLInputElement).value);
+            else if (e.key === 'Escape') setInlineInput(null);
           }}
           onBlur={(e) => handleInlineSubmit(e.target.value)}
         />
@@ -546,65 +571,60 @@ function CodeEditor({
     );
   };
 
-  // ── Render file tree ───────────────────────────────────────────────
+  // ── Render file tree (VS Code style) ──────────────────────────────
 
   const renderFileTree = (nodes: FileNode[], depth = 0) => {
     const items: React.ReactNode[] = [];
 
     nodes.forEach((node) => {
-      const isBeingRenamed =
-        inlineInput?.kind === 'rename' && inlineInput.originalPath === node.path;
+      const isBeingRenamed = inlineInput?.kind === 'rename' && inlineInput.originalPath === node.path;
+      const isActive = selectedFile === node.path;
+      const isDirSelected = selectedDir === node.path;
+      const isDirty = !node.isDirectory && isFileDirty(node.path);
 
       items.push(
         <div key={node.path} className="select-none">
           {isBeingRenamed ? (
-            <div
-              className="flex items-center py-1 px-3"
-              style={{ paddingLeft: `${depth * 16 + 12}px` }}
-            >
+            <div className={`flex items-center ${isMobile ? 'h-9' : 'h-[22px]'} px-2`} style={{ paddingLeft: `${depth * 12 + 16}px` }}>
               {node.isDirectory ? (
                 <>
-                  <ChevronRight size={14} className="mr-2 text-[var(--text)]/50" />
-                  <Folder size={14} className="mr-2 text-blue-400" />
+                  <ChevronRight size={12} className="mr-1 text-[var(--text-subtle)] shrink-0" />
+                  <Folder size={14} className="mr-1.5 text-[var(--text-muted)] shrink-0" />
                 </>
               ) : (
                 <>
-                  <div className="w-4 mr-2" />
+                  <div className="w-3 mr-1" />
                   {getFileIcon(node.name)}
-                  <div className="mr-2" />
+                  <div className="mr-1.5" />
                 </>
               )}
               <input
                 ref={inlineInputRef}
-                className="flex-1 text-sm bg-[var(--surface)] text-[var(--text)] border border-[var(--primary)] rounded px-1.5 py-0.5 outline-none"
+                className="flex-1 text-xs bg-[var(--bg)] text-[var(--text)] border border-[var(--primary)] rounded-[var(--radius-small)] px-1.5 py-0.5 outline-none"
                 defaultValue={inlineInput?.initialValue || ''}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleInlineSubmit((e.target as HTMLInputElement).value);
-                  } else if (e.key === 'Escape') {
-                    setInlineInput(null);
-                  }
+                  if (e.key === 'Enter') handleInlineSubmit((e.target as HTMLInputElement).value);
+                  else if (e.key === 'Escape') setInlineInput(null);
                 }}
                 onBlur={(e) => handleInlineSubmit(e.target.value)}
               />
             </div>
           ) : (
             <div
-              className={`flex items-center py-2 px-3 cursor-pointer rounded-lg mb-0.5 transition-all duration-150 ${
-                selectedFile === node.path
-                  ? 'bg-orange-500/20 text-orange-300 border-l-2 border-orange-500'
-                  : selectedDir === node.path
-                    ? 'bg-[var(--text)]/10 text-[var(--text)] border-l-2 border-[var(--text)]/30'
-                    : 'hover:bg-[var(--surface)]/70 text-[var(--text)]/80 hover:text-[var(--text)]'
+              className={`flex items-center ${isMobile ? 'h-9' : 'h-[22px]'} px-2 cursor-pointer transition-colors ${
+                isActive
+                  ? 'bg-[var(--surface-hover)] text-[var(--text)]'
+                  : isDirSelected
+                    ? 'bg-[var(--surface-hover)]/50 text-[var(--text)]'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)]/50 hover:text-[var(--text)]'
               }`}
-              style={{ paddingLeft: `${depth * 16 + 12}px` }}
+              style={{ paddingLeft: `${depth * 12 + 16}px` }}
               onClick={() => {
                 if (node.isDirectory) {
                   toggleDirectory(node.path);
                   setSelectedDir(node.path);
                 } else {
-                  switchToFile(node.path);
-                  setSelectedDir(null);
+                  openFile(node.path);
                 }
               }}
               onContextMenu={(e) => handleContextMenu(e, node)}
@@ -612,36 +632,30 @@ function CodeEditor({
               {node.isDirectory ? (
                 <>
                   {expandedDirs.has(node.path) ? (
-                    <ChevronDown size={14} className="mr-2 text-[var(--text)]/50" />
+                    <ChevronDown size={12} className="mr-1 text-[var(--text-subtle)] shrink-0" />
                   ) : (
-                    <ChevronRight size={14} className="mr-2 text-[var(--text)]/50" />
+                    <ChevronRight size={12} className="mr-1 text-[var(--text-subtle)] shrink-0" />
                   )}
-                  <Folder size={14} className="mr-2 text-blue-400" />
+                  <Folder size={14} className="mr-1.5 text-[var(--text-muted)] shrink-0" />
                 </>
               ) : (
                 <>
-                  <div className="w-4 mr-2"></div>
+                  <div className="w-3 mr-1" />
                   {getFileIcon(node.name)}
-                  <div className="mr-2"></div>
+                  <div className="mr-1.5" />
                 </>
               )}
-              <span
-                className={`text-sm flex-1 font-medium truncate ${
-                  selectedFile === node.path ? 'text-orange-200' : ''
-                }`}
-              >
-                {node.name}
-              </span>
+              <span className="text-xs flex-1 truncate">{node.name}</span>
+              {isDirty && (
+                <span className="w-2 h-2 rounded-full bg-[var(--text-muted)] shrink-0 ml-1" />
+              )}
             </div>
           )}
 
           {node.isDirectory && expandedDirs.has(node.path) && (
             <>
-              {/* Inline input for new file/folder inside this directory */}
-              {inlineInput &&
-                inlineInput.kind !== 'rename' &&
-                inlineInput.parentPath === node.path &&
-                renderInlineInput(depth + 1)}
+              {inlineInput && inlineInput.kind !== 'rename' &&
+                inlineInput.parentPath === node.path && renderInlineInput(depth + 1)}
               {node.children && renderFileTree(node.children, depth + 1)}
             </>
           )}
@@ -652,159 +666,266 @@ function CodeEditor({
     return items;
   };
 
-  // Editor should stay mounted if we have local content (lazy-loaded)
-  const hasEditorContent = selectedFile != null && localContentRef.current.has(selectedFile);
+  // ── Get content for selected file (buffer or lazy-loaded) ─────────
 
-  // Compute initial stats text for the DOM ref (used when editor hasn't mounted yet)
-  const initialStatsText = useMemo(() => {
-    if (!selectedFile) return '';
-    const local = localContentRef.current.get(selectedFile);
-    if (local !== undefined) {
-      return `${local.split('\n').length} lines \u2022 ${local.length} characters`;
-    }
-    return '';
-  }, [selectedFile, hasEditorContent]); // eslint-disable-line react-hooks/exhaustive-deps
+  const getFileContent = (path: string): string | undefined => {
+    const buffer = dirtyBuffers.get(path);
+    if (buffer !== undefined) return buffer;
+    return localContentRef.current.get(path);
+  };
+
+  const selectedFileContent = selectedFile ? getFileContent(selectedFile) : undefined;
+  const dirtyCount = dirtyBuffers.size;
+
+  // ── Determine target directory for toolbar new file/folder ────────
+
+  const targetDir = selectedDir ||
+    (selectedFile?.includes('/') ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : '') || '';
 
   return (
-    <div className="h-full flex bg-[var(--surface)] overflow-hidden">
-      {/* File tree sidebar */}
+    <div className="h-full flex bg-[var(--bg)] overflow-hidden">
+      {/* ── Mobile explorer overlay backdrop ──────────────────────── */}
+      {isMobile && mobileExplorerOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40"
+          onClick={() => setMobileExplorerOpen(false)}
+        />
+      )}
+
+      {/* ── Explorer sidebar ───────────────────────────────────────── */}
       <div
-        className={`bg-[var(--background)] border-r border-[var(--border-color)] overflow-y-auto flex flex-col transition-all duration-300 ${
-          isSidebarCollapsed ? 'w-0 border-0' : 'w-72'
+        className={`bg-[var(--bg)] border-r border-[var(--border)] overflow-hidden flex flex-col transition-all duration-200 ${
+          isMobile
+            ? `fixed top-0 left-0 h-full z-50 w-64 ${mobileExplorerOpen ? 'translate-x-0' : '-translate-x-full'}`
+            : isSidebarCollapsed ? 'w-0 border-0' : 'w-56'
         }`}
       >
-        <div className="px-4 h-12 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-pink-600 rounded-lg flex items-center justify-center shadow-lg">
-              <FileText size={16} className="text-white" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text)]">Explorer</h3>
-              <p className="text-xs text-[var(--text)]/60">
-                {fileTreeProp.length} {fileTreeProp.length === 1 ? 'entry' : 'entries'}
-              </p>
-            </div>
+        {/* Explorer header */}
+        <div className={`${isMobile ? 'h-10' : 'h-8'} flex items-center justify-between px-3 shrink-0`}>
+          <div className="flex items-center gap-2">
+            {isMobile && (
+              <button
+                onClick={() => setMobileExplorerOpen(false)}
+                className="p-1 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] text-[var(--text-subtle)]"
+              >
+                <X size={14} />
+              </button>
+            )}
+            <span className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wider">Explorer</span>
           </div>
-          {/* Toolbar buttons */}
-          {(onFileCreate || onDirectoryCreate) &&
-            (() => {
-              const targetDir =
-                selectedDir ||
-                (selectedFile?.includes('/')
-                  ? selectedFile.substring(0, selectedFile.lastIndexOf('/'))
-                  : '') ||
-                '';
-              return (
-                <div className="flex items-center gap-0.5">
-                  {onFileCreate && (
-                    <button
-                      onClick={() => startNewFile(targetDir)}
-                      className="p-1.5 hover:bg-[var(--text)]/10 active:bg-[var(--text)]/20 rounded transition-colors"
-                      title={targetDir ? `New File in ${targetDir}` : 'New File'}
-                    >
-                      <FilePlus size={15} className="text-[var(--text)]/60" />
-                    </button>
-                  )}
-                  {onDirectoryCreate && (
-                    <button
-                      onClick={() => startNewFolder(targetDir)}
-                      className="p-1.5 hover:bg-[var(--text)]/10 active:bg-[var(--text)]/20 rounded transition-colors"
-                      title={targetDir ? `New Folder in ${targetDir}` : 'New Folder'}
-                    >
-                      <FolderPlus size={15} className="text-[var(--text)]/60" />
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setIsSearching(!isSearching)}
+              className="p-0.5 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+              title="Search files"
+            >
+              <Search size={13} />
+            </button>
+            {onFileCreate && (
+              <button
+                onClick={() => startNewFile(targetDir)}
+                className="p-0.5 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+                title="New File"
+              >
+                <FilePlus size={13} />
+              </button>
+            )}
+            {onDirectoryCreate && (
+              <button
+                onClick={() => startNewFolder(targetDir)}
+                className="p-0.5 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+                title="New Folder"
+              >
+                <FolderPlus size={13} />
+              </button>
+            )}
+          </div>
         </div>
 
+        {/* Search input */}
+        {isSearching && (
+          <div className="px-2 pb-1.5 shrink-0">
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search files..."
+              className="w-full px-2 py-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setIsSearching(false);
+                  setSearchQuery('');
+                }
+              }}
+            />
+          </div>
+        )}
+
+        {/* File tree */}
         <div
-          className="flex-1 p-2 overflow-y-auto"
+          className="flex-1 py-0.5 overflow-y-auto scrollbar-none"
           key={fileTreeProp.length}
-          onClick={(e) => {
-            // Click on empty space clears directory selection
-            if (e.target === e.currentTarget) setSelectedDir(null);
-          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedDir(null); }}
           onContextMenu={(e) => handleContextMenu(e, null)}
         >
-          {fileTree.length > 0 ? (
+          {displayTree.length > 0 ? (
             <>
-              {/* Inline input at root level */}
-              {inlineInput &&
-                inlineInput.kind !== 'rename' &&
-                inlineInput.parentPath === '' &&
-                renderInlineInput(0)}
-              {renderFileTree(fileTree)}
+              {inlineInput && inlineInput.kind !== 'rename' &&
+                inlineInput.parentPath === '' && renderInlineInput(0)}
+              {renderFileTree(displayTree)}
             </>
           ) : isFilesSyncing ? (
             <div className="h-full flex items-center justify-center">
-              <div className="text-[var(--text)]/60 text-sm p-6 text-center rounded-xl bg-[var(--surface)]/50">
-                <div className="w-8 h-8 mx-auto mb-3 border-2 border-[var(--text)]/20 border-t-orange-500 rounded-full animate-spin" />
-                <p className="font-medium mb-1 text-[var(--text)]">Syncing files...</p>
-                <p className="text-xs text-[var(--text)]/40">Waiting for container to be ready</p>
+              <div className="text-center px-4">
+                <div className="w-5 h-5 mx-auto mb-2 border border-[var(--text-subtle)] border-t-[var(--text-muted)] rounded-full animate-spin" />
+                <p className="text-xs text-[var(--text-muted)]">Syncing...</p>
               </div>
+            </div>
+          ) : searchQuery ? (
+            <div className="px-4 py-6 text-center">
+              <p className="text-xs text-[var(--text-subtle)]">No matching files</p>
             </div>
           ) : (
             <>
-              {/* Inline input when tree is empty */}
-              {inlineInput &&
-                inlineInput.kind !== 'rename' &&
-                inlineInput.parentPath === '' &&
-                renderInlineInput(0)}
-              <div className="text-[var(--text)]/60 text-sm p-6 text-center rounded-xl bg-[var(--surface)]/50">
-                <Code size={32} className="mx-auto mb-3 opacity-50" />
-                <p className="font-medium mb-1 text-[var(--text)]">No files yet</p>
-                <p className="text-xs text-[var(--text)]/40">Files will appear here as you build</p>
+              {inlineInput && inlineInput.kind !== 'rename' &&
+                inlineInput.parentPath === '' && renderInlineInput(0)}
+              <div className="px-4 py-6 text-center">
+                <Code size={20} className="mx-auto mb-2 text-[var(--text-subtle)]" />
+                <p className="text-xs text-[var(--text-muted)]">No files yet</p>
+                <p className="text-[10px] text-[var(--text-subtle)] mt-0.5">Files appear as you build</p>
               </div>
             </>
           )}
         </div>
       </div>
 
-      {/* Code editor area */}
-      <div className="flex-1 bg-[var(--background)] overflow-hidden flex flex-col">
-        {selectedFile && hasEditorContent ? (
-          <>
-            {/* File header */}
-            <div className="px-4 h-12 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm flex items-center">
-              <div className="flex items-center gap-3">
-                {/* Toggle sidebar button */}
-                <button
-                  onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                  className="p-1.5 hover:bg-[var(--text)]/10 active:bg-[var(--text)]/20 rounded transition-colors"
-                  title={isSidebarCollapsed ? 'Show file explorer' : 'Hide file explorer'}
-                >
-                  {isSidebarCollapsed ? (
-                    <PanelLeft size={16} className="text-[var(--text)]/60" />
-                  ) : (
-                    <PanelLeftClose size={16} className="text-[var(--text)]/60" />
-                  )}
-                </button>
-                {getFileIcon(selectedFile.split('/').pop() || '')}
-                <div className="flex-1">
-                  <h4 className="text-sm font-semibold text-[var(--text)]">{selectedFile}</h4>
-                  <p ref={statsElementRef} className="text-xs text-[var(--text)]/50">
-                    {initialStatsText}
-                  </p>
-                </div>
-              </div>
-            </div>
+      {/* ── Editor area ────────────────────────────────────────────── */}
+      <div className="flex-1 bg-[var(--bg)] overflow-hidden flex flex-col min-w-0">
+        {/* Tab bar */}
+        <div className={`${isMobile ? 'h-[40px]' : 'h-[35px]'} bg-[var(--bg)] border-b border-[var(--border)] flex items-end shrink-0`}>
+          {/* Sidebar toggle */}
+          <button
+            onClick={() => isMobile ? setMobileExplorerOpen(true) : setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className="h-full px-2 flex items-center text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors shrink-0"
+            title={isSidebarCollapsed || isMobile ? 'Show explorer' : 'Hide explorer'}
+          >
+            {isSidebarCollapsed || isMobile ? <PanelLeft size={14} /> : <PanelLeftClose size={14} />}
+          </button>
 
-            {/* Monaco Editor */}
-            <div className="flex-1 overflow-hidden">
-              <Editor
-                key={selectedFile}
-                height="100%"
-                language={getLanguage(selectedFile)}
-                defaultValue={localContentRef.current.get(selectedFile) ?? ''}
-                onChange={handleEditorChange}
-                onMount={handleEditorDidMount}
-                theme={theme === 'dark' ? 'vs-dark' : 'vs'}
-                options={editorOptions}
-              />
-            </div>
-          </>
+          {/* Tabs */}
+          <div className="flex-1 flex items-end overflow-x-auto scrollbar-none min-w-0">
+            {openTabs.map(tab => {
+              const isActive = selectedFile === tab.path;
+              const isDirty = isFileDirty(tab.path);
+              return (
+                <div
+                  key={tab.path}
+                  onClick={() => setSelectedFile(tab.path)}
+                  className={`group flex items-center gap-1.5 ${isMobile ? 'h-[39px] px-3' : 'h-[34px] px-3'} cursor-pointer border-r border-[var(--border)] shrink-0 transition-colors ${
+                    isActive
+                      ? 'bg-[var(--surface)] text-[var(--text)] border-t border-t-[var(--primary)] border-b-0'
+                      : 'bg-[var(--bg)] text-[var(--text-muted)] hover:bg-[var(--surface-hover)]/50 border-t border-t-transparent'
+                  }`}
+                  style={{ maxWidth: isMobile ? 140 : 160 }}
+                >
+                  {getFileIcon(tab.name, 12)}
+                  <span className="text-xs truncate">{tab.name}</span>
+                  {isDirty && !isMobile && (
+                    <span className="w-2 h-2 rounded-full bg-[var(--text-muted)] shrink-0 group-hover:hidden" />
+                  )}
+                  {isDirty && isMobile && (
+                    <span className="w-2 h-2 rounded-full bg-[var(--text-muted)] shrink-0" />
+                  )}
+                  <button
+                    onClick={(e) => closeTab(tab.path, e)}
+                    className={`shrink-0 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] ${isMobile ? 'p-1' : 'p-0.5'} transition-colors ${
+                      isMobile
+                        ? '' // Always visible on mobile
+                        : isDirty ? 'hidden group-hover:block' : 'invisible group-hover:visible'
+                    }`}
+                  >
+                    <X size={isMobile ? 14 : 12} className="text-[var(--text-subtle)]" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Save indicator */}
+          {dirtyCount > 0 && (
+            <button
+              onClick={saveAllFiles}
+              className="h-full px-2 flex items-center gap-1 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
+              title={`Save all (${dirtyCount} unsaved)`}
+            >
+              <span className="w-2 h-2 rounded-full bg-[var(--text-muted)]" />
+              <span className="text-[10px]">{dirtyCount}</span>
+            </button>
+          )}
+        </div>
+
+        {/* Breadcrumb bar + save button */}
+        {selectedFile && (
+          <div className={`${isMobile ? 'h-[34px]' : 'h-[26px]'} bg-[var(--bg)] border-b border-[var(--border)] flex items-center px-3 shrink-0 gap-2`}>
+            <span className={`${isMobile ? 'text-xs' : 'text-[11px]'} text-[var(--text-subtle)] truncate flex-1`}>{selectedFile}</span>
+            {isFileDirty(selectedFile) && (
+              <button
+                onClick={saveCurrentFile}
+                className={`btn flex items-center gap-1 shrink-0 ${isMobile ? 'btn-sm h-[24px] px-3 text-xs' : 'btn-sm h-[18px] px-2 text-[10px]'}`}
+                title="Save (Ctrl+S)"
+              >
+                <Save size={isMobile ? 13 : 11} />
+                Save
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Editor content */}
+        {selectedFile && selectedFileContent !== undefined ? (
+          <div className="flex-1 overflow-hidden">
+            <Editor
+              key={selectedFile}
+              height="100%"
+              language={getLanguage(selectedFile)}
+              defaultValue={selectedFileContent}
+              onChange={handleEditorChange}
+              onMount={handleEditorDidMount}
+              theme={theme === 'dark' ? 'vs-dark' : 'vs'}
+              options={{
+                fontSize: isMobile ? 12 : 13,
+                fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+                lineNumbers: isMobile ? 'off' : 'on',
+                minimap: { enabled: !isMobile, maxColumn: 80 },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                tabSize: 2,
+                wordWrap: 'on',
+                padding: { top: 8, bottom: 8 },
+                smoothScrolling: true,
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                renderLineHighlight: 'line',
+                bracketPairColorization: { enabled: true },
+                guides: { bracketPairs: true, indentation: true },
+                suggestOnTriggerCharacters: true,
+                quickSuggestions: !isMobile,
+                formatOnPaste: true,
+                formatOnType: true,
+                lineHeight: 20,
+                renderWhitespace: 'selection',
+                overviewRulerBorder: false,
+                hideCursorInOverviewRuler: true,
+                glyphMargin: !isMobile,
+                folding: !isMobile,
+                scrollbar: {
+                  verticalScrollbarSize: isMobile ? 6 : 10,
+                  horizontalScrollbarSize: isMobile ? 6 : 10,
+                },
+              }}
+            />
+          </div>
         ) : startupOverlay ? (
           startupOverlay
         ) : loadingContent ? (
@@ -816,45 +937,62 @@ function CodeEditor({
           </div>
         ) : isFilesSyncing && fileTreeProp.length === 0 ? (
           <div className="h-full flex items-center justify-center">
-            <div className="text-center p-8">
-              <div className="w-12 h-12 mx-auto mb-4 border-3 border-[var(--text)]/20 border-t-orange-500 rounded-full animate-spin" />
-              <h3 className="text-lg font-semibold mb-2 text-[var(--text)]">Syncing files...</h3>
-              <p className="text-sm text-[var(--text)]/50 max-w-sm">
-                Waiting for container to be ready
-              </p>
+            <div className="text-center">
+              <div className="w-6 h-6 mx-auto mb-3 border border-[var(--text-subtle)] border-t-[var(--text-muted)] rounded-full animate-spin" />
+              <p className="text-xs text-[var(--text-muted)]">Syncing files...</p>
+              <p className="text-[10px] text-[var(--text-subtle)] mt-1">Waiting for container</p>
             </div>
           </div>
         ) : (
-          <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-            <div className="text-center p-8">
-              <div className="w-20 h-20 bg-gradient-to-br from-orange-500/20 to-pink-600/20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-                <Code size={40} className="opacity-60 text-orange-500" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2 text-[var(--text)]">
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center">
+              <Code size={24} className="mx-auto mb-3 text-[var(--text-subtle)]" />
+              <p className="text-xs text-[var(--text-muted)]">
                 {fileTreeProp.length > 0 ? 'Select a file to edit' : 'No files yet'}
-              </h3>
-              <p className="text-sm text-[var(--text)]/50 max-w-sm">
-                {fileTreeProp.length > 0
-                  ? 'Choose a file from the explorer to start editing'
-                  : 'Chat with your AI agent to generate code'}
+              </p>
+              <p className="text-[10px] text-[var(--text-subtle)] mt-1">
+                {fileTreeProp.length > 0 ? 'Choose from the explorer' : 'Chat with your agent to generate code'}
               </p>
             </div>
           </div>
         )}
+
+        {/* Status bar */}
+        <div className="h-[22px] bg-[var(--surface)] border-t border-[var(--border)] flex items-center px-3 justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            {selectedFile && (
+              <>
+                <span className="text-[10px] text-[var(--text-subtle)]">
+                  {getLanguage(selectedFile).charAt(0).toUpperCase() + getLanguage(selectedFile).slice(1)}
+                </span>
+                {!isMobile && selectedFileContent !== undefined && (
+                  <span className="text-[10px] text-[var(--text-subtle)]">
+                    {selectedFileContent.split('\n').length} lines
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {selectedFile && isFileDirty(selectedFile) && (
+              <span className="text-[10px] text-[var(--text-muted)]">Modified</span>
+            )}
+            {!isMobile && <span className="text-[10px] text-[var(--text-subtle)]">UTF-8</span>}
+            {!isMobile && <span className="text-[10px] text-[var(--text-subtle)]">Spaces: 2</span>}
+          </div>
+        </div>
       </div>
 
-      {/* ── Context Menu (portal-rendered) ────────────────────────────── */}
+      {/* ── Context Menu ───────────────────────────────────────────── */}
       {contextMenu && (
         <div
           ref={menuRef}
-          className="fixed z-50 min-w-[180px] py-1.5 bg-[var(--surface)] border border-[var(--border-color)] rounded-lg shadow-xl backdrop-blur-sm"
+          className="fixed z-50 min-w-[180px] py-1 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] overflow-hidden"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          {/* New File / New Folder — available on any right-click */}
           <button
-            className="w-full px-3 py-1.5 text-left text-sm text-[var(--text)] hover:bg-[var(--text)]/10 flex items-center gap-2"
+            className="w-full px-3 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--surface-hover)] flex items-center gap-2 transition-colors"
             onClick={() => {
-              // Directory: create inside it. File: create in its parent. Empty space: root.
               const parent = contextMenu.node
                 ? contextMenu.node.isDirectory
                   ? contextMenu.node.path
@@ -865,11 +1003,11 @@ function CodeEditor({
               startNewFile(parent);
             }}
           >
-            <FilePlus size={14} className="text-[var(--text)]/60" />
+            <FilePlus size={13} className="text-[var(--text-subtle)]" />
             New File
           </button>
           <button
-            className="w-full px-3 py-1.5 text-left text-sm text-[var(--text)] hover:bg-[var(--text)]/10 flex items-center gap-2"
+            className="w-full px-3 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--surface-hover)] flex items-center gap-2 transition-colors"
             onClick={() => {
               const parent = contextMenu.node
                 ? contextMenu.node.isDirectory
@@ -881,25 +1019,24 @@ function CodeEditor({
               startNewFolder(parent);
             }}
           >
-            <FolderPlus size={14} className="text-[var(--text)]/60" />
+            <FolderPlus size={13} className="text-[var(--text-subtle)]" />
             New Folder
           </button>
-          {/* For files and directories: Rename / Delete */}
           {contextMenu.node && (
             <>
-              <div className="h-px bg-[var(--border-color)] my-1" />
+              <div className="h-px bg-[var(--border)] my-0.5 mx-1.5" />
               <button
-                className="w-full px-3 py-1.5 text-left text-sm text-[var(--text)] hover:bg-[var(--text)]/10 flex items-center gap-2"
+                className="w-full px-3 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--surface-hover)] flex items-center gap-2 transition-colors"
                 onClick={() => startRename(contextMenu.node!)}
               >
-                <Pencil size={14} className="text-[var(--text)]/60" />
+                <Pencil size={13} className="text-[var(--text-subtle)]" />
                 Rename
               </button>
               <button
-                className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2"
+                className="w-full px-3 py-1.5 text-left text-xs text-[var(--status-error)] hover:bg-[var(--status-error)]/10 flex items-center gap-2 transition-colors"
                 onClick={() => confirmDelete(contextMenu.node!)}
               >
-                <Trash2 size={14} />
+                <Trash2 size={13} />
                 Delete
               </button>
             </>
@@ -907,34 +1044,28 @@ function CodeEditor({
         </div>
       )}
 
-      {/* ── Delete Confirmation Dialog ────────────────────────────────── */}
+      {/* ── Delete Confirmation ─────────────────────────────────────── */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-[var(--surface)] border border-[var(--border-color)] rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl">
-            <h3 className="text-base font-semibold text-[var(--text)] mb-2">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] p-5 max-w-sm w-full mx-4">
+            <h3 className="text-xs font-semibold text-[var(--text)] mb-2">
               Delete {deleteConfirm.isDirectory ? 'Folder' : 'File'}
             </h3>
-            <p className="text-sm text-[var(--text)]/70 mb-1">
+            <p className="text-xs text-[var(--text-muted)] mb-1">
               Are you sure you want to delete{' '}
               <span className="font-mono text-[var(--text)]">{deleteConfirm.name}</span>?
             </p>
             {deleteConfirm.isDirectory && (
-              <p className="text-xs text-red-400 mb-4">
+              <p className="text-[10px] text-[var(--status-error)] mb-3">
                 This will recursively delete the folder and all its contents.
               </p>
             )}
-            {!deleteConfirm.isDirectory && <div className="mb-4" />}
+            {!deleteConfirm.isDirectory && <div className="mb-3" />}
             <div className="flex justify-end gap-2">
-              <button
-                className="px-3 py-1.5 text-sm rounded-lg border border-[var(--border-color)] text-[var(--text)] hover:bg-[var(--text)]/10 transition-colors"
-                onClick={() => setDeleteConfirm(null)}
-              >
+              <button className="btn btn-sm" onClick={() => setDeleteConfirm(null)}>
                 Cancel
               </button>
-              <button
-                className="px-3 py-1.5 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
-                onClick={executeDelete}
-              >
+              <button className="btn btn-sm btn-danger" onClick={executeDelete}>
                 Delete
               </button>
             </div>

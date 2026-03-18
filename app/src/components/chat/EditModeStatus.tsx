@@ -57,15 +57,15 @@ export function EditModeStatus({
       <button
         onClick={cycleMode}
         className={`
-          flex items-center gap-2 rounded-full
+          flex items-center gap-1.5 rounded-full
           border transition-all duration-200
           ${config.bgColor} ${config.borderColor} ${config.hoverBg}
-          text-sm font-medium
-          ${compact ? 'p-1.5' : 'px-3 py-1.5'}
+          text-xs font-medium h-7
+          ${compact ? 'px-1.5' : 'px-3'}
         `}
         title={compact ? config.label : 'Click to cycle edit mode'}
       >
-        <Icon className={`w-4 h-4 ${config.color}`} />
+        <Icon className={`w-3.5 h-3.5 ${config.color}`} />
         {!compact && <span className={config.color}>{config.label}</span>}
       </button>
     </div>

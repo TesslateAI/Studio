@@ -36,7 +36,6 @@ import {
 } from '../components/marketplace';
 import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
-import { useTheme } from '../theme/ThemeContext';
 import {
   SEO,
   generateProductStructuredData,
@@ -79,7 +78,6 @@ const ALL_TOOLS = Object.keys(toolIcons);
 export default function MarketplaceDetail() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { theme } = useTheme();
   const { isAuthenticated } = useMarketplaceAuth();
   const [item, setItem] = useState<MarketplaceItem | null>(null);
   const [relatedItems, setRelatedItems] = useState<MarketplaceItem[]>([]);
@@ -420,7 +418,7 @@ export default function MarketplaceDetail() {
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-[var(--bg)]">
-        <LoadingSpinner message="Loading extension..." size={80} />
+        <LoadingSpinner message="Loading extension..." size={40} />
       </div>
     );
   }
@@ -478,40 +476,28 @@ export default function MarketplaceDetail() {
           '@graph': [productStructuredData, breadcrumbData],
         }}
       />
-      <div
-        className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}
-      >
+      <div className="h-screen overflow-y-auto bg-[var(--bg)]">
         {/* Header */}
-        <div
-          className={`border-b ${theme === 'light' ? 'border-black/10' : 'border-white/10'} sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}
-        >
+        <div className="border-b border-[var(--border)] flex-shrink-0">
           <div className="max-w-5xl mx-auto px-6 md:px-12">
-            <div className="h-14 flex items-center gap-4">
+            <div className="h-10 flex items-center gap-3">
               <button
                 onClick={() => navigate(marketplaceBackUrl)}
-                className={`
-                flex items-center gap-2 text-sm font-medium transition-colors
-                ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}
-              `}
+                className="btn"
               >
-                <ArrowLeft size={18} />
-                <span>Marketplace</span>
+                <ArrowLeft size={15} />
+                Marketplace
               </button>
             </div>
           </div>
         </div>
 
         {/* Hero Section */}
-        <div className="max-w-5xl mx-auto px-6 md:px-12 py-12">
+        <div className="max-w-5xl mx-auto px-6 md:px-12 py-6">
           <div className="flex flex-col md:flex-row gap-8">
             {/* Icon */}
             <div className="flex-shrink-0">
-              <div
-                className={`
-              w-24 h-24 md:w-32 md:h-32 rounded-3xl flex items-center justify-center overflow-hidden
-              ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-            `}
-              >
+              <div className="w-16 h-16 rounded-[var(--radius)] bg-[var(--surface-hover)] border border-[var(--border)] flex items-center justify-center overflow-hidden">
                 {item.avatar_url ? (
                   <img
                     src={item.avatar_url}
@@ -519,9 +505,9 @@ export default function MarketplaceDetail() {
                     className="w-full h-full object-cover"
                   />
                 ) : item.git_repo_url && parseGitHubRepo(item.git_repo_url) ? (
-                  <GithubLogo size={48} weight="fill" className={theme === 'light' ? 'text-black/70' : 'text-white/70'} />
+                  <GithubLogo size={48} weight="fill" className="text-[var(--text-muted)]" />
                 ) : (
-                  <img src="/favicon.svg" alt="Tesslate" className="w-16 h-16 md:w-20 md:h-20" />
+                  <img src="/favicon.svg" alt="Tesslate" className="w-10 h-10" />
                 )}
               </div>
             </div>
@@ -530,26 +516,24 @@ export default function MarketplaceDetail() {
             <div className="flex-1">
               {/* Title Row */}
               <div className="flex flex-wrap items-start gap-2 sm:gap-3 mb-3">
-                <h1
-                  className={`font-heading text-2xl sm:text-3xl md:text-4xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                >
+                <h1 className="font-heading text-xl font-semibold text-[var(--text)]">
                   {item.name}
                 </h1>
                 <div className="flex items-center gap-2 flex-wrap">
                   {(item.source_type === 'open' || (item.source_type === 'git' && item.git_repo_url)) && (
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-500/15 text-green-500 text-xs sm:text-sm rounded-lg font-medium whitespace-nowrap">
+                    <span className="flex items-center gap-1.5 bg-[var(--surface-hover)] border border-[var(--border)] text-[var(--text-muted)] rounded-[var(--radius-small)] text-[10px] px-1.5 py-0.5 font-medium whitespace-nowrap">
                       <GitFork size={14} weight="bold" />
                       Open Source
                     </span>
                   )}
                   {item.creator_type === 'community' && (
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/15 text-purple-400 text-xs sm:text-sm rounded-lg font-medium whitespace-nowrap">
+                    <span className="flex items-center gap-1.5 bg-[var(--surface-hover)] border border-[var(--border)] text-[var(--text-muted)] rounded-[var(--radius-small)] text-[10px] px-1.5 py-0.5 font-medium whitespace-nowrap">
                       <Users size={14} weight="bold" />
                       Community
                     </span>
                   )}
                   {item.creator_type === 'official' && (
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-500/15 text-blue-400 text-xs sm:text-sm rounded-lg font-medium whitespace-nowrap">
+                    <span className="flex items-center gap-1.5 bg-[var(--surface-hover)] border border-[var(--border)] text-[var(--text-muted)] rounded-[var(--radius-small)] text-[10px] px-1.5 py-0.5 font-medium whitespace-nowrap">
                       <ShieldCheck size={14} weight="bold" />
                       Official
                     </span>
@@ -558,9 +542,7 @@ export default function MarketplaceDetail() {
               </div>
 
               {/* Description */}
-              <p
-                className={`text-lg mb-4 ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
-              >
+              <p className="text-xs text-[var(--text-muted)] mb-4">
                 {item.description}
               </p>
 
@@ -573,17 +555,9 @@ export default function MarketplaceDetail() {
                         ? `/@${item.creator_username}`
                         : `/marketplace/creator/${creatorId}`
                     }
-                    className={`
-                    flex items-center gap-2 text-sm hover:text-[var(--primary)] transition-colors
-                    ${theme === 'light' ? 'text-black/60' : 'text-white/60'}
-                  `}
+                    className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors"
                   >
-                    <div
-                      className={`
-                    w-6 h-6 rounded-full overflow-hidden flex-shrink-0
-                    ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'}
-                  `}
-                    >
+                    <div className="w-6 h-6 rounded-full overflow-hidden flex-shrink-0 bg-[var(--surface-hover)]">
                       {item.creator_avatar_url ? (
                         <img
                           src={item.creator_avatar_url}
@@ -605,9 +579,7 @@ export default function MarketplaceDetail() {
                     </span>
                   </Link>
                 ) : (
-                  <span
-                    className={`text-sm ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}
-                  >
+                  <span className="text-[11px] text-[var(--text-muted)]">
                     By Tesslate
                   </span>
                 )}
@@ -617,7 +589,7 @@ export default function MarketplaceDetail() {
               <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                 {item.is_purchased ? (
                   <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-2 px-6 py-3 bg-green-500/15 text-green-500 rounded-xl text-sm font-semibold">
+                    <span className="btn flex items-center gap-2">
                       <Check size={18} weight="bold" />
                       Installed
                     </span>
@@ -625,14 +597,7 @@ export default function MarketplaceDetail() {
                       <button
                         onClick={handleUninstall}
                         disabled={uninstalling}
-                        className={`
-                          flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all
-                          ${
-                            theme === 'light'
-                              ? 'bg-red-500/10 hover:bg-red-500/20 text-red-600 border border-red-500/20'
-                              : 'bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20'
-                          }
-                        `}
+                        className="btn btn-danger"
                       >
                         {uninstalling ? (
                           <>
@@ -652,16 +617,11 @@ export default function MarketplaceDetail() {
                   <button
                     onClick={handleInstall}
                     disabled={!item.is_active || installing}
-                    className={`
-                    flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all
-                    ${
+                    className={
                       item.is_active
-                        ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-lg hover:shadow-xl'
-                        : theme === 'light'
-                          ? 'bg-black/5 text-black/40 cursor-not-allowed'
-                          : 'bg-white/5 text-white/40 cursor-not-allowed'
+                        ? 'btn btn-filled'
+                        : 'btn opacity-50 cursor-not-allowed'
                     }
-                  `}
                   >
                     {installing ? (
                       <>
@@ -694,14 +654,7 @@ export default function MarketplaceDetail() {
                     <button
                       onClick={handleFork}
                       disabled={forking}
-                      className={`
-                    flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all
-                    ${
-                      theme === 'light'
-                        ? 'bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 border border-purple-500/20'
-                        : 'bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20'
-                    }
-                  `}
+                      className="btn"
                     >
                       {forking ? (
                         <>
@@ -719,9 +672,7 @@ export default function MarketplaceDetail() {
 
                 {/* Price Badge */}
                 {item.pricing_type === 'free' && (
-                  <span
-                    className={`text-sm font-medium ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-                  >
+                  <span className="text-xs text-[var(--text-subtle)]">
                     Free
                   </span>
                 )}
@@ -731,22 +682,18 @@ export default function MarketplaceDetail() {
         </div>
 
         {/* Stats Bar */}
-        <div className="max-w-5xl mx-auto px-6 md:px-12 mb-12">
+        <div className="max-w-5xl mx-auto px-6 md:px-12 mb-8">
           <StatsBar usageCount={item.usage_count || 0} category={item.category} />
         </div>
 
         {/* Versions Section (bases with git repos only) */}
         {item.item_type === 'base' && item.git_repo_url && (
-          <div className="max-w-5xl mx-auto px-6 md:px-12 mb-12">
-            <h2
-              className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-            >
+          <div className="max-w-5xl mx-auto px-6 md:px-12 mb-8">
+            <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
               Versions
             </h2>
             {loadingVersions ? (
-              <div
-                className={`flex items-center gap-2 py-4 text-sm ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-              >
+              <div className="flex items-center gap-2 py-4 text-xs text-[var(--text-subtle)]">
                 <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                 Loading versions...
               </div>
@@ -755,27 +702,24 @@ export default function MarketplaceDetail() {
                 {versions.map((version, idx) => (
                   <div
                     key={version.tag}
-                    className={`
-                      flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors
-                      ${theme === 'light' ? 'bg-black/[0.03] hover:bg-black/[0.06]' : 'bg-white/[0.03] hover:bg-white/[0.06]'}
-                    `}
+                    className="flex items-center justify-between gap-4 px-4 py-3 bg-[var(--surface-hover)] hover:bg-[var(--surface)] rounded-[var(--radius-small)] transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <Tag size={16} weight="fill" className={theme === 'light' ? 'text-black/40' : 'text-white/40'} />
-                      <span className={`font-semibold text-sm ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+                      <Tag size={16} weight="fill" className="text-[var(--text-subtle)]" />
+                      <span className="font-semibold text-sm text-[var(--text)]">
                         {version.tag}
                       </span>
                       {idx === 0 && (
-                        <span className="px-2 py-0.5 bg-green-500/15 text-green-500 text-xs rounded-md font-medium">
+                        <span className="px-2 py-0.5 bg-[var(--status-success)]/15 text-[var(--status-success)] text-xs rounded-[var(--radius-small)] font-medium">
                           latest
                         </span>
                       )}
-                      <span className={`flex items-center gap-1 text-xs ${theme === 'light' ? 'text-black/40' : 'text-white/40'}`}>
+                      <span className="flex items-center gap-1 text-xs text-[var(--text-subtle)]">
                         <GitCommit size={12} />
                         {version.sha}
                       </span>
                       {version.date && (
-                        <span className={`text-xs ${theme === 'light' ? 'text-black/40' : 'text-white/40'}`}>
+                        <span className="text-xs text-[var(--text-subtle)]">
                           {formatRelativeDate(version.date)}
                         </span>
                       )}
@@ -787,13 +731,7 @@ export default function MarketplaceDetail() {
                             `/dashboard?create=true&base_id=${item.id}&base_version=${encodeURIComponent(version.tag)}&base_name=${encodeURIComponent(item.name)}`
                           );
                         }}
-                        className={`
-                          flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0
-                          ${theme === 'light'
-                            ? 'bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20'
-                            : 'bg-[var(--primary)]/15 text-[var(--primary)] hover:bg-[var(--primary)]/25'
-                          }
-                        `}
+                        className="btn btn-sm flex-shrink-0"
                       >
                         Use This Version
                         <ArrowRight size={12} weight="bold" />
@@ -803,18 +741,13 @@ export default function MarketplaceDetail() {
                 ))}
               </div>
             ) : (
-              <div
-                className={`
-                  flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors
-                  ${theme === 'light' ? 'bg-black/[0.03] hover:bg-black/[0.06]' : 'bg-white/[0.03] hover:bg-white/[0.06]'}
-                `}
-              >
+              <div className="flex items-center justify-between gap-4 px-4 py-3 bg-[var(--surface-hover)] hover:bg-[var(--surface)] rounded-[var(--radius-small)] transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
-                  <GitBranch size={16} weight="fill" className={theme === 'light' ? 'text-black/40' : 'text-white/40'} />
-                  <span className={`font-semibold text-sm ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+                  <GitBranch size={16} weight="fill" className="text-[var(--text-subtle)]" />
+                  <span className="font-semibold text-sm text-[var(--text)]">
                     {versionsDefaultBranch || 'main'}
                   </span>
-                  <span className="px-2 py-0.5 bg-blue-500/15 text-blue-400 text-xs rounded-md font-medium">
+                  <span className="px-2 py-0.5 bg-[var(--surface-hover)] text-[var(--text-muted)] text-xs rounded-[var(--radius-small)] font-medium">
                     default branch
                   </span>
                 </div>
@@ -825,13 +758,7 @@ export default function MarketplaceDetail() {
                         `/dashboard?create=true&base_id=${item.id}&base_name=${encodeURIComponent(item.name)}`
                       );
                     }}
-                    className={`
-                      flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0
-                      ${theme === 'light'
-                        ? 'bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20'
-                        : 'bg-[var(--primary)]/15 text-[var(--primary)] hover:bg-[var(--primary)]/25'
-                      }
-                    `}
+                    className="btn btn-sm flex-shrink-0"
                   >
                     Use This Version
                     <ArrowRight size={12} weight="bold" />
@@ -846,18 +773,12 @@ export default function MarketplaceDetail() {
         <div className="max-w-5xl mx-auto px-6 md:px-12 pb-16">
           {/* Long Description */}
           {item.long_description && (
-            <section className="mb-12">
-              <h2
-                className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-              >
+            <section className="mb-8">
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
                 About
               </h2>
-              <div
-                className={`prose max-w-none ${theme === 'light' ? 'prose-gray' : 'prose-invert'}`}
-              >
-                <p
-                  className={`text-base leading-relaxed ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
-                >
+              <div>
+                <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                   {item.long_description}
                 </p>
               </div>
@@ -866,19 +787,15 @@ export default function MarketplaceDetail() {
 
           {/* Features */}
           {item.features && item.features.length > 0 && (
-            <section className="mb-12">
-              <h2
-                className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-              >
+            <section className="mb-8">
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
                 Features
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {item.features.map((feature, idx) => (
                   <div key={idx} className="flex items-center gap-3">
-                    <Check size={18} className="text-green-500 flex-shrink-0" weight="bold" />
-                    <span
-                      className={`text-sm ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
-                    >
+                    <Check size={18} className="text-[var(--status-success)] flex-shrink-0" weight="bold" />
+                    <span className="text-xs text-[var(--text-muted)]">
                       {feature}
                     </span>
                   </div>
@@ -889,10 +806,8 @@ export default function MarketplaceDetail() {
 
           {/* Tools (for agents) */}
           {item.item_type === 'agent' && (
-            <section className="mb-12">
-              <h2
-                className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-              >
+            <section className="mb-8">
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
                 Available Tools
               </h2>
               <div className="flex flex-wrap gap-2">
@@ -903,14 +818,7 @@ export default function MarketplaceDetail() {
                     return (
                       <div
                         key={idx}
-                        className={`
-                      flex items-center gap-2 px-3 py-2 rounded-lg text-sm
-                      ${
-                        theme === 'light'
-                          ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                          : 'bg-[var(--primary)]/20 text-[var(--primary)]'
-                      }
-                    `}
+                        className="flex items-center gap-2 px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] text-[var(--text-muted)] rounded-[var(--radius-small)] text-[11px]"
                       >
                         {tool.icon}
                         <span className="font-medium">{tool.label}</span>
@@ -924,10 +832,8 @@ export default function MarketplaceDetail() {
 
           {/* Tags */}
           {item.tags && item.tags.length > 0 && (
-            <section className="mb-12">
-              <h2
-                className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-              >
+            <section className="mb-8">
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
                 Tags
               </h2>
               <div className="flex flex-wrap gap-2">
@@ -935,14 +841,7 @@ export default function MarketplaceDetail() {
                   <button
                     key={idx}
                     onClick={() => navigate(`/marketplace?search=${encodeURIComponent(tag)}`)}
-                    className={`
-                    px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer
-                    ${
-                      theme === 'light'
-                        ? 'bg-black/5 text-black/60 hover:bg-[var(--primary)]/10 hover:text-[var(--primary)]'
-                        : 'bg-white/5 text-white/60 hover:bg-[var(--primary)]/20 hover:text-[var(--primary)]'
-                    }
-                  `}
+                    className="btn btn-sm"
                   >
                     {tag}
                   </button>
@@ -953,24 +852,15 @@ export default function MarketplaceDetail() {
 
           {/* Reviews Section (Agents and Bases) */}
           {(item.item_type === 'agent' || item.item_type === 'base') && (
-            <section className="mb-12">
+            <section className="mb-8">
               <div className="flex items-center justify-between mb-6">
-                <h2
-                  className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                >
+                <h2 className="text-sm font-semibold text-[var(--text)]">
                   Reviews
                 </h2>
                 {item.is_purchased && !showReviewForm && (
                   <button
                     onClick={() => setShowReviewForm(true)}
-                    className={`
-                    flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
-                    ${
-                      theme === 'light'
-                        ? 'bg-black/5 hover:bg-black/10 text-black/70'
-                        : 'bg-white/5 hover:bg-white/10 text-white/70'
-                    }
-                  `}
+                    className="btn"
                   >
                     <ChatCircle size={16} weight="fill" />
                     {editingReview ? 'Edit Review' : 'Write a Review'}
@@ -980,42 +870,31 @@ export default function MarketplaceDetail() {
 
               {/* Review Form */}
               {showReviewForm && (
-                <div
-                  className={`
-                p-6 rounded-xl mb-6
-                ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-              `}
-                >
+                <div className="p-6 rounded-[var(--radius)] bg-[var(--surface)] mb-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h3
-                      className={`font-semibold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                    >
+                    <h3 className="font-semibold text-[var(--text)]">
                       {editingReview ? 'Edit Your Review' : 'Write a Review'}
                     </h3>
                     <button
                       onClick={() => setShowReviewForm(false)}
-                      className={`p-1 rounded-lg transition-colors ${theme === 'light' ? 'hover:bg-black/10' : 'hover:bg-white/10'}`}
+                      className="btn"
                     >
                       <X
                         size={18}
-                        className={theme === 'light' ? 'text-black/50' : 'text-white/50'}
+                        className="text-[var(--text-subtle)]"
                       />
                     </button>
                   </div>
 
                   <div className="mb-4">
-                    <label
-                      className={`block text-sm font-medium mb-2 ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
-                    >
+                    <label className="block text-xs font-medium mb-2 text-[var(--text-muted)]">
                       Rating
                     </label>
                     <RatingPicker value={reviewRating} onChange={setReviewRating} />
                   </div>
 
                   <div className="mb-4">
-                    <label
-                      className={`block text-sm font-medium mb-2 ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
-                    >
+                    <label className="block text-xs font-medium mb-2 text-[var(--text-muted)]">
                       Comment (optional)
                     </label>
                     <textarea
@@ -1029,15 +908,7 @@ export default function MarketplaceDetail() {
                       }}
                       placeholder="Share your experience with this extension... (Press Enter to submit, Shift+Enter for new line)"
                       rows={4}
-                      className={`
-                      w-full px-4 py-3 rounded-lg text-sm resize-none
-                      ${
-                        theme === 'light'
-                          ? 'bg-white border border-black/10 text-black placeholder:text-black/40'
-                          : 'bg-white/5 border border-white/10 text-white placeholder:text-white/40'
-                      }
-                      focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/50
-                    `}
+                      className="w-full px-4 py-3 rounded-[var(--radius-small)] text-sm bg-[var(--surface-hover)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/50 resize-none"
                     />
                   </div>
 
@@ -1045,7 +916,7 @@ export default function MarketplaceDetail() {
                     <button
                       onClick={handleSubmitReview}
                       disabled={submittingReview}
-                      className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                      className="btn btn-filled disabled:opacity-50"
                     >
                       {submittingReview ? (
                         <>
@@ -1062,14 +933,7 @@ export default function MarketplaceDetail() {
                     {editingReview && (
                       <button
                         onClick={handleDeleteReview}
-                        className={`
-                        flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
-                        ${
-                          theme === 'light'
-                            ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
-                            : 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
-                        }
-                      `}
+                        className="btn btn-danger"
                       >
                         <Trash size={16} weight="bold" />
                         Delete
@@ -1081,9 +945,7 @@ export default function MarketplaceDetail() {
 
               {/* Reviews List */}
               {loadingReviews ? (
-                <div
-                  className={`text-center py-8 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-                >
+                <div className="text-center py-8 text-[var(--text-subtle)]">
                   <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                   Loading reviews...
                 </div>
@@ -1099,18 +961,13 @@ export default function MarketplaceDetail() {
                   ))}
                 </div>
               ) : (
-                <div
-                  className={`
-                text-center py-12 rounded-xl
-                ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-              `}
-                >
+                <div className="text-center py-12 rounded-[var(--radius)] bg-[var(--surface)]">
                   <ChatCircle
                     size={40}
                     weight="duotone"
-                    className={`mx-auto mb-3 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+                    className="mx-auto mb-3 text-[var(--text-subtle)]"
                   />
-                  <p className={`text-sm ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}>
+                  <p className="text-xs text-[var(--text-subtle)]">
                     No reviews yet. {item.is_purchased && 'Be the first to review!'}
                   </p>
                 </div>
@@ -1121,9 +978,7 @@ export default function MarketplaceDetail() {
           {/* Related Items */}
           {relatedItems.length > 0 && (
             <section>
-              <h2
-                className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-              >
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-6">
                 People also like
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

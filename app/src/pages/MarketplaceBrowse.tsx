@@ -3,12 +3,10 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { debounce } from 'lodash';
 import { ArrowLeft, MagnifyingGlass, X, Package, Plus, CaretDown } from '@phosphor-icons/react';
 import { AgentCard, SkeletonCard, Pagination, type MarketplaceItem } from '../components/marketplace';
-import { UserDropdown } from '../components/ui';
 import { SubmitBaseModal } from '../components/modals';
 import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { isCanceledError } from '../lib/utils';
-import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateBreadcrumbStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
@@ -57,7 +55,6 @@ export default function MarketplaceBrowse() {
   const navigate = useNavigate();
   const { itemType: itemTypeParam } = useParams<{ itemType: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { theme } = useTheme();
   const { isAuthenticated } = useMarketplaceAuth();
 
   // Validate item type
@@ -435,168 +432,69 @@ export default function MarketplaceBrowse() {
         url={`${baseUrl}/marketplace/browse/${itemType}`}
         structuredData={breadcrumbData}
       />
-      <div className="h-screen overflow-y-auto bg-[var(--bg)]">
-        {/* Header */}
-        <div
-          className={`border-b ${theme === 'light' ? 'border-black/10 bg-white/80' : 'border-white/10 bg-[#0a0a0a]/80'} backdrop-blur-xl sticky top-0 z-40`}
-        >
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="py-4 sm:py-6">
-              <button
-                onClick={() => navigate('/marketplace')}
-                className={`
-                flex items-center gap-2 mb-3 text-sm transition-colors
-                ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}
-              `}
-              >
-                <ArrowLeft size={16} />
-                Back to Marketplace
-              </button>
-
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h1
-                    className={`font-heading text-xl sm:text-2xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                  >
-                    Browse {itemTypeLabels[itemType]}
-                  </h1>
-                  {totalCount !== null && (
-                    <p
-                      className={`text-sm mt-1 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-                    >
-                      {totalCount} {totalCount === 1 ? 'result' : 'results'}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3">
-                  {/* Submit Template Button - Only for bases tab when authenticated */}
-                  {itemType === 'base' && isAuthenticated && (
-                    <button
-                      onClick={() => setShowSubmitBaseModal(true)}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-[var(--primary)] text-white rounded-xl text-sm font-medium hover:opacity-90 transition-all whitespace-nowrap"
-                    >
-                      <Plus size={16} weight="bold" />
-                      Submit Template
-                    </button>
-                  )}
-
-                  {/* Search Bar - Mobile & Desktop */}
-                  <div
-                    className={`
-                    relative flex items-center gap-3 px-4 py-2.5 rounded-xl border w-full sm:w-80
-                    ${
-                      theme === 'light'
-                        ? 'bg-black/5 border-black/10'
-                        : 'bg-white/5 border-white/10'
-                    }
-                  `}
-                  >
-                    <MagnifyingGlass
-                      size={18}
-                      className={theme === 'light' ? 'text-black/40' : 'text-white/40'}
-                    />
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      placeholder="Search... (press /)"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className={`
-                    flex-1 bg-transparent outline-none focus-visible:outline-none text-sm
-                    ${theme === 'light' ? 'text-black placeholder-black/40' : 'text-white placeholder-white/40'}
-                  `}
-                    />
-                    {searchQuery && (
-                      <button
-                        onClick={() => setSearchQuery('')}
-                        className={`
-                      p-1 rounded-full transition-colors
-                      ${theme === 'light' ? 'hover:bg-black/10 text-black/40' : 'hover:bg-white/10 text-white/40'}
-                    `}
-                        aria-label="Clear search"
-                      >
-                        <X size={14} />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* User Dropdown - Only show when authenticated */}
-                  {isAuthenticated && <UserDropdown />}
-                </div>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        {/* Header — compact toolbar rows */}
+        <div className="flex-shrink-0 sticky top-0 z-40 bg-[var(--bg)]">
+          {/* Title Row */}
+          <div className="h-10 flex items-center gap-3" style={{ paddingLeft: '7px', paddingRight: '10px', borderBottom: 'var(--border-width) solid var(--border)' }}>
+            <button onClick={() => navigate('/marketplace')} className="btn btn-sm">
+              <ArrowLeft size={14} />
+              Marketplace
+            </button>
+            <span className="text-xs font-semibold text-[var(--text)]">Browse {itemTypeLabels[itemType]}</span>
+            {totalCount !== null && (
+              <span className="text-[10px] text-[var(--text-subtle)]">{totalCount}</span>
+            )}
+            <div className="flex-1" />
+            <div className="flex items-center gap-[2px]">
+              {itemType === 'base' && isAuthenticated && (
+                <button onClick={() => setShowSubmitBaseModal(true)} className="btn btn-filled">
+                  <Plus size={14} weight="bold" />
+                  <span className="hidden sm:inline">Submit Template</span>
+                </button>
+              )}
+              <div className="relative hidden sm:flex items-center">
+                <MagnifyingGlass size={14} className="absolute left-3 text-[var(--text-subtle)]" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  placeholder="Search..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-48 h-[29px] pl-8 pr-8 bg-[var(--surface)] border border-[var(--border)] rounded-full text-xs text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)] transition-colors"
+                />
+                {searchQuery ? (
+                  <button onClick={() => setSearchQuery('')} className="absolute right-2.5 text-[var(--text-subtle)] hover:text-[var(--text)]" aria-label="Clear search">
+                    <X size={12} />
+                  </button>
+                ) : (
+                  <kbd className="absolute right-3 text-[10px] font-mono text-[var(--text-subtle)]">/</kbd>
+                )}
               </div>
             </div>
+          </div>
+
+          {/* Tab Row — scrollable category pills (visible on all sizes) */}
+          <div className="h-10 flex items-center overflow-x-auto scrollbar-none" style={{ paddingLeft: '7px', paddingRight: '10px', borderBottom: 'var(--border-width) solid var(--border)', maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)', WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)' }}>
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`btn shrink-0 mr-1 ${selectedCategory === cat.id ? 'btn-tab-active' : 'btn-tab'}`}
+              >
+                {cat.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Main Content with Sidebar */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex flex-col lg:flex-row gap-6">
-            {/* Sidebar Filters - Hidden on mobile, shown as horizontal on tablet, sidebar on desktop */}
-            <aside
-              className={`
-              lg:w-56 flex-shrink-0
-              ${theme === 'light' ? 'lg:border-r lg:border-black/10' : 'lg:border-r lg:border-white/10'}
-              lg:pr-6
-            `}
-            >
-              {/* Mobile/Tablet: Styled pill-button dropdowns */}
-              <div className="flex flex-wrap gap-2 lg:hidden mb-4">
-                {/* Category Dropdown */}
-                <div className="relative">
-                  <button
-                    onClick={() => {
-                      setShowMobileCategoryDropdown(!showMobileCategoryDropdown);
-                      setShowMobilePriceDropdown(false);
-                      setShowMobileSortDropdown(false);
-                    }}
-                    className={`
-                      flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors
-                      ${selectedCategory !== 'all'
-                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/30 text-[var(--primary)]'
-                        : theme === 'light'
-                          ? 'bg-white border-black/10 text-black/70 hover:border-black/20'
-                          : 'bg-white/5 border-white/10 text-white/70 hover:border-white/20'
-                      }
-                    `}
-                  >
-                    {categories.find((c) => c.id === selectedCategory)?.label || 'Category'}
-                    <CaretDown size={12} />
-                  </button>
-                  {showMobileCategoryDropdown && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowMobileCategoryDropdown(false)} />
-                      <div
-                        className={`
-                          absolute left-0 top-full mt-1 py-1 rounded-xl border shadow-xl z-50 min-w-[180px] max-h-64 overflow-y-auto
-                          ${theme === 'light' ? 'bg-white border-black/10' : 'bg-[#1a1a1c] border-white/10'}
-                        `}
-                      >
-                        {categories.map((cat) => (
-                          <button
-                            key={cat.id}
-                            onClick={() => {
-                              setSelectedCategory(cat.id);
-                              setShowMobileCategoryDropdown(false);
-                            }}
-                            className={`
-                              w-full px-3 py-2 text-left text-sm transition-colors
-                              ${selectedCategory === cat.id
-                                ? 'text-[var(--primary)] font-medium'
-                                : theme === 'light'
-                                  ? 'text-black/70 hover:bg-black/5'
-                                  : 'text-white/70 hover:bg-white/5'
-                              }
-                            `}
-                          >
-                            {cat.label}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-
+            {/* Sidebar Filters — price/sort pills on mobile, vertical on desktop */}
+            <aside className="lg:w-48 flex-shrink-0 lg:border-r lg:border-[var(--border)] lg:pr-5">
+              {/* Mobile/Tablet: Price + Sort pill row */}
+              <div className="flex gap-1.5 lg:hidden mb-4 overflow-x-auto scrollbar-none pb-1">
                 {/* Price Dropdown */}
                 <div className="relative">
                   <button
@@ -605,28 +503,15 @@ export default function MarketplaceBrowse() {
                       setShowMobileCategoryDropdown(false);
                       setShowMobileSortDropdown(false);
                     }}
-                    className={`
-                      flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors
-                      ${pricingFilter !== 'all'
-                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/30 text-[var(--primary)]'
-                        : theme === 'light'
-                          ? 'bg-white border-black/10 text-black/70 hover:border-black/20'
-                          : 'bg-white/5 border-white/10 text-white/70 hover:border-white/20'
-                      }
-                    `}
+                    className={`btn ${pricingFilter !== 'all' ? 'btn-active' : ''}`}
                   >
                     {pricingOptions.find((o) => o.id === pricingFilter)?.label || 'Price'}
-                    <CaretDown size={12} />
+                    <CaretDown size={10} />
                   </button>
                   {showMobilePriceDropdown && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setShowMobilePriceDropdown(false)} />
-                      <div
-                        className={`
-                          absolute left-0 top-full mt-1 py-1 rounded-xl border shadow-xl z-50 min-w-[140px]
-                          ${theme === 'light' ? 'bg-white border-black/10' : 'bg-[#1a1a1c] border-white/10'}
-                        `}
-                      >
+                      <div className="absolute left-0 top-full mt-1 py-1 rounded-[var(--radius-medium)] border border-[var(--border-hover)] shadow-xl z-50 min-w-[140px] bg-[var(--surface)]">
                         {pricingOptions.map((opt) => (
                           <button
                             key={opt.id}
@@ -635,12 +520,10 @@ export default function MarketplaceBrowse() {
                               setShowMobilePriceDropdown(false);
                             }}
                             className={`
-                              w-full px-3 py-2 text-left text-sm transition-colors
+                              w-full px-3 py-1.5 text-left text-xs transition-colors
                               ${pricingFilter === opt.id
-                                ? 'text-[var(--primary)] font-medium'
-                                : theme === 'light'
-                                  ? 'text-black/70 hover:bg-black/5'
-                                  : 'text-white/70 hover:bg-white/5'
+                                ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
+                                : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                               }
                             `}
                           >
@@ -660,26 +543,15 @@ export default function MarketplaceBrowse() {
                       setShowMobileCategoryDropdown(false);
                       setShowMobilePriceDropdown(false);
                     }}
-                    className={`
-                      flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors
-                      ${theme === 'light'
-                        ? 'bg-white border-black/10 text-black/70 hover:border-black/20'
-                        : 'bg-white/5 border-white/10 text-white/70 hover:border-white/20'
-                      }
-                    `}
+                    className="btn"
                   >
                     {sortOptions.find((o) => o.id === sortBy)?.label || 'Sort'}
-                    <CaretDown size={12} />
+                    <CaretDown size={10} />
                   </button>
                   {showMobileSortDropdown && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setShowMobileSortDropdown(false)} />
-                      <div
-                        className={`
-                          absolute left-0 top-full mt-1 py-1 rounded-xl border shadow-xl z-50 min-w-[180px]
-                          ${theme === 'light' ? 'bg-white border-black/10' : 'bg-[#1a1a1c] border-white/10'}
-                        `}
-                      >
+                      <div className="absolute left-0 top-full mt-1 py-1 rounded-[var(--radius-medium)] border border-[var(--border-hover)] shadow-xl z-50 min-w-[180px] bg-[var(--surface)]">
                         {sortOptions.map((opt) => (
                           <button
                             key={opt.id}
@@ -688,12 +560,10 @@ export default function MarketplaceBrowse() {
                               setShowMobileSortDropdown(false);
                             }}
                             className={`
-                              w-full px-3 py-2 text-left text-sm transition-colors
+                              w-full px-3 py-1.5 text-left text-xs transition-colors
                               ${sortBy === opt.id
-                                ? 'text-[var(--primary)] font-medium'
-                                : theme === 'light'
-                                  ? 'text-black/70 hover:bg-black/5'
-                                  : 'text-white/70 hover:bg-white/5'
+                                ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
+                                : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                               }
                             `}
                           >
@@ -706,44 +576,11 @@ export default function MarketplaceBrowse() {
                 </div>
               </div>
 
-              {/* Desktop: Sidebar filters */}
+              {/* Desktop: Sidebar filters (price + sort only, categories in tab row) */}
               <div className="hidden lg:block space-y-6">
-                {/* Categories */}
-                <div>
-                  <h3
-                    className={`text-xs font-semibold uppercase tracking-wider mb-3 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-                  >
-                    Category
-                  </h3>
-                  <div className="space-y-1">
-                    {categories.map((cat) => (
-                      <button
-                        key={cat.id}
-                        onClick={() => setSelectedCategory(cat.id)}
-                        className={`
-                        w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
-                        ${
-                          selectedCategory === cat.id
-                            ? theme === 'light'
-                              ? 'bg-black/10 text-black font-medium'
-                              : 'bg-white/10 text-white font-medium'
-                            : theme === 'light'
-                              ? 'text-black/70 hover:bg-black/5 hover:text-black'
-                              : 'text-white/70 hover:bg-white/5 hover:text-white'
-                        }
-                      `}
-                      >
-                        {cat.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 {/* Price Filter */}
                 <div>
-                  <h3
-                    className={`text-xs font-semibold uppercase tracking-wider mb-3 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-                  >
+                  <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-[var(--text-subtle)]">
                     Price
                   </h3>
                   <div className="space-y-1">
@@ -752,15 +589,11 @@ export default function MarketplaceBrowse() {
                         key={opt.id}
                         onClick={() => setPricingFilter(opt.id)}
                         className={`
-                        w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
+                        w-full text-left px-2.5 py-1.5 rounded-[var(--radius-small)] text-xs transition-colors
                         ${
                           pricingFilter === opt.id
-                            ? theme === 'light'
-                              ? 'bg-black/10 text-black font-medium'
-                              : 'bg-white/10 text-white font-medium'
-                            : theme === 'light'
-                              ? 'text-black/70 hover:bg-black/5 hover:text-black'
-                              : 'text-white/70 hover:bg-white/5 hover:text-white'
+                            ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
+                            : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                         }
                       `}
                       >
@@ -772,9 +605,7 @@ export default function MarketplaceBrowse() {
 
                 {/* Sort */}
                 <div>
-                  <h3
-                    className={`text-xs font-semibold uppercase tracking-wider mb-3 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-                  >
+                  <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-[var(--text-subtle)]">
                     Sort By
                   </h3>
                   <div className="space-y-1">
@@ -783,15 +614,11 @@ export default function MarketplaceBrowse() {
                         key={opt.id}
                         onClick={() => setSortBy(opt.id)}
                         className={`
-                        w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
+                        w-full text-left px-2.5 py-1.5 rounded-[var(--radius-small)] text-xs transition-colors
                         ${
                           sortBy === opt.id
-                            ? theme === 'light'
-                              ? 'bg-black/10 text-black font-medium'
-                              : 'bg-white/10 text-white font-medium'
-                            : theme === 'light'
-                              ? 'text-black/70 hover:bg-black/5 hover:text-black'
-                              : 'text-white/70 hover:bg-white/5 hover:text-white'
+                            ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
+                            : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                         }
                       `}
                       >
@@ -809,14 +636,7 @@ export default function MarketplaceBrowse() {
                       setPricingFilter('all');
                       setSearchQuery('');
                     }}
-                    className={`
-                    w-full px-3 py-2 text-sm rounded-lg border transition-colors
-                    ${
-                      theme === 'light'
-                        ? 'border-black/10 text-black/60 hover:bg-black/5'
-                        : 'border-white/10 text-white/60 hover:bg-white/5'
-                    }
-                  `}
+                    className="btn btn-danger w-full"
                   >
                     Clear All Filters
                   </button>
@@ -852,17 +672,12 @@ export default function MarketplaceBrowse() {
                   />
                 </>
               ) : (
-                <div
-                  className={`
-                  text-center py-16 rounded-2xl
-                  ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-                `}
-                >
+                <div className="text-center py-16 rounded-[var(--radius)] bg-[var(--surface)]">
                   <Package
                     size={48}
-                    className={`mx-auto mb-4 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+                    className="mx-auto mb-4 text-[var(--text-subtle)]"
                   />
-                  <p className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>
+                  <p className="text-[var(--text-subtle)]">
                     {searchQuery
                       ? `No ${itemType}s found matching "${searchQuery}"`
                       : `No ${itemType}s available${selectedCategory !== 'all' ? ` in ${selectedCategory}` : ''}`}
@@ -874,7 +689,7 @@ export default function MarketplaceBrowse() {
                         setPricingFilter('all');
                         setSearchQuery('');
                       }}
-                      className="mt-4 px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)] transition-colors"
+                      className="btn btn-filled mt-4"
                     >
                       Clear Filters
                     </button>

@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 import {
   ReactFlow,
   Background,
@@ -14,6 +14,7 @@ import {
   type OnConnect,
   type OnBeforeDelete,
   type ReactFlowInstance,
+  type ColorMode,
 } from '@xyflow/react';
 import { Hand } from '@phosphor-icons/react';
 
@@ -70,7 +71,7 @@ const GraphCanvasComponent = ({
   edgeTypes,
   theme,
 }: GraphCanvasProps) => {
-  const bgColor = useMemo(() => (theme === 'dark' ? '#2a2a2a' : '#e5e7eb'), [theme]);
+  const colorMode: ColorMode = theme;
 
   return (
     <ReactFlow
@@ -92,6 +93,7 @@ const GraphCanvasComponent = ({
       onPaneClick={onPaneClick}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
+      colorMode={colorMode}
       defaultViewport={DEFAULT_VIEWPORT}
       fitView
       fitViewOptions={FIT_VIEW_OPTIONS}
@@ -122,10 +124,10 @@ const GraphCanvasComponent = ({
       snapToGrid={false}
       // Disable selection box
       selectionOnDrag={false}
-      className="bg-[#0a0a0a] touch-none"
+      className="touch-none"
     >
-      <Background variant={BackgroundVariant.Dots} gap={20} size={0.8} color={bgColor} />
-      <Controls className="!bg-[var(--surface)] !border-[var(--sidebar-border)] !shadow-lg [&>button]:!bg-[var(--surface)] [&>button]:!border-[var(--sidebar-border)] [&>button]:!fill-[var(--text)] [&>button:hover]:!bg-[var(--sidebar-hover)]" />
+      <Background variant={BackgroundVariant.Dots} gap={20} size={0.8} />
+      <Controls />
 
       {/* Desktop hint */}
       <Panel

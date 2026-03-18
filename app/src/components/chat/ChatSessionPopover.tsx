@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { MagnifyingGlass, Plus, ChatCircleDots, PencilSimple, Trash } from '@phosphor-icons/react';
+import { MagnifyingGlass, Plus, ChatCircleDots, PencilSimple, Trash, X } from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 interface ChatSession {
@@ -41,9 +41,9 @@ function formatRelativeTime(dateString: string): string {
 }
 
 const originBadgeStyles: Record<string, string> = {
-  api: 'bg-purple-500/20 text-purple-300',
-  slack: 'bg-green-500/20 text-green-300',
-  cli: 'bg-orange-500/20 text-orange-300',
+  api: 'bg-[var(--surface-hover)] text-[var(--text-muted)]',
+  slack: 'bg-[var(--surface-hover)] text-[var(--text-muted)]',
+  cli: 'bg-[var(--surface-hover)] text-[var(--text-muted)]',
 };
 
 export function ChatSessionPopover({
@@ -142,49 +142,58 @@ export function ChatSessionPopover({
       {isOpen && (
         <motion.div
           ref={popoverRef}
-          initial={{ opacity: 0, y: -8, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -8, scale: 0.97 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-          className="absolute z-50 mt-2 w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl bg-[var(--surface)]/95 backdrop-blur-xl shadow-2xl shadow-black/40 ring-1 ring-white/10"
-          style={{ top: '100%', right: 0 }}
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
+          className="absolute z-50 mt-1 w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[var(--radius-medium)] bg-[var(--surface)] border flex flex-col"
+          style={{ top: '100%', right: 0, borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)', maxHeight: '420px' }}
         >
           {/* Search bar */}
           {showSearch && (
-            <div className="px-3 pt-3 pb-1">
-              <div className="flex items-center gap-2 rounded-lg bg-white/[0.06] px-2.5 py-2">
-                <MagnifyingGlass size={16} className="shrink-0 text-white/40" />
+            <div className="px-3 pt-3 pb-1 flex-shrink-0">
+              <div className="relative">
+                <MagnifyingGlass size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
                 <input
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search chats..."
-                  className="w-full bg-transparent text-sm text-white/90 placeholder-white/30 outline-none"
+                  className="w-full pl-8 pr-8 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)] transition-colors"
                 />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
             </div>
           )}
 
           {/* Session list */}
-          <div className="max-h-[320px] overflow-y-auto py-1.5">
+          <div className="flex-1 overflow-y-auto py-1">
             {filteredSessions.length === 0 && sessions.length === 0 ? (
               /* Empty state */
-              <div className="flex flex-col items-center gap-3 px-4 py-8">
-                <ChatCircleDots size={40} className="text-white/20" />
-                <p className="text-sm text-white/40">Start your first conversation</p>
+              <div className="flex flex-col items-center gap-2 px-4 py-8">
+                <ChatCircleDots size={28} className="text-[var(--text-subtle)]" />
+                <p className="text-xs text-[var(--text-muted)]">Start your first conversation</p>
                 <button
                   onClick={() => {
                     onNewSession();
                     onClose();
                   }}
-                  className="mt-1 flex items-center gap-2 rounded-lg bg-[var(--primary)]/20 px-4 py-2 text-sm font-medium text-[var(--primary)] transition-colors hover:bg-[var(--primary)]/30"
+                  className="btn btn-filled mt-1"
                 >
-                  <Plus size={16} weight="bold" />
+                  <Plus size={14} weight="bold" />
                   New Chat
                 </button>
               </div>
             ) : filteredSessions.length === 0 ? (
-              <div className="px-4 py-6 text-center text-sm text-white/30">
+              <div className="px-4 py-6 text-center text-xs text-[var(--text-subtle)]">
                 No chats matching "{search}"
               </div>
             ) : (
@@ -201,18 +210,18 @@ export function ChatSessionPopover({
                         onClose();
                       }
                     }}
-                    className={`group relative flex cursor-pointer items-start gap-2.5 px-3 py-2.5 transition-all duration-150 ${
+                    className={`group relative flex cursor-pointer items-start gap-2 px-3 py-2 mx-1 rounded-[var(--radius-small)] transition-colors ${
                       isSelected
-                        ? 'border-l-[3px] border-l-[var(--primary)] bg-[var(--primary)]/[0.06]'
-                        : 'border-l-[3px] border-l-transparent hover:bg-white/[0.06]'
+                        ? 'bg-[var(--surface-hover)]'
+                        : 'hover:bg-[var(--surface-hover)]'
                     }`}
                   >
                     {/* Status dot */}
                     {session.status === 'running' && (
-                      <div className="mt-1.5 w-2 h-2 shrink-0 rounded-full bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.6)]" />
+                      <span className="mt-1.5 w-1.5 h-1.5 shrink-0 rounded-full bg-[var(--status-success)] animate-pulse" />
                     )}
                     {session.status === 'waiting_approval' && (
-                      <div className="mt-1.5 w-2 h-2 shrink-0 rounded-full bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.5)]" />
+                      <span className="mt-1.5 w-1.5 h-1.5 shrink-0 rounded-full bg-[var(--status-warning)]" />
                     )}
 
                     {/* Content */}
@@ -227,10 +236,10 @@ export function ChatSessionPopover({
                             onKeyDown={handleRenameKeyDown}
                             onBlur={commitRename}
                             onClick={(e) => e.stopPropagation()}
-                            className="w-full border-b-2 border-[var(--primary)] bg-transparent text-sm text-white/90 outline-none"
+                            className="w-full bg-transparent border-b border-[var(--primary)] text-xs text-[var(--text)] outline-none"
                           />
                         ) : (
-                          <span className="truncate text-sm font-medium text-white/90">
+                          <span className={`truncate text-xs font-medium ${isSelected ? 'text-[var(--text)]' : 'text-[var(--text-muted)]'}`}>
                             {session.title || 'Untitled'}
                           </span>
                         )}
@@ -238,30 +247,30 @@ export function ChatSessionPopover({
                         {/* Origin badge */}
                         {session.origin !== 'browser' && originBadgeStyles[session.origin] && (
                           <span
-                            className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${originBadgeStyles[session.origin]}`}
+                            className={`shrink-0 text-[9px] px-1.5 py-px rounded-full font-medium ${originBadgeStyles[session.origin]}`}
                           >
                             {session.origin}
                           </span>
                         )}
                       </div>
 
-                      <div className="mt-0.5 flex items-center gap-2 text-[11px] text-white/30">
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[var(--text-subtle)]">
                         <span>
-                          {session.message_count} message{session.message_count !== 1 ? 's' : ''}
+                          {session.message_count} msg{session.message_count !== 1 ? 's' : ''}
                         </span>
-                        <span>·</span>
+                        <span className="opacity-40">·</span>
                         <span>{formatRelativeTime(session.updated_at || session.created_at)}</span>
                       </div>
                     </div>
 
                     {/* Actions: rename + delete */}
                     {!isRenaming && (
-                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
                         <button
                           onClick={(e) => startRename(e, session)}
-                          className="mt-0.5 rounded p-1 hover:bg-white/10"
+                          className="btn btn-icon btn-sm"
                         >
-                          <PencilSimple size={14} className="text-white/50" />
+                          <PencilSimple size={12} />
                         </button>
                         {onDeleteSession && (sessionCount ?? sessions.length) > 1 && (
                           <button
@@ -269,9 +278,9 @@ export function ChatSessionPopover({
                               e.stopPropagation();
                               onDeleteSession(session.id);
                             }}
-                            className="mt-0.5 rounded p-1 hover:bg-red-500/20"
+                            className="btn btn-icon btn-sm btn-danger"
                           >
-                            <Trash size={14} className="text-white/30 hover:text-red-400" />
+                            <Trash size={12} />
                           </button>
                         )}
                       </div>
@@ -284,15 +293,15 @@ export function ChatSessionPopover({
 
           {/* New Chat button */}
           {(sessions.length > 0 || filteredSessions.length > 0) && (
-            <div className="border-t border-white/[0.06] p-2">
+            <div className="border-t border-[var(--border)] p-1.5 flex-shrink-0">
               <button
                 onClick={() => {
                   onNewSession();
                   onClose();
                 }}
-                className="flex w-full items-center gap-2.5 rounded-xl bg-gradient-to-r from-[var(--primary)]/10 to-transparent px-3 py-2.5 text-sm font-medium text-white/70 transition-all duration-150 hover:-translate-y-[1px] hover:text-white/90"
+                className="btn w-full"
               >
-                <Plus size={18} weight="bold" className="text-[var(--primary)]" />
+                <Plus size={14} weight="bold" className="text-[var(--primary)]" />
                 New Chat
               </button>
             </div>

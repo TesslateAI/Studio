@@ -25,10 +25,10 @@ interface DeploymentsDropdownProps {
 }
 
 // Provider display info
-const PROVIDER_INFO: Record<string, { name: string; icon: string; color: string; bgColor: string }> = {
-  vercel: { name: 'Vercel', icon: '▲', color: 'text-black', bgColor: 'bg-white' },
-  netlify: { name: 'Netlify', icon: '◆', color: 'text-white', bgColor: 'bg-[#00C7B7]' },
-  cloudflare: { name: 'Cloudflare', icon: '🔥', color: 'text-white', bgColor: 'bg-[#F38020]' },
+const PROVIDER_INFO: Record<string, { name: string; icon: string }> = {
+  vercel: { name: 'Vercel', icon: '▲' },
+  netlify: { name: 'Netlify', icon: '◆' },
+  cloudflare: { name: 'Cloudflare', icon: '🔥' },
 };
 
 interface Deployment {
@@ -121,45 +121,32 @@ export function DeploymentsDropdown({
   const getStatusIcon = (status: Deployment['status']) => {
     switch (status) {
       case 'success':
-        return <CheckCircle size={16} className="text-green-400" weight="fill" />;
+        return <CheckCircle size={13} className="text-[var(--status-success)]" weight="fill" />;
       case 'failed':
-        return <XCircle size={16} className="text-red-400" weight="fill" />;
+        return <XCircle size={13} className="text-[var(--status-error)]" weight="fill" />;
       case 'building':
       case 'deploying':
-        return <Spinner size={16} className="text-blue-400 animate-spin" />;
+        return <Spinner size={13} className="text-[var(--primary)] animate-spin" />;
       case 'pending':
-        return <Clock size={16} className="text-yellow-400" />;
+        return <Clock size={13} className="text-[var(--status-warning)]" />;
       default:
-        return <Clock size={16} className="text-gray-400" />;
+        return <Clock size={13} className="text-[var(--text-subtle)]" />;
     }
   };
 
   const getStatusColor = (status: Deployment['status']) => {
     switch (status) {
       case 'success':
-        return 'text-green-400';
+        return 'text-[var(--status-success)]';
       case 'failed':
-        return 'text-red-400';
+        return 'text-[var(--status-error)]';
       case 'building':
       case 'deploying':
-        return 'text-blue-400';
+        return 'text-[var(--primary)]';
       case 'pending':
-        return 'text-yellow-400';
+        return 'text-[var(--status-warning)]';
       default:
-        return 'text-gray-400';
-    }
-  };
-
-  const getProviderColor = (provider: string) => {
-    switch (provider.toLowerCase()) {
-      case 'cloudflare':
-        return 'text-orange-400';
-      case 'vercel':
-        return 'text-white';
-      case 'netlify':
-        return 'text-teal-400';
-      default:
-        return 'text-purple-400';
+        return 'text-[var(--text-subtle)]';
     }
   };
 
@@ -183,166 +170,158 @@ export function DeploymentsDropdown({
   return (
     <div
       ref={dropdownRef}
-      className="absolute top-full right-0 mt-2 w-[480px] max-h-[600px] bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-2xl shadow-2xl overflow-hidden flex flex-col z-50"
+      className="absolute top-full right-0 mt-1 w-[400px] max-h-[480px] bg-[var(--surface)] border rounded-[var(--radius-medium)] overflow-hidden flex flex-col z-50"
+      style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
     >
-        {/* Header */}
-        <div className="p-4 border-b border-[var(--sidebar-border)] bg-[var(--bg)]/30">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Rocket size={20} className="text-[var(--primary)]" weight="bold" />
-              <h3 className="text-base font-semibold text-[var(--text)]">Deployments</h3>
-            </div>
-            <button
-              onClick={onClose}
-              className="p-1.5 hover:bg-[var(--sidebar-hover)] rounded-lg transition-colors"
-            >
-              <X size={18} className="text-[var(--text)]/60" />
-            </button>
+      {/* Header */}
+      <div className="px-3 pt-3 pb-2 flex-shrink-0">
+        <div className="flex items-center justify-between mb-2.5">
+          <div className="flex items-center gap-2">
+            <Rocket size={15} className="text-[var(--primary)]" weight="bold" />
+            <span className="text-xs font-semibold text-[var(--text)]">Deployments</span>
           </div>
-
-          {/* Show assigned deployment target if present */}
-          {assignedDeploymentTarget && PROVIDER_INFO[assignedDeploymentTarget] && (
-            <div className="mb-3 p-3 rounded-lg border border-[var(--primary)]/30 bg-[var(--primary)]/5">
-              <div className="flex items-center gap-2 mb-2">
-                <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${PROVIDER_INFO[assignedDeploymentTarget].bgColor} ${PROVIDER_INFO[assignedDeploymentTarget].color}`}>
-                  {PROVIDER_INFO[assignedDeploymentTarget].icon}
-                </div>
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-[var(--text)]">
-                    Assigned Target: {PROVIDER_INFO[assignedDeploymentTarget].name}
-                  </p>
-                  {containerName && (
-                    <p className="text-[10px] text-[var(--text)]/60">
-                      For container: {containerName}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <p className="text-[10px] text-[var(--text)]/60">
-                This container will deploy to {PROVIDER_INFO[assignedDeploymentTarget].name} when using "Deploy All" in the Architecture view.
-              </p>
-            </div>
-          )}
-
-          <button
-            onClick={() => {
-              if (!hasActiveDeployment) {
-                onClose();
-                onOpenDeployModal();
-              }
-            }}
-            disabled={hasActiveDeployment}
-            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm ${
-              hasActiveDeployment
-                ? 'bg-gray-600 cursor-not-allowed text-gray-400'
-                : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white'
-            }`}
-            title={hasActiveDeployment ? 'A deployment is already in progress' : undefined}
-          >
-            {hasActiveDeployment ? (
-              <>
-                <Spinner size={16} className="animate-spin" />
-                Deployment in Progress
-              </>
-            ) : (
-              <>
-                <Plus size={16} weight="bold" />
-                New Deployment
-              </>
-            )}
+          <button onClick={onClose} className="btn btn-icon btn-sm">
+            <X size={13} />
           </button>
         </div>
 
-        {/* Deployments List */}
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Spinner size={24} className="animate-spin text-[var(--primary)]" />
-            </div>
-          ) : deployments.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
-              <div className="p-3 bg-[var(--primary)]/10 rounded-full mb-3">
-                <CloudArrowUp size={32} className="text-[var(--primary)]" />
+        {/* Assigned deployment target */}
+        {assignedDeploymentTarget && PROVIDER_INFO[assignedDeploymentTarget] && (
+          <div className="mb-2.5 px-3 py-2 rounded-[var(--radius-small)] bg-[var(--surface-hover)] border border-[var(--border)]">
+            <div className="flex items-center gap-2">
+              <span className="text-xs">{PROVIDER_INFO[assignedDeploymentTarget].icon}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-medium text-[var(--text)]">
+                  Target: {PROVIDER_INFO[assignedDeploymentTarget].name}
+                </p>
+                {containerName && (
+                  <p className="text-[10px] text-[var(--text-subtle)]">
+                    {containerName}
+                  </p>
+                )}
               </div>
-              <h4 className="text-sm font-semibold text-[var(--text)] mb-1">
-                No deployments yet
-              </h4>
-              <p className="text-xs text-[var(--text)]/60">
-                Deploy your project to make it live on the web
-              </p>
             </div>
+          </div>
+        )}
+
+        {/* New deployment button */}
+        <button
+          onClick={() => {
+            if (!hasActiveDeployment) {
+              onClose();
+              onOpenDeployModal();
+            }
+          }}
+          disabled={hasActiveDeployment}
+          className={`w-full ${hasActiveDeployment ? 'btn opacity-50 cursor-not-allowed' : 'btn btn-filled'}`}
+        >
+          {hasActiveDeployment ? (
+            <>
+              <Spinner size={14} className="animate-spin" />
+              <span>Deployment in Progress</span>
+            </>
           ) : (
-            <div className="p-3 space-y-2">
-              {deployments.map((deployment) => (
-                <div
-                  key={deployment.id}
-                  className="bg-[var(--bg)]/50 border border-[var(--sidebar-border)] rounded-lg p-3 hover:border-[var(--text)]/20 transition-all"
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <span className={`text-xs font-semibold ${getProviderColor(deployment.provider)}`}>
-                        {deployment.provider.charAt(0).toUpperCase() + deployment.provider.slice(1)}
-                      </span>
-                      <div className={`flex items-center gap-1.5 ${getStatusColor(deployment.status)}`}>
-                        {getStatusIcon(deployment.status)}
-                        <span className="text-xs font-medium">
-                          {deployment.status.charAt(0).toUpperCase() + deployment.status.slice(1)}
-                        </span>
-                      </div>
-                    </div>
-                    <span className="text-xs text-[var(--text)]/50">
-                      {formatDate(deployment.created_at)}
+            <>
+              <Plus size={14} weight="bold" />
+              <span>New Deployment</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="h-px bg-[var(--border)] flex-shrink-0" />
+
+      {/* Deployments List */}
+      <div className="flex-1 overflow-y-auto">
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <Spinner size={18} className="animate-spin text-[var(--text-subtle)]" />
+          </div>
+        ) : deployments.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 px-6 text-center">
+            <CloudArrowUp size={24} className="text-[var(--text-subtle)] mb-2" />
+            <p className="text-xs font-medium text-[var(--text-muted)] mb-0.5">
+              No deployments yet
+            </p>
+            <p className="text-[10px] text-[var(--text-subtle)]">
+              Deploy your project to make it live
+            </p>
+          </div>
+        ) : (
+          <div className="p-1.5 space-y-0.5">
+            {deployments.map((deployment) => (
+              <div
+                key={deployment.id}
+                className="rounded-[var(--radius-small)] px-3 py-2.5 hover:bg-[var(--surface-hover)] transition-colors group"
+              >
+                {/* Top row: provider + status + time */}
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[11px] font-semibold text-[var(--text)]">
+                    {deployment.provider.charAt(0).toUpperCase() + deployment.provider.slice(1)}
+                  </span>
+                  <div className={`flex items-center gap-1 ${getStatusColor(deployment.status)}`}>
+                    {getStatusIcon(deployment.status)}
+                    <span className="text-[10px] font-medium">
+                      {deployment.status.charAt(0).toUpperCase() + deployment.status.slice(1)}
                     </span>
                   </div>
-
-                  {deployment.deployment_url && (
-                    <a
-                      href={deployment.deployment_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors mb-2 truncate"
-                    >
-                      <span className="truncate">{deployment.deployment_url}</span>
-                      <ArrowSquareOut size={12} className="flex-shrink-0" />
-                    </a>
-                  )}
-
-                  {deployment.error && (
-                    <p className="text-xs text-red-400 mb-2 line-clamp-1">
-                      Error: {deployment.error}
-                    </p>
-                  )}
-
-                  <div className="flex items-center gap-2 pt-2 border-t border-[var(--sidebar-border)]">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        window.open(deployment.deployment_url || '#', '_blank');
-                      }}
-                      disabled={!deployment.deployment_url}
-                      className="flex items-center gap-1 text-xs text-[var(--text)]/60 hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <ArrowSquareOut size={12} />
-                      Open
-                    </button>
-                    <button
-                      onClick={(e) => handleDelete(deployment.id, e)}
-                      disabled={deletingId === deployment.id}
-                      className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-auto"
-                    >
-                      {deletingId === deployment.id ? (
-                        <Spinner size={12} className="animate-spin" />
-                      ) : (
-                        <Trash size={12} />
-                      )}
-                      Delete
-                    </button>
-                  </div>
+                  <span className="text-[10px] text-[var(--text-subtle)] ml-auto">
+                    {formatDate(deployment.created_at)}
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
+
+                {/* URL */}
+                {deployment.deployment_url && (
+                  <a
+                    href={deployment.deployment_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1 text-[10px] text-[var(--primary)] hover:underline transition-colors mb-1 truncate"
+                  >
+                    <span className="truncate">{deployment.deployment_url}</span>
+                    <ArrowSquareOut size={10} className="flex-shrink-0" />
+                  </a>
+                )}
+
+                {/* Error */}
+                {deployment.error && (
+                  <p className="text-[10px] text-[var(--status-error)] mb-1 line-clamp-1">
+                    {deployment.error}
+                  </p>
+                )}
+
+                {/* Actions — visible on hover */}
+                <div className="flex items-center gap-1 pt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open(deployment.deployment_url || '#', '_blank');
+                    }}
+                    disabled={!deployment.deployment_url}
+                    className="btn btn-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ArrowSquareOut size={12} />
+                    Open
+                  </button>
+                  <button
+                    onClick={(e) => handleDelete(deployment.id, e)}
+                    disabled={deletingId === deployment.id}
+                    className="btn btn-sm btn-danger disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
+                  >
+                    {deletingId === deployment.id ? (
+                      <Spinner size={12} className="animate-spin" />
+                    ) : (
+                      <Trash size={12} />
+                    )}
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

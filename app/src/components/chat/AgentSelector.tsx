@@ -326,18 +326,18 @@ export function AgentSelector({
         }}
         className={`
           agent-pill
-          bg-[var(--text)]/10 text-[var(--text)]
+          bg-[var(--surface)] text-[var(--text)]
           flex items-center gap-1.5
           transition-all
           text-xs font-medium
           flex-shrink-0
-          hover:bg-[var(--text)]/20
-          active:bg-[var(--text)]/30
+          hover:bg-[var(--surface-hover)]
+          active:bg-[var(--border)]
           relative z-[10000]
-          h-8
-          rounded-xl
-          border-2 border-[var(--border-color)]
-          ${compact ? 'px-2' : 'px-3.5'}
+          h-7
+          rounded-full
+          border border-[var(--border)]
+          ${compact ? 'px-2' : 'px-3'}
         `}
         title={currentAgent.name}
       >
@@ -354,8 +354,8 @@ export function AgentSelector({
         <div
           className="
             agent-dropdown absolute bottom-full left-0 mb-2
-            bg-[rgba(20,20,20,0.98)] backdrop-blur-xl
-            border border-white/10 rounded-xl
+            bg-[var(--surface)]
+            border border-[var(--border-hover)] rounded-[var(--radius-medium)]
             min-w-[300px] z-[10000]
             shadow-lg overflow-hidden
             flex flex-col
@@ -380,11 +380,11 @@ export function AgentSelector({
                     key={agent.id}
                     onClick={() => handleSelect(agent)}
                     className={`
-                      w-full px-4 py-3 flex items-center gap-3
-                      text-sm text-white transition-colors
-                      hover:bg-white/8
+                      w-full px-3 py-2.5 flex items-center gap-3
+                      text-xs text-[var(--text)] transition-colors
+                      hover:bg-[var(--surface-hover)]
                       group/agent
-                      ${agent.id === currentAgent.id && 'bg-[rgba(255,107,0,0.2)]'}
+                      ${agent.id === currentAgent.id && 'bg-[var(--surface-hover)]'}
                     `}
                   >
                     <AgentAvatar agent={agent} size="md" />
@@ -412,8 +412,8 @@ export function AgentSelector({
                 ))}
               </div>
 
-              <div className="border-t border-white/10 p-3">
-                <div className="bg-gradient-to-r from-orange-500/20 to-orange-600/20 rounded-lg p-3 border border-orange-500/30">
+              <div className="border-t border-[var(--border)] p-3">
+                <div className="bg-[var(--surface-hover)] rounded-[var(--radius-medium)] p-3 border border-[var(--border)]">
                   <div className="flex items-center gap-2 mb-2">
                     <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 256 256">
                       <path d="M239.75,90.81c0,.11,0,.21-.05.32a15.94,15.94,0,0,1-8.32,12l-70.74,38.12,34.81,94a16.42,16.42,0,0,1-.93,13.38,15.94,15.94,0,0,1-12.21,7.73,16.86,16.86,0,0,1-5.18-.05,15.93,15.93,0,0,1-10.93-8.17L128,173.26,89.8,248.15a15.93,15.93,0,0,1-10.93,8.17,16.86,16.86,0,0,1-5.18.05,15.94,15.94,0,0,1-12.21-7.73,16.42,16.42,0,0,1-.93-13.38l34.81-94L24.62,103.13a15.94,15.94,0,0,1-8.32-12c0-.11,0-.21-.05-.32A16,16,0,0,1,26.71,75.68L109.18,64,147.24,8.12a16.1,16.1,0,0,1,28.52,0L213.82,64l82.47,11.68A16,16,0,0,1,239.75,90.81Z" />
@@ -429,7 +429,7 @@ export function AgentSelector({
                       setConfigAgent(null);
                       navigate('/marketplace');
                     }}
-                    className="w-full py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-lg text-white text-sm font-semibold transition-all"
+                    className="btn btn-primary w-full"
                   >
                     Browse Marketplace
                   </button>

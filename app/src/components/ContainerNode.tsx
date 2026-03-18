@@ -45,7 +45,6 @@ const arePropsEqual = (
     prevData.name === nextData.name &&
     prevData.status === nextData.status &&
     prevData.port === nextData.port &&
-    prevData.baseIcon === nextData.baseIcon &&
     prevData.containerType === nextData.containerType &&
     prevData.serviceType === nextData.serviceType &&
     prevData.techStack?.length === nextData.techStack?.length &&
@@ -58,7 +57,7 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
 
   return (
     <div
-      className="relative group transition-all duration-150"
+      className="relative group"
       style={{ contain: 'layout style' }}
     >
       {/* Connection handles */}
@@ -73,7 +72,7 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
         className="!bg-[#333] !w-2.5 !h-2.5 !border !border-[#444]"
       />
 
-      {/* Node content - no transitions for performance */}
+      {/* Node content */}
       <div
         onClick={() => data.onClick?.(id)}
         onDoubleClick={() => {
@@ -81,26 +80,22 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
             data.onDoubleClick(id);
           }
         }}
-        className="bg-[#1a1a1a] rounded-xl min-w-[180px] cursor-pointer shadow-md"
+        className="bg-[var(--xy-node-background-color,#1a1a1a)] rounded-xl min-w-[180px] cursor-pointer shadow-md border border-[var(--xy-node-border-color,transparent)]"
       >
         {/* Header - Color-coded icon + Title/Status */}
         <div className="flex items-center gap-3 p-3">
           {/* Color-coded icon square */}
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${typeColor}`}>
-            {data.baseIcon ? (
-              <span className="text-lg">{data.baseIcon}</span>
-            ) : (
-              <Cube size={20} weight="fill" className="text-white" />
-            )}
+            <Cube size={20} weight="fill" className="text-white" />
           </div>
 
           {/* Title and status */}
           <div className="flex-1 min-w-0">
-            <h3 className="font-medium text-white text-sm truncate">{data.name}</h3>
-            <span className="text-xs text-gray-400 capitalize">{data.status}</span>
+            <h3 className="font-medium text-[var(--xy-node-color,white)] text-sm truncate">{data.name}</h3>
+            <span className="text-xs text-[var(--xy-node-color,white)]/50 capitalize">{data.status}</span>
           </div>
 
-          {/* Delete button - visible on hover, no transition */}
+          {/* Delete button - visible on hover */}
           {data.onDelete && (
             <button
               onClick={(e) => { e.stopPropagation(); data.onDelete?.(id); }}
@@ -116,8 +111,8 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
         {(data.port || (data.techStack && data.techStack.length > 0)) && (
           <div className="px-3 pb-3 pt-0">
             {data.port && (
-              <div className="text-xs text-gray-500 mb-2">
-                Port: <span className="font-mono text-gray-400">{data.port}</span>
+              <div className="text-xs text-[var(--xy-node-color,white)]/40 mb-2">
+                Port: <span className="font-mono text-[var(--xy-node-color,white)]/60">{data.port}</span>
               </div>
             )}
 
@@ -126,13 +121,13 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
                 {data.techStack.slice(0, 3).map((tech, index) => (
                   <span
                     key={index}
-                    className="px-1.5 py-0.5 text-[10px] font-medium bg-white/5 text-gray-400 rounded"
+                    className="px-1.5 py-0.5 text-[10px] font-medium bg-white/5 text-[var(--xy-node-color,white)]/50 rounded"
                   >
                     {tech}
                   </span>
                 ))}
                 {data.techStack.length > 3 && (
-                  <span className="px-1.5 py-0.5 text-[10px] text-gray-500 rounded">
+                  <span className="px-1.5 py-0.5 text-[10px] text-[var(--xy-node-color,white)]/30 rounded">
                     +{data.techStack.length - 3}
                   </span>
                 )}

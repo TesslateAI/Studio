@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { feedbackApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
-import { MobileMenu, UserDropdown } from '../components/ui';
+import { MobileMenu } from '../components/ui';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { CreateFeedbackModal } from '../components/modals/CreateFeedbackModal';
 import { FeedbackModal } from '../components/modals/FeedbackModal';
@@ -174,100 +174,66 @@ export default function Feedback() {
   return (
     <>
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
-      {/* Top Bar */}
-      <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
-        <div className="flex items-center gap-4 md:gap-6">
-          <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Feedback</h1>
 
-          {/* Filter Tabs - Desktop */}
-          <div className="hidden md:flex items-center gap-1">
-            {[
-              { key: 'all' as FeedbackType, label: 'All', icon: ChatCircleDots },
-              { key: 'bug' as FeedbackType, label: 'Bugs', icon: Bug },
-              { key: 'suggestion' as FeedbackType, label: 'Suggestions', icon: Lightbulb },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setFilter(tab.key)}
-                className={`
-                    flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all
-                    ${
-                      filter === tab.key
-                        ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                        : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
-                    }
-                  `}
-              >
-                <tab.icon size={14} weight="fill" />
-                {tab.label}
-              </button>
-            ))}
+      {/* Header */}
+      <div className="flex-shrink-0">
+        {/* Title Row */}
+        <div className="h-10 flex items-center justify-between gap-[6px]" style={{ paddingLeft: '18px', paddingRight: '4px', borderBottom: 'var(--border-width) solid var(--border)' }}>
+          <button
+            onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+            className="mobile-only btn btn-icon mr-1"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+
+          <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Feedback</h2>
+
+          {/* New Feedback + Sort */}
+          <div className="flex items-center gap-2">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'upvotes' | 'date' | 'comments')}
+              className="hidden md:block btn text-xs"
+              style={{ appearance: 'auto', paddingRight: '24px' }}
+            >
+              <option value="upvotes">Most Upvoted</option>
+              <option value="date">Most Recent</option>
+              <option value="comments">Most Discussed</option>
+            </select>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="btn btn-filled"
+            >
+              <Plus size={16} />
+              <span className="hidden md:inline">New Feedback</span>
+            </button>
           </div>
-
-          {/* Sort Dropdown - Desktop */}
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'upvotes' | 'date' | 'comments')}
-            className="hidden md:block text-xs bg-[var(--surface)] border border-white/10 text-[var(--text)] px-2 py-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-          >
-            <option value="upvotes">Most Upvoted</option>
-            <option value="date">Most Recent</option>
-            <option value="comments">Most Discussed</option>
-          </select>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* New Feedback Button */}
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-          >
-            <Plus size={16} weight="bold" />
-            <span className="hidden md:inline">New Feedback</span>
-          </button>
-
-          {/* User Dropdown */}
-          <UserDropdown />
+        {/* Tab Bar */}
+        <div className="h-10 flex items-center gap-2" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
+          {[
+            { key: 'all' as FeedbackType, label: 'All', icon: ChatCircleDots },
+            { key: 'bug' as FeedbackType, label: 'Bugs', icon: Bug },
+            { key: 'suggestion' as FeedbackType, label: 'Suggestions', icon: Lightbulb },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setFilter(tab.key)}
+              className={`btn ${filter === tab.key ? 'btn-tab-active' : 'btn-tab'}`}
+            >
+              <tab.icon size={16} weight="fill" />
+              {tab.label}
+            </button>
+          ))}
         </div>
-      </div>
-
-      {/* Filter Tabs - Mobile */}
-      <div className="md:hidden bg-[var(--surface)] border-b border-white/10 px-4 py-2 flex items-center gap-2 overflow-x-auto">
-        {[
-          { key: 'all' as FeedbackType, label: 'All', icon: ChatCircleDots },
-          { key: 'bug' as FeedbackType, label: 'Bugs', icon: Bug },
-          { key: 'suggestion' as FeedbackType, label: 'Suggestions', icon: Lightbulb },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setFilter(tab.key)}
-            className={`
-                flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all whitespace-nowrap
-                ${
-                  filter === tab.key
-                    ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
-                }
-              `}
-          >
-            <tab.icon size={14} weight="fill" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Info Banner */}
-      <div className="bg-[rgba(var(--primary-rgb),0.1)] border-b border-[rgba(var(--primary-rgb),0.3)] px-4 md:px-6 py-1.5 flex items-center gap-2">
-        <ChatCircleDots size={14} className="text-[var(--primary)] shrink-0" weight="fill" />
-        <p className="text-xs text-[var(--text-muted)]">
-          <span className="font-semibold text-[var(--primary)]">Tesslate Studio Feedback</span>{' '}
-          Project-level feedback coming soon!
-        </p>
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto bg-[var(--bg)]">
-        <div className="p-4 md:p-6">
+      <div className="flex-1 overflow-auto">
+        <div className="p-4 md:p-5">
           {/* Feedback Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {feedback.map((item) => (

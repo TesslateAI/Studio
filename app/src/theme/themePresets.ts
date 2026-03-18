@@ -54,7 +54,7 @@ const DEFAULT_FALLBACK_THEME: Theme = {
     input: {
       background: '#1a1a1c',
       border: 'rgba(255, 255, 255, 0.1)',
-      borderFocus: '#F89521',
+      borderFocus: '#3a3c40',
       text: '#ffffff',
       placeholder: 'rgba(255, 255, 255, 0.4)',
     },
@@ -349,13 +349,16 @@ export function applyThemePreset(theme: Theme): void {
   safeSetProperty(root, '--radius-medium', spacing.radiusMedium);
   safeSetProperty(root, '--radius-large', spacing.radiusLarge);
   safeSetProperty(root, '--radius-xl', spacing.radiusXl);
-  safeSetProperty(root, '--radius', spacing.radiusXl); // Default radius
+  safeSetProperty(root, '--radius', spacing.radiusXl); // Default radius — main content panels
+  safeSetProperty(root, '--control-border-radius', spacing.radiusSmall); // Controls use small radius
 
   // === ANIMATION ===
   safeSetProperty(root, '--duration-fast', animation.durationFast);
   safeSetProperty(root, '--duration-normal', animation.durationNormal);
   safeSetProperty(root, '--duration-slow', animation.durationSlow);
   safeSetProperty(root, '--easing', animation.easing);
+  safeSetProperty(root, '--easing-layout', animation.easing); // Layout transitions use same easing
+  safeSetProperty(root, '--ease', animation.easing); // Legacy alias
 
   // === MODE CLASS ===
   document.body.classList.remove('light-mode', 'dark-mode');

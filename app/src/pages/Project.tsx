@@ -17,16 +17,16 @@ import {
   ArrowsClockwise,
   Kanban,
   FlowArrow,
-  List,
   Article,
   Terminal,
   Books,
+  LockSimple,
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
 import { Tooltip } from '../components/ui/Tooltip';
+import { NavigationSidebar } from '../components/ui/NavigationSidebar';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
-import { UserDropdown } from '../components/ui/UserDropdown';
 import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
@@ -53,7 +53,6 @@ import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
 import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
-import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { type ChatAgent } from '../types/chat';
 import { getFeatures, type ComputeTier } from '../types/project';
@@ -230,8 +229,9 @@ export default function Project() {
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
   const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
+  // Sync with NavigationSidebar's expanded state
   const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(() => {
-    const saved = localStorage.getItem('projectSidebarExpanded');
+    const saved = localStorage.getItem('navigationSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
   });
   const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
@@ -540,9 +540,7 @@ export default function Project() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [container, project?.volume_id]);
 
-  useEffect(() => {
-    localStorage.setItem('projectSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
-  }, [isLeftSidebarExpanded]);
+  // Sidebar expanded state is managed by NavigationSidebar via onExpandedChange
 
   const loadSettings = async () => {
     if (!slug) return;
@@ -1374,7 +1372,7 @@ export default function Project() {
   ];
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
+    <div className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]">
       {/* Idle Warning Banner */}
       {idleWarningMinutes !== null && slug && (
         <IdleWarningBanner
@@ -1390,209 +1388,113 @@ export default function Project() {
       {/* Mobile Menu - Shows on mobile only */}
       <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
 
-      {/* Fixed Left Sidebar */}
-      <motion.div
-        initial={false}
-        animate={{ width: isLeftSidebarExpanded ? 192 : 48 }}
-        transition={{
-          type: 'spring',
-          stiffness: 700,
-          damping: 28,
-          mass: 0.4,
-        }}
-        className="hidden md:flex flex-col bg-[var(--surface)] border-r border-[var(--sidebar-border)] overflow-x-hidden"
-      >
-        {/* Tesslate Logo */}
-        <div
-          className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-[var(--sidebar-border)]`}
-        >
-          <svg className="w-5 h-5 text-[var(--primary)] flex-shrink-0" viewBox="0 0 161.9 126.66">
-            <path
-              d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"
-              fill="currentColor"
-            />
-            <path
-              d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"
-              fill="currentColor"
-            />
-            <path
-              d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"
-              fill="currentColor"
-            />
-          </svg>
-          {isLeftSidebarExpanded && (
-            <span className="text-lg font-bold text-[var(--text)]">Tesslate</span>
-          )}
-        </div>
-
-        <div className="py-3 gap-1 flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
-          {/* Back Button */}
-          {isLeftSidebarExpanded ? (
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
-            >
-              <ArrowLeft
-                size={18}
-                className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
-              />
-              <span className="text-sm font-medium text-[var(--text)]">Back to Projects</span>
-            </button>
-          ) : (
-            <Tooltip content="Back to Projects" side="right" delay={200}>
+      {/* Navigation Sidebar — same as Dashboard, with builder-specific section injected */}
+      <NavigationSidebar
+        activePage="builder"
+        onExpandedChange={setIsLeftSidebarExpanded}
+        builderSection={({ isExpanded, navButtonClass, navButtonClassCollapsed, iconClass, labelClass, inactiveNavButton, inactiveNavButtonCollapsed, inactiveIconClass, inactiveLabelClass }) => (
+          <>
+            {/* Project name / back to projects */}
+            {isExpanded ? (
               <button
                 onClick={() => navigate('/dashboard')}
-                className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
+                className={navButtonClass(false)}
               >
-                <ArrowLeft
-                  size={18}
-                  className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
-                />
-              </button>
-            </Tooltip>
-          )}
-
-          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
-
-          {/* Main View Toggles */}
-          {leftSidebarItems.map((item, index) =>
-            isLeftSidebarExpanded ? (
-              <button
-                key={index}
-                onClick={item.onClick}
-                className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                  item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
-                }`}
-              >
-                {React.cloneElement(item.icon, {
-                  className: `transition-colors ${
-                    item.active
-                      ? 'text-[var(--text)]'
-                      : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                  }`,
-                })}
-                <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
+                <ArrowLeft size={16} className={inactiveIconClass} />
+                <span className={`${inactiveLabelClass} truncate`}>{project?.name || 'Project'}</span>
               </button>
             ) : (
-              <Tooltip key={index} content={item.title} side="right" delay={200}>
+              <Tooltip content={project?.name || 'Back to Projects'} side="right" delay={200}>
                 <button
+                  onClick={() => navigate('/dashboard')}
+                  className={navButtonClassCollapsed(false)}
+                >
+                  <ArrowLeft size={16} className={inactiveIconClass} />
+                </button>
+              </Tooltip>
+            )}
+
+            <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
+
+            {/* View Toggles */}
+            {leftSidebarItems.map((item, index) =>
+              isExpanded ? (
+                <button
+                  key={index}
                   onClick={item.onClick}
-                  className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                    item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
-                  }`}
+                  className={navButtonClass(item.active || false)}
                 >
                   {React.cloneElement(item.icon, {
-                    className: `transition-colors ${
-                      item.active
-                        ? 'text-[var(--text)]'
-                        : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                    }`,
+                    size: 16,
+                    className: iconClass(item.active || false),
                   })}
+                  <span className={labelClass(item.active || false)}>{item.title}</span>
                 </button>
-              </Tooltip>
-            )
-          )}
+              ) : (
+                <Tooltip key={index} content={item.title} side="right" delay={200}>
+                  <button
+                    onClick={item.onClick}
+                    className={navButtonClassCollapsed(item.active || false)}
+                  >
+                    {React.cloneElement(item.icon, {
+                      size: 16,
+                      className: iconClass(item.active || false),
+                    })}
+                  </button>
+                </Tooltip>
+              )
+            )}
 
-          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
+            <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
 
-          {/* Settings & Tools */}
-          {rightSidebarItems.map((item, index) =>
-            isLeftSidebarExpanded ? (
-              <button
-                key={index}
-                onClick={item.disabled ? undefined : item.onClick}
-                disabled={item.disabled}
-                className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                  item.disabled
-                    ? 'opacity-40 cursor-not-allowed'
-                    : item.active
-                      ? 'bg-[var(--sidebar-active)]'
-                      : 'hover:bg-[var(--sidebar-hover)]'
-                }`}
-              >
-                {React.cloneElement(item.icon, {
-                  className: `transition-colors ${
-                    item.disabled
-                      ? 'text-[var(--text)]/40'
-                      : item.active
-                        ? 'text-[var(--text)]'
-                        : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                  }`,
-                })}
-                <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
-              </button>
-            ) : (
-              <Tooltip
-                key={index}
-                content={item.disabled ? `${item.title} (Coming soon)` : item.title}
-                side="right"
-                delay={200}
-              >
+            {/* Panel Toggles — Notes, GitHub, Project Settings */}
+            {[
+              { icon: <BookOpen size={16} />, title: 'Notes', onClick: () => togglePanel('notes'), active: activePanel === 'notes' },
+              { icon: <GitBranch size={16} />, title: 'GitHub Sync', onClick: () => togglePanel('github'), active: activePanel === 'github' },
+              { icon: <Gear size={16} />, title: 'Project Settings', onClick: () => togglePanel('settings'), active: activePanel === 'settings' },
+            ].map((item, index) =>
+              isExpanded ? (
                 <button
-                  onClick={item.disabled ? undefined : item.onClick}
-                  disabled={item.disabled}
-                  className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                    item.disabled
-                      ? 'opacity-40 cursor-not-allowed'
-                      : item.active
-                        ? 'bg-[var(--sidebar-active)]'
-                        : 'hover:bg-[var(--sidebar-hover)]'
-                  }`}
+                  key={index}
+                  onClick={item.onClick}
+                  className={navButtonClass(item.active)}
                 >
                   {React.cloneElement(item.icon, {
-                    className: `transition-colors ${
-                      item.disabled
-                        ? 'text-[var(--text)]/40'
-                        : item.active
-                          ? 'text-[var(--text)]'
-                          : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                    }`,
+                    className: iconClass(item.active),
                   })}
+                  <span className={labelClass(item.active)}>{item.title}</span>
                 </button>
-              </Tooltip>
-            )
-          )}
+              ) : (
+                <Tooltip key={index} content={item.title} side="right" delay={200}>
+                  <button
+                    onClick={item.onClick}
+                    className={navButtonClassCollapsed(item.active)}
+                  >
+                    {React.cloneElement(item.icon, {
+                      className: iconClass(item.active),
+                    })}
+                  </button>
+                </Tooltip>
+              )
+            )}
+          </>
+        )}
+      />
 
-          {/* Spacer to push collapse button to bottom */}
-          <div className="flex-1" />
-
-          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
-
-          {/* Collapse/Expand Toggle */}
-          {isLeftSidebarExpanded ? (
-            <button
-              onClick={() => setIsLeftSidebarExpanded(false)}
-              className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
-            >
-              <List
-                size={18}
-                weight="bold"
-                className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
-              />
-              <span className="text-sm font-medium text-[var(--text)]">Collapse</span>
-            </button>
-          ) : (
-            <Tooltip content="Expand" side="right" delay={200}>
-              <button
-                onClick={() => setIsLeftSidebarExpanded(true)}
-                className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
-              >
-                <List
-                  size={18}
-                  weight="bold"
-                  className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
-                />
-              </button>
-            </Tooltip>
-          )}
-        </div>
-      </motion.div>
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Main Content Area — floating panel with margin & radius */}
+      <div
+        className="flex-1 flex flex-col overflow-hidden"
+        style={{
+          borderRadius: 'var(--radius)',
+          margin: 'var(--app-margin)',
+          marginLeft: '0',
+          border: 'var(--border-width) solid var(--border)',
+          backgroundColor: 'var(--bg)',
+        }}
+      >
         {/* Top Bar with Project Title */}
-        <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center justify-between px-4 md:px-6">
-          <div className="flex items-center gap-4">
+        <div className="h-10 border-b border-[var(--border)] flex items-center justify-between flex-shrink-0" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             <Breadcrumbs
               items={[
                 { label: 'Projects', href: '/dashboard' },
@@ -1603,7 +1505,7 @@ export default function Project() {
 
             {/* Container Selector */}
             {containers.length > 0 && (
-              <div className="hidden md:flex items-center border-l border-white/10 pl-4">
+              <div className="hidden md:flex items-center border-l border-[var(--border)] pl-2">
                 <ContainerSelector
                   containers={containers.map((c) => ({
                     id: c.id as string,
@@ -1619,30 +1521,24 @@ export default function Project() {
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-[2px]">
             {/* Architecture Button (Beta) */}
             <button
               onClick={() => navigate(`/project/${slug}`)}
-              className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors"
+              className="hidden md:flex btn"
             >
-              <FlowArrow size={18} className="text-[var(--text)]" />
-              <span className="text-sm font-medium text-[var(--text)]">Architecture</span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
+              <FlowArrow size={15} />
+              <span className="hidden lg:inline">Architecture</span>
+              <span className="text-[10px] px-1.5 py-px rounded-full bg-[var(--surface-hover)] text-[var(--text-subtle)] font-medium">
                 Beta
               </span>
             </button>
 
             {/* Deployment Target Badge */}
             {container?.deployment_provider && (
-              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-                <span className="text-xs text-purple-400">Deploy to:</span>
-                <span
-                  className={`text-xs font-semibold flex items-center gap-1
-                  ${container.deployment_provider === 'vercel' ? 'text-white' : ''}
-                  ${container.deployment_provider === 'netlify' ? 'text-[#00C7B7]' : ''}
-                  ${container.deployment_provider === 'cloudflare' ? 'text-[#F38020]' : ''}
-                `}
-                >
+              <div className="hidden md:flex items-center gap-1.5 btn cursor-default">
+                <span className="text-[11px] text-[var(--text-subtle)]">Deploy to:</span>
+                <span className="text-[11px] font-medium text-[var(--text)] flex items-center gap-1">
                   {container.deployment_provider === 'vercel' && '▲'}
                   {container.deployment_provider === 'netlify' && '◆'}
                   {container.deployment_provider === 'cloudflare' && '🔥'}
@@ -1659,14 +1555,16 @@ export default function Project() {
               </div>
             )}
 
+            <div className="w-px h-[22px] bg-[var(--border)] mx-0.5 hidden md:block" />
+
             {/* Deploy Button with Dropdown */}
-            <div className="relative hidden md:block">
+            <div className="relative">
               <button
                 onClick={() => setShowDeploymentsDropdown(!showDeploymentsDropdown)}
-                className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg font-semibold transition-all text-sm"
+                className="btn btn-filled"
               >
-                <Rocket size={16} weight="bold" />
-                Deploy
+                <Rocket size={15} weight="bold" />
+                <span className="hidden md:inline">Deploy</span>
               </button>
               <DeploymentsDropdown
                 projectSlug={slug!}
@@ -1684,30 +1582,6 @@ export default function Project() {
                 containerName={container?.name as string | undefined}
               />
             </div>
-
-            {/* User Dropdown */}
-            <UserDropdown />
-
-            {/* Mobile hamburger menu */}
-            <button
-              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-              className="md:hidden p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors"
-              aria-label="Open menu"
-            >
-              <svg
-                className="w-6 h-6 text-[var(--text)]"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 6h16M4 12h16M4 18h16"
-                />
-              </svg>
-            </button>
           </div>
         </div>
 
@@ -1782,46 +1656,46 @@ export default function Project() {
                             />
                           ) : (
                             <>
-                              <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
-                                <div className="flex items-center gap-1">
+                              <div className="h-10 bg-[var(--surface)] border-b border-[var(--border)] px-2 flex items-center gap-1.5 flex-shrink-0">
+                                <div className="flex items-center gap-0.5">
                                   <button
                                     onClick={navigateBack}
-                                    className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                    className="btn btn-icon btn-sm"
                                     title="Go back"
                                   >
-                                    <CaretLeft size={18} weight="bold" />
+                                    <CaretLeft size={14} weight="bold" />
                                   </button>
                                   <button
                                     onClick={navigateForward}
-                                    className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                    className="btn btn-icon btn-sm"
                                     title="Go forward"
                                   >
-                                    <CaretRight size={18} weight="bold" />
+                                    <CaretRight size={14} weight="bold" />
                                   </button>
                                 </div>
-                                <div className="hidden md:block flex-1">
-                                  <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
-                                    <span className="text-yellow-500 mr-2">🔒</span>
-                                    <span className="text-[var(--text)]/80 truncate">
-                                      {currentPreviewUrl || devServerUrl}
-                                    </span>
-                                  </div>
+                                <div className="hidden md:flex flex-1 items-center gap-1.5 h-7 bg-[var(--bg)] border border-[var(--border)] rounded-full px-3 min-w-0">
+                                  <LockSimple size={11} weight="bold" className="text-[var(--text-subtle)] flex-shrink-0" />
+                                  <span className="text-[11px] text-[var(--text-muted)] font-mono truncate">
+                                    {currentPreviewUrl || devServerUrl}
+                                  </span>
                                 </div>
-                                <PreviewPortPicker
-                                  containers={previewableContainers}
-                                  selectedContainerId={selectedPreviewContainerId}
-                                  onSelect={handlePreviewContainerSwitch}
-                                />
-                                <button
-                                  onClick={refreshPreview}
-                                  className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
-                                  title="Refresh"
-                                >
-                                  <ArrowsClockwise size={16} />
-                                </button>
+                                <div className="flex items-center gap-0.5 ml-auto">
+                                  <PreviewPortPicker
+                                    containers={previewableContainers}
+                                    selectedContainerId={selectedPreviewContainerId}
+                                    onSelect={handlePreviewContainerSwitch}
+                                  />
+                                  <button
+                                    onClick={refreshPreview}
+                                    className="btn btn-icon btn-sm"
+                                    title="Refresh"
+                                  >
+                                    <ArrowsClockwise size={14} />
+                                  </button>
+                                </div>
                               </div>
                               <div
-                                className="w-full h-[calc(100%-50px)] bg-white"
+                                className="w-full h-[calc(100%-40px)] bg-white"
                                 onMouseEnter={() => {
                                   isPointerOverPreviewRef.current = true;
                                 }}
@@ -1951,46 +1825,46 @@ export default function Project() {
                           />
                         ) : (
                           <>
-                            <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
-                              <div className="flex items-center gap-1">
+                            <div className="h-10 bg-[var(--surface)] border-b border-[var(--border)] px-2 flex items-center gap-1.5 flex-shrink-0">
+                              <div className="flex items-center gap-0.5">
                                 <button
                                   onClick={navigateBack}
-                                  className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                  className="btn btn-icon btn-sm"
                                   title="Go back"
                                 >
-                                  <CaretLeft size={18} weight="bold" />
+                                  <CaretLeft size={14} weight="bold" />
                                 </button>
                                 <button
                                   onClick={navigateForward}
-                                  className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                  className="btn btn-icon btn-sm"
                                   title="Go forward"
                                 >
-                                  <CaretRight size={18} weight="bold" />
+                                  <CaretRight size={14} weight="bold" />
                                 </button>
                               </div>
-                              <div className="hidden md:block flex-1">
-                                <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
-                                  <span className="text-yellow-500 mr-2">🔒</span>
-                                  <span className="text-[var(--text)]/80 truncate">
-                                    {currentPreviewUrl || devServerUrl}
-                                  </span>
-                                </div>
+                              <div className="hidden md:flex flex-1 items-center gap-1.5 h-7 bg-[var(--bg)] border border-[var(--border)] rounded-full px-3 min-w-0">
+                                <LockSimple size={11} weight="bold" className="text-[var(--text-subtle)] flex-shrink-0" />
+                                <span className="text-[11px] text-[var(--text-muted)] font-mono truncate">
+                                  {currentPreviewUrl || devServerUrl}
+                                </span>
                               </div>
-                              <PreviewPortPicker
-                                containers={previewableContainers}
-                                selectedContainerId={selectedPreviewContainerId}
-                                onSelect={handlePreviewContainerSwitch}
-                              />
-                              <button
-                                onClick={refreshPreview}
-                                className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
-                                title="Refresh"
-                              >
-                                <ArrowsClockwise size={16} />
-                              </button>
+                              <div className="flex items-center gap-0.5 ml-auto">
+                                <PreviewPortPicker
+                                  containers={previewableContainers}
+                                  selectedContainerId={selectedPreviewContainerId}
+                                  onSelect={handlePreviewContainerSwitch}
+                                />
+                                <button
+                                  onClick={refreshPreview}
+                                  className="btn btn-icon btn-sm"
+                                  title="Refresh"
+                                >
+                                  <ArrowsClockwise size={14} />
+                                </button>
+                              </div>
                             </div>
                             <div
-                              className="w-full h-[calc(100%-50px)] bg-white"
+                              className="w-full h-[calc(100%-40px)] bg-white"
                               onMouseEnter={() => {
                                 isPointerOverPreviewRef.current = true;
                               }}
@@ -2119,7 +1993,7 @@ export default function Project() {
         icon={<GitBranch size={20} />}
         isOpen={activePanel === 'github'}
         onClose={() => setActivePanel(null)}
-        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
         defaultSize={{ width: 420, height: 620 }}
       >
         <GitHubPanel projectId={project?.id} />
@@ -2130,7 +2004,7 @@ export default function Project() {
         icon={<BookOpen size={20} />}
         isOpen={activePanel === 'notes'}
         onClose={() => setActivePanel(null)}
-        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
       >
         <NotesPanel projectSlug={slug!} />
       </FloatingPanel>
@@ -2140,7 +2014,7 @@ export default function Project() {
         icon={<Gear size={20} />}
         isOpen={activePanel === 'settings'}
         onClose={() => setActivePanel(null)}
-        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
       >
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
@@ -2206,8 +2080,6 @@ export default function Project() {
         </div>
       )}
 
-      {/* Discord Support - position adjusts when chat is right-docked */}
-      <DiscordSupport chatPosition={chatPosition} mobileChatOpen={chatExpanded} />
 
       {/* Deployment Modal */}
       {showDeployModal && (

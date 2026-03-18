@@ -363,7 +363,7 @@ export function ChatInput({
       {/* Command suggestions bar - Minecraft style */}
       {showCommands && filteredCommands.length > 0 && (
         <div ref={commandsRef} className="absolute bottom-full left-0 right-0 mb-2 px-3">
-          <div className="bg-[var(--surface)] border-2 border-[var(--primary)]/40 rounded-xl p-2 shadow-lg shadow-[var(--primary)]/10">
+          <div className="bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg">
             {filteredCommands.map((cmd, idx) => (
               <div
                 key={idx}
@@ -371,18 +371,18 @@ export function ChatInput({
                   setMessage(cmd.command);
                   setShowCommands(false);
                 }}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--primary)]/10 cursor-pointer transition-colors"
+                className="flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] cursor-pointer transition-colors"
               >
-                <span className="text-[var(--primary)] font-mono font-semibold">{cmd.command}</span>
-                <span className="text-[var(--text)]/60 text-sm">{cmd.description}</span>
+                <span className="text-[var(--text)] font-mono text-xs font-semibold">{cmd.command}</span>
+                <span className="text-[var(--text-muted)] text-xs">{cmd.description}</span>
                 {cmd.isSkill && (
-                  <span className="ml-auto text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--primary)]/15 text-[var(--primary)]">
+                  <span className="ml-auto text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[var(--surface-hover)] text-[var(--text-muted)] border border-[var(--border)]">
                     Skill
                   </span>
                 )}
               </div>
             ))}
-            <div className="mt-2 pt-2 border-t border-[var(--border-color)]">
+            <div className="mt-2 pt-2 border-t border-[var(--border)]">
               <span className="text-xs text-[var(--text)]/40 px-3">
                 {filteredCommands.some((c) => c.isSkill)
                   ? 'Press Enter to send'
@@ -396,7 +396,7 @@ export function ChatInput({
       {/* Settings / menu dropdown */}
       {showSettings && (
         <div ref={settingsRef} className="absolute bottom-full right-0 mb-2 mr-3">
-          <div className="bg-[var(--surface)] border-2 border-[var(--border-color)] rounded-xl p-2 shadow-lg min-w-[200px]">
+          <div className="bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg min-w-[200px]">
             {/* Compact-only items: collapse toggle + commands */}
             {isCompact && (
               <>
@@ -407,7 +407,7 @@ export function ChatInput({
                       onToggleToolCallsCollapsed();
                       setShowSettings(false);
                     }}
-                    className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--text)]/5 cursor-pointer transition-colors w-full text-left"
+                    className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
                   >
                     <span
                       className={
@@ -433,14 +433,14 @@ export function ChatInput({
                     setShowCommands(true);
                     textareaRef.current?.focus();
                   }}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--text)]/5 cursor-pointer transition-colors w-full text-left"
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
                 >
                   <span className="text-[var(--text)]/60 w-4 text-center font-mono font-bold text-base leading-none">
                     /
                   </span>
                   <span className="text-[var(--text)] text-sm">Commands</span>
                 </button>
-                <div className="my-1 border-t border-[var(--border-color)]" />
+                <div className="my-1 border-t border-[var(--border)]" />
               </>
             )}
 
@@ -451,7 +451,7 @@ export function ChatInput({
                 downloadProject();
                 setShowSettings(false);
               }}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--text)]/5 cursor-pointer transition-colors w-full text-left"
+              className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
             >
               <span className="text-[var(--text)]/60">
                 <DownloadSimple size={16} weight="bold" />
@@ -465,7 +465,7 @@ export function ChatInput({
                   clearChatHistory();
                   setShowSettings(false);
                 }}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--text)]/5 cursor-pointer transition-colors w-full text-left"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
               >
                 <span className="text-[var(--text)]/60">
                   <Trash size={16} weight="bold" />
@@ -479,11 +479,11 @@ export function ChatInput({
 
       {/* Two-row layout */}
       <div
-        className={`flex flex-col bg-[var(--text)]/10 w-full ${isDocked ? '' : isExpanded ? 'rounded-b-3xl' : 'rounded-3xl'} ${!isDocked ? 'max-md:rounded-b-none' : ''}`}
+        className={`flex flex-col bg-[var(--surface)] w-full ${isDocked ? '' : isExpanded ? 'rounded-b-[var(--radius)]' : 'rounded-[var(--radius)]'} ${!isDocked ? 'max-md:rounded-b-none' : ''}`}
       >
         {/* First row: Growing textarea */}
         <div
-          className="px-3 flex items-center border-b border-[var(--border-color)]"
+          className="px-3 flex items-center border-b border-[var(--border)]"
           style={{ minHeight: '44px' }}
         >
           <textarea
@@ -525,7 +525,7 @@ export function ChatInput({
               <EditModeStatus
                 mode={editMode}
                 onModeChange={onModeChange}
-                className="scale-90"
+                className=""
                 compact={isEditModeCompact}
               />
             </div>
@@ -539,11 +539,7 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={onToggleToolCallsCollapsed}
-                  className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0 ${
-                    toolCallsCollapsed
-                      ? 'text-[var(--primary)] bg-[var(--primary)]/10'
-                      : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
-                  }`}
+                  className={`btn btn-icon btn-sm ${toolCallsCollapsed ? 'btn-active' : ''}`}
                   title={toolCallsCollapsed ? 'Expand tool calls' : 'Collapse tool calls'}
                 >
                   {toolCallsCollapsed ? (
@@ -562,11 +558,7 @@ export function ChatInput({
                   setShowSettings(!showSettings);
                   setShowCommands(false);
                 }}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0 ${
-                  showSettings
-                    ? 'text-[var(--primary)] bg-[var(--primary)]/10'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
-                }`}
+                className={`btn btn-icon btn-sm ${showSettings ? 'btn-active' : ''}`}
                 title="Settings"
               >
                 <Gear size={14} weight="bold" />
@@ -586,11 +578,7 @@ export function ChatInput({
                     setShowSettings(false);
                   }
                 }}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0 font-mono font-bold text-sm ${
-                  showCommands
-                    ? 'text-[var(--primary)] bg-[var(--primary)]/10'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
-                }`}
+                className={`btn btn-icon btn-sm font-mono font-bold text-sm ${showCommands ? 'btn-active' : ''}`}
                 title="Commands"
               >
                 /
@@ -607,11 +595,7 @@ export function ChatInput({
                 setShowSettings(!showSettings);
                 setShowCommands(false);
               }}
-              className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0 ${
-                showSettings
-                  ? 'text-[var(--primary)] bg-[var(--primary)]/10'
-                  : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--text)]/5'
-              }`}
+              className={`btn btn-icon btn-sm ${showSettings ? 'btn-active' : ''}`}
               title="Menu"
             >
               <DotsThreeVertical size={16} weight="bold" />
@@ -623,7 +607,7 @@ export function ChatInput({
             type="button"
             onClick={isExecuting ? onStop : sendMessage}
             disabled={!isExecuting && (!message.trim() || disabled)}
-            className="w-7 h-7 bg-[var(--text)]/10 hover:bg-[var(--text)]/20 rounded-lg border-2 border-[var(--border-color)] text-[var(--text)] flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn btn-icon btn-sm"
             title={
               isExecuting ? 'Stop execution (Escape)' : `Send message (Enter or ${modKey}+Enter)`
             }

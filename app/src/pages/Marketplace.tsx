@@ -23,7 +23,7 @@ import {
   Funnel,
   Lightning,
 } from '@phosphor-icons/react';
-import { MobileMenu, UserDropdown } from '../components/ui';
+import { MobileMenu } from '../components/ui';
 import {
   AgentCard,
   FeaturedCard,
@@ -464,299 +464,183 @@ export default function Marketplace() {
       />
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
 
-      <div className="h-screen overflow-y-auto bg-[var(--bg)]">
-        {/* Header */}
-        <div
-          className={`border-b ${theme === 'light' ? 'border-black/10 bg-white/80' : 'border-white/10 bg-[#0a0a0a]/80'} backdrop-blur-xl sticky top-0 z-40`}
-        >
-          <div className="max-w-6xl mx-auto px-6 md:px-12">
-            {/* Top Bar */}
-            <div className="h-14 flex items-center justify-between">
-              <h1
-                className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-              >
-                Marketplace
-              </h1>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header — sticky above scroll */}
+        <div className="flex-shrink-0">
+          {/* Title Row */}
+          <div className="h-10 flex items-center justify-between gap-[6px]" style={{ paddingLeft: '18px', paddingRight: '4px', borderBottom: 'var(--border-width) solid var(--border)' }}>
+            {/* Mobile hamburger */}
+            <button
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="mobile-only btn btn-icon mr-1"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Marketplace</h2>
+          </div>
 
-              <div className="flex items-center gap-3">
-                {/* User Dropdown - Only show when authenticated */}
-                {isAuthenticated && <UserDropdown />}
-
-                {/* Mobile hamburger */}
+          {/* Tab Bar — type tabs left, filter/sort right */}
+          <div className="h-10 flex items-center justify-between" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
+            {/* Item Type Tabs — scrollable with fade */}
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none flex-1 min-w-0" style={{ maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)', WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)' }}>
+              {itemTypes.map((type) => (
                 <button
-                  onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-                  className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+                  key={type.id}
+                  onClick={() => handleItemTypeChange(type.id)}
+                  className={`btn shrink-0 ${selectedItemType === type.id ? 'btn-tab-active' : 'btn-tab'}`}
                 >
-                  <svg
-                    className="w-6 h-6 text-[var(--text)]"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 6h16M4 12h16M4 18h16"
-                    />
-                  </svg>
+                  {type.icon}
+                  {type.label}
                 </button>
-              </div>
+              ))}
             </div>
 
-            {/* Search Bar */}
-            <div className="py-6">
-              <div
-                className={`
-                relative max-w-2xl mx-auto flex items-center gap-3 px-4 py-3 rounded-xl border
-                ${theme === 'light' ? 'bg-black/5 border-black/10' : 'bg-white/5 border-white/10'}
-              `}
-              >
-                <MagnifyingGlass
-                  size={20}
-                  className={theme === 'light' ? 'text-black/40' : 'text-white/40'}
-                />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  placeholder="Search extensions..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className={`
-                    flex-1 bg-transparent outline-none !outline-none focus:outline-none focus-visible:outline-none focus:ring-0 text-sm
-                    ${theme === 'light' ? 'text-black placeholder-black/40' : 'text-white placeholder-white/40'}
-                  `}
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className={`
-                      p-1 rounded-full transition-colors
-                      ${theme === 'light' ? 'hover:bg-black/10 text-black/40' : 'hover:bg-white/10 text-white/40'}
-                    `}
-                    aria-label="Clear search"
-                  >
-                    <X size={16} />
-                  </button>
-                )}
-                <kbd
-                  className={`
-                  hidden sm:flex items-center gap-1 px-2 py-1 rounded text-xs font-mono
-                  ${theme === 'light' ? 'bg-black/10 text-black/50' : 'bg-white/10 text-white/50'}
-                `}
+            {/* Filter + Sort */}
+            <div className="flex items-center gap-[2px]">
+              {/* Filter Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowFilterDropdown(!showFilterDropdown)}
+                  className={`btn btn-icon ${hasActiveFilters ? 'btn-active' : ''}`}
+                  aria-label="Filter"
                 >
-                  /
-                </kbd>
-              </div>
-            </div>
+                  <Funnel size={16} weight={hasActiveFilters ? 'fill' : 'regular'} />
+                </button>
 
-            {/* Tab Navigation */}
-            <div className="flex items-center justify-between pb-4 gap-4">
-              {/* Item Type Tabs */}
-              <div className="flex items-center gap-1 overflow-x-auto">
-                {itemTypes.map((type) => (
-                  <button
-                    key={type.id}
-                    onClick={() => handleItemTypeChange(type.id)}
-                    className={`
-                      flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap
-                      ${
-                        selectedItemType === type.id
-                          ? 'bg-[var(--primary)] text-white'
-                          : theme === 'light'
-                            ? 'text-black/60 hover:text-black hover:bg-black/5'
-                            : 'text-white/60 hover:text-white hover:bg-white/5'
-                      }
-                    `}
-                  >
-                    {type.icon}
-                    <span className="hidden sm:inline">{type.label}</span>
-                  </button>
-                ))}
-              </div>
+                {showFilterDropdown && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowFilterDropdown(false)} />
+                    <div
+                      className="absolute right-0 top-full mt-1 z-50 min-w-[200px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
+                      style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+                    >
+                      <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Price</div>
+                      {pricingOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          onClick={() => setPricingFilter(option.id)}
+                          className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                            pricingFilter === option.id
+                              ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                              : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                          }`}
+                        >
+                          {option.label}
+                          {pricingFilter === option.id && (
+                            <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
+                              <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
 
-              {/* Filter & Sort */}
-              <div className="flex items-center gap-2">
-                {/* Filter Dropdown */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowFilterDropdown(!showFilterDropdown)}
-                    className={`
-                      flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all
-                      ${hasActiveFilters ? 'bg-[var(--primary)]/10 text-[var(--primary)]' : ''}
-                      ${
-                        theme === 'light'
-                          ? 'text-black/60 hover:text-black hover:bg-black/5'
-                          : 'text-white/60 hover:text-white hover:bg-white/5'
-                      }
-                    `}
-                  >
-                    <Funnel size={16} />
-                    <span className="hidden sm:inline">Filter</span>
-                    {hasActiveFilters && (
-                      <span className="w-2 h-2 rounded-full bg-[var(--primary)]" />
-                    )}
-                  </button>
-
-                  {showFilterDropdown && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-40"
-                        onClick={() => setShowFilterDropdown(false)}
-                      />
-                      <div
-                        className={`
-                        absolute right-0 top-full mt-2 py-3 px-4 rounded-xl border shadow-xl z-50 min-w-[200px]
-                        ${
-                          theme === 'light'
-                            ? 'bg-white border-black/10'
-                            : 'bg-[#1a1a1c] border-white/10'
-                        }
-                      `}
-                      >
-                        <div className="mb-3">
-                          <label
-                            className={`text-xs font-medium uppercase tracking-wider ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-                          >
-                            Price
-                          </label>
-                          <div className="mt-2 space-y-1">
-                            {pricingOptions.map((option) => (
-                              <button
-                                key={option.id}
-                                onClick={() => {
-                                  setPricingFilter(option.id);
-                                }}
-                                className={`
-                                  w-full px-3 py-2 text-left text-sm rounded-lg transition-colors
-                                  ${
-                                    pricingFilter === option.id
-                                      ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                                      : theme === 'light'
-                                        ? 'text-black/70 hover:bg-black/5'
-                                        : 'text-white/70 hover:bg-white/5'
-                                  }
-                                `}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {hasActiveFilters && (
+                      {hasActiveFilters && (
+                        <>
+                          <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
                           <button
-                            onClick={() => {
-                              setPricingFilter('all');
-                              setSearchQuery('');
-                              setShowFilterDropdown(false);
-                            }}
-                            className={`
-                              w-full px-3 py-2 text-sm rounded-lg border mt-2
-                              ${
-                                theme === 'light'
-                                  ? 'border-black/10 text-black/60 hover:bg-black/5'
-                                  : 'border-white/10 text-white/60 hover:bg-white/5'
-                              }
-                            `}
+                            onClick={() => { setPricingFilter('all'); setSearchQuery(''); setShowFilterDropdown(false); }}
+                            className="w-full text-left px-3 py-1.5 text-xs text-[var(--status-error)] hover:bg-[var(--surface-hover)] transition-colors"
                           >
-                            Clear All Filters
+                            Clear all filters
                           </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
-                {/* Sort Dropdown */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowSortDropdown(!showSortDropdown)}
-                    className={`
-                      flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all
-                      ${
-                        theme === 'light'
-                          ? 'text-black/60 hover:text-black hover:bg-black/5'
-                          : 'text-white/60 hover:text-white hover:bg-white/5'
-                      }
-                    `}
-                  >
-                    <span className="hidden sm:inline">
-                      {sortOptions.find((o) => o.id === sortBy)?.label}
-                    </span>
-                    <CaretDown size={14} />
-                  </button>
+              {/* Sort Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowSortDropdown(!showSortDropdown)}
+                  className={`btn ${sortBy !== 'featured' ? 'btn-active' : ''}`}
+                  style={{ gap: '4px' }}
+                >
+                  <span className="hidden sm:inline text-xs">{sortOptions.find((o) => o.id === sortBy)?.label}</span>
+                  <CaretDown className="w-3 h-3 opacity-50" />
+                </button>
 
-                  {showSortDropdown && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-40"
-                        onClick={() => setShowSortDropdown(false)}
-                      />
-                      <div
-                        className={`
-                        absolute right-0 top-full mt-2 py-2 rounded-xl border shadow-xl z-50 min-w-[180px]
-                        ${
-                          theme === 'light'
-                            ? 'bg-white border-black/10'
-                            : 'bg-[#1a1a1c] border-white/10'
-                        }
-                      `}
-                      >
-                        {sortOptions.map((option) => (
-                          <button
-                            key={option.id}
-                            onClick={() => {
-                              setSortBy(option.id);
-                              setShowSortDropdown(false);
-                            }}
-                            className={`
-                              w-full px-4 py-2 text-left text-sm transition-colors
-                              ${
-                                sortBy === option.id
-                                  ? 'text-[var(--primary)]'
-                                  : theme === 'light'
-                                    ? 'text-black/70 hover:bg-black/5'
-                                    : 'text-white/70 hover:bg-white/5'
-                              }
-                            `}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
+                {showSortDropdown && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowSortDropdown(false)} />
+                    <div
+                      className="absolute right-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
+                      style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+                    >
+                      <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Sort by</div>
+                      {sortOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          onClick={() => { setSortBy(option.id); setShowSortDropdown(false); }}
+                          className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                            sortBy === option.id
+                              ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                              : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                          }`}
+                        >
+                          {option.label}
+                          {sortBy === option.id && (
+                            <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
+                              <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Main Content */}
+        {/* Search Bar */}
+        <div className="px-5 pt-4 pb-3 border-b border-[var(--border)]">
+          <div className="relative max-w-xl mx-auto flex items-center">
+            <MagnifyingGlass size={18} className="absolute left-4 text-[var(--text-subtle)]" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search marketplace..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-9 pl-11 pr-10 bg-[var(--surface)] border border-[var(--border)] rounded-full text-xs text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)] transition-colors"
+            />
+            {searchQuery ? (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 text-[var(--text-subtle)] hover:text-[var(--text)] transition-colors"
+                aria-label="Clear search"
+              >
+                <X size={16} />
+              </button>
+            ) : (
+              <kbd className="absolute right-4 text-[11px] font-mono text-[var(--text-subtle)] bg-[var(--surface-hover)] px-1.5 py-0.5 rounded">/</kbd>
+            )}
+          </div>
+        </div>
+
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <div
-          className={`max-w-6xl mx-auto px-6 md:px-12 py-8 ${filtering ? 'opacity-60' : ''} transition-opacity`}
+          className={`px-5 py-5 ${filtering ? 'opacity-60' : ''} transition-opacity`}
         >
           {/* Initial Loading - Skeleton */}
           {initialLoading ? (
             <>
-              {/* Featured skeleton */}
-              <section className="mb-12">
-                <div
-                  className={`h-6 w-32 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`}
-                />
-                <div className="space-y-4">
+              <section className="mb-10">
+                <div className="h-4 w-32 rounded bg-[var(--surface-hover)] mb-5 animate-pulse" />
+                <div className="space-y-3">
                   <SkeletonCard variant="featured" />
                   <SkeletonCard variant="featured" />
                 </div>
               </section>
-
-              {/* Grid skeleton */}
               <section>
-                <div
-                  className={`h-6 w-40 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`}
-                />
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div className="h-4 w-40 rounded bg-[var(--surface-hover)] mb-5 animate-pulse" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <SkeletonCard key={i} />
                   ))}
@@ -767,27 +651,17 @@ export default function Marketplace() {
             <>
               {/* Featured Section */}
               {featuredItems.length > 0 && (
-                <section className="mb-12">
-                  <div className="flex items-center justify-between mb-6">
-                    <h2
-                      className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                    >
-                      Featured
-                    </h2>
+                <section className="mb-10">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xs font-semibold text-[var(--text)]">Featured</h3>
                     <button
-                      onClick={() =>
-                        navigate(`/marketplace/browse/${selectedItemType}?sort=rating`)
-                      }
-                      className={`
-                        flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-full transition-colors
-                        ${theme === 'light' ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black' : 'bg-white/10 hover:bg-white/15 text-white/80 hover:text-white'}
-                      `}
+                      onClick={() => navigate(`/marketplace/browse/${selectedItemType}?sort=rating`)}
+                      className="btn"
                     >
-                      See All
-                      <span className="text-lg">→</span>
+                      See All →
                     </button>
                   </div>
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {featuredItems.slice(0, 3).map((item) => (
                       <FeaturedCard
                         key={item.id}
@@ -801,48 +675,25 @@ export default function Marketplace() {
               )}
 
               {/* Browse by Category Section */}
-              <section className="mb-12">
-                <div className="flex items-center justify-between mb-6">
-                  <h2
-                    className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                  >
-                    Browse by Category
-                  </h2>
+              <section className="mb-10">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-semibold text-[var(--text)]">Browse by Category</h3>
                   <button
                     onClick={() => navigate('/marketplace/browse/agent')}
-                    className={`
-                      flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-full transition-colors
-                      ${theme === 'light' ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black' : 'bg-white/10 hover:bg-white/15 text-white/80 hover:text-white'}
-                    `}
+                    className="btn"
                   >
-                    See All
-                    <span className="text-lg">→</span>
+                    See All →
                   </button>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-2">
                   {categories.map((cat) => (
                     <button
                       key={cat.id}
                       onClick={() => navigate(`/marketplace/browse/agent?category=${cat.id}`)}
-                      className={`
-                        p-4 rounded-xl border text-left transition-all group
-                        ${
-                          theme === 'light'
-                            ? 'bg-white border-black/10 hover:border-[var(--primary)] hover:shadow-lg'
-                            : 'bg-white/5 border-white/10 hover:border-[var(--primary)] hover:bg-white/10'
-                        }
-                      `}
+                      className="p-3 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] text-left transition-colors hover:bg-[var(--surface-hover)] hover:border-[var(--border-hover)] group"
                     >
-                      <div
-                        className={`font-medium text-sm ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                      >
-                        {cat.label}
-                      </div>
-                      <div
-                        className={`text-xs mt-1 line-clamp-2 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
-                      >
-                        {cat.description}
-                      </div>
+                      <div className="font-medium text-xs text-[var(--text)]">{cat.label}</div>
+                      <div className="text-[11px] mt-0.5 line-clamp-2 text-[var(--text-muted)]">{cat.description}</div>
                     </button>
                   ))}
                 </div>
@@ -850,64 +701,45 @@ export default function Marketplace() {
 
               {/* All Items Section */}
               <section>
-                <div className="flex items-center justify-between mb-6">
-                  <h2
-                    className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                  >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-semibold text-[var(--text)]">
                     {searchQuery
                       ? `Results for "${searchQuery}"`
                       : `All ${itemTypes.find((t) => t.id === selectedItemType)?.label}`}
-                  </h2>
+                  </h3>
                   {!searchQuery && (
                     <button
                       onClick={() => navigate(`/marketplace/browse/${selectedItemType}`)}
-                      className={`
-                        flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-full transition-colors
-                        ${theme === 'light' ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black' : 'bg-white/10 hover:bg-white/15 text-white/80 hover:text-white'}
-                      `}
+                      className="btn"
                     >
-                      See All
-                      <span className="text-lg">→</span>
+                      See All →
                     </button>
                   )}
                 </div>
 
                 {regularItems.length > 0 ? (
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                      {regularItems.map((item) => (
-                        <AgentCard
-                          key={item.id}
-                          item={item}
-                          onInstall={handleInstall}
-                          isAuthenticated={isAuthenticated}
-                        />
-                      ))}
-                    </div>
-                  </>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {regularItems.map((item) => (
+                      <AgentCard
+                        key={item.id}
+                        item={item}
+                        onInstall={handleInstall}
+                        isAuthenticated={isAuthenticated}
+                      />
+                    ))}
+                  </div>
                 ) : (
-                  <div
-                    className={`
-                    text-center py-16 rounded-2xl
-                    ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-                  `}
-                  >
-                    <Package
-                      size={48}
-                      className={`mx-auto mb-4 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
-                    />
-                    <p className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>
+                  <div className="text-center py-12 rounded-[var(--radius)] bg-[var(--surface)]">
+                    <Package size={36} className="mx-auto mb-3 text-[var(--text-subtle)]" />
+                    <p className="text-xs text-[var(--text-muted)]">
                       {searchQuery
                         ? `No ${selectedItemType}s found matching "${searchQuery}"`
                         : `No ${selectedItemType}s available yet`}
                     </p>
                     {hasActiveFilters && (
                       <button
-                        onClick={() => {
-                          setPricingFilter('all');
-                          setSearchQuery('');
-                        }}
-                        className="mt-4 px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)] transition-colors"
+                        onClick={() => { setPricingFilter('all'); setSearchQuery(''); }}
+                        className="btn btn-sm mt-3"
                       >
                         Clear Filters
                       </button>
@@ -917,6 +749,7 @@ export default function Marketplace() {
               </section>
             </>
           )}
+        </div>
         </div>
       </div>
     </>
