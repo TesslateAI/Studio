@@ -18,10 +18,13 @@ type NodeRegistry struct {
 }
 
 type volumeEntry struct {
-	volumeID    string
-	ownerNode   string                 // the authoritative node for this volume
-	cachedNodes map[string]time.Time   // nodeName -> cacheTime
-	lastSync    time.Time
+	volumeID     string
+	ownerNode    string
+	cachedNodes  map[string]time.Time // nodeName -> cacheTime
+	lastSync     time.Time
+	templateName string // template used to create the volume
+	templateHash string // base blob hash
+	latestHash   string // latest layer hash (from manifest)
 }
 
 type nodeEntry struct {
@@ -64,7 +67,6 @@ func (r *NodeRegistry) UnregisterVolume(volumeID string) {
 		return
 	}
 
-	// Remove from all nodes that had it cached.
 	for nodeName := range ve.cachedNodes {
 		if ne, exists := r.nodes[nodeName]; exists {
 			delete(ne.volumes, volumeID)
@@ -88,7 +90,6 @@ func (r *NodeRegistry) SetOwner(volumeID, nodeName string) {
 	}
 	ve.ownerNode = nodeName
 
-	// Ensure node entry exists.
 	if _, ok := r.nodes[nodeName]; !ok {
 		r.nodes[nodeName] = &nodeEntry{
 			name:    nodeName,
@@ -191,6 +192,29 @@ func (r *NodeRegistry) MarkSynced(volumeID string) {
 	}
 }
 
+// SetVolumeTemplate sets the template context for a volume.
+func (r *NodeRegistry) SetVolumeTemplate(volumeID, templateName, templateHash string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ve, ok := r.volumes[volumeID]
+	if !ok {
+		return
+	}
+	ve.templateName = templateName
+	ve.templateHash = templateHash
+}
+
+// SetLatestHash updates the latest layer hash for a volume.
+func (r *NodeRegistry) SetLatestHash(volumeID, hash string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if ve, ok := r.volumes[volumeID]; ok {
+		ve.latestHash = hash
+	}
+}
+
 // GetVolumeStatus returns a snapshot of the volume's current status. Returns
 // nil if the volume is not registered.
 func (r *NodeRegistry) GetVolumeStatus(volumeID string) *VolumeStatus {
@@ -209,9 +233,12 @@ func (r *NodeRegistry) GetVolumeStatus(volumeID string) *VolumeStatus {
 	sort.Strings(nodes)
 
 	vs := &VolumeStatus{
-		VolumeID:    volumeID,
-		OwnerNode:   ve.ownerNode,
-		CachedNodes: nodes,
+		VolumeID:     volumeID,
+		OwnerNode:    ve.ownerNode,
+		CachedNodes:  nodes,
+		TemplateName: ve.templateName,
+		TemplateHash: ve.templateHash,
+		LatestHash:   ve.latestHash,
 	}
 	if !ve.lastSync.IsZero() {
 		vs.LastSync = ve.lastSync.UTC().Format(time.RFC3339)

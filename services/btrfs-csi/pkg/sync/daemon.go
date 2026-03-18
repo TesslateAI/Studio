@@ -3,66 +3,59 @@ package sync
 import (
 	"context"
 	"fmt"
-	"io"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/metrics"
-	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/template"
 )
 
-// countingWriter wraps an io.Writer and tracks the number of bytes written.
-type countingWriter struct {
-	w     io.Writer
-	bytes int64
-}
-
-func (cw *countingWriter) Write(p []byte) (int, error) {
-	n, err := cw.w.Write(p)
-	cw.bytes += int64(n)
-	return n, err
-}
-
-// trackedVolume holds per-volume sync state.
+// trackedVolume holds per-volume CAS sync state.
 type trackedVolume struct {
-	volumeID   string
-	lastSnapID string // previous sync snapshot name for incremental sends
-	lastSyncAt time.Time
+	volumeID      string
+	templateName  string // template used to create this volume
+	templateHash  string // base blob hash from template
+	lastLayerHash string // hash of most recent layer (parent for next send)
+	lastSnapPath  string // local path of last layer snapshot (for -p parent)
+	lastSyncAt    time.Time
 }
 
-// Daemon periodically snapshots tracked volumes and uploads them to object storage.
+// Daemon periodically snapshots tracked volumes, uploads incremental layers
+// to the CAS store, and maintains volume manifests.
 type Daemon struct {
 	btrfs    *btrfs.Manager
-	store    objstore.ObjectStorage
+	cas      *cas.Store
+	tmplMgr  *template.Manager
 	interval time.Duration
 	mu       sync.Mutex
-	tracked  map[string]*trackedVolume // volumeID -> tracking state
+	tracked  map[string]*trackedVolume
+	syncLocks   sync.Mutex                  // guards volLocks
+	volLocks    map[string]*sync.Mutex       // per-volume sync serialization
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
 }
 
-// NewDaemon creates a sync Daemon that uses the given btrfs manager, object
-// storage backend, and sync interval.
-func NewDaemon(btrfs *btrfs.Manager, store objstore.ObjectStorage, interval time.Duration) *Daemon {
+// NewDaemon creates a sync Daemon that uses the CAS store for all storage.
+func NewDaemon(btrfs *btrfs.Manager, casStore *cas.Store, tmplMgr *template.Manager, interval time.Duration) *Daemon {
 	return &Daemon{
-		btrfs:    btrfs,
-		store:    store,
-		interval: interval,
-		tracked:  make(map[string]*trackedVolume),
-		stopCh:   make(chan struct{}),
+		btrfs:     btrfs,
+		cas:       casStore,
+		tmplMgr:   tmplMgr,
+		interval:  interval,
+		tracked:   make(map[string]*trackedVolume),
+		volLocks:  make(map[string]*sync.Mutex),
+		stopCh:    make(chan struct{}),
 	}
 }
 
 // Start begins the periodic sync loop. It blocks until Stop is called or the
 // provided context is cancelled.
 func (d *Daemon) Start(ctx context.Context) {
-	klog.Info("Sync daemon starting")
+	klog.Info("Sync daemon starting (CAS mode)")
 	d.wg.Add(1)
 	defer d.wg.Done()
 
@@ -89,7 +82,6 @@ func (d *Daemon) Start(ctx context.Context) {
 func (d *Daemon) Stop() {
 	select {
 	case <-d.stopCh:
-		// Already closed.
 	default:
 		close(d.stopCh)
 	}
@@ -97,20 +89,25 @@ func (d *Daemon) Stop() {
 	klog.Info("Sync daemon stopped")
 }
 
-// TrackVolume registers a volume for periodic S3 sync.
-func (d *Daemon) TrackVolume(volumeID string) {
+// TrackVolume registers a volume for periodic CAS sync with its template context.
+func (d *Daemon) TrackVolume(volumeID, templateName, templateHash string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if _, exists := d.tracked[volumeID]; exists {
 		return
 	}
-	d.tracked[volumeID] = &trackedVolume{volumeID: volumeID}
-	klog.V(2).Infof("Tracking volume %s for sync", volumeID)
+	d.tracked[volumeID] = &trackedVolume{
+		volumeID:     volumeID,
+		templateName: templateName,
+		templateHash: templateHash,
+	}
+	klog.V(2).Infof("Tracking volume %s for CAS sync (template=%s, base=%s)",
+		volumeID, templateName, cas.ShortHash(templateHash))
 }
 
-// UntrackVolume removes a volume from sync tracking and deletes its sync
-// snapshot if one exists.
+// UntrackVolume removes a volume from sync tracking and cleans up the last
+// layer snapshot if one exists.
 func (d *Daemon) UntrackVolume(volumeID string) {
 	d.mu.Lock()
 	tv, exists := d.tracked[volumeID]
@@ -118,22 +115,27 @@ func (d *Daemon) UntrackVolume(volumeID string) {
 		d.mu.Unlock()
 		return
 	}
-	lastSnap := tv.lastSnapID
+	lastSnapPath := tv.lastSnapPath
 	delete(d.tracked, volumeID)
 	d.mu.Unlock()
 
-	// Clean up the last sync snapshot if it exists.
-	if lastSnap != "" {
-		snapPath := fmt.Sprintf("snapshots/%s", lastSnap)
+	if lastSnapPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if d.btrfs.SubvolumeExists(ctx, snapPath) {
-			if err := d.btrfs.DeleteSubvolume(ctx, snapPath); err != nil {
-				klog.Warningf("Failed to cleanup sync snapshot %s: %v", lastSnap, err)
+		if d.btrfs.SubvolumeExists(ctx, lastSnapPath) {
+			if err := d.btrfs.DeleteSubvolume(ctx, lastSnapPath); err != nil {
+				klog.Warningf("Failed to cleanup layer snapshot %s: %v", lastSnapPath, err)
 			}
 		}
 	}
-	klog.V(2).Infof("Untracked volume %s from sync", volumeID)
+	klog.V(2).Infof("Untracked volume %s from CAS sync", volumeID)
+}
+
+// TrackedVolumeState reports the sync state for a tracked volume.
+type TrackedVolumeState struct {
+	VolumeID     string `json:"volume_id"`
+	TemplateHash string `json:"template_hash,omitempty"`
+	LastSyncAt   string `json:"last_sync_at,omitempty"`
 }
 
 // GetTrackedState returns the current sync state for all tracked volumes.
@@ -144,7 +146,10 @@ func (d *Daemon) GetTrackedState() []TrackedVolumeState {
 
 	states := make([]TrackedVolumeState, 0, len(d.tracked))
 	for _, tv := range d.tracked {
-		s := TrackedVolumeState{VolumeID: tv.volumeID}
+		s := TrackedVolumeState{
+			VolumeID:     tv.volumeID,
+			TemplateHash: tv.templateHash,
+		}
 		if !tv.lastSyncAt.IsZero() {
 			s.LastSyncAt = tv.lastSyncAt.UTC().Format(time.RFC3339)
 		}
@@ -153,70 +158,323 @@ func (d *Daemon) GetTrackedState() []TrackedVolumeState {
 	return states
 }
 
-// DeleteS3Prefix deletes all objects under the volume's S3 prefix.
-func (d *Daemon) DeleteS3Prefix(ctx context.Context, volumeID string) error {
-	if d.store == nil {
-		return nil
+// volumeLock returns the per-volume mutex, creating it if needed.
+// This serializes sync/snapshot operations on the same volume to prevent
+// manifest read-modify-write races.
+func (d *Daemon) volumeLock(volumeID string) *sync.Mutex {
+	d.syncLocks.Lock()
+	defer d.syncLocks.Unlock()
+	lk, ok := d.volLocks[volumeID]
+	if !ok {
+		lk = &sync.Mutex{}
+		d.volLocks[volumeID] = lk
 	}
-	prefix := fmt.Sprintf("volumes/%s/", volumeID)
-	objects, err := d.store.List(ctx, prefix)
-	if err != nil {
-		return fmt.Errorf("list objects for %q: %w", prefix, err)
-	}
-	for _, obj := range objects {
-		if delErr := d.store.Delete(ctx, obj.Key); delErr != nil {
-			klog.Warningf("DeleteS3Prefix: failed to delete %q: %v", obj.Key, delErr)
-		}
-	}
-	if len(objects) > 0 {
-		klog.V(2).Infof("DeleteS3Prefix: deleted %d objects for volume %s", len(objects), volumeID)
-	}
-	return nil
+	return lk
 }
 
-// TrackedVolumeState reports the sync state for a tracked volume.
-type TrackedVolumeState struct {
-	VolumeID   string `json:"volume_id"`
-	LastSyncAt string `json:"last_sync_at,omitempty"`
-}
-
-// SyncVolume performs an immediate sync of a single volume to S3.
+// SyncVolume performs an immediate sync of a single volume to CAS.
 func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
+	// Per-volume lock serializes with concurrent CreateSnapshot/RestoreToSnapshot.
+	vl := d.volumeLock(volumeID)
+	vl.Lock()
+	defer vl.Unlock()
+
 	d.mu.Lock()
 	tv, exists := d.tracked[volumeID]
 	if !exists {
 		d.mu.Unlock()
 		return fmt.Errorf("volume %q is not tracked for sync", volumeID)
 	}
-	// Copy state under lock to avoid holding it during I/O.
-	lastSnapID := tv.lastSnapID
+	tvCopy := *tv
 	d.mu.Unlock()
 
-	newSnapID, err := d.syncOne(ctx, volumeID, lastSnapID)
+	hash, newSnapPath, err := d.syncOne(ctx, &tvCopy, "sync", "")
 	if err != nil {
 		return err
 	}
 
 	d.mu.Lock()
 	if tv, ok := d.tracked[volumeID]; ok {
-		tv.lastSnapID = newSnapID
+		tv.lastLayerHash = hash
+		tv.lastSnapPath = newSnapPath
 		tv.lastSyncAt = time.Now()
 	}
 	d.mu.Unlock()
 	return nil
 }
 
+// CreateSnapshot creates a labeled snapshot layer and returns the blob hash.
+func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (string, error) {
+	// Per-volume lock serializes with concurrent SyncVolume/RestoreToSnapshot.
+	vl := d.volumeLock(volumeID)
+	vl.Lock()
+	defer vl.Unlock()
+
+	d.mu.Lock()
+	tv, exists := d.tracked[volumeID]
+	if !exists {
+		d.mu.Unlock()
+		return "", fmt.Errorf("volume %q is not tracked for sync", volumeID)
+	}
+	tvCopy := *tv
+	d.mu.Unlock()
+
+	hash, newSnapPath, err := d.syncOne(ctx, &tvCopy, "snapshot", label)
+	if err != nil {
+		return "", err
+	}
+
+	d.mu.Lock()
+	if tv, ok := d.tracked[volumeID]; ok {
+		tv.lastLayerHash = hash
+		tv.lastSnapPath = newSnapPath
+		tv.lastSyncAt = time.Now()
+	}
+	d.mu.Unlock()
+	return hash, nil
+}
+
+// RestoreVolume restores a volume from CAS by replaying all layers from the
+// manifest. The base template and each layer are downloaded and received in
+// order, then a writable snapshot is created as the working volume.
+func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
+	manifest, err := d.cas.GetManifest(ctx, volumeID)
+	if err != nil {
+		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
+	}
+
+	// Ensure base template exists locally.
+	if manifest.Base != "" && manifest.TemplateName != "" {
+		if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
+			return fmt.Errorf("ensure base template %s: %w", manifest.TemplateName, err)
+		}
+	}
+
+	// Receive each layer in order.
+	var lastLayerPath string
+	for _, layer := range manifest.Layers {
+		targetPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(layer.Hash))
+
+		// Skip if already present locally.
+		if d.btrfs.SubvolumeExists(ctx, targetPath) {
+			lastLayerPath = targetPath
+			continue
+		}
+
+		reader, err := d.cas.GetBlob(ctx, layer.Hash)
+		if err != nil {
+			return fmt.Errorf("download layer %s: %w", layer.Hash, err)
+		}
+
+		// btrfs receive creates a subvolume named from the send stream
+		// (typically "{vol}@pending"). We receive then rename.
+		if err := d.btrfs.Receive(ctx, "layers", reader); err != nil {
+			reader.Close()
+			return fmt.Errorf("receive layer %s: %w", layer.Hash, err)
+		}
+		reader.Close()
+
+		// Rename received subvolume to its content-addressed name.
+		receivedPath := fmt.Sprintf("layers/%s@pending", volumeID)
+		if d.btrfs.SubvolumeExists(ctx, receivedPath) {
+			if d.btrfs.SubvolumeExists(ctx, targetPath) {
+				_ = d.btrfs.DeleteSubvolume(ctx, targetPath)
+			}
+			if err := d.btrfs.SnapshotSubvolume(ctx, receivedPath, targetPath, true); err != nil {
+				return fmt.Errorf("rename layer to %s: %w", targetPath, err)
+			}
+			_ = d.btrfs.DeleteSubvolume(ctx, receivedPath)
+		}
+
+		lastLayerPath = targetPath
+	}
+
+	// Create writable volume from the final layer (or from base template).
+	volumePath := fmt.Sprintf("volumes/%s", volumeID)
+	if d.btrfs.SubvolumeExists(ctx, volumePath) {
+		if err := d.btrfs.DeleteSubvolume(ctx, volumePath); err != nil {
+			return fmt.Errorf("delete existing volume %s: %w", volumeID, err)
+		}
+	}
+
+	sourcePath := lastLayerPath
+	if sourcePath == "" && manifest.TemplateName != "" {
+		sourcePath = fmt.Sprintf("templates/%s", manifest.TemplateName)
+	}
+	if sourcePath == "" {
+		return fmt.Errorf("no layers and no base template for volume %s", volumeID)
+	}
+
+	if err := d.btrfs.SnapshotSubvolume(ctx, sourcePath, volumePath, false); err != nil {
+		return fmt.Errorf("snapshot to volume %s: %w", volumeID, err)
+	}
+
+	// Update tracked state.
+	latestHash := manifest.LatestHash()
+	d.mu.Lock()
+	if tv, ok := d.tracked[volumeID]; ok {
+		tv.lastLayerHash = latestHash
+		tv.lastSnapPath = lastLayerPath
+	}
+	d.mu.Unlock()
+
+	klog.Infof("Restored volume %s from CAS (%d layers)", volumeID, len(manifest.Layers))
+	return nil
+}
+
+// RestoreToSnapshot restores a volume to a specific snapshot hash. The current
+// state is saved as a "pre-restore" layer first as an undo point.
+func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash string) error {
+	// Per-volume lock serializes with concurrent SyncVolume/CreateSnapshot.
+	vl := d.volumeLock(volumeID)
+	vl.Lock()
+	defer vl.Unlock()
+
+	// Save current state as an undo point before restoring.
+	// Call syncOne directly (not CreateSnapshot) since we already hold the lock.
+	d.mu.Lock()
+	tv, exists := d.tracked[volumeID]
+	if !exists {
+		d.mu.Unlock()
+		return fmt.Errorf("volume %q is not tracked for sync", volumeID)
+	}
+	tvCopy := *tv
+	d.mu.Unlock()
+
+	if hash, newSnapPath, syncErr := d.syncOne(ctx, &tvCopy, "snapshot", "pre-restore"); syncErr != nil {
+		klog.Warningf("RestoreToSnapshot: failed to save undo point for %s: %v", volumeID, syncErr)
+	} else {
+		d.mu.Lock()
+		if tv, ok := d.tracked[volumeID]; ok {
+			tv.lastLayerHash = hash
+			tv.lastSnapPath = newSnapPath
+			tv.lastSyncAt = time.Now()
+		}
+		d.mu.Unlock()
+	}
+
+	// Re-read manifest (may have been modified by the undo-point sync above).
+	manifest, err := d.cas.GetManifest(ctx, volumeID)
+	if err != nil {
+		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
+	}
+
+	// Find the target layer path.
+	var targetLayerPath string
+	if targetHash == manifest.Base {
+		// Restore to base template.
+		if manifest.TemplateName != "" {
+			if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
+				return fmt.Errorf("ensure base template: %w", err)
+			}
+			targetLayerPath = fmt.Sprintf("templates/%s", manifest.TemplateName)
+		}
+	} else {
+		// Ensure all layers up to target exist locally.
+		for _, layer := range manifest.Layers {
+			layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(layer.Hash))
+			if !d.btrfs.SubvolumeExists(ctx, layerPath) {
+				reader, err := d.cas.GetBlob(ctx, layer.Hash)
+				if err != nil {
+					return fmt.Errorf("download layer %s: %w", layer.Hash, err)
+				}
+				if err := d.btrfs.Receive(ctx, "layers", reader); err != nil {
+					reader.Close()
+					return fmt.Errorf("receive layer %s: %w", layer.Hash, err)
+				}
+				reader.Close()
+
+				// Rename received snapshot.
+				receivedPath := fmt.Sprintf("layers/%s@pending", volumeID)
+				if d.btrfs.SubvolumeExists(ctx, receivedPath) {
+					if d.btrfs.SubvolumeExists(ctx, layerPath) {
+						_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
+					}
+					if snapErr := d.btrfs.SnapshotSubvolume(ctx, receivedPath, layerPath, true); snapErr != nil {
+						return fmt.Errorf("rename layer to %s: %w", layerPath, snapErr)
+					}
+					_ = d.btrfs.DeleteSubvolume(ctx, receivedPath)
+				}
+			}
+			if layer.Hash == targetHash {
+				targetLayerPath = layerPath
+				break
+			}
+		}
+	}
+
+	if targetLayerPath == "" {
+		return fmt.Errorf("target hash %s not found in manifest for volume %s", targetHash, volumeID)
+	}
+
+	// Replace the volume with a writable snapshot of the target layer.
+	volumePath := fmt.Sprintf("volumes/%s", volumeID)
+	if d.btrfs.SubvolumeExists(ctx, volumePath) {
+		if err := d.btrfs.DeleteSubvolume(ctx, volumePath); err != nil {
+			return fmt.Errorf("delete volume for restore: %w", err)
+		}
+	}
+	if err := d.btrfs.SnapshotSubvolume(ctx, targetLayerPath, volumePath, false); err != nil {
+		return fmt.Errorf("snapshot target layer to volume: %w", err)
+	}
+
+	// Truncate manifest to target.
+	manifest.TruncateAfter(targetHash)
+	if err := d.cas.PutManifest(ctx, manifest); err != nil {
+		return fmt.Errorf("save truncated manifest: %w", err)
+	}
+
+	// Update tracked state.
+	d.mu.Lock()
+	if tv, ok := d.tracked[volumeID]; ok {
+		tv.lastLayerHash = targetHash
+		tv.lastSnapPath = targetLayerPath
+	}
+	d.mu.Unlock()
+
+	klog.Infof("Restored volume %s to snapshot %s", volumeID, cas.ShortHash(targetHash))
+	return nil
+}
+
+// DeleteVolume cleans up the manifest and local layer snapshots for a volume.
+// Blob cleanup happens via GC (blobs may be shared across volumes).
+func (d *Daemon) DeleteVolume(ctx context.Context, volumeID string) error {
+	// Delete manifest from CAS.
+	if err := d.cas.DeleteManifest(ctx, volumeID); err != nil {
+		klog.Warningf("DeleteVolume: failed to delete manifest for %s: %v", volumeID, err)
+	}
+
+	// Delete all local layer snapshots for this volume.
+	layers, err := d.btrfs.ListSubvolumes(ctx, fmt.Sprintf("layers/%s@", volumeID))
+	if err != nil {
+		klog.Warningf("DeleteVolume: failed to list layer snapshots for %s: %v", volumeID, err)
+	} else {
+		for _, sub := range layers {
+			if delErr := d.btrfs.DeleteSubvolume(ctx, sub.Path); delErr != nil {
+				klog.Warningf("DeleteVolume: failed to delete layer %s: %v", sub.Path, delErr)
+			}
+		}
+	}
+
+	klog.V(2).Infof("Cleaned up CAS data for volume %s", volumeID)
+	return nil
+}
+
+// GetManifest returns the CAS manifest for a volume. Convenience accessor
+// for callers that need manifest data (e.g., Hub for ListSnapshots).
+func (d *Daemon) GetManifest(ctx context.Context, volumeID string) (*cas.Manifest, error) {
+	return d.cas.GetManifest(ctx, volumeID)
+}
+
 // syncAll iterates over all tracked volumes and syncs each one.
 func (d *Daemon) syncAll(ctx context.Context) error {
 	d.mu.Lock()
-	// Snapshot the list of tracked volumes to avoid holding the lock during I/O.
 	type syncItem struct {
-		volumeID   string
-		lastSnapID string
+		tv trackedVolume // copy
 	}
 	items := make([]syncItem, 0, len(d.tracked))
 	for _, tv := range d.tracked {
-		items = append(items, syncItem{volumeID: tv.volumeID, lastSnapID: tv.lastSnapID})
+		items = append(items, syncItem{tv: *tv})
 	}
 	d.mu.Unlock()
 
@@ -225,7 +483,7 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 		return nil
 	}
 
-	klog.V(4).Infof("Starting sync cycle for %d volumes", len(items))
+	klog.V(4).Infof("Starting CAS sync cycle for %d volumes", len(items))
 	var firstErr error
 	for _, item := range items {
 		select {
@@ -234,9 +492,9 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 		default:
 		}
 
-		newSnapID, err := d.syncOne(ctx, item.volumeID, item.lastSnapID)
+		hash, newSnapPath, err := d.syncOne(ctx, &item.tv, "sync", "")
 		if err != nil {
-			klog.Errorf("Sync failed for volume %s: %v", item.volumeID, err)
+			klog.Errorf("CAS sync failed for volume %s: %v", item.tv.volumeID, err)
 			metrics.SyncFailures.Inc()
 			if firstErr == nil {
 				firstErr = err
@@ -245,226 +503,126 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 		}
 
 		d.mu.Lock()
-		if tv, ok := d.tracked[item.volumeID]; ok {
-			tv.lastSnapID = newSnapID
+		if tv, ok := d.tracked[item.tv.volumeID]; ok {
+			tv.lastLayerHash = hash
+			tv.lastSnapPath = newSnapPath
 			tv.lastSyncAt = time.Now()
 		}
 		d.mu.Unlock()
-		metrics.SyncLag.WithLabelValues(item.volumeID).Set(0)
+		metrics.SyncLag.WithLabelValues(item.tv.volumeID).Set(0)
 	}
 
 	return firstErr
 }
 
-// syncOne performs the sync algorithm for a single volume:
-//  1. Create a read-only snapshot of volumes/{id} at snapshots/{id}@sync-new
-//  2. btrfs send (incremental if lastSnapID exists) | zstd | upload to object storage
-//  3. Delete the previous sync snapshot
-//  4. Return the new snapshot name
-func (d *Daemon) syncOne(ctx context.Context, volumeID, lastSnapID string) (string, error) {
+// syncOne performs the CAS sync algorithm for a single volume:
+//  1. Create read-only snapshot: layers/{volumeID}@pending
+//  2. Determine parent snapshot path for incremental send
+//  3. btrfs send → cas.PutBlob() → get hash
+//  4. Update manifest with new layer
+//  5. Rotate layer snapshot to layers/{volumeID}@{shortHash}
+func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, label string) (string, string, error) {
 	start := time.Now()
 
-	volumePath := fmt.Sprintf("volumes/%s", volumeID)
-	newSnapName := fmt.Sprintf("%s@sync-new", volumeID)
-	newSnapPath := fmt.Sprintf("snapshots/%s", newSnapName)
+	volumePath := fmt.Sprintf("volumes/%s", tv.volumeID)
+	pendingPath := fmt.Sprintf("layers/%s@pending", tv.volumeID)
 
-	// Verify the volume exists.
 	if !d.btrfs.SubvolumeExists(ctx, volumePath) {
-		return "", fmt.Errorf("volume subvolume %q does not exist", volumePath)
+		return "", "", fmt.Errorf("volume subvolume %q does not exist", volumePath)
 	}
 
-	// If a stale sync-new snapshot exists (from a previous failed run), remove it.
-	// If removal fails, fall back to a unique name so the sync can proceed.
-	if d.btrfs.SubvolumeExists(ctx, newSnapPath) {
-		if err := d.btrfs.DeleteSubvolume(ctx, newSnapPath); err != nil {
-			klog.Warningf("stale sync snapshot %q undeletable, using unique suffix: %v", newSnapPath, err)
-			newSnapName = fmt.Sprintf("%s@sync-%d", volumeID, time.Now().UnixNano())
-			newSnapPath = fmt.Sprintf("snapshots/%s", newSnapName)
+	// Clean up stale pending snapshot from a previous failed run.
+	if d.btrfs.SubvolumeExists(ctx, pendingPath) {
+		if err := d.btrfs.DeleteSubvolume(ctx, pendingPath); err != nil {
+			klog.Warningf("stale pending snapshot %q undeletable, using unique suffix: %v", pendingPath, err)
+			pendingPath = fmt.Sprintf("layers/%s@pending-%d", tv.volumeID, time.Now().UnixNano())
 		}
 	}
 
 	// 1. Create a read-only snapshot.
-	if err := d.btrfs.SnapshotSubvolume(ctx, volumePath, newSnapPath, true); err != nil {
-		return "", fmt.Errorf("create sync snapshot: %w", err)
+	if err := d.btrfs.SnapshotSubvolume(ctx, volumePath, pendingPath, true); err != nil {
+		return "", "", fmt.Errorf("create pending snapshot: %w", err)
 	}
 
-	// 2. Send (incremental or full) and upload to object storage.
+	// 2. Determine parent for incremental send.
 	var parentPath string
-	var objKey string
-	ts := time.Now().UTC().Format("20060102T150405Z")
-
-	if lastSnapID != "" {
-		parentSnapPath := fmt.Sprintf("snapshots/%s", lastSnapID)
-		if d.btrfs.SubvolumeExists(ctx, parentSnapPath) {
-			parentPath = parentSnapPath
-			objKey = fmt.Sprintf("volumes/%s/incremental-%s.zst", volumeID, ts)
-		} else {
-			// Parent disappeared; fall back to full send.
-			klog.Warningf("Previous sync snapshot %s missing, falling back to full send for %s", lastSnapID, volumeID)
-			objKey = fmt.Sprintf("volumes/%s/full-%s.zst", volumeID, ts)
+	if tv.lastSnapPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastSnapPath) {
+		parentPath = tv.lastSnapPath
+	} else if tv.templateName != "" {
+		// Use template as parent for first sync.
+		tmplPath := fmt.Sprintf("templates/%s", tv.templateName)
+		if d.btrfs.SubvolumeExists(ctx, tmplPath) {
+			parentPath = tmplPath
 		}
-	} else {
-		objKey = fmt.Sprintf("volumes/%s/full-%s.zst", volumeID, ts)
 	}
+	// If no parent found, full send (empty volume or no template).
 
-	sendReader, err := d.btrfs.Send(ctx, newSnapPath, parentPath)
+	// 3. btrfs send → CAS PutBlob.
+	sendReader, err := d.btrfs.Send(ctx, pendingPath, parentPath)
 	if err != nil {
-		// Clean up the snapshot we just created.
-		_ = d.btrfs.DeleteSubvolume(ctx, newSnapPath)
-		return "", fmt.Errorf("btrfs send: %w", err)
+		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		return "", "", fmt.Errorf("btrfs send: %w", err)
 	}
 
-	// Pipe through zstd compression before uploading.
-	pr, pw := io.Pipe()
-	cw := &countingWriter{w: pw}
-	compressErrCh := make(chan error, 1)
-	go func() {
-		defer sendReader.Close()
-
-		encoder, encErr := zstd.NewWriter(cw)
-		if encErr != nil {
-			pw.CloseWithError(encErr)
-			compressErrCh <- encErr
-			return
-		}
-
-		_, copyErr := io.Copy(encoder, sendReader)
-		closeErr := encoder.Close()
-		if copyErr != nil {
-			pw.CloseWithError(copyErr)
-			compressErrCh <- copyErr
-			return
-		}
-		if closeErr != nil {
-			pw.CloseWithError(closeErr)
-			compressErrCh <- closeErr
-			return
-		}
-		pw.Close()
-		compressErrCh <- nil
-	}()
-
-	// Upload the compressed stream. Size is unknown (-1) since we are streaming.
-	if uploadErr := d.store.Upload(ctx, objKey, pr, -1); uploadErr != nil {
-		_ = pr.Close()
-		_ = d.btrfs.DeleteSubvolume(ctx, newSnapPath)
-		return "", fmt.Errorf("upload to object storage key %q: %w", objKey, uploadErr)
+	hash, err := d.cas.PutBlob(ctx, sendReader)
+	_ = sendReader.Close()
+	if err != nil {
+		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		return "", "", fmt.Errorf("put blob: %w", err)
 	}
-	_ = pr.Close()
 
-	if compressErr := <-compressErrCh; compressErr != nil {
+	// 4. Update manifest.
+	manifest, manErr := d.cas.GetManifest(ctx, tv.volumeID)
+	if manErr != nil {
+		// Manifest doesn't exist yet — create it.
+		manifest = &cas.Manifest{
+			VolumeID:     tv.volumeID,
+			Base:         tv.templateHash,
+			TemplateName: tv.templateName,
+		}
+	}
+
+	parentHash := tv.lastLayerHash
+	if parentHash == "" {
+		parentHash = tv.templateHash
+	}
+	manifest.AppendLayer(cas.Layer{
+		Hash:   hash,
+		Parent: parentHash,
+		Type:   layerType,
+		Label:  label,
+		TS:     time.Now().UTC().Format(time.RFC3339),
+	})
+
+	if err := d.cas.PutManifest(ctx, manifest); err != nil {
+		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		return "", "", fmt.Errorf("put manifest: %w", err)
+	}
+
+	// 5. Rotate layer snapshots: delete old, rename pending to final.
+	shortHash := cas.ShortHash(hash)
+	newSnapPath := fmt.Sprintf("layers/%s@%s", tv.volumeID, shortHash)
+
+	if tv.lastSnapPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastSnapPath) {
+		if delErr := d.btrfs.DeleteSubvolume(ctx, tv.lastSnapPath); delErr != nil {
+			klog.Warningf("Failed to delete old layer snapshot %s: %v", tv.lastSnapPath, delErr)
+		}
+	}
+
+	// btrfs has no rename — use snapshot + delete to move.
+	if d.btrfs.SubvolumeExists(ctx, newSnapPath) {
 		_ = d.btrfs.DeleteSubvolume(ctx, newSnapPath)
-		return "", fmt.Errorf("zstd compression: %w", compressErr)
+	}
+	if err := d.btrfs.SnapshotSubvolume(ctx, pendingPath, newSnapPath, true); err != nil {
+		klog.Warningf("Failed to rename pending to %s: %v", newSnapPath, err)
+		newSnapPath = pendingPath // Keep using pending path as fallback.
+	} else {
+		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 	}
 
 	metrics.SyncDuration.Observe(time.Since(start).Seconds())
-	metrics.SyncBytesTransferred.Add(float64(cw.bytes))
-	klog.V(2).Infof("Synced volume %s to %s", volumeID, objKey)
+	klog.V(2).Infof("CAS synced volume %s → blob %s (type=%s)",
+		tv.volumeID, cas.ShortHash(hash), layerType)
 
-	// 3. Delete the previous sync snapshot if it exists.
-	if lastSnapID != "" {
-		oldSnapPath := fmt.Sprintf("snapshots/%s", lastSnapID)
-		if d.btrfs.SubvolumeExists(ctx, oldSnapPath) {
-			if delErr := d.btrfs.DeleteSubvolume(ctx, oldSnapPath); delErr != nil {
-				klog.Warningf("Failed to delete previous sync snapshot %s: %v", lastSnapID, delErr)
-			}
-		}
-	}
-
-	// 4. Return the new snapshot name.
-	return newSnapName, nil
-}
-
-// ListObjects lists all object keys matching the given prefix.
-func (d *Daemon) ListObjects(ctx context.Context, prefix string) ([]string, error) {
-	if d.store == nil {
-		return nil, fmt.Errorf("object storage not configured")
-	}
-
-	objects, err := d.store.List(ctx, prefix)
-	if err != nil {
-		return nil, err
-	}
-
-	keys := make([]string, 0, len(objects))
-	for _, obj := range objects {
-		keys = append(keys, obj.Key)
-	}
-	return keys, nil
-}
-
-// RestoreFromStorage downloads a compressed btrfs send stream from object
-// storage and receives it into the volumes directory to reconstruct a
-// subvolume. Used for cross-node migration when a volume is needed on a
-// different node. If objKey is empty, the latest full send is found
-// automatically.
-func (d *Daemon) RestoreFromStorage(ctx context.Context, volumeID, objKey string) error {
-	if d.store == nil {
-		return fmt.Errorf("object storage not configured")
-	}
-
-	// Auto-discover latest full send if no key specified.
-	if objKey == "" {
-		keys, err := d.ListObjects(ctx, fmt.Sprintf("volumes/%s/", volumeID))
-		if err != nil {
-			return fmt.Errorf("list storage objects: %w", err)
-		}
-		if len(keys) == 0 {
-			return fmt.Errorf("no snapshots in object storage for volume %q", volumeID)
-		}
-		// Prefer the latest full send; fall back to latest object.
-		objKey = keys[len(keys)-1]
-		for i := len(keys) - 1; i >= 0; i-- {
-			if strings.HasPrefix(filepath.Base(keys[i]), "full-") {
-				objKey = keys[i]
-				break
-			}
-		}
-	}
-
-	klog.Infof("Restoring volume %q from storage: %s", volumeID, objKey)
-
-	reader, err := d.store.Download(ctx, objKey)
-	if err != nil {
-		return fmt.Errorf("download %q: %w", objKey, err)
-	}
-	defer reader.Close()
-
-	// Decompress the zstd stream.
-	decoder, decErr := zstd.NewReader(reader)
-	if decErr != nil {
-		return fmt.Errorf("zstd decoder: %w", decErr)
-	}
-	defer decoder.Close()
-
-	// Receive into the volumes directory.
-	if err := d.btrfs.Receive(ctx, "volumes", decoder); err != nil {
-		return fmt.Errorf("btrfs receive volume %q: %w", volumeID, err)
-	}
-
-	// btrfs receive creates the subvolume with the snapshot basename from the
-	// send stream (e.g. "{volID}@sync-new"). Rename to the canonical path that
-	// NodePublishVolume expects.
-	receivedPath := fmt.Sprintf("volumes/%s@sync-new", volumeID)
-	canonicalPath := fmt.Sprintf("volumes/%s", volumeID)
-
-	if d.btrfs.SubvolumeExists(ctx, receivedPath) {
-		// Remove any stale subvolume at the target path.
-		if d.btrfs.SubvolumeExists(ctx, canonicalPath) {
-			if err := d.btrfs.DeleteSubvolume(ctx, canonicalPath); err != nil {
-				return fmt.Errorf("delete stale volume %q before rename: %w", canonicalPath, err)
-			}
-		}
-		// Create a writable snapshot (btrfs receive creates read-only snapshots).
-		if err := d.btrfs.SnapshotSubvolume(ctx, receivedPath, canonicalPath, false); err != nil {
-			return fmt.Errorf("snapshot %q -> %q: %w", receivedPath, canonicalPath, err)
-		}
-		// Delete the intermediate read-only snapshot.
-		if err := d.btrfs.DeleteSubvolume(ctx, receivedPath); err != nil {
-			klog.Warningf("Failed to clean up intermediate snapshot %q: %v", receivedPath, err)
-		}
-	}
-
-	klog.Infof("Volume %q restored from storage successfully", volumeID)
-	return nil
+	return hash, newSnapPath, nil
 }

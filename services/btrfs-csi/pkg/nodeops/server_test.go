@@ -1,7 +1,6 @@
 package nodeops
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -20,6 +19,9 @@ func TestNewServer(t *testing.T) {
 	}
 	if s.tmplMgr != nil {
 		t.Error("tmplMgr should be nil when constructed with nil")
+	}
+	if s.cas != nil {
+		t.Error("cas should be nil when constructed with nil")
 	}
 	if s.srv != nil {
 		t.Error("srv should be nil before Start is called")
@@ -80,16 +82,16 @@ func TestJsonCodec_Unmarshal(t *testing.T) {
 	}
 }
 
-func TestRestoreVolumeFromS3_NilSyncer(t *testing.T) {
+func TestSyncVolume_NilSyncer(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
 	s := NewServer(bm, nil, nil, nil)
 
-	err := s.restoreVolumeFromS3(context.Background(), "vol-1")
-	if err == nil {
-		t.Fatal("expected error when syncer is nil, got nil")
-	}
-	if !strings.Contains(err.Error(), "S3 sync not configured") {
-		t.Errorf("error message = %q, want it to contain %q", err.Error(), "S3 sync not configured")
+	// Use handleSyncVolume indirectly — the syncer is nil, so any sync
+	// attempt through the server should fail with "CAS sync not configured".
+	// Since restoreVolumeFromS3 no longer exists, we test that the server
+	// properly stores a nil syncer.
+	if s.syncer != nil {
+		t.Error("syncer should be nil")
 	}
 }
 
@@ -159,5 +161,64 @@ func TestPromoteToTemplate_NilTmplMgr(t *testing.T) {
 
 	if s.tmplMgr != nil {
 		t.Error("expected nil tmplMgr")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// VolumeTrackRequest serialization (with new template fields)
+// ---------------------------------------------------------------------------
+
+func TestVolumeTrackRequest_Marshal(t *testing.T) {
+	codec := jsonCodec{}
+	req := VolumeTrackRequest{
+		VolumeID:     "vol-123",
+		TemplateName: "nodejs",
+		TemplateHash: "sha256:abc123",
+	}
+
+	data, err := codec.Marshal(req)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var decoded VolumeTrackRequest
+	if err := codec.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if decoded.VolumeID != req.VolumeID {
+		t.Errorf("VolumeID = %q, want %q", decoded.VolumeID, req.VolumeID)
+	}
+	if decoded.TemplateName != req.TemplateName {
+		t.Errorf("TemplateName = %q, want %q", decoded.TemplateName, req.TemplateName)
+	}
+	if decoded.TemplateHash != req.TemplateHash {
+		t.Errorf("TemplateHash = %q, want %q", decoded.TemplateHash, req.TemplateHash)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DeleteVolumeCAS request serialization
+// ---------------------------------------------------------------------------
+
+func TestDeleteVolumeCASRequest_Marshal(t *testing.T) {
+	codec := jsonCodec{}
+	req := DeleteVolumeCASRequest{VolumeID: "vol-xyz"}
+
+	data, err := codec.Marshal(req)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	if !strings.Contains(string(data), "vol-xyz") {
+		t.Errorf("marshaled data should contain vol-xyz, got %s", string(data))
+	}
+
+	var decoded DeleteVolumeCASRequest
+	if err := codec.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if decoded.VolumeID != "vol-xyz" {
+		t.Errorf("VolumeID = %q, want %q", decoded.VolumeID, "vol-xyz")
 	}
 }

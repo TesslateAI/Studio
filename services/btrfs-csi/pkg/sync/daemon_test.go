@@ -12,8 +12,8 @@ func TestNewDaemon(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
 	interval := 30 * time.Second
 
-	// Pass nil for object storage since we only test constructor fields.
-	d := NewDaemon(bm, nil, interval)
+	// Pass nil for CAS store and template manager since we only test constructor fields.
+	d := NewDaemon(bm, nil, nil, interval)
 
 	if d == nil {
 		t.Fatal("NewDaemon returned nil")
@@ -21,8 +21,11 @@ func TestNewDaemon(t *testing.T) {
 	if d.btrfs != bm {
 		t.Error("btrfs manager not set correctly")
 	}
-	if d.store != nil {
-		t.Error("object storage should be nil when passed nil")
+	if d.cas != nil {
+		t.Error("CAS store should be nil when passed nil")
+	}
+	if d.tmplMgr != nil {
+		t.Error("template manager should be nil when passed nil")
 	}
 	if d.interval != interval {
 		t.Errorf("interval = %v, want %v", d.interval, interval)
@@ -40,10 +43,10 @@ func TestNewDaemon(t *testing.T) {
 
 func TestTrackUntrack(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
+	d := NewDaemon(bm, nil, nil, 60*time.Second)
 
 	// Track a volume.
-	d.TrackVolume("vol-1")
+	d.TrackVolume("vol-1", "", "")
 
 	d.mu.Lock()
 	if _, exists := d.tracked["vol-1"]; !exists {
@@ -55,7 +58,7 @@ func TestTrackUntrack(t *testing.T) {
 	d.mu.Unlock()
 
 	// Track a second volume.
-	d.TrackVolume("vol-2")
+	d.TrackVolume("vol-2", "", "")
 
 	d.mu.Lock()
 	if len(d.tracked) != 2 {
@@ -63,8 +66,8 @@ func TestTrackUntrack(t *testing.T) {
 	}
 	d.mu.Unlock()
 
-	// Untrack vol-1. Note: UntrackVolume tries to delete the last sync
-	// snapshot via btrfs, but since there is no lastSnapID set and the
+	// Untrack vol-1. Note: UntrackVolume tries to delete the last layer
+	// snapshot via btrfs, but since there is no lastSnapPath set and the
 	// btrfs manager won't find any real subvolume, the untrack still
 	// removes the entry from the map.
 	d.UntrackVolume("vol-1")
@@ -93,11 +96,11 @@ func TestTrackUntrack(t *testing.T) {
 
 func TestTrackVolume_Idempotent(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
+	d := NewDaemon(bm, nil, nil, 60*time.Second)
 
-	d.TrackVolume("vol-1")
-	d.TrackVolume("vol-1")
-	d.TrackVolume("vol-1")
+	d.TrackVolume("vol-1", "", "")
+	d.TrackVolume("vol-1", "", "")
+	d.TrackVolume("vol-1", "", "")
 
 	d.mu.Lock()
 	count := len(d.tracked)
@@ -110,7 +113,7 @@ func TestTrackVolume_Idempotent(t *testing.T) {
 
 func TestUntrackVolume_NotTracked(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
+	d := NewDaemon(bm, nil, nil, 60*time.Second)
 
 	// Untracking a volume that was never tracked should not panic.
 	d.UntrackVolume("nonexistent")
@@ -126,7 +129,7 @@ func TestUntrackVolume_NotTracked(t *testing.T) {
 
 func TestSyncVolume_NotTracked(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
+	d := NewDaemon(bm, nil, nil, 60*time.Second)
 
 	err := d.SyncVolume(context.Background(), "vol-not-tracked")
 	if err == nil {
@@ -141,9 +144,9 @@ func TestSyncVolume_NotTracked(t *testing.T) {
 
 func TestTrackVolume_SetsVolumeID(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
+	d := NewDaemon(bm, nil, nil, 60*time.Second)
 
-	d.TrackVolume("my-special-vol")
+	d.TrackVolume("my-special-vol", "nodejs", "abc123hash")
 
 	d.mu.Lock()
 	tv, exists := d.tracked["my-special-vol"]
@@ -155,62 +158,23 @@ func TestTrackVolume_SetsVolumeID(t *testing.T) {
 	if tv.volumeID != "my-special-vol" {
 		t.Errorf("volumeID = %q, want %q", tv.volumeID, "my-special-vol")
 	}
-	if tv.lastSnapID != "" {
-		t.Errorf("lastSnapID = %q, want empty", tv.lastSnapID)
+	if tv.templateName != "nodejs" {
+		t.Errorf("templateName = %q, want %q", tv.templateName, "nodejs")
+	}
+	if tv.templateHash != "abc123hash" {
+		t.Errorf("templateHash = %q, want %q", tv.templateHash, "abc123hash")
+	}
+	if tv.lastSnapPath != "" {
+		t.Errorf("lastSnapPath = %q, want empty", tv.lastSnapPath)
 	}
 	if !tv.lastSyncAt.IsZero() {
 		t.Errorf("lastSyncAt should be zero time, got %v", tv.lastSyncAt)
 	}
 }
 
-func TestListObjects_NilStore(t *testing.T) {
-	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
-
-	_, err := d.ListObjects(context.Background(), "some/prefix")
-	if err == nil {
-		t.Fatal("expected error when object storage is nil")
-	}
-
-	wantMsg := "object storage not configured"
-	if err.Error() != wantMsg {
-		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
-	}
-}
-
-func TestRestoreFromStorage_NilStore(t *testing.T) {
-	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
-
-	err := d.RestoreFromStorage(context.Background(), "vol-1", "backups/vol-1/snap.tar.zst")
-	if err == nil {
-		t.Fatal("expected error when object storage is nil")
-	}
-
-	wantMsg := "object storage not configured"
-	if err.Error() != wantMsg {
-		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
-	}
-}
-
-func TestRestoreFromStorage_EmptyKey_NilStore(t *testing.T) {
-	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
-
-	err := d.RestoreFromStorage(context.Background(), "vol-1", "")
-	if err == nil {
-		t.Fatal("expected error when object storage is nil, even with empty key")
-	}
-
-	wantMsg := "object storage not configured"
-	if err.Error() != wantMsg {
-		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
-	}
-}
-
 func TestStart_ContextCancel(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
-	d := NewDaemon(bm, nil, 60*time.Second)
+	d := NewDaemon(bm, nil, nil, 60*time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately

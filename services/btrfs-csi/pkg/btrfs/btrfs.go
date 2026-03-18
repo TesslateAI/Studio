@@ -299,7 +299,7 @@ func (m *Manager) Receive(ctx context.Context, destDir string, reader io.Reader)
 // EnsurePoolStructure creates the top-level pool subdirectories (templates/,
 // volumes/, snapshots/) as btrfs subvolumes if they do not already exist.
 func (m *Manager) EnsurePoolStructure(ctx context.Context) error {
-	for _, dir := range []string{"templates", "volumes", "snapshots"} {
+	for _, dir := range []string{"templates", "volumes", "snapshots", "layers"} {
 		if m.SubvolumeExists(ctx, dir) {
 			continue
 		}

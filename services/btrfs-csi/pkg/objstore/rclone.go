@@ -153,6 +153,19 @@ func (r *RcloneStorage) List(ctx context.Context, prefix string) ([]ObjectInfo, 
 	return results, nil
 }
 
+// Copy performs a server-side copy from srcKey to dstKey using `rclone copyto`.
+// For S3, this uses CopyObject (zero data transfer — server-side only).
+func (r *RcloneStorage) Copy(ctx context.Context, srcKey, dstKey string) error {
+	cmd := r.command(ctx, "copyto", r.remotePath(srcKey), r.remotePath(dstKey))
+	cmd.Stderr = &logWriter{prefix: "rclone copyto"}
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("copy %q -> %q: %w", srcKey, dstKey, err)
+	}
+	klog.V(4).Infof("Copied %s -> %s", srcKey, dstKey)
+	return nil
+}
+
 // EnsureBucket creates the bucket if it does not already exist using
 // `rclone mkdir`. This operation is idempotent.
 func (r *RcloneStorage) EnsureBucket(ctx context.Context) error {

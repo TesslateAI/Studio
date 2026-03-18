@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/grpc"
@@ -20,7 +19,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
-	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/template"
 )
@@ -35,17 +34,17 @@ type Server struct {
 	btrfs   *btrfs.Manager
 	syncer  *bsync.Daemon
 	tmplMgr *template.Manager
-	store   objstore.ObjectStorage
+	cas     *cas.Store
 	srv     *grpc.Server
 }
 
 // NewServer creates a nodeops Server.
-func NewServer(btrfs *btrfs.Manager, syncer *bsync.Daemon, tmplMgr *template.Manager, store objstore.ObjectStorage) *Server {
+func NewServer(btrfs *btrfs.Manager, syncer *bsync.Daemon, tmplMgr *template.Manager, casStore *cas.Store) *Server {
 	return &Server{
 		btrfs:   btrfs,
 		syncer:  syncer,
 		tmplMgr: tmplMgr,
-		store:   store,
+		cas:     casStore,
 	}
 }
 
@@ -162,7 +161,9 @@ type (
 	}
 
 	VolumeTrackRequest struct {
-		VolumeID string `json:"volume_id"`
+		VolumeID     string `json:"volume_id"`
+		TemplateName string `json:"template_name,omitempty"`
+		TemplateHash string `json:"template_hash,omitempty"`
 	}
 
 	TemplateRequest struct {
@@ -180,7 +181,7 @@ type (
 		Gid  int    `json:"gid"`
 	}
 
-	DeleteFromS3Request struct {
+	DeleteVolumeCASRequest struct {
 		VolumeID string `json:"volume_id"`
 	}
 
@@ -200,9 +201,36 @@ type (
 
 	// ReceiveStreamChunk is sent by the client in a client-streaming RPC.
 	ReceiveStreamChunk struct {
-		VolumeID string `json:"volume_id,omitempty"` // set on first chunk
-		Data     []byte `json:"data"`
-		Final    bool   `json:"final,omitempty"` // set on last chunk
+		VolumeID       string `json:"volume_id,omitempty"`        // set on first chunk
+		TemplateParent string `json:"template_parent,omitempty"`  // template name if incremental from template
+		Data           []byte `json:"data"`
+		Final          bool   `json:"final,omitempty"` // set on last chunk
+	}
+
+	HasBlobsRequest struct {
+		Hashes []string `json:"hashes"`
+	}
+
+	HasBlobsResponse struct {
+		Exists []bool `json:"exists"`
+	}
+
+	CreateUserSnapshotRequest struct {
+		VolumeID string `json:"volume_id"`
+		Label    string `json:"label"`
+	}
+
+	CreateUserSnapshotResponse struct {
+		Hash string `json:"hash"`
+	}
+
+	RestoreFromSnapshotRequest struct {
+		VolumeID   string `json:"volume_id"`
+		TargetHash string `json:"target_hash"`
+	}
+
+	GetVolumeMetadataRequest struct {
+		VolumeID string `json:"volume_id"`
 	}
 
 	Empty struct{}
@@ -237,10 +265,14 @@ func registerNodeOpsServer(srv *grpc.Server, s *Server) {
 			{MethodName: "SyncVolume", Handler: s.handleSyncVolume},
 			{MethodName: "PromoteToTemplate", Handler: s.handlePromoteToTemplate},
 			{MethodName: "SetOwnership", Handler: s.handleSetOwnership},
-			{MethodName: "DeleteFromS3", Handler: s.handleDeleteFromS3},
+			{MethodName: "DeleteVolumeCAS", Handler: s.handleDeleteVolumeCAS},
 			{MethodName: "GetSyncState", Handler: s.handleGetSyncState},
 			{MethodName: "SendVolumeTo", Handler: s.handleSendVolumeTo},
 			{MethodName: "SendTemplateTo", Handler: s.handleSendTemplateTo},
+			{MethodName: "HasBlobs", Handler: s.handleHasBlobs},
+			{MethodName: "CreateUserSnapshot", Handler: s.handleCreateUserSnapshot},
+			{MethodName: "RestoreFromSnapshot", Handler: s.handleRestoreFromSnapshot},
+			{MethodName: "GetVolumeMetadata", Handler: s.handleGetVolumeMetadata},
 		},
 		Streams: []grpc.StreamDesc{
 			{
@@ -252,6 +284,10 @@ func registerNodeOpsServer(srv *grpc.Server, s *Server) {
 		},
 	}, s)
 }
+
+// ---------------------------------------------------------------------------
+// Existing handler implementations
+// ---------------------------------------------------------------------------
 
 func (s *Server) handleCreateSubvolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
 	var req SubvolumeRequest
@@ -334,18 +370,18 @@ func (s *Server) handleListSubvolumes(_ interface{}, ctx context.Context, dec fu
 	return &ListSubvolumesResponse{Subvolumes: infos}, nil
 }
 
-func (s *Server) handleTrackVolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+func (s *Server) handleTrackVolume(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
 	var req VolumeTrackRequest
 	if err := dec(&req); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
 	}
 	if s.syncer != nil {
-		s.syncer.TrackVolume(req.VolumeID)
+		s.syncer.TrackVolume(req.VolumeID, req.TemplateName, req.TemplateHash)
 	}
 	return &Empty{}, nil
 }
 
-func (s *Server) handleUntrackVolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+func (s *Server) handleUntrackVolume(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
 	var req VolumeTrackRequest
 	if err := dec(&req); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
@@ -373,7 +409,7 @@ func (s *Server) handleSyncVolume(_ interface{}, ctx context.Context, dec func(i
 		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
 	}
 	if s.syncer == nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "S3 sync not configured")
+		return nil, status.Errorf(codes.FailedPrecondition, "CAS sync not configured")
 	}
 	if err := s.syncer.SyncVolume(ctx, req.VolumeID); err != nil {
 		return nil, status.Errorf(codes.Internal, "sync volume: %v", err)
@@ -386,7 +422,10 @@ func (s *Server) handleRestoreVolume(_ interface{}, ctx context.Context, dec fun
 	if err := dec(&req); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
 	}
-	if err := s.restoreVolumeFromS3(ctx, req.VolumeID); err != nil {
+	if s.syncer == nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "CAS sync not configured")
+	}
+	if err := s.syncer.RestoreVolume(ctx, req.VolumeID); err != nil {
 		return nil, status.Errorf(codes.Internal, "restore volume: %v", err)
 	}
 	return &Empty{}, nil
@@ -397,26 +436,25 @@ func (s *Server) handlePromoteToTemplate(_ interface{}, ctx context.Context, dec
 	if err := dec(&req); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
 	}
-	// Verify source volume exists
 	if !s.btrfs.SubvolumeExists(ctx, "volumes/"+req.VolumeID) {
 		return nil, status.Errorf(codes.NotFound, "volume %q does not exist", req.VolumeID)
 	}
-	// Delete existing template if present (refresh case)
+	// Delete existing template if present (refresh case).
 	tmplPath := "templates/" + req.TemplateName
 	if s.btrfs.SubvolumeExists(ctx, tmplPath) {
 		if err := s.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
 			return nil, status.Errorf(codes.Internal, "delete existing template: %v", err)
 		}
 	}
-	// Snapshot volume as read-only template
+	// Snapshot volume as read-only template.
 	if err := s.btrfs.SnapshotSubvolume(ctx, "volumes/"+req.VolumeID, tmplPath, true); err != nil {
 		return nil, status.Errorf(codes.Internal, "snapshot to template: %v", err)
 	}
-	// Upload to S3
-	if err := s.tmplMgr.UploadTemplate(ctx, req.TemplateName); err != nil {
+	// Upload to CAS and record hash.
+	if _, err := s.tmplMgr.UploadTemplate(ctx, req.TemplateName); err != nil {
 		return nil, status.Errorf(codes.Internal, "upload template: %v", err)
 	}
-	// Cleanup build volume
+	// Cleanup build volume.
 	if err := s.btrfs.DeleteSubvolume(ctx, "volumes/"+req.VolumeID); err != nil {
 		return nil, status.Errorf(codes.Internal, "cleanup build volume: %v", err)
 	}
@@ -432,7 +470,7 @@ func (s *Server) handleSetOwnership(_ interface{}, ctx context.Context, dec func
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 	if req.Uid == 0 && req.Gid == 0 {
-		return &Empty{}, nil // Nothing to do
+		return &Empty{}, nil
 	}
 	if err := s.btrfs.SetOwnership(ctx, req.Name, req.Uid, req.Gid); err != nil {
 		return nil, status.Errorf(codes.Internal, "set ownership: %v", err)
@@ -440,31 +478,20 @@ func (s *Server) handleSetOwnership(_ interface{}, ctx context.Context, dec func
 	return &Empty{}, nil
 }
 
-func (s *Server) handleDeleteFromS3(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
-	var req DeleteFromS3Request
+func (s *Server) handleDeleteVolumeCAS(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req DeleteVolumeCASRequest
 	if err := dec(&req); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
 	}
 	if req.VolumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
-	if s.store == nil {
-		klog.V(2).Infof("DeleteFromS3: no object storage configured, skipping for %s", req.VolumeID)
+	if s.syncer == nil {
+		klog.V(2).Infof("DeleteVolumeCAS: no syncer configured, skipping for %s", req.VolumeID)
 		return &Empty{}, nil
 	}
-
-	prefix := fmt.Sprintf("volumes/%s/", req.VolumeID)
-	objects, err := s.store.List(ctx, prefix)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "list S3 objects for %q: %v", req.VolumeID, err)
-	}
-	for _, obj := range objects {
-		if delErr := s.store.Delete(ctx, obj.Key); delErr != nil {
-			klog.Warningf("DeleteFromS3: failed to delete %q: %v", obj.Key, delErr)
-		}
-	}
-	if len(objects) > 0 {
-		klog.V(2).Infof("DeleteFromS3: deleted %d objects for volume %s", len(objects), req.VolumeID)
+	if err := s.syncer.DeleteVolume(ctx, req.VolumeID); err != nil {
+		return nil, status.Errorf(codes.Internal, "delete volume CAS data: %v", err)
 	}
 	return &Empty{}, nil
 }
@@ -481,12 +508,119 @@ func (s *Server) handleGetSyncState(_ interface{}, _ context.Context, dec func(i
 	result := make([]TrackedVolumeState, len(states))
 	for i, st := range states {
 		result[i] = TrackedVolumeState{
-			VolumeID:   st.VolumeID,
-			LastSyncAt: st.LastSyncAt,
+			VolumeID:     st.VolumeID,
+			TemplateHash: st.TemplateHash,
+			LastSyncAt:   st.LastSyncAt,
 		}
 	}
 	return &GetSyncStateResponse{Volumes: result}, nil
 }
+
+// ---------------------------------------------------------------------------
+// New CAS-aware handlers
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleHasBlobs(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req HasBlobsRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	results := make([]bool, len(req.Hashes))
+	for i, hash := range req.Hashes {
+		// Check if this hash exists as a local subvolume (template or layer).
+		shortHash := cas.ShortHash(hash)
+		// Check templates — iterate local templates to see if any match.
+		// Also check if CAS store has it.
+		if s.cas != nil {
+			exists, err := s.cas.HasBlob(ctx, hash)
+			if err == nil && exists {
+				results[i] = true
+				continue
+			}
+		}
+		// Check local layers.
+		layers, err := s.btrfs.ListSubvolumes(ctx, "layers/")
+		if err == nil {
+			for _, sub := range layers {
+				if len(sub.Name) >= len(shortHash) && sub.Name[len(sub.Name)-len(shortHash):] == shortHash {
+					results[i] = true
+					break
+				}
+			}
+		}
+	}
+	return &HasBlobsResponse{Exists: results}, nil
+}
+
+func (s *Server) handleCreateUserSnapshot(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req CreateUserSnapshotRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if s.syncer == nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "CAS sync not configured")
+	}
+	hash, err := s.syncer.CreateSnapshot(ctx, req.VolumeID, req.Label)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "create snapshot: %v", err)
+	}
+	return &CreateUserSnapshotResponse{Hash: hash}, nil
+}
+
+func (s *Server) handleRestoreFromSnapshot(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req RestoreFromSnapshotRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.TargetHash == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and target_hash required")
+	}
+	if s.syncer == nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "CAS sync not configured")
+	}
+	if err := s.syncer.RestoreToSnapshot(ctx, req.VolumeID, req.TargetHash); err != nil {
+		return nil, status.Errorf(codes.Internal, "restore to snapshot: %v", err)
+	}
+	return &Empty{}, nil
+}
+
+func (s *Server) handleGetVolumeMetadata(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req GetVolumeMetadataRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if s.syncer == nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "CAS sync not configured")
+	}
+	manifest, err := s.syncer.GetManifest(ctx, req.VolumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get manifest: %v", err)
+	}
+
+	meta := &VolumeMetadata{
+		VolumeID:     manifest.VolumeID,
+		TemplateName: manifest.TemplateName,
+		TemplateHash: manifest.Base,
+		LatestHash:   manifest.LatestHash(),
+		LayerCount:   len(manifest.Layers),
+	}
+	for _, l := range manifest.Layers {
+		if l.Type == "snapshot" {
+			meta.Snapshots = append(meta.Snapshots, l)
+		}
+	}
+	return meta, nil
+}
+
+// ---------------------------------------------------------------------------
+// Peer transfer handlers
+// ---------------------------------------------------------------------------
 
 func (s *Server) handleSendVolumeTo(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
 	var req SendVolumeToRequest
@@ -518,7 +652,7 @@ func (s *Server) handleSendVolumeTo(_ interface{}, ctx context.Context, dec func
 		_ = s.btrfs.DeleteSubvolume(bg, snapPath)
 	}()
 
-	if err := s.sendSubvolumeTo(ctx, snapPath, req.VolumeID, req.TargetAddr); err != nil {
+	if err := s.sendSubvolumeTo(ctx, snapPath, req.VolumeID, req.TargetAddr, ""); err != nil {
 		return nil, status.Errorf(codes.Internal, "send volume to %s: %v", req.TargetAddr, err)
 	}
 
@@ -541,7 +675,7 @@ func (s *Server) handleSendTemplateTo(_ interface{}, ctx context.Context, dec fu
 	}
 
 	// Templates are already read-only — send directly.
-	if err := s.sendSubvolumeTo(ctx, tmplPath, req.TemplateName, req.TargetAddr); err != nil {
+	if err := s.sendSubvolumeTo(ctx, tmplPath, req.TemplateName, req.TargetAddr, ""); err != nil {
 		return nil, status.Errorf(codes.Internal, "send template to %s: %v", req.TargetAddr, err)
 	}
 
@@ -550,11 +684,19 @@ func (s *Server) handleSendTemplateTo(_ interface{}, ctx context.Context, dec fu
 }
 
 // sendSubvolumeTo streams a btrfs send | zstd to the target node's ReceiveVolumeStream RPC.
-// Uses streaming compression (same pattern as S3 sync in daemon.go syncOne):
-//
-//	btrfs send → io.Copy → zstd.NewWriter(pw) → io.Pipe → 2MB chunks → gRPC stream
-func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, targetAddr string) error {
-	sendReader, err := s.btrfs.Send(ctx, subvolPath, "")
+// If templateParent is non-empty, it's included in the header so the receiver can
+// ensure the template exists before btrfs receive.
+func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, targetAddr, templateParent string) error {
+	// CAS-aware incremental: try to use template as parent for smaller transfer.
+	parentPath := ""
+	if templateParent != "" {
+		tmplPath := fmt.Sprintf("templates/%s", templateParent)
+		if s.btrfs.SubvolumeExists(ctx, tmplPath) {
+			parentPath = tmplPath
+		}
+	}
+
+	sendReader, err := s.btrfs.Send(ctx, subvolPath, parentPath)
 	if err != nil {
 		return fmt.Errorf("btrfs send %q: %w", subvolPath, err)
 	}
@@ -574,8 +716,9 @@ func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, ta
 		return fmt.Errorf("open receive stream on %s: %w", targetAddr, err)
 	}
 
-	// Send metadata header first.
-	if err := stream.SendMsg(&ReceiveStreamChunk{VolumeID: identifier}); err != nil {
+	// Send metadata header with template parent info.
+	header := &ReceiveStreamChunk{VolumeID: identifier, TemplateParent: templateParent}
+	if err := stream.SendMsg(header); err != nil {
 		return fmt.Errorf("stream header: %w", err)
 	}
 
@@ -583,7 +726,6 @@ func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, ta
 	const chunkSize = 2 * 1024 * 1024 // 2 MiB
 	pr, pw := io.Pipe()
 
-	// Goroutine: btrfs send → streaming zstd compress → pipe
 	go func() {
 		encoder, encErr := zstd.NewWriter(pw)
 		if encErr != nil {
@@ -603,7 +745,6 @@ func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, ta
 		pw.Close()
 	}()
 
-	// Main: read compressed data in 2MB chunks → gRPC send
 	buf := make([]byte, chunkSize)
 	for {
 		n, readErr := io.ReadFull(pr, buf)
@@ -621,7 +762,6 @@ func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, ta
 		}
 	}
 
-	// Final marker + response.
 	if err := stream.SendMsg(&ReceiveStreamChunk{Final: true}); err != nil {
 		return fmt.Errorf("stream final: %w", err)
 	}
@@ -634,13 +774,12 @@ func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, ta
 
 // handleReceiveVolumeStream is a client-streaming RPC handler.
 // Receives a streaming zstd-compressed btrfs send stream from a peer node.
-// Uses streaming decompression (same pattern as S3 restore in daemon.go RestoreFromStorage):
-//
-//	gRPC chunks → io.Pipe → zstd.NewReader → btrfs.Receive
+// Template parent awareness: if the header includes TemplateParent, the
+// receiver ensures the template exists before btrfs receive.
 func (s *Server) handleReceiveVolumeStream(srv interface{}, stream grpc.ServerStream) error {
 	ctx := stream.Context()
 
-	// Phase 1: receive header with volume ID.
+	// Phase 1: receive header with volume ID and optional template parent.
 	var header ReceiveStreamChunk
 	if err := stream.RecvMsg(&header); err != nil {
 		return status.Errorf(codes.InvalidArgument, "receive header: %v", err)
@@ -650,10 +789,16 @@ func (s *Server) handleReceiveVolumeStream(srv interface{}, stream grpc.ServerSt
 		return status.Error(codes.InvalidArgument, "first message must contain volume_id")
 	}
 
+	// Ensure template parent exists if specified.
+	if header.TemplateParent != "" {
+		if err := s.tmplMgr.EnsureTemplate(ctx, header.TemplateParent); err != nil {
+			klog.Warningf("ReceiveVolumeStream: ensure template parent %s: %v", header.TemplateParent, err)
+		}
+	}
+
 	// Phase 2: pipe gRPC chunks → streaming zstd decompress → btrfs receive.
 	compressedPR, compressedPW := io.Pipe()
 
-	// Goroutine: receive gRPC chunks → write compressed bytes into pipe.
 	recvErrCh := make(chan error, 1)
 	go func() {
 		defer compressedPW.Close()
@@ -681,7 +826,6 @@ func (s *Server) handleReceiveVolumeStream(srv interface{}, stream grpc.ServerSt
 		}
 	}()
 
-	// Main: streaming zstd decompress → btrfs receive.
 	decoder, decErr := zstd.NewReader(compressedPR)
 	if decErr != nil {
 		compressedPR.Close()
@@ -717,51 +861,4 @@ func (s *Server) handleReceiveVolumeStream(srv interface{}, stream grpc.ServerSt
 
 	klog.Infof("ReceiveVolumeStream: received volume %s", volumeID)
 	return stream.SendMsg(&Empty{})
-}
-
-// restoreVolumeFromS3 downloads the latest snapshot chain from S3 and
-// reconstructs the volume via btrfs receive.
-func (s *Server) restoreVolumeFromS3(ctx context.Context, volumeID string) error {
-	if s.syncer == nil {
-		return fmt.Errorf("S3 sync not configured, cannot restore volume %q", volumeID)
-	}
-
-	// The sync daemon uploads to s3://bucket/volumes/{volumeID}/full-*.zst or incremental-*.zst.
-	// For restore, we download the latest full send stream and apply it.
-	s3Prefix := fmt.Sprintf("volumes/%s/", volumeID)
-
-	// List all snapshots for this volume to find the latest full send.
-	objects, err := s.syncer.ListObjects(ctx, s3Prefix)
-	if err != nil {
-		return fmt.Errorf("list storage objects for volume %q: %w", volumeID, err)
-	}
-
-	if len(objects) == 0 {
-		return fmt.Errorf("no snapshots found in object storage for volume %q", volumeID)
-	}
-
-	// Find the latest full send (we need a full send for initial restore).
-	var latestFullKey string
-	for i := len(objects) - 1; i >= 0; i-- {
-		if strings.Contains(objects[i], "full-") {
-			latestFullKey = objects[i]
-			break
-		}
-	}
-
-	if latestFullKey == "" {
-		// No full send — use the latest object (could be incremental, but it's
-		// better than nothing; the sync daemon should always create an initial full).
-		latestFullKey = objects[len(objects)-1]
-		klog.Warningf("No full send found for volume %q, using latest: %s", volumeID, latestFullKey)
-	}
-
-	klog.Infof("Restoring volume %q from storage: %s", volumeID, latestFullKey)
-
-	if err := s.syncer.RestoreFromStorage(ctx, volumeID, latestFullKey); err != nil {
-		return fmt.Errorf("restore from storage: %w", err)
-	}
-
-	klog.Infof("Volume %q restored successfully from storage", volumeID)
-	return nil
 }

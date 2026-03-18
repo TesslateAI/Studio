@@ -10,7 +10,7 @@ func TestNewManager(t *testing.T) {
 	bm := btrfs.NewManager("/pool")
 	poolPath := "/pool"
 
-	// With nil object storage (valid scenario for local-only usage).
+	// With nil CAS store (valid scenario for local-only usage).
 	m := NewManager(bm, nil, poolPath)
 	if m == nil {
 		t.Fatal("NewManager returned nil")
@@ -18,8 +18,8 @@ func TestNewManager(t *testing.T) {
 	if m.btrfs != bm {
 		t.Error("btrfs manager not set correctly")
 	}
-	if m.store != nil {
-		t.Error("object storage should be nil when passed nil")
+	if m.cas != nil {
+		t.Error("CAS store should be nil when passed nil")
 	}
 	if m.poolPath != poolPath {
 		t.Errorf("poolPath = %q, want %q", m.poolPath, poolPath)

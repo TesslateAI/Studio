@@ -61,7 +61,6 @@ func NewClientWithDialOptions(addr string, opts ...grpc.DialOption) (*Client, er
 //   - cfg with CertFile: mutual TLS
 //   - cfg without CertFile but with CAFile: server-auth TLS
 func loadClientTLS(cfg *TLSConfig) (credentials.TransportCredentials, error) {
-	// No TLS config → plaintext, matching server behavior when no certs are provided.
 	if cfg == nil {
 		return insecure.NewCredentials(), nil
 	}
@@ -70,7 +69,6 @@ func loadClientTLS(cfg *TLSConfig) (credentials.TransportCredentials, error) {
 		MinVersion: tls.VersionTLS13,
 	}
 
-	// Load client certificate for mTLS if provided.
 	if cfg.CertFile != "" {
 		if _, err := os.Stat(cfg.CertFile); err == nil {
 			cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
@@ -81,7 +79,6 @@ func loadClientTLS(cfg *TLSConfig) (credentials.TransportCredentials, error) {
 		}
 	}
 
-	// Load custom CA if provided.
 	if cfg.CAFile != "" {
 		caPEM, err := os.ReadFile(cfg.CAFile)
 		if err != nil {
@@ -143,8 +140,10 @@ func (c *Client) ListSubvolumes(ctx context.Context, prefix string) ([]Subvolume
 	return resp.Subvolumes, nil
 }
 
-func (c *Client) TrackVolume(ctx context.Context, volumeID string) error {
-	return c.invoke(ctx, "TrackVolume", &VolumeTrackRequest{VolumeID: volumeID}, &Empty{})
+func (c *Client) TrackVolume(ctx context.Context, volumeID, templateName, templateHash string) error {
+	return c.invoke(ctx, "TrackVolume", &VolumeTrackRequest{
+		VolumeID: volumeID, TemplateName: templateName, TemplateHash: templateHash,
+	}, &Empty{})
 }
 
 func (c *Client) UntrackVolume(ctx context.Context, volumeID string) error {
@@ -173,8 +172,8 @@ func (c *Client) SyncVolume(ctx context.Context, volumeID string) error {
 	return c.invoke(ctx, "SyncVolume", &VolumeTrackRequest{VolumeID: volumeID}, &Empty{})
 }
 
-func (c *Client) DeleteFromS3(ctx context.Context, volumeID string) error {
-	return c.invoke(ctx, "DeleteFromS3", &DeleteFromS3Request{VolumeID: volumeID}, &Empty{})
+func (c *Client) DeleteVolumeCAS(ctx context.Context, volumeID string) error {
+	return c.invoke(ctx, "DeleteVolumeCAS", &DeleteVolumeCASRequest{VolumeID: volumeID}, &Empty{})
 }
 
 func (c *Client) GetSyncState(ctx context.Context) ([]TrackedVolumeState, error) {
@@ -191,4 +190,36 @@ func (c *Client) SendVolumeTo(ctx context.Context, volumeID, targetAddr string) 
 
 func (c *Client) SendTemplateTo(ctx context.Context, templateName, targetAddr string) error {
 	return c.invoke(ctx, "SendTemplateTo", &SendTemplateToRequest{TemplateName: templateName, TargetAddr: targetAddr}, &Empty{})
+}
+
+func (c *Client) HasBlobs(ctx context.Context, hashes []string) ([]bool, error) {
+	var resp HasBlobsResponse
+	if err := c.invoke(ctx, "HasBlobs", &HasBlobsRequest{Hashes: hashes}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Exists, nil
+}
+
+func (c *Client) CreateUserSnapshot(ctx context.Context, volumeID, label string) (string, error) {
+	var resp CreateUserSnapshotResponse
+	if err := c.invoke(ctx, "CreateUserSnapshot", &CreateUserSnapshotRequest{
+		VolumeID: volumeID, Label: label,
+	}, &resp); err != nil {
+		return "", err
+	}
+	return resp.Hash, nil
+}
+
+func (c *Client) RestoreFromSnapshot(ctx context.Context, volumeID, targetHash string) error {
+	return c.invoke(ctx, "RestoreFromSnapshot", &RestoreFromSnapshotRequest{
+		VolumeID: volumeID, TargetHash: targetHash,
+	}, &Empty{})
+}
+
+func (c *Client) GetVolumeMetadata(ctx context.Context, volumeID string) (*VolumeMetadata, error) {
+	var resp VolumeMetadata
+	if err := c.invoke(ctx, "GetVolumeMetadata", &GetVolumeMetadataRequest{VolumeID: volumeID}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }

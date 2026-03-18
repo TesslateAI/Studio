@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -18,6 +19,7 @@ import (
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
 )
 
@@ -34,14 +36,16 @@ type NodeClientFactory func(nodeName string) (*nodeops.Client, error)
 // coordinates: volume→owner_node mapping, template→cached_nodes, node→capacity.
 type Server struct {
 	registry   *NodeRegistry
+	cas        *cas.Store // for manifest reads (ListSnapshots, EnsureCached)
 	nodeClient NodeClientFactory
 	srv        *grpc.Server
 }
 
 // NewServer creates a VolumeHub Server.
-func NewServer(registry *NodeRegistry, nodeClient NodeClientFactory) *Server {
+func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClientFactory) *Server {
 	return &Server{
 		registry:   registry,
+		cas:        casStore,
 		nodeClient: nodeClient,
 	}
 }
@@ -125,8 +129,6 @@ func (s *Server) Stop() {
 }
 
 // --- gRPC service implementation using manual service descriptors ---
-// This avoids protobuf compilation while still using proper gRPC transport.
-// Request/response bodies are JSON-encoded in a wrapper message.
 
 // Request and response types for the volumehub service.
 type (
@@ -158,12 +160,7 @@ type (
 	VolumeStatusRequest struct {
 		VolumeID string `json:"volume_id"`
 	}
-	VolumeStatusResponse struct {
-		VolumeID    string   `json:"volume_id"`
-		OwnerNode   string   `json:"owner_node"`
-		CachedNodes []string `json:"cached_nodes"`
-		LastSync    string   `json:"last_sync,omitempty"`
-	}
+	VolumeStatusResponse = VolumeStatus
 
 	CreateServiceVolumeRequest struct {
 		BaseVolumeID string `json:"base_volume_id"`
@@ -171,6 +168,26 @@ type (
 	}
 	CreateServiceVolumeResponse struct {
 		VolumeID string `json:"volume_id"`
+	}
+
+	CreateSnapshotRequest struct {
+		VolumeID string `json:"volume_id"`
+		Label    string `json:"label,omitempty"`
+	}
+	CreateSnapshotResponse struct {
+		Hash string `json:"hash"`
+	}
+
+	ListSnapshotsRequest struct {
+		VolumeID string `json:"volume_id"`
+	}
+	ListSnapshotsResponse struct {
+		Snapshots []cas.Layer `json:"snapshots"`
+	}
+
+	RestoreToSnapshotRequest struct {
+		VolumeID   string `json:"volume_id"`
+		TargetHash string `json:"target_hash"`
 	}
 
 	Empty struct{}
@@ -197,6 +214,9 @@ func registerVolumeHubServer(srv *grpc.Server, s *Server) {
 			{MethodName: "TriggerSync", Handler: s.handleTriggerSync},
 			{MethodName: "VolumeStatus", Handler: s.handleVolumeStatus},
 			{MethodName: "CreateServiceVolume", Handler: s.handleCreateServiceVolume},
+			{MethodName: "CreateSnapshot", Handler: s.handleCreateSnapshot},
+			{MethodName: "ListSnapshots", Handler: s.handleListSnapshots},
+			{MethodName: "RestoreToSnapshot", Handler: s.handleRestoreToSnapshot},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -234,6 +254,7 @@ func (s *Server) handleCreateVolume(_ interface{}, ctx context.Context, dec func
 	defer client.Close()
 
 	volumePath := "volumes/" + volumeID
+	var templateHash string
 
 	if req.Template != "" {
 		// Ensure the template exists on the target node.
@@ -243,6 +264,12 @@ func (s *Server) handleCreateVolume(_ interface{}, ctx context.Context, dec func
 		// Snapshot the template into the new volume (writable).
 		if err := client.SnapshotSubvolume(ctx, "templates/"+req.Template, volumePath, false); err != nil {
 			return nil, status.Errorf(codes.Internal, "snapshot template to volume: %v", err)
+		}
+		// Look up template hash for manifest creation.
+		if s.cas != nil {
+			if h, hashErr := s.cas.GetTemplateHash(ctx, req.Template); hashErr == nil {
+				templateHash = h
+			}
 		}
 	} else {
 		// Create an empty subvolume.
@@ -255,21 +282,34 @@ func (s *Server) handleCreateVolume(_ interface{}, ctx context.Context, dec func
 		}
 	}
 
-	// Track volume for periodic S3 sync on the node.
-	if err := client.TrackVolume(ctx, volumeID); err != nil {
+	// Create manifest in CAS.
+	if s.cas != nil {
+		manifest := &cas.Manifest{
+			VolumeID:     volumeID,
+			Base:         templateHash,
+			TemplateName: req.Template,
+		}
+		if putErr := s.cas.PutManifest(ctx, manifest); putErr != nil {
+			klog.Warningf("CreateVolume: failed to create manifest for %s: %v", volumeID, putErr)
+		}
+	}
+
+	// Track volume for periodic CAS sync on the node.
+	if err := client.TrackVolume(ctx, volumeID, req.Template, templateHash); err != nil {
 		klog.Warningf("TrackVolume failed for %s on %s: %v", volumeID, targetNode, err)
 	}
 
-	// Register in Hub registry with owner.
+	// Register in Hub registry with owner and template context.
 	s.registry.RegisterVolume(volumeID)
 	s.registry.SetOwner(volumeID, targetNode)
 	s.registry.SetCached(volumeID, targetNode)
+	s.registry.SetVolumeTemplate(volumeID, req.Template, templateHash)
 
 	if req.Template != "" {
 		s.registry.RegisterTemplate(req.Template, targetNode)
 	}
 
-	klog.Infof("Created volume %s on node %s (template=%q)", volumeID, targetNode, req.Template)
+	klog.Infof("Created volume %s on node %s (template=%q, base=%s)", volumeID, targetNode, req.Template, cas.ShortHash(templateHash))
 	return &CreateVolumeResponse{VolumeID: volumeID, NodeName: targetNode}, nil
 }
 
@@ -302,9 +342,9 @@ func (s *Server) handleDeleteVolume(_ interface{}, ctx context.Context, dec func
 				klog.Warningf("DeleteVolume: delete subvolume %s on %s: %v", req.VolumeID, ownerNode, err)
 			}
 
-			// Delete from S3 (best-effort).
-			if err := client.DeleteFromS3(ctx, req.VolumeID); err != nil {
-				klog.Warningf("DeleteVolume: delete S3 for %s: %v", req.VolumeID, err)
+			// Delete CAS data (manifest + local layers, blobs via GC).
+			if err := client.DeleteVolumeCAS(ctx, req.VolumeID); err != nil {
+				klog.Warningf("DeleteVolume: delete CAS for %s: %v", req.VolumeID, err)
 			}
 		}
 	}
@@ -334,7 +374,6 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 	// Check if any node already has it cached.
 	cachedNodes := s.registry.GetCachedNodes(req.VolumeID)
 	if len(cachedNodes) > 0 {
-		// Prefer hint_node if it's in the list.
 		for _, n := range cachedNodes {
 			if n == req.HintNode {
 				return &EnsureCachedResponse{NodeName: n}, nil
@@ -346,7 +385,6 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 	// Volume not cached anywhere — need to transfer.
 	ownerNode := s.registry.GetOwner(req.VolumeID)
 
-	// Determine target node.
 	targetNode := req.HintNode
 	if targetNode == "" {
 		registeredNodes := s.registry.RegisteredNodes()
@@ -360,13 +398,13 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		// Peer transfer: tell owner node to send volume to target.
 		ownerClient, err := s.nodeClient(ownerNode)
 		if err != nil {
-			klog.Warningf("EnsureCached: owner %s unavailable (%v), trying S3 restore", ownerNode, err)
+			klog.Warningf("EnsureCached: owner %s unavailable (%v), trying CAS restore", ownerNode, err)
 		} else {
 			defer ownerClient.Close()
-			// Get target's nodeops address for the transfer.
-			targetAddr := targetNode + ":9741" // Node DaemonSet nodeops port
+			// NodeOps gRPC port matches NodeResolver's configured port (9741).
+			targetAddr := targetNode + ":9741"
 			if err := ownerClient.SendVolumeTo(ctx, req.VolumeID, targetAddr); err != nil {
-				klog.Warningf("EnsureCached: peer transfer from %s to %s failed: %v, trying S3 restore", ownerNode, targetNode, err)
+				klog.Warningf("EnsureCached: peer transfer from %s to %s failed: %v, trying CAS restore", ownerNode, targetNode, err)
 			} else {
 				s.registry.SetCached(req.VolumeID, targetNode)
 				klog.Infof("EnsureCached: peer-transferred volume %s from %s to %s", req.VolumeID, ownerNode, targetNode)
@@ -375,7 +413,7 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		}
 	}
 
-	// Fallback: restore from S3 on target node.
+	// Fallback: restore from CAS on target node.
 	targetClient, err := s.nodeClient(targetNode)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "connect to target %s: %v", targetNode, err)
@@ -387,7 +425,7 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 	}
 
 	s.registry.SetCached(req.VolumeID, targetNode)
-	klog.Infof("EnsureCached: restored volume %s from S3 on %s", req.VolumeID, targetNode)
+	klog.Infof("EnsureCached: restored volume %s from CAS on %s", req.VolumeID, targetNode)
 	return &EnsureCachedResponse{NodeName: targetNode}, nil
 }
 
@@ -412,7 +450,6 @@ func (s *Server) handleTriggerSync(_ interface{}, ctx context.Context, dec func(
 	}
 	defer client.Close()
 
-	// SyncVolume is already in the NodeOps interface — triggers immediate S3 sync.
 	if err := client.SyncVolume(ctx, req.VolumeID); err != nil {
 		return nil, status.Errorf(codes.Internal, "sync volume %s on %s: %v", req.VolumeID, ownerNode, err)
 	}
@@ -422,7 +459,7 @@ func (s *Server) handleTriggerSync(_ interface{}, ctx context.Context, dec func(
 	return &Empty{}, nil
 }
 
-func (s *Server) handleVolumeStatus(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+func (s *Server) handleVolumeStatus(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
 	var req VolumeStatusRequest
 	if err := dec(&req); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
@@ -437,12 +474,21 @@ func (s *Server) handleVolumeStatus(_ interface{}, _ context.Context, dec func(i
 		return nil, status.Errorf(codes.NotFound, "volume %q not registered", req.VolumeID)
 	}
 
-	return &VolumeStatusResponse{
-		VolumeID:    regStatus.VolumeID,
-		OwnerNode:   regStatus.OwnerNode,
-		CachedNodes: regStatus.CachedNodes,
-		LastSync:    regStatus.LastSync,
-	}, nil
+	// Enrich with manifest data if CAS is available.
+	if s.cas != nil {
+		manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
+		if err == nil {
+			regStatus.LatestHash = manifest.LatestHash()
+			regStatus.LayerCount = len(manifest.Layers)
+			for _, l := range manifest.Layers {
+				if l.Type == "snapshot" {
+					regStatus.Snapshots = append(regStatus.Snapshots, l)
+				}
+			}
+		}
+	}
+
+	return regStatus, nil
 }
 
 func (s *Server) handleCreateServiceVolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -458,7 +504,6 @@ func (s *Server) handleCreateServiceVolume(_ interface{}, ctx context.Context, d
 		return nil, status.Error(codes.InvalidArgument, "service_name is required")
 	}
 
-	// Find the owner node of the base volume.
 	ownerNode := s.registry.GetOwner(req.BaseVolumeID)
 	if ownerNode == "" {
 		return nil, status.Errorf(codes.NotFound, "no owner for base volume %q", req.BaseVolumeID)
@@ -473,7 +518,6 @@ func (s *Server) handleCreateServiceVolume(_ interface{}, ctx context.Context, d
 	serviceVolumeID := req.BaseVolumeID + "-" + req.ServiceName
 	volumePath := "volumes/" + serviceVolumeID
 
-	// Idempotent — check if already exists.
 	exists, err := client.SubvolumeExists(ctx, volumePath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "check service volume: %v", err)
@@ -487,7 +531,6 @@ func (s *Server) handleCreateServiceVolume(_ interface{}, ctx context.Context, d
 		return nil, status.Errorf(codes.Internal, "create service subvolume: %v", err)
 	}
 
-	// Set ownership to match project volumes (uid:gid 1000).
 	if err := client.SetOwnership(ctx, volumePath, 1000, 1000); err != nil {
 		klog.Warningf("SetOwnership for service volume %s: %v", serviceVolumeID, err)
 	}
@@ -495,6 +538,104 @@ func (s *Server) handleCreateServiceVolume(_ interface{}, ctx context.Context, d
 	klog.Infof("Created service volume %s on %s (base=%s, service=%s)", serviceVolumeID, ownerNode, req.BaseVolumeID, req.ServiceName)
 	return &CreateServiceVolumeResponse{VolumeID: serviceVolumeID}, nil
 }
+
+// ---------------------------------------------------------------------------
+// New snapshot CRUD handlers
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleCreateSnapshot(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req CreateSnapshotRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+
+	ownerNode := s.registry.GetOwner(req.VolumeID)
+	if ownerNode == "" {
+		return nil, status.Errorf(codes.NotFound, "no owner node for volume %q", req.VolumeID)
+	}
+
+	client, err := s.nodeClient(ownerNode)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "connect to owner %s: %v", ownerNode, err)
+	}
+	defer client.Close()
+
+	hash, err := client.CreateUserSnapshot(ctx, req.VolumeID, req.Label)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "create snapshot for %s: %v", req.VolumeID, err)
+	}
+
+	s.registry.SetLatestHash(req.VolumeID, hash)
+	klog.Infof("CreateSnapshot: volume %s → %s (label=%s)", req.VolumeID, cas.ShortHash(hash), req.Label)
+	return &CreateSnapshotResponse{Hash: hash}, nil
+}
+
+func (s *Server) handleListSnapshots(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req ListSnapshotsRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+
+	if s.cas == nil {
+		return nil, status.Error(codes.FailedPrecondition, "CAS store not available")
+	}
+
+	manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get manifest for %s: %v", req.VolumeID, err)
+	}
+
+	var snapshots []cas.Layer
+	for _, l := range manifest.Layers {
+		if l.Type == "snapshot" {
+			snapshots = append(snapshots, l)
+		}
+	}
+
+	return &ListSnapshotsResponse{Snapshots: snapshots}, nil
+}
+
+func (s *Server) handleRestoreToSnapshot(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req RestoreToSnapshotRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+
+	if req.VolumeID == "" || req.TargetHash == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and target_hash required")
+	}
+
+	ownerNode := s.registry.GetOwner(req.VolumeID)
+	if ownerNode == "" {
+		return nil, status.Errorf(codes.NotFound, "no owner node for volume %q", req.VolumeID)
+	}
+
+	client, err := s.nodeClient(ownerNode)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "connect to owner %s: %v", ownerNode, err)
+	}
+	defer client.Close()
+
+	if err := client.RestoreFromSnapshot(ctx, req.VolumeID, req.TargetHash); err != nil {
+		return nil, status.Errorf(codes.Internal, "restore snapshot for %s: %v", req.VolumeID, err)
+	}
+
+	s.registry.SetLatestHash(req.VolumeID, req.TargetHash)
+	klog.Infof("RestoreToSnapshot: volume %s → %s", req.VolumeID, cas.ShortHash(req.TargetHash))
+	return &Empty{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Discovery and registry rebuild
+// ---------------------------------------------------------------------------
 
 // DiscoverNodes uses the NodeResolver to find CSI nodes via K8s Endpoints API
 // and registers them by their stable K8s node names.
@@ -527,7 +668,7 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 			continue
 		}
 
-		// Get sync state to find tracked volumes.
+		// Get sync state to find tracked volumes with template context.
 		states, err := client.GetSyncState(ctx)
 		if err != nil {
 			klog.Warningf("RebuildRegistry: GetSyncState on %s: %v", nodeName, err)
@@ -538,6 +679,9 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 			s.registry.RegisterVolume(st.VolumeID)
 			s.registry.SetOwner(st.VolumeID, nodeName)
 			s.registry.SetCached(st.VolumeID, nodeName)
+			if st.TemplateHash != "" {
+				s.registry.SetVolumeTemplate(st.VolumeID, "", st.TemplateHash)
+			}
 		}
 
 		// List subvolumes to find cached volumes not in sync tracking.
@@ -546,12 +690,10 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 			klog.Warningf("RebuildRegistry: ListSubvolumes on %s: %v", nodeName, err)
 		} else {
 			for _, sub := range subs {
-				// Strip "volumes/" prefix to get volume ID.
-				if len(sub.Name) > 8 {
-					volID := sub.Name[8:]
+				volID := strings.TrimPrefix(sub.Path, "volumes/")
+				if volID != "" && volID != sub.Path {
 					s.registry.RegisterVolume(volID)
 					s.registry.SetCached(volID, nodeName)
-					// If no owner set yet, this node is the owner.
 					if s.registry.GetOwner(volID) == "" {
 						s.registry.SetOwner(volID, nodeName)
 					}
@@ -565,8 +707,8 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 			klog.Warningf("RebuildRegistry: ListSubvolumes templates on %s: %v", nodeName, err)
 		} else {
 			for _, sub := range tmpls {
-				if len(sub.Name) > 10 {
-					tmplName := sub.Name[10:]
+				tmplName := strings.TrimPrefix(sub.Path, "templates/")
+				if tmplName != "" && tmplName != sub.Path {
 					s.registry.RegisterTemplate(tmplName, nodeName)
 				}
 			}

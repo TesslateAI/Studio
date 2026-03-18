@@ -230,7 +230,7 @@ func (m *mockNodeOps) ListSubvolumes(_ context.Context, _ string) ([]nodeops.Sub
 	return m.listResult, nil
 }
 
-func (m *mockNodeOps) TrackVolume(_ context.Context, volumeID string) error {
+func (m *mockNodeOps) TrackVolume(_ context.Context, volumeID, _, _ string) error {
 	m.tracked[volumeID] = true
 	return nil
 }
@@ -272,7 +272,7 @@ func (m *mockNodeOps) SyncVolume(_ context.Context, _ string) error {
 	return nil
 }
 
-func (m *mockNodeOps) DeleteFromS3(_ context.Context, _ string) error {
+func (m *mockNodeOps) DeleteVolumeCAS(_ context.Context, _ string) error {
 	return nil
 }
 
@@ -286,6 +286,22 @@ func (m *mockNodeOps) SendVolumeTo(_ context.Context, _, _ string) error {
 
 func (m *mockNodeOps) SendTemplateTo(_ context.Context, _, _ string) error {
 	return nil
+}
+
+func (m *mockNodeOps) HasBlobs(_ context.Context, hashes []string) ([]bool, error) {
+	return make([]bool, len(hashes)), nil
+}
+
+func (m *mockNodeOps) CreateUserSnapshot(_ context.Context, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (m *mockNodeOps) RestoreFromSnapshot(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (m *mockNodeOps) GetVolumeMetadata(_ context.Context, _ string) (*nodeops.VolumeMetadata, error) {
+	return &nodeops.VolumeMetadata{}, nil
 }
 
 // newTestControllerServer builds a ControllerServer backed by the given mock.

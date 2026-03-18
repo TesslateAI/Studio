@@ -117,8 +117,9 @@ func (cs *ControllerServer) CreateVolume(
 		}
 	}
 
-	// Register the volume for periodic sync.
-	if err := cs.driver.nodeOps.TrackVolume(ctx, volID); err != nil {
+	// Register the volume for periodic CAS sync.
+	templateName := params["template"]
+	if err := cs.driver.nodeOps.TrackVolume(ctx, volID, templateName, ""); err != nil {
 		klog.Warningf("Failed to track volume %q for sync: %v", volID, err)
 	}
 

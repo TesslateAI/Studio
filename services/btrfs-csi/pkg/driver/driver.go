@@ -13,6 +13,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/fileops"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/gc"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/metrics"
@@ -52,10 +53,11 @@ type Driver struct {
 	hubGRPCPort int // VolumeHub gRPC listen port (hub mode)
 
 	// Node-mode subsystems (nil in controller mode).
-	btrfs   *btrfs.Manager
-	store   objstore.ObjectStorage
-	syncer  *bsync.Daemon
-	tmplMgr *template.Manager
+	btrfs    *btrfs.Manager
+	store    objstore.ObjectStorage
+	casStore *cas.Store
+	syncer   *bsync.Daemon
+	tmplMgr  *template.Manager
 
 	// Controller-mode subsystem (nil in node mode).
 	nodeOps nodeops.NodeOps
@@ -148,8 +150,8 @@ func (d *Driver) runNode(ctx context.Context) error {
 	// Initialize btrfs subsystems.
 	d.btrfs = btrfs.NewManager(d.poolPath)
 
-	// Ensure pool directories exist.
-	for _, sub := range []string{"volumes", "snapshots", "templates"} {
+	// Ensure pool directories exist (including layers for CAS layer snapshots).
+	for _, sub := range []string{"volumes", "snapshots", "templates", "layers"} {
 		dir := fmt.Sprintf("%s/%s", d.poolPath, sub)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create pool directory %s: %w", dir, err)
@@ -166,17 +168,23 @@ func (d *Driver) runNode(ctx context.Context) error {
 		}
 	}
 
-	// Start sync daemon if object storage is configured.
+	// Create CAS store from object storage.
 	if d.store != nil {
-		d.syncer = bsync.NewDaemon(d.btrfs, d.store, d.syncInterval)
-		go d.syncer.Start(ctx)
-		klog.Info("Sync daemon started")
+		d.casStore = cas.NewStore(d.store)
 	}
 
-	d.tmplMgr = template.NewManager(d.btrfs, d.store, d.poolPath)
+	// Create template manager backed by CAS store.
+	d.tmplMgr = template.NewManager(d.btrfs, d.casStore, d.poolPath)
+
+	// Start sync daemon if CAS store is available.
+	if d.casStore != nil {
+		d.syncer = bsync.NewDaemon(d.btrfs, d.casStore, d.tmplMgr, d.syncInterval)
+		go d.syncer.Start(ctx)
+		klog.Info("Sync daemon started (CAS mode)")
+	}
 
 	// Start nodeops gRPC server for controller delegation.
-	d.nodeOpsSrv = nodeops.NewServer(d.btrfs, d.syncer, d.tmplMgr, d.store)
+	d.nodeOpsSrv = nodeops.NewServer(d.btrfs, d.syncer, d.tmplMgr, d.casStore)
 	go func() {
 		addr := fmt.Sprintf(":%d", d.nodeOpsPort)
 		if err := d.nodeOpsSrv.Start(addr, nil); err != nil {
@@ -210,6 +218,7 @@ func (d *Driver) runNode(ctx context.Context) error {
 			btrfs:   d.btrfs,
 			syncer:  d.syncer,
 			tmplMgr: d.tmplMgr,
+			cas:     d.casStore,
 		}
 	}
 
@@ -235,11 +244,22 @@ func (d *Driver) runController(ctx context.Context) error {
 }
 
 // runHub initializes the Volume Hub — a storageless orchestrator that
-// coordinates nodes for volume lifecycle, cache placement, and S3 sync.
+// coordinates nodes for volume lifecycle, cache placement, and CAS sync.
 // Hub mode has ZERO storage, ZERO btrfs — it only serves VolumeHub gRPC.
 func (d *Driver) runHub(ctx context.Context) error {
 	// Build the node registry and populate with known CSI nodes.
 	registry := volumehub.NewNodeRegistry()
+
+	// Initialize object storage for Hub's CAS manifest reads.
+	var casStore *cas.Store
+	if d.storageProvider != "" && d.storageBucket != "" {
+		store, err := objstore.NewRcloneStorage(d.storageProvider, d.storageBucket, d.storageEnv)
+		if err != nil {
+			klog.Warningf("Hub: failed to create object storage: %v", err)
+		} else {
+			casStore = cas.NewStore(store)
+		}
+	}
 
 	// NodeResolver discovers CSI node pods via K8s Endpoints API and maps
 	// stable K8s node names → current pod IPs.
@@ -252,7 +272,6 @@ func (d *Driver) runHub(ctx context.Context) error {
 	nodeClientFactory := func(nodeName string) (*nodeops.Client, error) {
 		addr := resolver.Resolve(nodeName)
 		if addr == "" {
-			// Stale mapping — try a refresh and resolve again.
 			if refreshErr := resolver.Refresh(ctx); refreshErr != nil {
 				return nil, fmt.Errorf("resolve node %s (refresh failed: %w)", nodeName, refreshErr)
 			}
@@ -264,8 +283,8 @@ func (d *Driver) runHub(ctx context.Context) error {
 		return nodeops.NewClient(addr, nil)
 	}
 
-	// Start VolumeHub gRPC server.
-	hubSrv := volumehub.NewServer(registry, nodeClientFactory)
+	// Start VolumeHub gRPC server with CAS store for manifest reads.
+	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory)
 
 	// Initial discovery + periodic refresh (30s) of node endpoints.
 	go func() {
@@ -396,6 +415,7 @@ type localNodeOps struct {
 	btrfs   *btrfs.Manager
 	syncer  *bsync.Daemon
 	tmplMgr *template.Manager
+	cas     *cas.Store
 }
 
 func (l *localNodeOps) CreateSubvolume(ctx context.Context, name string) error {
@@ -432,14 +452,14 @@ func (l *localNodeOps) ListSubvolumes(ctx context.Context, prefix string) ([]nod
 	return infos, nil
 }
 
-func (l *localNodeOps) TrackVolume(ctx context.Context, volumeID string) error {
+func (l *localNodeOps) TrackVolume(_ context.Context, volumeID, templateName, templateHash string) error {
 	if l.syncer != nil {
-		l.syncer.TrackVolume(volumeID)
+		l.syncer.TrackVolume(volumeID, templateName, templateHash)
 	}
 	return nil
 }
 
-func (l *localNodeOps) UntrackVolume(ctx context.Context, volumeID string) error {
+func (l *localNodeOps) UntrackVolume(_ context.Context, volumeID string) error {
 	if l.syncer != nil {
 		l.syncer.UntrackVolume(volumeID)
 	}
@@ -452,39 +472,25 @@ func (l *localNodeOps) EnsureTemplate(ctx context.Context, name string) error {
 
 func (l *localNodeOps) RestoreVolume(ctx context.Context, volumeID string) error {
 	if l.syncer == nil {
-		return fmt.Errorf("object storage sync not configured, cannot restore volume %q", volumeID)
+		return fmt.Errorf("CAS sync not configured, cannot restore volume %q", volumeID)
 	}
-
-	objects, err := l.syncer.ListObjects(ctx, fmt.Sprintf("volumes/%s/", volumeID))
-	if err != nil {
-		return err
-	}
-	if len(objects) == 0 {
-		return fmt.Errorf("no snapshots in S3 for volume %q", volumeID)
-	}
-
-	// Use the latest object.
-	return l.syncer.RestoreFromStorage(ctx, volumeID, objects[len(objects)-1])
+	return l.syncer.RestoreVolume(ctx, volumeID)
 }
 
 func (l *localNodeOps) PromoteToTemplate(ctx context.Context, volumeID, templateName string) error {
 	volPath := fmt.Sprintf("volumes/%s", volumeID)
 	tmplPath := fmt.Sprintf("templates/%s", templateName)
-	// Delete existing template if present (refresh case)
 	if l.btrfs.SubvolumeExists(ctx, tmplPath) {
 		if err := l.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
 			return fmt.Errorf("delete existing template: %w", err)
 		}
 	}
-	// Snapshot volume as read-only template
 	if err := l.btrfs.SnapshotSubvolume(ctx, volPath, tmplPath, true); err != nil {
 		return fmt.Errorf("snapshot to template: %w", err)
 	}
-	// Upload to S3
-	if err := l.tmplMgr.UploadTemplate(ctx, templateName); err != nil {
+	if _, err := l.tmplMgr.UploadTemplate(ctx, templateName); err != nil {
 		return fmt.Errorf("upload template: %w", err)
 	}
-	// Cleanup build volume
 	if err := l.btrfs.DeleteSubvolume(ctx, volPath); err != nil {
 		return fmt.Errorf("cleanup build volume: %w", err)
 	}
@@ -497,19 +503,19 @@ func (l *localNodeOps) SetOwnership(ctx context.Context, name string, uid, gid i
 
 func (l *localNodeOps) SyncVolume(ctx context.Context, volumeID string) error {
 	if l.syncer == nil {
-		return fmt.Errorf("S3 sync not configured")
+		return fmt.Errorf("CAS sync not configured")
 	}
 	return l.syncer.SyncVolume(ctx, volumeID)
 }
 
-func (l *localNodeOps) DeleteFromS3(ctx context.Context, volumeID string) error {
+func (l *localNodeOps) DeleteVolumeCAS(ctx context.Context, volumeID string) error {
 	if l.syncer == nil {
 		return nil
 	}
-	return l.syncer.DeleteS3Prefix(ctx, volumeID)
+	return l.syncer.DeleteVolume(ctx, volumeID)
 }
 
-func (l *localNodeOps) GetSyncState(ctx context.Context) ([]nodeops.TrackedVolumeState, error) {
+func (l *localNodeOps) GetSyncState(_ context.Context) ([]nodeops.TrackedVolumeState, error) {
 	if l.syncer == nil {
 		return nil, nil
 	}
@@ -517,8 +523,9 @@ func (l *localNodeOps) GetSyncState(ctx context.Context) ([]nodeops.TrackedVolum
 	result := make([]nodeops.TrackedVolumeState, len(daemonStates))
 	for i, s := range daemonStates {
 		result[i] = nodeops.TrackedVolumeState{
-			VolumeID:   s.VolumeID,
-			LastSyncAt: s.LastSyncAt,
+			VolumeID:     s.VolumeID,
+			TemplateHash: s.TemplateHash,
+			LastSyncAt:   s.LastSyncAt,
 		}
 	}
 	return result, nil
@@ -530,4 +537,55 @@ func (l *localNodeOps) SendVolumeTo(_ context.Context, _, _ string) error {
 
 func (l *localNodeOps) SendTemplateTo(_ context.Context, _, _ string) error {
 	return fmt.Errorf("SendTemplateTo not supported in all-in-one mode")
+}
+
+func (l *localNodeOps) HasBlobs(ctx context.Context, hashes []string) ([]bool, error) {
+	results := make([]bool, len(hashes))
+	if l.cas == nil {
+		return results, nil
+	}
+	for i, hash := range hashes {
+		exists, err := l.cas.HasBlob(ctx, hash)
+		if err == nil && exists {
+			results[i] = true
+		}
+	}
+	return results, nil
+}
+
+func (l *localNodeOps) CreateUserSnapshot(ctx context.Context, volumeID, label string) (string, error) {
+	if l.syncer == nil {
+		return "", fmt.Errorf("CAS sync not configured")
+	}
+	return l.syncer.CreateSnapshot(ctx, volumeID, label)
+}
+
+func (l *localNodeOps) RestoreFromSnapshot(ctx context.Context, volumeID, targetHash string) error {
+	if l.syncer == nil {
+		return fmt.Errorf("CAS sync not configured")
+	}
+	return l.syncer.RestoreToSnapshot(ctx, volumeID, targetHash)
+}
+
+func (l *localNodeOps) GetVolumeMetadata(ctx context.Context, volumeID string) (*nodeops.VolumeMetadata, error) {
+	if l.syncer == nil {
+		return nil, fmt.Errorf("CAS sync not configured")
+	}
+	manifest, err := l.syncer.GetManifest(ctx, volumeID)
+	if err != nil {
+		return nil, err
+	}
+	meta := &nodeops.VolumeMetadata{
+		VolumeID:     manifest.VolumeID,
+		TemplateName: manifest.TemplateName,
+		TemplateHash: manifest.Base,
+		LatestHash:   manifest.LatestHash(),
+		LayerCount:   len(manifest.Layers),
+	}
+	for _, l := range manifest.Layers {
+		if l.Type == "snapshot" {
+			meta.Snapshots = append(meta.Snapshots, l)
+		}
+	}
+	return meta, nil
 }
