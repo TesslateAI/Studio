@@ -56,11 +56,6 @@ interface StreamingFile {
   isStreaming: boolean;
 }
 
-interface ProjectFile {
-  file_path: string;
-  content: string;
-}
-
 interface ChatContainerProps {
   projectId: number;
   containerId?: string; // Container ID for container-scoped agents
@@ -69,7 +64,7 @@ interface ChatContainerProps {
   currentAgent: ChatAgent;
   onSelectAgent: (agent: ChatAgent) => void;
   onFileUpdate: (filePath: string, content: string) => void;
-  projectFiles?: ProjectFile[];
+  slug?: string;
   projectName?: string;
   className?: string;
   sidebarExpanded?: boolean;
@@ -92,7 +87,7 @@ export function ChatContainer({
   currentAgent: initialCurrentAgent,
   onSelectAgent,
   onFileUpdate,
-  projectFiles = [],
+  slug: projectSlug,
   projectName = 'project',
   className = '',
   sidebarExpanded = true,
@@ -1953,7 +1948,7 @@ export function ChatContainer({
             onSelectAgent={handleAgentSelect}
             onModelChange={handleModelChange}
             onSendMessage={handleSendMessage}
-            projectFiles={projectFiles}
+            slug={projectSlug}
             projectName={projectName}
             disabled={isStreaming || agentExecuting}
             isExecuting={agentExecuting}

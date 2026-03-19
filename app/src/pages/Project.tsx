@@ -213,7 +213,9 @@ export default function Project() {
 
   const { chatPosition } = useChatPosition();
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
-  const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
+  const [fileTree, setFileTree] = useState<
+    Array<{ path: string; name: string; is_dir: boolean; size: number; mod_time: number }>
+  >([]);
   const [container, setContainer] = useState<Record<string, unknown> | null>(null);
   const [containers, setContainers] = useState<Array<Record<string, unknown>>>([]);
   const [agents, setAgents] = useState<ChatAgent[]>([]);
@@ -652,12 +654,12 @@ export default function Project() {
     };
 
     const startPolling = () => {
-      // Poll every 30 seconds - events handle most changes, this catches edge cases
+      // Poll every 60 seconds - tree metadata only, cheap
       pollInterval = setInterval(() => {
         if (isTabVisible && slug) {
-          loadFiles();
+          loadFileTree();
         }
-      }, 30000);
+      }, 60000);
     };
 
     // Listen for visibility changes
@@ -677,10 +679,10 @@ export default function Project() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, container]); // Re-create interval when container changes to use fresh loadFiles
 
-  // Refresh files when switching to code view
+  // Refresh file tree when switching to code view
   useEffect(() => {
     if (activeView === 'code' && slug) {
-      loadFiles();
+      loadFileTree();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, slug, container]); // Include container to use correct filter
@@ -706,24 +708,26 @@ export default function Project() {
     }
   };
 
-  const loadFiles = async () => {
+  const loadFileTree = async () => {
     if (!slug) return;
     try {
-      const filesData = await projectsApi.getFiles(slug);
-      setFiles((prev) => {
-        // Skip update if file paths haven't changed — Monaco owns content,
-        // the tree only cares about paths. Prevents re-renders from 30s polling.
-        const prevPaths = prev.map((f) => f.file_path).join('\0');
-        const newPaths = filesData.map((f: { file_path: string }) => f.file_path).join('\0');
+      const containerDir = (container as Record<string, unknown> | null)?.directory as
+        | string
+        | undefined;
+      const entries = await projectsApi.getFileTree(slug, containerDir);
+      setFileTree((prev) => {
+        // Skip update if paths haven't changed — prevents re-renders from polling.
+        const prevPaths = prev.map((f) => f.path).join('\0');
+        const newPaths = entries.map((f) => f.path).join('\0');
         if (prevPaths === newPaths) return prev;
-        return filesData;
+        return entries;
       });
     } catch (error) {
-      console.error('Failed to load files:', error);
+      console.error('Failed to load file tree:', error);
     }
   };
   // Keep ref in sync so event listeners never use a stale closure
-  loadFilesRef.current = loadFiles;
+  loadFilesRef.current = loadFileTree;
 
   const FILE_RETRY_MAX = 8;
 
@@ -734,13 +738,16 @@ export default function Project() {
     fileRetryCancelledRef.current = false;
 
     try {
-      const filesData = await projectsApi.getFiles(slug);
+      const containerDir = (container as Record<string, unknown> | null)?.directory as
+        | string
+        | undefined;
+      const entries = await projectsApi.getFileTree(slug, containerDir);
 
       // Bail if this sequence was cancelled while the request was in-flight
       if (fileRetryCancelledRef.current) return;
 
-      if (filesData.length > 0) {
-        setFiles(filesData);
+      if (entries.length > 0) {
+        setFileTree(entries);
         setFilesInitiallyLoaded(true);
         fileRetryCountRef.current = 0;
         return;
@@ -755,13 +762,13 @@ export default function Project() {
         }, delay);
       } else {
         // Exhausted retries - accept empty
-        setFiles([]);
+        setFileTree([]);
         setFilesInitiallyLoaded(true);
         fileRetryCountRef.current = 0;
       }
     } catch (error) {
       if (fileRetryCancelledRef.current) return;
-      console.error('Failed to load files (retry):', error);
+      console.error('Failed to load file tree (retry):', error);
 
       if (fileRetryCountRef.current < FILE_RETRY_MAX) {
         const delay = Math.min((fileRetryCountRef.current + 1) * 1000, 5000);
@@ -1728,7 +1735,7 @@ export default function Project() {
                         currentAgent={currentAgent}
                         onSelectAgent={handleAgentSelect}
                         onFileUpdate={handleFileUpdate}
-                        projectFiles={files}
+                        slug={slug!}
                         projectName={project?.name}
                         sidebarExpanded={isLeftSidebarExpanded}
                         isDocked={true}
@@ -1844,13 +1851,14 @@ export default function Project() {
                   >
                     <CodeEditor
                       projectId={project?.id}
-                      files={files}
+                      slug={slug!}
+                      fileTree={fileTree}
                       onFileUpdate={handleFileUpdate}
                       onFileCreate={handleFileCreate}
                       onFileDelete={handleFileDelete}
                       onFileRename={handleFileRename}
                       onDirectoryCreate={handleDirectoryCreate}
-                      isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
+                      isFilesSyncing={!filesInitiallyLoaded && fileTree.length === 0}
                       startupOverlay={codeEditorOverlay}
                     />
                   </div>
@@ -1896,7 +1904,7 @@ export default function Project() {
                         currentAgent={currentAgent}
                         onSelectAgent={handleAgentSelect}
                         onFileUpdate={handleFileUpdate}
-                        projectFiles={files}
+                        slug={slug!}
                         projectName={project?.name}
                         sidebarExpanded={isLeftSidebarExpanded}
                         isDocked={true}
@@ -2012,13 +2020,14 @@ export default function Project() {
                 >
                   <CodeEditor
                     projectId={project?.id}
-                    files={files}
+                    slug={slug!}
+                    fileTree={fileTree}
                     onFileUpdate={handleFileUpdate}
                     onFileCreate={handleFileCreate}
                     onFileDelete={handleFileDelete}
                     onFileRename={handleFileRename}
                     onDirectoryCreate={handleDirectoryCreate}
-                    isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
+                    isFilesSyncing={!filesInitiallyLoaded && fileTree.length === 0}
                     startupOverlay={codeEditorOverlay}
                   />
                 </div>
@@ -2071,13 +2080,14 @@ export default function Project() {
             >
               <CodeEditor
                 projectId={project?.id}
-                files={files}
+                slug={slug!}
+                fileTree={fileTree}
                 onFileUpdate={handleFileUpdate}
                 onFileCreate={handleFileCreate}
                 onFileDelete={handleFileDelete}
                 onFileRename={handleFileRename}
                 onDirectoryCreate={handleDirectoryCreate}
-                isFilesSyncing={!filesInitiallyLoaded && files.length === 0}
+                isFilesSyncing={!filesInitiallyLoaded && fileTree.length === 0}
                 startupOverlay={codeEditorOverlay}
               />
             </div>
@@ -2146,7 +2156,7 @@ export default function Project() {
             currentAgent={currentAgent}
             onSelectAgent={handleAgentSelect}
             onFileUpdate={handleFileUpdate}
-            projectFiles={files}
+            slug={slug!}
             projectName={project?.name}
             sidebarExpanded={isLeftSidebarExpanded}
             isPointerOverPreviewRef={isPointerOverPreviewRef}

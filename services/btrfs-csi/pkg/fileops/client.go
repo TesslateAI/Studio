@@ -64,6 +64,32 @@ func (c *Client) ListDir(ctx context.Context, volumeID, path string, recursive b
 	return resp.Entries, nil
 }
 
+func (c *Client) ListTree(ctx context.Context, volumeID, path string, excludeDirs, excludeFiles, excludeExts []string) ([]FileInfo, error) {
+	var resp ListTreeResponse
+	if err := c.invoke(ctx, "ListTree", &ListTreeRequest{
+		VolumeID:          volumeID,
+		Path:              path,
+		ExcludeDirs:       excludeDirs,
+		ExcludeFiles:      excludeFiles,
+		ExcludeExtensions: excludeExts,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Entries, nil
+}
+
+func (c *Client) ReadFiles(ctx context.Context, volumeID string, paths []string, maxFileSize int64) ([]FileContent, []string, error) {
+	var resp ReadFilesResponse
+	if err := c.invoke(ctx, "ReadFiles", &ReadFilesRequest{
+		VolumeID:    volumeID,
+		Paths:       paths,
+		MaxFileSize: maxFileSize,
+	}, &resp); err != nil {
+		return nil, nil, err
+	}
+	return resp.Files, resp.Errors, nil
+}
+
 func (c *Client) StatPath(ctx context.Context, volumeID, path string) (*FileInfo, error) {
 	var resp FileInfoResponse
 	if err := c.invoke(ctx, "StatPath", &StatPathRequest{VolumeID: volumeID, Path: path}, &resp); err != nil {

@@ -200,6 +200,7 @@ class DockerOrchestrator(BaseOrchestrator):
     def _sanitize_service_name(self, name: str) -> str:
         """Sanitize a name for Docker service naming (DNS-safe)."""
         from ...services.project_setup.naming import sanitize_name
+
         return sanitize_name(name)
 
     def _resolve_service_name(self, container_name: str, project_slug: str) -> str:
@@ -214,7 +215,7 @@ class DockerOrchestrator(BaseOrchestrator):
         sanitized = self._sanitize_service_name(container_name)
         prefix = f"{project_slug}-"
         if sanitized.startswith(prefix):
-            return sanitized[len(prefix):]
+            return sanitized[len(prefix) :]
         return sanitized
 
     # =========================================================================
@@ -447,9 +448,7 @@ class DockerOrchestrator(BaseOrchestrator):
         env_overrides = None
         if db:
             env_overrides = await build_env_overrides(db, project.id, all_containers)
-        await self._write_compose_file(
-            project, all_containers, connections, user_id, env_overrides
-        )
+        await self._write_compose_file(project, all_containers, connections, user_id, env_overrides)
         compose_file_path = self._get_compose_file_path(project.slug)
 
         service_name = self._sanitize_service_name(container.name)
@@ -942,6 +941,158 @@ class DockerOrchestrator(BaseOrchestrator):
         except Exception as e:
             logger.error(f"[DOCKER] Failed to get files with content: {e}")
             return []
+
+    async def list_tree(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        subdir: str | None = None,
+        project_slug: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Recursive filtered file tree via local filesystem."""
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                return []
+
+        try:
+            walk_root = self._safe_project_path(project_slug, subdir or ".")
+        except ValueError as e:
+            logger.warning(f"[DOCKER] Path traversal blocked in list_tree: {e}")
+            return []
+
+        if not walk_root.exists():
+            return []
+
+        entries: list[dict[str, Any]] = []
+        try:
+            for root, dirs, filenames in os.walk(walk_root):
+                dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+
+                rel_root = Path(root).relative_to(walk_root)
+
+                # Emit directory entries (except root)
+                for d in dirs:
+                    dir_path = rel_root / d if str(rel_root) != "." else Path(d)
+                    full = Path(root) / d
+                    try:
+                        st = full.stat()
+                        entries.append(
+                            {
+                                "path": str(dir_path),
+                                "name": d,
+                                "is_dir": True,
+                                "size": 0,
+                                "mod_time": int(st.st_mtime),
+                            }
+                        )
+                    except OSError:
+                        entries.append(
+                            {
+                                "path": str(dir_path),
+                                "name": d,
+                                "is_dir": True,
+                                "size": 0,
+                                "mod_time": 0,
+                            }
+                        )
+
+                for filename in filenames:
+                    if filename in EXCLUDED_FILES:
+                        continue
+                    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+                    if ext in BINARY_EXTENSIONS:
+                        continue
+
+                    file_path = rel_root / filename if str(rel_root) != "." else Path(filename)
+                    full = Path(root) / filename
+                    try:
+                        st = full.stat()
+                        entries.append(
+                            {
+                                "path": str(file_path),
+                                "name": filename,
+                                "is_dir": False,
+                                "size": st.st_size,
+                                "mod_time": int(st.st_mtime),
+                            }
+                        )
+                    except OSError:
+                        continue
+
+            return entries
+        except Exception as e:
+            logger.error(f"[DOCKER] Failed to list tree: {e}")
+            return []
+
+    async def read_file_content(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        file_path: str,
+        subdir: str | None = None,
+        project_slug: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Read a single file from local filesystem."""
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                return None
+
+        target = subdir + "/" + file_path if subdir else file_path
+        try:
+            full_path = self._safe_project_path(project_slug, target)
+        except ValueError:
+            return None
+
+        if not full_path.exists() or not full_path.is_file():
+            return None
+
+        try:
+            async with aiofiles.open(full_path, encoding="utf-8") as f:
+                content = await f.read()
+            return {"path": file_path, "content": content, "size": len(content)}
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    async def read_files_batch(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        paths: list[str],
+        subdir: str | None = None,
+        project_slug: str | None = None,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Batch-read multiple files from local filesystem."""
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                return [], list(paths)
+
+        import asyncio
+
+        async def _read_one(p: str) -> dict[str, Any] | None:
+            return await self.read_file_content(
+                user_id,
+                project_id,
+                container_name,
+                p,
+                subdir=subdir,
+                project_slug=project_slug,
+            )
+
+        results = await asyncio.gather(*[_read_one(p) for p in paths], return_exceptions=True)
+        files = []
+        errors = []
+        for p, result in zip(paths, results, strict=True):
+            if isinstance(result, Exception) or result is None:
+                errors.append(p)
+            else:
+                files.append(result)
+        return files, errors
 
     async def project_exists(self, project_slug: str) -> bool:
         """Check if a project directory exists."""
@@ -1676,7 +1827,9 @@ class DockerOrchestrator(BaseOrchestrator):
             port = container.effective_port
             deps_prefix = get_node_modules_fix_prefix()
             command = ["sh", "-c", deps_prefix + container.startup_command]
-            logger.info(f"[DOCKER] Using startup_command from DB for '{container.name}': port={port}")
+            logger.info(
+                f"[DOCKER] Using startup_command from DB for '{container.name}': port={port}"
+            )
             return command, port
 
         # Priority 2: .tesslate/config.json (unified config)

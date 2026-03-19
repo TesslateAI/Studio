@@ -60,6 +60,69 @@ from .kubernetes.helpers import (
 
 logger = logging.getLogger(__name__)
 
+# Directories, files, and extensions to exclude from tree listings (matches docker.py).
+_TREE_EXCLUDE_DIRS = [
+    "node_modules",
+    ".git",
+    "__pycache__",
+    ".next",
+    "dist",
+    "build",
+    ".venv",
+    "venv",
+    ".cache",
+    ".turbo",
+    "coverage",
+    ".nyc_output",
+    "lost+found",
+]
+_TREE_EXCLUDE_FILES = [".DS_Store", "Thumbs.db", ".env.local", ".ash_history"]
+_TREE_EXCLUDE_EXTS = [
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "ico",
+    "svg",
+    "webp",
+    "bmp",
+    "woff",
+    "woff2",
+    "ttf",
+    "eot",
+    "otf",
+    "mp3",
+    "mp4",
+    "wav",
+    "ogg",
+    "webm",
+    "avi",
+    "mov",
+    "pdf",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+    "zip",
+    "tar",
+    "gz",
+    "rar",
+    "7z",
+    "bin",
+    "exe",
+    "dll",
+    "so",
+    "dylib",
+    "class",
+    "jar",
+    "pyc",
+    "pyo",
+    "lock",
+    "map",
+]
+
 
 class KubernetesOrchestrator(BaseOrchestrator):
     """
@@ -1385,6 +1448,117 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         except Exception as e:
             logger.error(f"[K8S] FileOps list_files error: {e}")
             return []
+
+    async def list_tree(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        subdir: str | None = None,
+        # Volume routing hints
+        volume_id: str | None = None,
+        cache_node: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Recursive filtered file tree via FileOps ListTree RPC."""
+        _ = user_id, container_name
+
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
+
+        vol_path = self._build_volume_path(subdir) if subdir else "."
+        try:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
+                entries = await client.list_tree(
+                    volume_id,
+                    vol_path,
+                    exclude_dirs=_TREE_EXCLUDE_DIRS,
+                    exclude_files=_TREE_EXCLUDE_FILES,
+                    exclude_extensions=_TREE_EXCLUDE_EXTS,
+                )
+                return [
+                    {
+                        "path": entry.path,
+                        "name": entry.name,
+                        "is_dir": entry.is_dir,
+                        "size": entry.size,
+                        "mod_time": entry.mod_time,
+                    }
+                    for entry in entries
+                ]
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                return []
+            logger.error(f"[K8S] FileOps list_tree error: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"[K8S] FileOps list_tree error: {e}")
+            return []
+
+    async def read_file_content(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        file_path: str,
+        subdir: str | None = None,
+        # Volume routing hints
+        volume_id: str | None = None,
+        cache_node: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Read a single file via FileOps."""
+        _ = user_id, container_name
+
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
+
+        vol_path = self._build_volume_path(file_path, subdir)
+        try:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
+                content = await client.read_file_text(volume_id, vol_path)
+                return {"path": file_path, "content": content, "size": len(content)}
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                return None
+            logger.error(f"[K8S] FileOps read_file_content error: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[K8S] FileOps read_file_content error: {e}")
+            return None
+
+    async def read_files_batch(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        paths: list[str],
+        subdir: str | None = None,
+        # Volume routing hints
+        volume_id: str | None = None,
+        cache_node: str | None = None,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Batch-read multiple files via FileOps ReadFiles RPC."""
+        _ = user_id, container_name
+
+        if volume_id is None:
+            volume_id, cache_node = await self._get_project_volume_info(project_id)
+
+        vol_paths = [self._build_volume_path(p, subdir) for p in paths]
+        # Map volume paths back to original caller paths for the response.
+        vol_to_orig = dict(zip(vol_paths, paths, strict=True))
+        try:
+            async with await self._get_fileops_client(cache_node, volume_id) as client:
+                file_contents, rpc_errors = await client.read_files(
+                    volume_id, vol_paths, max_file_size=100_000
+                )
+                files = [
+                    {"path": vol_to_orig.get(fc.path, fc.path), "content": fc.data, "size": fc.size}
+                    for fc in file_contents
+                ]
+                errors = [vol_to_orig.get(e, e) for e in rpc_errors]
+                return files, errors
+        except Exception as e:
+            logger.error(f"[K8S] FileOps read_files_batch error: {e}")
+            return [], list(paths)
 
     # =========================================================================
     # SHELL OPERATIONS

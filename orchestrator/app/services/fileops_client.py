@@ -53,6 +53,15 @@ class FileInfo:
     mode: int
 
 
+@dataclass(frozen=True, slots=True)
+class FileContent:
+    """Content of a single file from batch read."""
+
+    path: str
+    data: str  # text content (decoded from base64 bytes)
+    size: int
+
+
 class FileOpsClient:
     """Async client for the btrfs CSI FileOps gRPC service.
 
@@ -79,9 +88,7 @@ class FileOpsClient:
             )
         return self._channel
 
-    async def _call(
-        self, method: str, request: dict, *, timeout: float = 30.0
-    ) -> dict:
+    async def _call(self, method: str, request: dict, *, timeout: float = 30.0) -> dict:
         """Invoke a FileOps RPC with JSON codec content-type."""
         channel = await self._ensure_channel()
         call = channel.unary_unary(
@@ -95,13 +102,9 @@ class FileOpsClient:
     # File operations
     # ------------------------------------------------------------------
 
-    async def read_file(
-        self, volume_id: str, path: str, *, timeout: float = 30.0
-    ) -> bytes:
+    async def read_file(self, volume_id: str, path: str, *, timeout: float = 30.0) -> bytes:
         """Read a file from a volume. Returns raw bytes."""
-        resp = await self._call(
-            "ReadFile", {"volume_id": volume_id, "path": path}, timeout=timeout
-        )
+        resp = await self._call("ReadFile", {"volume_id": volume_id, "path": path}, timeout=timeout)
         return base64.b64decode(resp.get("data", ""))
 
     async def write_file(
@@ -156,13 +159,72 @@ class FileOpsClient:
             for e in resp.get("entries", [])
         ]
 
-    async def stat_path(
-        self, volume_id: str, path: str, *, timeout: float = 30.0
-    ) -> FileInfo:
-        """Get file/directory metadata."""
+    async def list_tree(
+        self,
+        volume_id: str,
+        path: str = ".",
+        *,
+        exclude_dirs: list[str] | None = None,
+        exclude_files: list[str] | None = None,
+        exclude_extensions: list[str] | None = None,
+        timeout: float = 30.0,
+    ) -> list[FileInfo]:
+        """Recursive filtered directory tree via ListTree RPC."""
         resp = await self._call(
-            "StatPath", {"volume_id": volume_id, "path": path}, timeout=timeout
+            "ListTree",
+            {
+                "volume_id": volume_id,
+                "path": path,
+                "exclude_dirs": exclude_dirs or [],
+                "exclude_files": exclude_files or [],
+                "exclude_extensions": exclude_extensions or [],
+            },
+            timeout=timeout,
         )
+        return [
+            FileInfo(
+                name=e["name"],
+                path=e["path"],
+                size=e.get("size", 0),
+                is_dir=e.get("is_dir", False),
+                mod_time=e.get("mod_time", 0),
+                mode=e.get("mode", 0),
+            )
+            for e in resp.get("entries", [])
+        ]
+
+    async def read_files(
+        self,
+        volume_id: str,
+        paths: list[str],
+        *,
+        max_file_size: int = 100_000,
+        timeout: float = 30.0,
+    ) -> tuple[list[FileContent], list[str]]:
+        """Batch-read multiple files via ReadFiles RPC."""
+        resp = await self._call(
+            "ReadFiles",
+            {
+                "volume_id": volume_id,
+                "paths": paths,
+                "max_file_size": max_file_size,
+            },
+            timeout=timeout,
+        )
+        files = [
+            FileContent(
+                path=f["path"],
+                data=base64.b64decode(f.get("data", "")).decode("utf-8", errors="replace"),
+                size=f.get("size", 0),
+            )
+            for f in resp.get("files", [])
+        ]
+        errors = resp.get("errors", [])
+        return files, errors
+
+    async def stat_path(self, volume_id: str, path: str, *, timeout: float = 30.0) -> FileInfo:
+        """Get file/directory metadata."""
+        resp = await self._call("StatPath", {"volume_id": volume_id, "path": path}, timeout=timeout)
         info = resp.get("info", {})
         return FileInfo(
             name=info.get("name", ""),
@@ -173,35 +235,27 @@ class FileOpsClient:
             mode=info.get("mode", 0),
         )
 
-    async def delete_path(
-        self, volume_id: str, path: str, *, timeout: float = 30.0
-    ) -> None:
+    async def delete_path(self, volume_id: str, path: str, *, timeout: float = 30.0) -> None:
         """Delete a file or directory on a volume."""
-        await self._call(
-            "DeletePath", {"volume_id": volume_id, "path": path}, timeout=timeout
-        )
-        logger.info(
-            "DeletePath succeeded: volume=%s path=%s", volume_id, path
-        )
+        await self._call("DeletePath", {"volume_id": volume_id, "path": path}, timeout=timeout)
+        logger.info("DeletePath succeeded: volume=%s path=%s", volume_id, path)
 
     async def mkdir_all(
         self, volume_id: str, path: str, *, uid: int = 1000, gid: int = 1000, timeout: float = 30.0
     ) -> None:
         """Create a directory and all parents on a volume."""
         await self._call(
-            "MkdirAll", {"volume_id": volume_id, "path": path, "uid": uid, "gid": gid}, timeout=timeout
+            "MkdirAll",
+            {"volume_id": volume_id, "path": path, "uid": uid, "gid": gid},
+            timeout=timeout,
         )
-        logger.info(
-            "MkdirAll succeeded: volume=%s path=%s", volume_id, path
-        )
+        logger.info("MkdirAll succeeded: volume=%s path=%s", volume_id, path)
 
     # ------------------------------------------------------------------
     # Tar operations
     # ------------------------------------------------------------------
 
-    async def tar_create(
-        self, volume_id: str, path: str, *, timeout: float = 60.0
-    ) -> bytes:
+    async def tar_create(self, volume_id: str, path: str, *, timeout: float = 60.0) -> bytes:
         """Create a tar archive of a path on a volume. Returns raw bytes."""
         resp = await self._call(
             "TarCreate", {"volume_id": volume_id, "path": path}, timeout=timeout
@@ -230,17 +284,13 @@ class FileOpsClient:
             },
             timeout=timeout,
         )
-        logger.info(
-            "TarExtract succeeded: volume=%s path=%s", volume_id, path
-        )
+        logger.info("TarExtract succeeded: volume=%s path=%s", volume_id, path)
 
     # ------------------------------------------------------------------
     # Convenience wrappers
     # ------------------------------------------------------------------
 
-    async def read_file_text(
-        self, volume_id: str, path: str, *, timeout: float = 30.0
-    ) -> str:
+    async def read_file_text(self, volume_id: str, path: str, *, timeout: float = 30.0) -> str:
         """Read a file as UTF-8 text."""
         data = await self.read_file(volume_id, path, timeout=timeout)
         return data.decode("utf-8")

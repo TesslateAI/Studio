@@ -15,18 +15,21 @@ import {
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '../theme/ThemeContext';
+import { projectsApi } from '../lib/api';
 
 interface FileNode {
   name: string;
   path: string;
-  content?: string;
   isDirectory: boolean;
   children?: FileNode[];
 }
 
-interface FileData {
-  file_path: string;
-  content: string;
+interface FileTreeEntry {
+  path: string;
+  name: string;
+  is_dir: boolean;
+  size: number;
+  mod_time: number;
 }
 
 interface ContextMenuState {
@@ -44,7 +47,9 @@ interface InlineInputState {
 
 interface CodeEditorProps {
   projectId: number;
-  files: FileData[];
+  slug: string;
+  fileTree: FileTreeEntry[];
+  containerDir?: string;
   onFileUpdate: (filePath: string, content: string) => void;
   onFileCreate?: (filePath: string) => void;
   onFileDelete?: (filePath: string, isDirectory: boolean) => void;
@@ -56,7 +61,9 @@ interface CodeEditorProps {
 
 function CodeEditor({
   projectId: _projectId,
-  files,
+  slug,
+  fileTree: fileTreeProp,
+  containerDir,
   onFileUpdate,
   onFileCreate,
   onFileDelete,
@@ -106,32 +113,37 @@ function CodeEditor({
   const [inlineInput, setInlineInput] = useState<InlineInputState | null>(null);
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<FileNode | null>(null);
+  // Loading state for lazy content fetch
+  const [loadingContent, setLoadingContent] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const inlineInputRef = useRef<HTMLInputElement>(null);
 
   // ── Memoized Monaco options — same reference across all renders ──────
-  const editorOptions = useMemo(() => ({
-    fontSize: 14,
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
-    lineNumbers: 'on' as const,
-    minimap: { enabled: true },
-    scrollBeyondLastLine: false,
-    automaticLayout: true,
-    tabSize: 2,
-    wordWrap: 'on' as const,
-    padding: { top: 16, bottom: 16 },
-    smoothScrolling: true,
-    cursorBlinking: 'smooth' as const,
-    cursorSmoothCaretAnimation: 'on' as const,
-    renderLineHighlight: 'all' as const,
-    bracketPairColorization: { enabled: true },
-    guides: { bracketPairs: true, indentation: true },
-    suggestOnTriggerCharacters: true,
-    quickSuggestions: true,
-    formatOnPaste: true,
-    formatOnType: true,
-  }), []);
+  const editorOptions = useMemo(
+    () => ({
+      fontSize: 14,
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+      lineNumbers: 'on' as const,
+      minimap: { enabled: true },
+      scrollBeyondLastLine: false,
+      automaticLayout: true,
+      tabSize: 2,
+      wordWrap: 'on' as const,
+      padding: { top: 16, bottom: 16 },
+      smoothScrolling: true,
+      cursorBlinking: 'smooth' as const,
+      cursorSmoothCaretAnimation: 'on' as const,
+      renderLineHighlight: 'all' as const,
+      bracketPairColorization: { enabled: true },
+      guides: { bracketPairs: true, indentation: true },
+      suggestOnTriggerCharacters: true,
+      quickSuggestions: true,
+      formatOnPaste: true,
+      formatOnType: true,
+    }),
+    []
+  );
 
   // Flush any pending debounced save immediately
   const flushPendingSave = useCallback(() => {
@@ -150,10 +162,13 @@ function CodeEditor({
   }, []);
 
   // Flush pending save before switching files
-  const switchToFile = useCallback((path: string) => {
-    flushPendingSave();
-    setSelectedFile(path);
-  }, [flushPendingSave]);
+  const switchToFile = useCallback(
+    (path: string) => {
+      flushPendingSave();
+      setSelectedFile(path);
+    },
+    [flushPendingSave]
+  );
 
   // Flush on unmount
   useEffect(() => {
@@ -230,39 +245,33 @@ function CodeEditor({
     }, 500);
   }, []);
 
-  // Memoize file paths so the tree only rebuilds when paths change, not content
-  const filePathsKey = useMemo(
-    () => files.map(f => f.file_path).join('\0'),
-    [files]
-  );
+  // Memoize file paths so the tree only rebuilds when paths change
+  const filePathsKey = useMemo(() => fileTreeProp.map((f) => f.path).join('\0'), [fileTreeProp]);
 
   useEffect(() => {
-    // Build file tree structure
+    // Build hierarchical FileNode[] tree from flat fileTreeProp entries
     const tree: FileNode[] = [];
     const pathMap = new Map<string, FileNode>();
 
-    // Sort files by path to ensure proper tree building
-    const sortedFiles = [...files].sort((a, b) => a.file_path.localeCompare(b.file_path));
+    // Sort entries by path for proper tree building
+    const sorted = [...fileTreeProp]
+      .filter((e) => e.path && e.path !== '.')
+      .sort((a, b) => a.path.localeCompare(b.path));
 
-    sortedFiles.forEach((file) => {
-      // Handle empty directory entries (path ends with /)
-      const isEmptyDir = file.file_path.endsWith('/');
-      const cleanPath = isEmptyDir ? file.file_path.slice(0, -1) : file.file_path;
-      const parts = cleanPath.split('/').filter(Boolean);
+    sorted.forEach((entry) => {
+      const parts = entry.path.split('/').filter(Boolean);
       let currentPath = '';
 
       parts.forEach((part: string, index: number) => {
         const fullPath = currentPath ? `${currentPath}/${part}` : part;
-        // For empty dir entries, all parts (including the last) are directories
-        const isFile = !isEmptyDir && index === parts.length - 1;
+        const isLeaf = index === parts.length - 1;
 
         if (!pathMap.has(fullPath)) {
           const node: FileNode = {
             name: part,
             path: fullPath,
-            isDirectory: !isFile,
-            children: !isFile ? [] : undefined,
-            content: isFile ? file.content : undefined,
+            isDirectory: isLeaf ? entry.is_dir : true,
+            children: (isLeaf ? entry.is_dir : true) ? [] : undefined,
           };
 
           pathMap.set(fullPath, node);
@@ -295,14 +304,34 @@ function CodeEditor({
 
     setFileTree(tree);
 
-    // Auto-select the first actual file if none selected (skip directory placeholders)
-    if (!selectedFile && files.length > 0) {
-      const firstFile = files.find((f) => !f.file_path.endsWith('/'));
+    // Auto-select the first actual file if none selected
+    if (!selectedFile && sorted.length > 0) {
+      const firstFile = sorted.find((e) => !e.is_dir);
       if (firstFile) {
-        switchToFile(firstFile.file_path);
+        switchToFile(firstFile.path);
       }
     }
   }, [filePathsKey]);
+
+  // Lazy-load file content when selectedFile changes
+  useEffect(() => {
+    if (!selectedFile || localContentRef.current.has(selectedFile)) return;
+    let cancelled = false;
+    setLoadingContent(true);
+    projectsApi
+      .getFileContent(slug, selectedFile, containerDir)
+      .then((res) => {
+        if (cancelled) return;
+        localContentRef.current.set(selectedFile, res.content);
+        setLoadingContent(false);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadingContent(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFile, slug, containerDir]);
 
   const toggleDirectory = (path: string) => {
     setExpandedDirs((prev) => {
@@ -623,10 +652,8 @@ function CodeEditor({
     return items;
   };
 
-  const selectedFileContent = files.find((f) => f.file_path === selectedFile);
-  // Editor should stay mounted if we have local content even if polling temporarily drops the file
-  const hasEditorContent = selectedFile != null &&
-    (selectedFileContent != null || localContentRef.current.has(selectedFile));
+  // Editor should stay mounted if we have local content (lazy-loaded)
+  const hasEditorContent = selectedFile != null && localContentRef.current.has(selectedFile);
 
   // Compute initial stats text for the DOM ref (used when editor hasn't mounted yet)
   const initialStatsText = useMemo(() => {
@@ -635,11 +662,8 @@ function CodeEditor({
     if (local !== undefined) {
       return `${local.split('\n').length} lines \u2022 ${local.length} characters`;
     }
-    if (selectedFileContent) {
-      return `${selectedFileContent.content.split('\n').length} lines \u2022 ${selectedFileContent.content.length} characters`;
-    }
     return '';
-  }, [selectedFile, selectedFileContent]);
+  }, [selectedFile, hasEditorContent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="h-full flex bg-[var(--surface)] overflow-hidden">
@@ -657,7 +681,7 @@ function CodeEditor({
             <div>
               <h3 className="text-sm font-semibold text-[var(--text)]">Explorer</h3>
               <p className="text-xs text-[var(--text)]/60">
-                {files.length} {files.length === 1 ? 'file' : 'files'}
+                {fileTreeProp.length} {fileTreeProp.length === 1 ? 'entry' : 'entries'}
               </p>
             </div>
           </div>
@@ -697,7 +721,7 @@ function CodeEditor({
 
         <div
           className="flex-1 p-2 overflow-y-auto"
-          key={files.length}
+          key={fileTreeProp.length}
           onClick={(e) => {
             // Click on empty space clears directory selection
             if (e.target === e.currentTarget) setSelectedDir(null);
@@ -773,7 +797,7 @@ function CodeEditor({
                 key={selectedFile}
                 height="100%"
                 language={getLanguage(selectedFile)}
-                defaultValue={localContentRef.current.get(selectedFile) ?? selectedFileContent?.content ?? ''}
+                defaultValue={localContentRef.current.get(selectedFile) ?? ''}
                 onChange={handleEditorChange}
                 onMount={handleEditorDidMount}
                 theme={theme === 'dark' ? 'vs-dark' : 'vs'}
@@ -783,7 +807,14 @@ function CodeEditor({
           </>
         ) : startupOverlay ? (
           startupOverlay
-        ) : isFilesSyncing && files.length === 0 ? (
+        ) : loadingContent ? (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center p-8">
+              <div className="w-10 h-10 mx-auto mb-4 border-2 border-[var(--text)]/20 border-t-orange-500 rounded-full animate-spin" />
+              <p className="text-sm text-[var(--text)]/50">Loading file...</p>
+            </div>
+          </div>
+        ) : isFilesSyncing && fileTreeProp.length === 0 ? (
           <div className="h-full flex items-center justify-center">
             <div className="text-center p-8">
               <div className="w-12 h-12 mx-auto mb-4 border-3 border-[var(--text)]/20 border-t-orange-500 rounded-full animate-spin" />
@@ -800,10 +831,10 @@ function CodeEditor({
                 <Code size={40} className="opacity-60 text-orange-500" />
               </div>
               <h3 className="text-lg font-semibold mb-2 text-[var(--text)]">
-                {files.length > 0 ? 'Select a file to edit' : 'No files yet'}
+                {fileTreeProp.length > 0 ? 'Select a file to edit' : 'No files yet'}
               </h3>
               <p className="text-sm text-[var(--text)]/50 max-w-sm">
-                {files.length > 0
+                {fileTreeProp.length > 0
                   ? 'Choose a file from the explorer to start editing'
                   : 'Chat with your AI agent to generate code'}
               </p>

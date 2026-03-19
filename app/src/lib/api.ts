@@ -449,6 +449,35 @@ export const projectsApi = {
     const response = await api.get(`/api/projects/${slug}/files`);
     return response.data;
   },
+  getFileTree: async (slug: string, containerDir?: string) => {
+    const params = containerDir ? { container_dir: containerDir } : {};
+    const response = await api.get(`/api/projects/${slug}/files/tree`, { params });
+    return response.data as Array<{
+      path: string;
+      name: string;
+      is_dir: boolean;
+      size: number;
+      mod_time: number;
+    }>;
+  },
+  getFileContent: async (slug: string, path: string, containerDir?: string) => {
+    const params: Record<string, string> = { path };
+    if (containerDir) params.container_dir = containerDir;
+    const response = await api.get(`/api/projects/${slug}/files/content`, { params });
+    return response.data as { path: string; content: string; size: number };
+  },
+  getFileContentBatch: async (slug: string, paths: string[], containerDir?: string) => {
+    const params = containerDir ? { container_dir: containerDir } : {};
+    const response = await api.post(
+      `/api/projects/${slug}/files/content/batch`,
+      { paths },
+      { params }
+    );
+    return response.data as {
+      files: Array<{ path: string; content: string; size: number }>;
+      errors: string[];
+    };
+  },
   getDevServerUrl: async (slug: string) => {
     const response = await api.get(`/api/projects/${slug}/dev-server-url`);
     return response.data;

@@ -48,8 +48,8 @@ from ..models import (
     User,
     UserPurchasedBase,
 )
-from ..schemas import BrowserPreview as BrowserPreviewSchema
 from ..schemas import (
+    BatchContentRequest,
     BrowserPreviewCreate,
     BrowserPreviewUpdate,
     ContainerConnectionCreate,
@@ -59,14 +59,17 @@ from ..schemas import (
     ContainerUpdate,
     DeploymentTargetAssignment,
     DirectoryCreateRequest,
+    FileContentResponse,
     FileDeleteRequest,
     FileRenameRequest,
+    FileTreeEntry,
     ProjectCreate,
     SetupConfigSyncResponse,
     TemplateExportRequest,
     TesslateConfigCreate,
     TesslateConfigResponse,
 )
+from ..schemas import BrowserPreview as BrowserPreviewSchema
 from ..schemas import Container as ContainerSchema
 from ..schemas import ContainerConnection as ContainerConnectionSchema
 from ..schemas import Project as ProjectSchema
@@ -482,6 +485,81 @@ async def get_project(
     """Get a project by its slug."""
     project = await get_project_by_slug(db, project_slug, current_user.id)
     return project
+
+
+@router.get("/{project_slug}/files/tree", response_model=list[FileTreeEntry])
+async def get_file_tree(
+    project_slug: str,
+    container_dir: str | None = None,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get recursive filtered file tree (metadata only, no content)."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    from ..services.orchestration import get_orchestrator
+
+    orchestrator = get_orchestrator()
+
+    entries = await orchestrator.list_tree(
+        user_id=current_user.id,
+        project_id=project.id,
+        container_name=None,
+        subdir=container_dir,
+    )
+    return entries
+
+
+@router.get("/{project_slug}/files/content", response_model=FileContentResponse)
+async def get_file_content(
+    project_slug: str,
+    path: str,
+    container_dir: str | None = None,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get content of a single file."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    from ..services.orchestration import get_orchestrator
+
+    orchestrator = get_orchestrator()
+
+    result = await orchestrator.read_file_content(
+        user_id=current_user.id,
+        project_id=project.id,
+        container_name=None,
+        file_path=path,
+        subdir=container_dir,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    return result
+
+
+@router.post("/{project_slug}/files/content/batch")
+async def get_files_content_batch(
+    project_slug: str,
+    body: BatchContentRequest,
+    container_dir: str | None = None,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Batch-read multiple files in one request."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    from ..services.orchestration import get_orchestrator
+
+    orchestrator = get_orchestrator()
+
+    files, errors = await orchestrator.read_files_batch(
+        user_id=current_user.id,
+        project_id=project.id,
+        container_name=None,
+        paths=body.paths,
+        subdir=container_dir,
+    )
+    return {"files": files, "errors": errors}
 
 
 @router.get("/{project_slug}/files", response_model=list[ProjectFileSchema])

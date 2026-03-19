@@ -272,6 +272,56 @@ class BaseOrchestrator(ABC):
         """
         pass
 
+    @abstractmethod
+    async def list_tree(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        subdir: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Recursive filtered file tree (excludes node_modules, .git, binaries, etc.).
+
+        Returns:
+            List of dicts with: path, name, is_dir, size, mod_time
+        """
+        pass
+
+    @abstractmethod
+    async def read_file_content(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        file_path: str,
+        subdir: str | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Read a single file's content.
+
+        Returns:
+            Dict with path, content, size — or None if not found
+        """
+        pass
+
+    @abstractmethod
+    async def read_files_batch(
+        self,
+        user_id: UUID,
+        project_id: UUID,
+        container_name: str,
+        paths: list[str],
+        subdir: str | None = None,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """
+        Batch-read multiple files.
+
+        Returns:
+            Tuple of ([{path, content, size}], [error_paths])
+        """
+        pass
+
     # =========================================================================
     # SHELL OPERATIONS (for agent tools)
     # =========================================================================

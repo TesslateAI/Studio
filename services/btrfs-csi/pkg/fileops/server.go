@@ -192,6 +192,27 @@ type (
 	}
 
 	Empty struct{}
+
+	ListTreeRequest struct {
+		VolumeID          string   `json:"volume_id"`
+		Path              string   `json:"path"`
+		ExcludeDirs       []string `json:"exclude_dirs"`
+		ExcludeFiles      []string `json:"exclude_files"`
+		ExcludeExtensions []string `json:"exclude_extensions"`
+	}
+	ListTreeResponse struct {
+		Entries []FileInfo `json:"entries"`
+	}
+
+	ReadFilesRequest struct {
+		VolumeID    string   `json:"volume_id"`
+		Paths       []string `json:"paths"`
+		MaxFileSize int64    `json:"max_file_size"`
+	}
+	ReadFilesResponse struct {
+		Files  []FileContent `json:"files"`
+		Errors []string      `json:"errors"`
+	}
 )
 
 // chownNewParents chowns directories from child up to (but not including) root.
@@ -224,9 +245,11 @@ func registerFileOpsServer(srv *grpc.Server, s *Server) {
 			{MethodName: "ReadFile", Handler: s.handleReadFile},
 			{MethodName: "WriteFile", Handler: s.handleWriteFile},
 			{MethodName: "ListDir", Handler: s.handleListDir},
+			{MethodName: "ListTree", Handler: s.handleListTree},
 			{MethodName: "StatPath", Handler: s.handleStatPath},
 			{MethodName: "DeletePath", Handler: s.handleDeletePath},
 			{MethodName: "MkdirAll", Handler: s.handleMkdirAll},
+			{MethodName: "ReadFiles", Handler: s.handleReadFiles},
 			{MethodName: "TarCreate", Handler: s.handleTarCreate},
 			{MethodName: "TarExtract", Handler: s.handleTarExtract},
 		},
@@ -448,6 +471,145 @@ func (s *Server) handleMkdirAll(_ interface{}, ctx context.Context, dec func(int
 	}
 
 	return &Empty{}, nil
+}
+
+func (s *Server) handleListTree(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req ListTreeRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+
+	walkPath := req.Path
+	if walkPath == "" {
+		walkPath = "."
+	}
+
+	fullPath, err := s.volumePath(req.VolumeID, walkPath)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	// Build lookup sets for O(1) filtering.
+	excludeDirs := make(map[string]struct{}, len(req.ExcludeDirs))
+	for _, d := range req.ExcludeDirs {
+		excludeDirs[d] = struct{}{}
+	}
+	excludeFiles := make(map[string]struct{}, len(req.ExcludeFiles))
+	for _, f := range req.ExcludeFiles {
+		excludeFiles[f] = struct{}{}
+	}
+	excludeExts := make(map[string]struct{}, len(req.ExcludeExtensions))
+	for _, e := range req.ExcludeExtensions {
+		excludeExts[e] = struct{}{}
+	}
+
+	var entries []FileInfo
+
+	err = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil // Skip entries we can't read.
+		}
+
+		relPath, _ := filepath.Rel(fullPath, path)
+		if relPath == "." {
+			return nil // Skip root entry.
+		}
+
+		name := d.Name()
+
+		// Skip excluded directories (and their entire subtree).
+		if d.IsDir() {
+			if _, ok := excludeDirs[name]; ok {
+				return filepath.SkipDir
+			}
+		} else {
+			// Skip excluded filenames.
+			if _, ok := excludeFiles[name]; ok {
+				return nil
+			}
+			// Skip excluded extensions.
+			if idx := strings.LastIndex(name, "."); idx >= 0 {
+				ext := name[idx+1:]
+				if _, ok := excludeExts[ext]; ok {
+					return nil
+				}
+			}
+		}
+
+		info, statErr := d.Info()
+		if statErr != nil {
+			return nil
+		}
+
+		entries = append(entries, FileInfo{
+			Name:    name,
+			Path:    relPath,
+			Size:    info.Size(),
+			IsDir:   d.IsDir(),
+			ModTime: info.ModTime().Unix(),
+			Mode:    uint32(info.Mode()),
+		})
+		return nil
+	})
+
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list tree: %v", err)
+	}
+
+	return &ListTreeResponse{Entries: entries}, nil
+}
+
+func (s *Server) handleReadFiles(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req ReadFilesRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if len(req.Paths) == 0 {
+		return &ReadFilesResponse{}, nil
+	}
+
+	var files []FileContent
+	var errors []string
+
+	for _, p := range req.Paths {
+		fullPath, err := s.volumePath(req.VolumeID, p)
+		if err != nil {
+			errors = append(errors, p)
+			continue
+		}
+
+		info, statErr := os.Stat(fullPath)
+		if statErr != nil {
+			errors = append(errors, p)
+			continue
+		}
+
+		// Skip files larger than max size (if limit set).
+		if req.MaxFileSize > 0 && info.Size() > req.MaxFileSize {
+			errors = append(errors, p)
+			continue
+		}
+
+		data, readErr := os.ReadFile(fullPath)
+		if readErr != nil {
+			errors = append(errors, p)
+			continue
+		}
+
+		files = append(files, FileContent{
+			Path: p,
+			Data: data,
+			Size: info.Size(),
+		})
+	}
+
+	return &ReadFilesResponse{Files: files, Errors: errors}, nil
 }
 
 func (s *Server) handleTarCreate(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {

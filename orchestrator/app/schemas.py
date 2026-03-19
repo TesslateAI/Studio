@@ -1452,3 +1452,34 @@ class AgentMcpAssignmentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FileTreeEntry(BaseModel):
+    """Single entry in a recursive file tree."""
+
+    path: str
+    name: str
+    is_dir: bool
+    size: int = 0
+    mod_time: int = 0
+
+
+class FileContentResponse(BaseModel):
+    """Content of a single file."""
+
+    path: str
+    content: str
+    size: int = 0
+
+
+class BatchContentRequest(BaseModel):
+    """Request to read multiple files at once."""
+
+    paths: list[str]
+
+    @field_validator("paths")
+    @classmethod
+    def limit_paths(cls, v):
+        if len(v) > 200:
+            raise ValueError("Maximum 200 paths per batch request")
+        return v

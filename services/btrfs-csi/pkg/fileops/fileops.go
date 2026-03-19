@@ -18,6 +18,13 @@ type FileInfo struct {
 	Mode    uint32 `json:"mode"`     // File permission bits
 }
 
+// FileContent holds a file's path, data and size for batch reads.
+type FileContent struct {
+	Path string `json:"path"`
+	Data []byte `json:"data"`
+	Size int64  `json:"size"`
+}
+
 // FileOps defines the file operations interface for Tier 0.
 type FileOps interface {
 	// ReadFile reads the contents of a file in a project volume.
@@ -29,6 +36,9 @@ type FileOps interface {
 	// ListDir lists the contents of a directory in a project volume.
 	ListDir(ctx context.Context, volumeID, path string, recursive bool) ([]FileInfo, error)
 
+	// ListTree returns a filtered recursive file listing, skipping excluded dirs/files/extensions.
+	ListTree(ctx context.Context, volumeID, path string, excludeDirs, excludeFiles, excludeExts []string) ([]FileInfo, error)
+
 	// StatPath returns metadata about a file or directory.
 	StatPath(ctx context.Context, volumeID, path string) (*FileInfo, error)
 
@@ -37,6 +47,9 @@ type FileOps interface {
 
 	// MkdirAll creates a directory and all parents.
 	MkdirAll(ctx context.Context, volumeID, path string) error
+
+	// ReadFiles reads multiple files in a single call. Returns contents and error paths.
+	ReadFiles(ctx context.Context, volumeID string, paths []string, maxFileSize int64) ([]FileContent, []string, error)
 
 	// TarCreate creates a tar archive of a directory or file.
 	TarCreate(ctx context.Context, volumeID, path string) ([]byte, error)

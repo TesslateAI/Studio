@@ -13,6 +13,7 @@ import {
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
 import { type ChatAgent } from '../../types/chat';
+import { projectsApi } from '../../lib/api';
 import { modKey } from '../../lib/keyboard-registry';
 
 // Width thresholds for responsive collapse
@@ -24,17 +25,12 @@ const VERY_COMPACT_WIDTH_THRESHOLD = 300;
 const COMPACT_WIDTH_THRESHOLD = 380;
 const EDIT_MODE_COMPACT_THRESHOLD = 480;
 
-interface ProjectFile {
-  file_path: string;
-  content: string;
-}
-
 interface ChatInputProps {
   agents: ChatAgent[];
   currentAgent: ChatAgent;
   onSelectAgent: (agent: ChatAgent) => void;
   onSendMessage: (message: string) => void;
-  projectFiles?: ProjectFile[];
+  slug?: string;
   projectName?: string;
   placeholder?: string;
   disabled?: boolean;
@@ -59,7 +55,7 @@ export function ChatInput({
   currentAgent,
   onSelectAgent,
   onSendMessage,
-  projectFiles = [],
+  slug: projectSlug,
   projectName = 'project',
   placeholder:
     _placeholder = 'Ask AI to build something... (Enter or ⌃↵ to send, Shift+Enter for new line)',
@@ -312,15 +308,25 @@ export function ChatInput({
   };
 
   const downloadProject = async () => {
+    if (!projectSlug) return;
     try {
       toast.loading('Preparing download...', { id: 'download' });
 
+      // Fetch file tree, then batch-fetch all file contents
+      const tree = await projectsApi.getFileTree(projectSlug);
+      const filePaths = tree.filter((e) => !e.is_dir).map((e) => e.path);
+
       const zip = new JSZip();
 
-      // Add all project files to zip
-      projectFiles.forEach((file) => {
-        zip.file(file.file_path, file.content);
-      });
+      // Batch fetch in chunks of 200 (server limit)
+      const BATCH_SIZE = 200;
+      for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
+        const chunk = filePaths.slice(i, i + BATCH_SIZE);
+        const { files: contents } = await projectsApi.getFileContentBatch(projectSlug, chunk);
+        contents.forEach((file) => {
+          zip.file(file.path, file.content);
+        });
+      }
 
       // Generate zip file
       const blob = await zip.generateAsync({ type: 'blob' });
@@ -335,7 +341,7 @@ export function ChatInput({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      toast.success('Project downloaded!', { id: 'download', icon: '📦' });
+      toast.success('Project downloaded!', { id: 'download' });
     } catch (error) {
       console.error('Failed to download project:', error);
       toast.error('Failed to download project', { id: 'download' });
@@ -378,7 +384,9 @@ export function ChatInput({
             ))}
             <div className="mt-2 pt-2 border-t border-[var(--border-color)]">
               <span className="text-xs text-[var(--text)]/40 px-3">
-                {filteredCommands.some((c) => c.isSkill) ? 'Press Enter to send' : 'Press Enter to execute'}
+                {filteredCommands.some((c) => c.isSkill)
+                  ? 'Press Enter to send'
+                  : 'Press Enter to execute'}
               </span>
             </div>
           </div>
