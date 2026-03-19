@@ -18,7 +18,7 @@ test.describe('Authentication', () => {
     await expect(page).toHaveURL('/dashboard');
 
     // Should see dashboard elements (adjust selectors based on actual UI)
-    await expect(page.locator('text=Dashboard').or(page.locator('h1')).first()).toBeVisible();
+    await expect(page.locator('text=Projects').or(page.locator('h1')).first()).toBeVisible();
   });
 
   test('unauthenticated user cannot access protected content', async ({ browser }) => {
