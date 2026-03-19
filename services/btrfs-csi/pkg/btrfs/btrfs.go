@@ -87,6 +87,43 @@ func (m *Manager) DeleteSubvolume(ctx context.Context, name string) error {
 	return nil
 }
 
+// RenameSubvolume renames a btrfs subvolume from /pool/{oldName} to
+// /pool/{newName}. Uses os.Rename (preserves UUID and received_uuid) with
+// SnapshotSubvolume + DeleteSubvolume fallback if os.Rename fails.
+func (m *Manager) RenameSubvolume(ctx context.Context, oldName, newName string) error {
+	oldFull, err := m.safePath(oldName)
+	if err != nil {
+		return err
+	}
+	newFull, nErr := m.safePath(newName)
+	if nErr != nil {
+		return nErr
+	}
+
+	// Ensure the parent directory of the target exists.
+	if mkErr := os.MkdirAll(filepath.Dir(newFull), 0755); mkErr != nil {
+		return fmt.Errorf("mkdir parent for %q: %w", newName, mkErr)
+	}
+
+	// Primary: os.Rename preserves UUID + received_uuid.
+	if err := os.Rename(oldFull, newFull); err == nil {
+		klog.V(4).Infof("Renamed subvolume %s -> %s (os.Rename)", oldName, newName)
+		return nil
+	} else {
+		klog.Warningf("os.Rename %s -> %s failed (%v), falling back to snapshot+delete", oldName, newName, err)
+	}
+
+	// Fallback: snapshot + delete (works but loses received_uuid).
+	if err := m.SnapshotSubvolume(ctx, oldName, newName, true); err != nil {
+		return fmt.Errorf("fallback snapshot %s -> %s: %w", oldName, newName, err)
+	}
+	if err := m.DeleteSubvolume(ctx, oldName); err != nil {
+		klog.Warningf("RenameSubvolume fallback: failed to delete %s after snapshot: %v", oldName, err)
+	}
+	klog.V(4).Infof("Renamed subvolume %s -> %s (snapshot+delete fallback)", oldName, newName)
+	return nil
+}
+
 // SnapshotSubvolume creates a snapshot of /pool/{source} at /pool/{dest}.
 // If readOnly is true the snapshot is created with the -r flag.
 func (m *Manager) SnapshotSubvolume(ctx context.Context, source, dest string, readOnly bool) error {

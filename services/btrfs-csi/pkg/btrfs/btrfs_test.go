@@ -1,6 +1,8 @@
 package btrfs
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -258,5 +260,50 @@ func TestNewManager(t *testing.T) {
 				t.Errorf("PoolPath() = %q, want %q", m.PoolPath(), tt.poolPath)
 			}
 		})
+	}
+}
+
+func TestRenameSubvolume(t *testing.T) {
+	pool := t.TempDir()
+	mgr := NewManager(pool)
+
+	// Create source directory to simulate a subvolume.
+	srcPath := filepath.Join(pool, "layers", "vol@pending")
+	if err := os.MkdirAll(srcPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(srcPath, "marker.txt")
+	if err := os.WriteFile(marker, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dstName := "layers/vol@abc123"
+	if err := mgr.RenameSubvolume(context.Background(), "layers/vol@pending", dstName); err != nil {
+		t.Fatalf("RenameSubvolume: %v", err)
+	}
+
+	// Source should be gone.
+	if _, err := os.Stat(srcPath); !os.IsNotExist(err) {
+		t.Errorf("source still exists after rename")
+	}
+
+	// Dest should exist with marker.
+	dstFull := filepath.Join(pool, dstName)
+	data, err := os.ReadFile(filepath.Join(dstFull, "marker.txt"))
+	if err != nil {
+		t.Fatalf("read marker from dest: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("marker content = %q, want %q", data, "hello")
+	}
+}
+
+func TestRenameSubvolume_PathTraversal(t *testing.T) {
+	pool := t.TempDir()
+	mgr := NewManager(pool)
+
+	err := mgr.RenameSubvolume(context.Background(), "../escape", "layers/dest")
+	if err == nil {
+		t.Fatal("expected path traversal error, got nil")
 	}
 }

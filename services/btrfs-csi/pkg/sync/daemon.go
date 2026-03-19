@@ -280,13 +280,20 @@ func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (st
 	return hash, nil
 }
 
-// RestoreVolume restores a volume from CAS by replaying all layers from the
-// manifest. The base template and each layer are downloaded and received in
-// order, then a writable snapshot is created as the working volume.
+// RestoreVolume restores a volume from CAS by downloading the latest layer
+// from the manifest and applying it on top of the base template. Each layer
+// is a full diff from the template (not incremental from the previous layer),
+// so only one layer download is needed regardless of manifest history.
 func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	if d.cas == nil {
 		return fmt.Errorf("CAS store not configured, cannot restore volume %q", volumeID)
 	}
+
+	// Acquire per-volume lock to serialize with concurrent SyncVolume/CreateSnapshot.
+	vl := d.volumeLock(volumeID)
+	vl.Lock()
+	defer vl.Unlock()
+
 	manifest, err := d.cas.GetManifest(ctx, volumeID)
 	if err != nil {
 		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
@@ -299,59 +306,50 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		}
 	}
 
-	// Receive each layer in order.
-	var lastLayerPath string
-	for _, layer := range manifest.Layers {
-		targetPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(layer.Hash))
+	// Determine source for writable volume: latest layer or base template.
+	var sourcePath string
+	if len(manifest.Layers) > 0 {
+		latest := manifest.Layers[len(manifest.Layers)-1]
+		targetPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latest.Hash))
 
-		// Skip if already present locally.
-		if d.btrfs.SubvolumeExists(ctx, targetPath) {
-			lastLayerPath = targetPath
-			continue
-		}
+		if !d.btrfs.SubvolumeExists(ctx, targetPath) {
+			reader, err := d.cas.GetBlob(ctx, latest.Hash)
+			if err != nil {
+				return fmt.Errorf("download layer %s: %w", latest.Hash, err)
+			}
 
-		reader, err := d.cas.GetBlob(ctx, layer.Hash)
-		if err != nil {
-			return fmt.Errorf("download layer %s: %w", layer.Hash, err)
-		}
-
-		// btrfs receive creates a subvolume named from the send stream
-		// (typically "{vol}@pending"). We receive then rename.
-		if err := d.btrfs.Receive(ctx, "layers", reader); err != nil {
+			if err := d.btrfs.Receive(ctx, "layers", reader); err != nil {
+				reader.Close()
+				return fmt.Errorf("receive layer %s: %w", latest.Hash, err)
+			}
 			reader.Close()
-			return fmt.Errorf("receive layer %s: %w", layer.Hash, err)
-		}
-		reader.Close()
 
-		// Rename received subvolume to its content-addressed name.
-		receivedPath := fmt.Sprintf("layers/%s@pending", volumeID)
-		if d.btrfs.SubvolumeExists(ctx, receivedPath) {
-			if d.btrfs.SubvolumeExists(ctx, targetPath) {
-				_ = d.btrfs.DeleteSubvolume(ctx, targetPath)
+			// Rename received subvolume to content-addressed name.
+			receivedPath := fmt.Sprintf("layers/%s@pending", volumeID)
+			if d.btrfs.SubvolumeExists(ctx, receivedPath) {
+				if d.btrfs.SubvolumeExists(ctx, targetPath) {
+					_ = d.btrfs.DeleteSubvolume(ctx, targetPath)
+				}
+				if err := d.btrfs.RenameSubvolume(ctx, receivedPath, targetPath); err != nil {
+					return fmt.Errorf("rename layer to %s: %w", targetPath, err)
+				}
 			}
-			if err := d.btrfs.SnapshotSubvolume(ctx, receivedPath, targetPath, true); err != nil {
-				return fmt.Errorf("rename layer to %s: %w", targetPath, err)
-			}
-			_ = d.btrfs.DeleteSubvolume(ctx, receivedPath)
 		}
-
-		lastLayerPath = targetPath
+		sourcePath = targetPath
+	} else if manifest.TemplateName != "" {
+		sourcePath = fmt.Sprintf("templates/%s", manifest.TemplateName)
 	}
 
-	// Create writable volume from the final layer (or from base template).
+	if sourcePath == "" {
+		return fmt.Errorf("no layers and no base template for volume %s", volumeID)
+	}
+
+	// Create writable volume from source.
 	volumePath := fmt.Sprintf("volumes/%s", volumeID)
 	if d.btrfs.SubvolumeExists(ctx, volumePath) {
 		if err := d.btrfs.DeleteSubvolume(ctx, volumePath); err != nil {
 			return fmt.Errorf("delete existing volume %s: %w", volumeID, err)
 		}
-	}
-
-	sourcePath := lastLayerPath
-	if sourcePath == "" && manifest.TemplateName != "" {
-		sourcePath = fmt.Sprintf("templates/%s", manifest.TemplateName)
-	}
-	if sourcePath == "" {
-		return fmt.Errorf("no layers and no base template for volume %s", volumeID)
 	}
 
 	if err := d.btrfs.SnapshotSubvolume(ctx, sourcePath, volumePath, false); err != nil {
@@ -363,11 +361,11 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	d.mu.Lock()
 	if tv, ok := d.tracked[volumeID]; ok {
 		tv.lastLayerHash = latestHash
-		tv.lastSnapPath = lastLayerPath
+		tv.lastSnapPath = sourcePath
 	}
 	d.mu.Unlock()
 
-	klog.Infof("Restored volume %s from CAS (%d layers)", volumeID, len(manifest.Layers))
+	klog.Infof("Restored volume %s from CAS (latest layer)", volumeID)
 	return nil
 }
 
@@ -419,37 +417,43 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 			targetLayerPath = fmt.Sprintf("templates/%s", manifest.TemplateName)
 		}
 	} else {
-		// Ensure all layers up to target exist locally.
-		for _, layer := range manifest.Layers {
-			layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(layer.Hash))
-			if !d.btrfs.SubvolumeExists(ctx, layerPath) {
-				reader, err := d.cas.GetBlob(ctx, layer.Hash)
-				if err != nil {
-					return fmt.Errorf("download layer %s: %w", layer.Hash, err)
-				}
-				if err := d.btrfs.Receive(ctx, "layers", reader); err != nil {
-					reader.Close()
-					return fmt.Errorf("receive layer %s: %w", layer.Hash, err)
-				}
-				reader.Close()
-
-				// Rename received snapshot.
-				receivedPath := fmt.Sprintf("layers/%s@pending", volumeID)
-				if d.btrfs.SubvolumeExists(ctx, receivedPath) {
-					if d.btrfs.SubvolumeExists(ctx, layerPath) {
-						_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
-					}
-					if snapErr := d.btrfs.SnapshotSubvolume(ctx, receivedPath, layerPath, true); snapErr != nil {
-						return fmt.Errorf("rename layer to %s: %w", layerPath, snapErr)
-					}
-					_ = d.btrfs.DeleteSubvolume(ctx, receivedPath)
-				}
-			}
-			if layer.Hash == targetHash {
-				targetLayerPath = layerPath
+		// Each layer is independently restorable (full diff from template),
+		// so download only the target layer directly.
+		var targetLayer *cas.Layer
+		for i := range manifest.Layers {
+			if manifest.Layers[i].Hash == targetHash {
+				targetLayer = &manifest.Layers[i]
 				break
 			}
 		}
+		if targetLayer == nil {
+			return fmt.Errorf("target hash %s not found in manifest for volume %s", targetHash, volumeID)
+		}
+
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(targetLayer.Hash))
+		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
+			reader, err := d.cas.GetBlob(ctx, targetLayer.Hash)
+			if err != nil {
+				return fmt.Errorf("download layer %s: %w", targetLayer.Hash, err)
+			}
+			if err := d.btrfs.Receive(ctx, "layers", reader); err != nil {
+				reader.Close()
+				return fmt.Errorf("receive layer %s: %w", targetLayer.Hash, err)
+			}
+			reader.Close()
+
+			// Rename received snapshot.
+			receivedPath := fmt.Sprintf("layers/%s@pending", volumeID)
+			if d.btrfs.SubvolumeExists(ctx, receivedPath) {
+				if d.btrfs.SubvolumeExists(ctx, layerPath) {
+					_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
+				}
+				if err := d.btrfs.RenameSubvolume(ctx, receivedPath, layerPath); err != nil {
+					return fmt.Errorf("rename layer to %s: %w", layerPath, err)
+				}
+			}
+		}
+		targetLayerPath = layerPath
 	}
 
 	if targetLayerPath == "" {
@@ -602,18 +606,16 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 		return "", "", fmt.Errorf("create pending snapshot: %w", err)
 	}
 
-	// 2. Determine parent for incremental send.
+	// 2. Determine parent for incremental send. Always use the template so
+	// every layer is independently restorable (no chain dependency).
 	var parentPath string
-	if tv.lastSnapPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastSnapPath) {
-		parentPath = tv.lastSnapPath
-	} else if tv.templateName != "" {
-		// Use template as parent for first sync.
+	if tv.templateName != "" {
 		tmplPath := fmt.Sprintf("templates/%s", tv.templateName)
 		if d.btrfs.SubvolumeExists(ctx, tmplPath) {
 			parentPath = tmplPath
 		}
 	}
-	// If no parent found, full send (empty volume or no template).
+	// If no template, full send (blank project or template not locally cached).
 
 	// 3. btrfs send → CAS PutBlob.
 	sendReader, err := d.btrfs.Send(ctx, pendingPath, parentPath)
@@ -640,10 +642,7 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 		}
 	}
 
-	parentHash := tv.lastLayerHash
-	if parentHash == "" {
-		parentHash = tv.templateHash
-	}
+	parentHash := tv.templateHash
 	manifest.AppendLayer(cas.Layer{
 		Hash:   hash,
 		Parent: parentHash,
@@ -667,15 +666,14 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 		}
 	}
 
-	// btrfs has no rename — use snapshot + delete to move.
+	// Rename pending snapshot to content-addressed name. os.Rename preserves
+	// UUID and received_uuid, critical for cross-node incremental restore.
 	if d.btrfs.SubvolumeExists(ctx, newSnapPath) {
 		_ = d.btrfs.DeleteSubvolume(ctx, newSnapPath)
 	}
-	if err := d.btrfs.SnapshotSubvolume(ctx, pendingPath, newSnapPath, true); err != nil {
+	if err := d.btrfs.RenameSubvolume(ctx, pendingPath, newSnapPath); err != nil {
 		klog.Warningf("Failed to rename pending to %s: %v", newSnapPath, err)
 		newSnapPath = pendingPath // Keep using pending path as fallback.
-	} else {
-		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 	}
 
 	metrics.SyncDuration.Observe(time.Since(start).Seconds())

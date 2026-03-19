@@ -452,16 +452,24 @@ func TestRestoreFromS3(t *testing.T) {
 		t.Fatalf("SyncVolume: %v", err)
 	}
 
-	// Verify manifest exists.
+	// Modify the volume and sync again to create a second layer.
+	secondData := "second-sync-" + uniqueName("payload2")
+	writeTestFile(t, filepath.Join(pool, volPath), "second.txt", secondData)
+
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("second SyncVolume: %v", err)
+	}
+
+	// Verify manifest has 2 layers (each independently restorable).
 	manifest, err := casStore.GetManifest(ctx, volID)
 	if err != nil {
 		t.Fatalf("GetManifest after sync: %v", err)
 	}
-	if len(manifest.Layers) == 0 {
-		t.Fatal("expected at least 1 layer in manifest after sync")
+	if len(manifest.Layers) != 2 {
+		t.Fatalf("expected 2 layers in manifest, got %d", len(manifest.Layers))
 	}
 
-	// Delete the local volume subvolume (simulate node loss).
+	// Delete local volume and ALL layer snapshots (simulate fresh node).
 	if err := mgr.DeleteSubvolume(ctx, volPath); err != nil {
 		t.Fatalf("delete volume for restore test: %v", err)
 	}
@@ -469,13 +477,12 @@ func TestRestoreFromS3(t *testing.T) {
 		t.Fatal("volume should not exist after deletion")
 	}
 
-	// Clean up the layer snapshot from the sync so restore has to re-download.
 	layerSubs, _ := mgr.ListSubvolumes(ctx, "layers/"+volID)
 	for _, sub := range layerSubs {
 		mgr.DeleteSubvolume(ctx, sub.Path)
 	}
 
-	// Restore from S3.
+	// Restore from S3 — should succeed with only the latest layer + template.
 	if err := daemon.RestoreVolume(ctx, volID); err != nil {
 		t.Fatalf("RestoreVolume: %v", err)
 	}
@@ -485,11 +492,112 @@ func TestRestoreFromS3(t *testing.T) {
 		t.Fatal("volume should exist after restore")
 	}
 
-	// Read data back and verify content matches original.
+	// Restored volume should have content from the latest (second) sync.
 	verifyFileContent(t, filepath.Join(pool, volPath, "user-data.txt"), uniqueData)
+	verifyFileContent(t, filepath.Join(pool, volPath, "second.txt"), secondData)
 	verifyFileContent(t, filepath.Join(pool, volPath, "base.txt"), "template-base")
 
 	// Cleanup: delete the restored volume and any layer snapshots.
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+		subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
+		for _, sub := range subs {
+			mgr.DeleteSubvolume(context.Background(), sub.Path)
+		}
+	})
+}
+
+// TestRestoreToSnapshot verifies that any layer in the manifest can be restored
+// independently without replaying earlier layers. Each layer is a full diff
+// from the template, so only the target layer + template are needed.
+func TestRestoreToSnapshot(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	// CAS infrastructure.
+	bucket := uniqueName("snaprestore")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create template.
+	tmplName := uniqueName("sr-tmpl")
+	tmplPath := "templates/" + tmplName
+	stagingPath := "volumes/" + uniqueName("staging")
+	if err := mgr.CreateSubvolume(ctx, stagingPath); err != nil {
+		t.Fatalf("create staging: %v", err)
+	}
+	writeTestFile(t, filepath.Join(pool, stagingPath), "base.txt", "template-base")
+	if err := mgr.SnapshotSubvolume(ctx, stagingPath, tmplPath, true); err != nil {
+		t.Fatalf("snapshot staging to template: %v", err)
+	}
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), tmplPath)
+		mgr.DeleteSubvolume(context.Background(), stagingPath)
+	})
+
+	tmplHash, err := tmplMgr.UploadTemplate(ctx, tmplName)
+	if err != nil {
+		t.Fatalf("UploadTemplate: %v", err)
+	}
+
+	// Create volume and sync twice to get 2 layers.
+	volID := uniqueName("sr-vol")
+	volPath := "volumes/" + volID
+	if err := mgr.SnapshotSubvolume(ctx, tmplPath, volPath, false); err != nil {
+		t.Fatalf("snapshot template to volume: %v", err)
+	}
+
+	v1Data := "version-1-" + uniqueName("v1")
+	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", v1Data)
+
+	daemon := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+	daemon.TrackVolume(volID, tmplName, tmplHash)
+
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("SyncVolume v1: %v", err)
+	}
+
+	// Get the first layer's hash.
+	manifest, err := casStore.GetManifest(ctx, volID)
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if len(manifest.Layers) != 1 {
+		t.Fatalf("expected 1 layer, got %d", len(manifest.Layers))
+	}
+	v1Hash := manifest.Layers[0].Hash
+
+	// Second sync with different content.
+	v2Data := "version-2-" + uniqueName("v2")
+	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", v2Data)
+
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("SyncVolume v2: %v", err)
+	}
+
+	// Delete all local layers so restore has to re-download.
+	layerSubs, _ := mgr.ListSubvolumes(ctx, "layers/"+volID)
+	for _, sub := range layerSubs {
+		mgr.DeleteSubvolume(ctx, sub.Path)
+	}
+
+	// Restore to v1 (first layer) — should only need that one layer + template.
+	if err := daemon.RestoreToSnapshot(ctx, volID, v1Hash); err != nil {
+		t.Fatalf("RestoreToSnapshot to v1: %v", err)
+	}
+
+	// Volume should have v1 content.
+	verifyFileContent(t, filepath.Join(pool, volPath, "data.txt"), v1Data)
+	verifyFileContent(t, filepath.Join(pool, volPath, "base.txt"), "template-base")
+
+	// Cleanup.
 	t.Cleanup(func() {
 		mgr.DeleteSubvolume(context.Background(), volPath)
 		subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
