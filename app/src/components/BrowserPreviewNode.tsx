@@ -15,7 +15,7 @@ interface BrowserPreviewNodeData extends Record<string, unknown> {
   connectedContainerId?: string;
   connectedContainerName?: string;
   connectedPort?: number;
-  baseUrl?: string;
+  getContainerUrl?: (containerId: string) => string;
   onDelete?: (id: string) => void;
   onDisconnect?: (id: string) => void;
 }
@@ -45,8 +45,7 @@ const arePropsEqual = (
     prevProps.id === nextProps.id &&
     prevData.connectedContainerId === nextData.connectedContainerId &&
     prevData.connectedContainerName === nextData.connectedContainerName &&
-    prevData.connectedPort === nextData.connectedPort &&
-    prevData.baseUrl === nextData.baseUrl
+    prevData.connectedPort === nextData.connectedPort
   );
 };
 
@@ -69,14 +68,19 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
     handle: ResizeHandle;
   } | null>(null);
 
-  // Build the full URL based on connected container
+  // Resolve base URL from runtime status via callback
+  const baseUrl =
+    data.connectedContainerId && data.getContainerUrl
+      ? data.getContainerUrl(data.connectedContainerId)
+      : '';
+
   const getFullUrl = useCallback(
     (path: string) => {
-      if (!data.baseUrl) return '';
+      if (!baseUrl) return '';
       const cleanPath = path.startsWith('/') ? path : `/${path}`;
-      return `${data.baseUrl}${cleanPath}`;
+      return `${baseUrl}${cleanPath}`;
     },
-    [data.baseUrl]
+    [baseUrl]
   );
 
   // Update input when path changes
@@ -204,7 +208,7 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
     };
   }, [isResizing]);
 
-  const isConnected = !!data.connectedContainerId && !!data.baseUrl;
+  const isConnected = !!data.connectedContainerId && !!baseUrl;
 
   return (
     <div className="relative group" style={{ contain: 'layout style' }}>

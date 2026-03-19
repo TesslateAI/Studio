@@ -17,7 +17,6 @@ import {
   Play,
   Stop,
   Code,
-  FlowArrow,
   Storefront,
   BookOpen,
   GitBranch,
@@ -43,7 +42,7 @@ import { ChatContainer } from '../components/chat/ChatContainer';
 
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, configApi, deploymentTargetsApi, marketplaceApi } from '../lib/api';
+import api, { projectsApi, deploymentTargetsApi, marketplaceApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { type ChatAgent } from '../types/chat';
 import { fileEvents } from '../utils/fileEvents';
@@ -118,12 +117,20 @@ const ProjectGraphCanvasInner = () => {
   // Refs for stable callback references - prevents node re-renders when parent state changes
   const nodesRef = useRef<Node[]>(nodes);
   const edgesRef = useRef<Edge[]>(edges);
-  const filesRef = useRef<Array<Record<string, unknown>>>([]);
+  const filesRef = useRef<
+    Array<{ path: string; name: string; is_dir: boolean; size: number; mod_time: number }>
+  >([]);
   const slugRef = useRef(slug);
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
-  const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
-  const [_appDomain, setAppDomain] = useState<string>('localhost');
-  const appDomainRef = useRef<string>('localhost');
+  const [fileTree, setFileTree] = useState<
+    Array<{ path: string; name: string; is_dir: boolean; size: number; mod_time: number }>
+  >([]);
+  // Runtime URLs keyed by container_id — populated by status poller, read by browser preview nodes
+  const runtimeUrlsRef = useRef<Map<string, string>>(new Map());
+  const getContainerUrl = useCallback(
+    (containerId: string) => runtimeUrlsRef.current.get(containerId) || '',
+    []
+  );
   const [isRunning, setIsRunning] = useState(false);
   const [activeView, setActiveView] = useState<MainViewType>('graph');
   const [kanbanMounted, setKanbanMounted] = useState(false);
@@ -165,8 +172,8 @@ const ProjectGraphCanvasInner = () => {
   }, [edges]);
 
   useEffect(() => {
-    filesRef.current = files;
-  }, [files]);
+    filesRef.current = fileTree;
+  }, [fileTree]);
 
   useEffect(() => {
     slugRef.current = slug;
@@ -182,14 +189,6 @@ const ProjectGraphCanvasInner = () => {
       setKanbanMounted(true);
     }
   }, [activeView, kanbanMounted]);
-
-  // Fetch app domain config on mount
-  useEffect(() => {
-    configApi.getAppDomain().then((domain) => {
-      setAppDomain(domain);
-      appDomainRef.current = domain;
-    });
-  }, []);
 
   useEffect(() => {
     if (slug) {
@@ -211,11 +210,17 @@ const ProjectGraphCanvasInner = () => {
       try {
         const statusData = await projectsApi.getContainersRuntimeStatus(slug);
         if (statusData.containers) {
-          // Update nodes with actual Docker status - only update if something changed
+          // Populate runtime URL map for browser preview nodes to read
+          for (const info of Object.values(statusData.containers) as Record<string, unknown>[]) {
+            if (info.container_id && info.url) {
+              runtimeUrlsRef.current.set(info.container_id as string, info.url as string);
+            }
+          }
+
+          // Update container node statuses
           setNodes((currentNodes) => {
             let hasChanges = false;
             const updatedNodes = currentNodes.map((node) => {
-              // Find matching container by service name (sanitized container name)
               const serviceName = node.data.name
                 ?.toLowerCase()
                 .replace(/[^a-z0-9-]/g, '-')
@@ -229,21 +234,16 @@ const ProjectGraphCanvasInner = () => {
                   hasChanges = true;
                   return {
                     ...node,
-                    data: {
-                      ...node.data,
-                      status: newStatus,
-                    },
+                    data: { ...node.data, status: newStatus },
                   };
                 }
               }
               return node;
             });
 
-            // Only return new array if something actually changed
             return hasChanges ? updatedNodes : currentNodes;
           });
 
-          // Update isRunning state based on overall status
           setIsRunning(statusData.status === 'running');
         }
       } catch (error) {
@@ -402,37 +402,37 @@ const ProjectGraphCanvasInner = () => {
         },
       }));
 
+      // Seed runtime URL map from initial status fetch
+      try {
+        const statusData = await projectsApi.getContainersRuntimeStatus(projectRes.slug);
+        for (const info of Object.values(statusData.containers || {}) as Record<
+          string,
+          unknown
+        >[]) {
+          if (info.container_id && info.url) {
+            runtimeUrlsRef.current.set(info.container_id as string, info.url as string);
+          }
+        }
+      } catch {
+        // URLs will be populated by polling
+      }
+
       // Convert browser previews to React Flow nodes
       const browserNodes: Node[] = browserPreviews.map((preview: Record<string, unknown>) => {
-        // Find connected container for URL building
         const connectedContainer = preview.connected_container_id
           ? containers.find((c: Container) => c.id === preview.connected_container_id)
           : null;
 
-        let baseUrl = '';
-        if (connectedContainer) {
-          const sanitizedName =
-            connectedContainer.name
-              ?.toLowerCase()
-              .replace(/[^a-z0-9-]/g, '-')
-              .replace(/-+/g, '-')
-              .replace(/^-|-$/g, '') || 'app';
-          // URL format: {project-slug}-{container-name}.{app_domain}
-          const domain = appDomainRef.current;
-          const protocol = domain.includes('localhost') ? 'http' : 'https';
-          baseUrl = `${protocol}://${projectRes.slug}-${sanitizedName}.${domain}`;
-        }
-
         return {
-          id: preview.id,
+          id: preview.id as string,
           type: 'browserPreview',
-          position: { x: preview.position_x, y: preview.position_y },
+          position: { x: preview.position_x as number, y: preview.position_y as number },
           dragHandle: '.browser-drag-handle',
           data: {
             connectedContainerId: preview.connected_container_id,
             connectedContainerName: connectedContainer?.name,
             connectedPort: connectedContainer?.port,
-            baseUrl: baseUrl,
+            getContainerUrl,
             onDelete: handleDeleteBrowser,
           },
         };
@@ -519,8 +519,13 @@ const ProjectGraphCanvasInner = () => {
   const loadFiles = useCallback(async () => {
     if (!slugRef.current) return;
     try {
-      const filesData = await projectsApi.getFiles(slugRef.current);
-      setFiles(filesData);
+      const entries = await projectsApi.getFileTree(slugRef.current);
+      setFileTree((prev) => {
+        const prevPaths = prev.map((f) => f.path).join('\0');
+        const newPaths = entries.map((f: { path: string }) => f.path).join('\0');
+        if (prevPaths === newPaths) return prev;
+        return entries;
+      });
     } catch (error) {
       console.error('Failed to load files:', error);
     }
@@ -572,28 +577,18 @@ const ProjectGraphCanvasInner = () => {
     async (filePath: string, content: string) => {
       if (!slug) return;
 
-      // Track if this is a new file or an update
-      const isNewFile = !files.find((f) => f.file_path === filePath);
-
-      setFiles((prev) => {
-        const existing = prev.find((f) => f.file_path === filePath);
-        if (existing) {
-          return prev.map((f) => (f.file_path === filePath ? { ...f, content } : f));
-        }
-        return [...prev, { file_path: filePath, content }];
-      });
-
       try {
         await projectsApi.saveFile(slug, filePath, content);
 
-        // Emit file event to refresh the code editor file tree
-        fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
+        // Refresh file tree to pick up any new files
+        loadFiles();
+        fileEvents.emit('file-updated', filePath);
       } catch (error) {
         console.error('Failed to save file:', error);
         toast.error(`Failed to save ${filePath}`);
       }
     },
-    [slug, files]
+    [slug, loadFiles]
   );
 
   const togglePanel = (panel: PanelType) => {
@@ -776,26 +771,13 @@ const ProjectGraphCanvasInner = () => {
         const containerName = sourceNode.data.name;
         const containerPort = sourceNode.data.port || 3000;
 
-        // Build the preview URL based on container name
-        // Format: {project-slug}-{container-name}.{appDomain}
-        const sanitizedName =
-          containerName
-            ?.toLowerCase()
-            .replace(/[^a-z0-9-]/g, '-')
-            .replace(/-+/g, '-')
-            .replace(/^-|-$/g, '') || 'app';
-
-        const domain = appDomainRef.current;
-        const protocol = domain.includes('localhost') ? 'http' : 'https';
-        const baseUrl = `${protocol}://${project.slug}-${sanitizedName}.${domain}`;
-
         try {
           // Save connection to backend
           await api.post(
             `/api/projects/${slug}/browser-previews/${connection.target}/connect/${connection.source}`
           );
 
-          // Update the browser node with container data
+          // Update the browser node with container data — URL resolved via getContainerUrl
           setNodes((nds) =>
             nds.map((node) =>
               node.id === connection.target
@@ -806,7 +788,7 @@ const ProjectGraphCanvasInner = () => {
                       connectedContainerId: connection.source,
                       connectedContainerName: containerName,
                       connectedPort: containerPort,
-                      baseUrl: baseUrl,
+                      getContainerUrl,
                       onDelete: handleDeleteBrowser,
                     },
                   }
@@ -1455,11 +1437,13 @@ const ProjectGraphCanvasInner = () => {
         );
 
         if (deleteFiles) {
-          // Find all files that belong to this container - use ref for latest files
-          const containerFiles = filesRef.current.filter((file) => {
+          // Find all files that belong to this container - use ref for latest tree
+          const containerFiles = filesRef.current.filter((entry) => {
             // Files are typically organized as: containerName/...
-            const pathParts = file.file_path.split('/');
-            return pathParts[0] === containerName || pathParts[0] === containerId;
+            const pathParts = entry.path.split('/');
+            return (
+              !entry.is_dir && (pathParts[0] === containerName || pathParts[0] === containerId)
+            );
           });
 
           if (containerFiles.length === 0) {
@@ -1468,8 +1452,8 @@ const ProjectGraphCanvasInner = () => {
           }
 
           // Delete each file
-          const deletePromises = containerFiles.map((file) =>
-            projectsApi.deleteFile(currentSlug!, file.file_path)
+          const deletePromises = containerFiles.map((entry) =>
+            projectsApi.deleteFile(currentSlug!, entry.path)
           );
 
           try {
@@ -1844,16 +1828,25 @@ const ProjectGraphCanvasInner = () => {
       <NavigationSidebar
         activePage="builder"
         onExpandedChange={setIsLeftSidebarExpanded}
-        builderSection={({ isExpanded, navButtonClass, navButtonClassCollapsed, iconClass, labelClass, inactiveNavButton, inactiveNavButtonCollapsed, inactiveIconClass, inactiveLabelClass }) => (
+        builderSection={({
+          isExpanded,
+          navButtonClass,
+          navButtonClassCollapsed,
+          iconClass,
+          labelClass,
+          _inactiveNavButton,
+          _inactiveNavButtonCollapsed,
+          inactiveIconClass,
+          inactiveLabelClass,
+        }) => (
           <>
             {/* Project name / back to projects */}
             {isExpanded ? (
-              <button
-                onClick={() => navigate('/dashboard')}
-                className={navButtonClass(false)}
-              >
+              <button onClick={() => navigate('/dashboard')} className={navButtonClass(false)}>
                 <ArrowLeft size={16} className={inactiveIconClass} />
-                <span className={`${inactiveLabelClass} truncate`}>{project?.name || 'Project'}</span>
+                <span className={`${inactiveLabelClass} truncate`}>
+                  {project?.name || 'Project'}
+                </span>
               </button>
             ) : (
               <Tooltip content={project?.name || 'Back to Projects'} side="right" delay={200}>
@@ -1901,15 +1894,21 @@ const ProjectGraphCanvasInner = () => {
 
             {/* Panel Toggles — Notes, Settings */}
             {[
-              { icon: <BookOpen size={16} />, title: 'Notes', onClick: () => togglePanel('notes'), active: activePanel === 'notes' },
-              { icon: <Gear size={16} />, title: 'Project Settings', onClick: () => togglePanel('settings'), active: activePanel === 'settings' },
+              {
+                icon: <BookOpen size={16} />,
+                title: 'Notes',
+                onClick: () => togglePanel('notes'),
+                active: activePanel === 'notes',
+              },
+              {
+                icon: <Gear size={16} />,
+                title: 'Project Settings',
+                onClick: () => togglePanel('settings'),
+                active: activePanel === 'settings',
+              },
             ].map((item, index) =>
               isExpanded ? (
-                <button
-                  key={index}
-                  onClick={item.onClick}
-                  className={navButtonClass(item.active)}
-                >
+                <button key={index} onClick={item.onClick} className={navButtonClass(item.active)}>
                   {React.cloneElement(item.icon, {
                     className: iconClass(item.active),
                   })}
@@ -1917,10 +1916,7 @@ const ProjectGraphCanvasInner = () => {
                 </button>
               ) : (
                 <Tooltip key={index} content={item.title} side="right" delay={200}>
-                  <button
-                    onClick={item.onClick}
-                    className={navButtonClassCollapsed(item.active)}
-                  >
+                  <button onClick={item.onClick} className={navButtonClassCollapsed(item.active)}>
                     {React.cloneElement(item.icon, {
                       className: iconClass(item.active),
                     })}
@@ -1968,7 +1964,11 @@ const ProjectGraphCanvasInner = () => {
               <button
                 onClick={handleStopAll}
                 className="btn btn-danger"
-                style={{ background: 'rgba(var(--status-red-rgb), 0.1)', borderColor: 'rgba(var(--status-red-rgb), 0.3)', color: 'var(--status-error)' }}
+                style={{
+                  background: 'rgba(var(--status-red-rgb), 0.1)',
+                  borderColor: 'rgba(var(--status-red-rgb), 0.3)',
+                  color: 'var(--status-error)',
+                }}
               >
                 <Stop size={16} weight="fill" />
                 <span className="hidden md:inline">Stop All</span>
@@ -1977,7 +1977,11 @@ const ProjectGraphCanvasInner = () => {
               <button
                 onClick={handleStartAll}
                 className="btn"
-                style={{ background: 'rgba(var(--status-green-rgb), 0.1)', borderColor: 'rgba(var(--status-green-rgb), 0.3)', color: 'var(--status-success)' }}
+                style={{
+                  background: 'rgba(var(--status-green-rgb), 0.1)',
+                  borderColor: 'rgba(var(--status-green-rgb), 0.3)',
+                  color: 'var(--status-success)',
+                }}
               >
                 <Play size={16} weight="fill" />
                 <span className="hidden md:inline">Start All</span>
@@ -2014,7 +2018,10 @@ const ProjectGraphCanvasInner = () => {
             {/* React Flow canvas */}
             <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform">
               {/* Floating component drawer */}
-              <MarketplaceSidebar onAutoLayout={handleAutoLayout} autoLayoutDisabled={nodes.length < 2} />
+              <MarketplaceSidebar
+                onAutoLayout={handleAutoLayout}
+                autoLayoutDisabled={nodes.length < 2}
+              />
 
               <GraphCanvas
                 nodes={nodes}
@@ -2080,7 +2087,12 @@ const ProjectGraphCanvasInner = () => {
           <div
             className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
           >
-            <CodeEditor projectId={project?.id} files={files} onFileUpdate={handleFileUpdate} />
+            <CodeEditor
+              projectId={project?.id}
+              slug={slug!}
+              fileTree={fileTree}
+              onFileUpdate={handleFileUpdate}
+            />
           </div>
 
           {/* Kanban View */}
@@ -2131,12 +2143,10 @@ const ProjectGraphCanvasInner = () => {
           currentAgent={currentAgent}
           onSelectAgent={handleAgentSelect}
           onFileUpdate={handleFileUpdate}
-          projectFiles={files}
           projectName={project?.name}
           sidebarExpanded={isLeftSidebarExpanded}
         />
       )}
-
 
       {/* External Service Credential Modal */}
       {externalServiceModal.item && (
