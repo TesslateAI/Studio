@@ -13,6 +13,7 @@ spec:
       labels:
         app: tesslate-btrfs-csi-node
     spec:
+      terminationGracePeriodSeconds: 600
       serviceAccountName: tesslate-btrfs-csi-node
       securityContext:
         seccompProfile:
@@ -86,6 +87,18 @@ spec:
             - "--pool-path=/mnt/tesslate-pool"
             - "--mode=node"
             - "--nodeops-port=9741"
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    wget -q -O- --post-data='' http://localhost:9743/drain || true
+                    for i in $(seq 1 580); do
+                      [ -f /run/csi/drain-complete ] && exit 0
+                      sleep 1
+                    done
           ports:
             - name: nodeops
               containerPort: 9741
@@ -93,11 +106,16 @@ spec:
             - name: fileops
               containerPort: 9742
               protocol: TCP
+            - name: drain
+              containerPort: 9743
+              protocol: TCP
           env:
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: ORCHESTRATOR_URL
+              value: "http://tesslate-backend-service.tesslate.svc.cluster.local:8000"
           envFrom:
             - secretRef:
                 name: tesslate-btrfs-csi-config

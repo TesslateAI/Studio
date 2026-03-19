@@ -233,6 +233,16 @@ type (
 		VolumeID string `json:"volume_id"`
 	}
 
+	QgroupLimitRequest struct {
+		Name  string `json:"name"`
+		Bytes int64  `json:"bytes"`
+	}
+
+	QgroupUsageResponse struct {
+		Exclusive int64 `json:"exclusive"`
+		Limit     int64 `json:"limit"`
+	}
+
 	Empty struct{}
 )
 
@@ -273,6 +283,8 @@ func registerNodeOpsServer(srv *grpc.Server, s *Server) {
 			{MethodName: "CreateUserSnapshot", Handler: s.handleCreateUserSnapshot},
 			{MethodName: "RestoreFromSnapshot", Handler: s.handleRestoreFromSnapshot},
 			{MethodName: "GetVolumeMetadata", Handler: s.handleGetVolumeMetadata},
+			{MethodName: "SetQgroupLimit", Handler: s.handleSetQgroupLimit},
+			{MethodName: "GetQgroupUsage", Handler: s.handleGetQgroupUsage},
 		},
 		Streams: []grpc.StreamDesc{
 			{
@@ -616,6 +628,39 @@ func (s *Server) handleGetVolumeMetadata(_ interface{}, ctx context.Context, dec
 		}
 	}
 	return meta, nil
+}
+
+// ---------------------------------------------------------------------------
+// Quota group handlers
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSetQgroupLimit(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req QgroupLimitRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "name is required")
+	}
+	if err := s.btrfs.SetQgroupLimit(ctx, req.Name, req.Bytes); err != nil {
+		return nil, status.Errorf(codes.Internal, "set qgroup limit: %v", err)
+	}
+	return &Empty{}, nil
+}
+
+func (s *Server) handleGetQgroupUsage(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req SubvolumeRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "name is required")
+	}
+	excl, limit, err := s.btrfs.GetQgroupUsage(ctx, req.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get qgroup usage: %v", err)
+	}
+	return &QgroupUsageResponse{Exclusive: excl, Limit: limit}, nil
 }
 
 // ---------------------------------------------------------------------------

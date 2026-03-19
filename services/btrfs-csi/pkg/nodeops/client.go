@@ -223,3 +223,15 @@ func (c *Client) GetVolumeMetadata(ctx context.Context, volumeID string) (*Volum
 	}
 	return &resp, nil
 }
+
+func (c *Client) SetQgroupLimit(ctx context.Context, name string, bytes int64) error {
+	return c.invoke(ctx, "SetQgroupLimit", &QgroupLimitRequest{Name: name, Bytes: bytes}, &Empty{})
+}
+
+func (c *Client) GetQgroupUsage(ctx context.Context, name string) (int64, int64, error) {
+	var resp QgroupUsageResponse
+	if err := c.invoke(ctx, "GetQgroupUsage", &SubvolumeRequest{Name: name}, &resp); err != nil {
+		return 0, 0, err
+	}
+	return resp.Exclusive, resp.Limit, nil
+}

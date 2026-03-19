@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -190,5 +191,43 @@ func TestStart_ContextCancel(t *testing.T) {
 		// Start returned promptly — success.
 	case <-time.After(2 * time.Second):
 		t.Fatal("Start did not return within 2 seconds after context cancellation")
+	}
+}
+
+func TestDrainAll_Empty(t *testing.T) {
+	bm := btrfs.NewManager("/pool")
+	d := NewDaemon(bm, nil, nil, 60*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := d.DrainAll(ctx); err != nil {
+		t.Fatalf("DrainAll on empty daemon: %v", err)
+	}
+
+	if len(d.GetTrackedState()) != 0 {
+		t.Error("tracked state should be empty after drain")
+	}
+}
+
+func TestDrainAll_ContextCancellation(t *testing.T) {
+	bm := btrfs.NewManager("/pool")
+	d := NewDaemon(bm, nil, nil, 60*time.Second)
+
+	// Track several volumes — SyncVolume will fail (no real btrfs) but
+	// context cancellation should stop the drain.
+	for i := 0; i < 10; i++ {
+		d.TrackVolume(fmt.Sprintf("vol-%d", i), "", "")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately.
+
+	err := d.DrainAll(ctx)
+	if err == nil {
+		t.Fatal("expected context error from cancelled DrainAll")
+	}
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
 }

@@ -89,6 +89,52 @@ func (d *Daemon) Stop() {
 	klog.Info("Sync daemon stopped")
 }
 
+// DrainAll performs a final CAS sync for all tracked volumes, then stops
+// the daemon. Used during node drain to persist unsaved data before
+// DaemonSet pod termination. Volumes are synced sequentially to avoid
+// contending on disk I/O and S3 bandwidth.
+func (d *Daemon) DrainAll(ctx context.Context) error {
+	d.mu.Lock()
+	type drainItem struct {
+		volumeID     string
+		templateName string
+		templateHash string
+	}
+	items := make([]drainItem, 0, len(d.tracked))
+	for _, tv := range d.tracked {
+		items = append(items, drainItem{
+			volumeID:     tv.volumeID,
+			templateName: tv.templateName,
+			templateHash: tv.templateHash,
+		})
+	}
+	d.mu.Unlock()
+
+	total := len(items)
+	klog.Infof("Drain: starting final sync for %d volumes", total)
+
+	for i, item := range items {
+		select {
+		case <-ctx.Done():
+			klog.Warningf("Drain: context cancelled after syncing %d/%d volumes", i, total)
+			return ctx.Err()
+		default:
+		}
+
+		if err := d.SyncVolume(ctx, item.volumeID); err != nil {
+			klog.Errorf("Drain: failed to sync volume %d/%d %s: %v", i+1, total, item.volumeID, err)
+			// Continue draining remaining volumes — partial drain > no drain.
+			continue
+		}
+		d.UntrackVolume(item.volumeID)
+		klog.Infof("Drain: synced volume %d/%d: %s", i+1, total, item.volumeID)
+	}
+
+	d.Stop()
+	klog.Info("Drain: complete")
+	return nil
+}
+
 // TrackVolume registers a volume for periodic CAS sync with its template context.
 func (d *Daemon) TrackVolume(volumeID, templateName, templateHash string) {
 	d.mu.Lock()
@@ -238,6 +284,9 @@ func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (st
 // manifest. The base template and each layer are downloaded and received in
 // order, then a writable snapshot is created as the working volume.
 func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
+	if d.cas == nil {
+		return fmt.Errorf("CAS store not configured, cannot restore volume %q", volumeID)
+	}
 	manifest, err := d.cas.GetManifest(ctx, volumeID)
 	if err != nil {
 		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
@@ -510,6 +559,12 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 		}
 		d.mu.Unlock()
 		metrics.SyncLag.WithLabelValues(item.tv.volumeID).Set(0)
+
+		// Update qgroup metrics if quotas are enabled.
+		if excl, limit, qErr := d.btrfs.GetQgroupUsage(ctx, "volumes/"+item.tv.volumeID); qErr == nil {
+			metrics.QgroupUsageBytes.WithLabelValues(item.tv.volumeID).Set(float64(excl))
+			metrics.QgroupLimitBytes.WithLabelValues(item.tv.volumeID).Set(float64(limit))
+		}
 	}
 
 	return firstErr
@@ -522,6 +577,9 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 //  4. Update manifest with new layer
 //  5. Rotate layer snapshot to layers/{volumeID}@{shortHash}
 func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, label string) (string, string, error) {
+	if d.cas == nil {
+		return "", "", fmt.Errorf("CAS store not configured")
+	}
 	start := time.Now()
 
 	volumePath := fmt.Sprintf("volumes/%s", tv.volumeID)

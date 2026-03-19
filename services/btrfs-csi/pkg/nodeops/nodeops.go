@@ -79,6 +79,12 @@ type NodeOps interface {
 
 	// GetVolumeMetadata returns CAS metadata for a volume (manifest info).
 	GetVolumeMetadata(ctx context.Context, volumeID string) (*VolumeMetadata, error)
+
+	// SetQgroupLimit sets a storage quota on a subvolume.
+	SetQgroupLimit(ctx context.Context, name string, bytes int64) error
+
+	// GetQgroupUsage returns exclusive byte usage and limit for a subvolume.
+	GetQgroupUsage(ctx context.Context, name string) (exclusive, limit int64, err error)
 }
 
 // SubvolumeInfo mirrors btrfs.SubvolumeInfo for the nodeops API boundary.

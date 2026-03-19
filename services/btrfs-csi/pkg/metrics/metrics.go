@@ -139,6 +139,25 @@ var (
 			Help:      "Total orphaned S3 objects deleted by GC",
 		},
 	)
+
+	// Quota.
+	QgroupUsageBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tesslate_csi",
+			Name:      "qgroup_usage_bytes",
+			Help:      "Exclusive byte usage per volume qgroup",
+		},
+		[]string{"volume_id"},
+	)
+
+	QgroupLimitBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tesslate_csi",
+			Name:      "qgroup_limit_bytes",
+			Help:      "Quota limit in bytes per volume qgroup (0 = no limit)",
+		},
+		[]string{"volume_id"},
+	)
 )
 
 func init() {
@@ -157,6 +176,8 @@ func init() {
 		RestoreDuration,
 		GCOrphansDeleted,
 		GCS3ObjectsDeleted,
+		QgroupUsageBytes,
+		QgroupLimitBytes,
 	)
 }
 

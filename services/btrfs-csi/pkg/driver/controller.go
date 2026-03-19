@@ -123,6 +123,19 @@ func (cs *ControllerServer) CreateVolume(
 		klog.Warningf("Failed to track volume %q for sync: %v", volID, err)
 	}
 
+	// Apply storage quota if configured.
+	quotaStr := params["quota"]
+	quotaBytes := cs.driver.defaultQuota
+	if quotaStr != "" {
+		quotaBytes = ParseQuota(quotaStr)
+	}
+	if quotaBytes > 0 {
+		volName := fmt.Sprintf("volumes/%s", volID)
+		if qErr := cs.driver.nodeOps.SetQgroupLimit(ctx, volName, quotaBytes); qErr != nil {
+			klog.Warningf("Failed to set quota for %s: %v", volID, qErr)
+		}
+	}
+
 	return cs.buildVolumeResponse(volID, req), nil
 }
 
@@ -453,3 +466,4 @@ func (cs *ControllerServer) ControllerGetCapabilities(
 		Capabilities: csiCaps,
 	}, nil
 }
+

@@ -3,7 +3,7 @@ set -euo pipefail
 
 POOL_DIR="/mnt/tesslate-pool"
 LOOP_FILE="/tmp/btrfs-test.img"
-LOOP_SIZE="1G"
+LOOP_SIZE="${BTRFS_POOL_SIZE:-1G}"
 
 echo "=== Setting up btrfs loopback filesystem ==="
 
@@ -19,6 +19,7 @@ mount -o loop "$LOOP_FILE" "$POOL_DIR"
 btrfs subvolume create "$POOL_DIR/templates"
 btrfs subvolume create "$POOL_DIR/volumes"
 btrfs subvolume create "$POOL_DIR/snapshots"
+btrfs subvolume create "$POOL_DIR/layers"
 
 # Enable quotas for capacity tracking (non-fatal — may fail in some container runtimes)
 btrfs quota enable "$POOL_DIR" 2>/dev/null || echo "WARNING: quotas not available (non-fatal)"
@@ -47,7 +48,12 @@ export TESSLATE_S3_ENDPOINT="localhost:9000"
 # Run integration tests
 echo "=== Running integration tests ==="
 cd /build
-TESSLATE_BTRFS_POOL="$POOL_DIR" TESSLATE_S3_ENDPOINT="$TESSLATE_S3_ENDPOINT" go test -v -tags=integration -count=1 ./integration/... -timeout 300s
+TEST_TAGS="integration"
+if [ -n "${EXTRA_TEST_TAGS:-}" ]; then
+    TEST_TAGS="integration,$EXTRA_TEST_TAGS"
+fi
+TEST_TIMEOUT="${TEST_TIMEOUT:-300s}"
+TESSLATE_BTRFS_POOL="$POOL_DIR" TESSLATE_S3_ENDPOINT="$TESSLATE_S3_ENDPOINT" go test -v -tags="$TEST_TAGS" -count=1 ./integration/... -timeout "$TEST_TIMEOUT"
 EXIT_CODE=$?
 
 # Cleanup

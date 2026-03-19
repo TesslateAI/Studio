@@ -304,6 +304,14 @@ func (m *mockNodeOps) GetVolumeMetadata(_ context.Context, _ string) (*nodeops.V
 	return &nodeops.VolumeMetadata{}, nil
 }
 
+func (m *mockNodeOps) GetQgroupUsage(_ context.Context, _ string) (int64, int64, error) {
+	return 0, 0, nil
+}
+
+func (m *mockNodeOps) SetQgroupLimit(_ context.Context, _ string, _ int64) error {
+	return nil
+}
+
 // newTestControllerServer builds a ControllerServer backed by the given mock.
 func newTestControllerServer(mock *mockNodeOps) *ControllerServer {
 	d := &Driver{

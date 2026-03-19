@@ -107,6 +107,9 @@ func (m *Manager) EnsureTemplateByHash(ctx context.Context, name, expectedHash s
 // it to the CAS store as a blob, and records the name→hash mapping in the
 // template index. Returns the blob hash.
 func (m *Manager) UploadTemplate(ctx context.Context, name string) (string, error) {
+	if m.cas == nil {
+		return "", fmt.Errorf("CAS store not configured, cannot upload template %q", name)
+	}
 	tmplPath := fmt.Sprintf("templates/%s", name)
 	snapPath := fmt.Sprintf("snapshots/%s", name)
 

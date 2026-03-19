@@ -4,13 +4,16 @@ package gc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/metrics"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/objstore"
 )
 
@@ -53,6 +56,43 @@ func (c *Collector) SetKnownVolumesFunc(fn func(ctx context.Context) (map[string
 	c.knownVolumes = fn
 }
 
+// SetOrchestratorURL configures the GC collector to fetch known volume IDs
+// from the orchestrator's internal API. This replaces SetKnownVolumesFunc
+// with an HTTP-based implementation.
+func (c *Collector) SetOrchestratorURL(url string) {
+	c.knownVolumes = func(ctx context.Context) (map[string]bool, error) {
+		return fetchKnownVolumes(ctx, url)
+	}
+}
+
+// fetchKnownVolumes fetches the set of known volume IDs from the orchestrator.
+func fetchKnownVolumes(ctx context.Context, baseURL string) (map[string]bool, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/internal/known-volume-ids", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch known volumes: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("orchestrator returned %d", resp.StatusCode)
+	}
+	var body struct {
+		VolumeIDs []string `json:"volume_ids"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	result := make(map[string]bool, len(body.VolumeIDs))
+	for _, id := range body.VolumeIDs {
+		result[id] = true
+	}
+	return result, nil
+}
+
 // Start begins the periodic GC loop. Blocks until context is cancelled.
 func (c *Collector) Start(ctx context.Context) {
 	klog.Infof("GC collector starting (interval=%v, grace=%v, dryRun=%v)",
@@ -92,6 +132,9 @@ func (c *Collector) RunOnce(ctx context.Context) error {
 	if err != nil {
 		klog.Errorf("GC stale snapshot cleanup error: %v", err)
 	}
+
+	metrics.GCOrphansDeleted.Add(float64(orphansDeleted))
+	metrics.GCS3ObjectsDeleted.Add(float64(snapshotsDeleted))
 
 	klog.V(2).Infof("GC cycle complete: orphans=%d, s3_snapshots=%d, stale_local=%d",
 		orphansDeleted, snapshotsDeleted, staleSnaps)

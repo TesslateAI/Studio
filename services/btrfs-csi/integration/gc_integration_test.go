@@ -83,7 +83,7 @@ func TestGC_CleanOrphanedSubvolumes(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// Grace period (CreatedAt is zero → orphans are still deleted)
+// Grace period protects recently-created orphans
 // --------------------------------------------------------------------------
 
 func TestGC_GracePeriod(t *testing.T) {
@@ -113,12 +113,11 @@ func TestGC_GracePeriod(t *testing.T) {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
-	// CreatedAt from btrfs subvolume list is zero for most entries, so the
-	// grace-period check (!sub.CreatedAt.IsZero() && ...) evaluates to false
-	// and orphans ARE deleted despite the long grace period.
+	// CreatedAt is now populated via os.Stat mtime, so the grace period
+	// correctly protects these just-created orphans from deletion.
 	for _, v := range []string{volX, volY} {
-		if mgr.SubvolumeExists(ctx, v) {
-			t.Errorf("expected orphan %s to be deleted (zero CreatedAt bypasses grace period)", v)
+		if !mgr.SubvolumeExists(ctx, v) {
+			t.Errorf("expected young orphan %s to survive grace period", v)
 		}
 	}
 }

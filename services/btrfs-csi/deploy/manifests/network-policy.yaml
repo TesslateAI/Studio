@@ -8,6 +8,7 @@ spec:
       app: tesslate-btrfs-csi-node
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     # Allow nodeops gRPC (port 9741) and FileOps gRPC (port 9742)
     # only from tesslate backend pods.
@@ -23,3 +24,29 @@ spec:
           port: 9741
         - protocol: TCP
           port: 9742
+  egress:
+    # Allow GC collector to reach orchestrator backend
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tesslate
+          podSelector:
+            matchLabels:
+              app: tesslate-backend
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Allow DNS resolution
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow S3/object storage egress (required for sync + GC S3 cleanup)
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 9000

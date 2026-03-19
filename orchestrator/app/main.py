@@ -36,6 +36,7 @@ from .routers import (
     git,
     git_providers,
     github,
+    internal,
     kanban,
     marketplace,
     mcp,
@@ -1099,6 +1100,7 @@ app.include_router(channels.router, tags=["channels"])  # /api/channels - Messag
 app.include_router(mcp.router, tags=["mcp"])  # /api/mcp - MCP server management
 app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoint
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
+app.include_router(internal.router, prefix="/api")  # /api/internal - Cluster-internal endpoints
 
 # Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
 try:

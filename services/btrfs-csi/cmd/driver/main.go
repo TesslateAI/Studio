@@ -39,7 +39,10 @@ func main() {
 		s3SecretKey = flag.String("s3-secret-key", "", "(deprecated) S3 secret key")
 		s3Region    = flag.String("s3-region", "us-east-1", "(deprecated) S3 region")
 		syncInterval   = flag.Duration("sync-interval", 60*time.Second, "Interval between sync daemon runs")
-		hubGRPCPort = flag.Int("hub-grpc-port", 9750, "VolumeHub gRPC listen port (hub mode)")
+		hubGRPCPort     = flag.Int("hub-grpc-port", 9750, "VolumeHub gRPC listen port (hub mode)")
+		orchestratorURL = flag.String("orchestrator-url", "", "Orchestrator base URL for GC known-volumes (e.g., http://tesslate-backend:8000)")
+		drainPort       = flag.Int("drain-port", 9743, "HTTP port for drain endpoint (preStop hook)")
+		defaultQuota   = flag.String("default-quota", "", "Default per-volume storage quota (e.g., 5Gi, 500Mi)")
 		showVersion    = flag.Bool("version", false, "Print version and exit")
 	)
 
@@ -59,6 +62,12 @@ func main() {
 	if *storageBucket == "" {
 		if v := os.Getenv("STORAGE_BUCKET"); v != "" {
 			*storageBucket = v
+		}
+	}
+
+	if *orchestratorURL == "" {
+		if v := os.Getenv("ORCHESTRATOR_URL"); v != "" {
+			*orchestratorURL = v
 		}
 	}
 
@@ -114,6 +123,9 @@ func main() {
 		driver.WithStorageConfig(*storageProvider, *storageBucket, storageEnvMap),
 		driver.WithSyncInterval(*syncInterval),
 		driver.WithHubGRPCPort(*hubGRPCPort),
+		driver.WithOrchestratorURL(*orchestratorURL),
+		driver.WithDrainPort(*drainPort),
+		driver.WithDefaultQuota(driver.ParseQuota(*defaultQuota)),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -141,3 +153,4 @@ func main() {
 	klog.Info("Driver stopped")
 	klog.Flush()
 }
+

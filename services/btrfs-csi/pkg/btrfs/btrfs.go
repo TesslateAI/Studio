@@ -154,12 +154,19 @@ func (m *Manager) ListSubvolumes(ctx context.Context, prefix string) ([]Subvolum
 		}
 	}
 
-	// Enrich with read-only status where possible.
+	// Enrich with read-only status and creation time where possible.
 	for i := range results {
 		fullPath := filepath.Join(m.poolPath, results[i].Path)
 		showOut, showErr := m.run(ctx, "subvolume", "show", fullPath)
-		if showErr == nil && strings.Contains(showOut, "readonly") && strings.Contains(showOut, "true") {
-			results[i].ReadOnly = true
+		if showErr == nil {
+			if strings.Contains(showOut, "readonly") && strings.Contains(showOut, "true") {
+				results[i].ReadOnly = true
+			}
+		}
+		// Use directory mtime as creation proxy — btrfs preserves mtime of
+		// the subvolume root directory from creation.
+		if info, statErr := os.Stat(fullPath); statErr == nil {
+			results[i].CreatedAt = info.ModTime()
 		}
 	}
 
@@ -331,6 +338,109 @@ func (m *Manager) EnableQuotas(ctx context.Context) error {
 }
 
 // ---------------------------------------------------------------------------
+// Quota group operations
+// ---------------------------------------------------------------------------
+
+// getSubvolumeID retrieves the btrfs subvolume ID for the given relative name
+// by parsing the output of `btrfs subvolume show`.
+func (m *Manager) getSubvolumeID(ctx context.Context, name string) (int, error) {
+	target, err := m.safePath(name)
+	if err != nil {
+		return 0, err
+	}
+	output, err := m.run(ctx, "subvolume", "show", target)
+	if err != nil {
+		return 0, fmt.Errorf("subvolume show %q: %w", name, err)
+	}
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if after, ok := strings.CutPrefix(line, "Subvolume ID:"); ok {
+			field := strings.TrimSpace(after)
+			id, parseErr := strconv.Atoi(field)
+			if parseErr != nil {
+				return 0, fmt.Errorf("parse subvolume ID %q: %w", field, parseErr)
+			}
+			return id, nil
+		}
+	}
+	return 0, fmt.Errorf("subvolume ID not found in show output for %q", name)
+}
+
+// SetQgroupLimit sets a storage quota on a subvolume via btrfs qgroup.
+// If bytes <= 0, the limit is removed ("none").
+func (m *Manager) SetQgroupLimit(ctx context.Context, name string, bytes int64) error {
+	id, err := m.getSubvolumeID(ctx, name)
+	if err != nil {
+		return fmt.Errorf("get subvolume ID for quota: %w", err)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var limitArg string
+	if bytes <= 0 {
+		limitArg = "none"
+	} else {
+		limitArg = strconv.FormatInt(bytes, 10)
+	}
+
+	qgroup := fmt.Sprintf("0/%d", id)
+	_, err = m.run(ctx, "qgroup", "limit", limitArg, qgroup, m.poolPath)
+	if err != nil {
+		return fmt.Errorf("set qgroup limit on %q: %w", name, err)
+	}
+	klog.V(4).Infof("Set qgroup limit %s on %s (qgroup=%s)", limitArg, name, qgroup)
+	return nil
+}
+
+// GetQgroupUsage returns the exclusive byte usage and limit for a subvolume's qgroup.
+// Exclusive bytes exclude shared CoW blocks from templates.
+// Returns limit=0 if no limit is set ("none").
+func (m *Manager) GetQgroupUsage(ctx context.Context, name string) (exclusive int64, limit int64, err error) {
+	id, err := m.getSubvolumeID(ctx, name)
+	if err != nil {
+		return 0, 0, fmt.Errorf("get subvolume ID for usage: %w", err)
+	}
+
+	target, err := m.safePath(name)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	output, err := m.run(ctx, "qgroup", "show", "--raw", "-re", target)
+	if err != nil {
+		return 0, 0, fmt.Errorf("qgroup show %q: %w", name, err)
+	}
+
+	qgroupPrefix := fmt.Sprintf("0/%d", id)
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == qgroupPrefix {
+			// With --raw -re the format is:
+			//   0/{id}  <rfer>  <excl>  <max_rfer>  <max_excl>
+			// "none" appears as literal "none" for unlimited.
+			excl, parseErr := strconv.ParseInt(fields[2], 10, 64)
+			if parseErr != nil {
+				return 0, 0, fmt.Errorf("parse exclusive bytes %q: %w", fields[2], parseErr)
+			}
+			// Parse max_rfer (field 3) as the limit.
+			if len(fields) >= 4 {
+				lim, limErr := strconv.ParseInt(fields[3], 10, 64)
+				if limErr == nil {
+					limit = lim
+				}
+				// If "none", limErr != nil and limit stays 0.
+			}
+			return excl, limit, nil
+		}
+	}
+	return 0, 0, fmt.Errorf("qgroup %s not found in show output for %q", qgroupPrefix, name)
+}
+
+// ---------------------------------------------------------------------------
 // Ownership operations
 // ---------------------------------------------------------------------------
 
@@ -413,11 +523,11 @@ func parseSubvolumeLine(line string) (SubvolumeInfo, bool) {
 	}
 
 	// The path is everything after "path ".
-	pathIdx := strings.Index(line, " path ")
-	if pathIdx < 0 {
+	_, subPath, found := strings.Cut(line, " path ")
+	if !found {
 		return SubvolumeInfo{}, false
 	}
-	subPath := strings.TrimSpace(line[pathIdx+6:])
+	subPath = strings.TrimSpace(subPath)
 
 	return SubvolumeInfo{
 		ID:   id,

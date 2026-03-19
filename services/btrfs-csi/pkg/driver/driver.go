@@ -3,7 +3,9 @@ package driver
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -34,6 +36,11 @@ const (
 	ModeHub        Mode = "hub" // Volume Hub — canonical store, S3 gateway, cache orchestrator
 )
 
+// drainSentinelPath is written after a successful drain to signal the preStop
+// hook that all volumes have been synced.  Placed inside the CSI socket
+// directory (a dedicated hostPath volume), not /tmp, to avoid CWE-377.
+const drainSentinelPath = "/run/csi/drain-complete"
+
 // Driver is the top-level CSI driver struct that ties together all subsystems.
 type Driver struct {
 	name     string
@@ -50,7 +57,11 @@ type Driver struct {
 	syncInterval   time.Duration
 	nodeOpsAddr    string // Address of nodeops gRPC server (for controller mode)
 	nodeOpsPort    int    // Port for nodeops gRPC server (for node mode)
-	hubGRPCPort int // VolumeHub gRPC listen port (hub mode)
+	hubGRPCPort     int // VolumeHub gRPC listen port (hub mode)
+	orchestratorURL string
+	drainPort       int
+	drainSrv        *http.Server
+	defaultQuota    int64 // Default per-volume storage quota in bytes (0 = unlimited)
 
 	// Node-mode subsystems (nil in controller mode).
 	btrfs    *btrfs.Manager
@@ -112,6 +123,10 @@ func WithHubGRPCPort(grpcPort int) Option {
 	}
 }
 
+func WithOrchestratorURL(url string) Option { return func(d *Driver) { d.orchestratorURL = url } }
+func WithDrainPort(port int) Option         { return func(d *Driver) { d.drainPort = port } }
+func WithDefaultQuota(bytes int64) Option   { return func(d *Driver) { d.defaultQuota = bytes } }
+
 // NewDriver creates a new Driver with the given options applied.
 func NewDriver(opts ...Option) *Driver {
 	d := &Driver{
@@ -121,6 +136,7 @@ func NewDriver(opts ...Option) *Driver {
 		mode:           ModeAll,
 		nodeOpsPort:    9741,
 		hubGRPCPort: 9750,
+		drainPort:   9743,
 	}
 
 	for _, opt := range opts {
@@ -156,6 +172,11 @@ func (d *Driver) runNode(ctx context.Context) error {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create pool directory %s: %w", dir, err)
 		}
+	}
+
+	// Enable btrfs quotas for per-volume storage limits.
+	if err := d.btrfs.EnableQuotas(ctx); err != nil {
+		klog.Warningf("Failed to enable btrfs quotas (non-fatal): %v", err)
 	}
 
 	// Initialize object storage if configured.
@@ -209,7 +230,50 @@ func (d *Driver) runNode(ctx context.Context) error {
 		GracePeriod: 24 * time.Hour,
 		DryRun:      false,
 	})
+	if d.orchestratorURL != "" {
+		gcCollector.SetOrchestratorURL(d.orchestratorURL)
+		klog.Infof("GC collector wired to orchestrator at %s", d.orchestratorURL)
+	}
 	go gcCollector.Start(ctx)
+
+	// Start drain HTTP server for preStop hook.
+	if d.syncer != nil {
+		// Clean up stale sentinel from a previous run (container restart).
+		_ = os.Remove(drainSentinelPath)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /drain", func(w http.ResponseWriter, r *http.Request) {
+			klog.Info("Drain request received via HTTP")
+			// Use background context — the HTTP client (wget in preStop) may
+			// disconnect before drain completes, which would cancel r.Context().
+			drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer drainCancel()
+			if err := d.syncer.DrainAll(drainCtx); err != nil {
+				klog.Errorf("Drain failed: %v", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			// Write sentinel file for preStop polling.  Path is inside the CSI
+			// socket directory (mounted volume, not shared /tmp).
+			_ = os.WriteFile(drainSentinelPath, []byte("ok"), 0600)
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "drain complete\n")
+		})
+		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "ok\n")
+		})
+		d.drainSrv = &http.Server{
+			Addr:    fmt.Sprintf(":%d", d.drainPort),
+			Handler: mux,
+		}
+		go func() {
+			if err := d.drainSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				klog.Errorf("Drain HTTP server failed: %v", err)
+			}
+		}()
+		klog.Infof("Drain HTTP server listening on :%d", d.drainPort)
+	}
 
 	// In "all" mode, also register the controller (for minikube/testing).
 	// The controller uses a local nodeops implementation that calls btrfs directly.
@@ -288,7 +352,7 @@ func (d *Driver) runHub(ctx context.Context) error {
 
 	// Initial discovery + periodic refresh (30s) of node endpoints.
 	go func() {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			if refreshErr := resolver.Refresh(ctx); refreshErr != nil {
 				klog.Warningf("Node discovery attempt %d: %v", i+1, refreshErr)
 				time.Sleep(3 * time.Second)
@@ -325,10 +389,7 @@ func (d *Driver) runHub(ctx context.Context) error {
 
 // startCSIServer starts the gRPC server with the appropriate CSI services.
 func (d *Driver) startCSIServer(ctx context.Context) error {
-	socketPath := d.endpoint
-	if strings.HasPrefix(socketPath, "unix://") {
-		socketPath = strings.TrimPrefix(socketPath, "unix://")
-	}
+	socketPath := strings.TrimPrefix(d.endpoint, "unix://")
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove stale socket %s: %w", socketPath, err)
 	}
@@ -378,6 +439,11 @@ func (d *Driver) startCSIServer(ctx context.Context) error {
 
 // Stop performs a graceful shutdown of the driver.
 func (d *Driver) Stop() {
+	if d.drainSrv != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		d.drainSrv.Shutdown(shutdownCtx)
+	}
 	if d.fileOpsSrv != nil {
 		d.fileOpsSrv.Stop()
 	}
@@ -393,10 +459,10 @@ func (d *Driver) Stop() {
 // loggingInterceptor logs all gRPC calls with their method name and duration.
 func loggingInterceptor(
 	ctx context.Context,
-	req interface{},
+	req any,
 	info *grpc.UnaryServerInfo,
 	handler grpc.UnaryHandler,
-) (interface{}, error) {
+) (any, error) {
 	start := time.Now()
 	resp, err := handler(ctx, req)
 	duration := time.Since(start)
@@ -588,4 +654,12 @@ func (l *localNodeOps) GetVolumeMetadata(ctx context.Context, volumeID string) (
 		}
 	}
 	return meta, nil
+}
+
+func (l *localNodeOps) SetQgroupLimit(ctx context.Context, name string, bytes int64) error {
+	return l.btrfs.SetQgroupLimit(ctx, name, bytes)
+}
+
+func (l *localNodeOps) GetQgroupUsage(ctx context.Context, name string) (int64, int64, error) {
+	return l.btrfs.GetQgroupUsage(ctx, name)
 }
