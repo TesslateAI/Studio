@@ -48,10 +48,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     allowedHosts: process.env.VITE_ALLOWED_HOSTS ? [process.env.VITE_ALLOWED_HOSTS] : 'all',
-    hmr: {
-      host: process.env.VITE_HMR_HOST || 'localhost',
-      port: process.env.VITE_HMR_PORT ? parseInt(process.env.VITE_HMR_PORT) : 5173,
-    },
+    hmr: true,
     watch: {
       usePolling: process.env.CHOKIDAR_USEPOLLING === 'true',
       interval: process.env.CHOKIDAR_INTERVAL ? parseInt(process.env.CHOKIDAR_INTERVAL) : 1000,
