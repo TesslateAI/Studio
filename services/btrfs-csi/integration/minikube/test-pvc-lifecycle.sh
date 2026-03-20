@@ -52,7 +52,7 @@ echo ""
 
 # Pre-flight: verify CSI driver pods are running
 echo "--- Pre-flight check ---"
-CONTROLLER_READY=$($KUBECTL get deployment tesslate-btrfs-csi-controller -n kube-system -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+CONTROLLER_READY=$($KUBECTL get deployment tesslate-volume-hub -n kube-system -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
 NODE_READY=$($KUBECTL get daemonset tesslate-btrfs-csi-node -n kube-system -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
 
 if [ "$CONTROLLER_READY" = "0" ] || [ "$NODE_READY" = "0" ]; then
@@ -158,7 +158,7 @@ if [ "$READY" != "true" ]; then
     echo "--- VolumeSnapshotContent ---"
     $KUBECTL get volumesnapshotcontent -o yaml 2>/dev/null || true
     echo "--- CSI controller logs ---"
-    $KUBECTL logs -n kube-system deployment/tesslate-btrfs-csi-controller -c tesslate-btrfs-csi --tail=30 || true
+    $KUBECTL logs -n kube-system deployment/tesslate-volume-hub -c hub --tail=30 || true
     fail "Snapshot not readyToUse after 60s"
 fi
 pass "VolumeSnapshot 'test-snap' created and readyToUse=true"

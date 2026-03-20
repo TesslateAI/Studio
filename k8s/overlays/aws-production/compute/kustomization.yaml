@@ -1,5 +1,5 @@
 # AWS EKS Production Overlay for Compute Infrastructure
-# Includes: btrfs CSI driver (controller + node) + Volume Hub
+# Includes: btrfs CSI driver (node DaemonSet) + Volume Hub (CSI controller + orchestrator)
 # Deploy with: ./scripts/aws-deploy.sh deploy-compute production
 # SA + config Secret are created by terraform (kubernetes.tf) — not kustomize
 apiVersion: kustomize.config.k8s.io/v1beta1

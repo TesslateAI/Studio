@@ -349,15 +349,13 @@ case "$COMMAND" in
         success "✓ Compute manifests applied"
         echo
 
-        info "Waiting for CSI controller..."
-        kubectl rollout status deployment/tesslate-btrfs-csi-controller -n kube-system --timeout=120s
         info "Waiting for CSI node daemonset..."
         kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
-        info "Waiting for Volume Hub..."
+        info "Waiting for Volume Hub (includes CSI controller)..."
         kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
         success "✓ Compute infrastructure deployed"
         echo
-        info "Verify with: kubectl get pods -n kube-system -l 'app in (tesslate-btrfs-csi-controller,tesslate-btrfs-csi-node,tesslate-volume-hub)'"
+        info "Verify with: kubectl get pods -n kube-system -l 'app in (tesslate-btrfs-csi-node,tesslate-volume-hub)'"
         ;;
 
     build)
@@ -567,23 +565,19 @@ case "$COMMAND" in
             ROLLOUT_IMGS+=("${RESTART_NAMES[$i]}")
         done
 
-        # Handle compute image restarts (kube-system: CSI controller + node + Volume Hub)
+        # Handle compute image restarts (kube-system: CSI node + Volume Hub)
+        # CSI nodes restart first, Hub restarts LAST (so it rediscovers stable node IPs).
         for img in $IMAGES; do
             if [ -n "${COMPUTE_RESTART[$img]:-}" ]; then
                 info "[compute] Applying compute manifests..."
                 kubectl apply -k "$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/compute"
-                info "[compute] Rolling restart CSI controller..."
-                kubectl rollout restart deployment/tesslate-btrfs-csi-controller -n kube-system
                 info "[compute] Rolling restart CSI node daemonset..."
                 kubectl rollout restart daemonset/tesslate-btrfs-csi-node -n kube-system
-                info "[compute] Rolling restart Volume Hub..."
-                kubectl rollout restart deployment/tesslate-volume-hub -n kube-system
-                kubectl rollout status deployment/tesslate-btrfs-csi-controller -n kube-system --timeout=120s &
-                ROLLOUT_PIDS+=($!)
-                ROLLOUT_IMGS+=("csi-controller")
                 kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s &
                 ROLLOUT_PIDS+=($!)
                 ROLLOUT_IMGS+=("csi-node")
+                info "[compute] Rolling restart Volume Hub (after nodes are stable)..."
+                kubectl rollout restart deployment/tesslate-volume-hub -n kube-system
                 kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s &
                 ROLLOUT_PIDS+=($!)
                 ROLLOUT_IMGS+=("volume-hub")

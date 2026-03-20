@@ -260,6 +260,24 @@ func (r *NodeRegistry) RegisteredNodes() []string {
 	return names
 }
 
+// LeastLoadedNode returns the registered node with the fewest cached volumes.
+// Returns "" if no nodes are registered.
+func (r *NodeRegistry) LeastLoadedNode() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var best string
+	bestCount := -1
+	for name, ne := range r.nodes {
+		count := len(ne.volumes)
+		if bestCount < 0 || count < bestCount {
+			best = name
+			bestCount = count
+		}
+	}
+	return best
+}
+
 // RegisterNode adds a node to the registry. Idempotent.
 func (r *NodeRegistry) RegisterNode(nodeName string) {
 	r.mu.Lock()
@@ -284,6 +302,19 @@ func (r *NodeRegistry) RegisterTemplate(templateName, nodeName string) {
 		r.templateNodes[templateName] = nodes
 	}
 	nodes[nodeName] = struct{}{}
+}
+
+// AllVolumeIDs returns a sorted list of all registered volume IDs.
+func (r *NodeRegistry) AllVolumeIDs() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.volumes))
+	for id := range r.volumes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // GetTemplateNodes returns a sorted list of nodes that have the template cached.

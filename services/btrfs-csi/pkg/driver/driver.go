@@ -30,10 +30,9 @@ import (
 type Mode string
 
 const (
-	ModeController Mode = "controller"
-	ModeNode       Mode = "node"
-	ModeAll        Mode = "all" // For single-node testing (e.g., minikube)
-	ModeHub        Mode = "hub" // Volume Hub — canonical store, S3 gateway, cache orchestrator
+	ModeNode Mode = "node"
+	ModeAll  Mode = "all" // For single-node testing (e.g., minikube)
+	ModeHub  Mode = "hub" // Volume Hub + CSI Controller — orchestrates nodes, serves CSI
 )
 
 // drainSentinelPath is written after a successful drain to signal the preStop
@@ -55,7 +54,6 @@ type Driver struct {
 	storageEnv      map[string]string
 
 	syncInterval   time.Duration
-	nodeOpsAddr    string // Address of nodeops gRPC server (for controller mode)
 	nodeOpsPort    int    // Port for nodeops gRPC server (for node mode)
 	hubGRPCPort     int // VolumeHub gRPC listen port (hub mode)
 	orchestratorURL string
@@ -63,7 +61,7 @@ type Driver struct {
 	drainSrv        *http.Server
 	defaultQuota    int64 // Default per-volume storage quota in bytes (0 = unlimited)
 
-	// Node-mode subsystems (nil in controller mode).
+	// Node-mode subsystems (nil in hub mode).
 	btrfs    *btrfs.Manager
 	store    objstore.ObjectStorage
 	casStore *cas.Store
@@ -72,6 +70,9 @@ type Driver struct {
 
 	// Controller-mode subsystem (nil in node mode).
 	nodeOps nodeops.NodeOps
+
+	// Hub-mode subsystem: in-process Hub server for CSI controller delegation.
+	hubServer *volumehub.Server
 
 	srv        *grpc.Server
 	nodeOpsSrv *nodeops.Server
@@ -87,7 +88,6 @@ func WithNodeID(nodeID string) Option    { return func(d *Driver) { d.nodeID = n
 func WithPoolPath(poolPath string) Option { return func(d *Driver) { d.poolPath = poolPath } }
 func WithEndpoint(endpoint string) Option { return func(d *Driver) { d.endpoint = endpoint } }
 func WithMode(mode string) Option        { return func(d *Driver) { d.mode = Mode(mode) } }
-func WithNodeOpsAddr(addr string) Option { return func(d *Driver) { d.nodeOpsAddr = addr } }
 func WithNodeOpsPort(port int) Option    { return func(d *Driver) { d.nodeOpsPort = port } }
 
 func WithStorageConfig(provider, bucket string, env map[string]string) Option {
@@ -151,8 +151,6 @@ func (d *Driver) Run(ctx context.Context) error {
 	switch d.mode {
 	case ModeNode, ModeAll:
 		return d.runNode(ctx)
-	case ModeController:
-		return d.runController(ctx)
 	case ModeHub:
 		return d.runHub(ctx)
 	default:
@@ -275,8 +273,8 @@ func (d *Driver) runNode(ctx context.Context) error {
 		klog.Infof("Drain HTTP server listening on :%d", d.drainPort)
 	}
 
-	// In "all" mode, also register the controller (for minikube/testing).
-	// The controller uses a local nodeops implementation that calls btrfs directly.
+	// In "all" mode, also register the CSI controller (for minikube/testing).
+	// Uses a local nodeOps implementation that calls btrfs directly.
 	if d.mode == ModeAll {
 		d.nodeOps = &localNodeOps{
 			btrfs:   d.btrfs,
@@ -290,26 +288,11 @@ func (d *Driver) runNode(ctx context.Context) error {
 	return d.startCSIServer(ctx)
 }
 
-// runController initializes the nodeops client for delegation and registers
-// CSI Identity + Controller services.
-func (d *Driver) runController(ctx context.Context) error {
-	if d.nodeOpsAddr == "" {
-		return fmt.Errorf("--nodeops-addr is required in controller mode")
-	}
-
-	client, err := nodeops.NewClient(d.nodeOpsAddr, nil)
-	if err != nil {
-		return fmt.Errorf("connect to nodeops: %w", err)
-	}
-	d.nodeOps = client
-	klog.Infof("Controller connected to nodeops at %s", d.nodeOpsAddr)
-
-	return d.startCSIServer(ctx)
-}
-
 // runHub initializes the Volume Hub — a storageless orchestrator that
 // coordinates nodes for volume lifecycle, cache placement, and CAS sync.
-// Hub mode has ZERO storage, ZERO btrfs — it only serves VolumeHub gRPC.
+// Hub mode serves both the VolumeHub gRPC (TCP :9750) for the Python
+// orchestrator and the CSI Controller gRPC (unix socket) for the K8s
+// csi-provisioner and csi-snapshotter sidecars.
 func (d *Driver) runHub(ctx context.Context) error {
 	// Build the node registry and populate with known CSI nodes.
 	registry := volumehub.NewNodeRegistry()
@@ -349,8 +332,11 @@ func (d *Driver) runHub(ctx context.Context) error {
 
 	// Start VolumeHub gRPC server with CAS store for manifest reads.
 	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory, resolver.Resolve)
+	d.hubServer = hubSrv // store for CSI controller access
 
 	// Initial discovery + periodic refresh (30s) of node endpoints.
+	// After each successful refresh, re-run DiscoverNodes + RebuildRegistry
+	// to pick up new nodes and drop dead ones after CSI node restarts.
 	go func() {
 		for i := range 10 {
 			if refreshErr := resolver.Refresh(ctx); refreshErr != nil {
@@ -367,7 +353,14 @@ func (d *Driver) runHub(ctx context.Context) error {
 			klog.Warningf("Registry rebuild: %v", rebuildErr)
 		}
 	}()
-	resolver.StartPeriodicRefresh(ctx, 30*time.Second)
+	resolver.StartPeriodicRefresh(ctx, 30*time.Second, func() {
+		if discoverErr := hubSrv.DiscoverNodes(resolver); discoverErr != nil {
+			klog.Warningf("DiscoverNodes after refresh: %v", discoverErr)
+		}
+		if rebuildErr := hubSrv.RebuildRegistry(ctx); rebuildErr != nil {
+			klog.Warningf("RebuildRegistry after refresh: %v", rebuildErr)
+		}
+	})
 
 	go func() {
 		addr := fmt.Sprintf(":%d", d.hubGRPCPort)
@@ -377,12 +370,24 @@ func (d *Driver) runHub(ctx context.Context) error {
 	}()
 	klog.Infof("VolumeHub gRPC server on :%d", d.hubGRPCPort)
 
+	// Start CSI Controller gRPC on unix socket (for csi-provisioner/snapshotter sidecars).
+	if d.endpoint != "" {
+		go func() {
+			if err := d.startCSIServer(ctx); err != nil {
+				klog.Errorf("CSI Controller gRPC server failed: %v", err)
+			}
+		}()
+	}
+
 	// Start Prometheus metrics server.
 	go metrics.StartMetricsServer(":9090", "", "")
 
 	// Block until context is cancelled (signal handler in main.go).
 	<-ctx.Done()
 	hubSrv.Stop()
+	if d.srv != nil {
+		d.srv.GracefulStop()
+	}
 	klog.Info("Hub mode stopped")
 	return nil
 }
@@ -408,14 +413,14 @@ func (d *Driver) startCSIServer(ctx context.Context) error {
 
 	// Register services based on mode.
 	switch d.mode {
-	case ModeController:
-		csi.RegisterControllerServer(d.srv, NewControllerServer(d))
-		klog.Info("Registered CSI Identity + Controller services")
+	case ModeHub:
+		csi.RegisterControllerServer(d.srv, NewControllerServer(d, d.hubServer))
+		klog.Info("Registered CSI Identity + Controller services (Hub-delegated)")
 	case ModeNode:
 		csi.RegisterNodeServer(d.srv, NewNodeServer(d))
 		klog.Info("Registered CSI Identity + Node services")
 	case ModeAll:
-		csi.RegisterControllerServer(d.srv, NewControllerServer(d))
+		csi.RegisterControllerServer(d.srv, NewControllerServer(d, nil))
 		csi.RegisterNodeServer(d.srv, NewNodeServer(d))
 		klog.Info("Registered CSI Identity + Controller + Node services")
 	}

@@ -136,8 +136,11 @@ func (r *NodeResolver) NodeNames() []string {
 }
 
 // StartPeriodicRefresh runs Refresh every interval in a background goroutine.
+// If onRefresh is non-nil it is called after each successful Refresh — use
+// this to re-run DiscoverNodes + RebuildRegistry so the Hub picks up new
+// nodes and drops dead ones after CSI node pod restarts.
 // Stops when ctx is cancelled.
-func (r *NodeResolver) StartPeriodicRefresh(ctx context.Context, interval time.Duration) {
+func (r *NodeResolver) StartPeriodicRefresh(ctx context.Context, interval time.Duration, onRefresh func()) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -148,6 +151,8 @@ func (r *NodeResolver) StartPeriodicRefresh(ctx context.Context, interval time.D
 			case <-ticker.C:
 				if err := r.Refresh(ctx); err != nil {
 					klog.Warningf("NodeResolver periodic refresh: %v", err)
+				} else if onRefresh != nil {
+					onRefresh()
 				}
 			}
 		}

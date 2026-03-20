@@ -27,8 +27,7 @@ func main() {
 		nodeID       = flag.String("node-id", "", "Node hostname / identifier")
 		poolPath     = flag.String("pool-path", "/mnt/tesslate-pool", "Path to btrfs pool mount")
 		driverName   = flag.String("driver-name", "btrfs.csi.tesslate.io", "CSI driver name")
-		mode         = flag.String("mode", "all", "Driver mode: controller, node, or all")
-		nodeOpsAddr  = flag.String("nodeops-addr", "", "NodeOps gRPC address (controller mode, e.g., node-svc:9741)")
+		mode         = flag.String("mode", "all", "Driver mode: node, hub, or all")
 		nodeOpsPort  = flag.Int("nodeops-port", 9741, "NodeOps gRPC listen port (node mode)")
 		storageProvider = flag.String("storage-provider", "", "Object storage provider (s3, gcs, azureblob)")
 		storageBucket   = flag.String("storage-bucket", "", "Object storage bucket name")
@@ -118,7 +117,6 @@ func main() {
 		driver.WithPoolPath(*poolPath),
 		driver.WithEndpoint(*endpoint),
 		driver.WithMode(*mode),
-		driver.WithNodeOpsAddr(*nodeOpsAddr),
 		driver.WithNodeOpsPort(*nodeOpsPort),
 		driver.WithStorageConfig(*storageProvider, *storageBucket, storageEnvMap),
 		driver.WithSyncInterval(*syncInterval),

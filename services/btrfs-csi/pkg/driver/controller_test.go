@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/volumehub"
 )
 
 func TestBuildVolumeResponse(t *testing.T) {
@@ -17,7 +18,7 @@ func TestBuildVolumeResponse(t *testing.T) {
 		name:   "btrfs.csi.tesslate.io",
 		nodeID: "node-1",
 	}
-	cs := NewControllerServer(d)
+	cs := NewControllerServer(d, nil)
 
 	req := &csi.CreateVolumeRequest{
 		Name: "test-vol",
@@ -59,7 +60,7 @@ func TestBuildVolumeResponse_WithContentSource(t *testing.T) {
 		name:   "btrfs.csi.tesslate.io",
 		nodeID: "node-2",
 	}
-	cs := NewControllerServer(d)
+	cs := NewControllerServer(d, nil)
 
 	contentSource := &csi.VolumeContentSource{
 		Type: &csi.VolumeContentSource_Snapshot{
@@ -93,7 +94,7 @@ func TestBuildSnapshotResponse(t *testing.T) {
 		name:   "btrfs.csi.tesslate.io",
 		nodeID: "node-1",
 	}
-	cs := NewControllerServer(d)
+	cs := NewControllerServer(d, nil)
 
 	resp := cs.buildSnapshotResponse("snap-abc", "vol-xyz")
 
@@ -122,7 +123,7 @@ func TestControllerGetCapabilities(t *testing.T) {
 		name:   "btrfs.csi.tesslate.io",
 		nodeID: "node-1",
 	}
-	cs := NewControllerServer(d)
+	cs := NewControllerServer(d, nil)
 
 	resp, err := cs.ControllerGetCapabilities(context.Background(), &csi.ControllerGetCapabilitiesRequest{})
 	if err != nil {
@@ -319,7 +320,7 @@ func newTestControllerServer(mock *mockNodeOps) *ControllerServer {
 		nodeID:  "test-node",
 		nodeOps: mock,
 	}
-	return NewControllerServer(d)
+	return NewControllerServer(d, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -1011,5 +1012,319 @@ func TestMockPromoteToTemplate_RefreshExistingTemplate(t *testing.T) {
 	// Source volume should be cleaned up.
 	if mock.subvolumes["volumes/build-vol-2"] {
 		t.Error("source volume should have been deleted after promote")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hub-mode test helpers
+// ---------------------------------------------------------------------------
+
+// newTestHubControllerServer creates a ControllerServer backed by a real Hub
+// with an in-memory registry. The nodeClientFactory returns an error (no real
+// nodes), so only paths that don't require node RPCs can be tested.
+func newTestHubControllerServer() (*ControllerServer, *volumehub.NodeRegistry) {
+	registry := volumehub.NewNodeRegistry()
+	hub := volumehub.NewServer(registry, nil, func(nodeName string) (*nodeops.Client, error) {
+		return nil, fmt.Errorf("no test node %q", nodeName)
+	}, func(nodeName string) string { return "" })
+
+	d := &Driver{
+		name:   "btrfs.csi.tesslate.io",
+		nodeID: "hub-node",
+	}
+	return NewControllerServer(d, hub), registry
+}
+
+// ---------------------------------------------------------------------------
+// Hub-mode CreateVolume tests
+// ---------------------------------------------------------------------------
+
+func TestHubCreateVolume_Idempotent(t *testing.T) {
+	cs, reg := newTestHubControllerServer()
+
+	// Pre-register volume in the Hub registry.
+	reg.RegisterNode("node-A")
+	reg.RegisterVolume("vol-exists")
+	reg.SetOwner("vol-exists", "node-A")
+
+	resp, err := cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-exists",
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 1 << 30,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume returned error: %v", err)
+	}
+	if resp.Volume.VolumeId != "vol-exists" {
+		t.Errorf("VolumeId = %q, want %q", resp.Volume.VolumeId, "vol-exists")
+	}
+
+	// Topology should point to the registered owner node.
+	topo := resp.Volume.AccessibleTopology
+	if len(topo) != 1 {
+		t.Fatalf("AccessibleTopology length = %d, want 1", len(topo))
+	}
+	topologyKey := "btrfs.csi.tesslate.io/node"
+	if val := topo[0].Segments[topologyKey]; val != "node-A" {
+		t.Errorf("topology[%q] = %q, want %q", topologyKey, val, "node-A")
+	}
+}
+
+func TestHubCreateVolume_TopologyPreferred(t *testing.T) {
+	cs, reg := newTestHubControllerServer()
+	reg.RegisterNode("node-A")
+	reg.RegisterNode("node-B")
+	reg.RegisterVolume("vol-pre")
+	reg.SetOwner("vol-pre", "node-B")
+
+	topologyKey := "btrfs.csi.tesslate.io/node"
+	resp, err := cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-pre",
+		AccessibilityRequirements: &csi.TopologyRequirement{
+			Preferred: []*csi.Topology{
+				{Segments: map[string]string{topologyKey: "node-B"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume returned error: %v", err)
+	}
+
+	// Idempotent return should reflect the registered owner, not the hint.
+	if val := resp.Volume.AccessibleTopology[0].Segments[topologyKey]; val != "node-B" {
+		t.Errorf("topology = %q, want %q", val, "node-B")
+	}
+}
+
+func TestHubCreateVolume_TopologyRequisiteFallback(t *testing.T) {
+	cs, reg := newTestHubControllerServer()
+	reg.RegisterNode("node-C")
+	reg.RegisterVolume("vol-req")
+	reg.SetOwner("vol-req", "node-C")
+
+	topologyKey := "btrfs.csi.tesslate.io/node"
+
+	// Requisite only (no Preferred) — should still extract the hint.
+	resp, err := cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-req",
+		AccessibilityRequirements: &csi.TopologyRequirement{
+			Requisite: []*csi.Topology{
+				{Segments: map[string]string{topologyKey: "node-C"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume returned error: %v", err)
+	}
+	if val := resp.Volume.AccessibleTopology[0].Segments[topologyKey]; val != "node-C" {
+		t.Errorf("topology = %q, want %q", val, "node-C")
+	}
+}
+
+func TestHubCreateVolume_SnapshotNotTracked(t *testing.T) {
+	cs, reg := newTestHubControllerServer()
+	reg.RegisterNode("node-A")
+
+	_, err := cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "vol-from-snap",
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: "snap-unknown",
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for untracked snapshot, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got %v", err)
+	}
+	if st.Code() != codes.NotFound {
+		t.Errorf("code = %v, want %v", st.Code(), codes.NotFound)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hub-mode DeleteVolume tests
+// ---------------------------------------------------------------------------
+
+func TestHubDeleteVolume_UnknownVolume(t *testing.T) {
+	cs, _ := newTestHubControllerServer()
+
+	// Deleting an unknown volume should succeed (idempotent).
+	_, err := cs.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{
+		VolumeId: "vol-never-existed",
+	})
+	if err != nil {
+		t.Fatalf("DeleteVolume should succeed for unknown volume, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hub-mode ValidateVolumeCapabilities tests
+// ---------------------------------------------------------------------------
+
+func TestHubValidateVolumeCapabilities_Registered(t *testing.T) {
+	cs, reg := newTestHubControllerServer()
+	reg.RegisterNode("node-A")
+	reg.RegisterVolume("vol-valid")
+	reg.SetOwner("vol-valid", "node-A")
+
+	resp, err := cs.ValidateVolumeCapabilities(context.Background(),
+		&csi.ValidateVolumeCapabilitiesRequest{
+			VolumeId: "vol-valid",
+			VolumeCapabilities: []*csi.VolumeCapability{
+				{
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+					},
+					AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{},
+					},
+				},
+			},
+		})
+	if err != nil {
+		t.Fatalf("ValidateVolumeCapabilities returned error: %v", err)
+	}
+	if resp.Confirmed == nil {
+		t.Error("expected Confirmed to be non-nil for registered volume")
+	}
+}
+
+func TestHubValidateVolumeCapabilities_NotRegistered(t *testing.T) {
+	cs, _ := newTestHubControllerServer()
+
+	_, err := cs.ValidateVolumeCapabilities(context.Background(),
+		&csi.ValidateVolumeCapabilitiesRequest{
+			VolumeId: "vol-missing",
+			VolumeCapabilities: []*csi.VolumeCapability{
+				{
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+					},
+					AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{},
+					},
+				},
+			},
+		})
+	if err == nil {
+		t.Fatal("expected NotFound error, got nil")
+	}
+	st, _ := status.FromError(err)
+	if st.Code() != codes.NotFound {
+		t.Errorf("code = %v, want %v", st.Code(), codes.NotFound)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hub-mode GetCapacity / ListVolumes tests
+// ---------------------------------------------------------------------------
+
+func TestHubGetCapacity_NoNodes(t *testing.T) {
+	cs, _ := newTestHubControllerServer()
+
+	resp, err := cs.GetCapacity(context.Background(), &csi.GetCapacityRequest{})
+	if err != nil {
+		t.Fatalf("GetCapacity returned error: %v", err)
+	}
+	if resp.AvailableCapacity != 0 {
+		t.Errorf("AvailableCapacity = %d, want 0 (no nodes)", resp.AvailableCapacity)
+	}
+}
+
+func TestHubListVolumes(t *testing.T) {
+	cs, reg := newTestHubControllerServer()
+	reg.RegisterNode("node-A")
+	for _, id := range []string{"vol-1", "vol-2", "vol-3"} {
+		reg.RegisterVolume(id)
+		reg.SetOwner(id, "node-A")
+	}
+
+	resp, err := cs.ListVolumes(context.Background(), &csi.ListVolumesRequest{})
+	if err != nil {
+		t.Fatalf("ListVolumes returned error: %v", err)
+	}
+	if len(resp.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(resp.Entries))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hub-mode ListSnapshots tests
+// ---------------------------------------------------------------------------
+
+func TestHubListSnapshots(t *testing.T) {
+	cs, _ := newTestHubControllerServer()
+	cs.snapSourceMap["snap-1"] = "vol-A"
+	cs.snapSourceMap["snap-2"] = "vol-A"
+	cs.snapSourceMap["snap-3"] = "vol-B"
+
+	// No filter — returns all.
+	resp, err := cs.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{})
+	if err != nil {
+		t.Fatalf("ListSnapshots returned error: %v", err)
+	}
+	if len(resp.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(resp.Entries))
+	}
+
+	// Filter by source volume.
+	resp, err = cs.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SourceVolumeId: "vol-A",
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots returned error: %v", err)
+	}
+	if len(resp.Entries) != 2 {
+		t.Errorf("got %d entries for vol-A, want 2", len(resp.Entries))
+	}
+
+	// Filter by snapshot ID.
+	resp, err = cs.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SnapshotId: "snap-3",
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots returned error: %v", err)
+	}
+	if len(resp.Entries) != 1 {
+		t.Errorf("got %d entries for snap-3, want 1", len(resp.Entries))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hub-mode CreateSnapshot / DeleteSnapshot tests
+// ---------------------------------------------------------------------------
+
+func TestHubCreateSnapshot_VolumeNotRegistered(t *testing.T) {
+	cs, _ := newTestHubControllerServer()
+
+	_, err := cs.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		SourceVolumeId: "vol-unknown",
+		Name:           "snap-fail",
+	})
+	if err == nil {
+		t.Fatal("expected error for unregistered volume, got nil")
+	}
+	st, _ := status.FromError(err)
+	if st.Code() != codes.NotFound {
+		t.Errorf("code = %v, want %v", st.Code(), codes.NotFound)
+	}
+}
+
+func TestHubDeleteSnapshot_NotTracked(t *testing.T) {
+	cs, _ := newTestHubControllerServer()
+
+	// Deleting an untracked snapshot should succeed (idempotent).
+	_, err := cs.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: "snap-gone",
+	})
+	if err != nil {
+		t.Fatalf("DeleteSnapshot should succeed for untracked snapshot, got: %v", err)
 	}
 }

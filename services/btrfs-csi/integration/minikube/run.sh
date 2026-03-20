@@ -55,7 +55,7 @@ else
 
     echo ""
     echo "CSI controller logs:"
-    $KUBECTL logs -n kube-system deployment/tesslate-btrfs-csi-controller -c tesslate-btrfs-csi --tail=50 2>/dev/null || echo "(no logs)"
+    $KUBECTL logs -n kube-system deployment/tesslate-volume-hub -c hub --tail=50 2>/dev/null || echo "(no logs)"
 
     echo ""
     echo "CSI node logs:"
@@ -101,7 +101,7 @@ if [ "$TEST_EXIT" -eq 0 ]; then
         echo "--- Diagnostic info ---"
         echo ""
         echo "CSI controller logs:"
-        $KUBECTL logs -n kube-system deployment/tesslate-btrfs-csi-controller -c tesslate-btrfs-csi --tail=50 2>/dev/null || echo "(no logs)"
+        $KUBECTL logs -n kube-system deployment/tesslate-volume-hub -c hub --tail=50 2>/dev/null || echo "(no logs)"
 
         echo ""
         echo "Pods in csi-template-test namespace:"

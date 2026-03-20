@@ -243,80 +243,11 @@ func (s *Server) handleCreateVolume(_ interface{}, ctx context.Context, dec func
 		return nil, status.Errorf(codes.Internal, "generate volume id: %v", err)
 	}
 
-	// Pick target node: prefer hint, then least loaded registered node.
-	targetNode := req.HintNode
-	if targetNode == "" {
-		registeredNodes := s.registry.RegisteredNodes()
-		if len(registeredNodes) == 0 {
-			return nil, status.Error(codes.FailedPrecondition, "no compute nodes registered")
-		}
-		targetNode = registeredNodes[0]
-	}
-
-	client, err := s.nodeClient(targetNode)
+	nodeName, err := s.CreateVolumeOnNode(ctx, volumeID, req.Template, req.HintNode)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "connect to node %s: %v", targetNode, err)
+		return nil, status.Errorf(codes.Internal, "%v", err)
 	}
-	defer client.Close()
-
-	volumePath := "volumes/" + volumeID
-	var templateHash string
-
-	if req.Template != "" {
-		// Ensure the template exists on the target node.
-		if err := client.EnsureTemplate(ctx, req.Template); err != nil {
-			return nil, status.Errorf(codes.Internal, "ensure template %q on %s: %v", req.Template, targetNode, err)
-		}
-		// Snapshot the template into the new volume (writable).
-		if err := client.SnapshotSubvolume(ctx, "templates/"+req.Template, volumePath, false); err != nil {
-			return nil, status.Errorf(codes.Internal, "snapshot template to volume: %v", err)
-		}
-		// Look up template hash for manifest creation.
-		if s.cas != nil {
-			if h, hashErr := s.cas.GetTemplateHash(ctx, req.Template); hashErr == nil {
-				templateHash = h
-			}
-		}
-	} else {
-		// Create an empty subvolume.
-		if err := client.CreateSubvolume(ctx, volumePath); err != nil {
-			return nil, status.Errorf(codes.Internal, "create subvolume: %v", err)
-		}
-		// Set ownership to uid/gid 1000 (non-root user in devserver).
-		if err := client.SetOwnership(ctx, volumePath, 1000, 1000); err != nil {
-			return nil, status.Errorf(codes.Internal, "set ownership: %v", err)
-		}
-	}
-
-	// Create manifest in CAS.
-	if s.cas != nil {
-		manifest := &cas.Manifest{
-			VolumeID:     volumeID,
-			Base:         templateHash,
-			TemplateName: req.Template,
-		}
-		if putErr := s.cas.PutManifest(ctx, manifest); putErr != nil {
-			klog.Warningf("CreateVolume: failed to create manifest for %s: %v", volumeID, putErr)
-		}
-	}
-
-	// Track volume for periodic CAS sync on the node.
-	if err := client.TrackVolume(ctx, volumeID, req.Template, templateHash); err != nil {
-		klog.Warningf("TrackVolume failed for %s on %s: %v", volumeID, targetNode, err)
-	}
-
-	// Register in Hub registry with owner and template context.
-	s.registry.RegisterVolume(volumeID)
-	s.registry.SetOwner(volumeID, targetNode)
-	s.registry.SetCached(volumeID, targetNode)
-	s.registry.SetVolumeTemplate(volumeID, req.Template, templateHash)
-
-	if req.Template != "" {
-		s.registry.RegisterTemplate(req.Template, targetNode)
-	}
-
-	klog.Infof("Created volume %s on node %s (template=%q, base=%s)", volumeID, targetNode, req.Template, cas.ShortHash(templateHash))
-	return &CreateVolumeResponse{VolumeID: volumeID, NodeName: targetNode}, nil
+	return &CreateVolumeResponse{VolumeID: volumeID, NodeName: nodeName}, nil
 }
 
 func (s *Server) handleDeleteVolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -329,36 +260,9 @@ func (s *Server) handleDeleteVolume(_ interface{}, ctx context.Context, dec func
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
-	ownerNode := s.registry.GetOwner(req.VolumeID)
-	if ownerNode != "" {
-		client, err := s.nodeClient(ownerNode)
-		if err != nil {
-			klog.Warningf("DeleteVolume: connect to owner %s failed: %v", ownerNode, err)
-		} else {
-			defer client.Close()
-
-			// Untrack from sync.
-			if err := client.UntrackVolume(ctx, req.VolumeID); err != nil {
-				klog.Warningf("DeleteVolume: untrack %s on %s: %v", req.VolumeID, ownerNode, err)
-			}
-
-			// Delete subvolume from node.
-			volumePath := "volumes/" + req.VolumeID
-			if err := client.DeleteSubvolume(ctx, volumePath); err != nil {
-				klog.Warningf("DeleteVolume: delete subvolume %s on %s: %v", req.VolumeID, ownerNode, err)
-			}
-
-			// Delete CAS data (manifest + local layers, blobs via GC).
-			if err := client.DeleteVolumeCAS(ctx, req.VolumeID); err != nil {
-				klog.Warningf("DeleteVolume: delete CAS for %s: %v", req.VolumeID, err)
-			}
-		}
+	if err := s.DeleteVolumeFromNode(ctx, req.VolumeID); err != nil {
+		return nil, status.Errorf(codes.Internal, "%v", err)
 	}
-
-	// Remove from registry (idempotent).
-	s.registry.UnregisterVolume(req.VolumeID)
-
-	klog.Infof("Deleted volume %s", req.VolumeID)
 	return &Empty{}, nil
 }
 
@@ -560,24 +464,10 @@ func (s *Server) handleCreateSnapshot(_ interface{}, ctx context.Context, dec fu
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
-	ownerNode := s.registry.GetOwner(req.VolumeID)
-	if ownerNode == "" {
-		return nil, status.Errorf(codes.NotFound, "no owner node for volume %q", req.VolumeID)
-	}
-
-	client, err := s.nodeClient(ownerNode)
+	hash, err := s.CreateSnapshotForVolume(ctx, req.VolumeID, req.Label)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "connect to owner %s: %v", ownerNode, err)
+		return nil, status.Errorf(codes.Internal, "%v", err)
 	}
-	defer client.Close()
-
-	hash, err := client.CreateUserSnapshot(ctx, req.VolumeID, req.Label)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "create snapshot for %s: %v", req.VolumeID, err)
-	}
-
-	s.registry.SetLatestHash(req.VolumeID, hash)
-	klog.Infof("CreateSnapshot: volume %s → %s (label=%s)", req.VolumeID, cas.ShortHash(hash), req.Label)
 	return &CreateSnapshotResponse{Hash: hash}, nil
 }
 
@@ -638,6 +528,179 @@ func (s *Server) handleRestoreToSnapshot(_ interface{}, ctx context.Context, dec
 	s.registry.SetLatestHash(req.VolumeID, req.TargetHash)
 	klog.Infof("RestoreToSnapshot: volume %s → %s", req.VolumeID, cas.ShortHash(req.TargetHash))
 	return &Empty{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Exported methods for in-process CSI controller delegation
+// ---------------------------------------------------------------------------
+
+// CreateVolumeOnNode creates a volume with the given ID on the best available
+// node. If hintNode is non-empty it is preferred, otherwise the least-loaded
+// registered node is chosen. Returns the node the volume was placed on.
+func (s *Server) CreateVolumeOnNode(ctx context.Context, volumeID, template, hintNode string) (string, error) {
+	targetNode := hintNode
+	if targetNode == "" {
+		targetNode = s.registry.LeastLoadedNode()
+		if targetNode == "" {
+			return "", fmt.Errorf("no compute nodes registered")
+		}
+	}
+
+	client, err := s.nodeClient(targetNode)
+	if err != nil {
+		return "", fmt.Errorf("connect to node %s: %v", targetNode, err)
+	}
+	defer client.Close()
+
+	volumePath := "volumes/" + volumeID
+	var templateHash string
+
+	if template != "" {
+		if err := client.EnsureTemplate(ctx, template); err != nil {
+			return "", fmt.Errorf("ensure template %q on %s: %v", template, targetNode, err)
+		}
+		if err := client.SnapshotSubvolume(ctx, "templates/"+template, volumePath, false); err != nil {
+			return "", fmt.Errorf("snapshot template to volume: %v", err)
+		}
+		if s.cas != nil {
+			if h, hashErr := s.cas.GetTemplateHash(ctx, template); hashErr == nil {
+				templateHash = h
+			}
+		}
+	} else {
+		if err := client.CreateSubvolume(ctx, volumePath); err != nil {
+			return "", fmt.Errorf("create subvolume: %v", err)
+		}
+		if err := client.SetOwnership(ctx, volumePath, 1000, 1000); err != nil {
+			return "", fmt.Errorf("set ownership: %v", err)
+		}
+	}
+
+	if s.cas != nil {
+		manifest := &cas.Manifest{
+			VolumeID:     volumeID,
+			Base:         templateHash,
+			TemplateName: template,
+		}
+		if putErr := s.cas.PutManifest(ctx, manifest); putErr != nil {
+			klog.Warningf("CreateVolumeOnNode: manifest write for %s: %v", volumeID, putErr)
+		}
+	}
+
+	if err := client.TrackVolume(ctx, volumeID, template, templateHash); err != nil {
+		klog.Warningf("CreateVolumeOnNode: track %s on %s: %v", volumeID, targetNode, err)
+	}
+
+	s.registry.RegisterVolume(volumeID)
+	s.registry.SetOwner(volumeID, targetNode)
+	s.registry.SetCached(volumeID, targetNode)
+	s.registry.SetVolumeTemplate(volumeID, template, templateHash)
+
+	if template != "" {
+		s.registry.RegisterTemplate(template, targetNode)
+	}
+
+	klog.Infof("Created volume %s on node %s (template=%q, base=%s)", volumeID, targetNode, template, cas.ShortHash(templateHash))
+	return targetNode, nil
+}
+
+// DeleteVolumeFromNode deletes a volume by finding its owner node in the
+// registry. Idempotent: returns nil if the volume is unknown.
+func (s *Server) DeleteVolumeFromNode(ctx context.Context, volumeID string) error {
+	ownerNode := s.registry.GetOwner(volumeID)
+	if ownerNode != "" {
+		client, err := s.nodeClient(ownerNode)
+		if err != nil {
+			klog.Warningf("DeleteVolumeFromNode: connect to owner %s: %v", ownerNode, err)
+		} else {
+			defer client.Close()
+			if err := client.UntrackVolume(ctx, volumeID); err != nil {
+				klog.Warningf("DeleteVolumeFromNode: untrack %s on %s: %v", volumeID, ownerNode, err)
+			}
+			if err := client.DeleteSubvolume(ctx, "volumes/"+volumeID); err != nil {
+				klog.Warningf("DeleteVolumeFromNode: delete %s on %s: %v", volumeID, ownerNode, err)
+			}
+			if err := client.DeleteVolumeCAS(ctx, volumeID); err != nil {
+				klog.Warningf("DeleteVolumeFromNode: CAS cleanup %s: %v", volumeID, err)
+			}
+		}
+	}
+
+	s.registry.UnregisterVolume(volumeID)
+	klog.Infof("Deleted volume %s", volumeID)
+	return nil
+}
+
+// CreateSnapshotForVolume creates a CAS user snapshot for the given volume,
+// delegating to the volume's owner node. Returns the snapshot layer hash.
+func (s *Server) CreateSnapshotForVolume(ctx context.Context, volumeID, label string) (string, error) {
+	ownerNode := s.registry.GetOwner(volumeID)
+	if ownerNode == "" {
+		return "", fmt.Errorf("no owner node for volume %q", volumeID)
+	}
+
+	client, err := s.nodeClient(ownerNode)
+	if err != nil {
+		return "", fmt.Errorf("connect to owner %s: %v", ownerNode, err)
+	}
+	defer client.Close()
+
+	hash, err := client.CreateUserSnapshot(ctx, volumeID, label)
+	if err != nil {
+		return "", fmt.Errorf("create snapshot for %s: %v", volumeID, err)
+	}
+
+	s.registry.SetLatestHash(volumeID, hash)
+	klog.Infof("CreateSnapshotForVolume: %s → %s (label=%s)", volumeID, cas.ShortHash(hash), label)
+	return hash, nil
+}
+
+// NodeClientFor creates a nodeops client for the given node name. The caller
+// is responsible for calling Close() on the returned client.
+func (s *Server) NodeClientFor(nodeName string) (*nodeops.Client, error) {
+	return s.nodeClient(nodeName)
+}
+
+// GetOwnerNode returns the owner node of a volume, or "" if unknown.
+func (s *Server) GetOwnerNode(volumeID string) string {
+	return s.registry.GetOwner(volumeID)
+}
+
+// VolumeRegistered returns true if the volume has an owner in the registry.
+func (s *Server) VolumeRegistered(volumeID string) bool {
+	return s.registry.GetOwner(volumeID) != ""
+}
+
+// AggregateCapacity returns the total available bytes across all registered
+// compute nodes. Nodes that are unreachable are skipped.
+func (s *Server) AggregateCapacity(ctx context.Context) (int64, error) {
+	var totalAvailable int64
+	for _, nodeName := range s.registry.RegisteredNodes() {
+		client, err := s.nodeClient(nodeName)
+		if err != nil {
+			klog.Warningf("AggregateCapacity: skip node %s: %v", nodeName, err)
+			continue
+		}
+		_, available, err := client.GetCapacity(ctx)
+		client.Close()
+		if err != nil {
+			klog.Warningf("AggregateCapacity: GetCapacity on %s: %v", nodeName, err)
+			continue
+		}
+		totalAvailable += available
+	}
+	return totalAvailable, nil
+}
+
+// RegisteredVolumeIDs returns all volume IDs known to the registry.
+func (s *Server) RegisteredVolumeIDs() []string {
+	return s.registry.AllVolumeIDs()
+}
+
+// Registry returns the Hub's NodeRegistry for direct access by the CSI
+// controller (e.g. registering volumes created from snapshots).
+func (s *Server) Registry() *NodeRegistry {
+	return s.registry
 }
 
 // ---------------------------------------------------------------------------

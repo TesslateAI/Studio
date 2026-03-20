@@ -4,12 +4,10 @@ kind: Kustomization
 namespace: kube-system
 
 resources:
-  - rbac/controller-rbac.yaml
   - rbac/node-rbac.yaml
   - manifests/csi-driver.yaml
   - manifests/storage-class.yaml
   - manifests/snapshot-class.yaml
-  - manifests/controller.yaml
   - manifests/node.yaml
   - manifests/node-service.yaml
   - manifests/network-policy.yaml

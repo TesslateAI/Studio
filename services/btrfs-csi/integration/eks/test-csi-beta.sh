@@ -93,8 +93,8 @@ wait_for_pod_ready() {
 dump_diagnostics() {
     echo ""
     echo "--- Diagnostics ---"
-    echo "CSI controller logs (last 20 lines):"
-    $KUBECTL logs -n "$CSI_NS" -l app=tesslate-btrfs-csi-controller -c tesslate-btrfs-csi --tail=20 2>/dev/null || echo "(unavailable)"
+    echo "Volume Hub logs (last 20 lines):"
+    $KUBECTL logs -n "$CSI_NS" -l app=tesslate-volume-hub -c hub --tail=20 2>/dev/null || echo "(unavailable)"
     echo ""
     echo "CSI node logs (last 20 lines):"
     $KUBECTL logs -n "$CSI_NS" -l app=tesslate-btrfs-csi-node -c tesslate-btrfs-csi --tail=20 2>/dev/null || echo "(unavailable)"
@@ -186,7 +186,7 @@ if should_run "preflight"; then
 echo "=== 1. Pre-flight Checks ==="
 
 # 1a. Controller deployment
-CONTROLLER_READY=$($KUBECTL get deployment tesslate-btrfs-csi-controller -n "$CSI_NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+CONTROLLER_READY=$($KUBECTL get deployment tesslate-volume-hub -n "$CSI_NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
 if [ "${CONTROLLER_READY:-0}" -ge 1 ]; then
     pass "CSI controller running ($CONTROLLER_READY replica(s))"
 else
@@ -225,14 +225,14 @@ else
     fail "CSIDriver object not registered"
 fi
 
-# 1f. Controller can reach NodeOps
-CTRL_LOG=$($KUBECTL logs -n "$CSI_NS" -l app=tesslate-btrfs-csi-controller -c tesslate-btrfs-csi --tail=50 2>/dev/null || echo "")
-if echo "$CTRL_LOG" | grep -q "Controller connected to nodeops"; then
-    pass "Controller connected to NodeOps gRPC"
-elif echo "$CTRL_LOG" | grep -q "listening on.*mode=controller"; then
-    pass "Controller started successfully (NodeOps connected implicitly)"
+# 1f. Hub serving CSI + VolumeHub gRPC
+HUB_LOG=$($KUBECTL logs -n "$CSI_NS" -l app=tesslate-volume-hub -c hub --tail=50 2>/dev/null || echo "")
+if echo "$HUB_LOG" | grep -q "VolumeHub gRPC server"; then
+    pass "Volume Hub gRPC server started"
+elif echo "$HUB_LOG" | grep -q "Registered CSI Identity"; then
+    pass "Hub CSI controller registered"
 else
-    fail "Controller NodeOps connection not confirmed in logs"
+    fail "Hub startup not confirmed in logs"
 fi
 
 # 1g. Node metrics endpoint
@@ -696,7 +696,7 @@ if wait_for_pod_ready grpc-probe "$NS" 60; then
         pass "NodeOps gRPC port 9741 reachable from test namespace"
     else
         # Fallback: verify the controller can reach it (functional proof)
-        CTRL_ERRORS=$($KUBECTL logs -n "$CSI_NS" -l app=tesslate-btrfs-csi-controller -c tesslate-btrfs-csi --tail=5 2>/dev/null | grep -c "Unavailable" || echo "0")
+        CTRL_ERRORS=$($KUBECTL logs -n "$CSI_NS" -l app=tesslate-volume-hub -c hub --tail=5 2>/dev/null | grep -c "Unavailable" || echo "0")
         if [ "$CTRL_ERRORS" = "0" ]; then
             pass "NodeOps gRPC reachable (verified via controller — no Unavailable errors)"
         else

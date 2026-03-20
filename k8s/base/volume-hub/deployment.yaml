@@ -20,16 +20,37 @@ spec:
         app.kubernetes.io/component: volume-hub
     spec:
       serviceAccountName: tesslate-volume-hub
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: hub
         image: tesslate-btrfs-csi:latest
         args:
         - "--mode=hub"
         - "--hub-grpc-port=9750"
+        - "--endpoint=unix:///run/csi/csi.sock"
+        - "--node-id=$(NODE_NAME)"
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        envFrom:
+        - secretRef:
+            name: tesslate-btrfs-csi-config
+        securityContext:
+          allowPrivilegeEscalation: false
         ports:
         - name: hub-grpc
           containerPort: 9750
           protocol: TCP
+        volumeMounts:
+        - name: socket-dir
+          mountPath: /run/csi
         resources:
           requests:
             cpu: 100m
@@ -47,3 +68,44 @@ spec:
             port: 9750
           initialDelaySeconds: 15
           periodSeconds: 20
+
+      - name: csi-provisioner
+        image: registry.k8s.io/sig-storage/csi-provisioner:v5.1.0
+        args:
+        - "--csi-address=/run/csi/csi.sock"
+        - "--leader-election=true"
+        - "--feature-gates=Topology=true"
+        securityContext:
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: socket-dir
+          mountPath: /run/csi
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+
+      - name: csi-snapshotter
+        image: registry.k8s.io/sig-storage/csi-snapshotter:v8.2.0
+        args:
+        - "--csi-address=/run/csi/csi.sock"
+        - "--leader-election=true"
+        securityContext:
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: socket-dir
+          mountPath: /run/csi
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+
+      volumes:
+      - name: socket-dir
+        emptyDir: {}

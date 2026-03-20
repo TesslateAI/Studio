@@ -1,6 +1,7 @@
 # Build output
 /bin/
 /btrfs-csi-driver
+/driver
 
 # Test artifacts
 coverage.out

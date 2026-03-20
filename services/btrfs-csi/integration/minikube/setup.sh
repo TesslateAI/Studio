@@ -143,14 +143,14 @@ $KUBECTL apply -k "$SCRIPT_DIR"
 
 echo ""
 echo "Waiting for CSI controller to be ready..."
-$KUBECTL rollout status deployment/tesslate-btrfs-csi-controller -n kube-system --timeout=120s
+$KUBECTL rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
 
 echo "Waiting for CSI node DaemonSet to be ready..."
 $KUBECTL rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
 
 echo ""
 echo "--- CSI driver pods ---"
-$KUBECTL get pods -n kube-system -l 'app in (tesslate-btrfs-csi-controller,tesslate-btrfs-csi-node)' -o wide
+$KUBECTL get pods -n kube-system -l 'app in (tesslate-volume-hub,tesslate-btrfs-csi-node)' -o wide
 
 echo ""
 echo "============================================="
