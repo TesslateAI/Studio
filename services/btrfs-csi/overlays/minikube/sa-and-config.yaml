@@ -1,0 +1,23 @@
+# ServiceAccount and config secret for minikube (no IRSA, no S3).
+# On AWS these are managed by Terraform with IRSA annotations and real S3 config.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tesslate-btrfs-csi-node
+  namespace: kube-system
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tesslate-btrfs-csi-config
+  namespace: kube-system
+type: Opaque
+stringData:
+  S3_ENDPOINT: ""
+  S3_BUCKET: ""
+  S3_ACCESS_KEY: ""
+  S3_SECRET_KEY: ""
+  S3_REGION: ""
+  SYNC_INTERVAL: "0"
+  POOL_PATH: "/mnt/tesslate-pool"

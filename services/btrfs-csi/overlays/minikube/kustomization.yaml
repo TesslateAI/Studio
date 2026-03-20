@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - ../../deploy
   - ../../../../k8s/base/volume-hub
+  - sa-and-config.yaml
 
 namespace: kube-system
 

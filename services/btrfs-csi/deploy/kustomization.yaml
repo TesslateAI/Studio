@@ -8,7 +8,9 @@ resources:
   - manifests/csi-driver.yaml
   - manifests/storage-class.yaml
   - manifests/snapshot-class.yaml
-  - manifests/config-secret.yaml
+  # config-secret is managed per-environment:
+  #   AWS: Terraform creates it with S3 bucket + rclone config (kubernetes.tf)
+  #   Minikube: minikube overlay creates it with local/empty values
   - manifests/node.yaml
   - manifests/node-service.yaml
   - manifests/network-policy.yaml

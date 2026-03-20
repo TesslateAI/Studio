@@ -13,3 +13,6 @@ images:
   - name: tesslate-btrfs-csi
     newName: <ECR_REGISTRY>/tesslate-btrfs-csi
     newTag: beta
+  - name: tesslate-devserver
+    newName: <ECR_REGISTRY>/tesslate-devserver
+    newTag: beta
