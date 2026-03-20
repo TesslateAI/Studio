@@ -103,40 +103,24 @@ func (m *Manager) EnsureTemplateByHash(ctx context.Context, name, expectedHash s
 	return m.downloadTemplateByHash(ctx, name, expectedHash)
 }
 
-// UploadTemplate creates a read-only snapshot of the named template, uploads
-// it to the CAS store as a blob, and records the name→hash mapping in the
-// template index. Returns the blob hash.
+// UploadTemplate sends the named template directly to the CAS store and
+// records the name→hash mapping in the template index. Returns the blob hash.
+// The template is sent directly (not via an intermediate snapshot) so that
+// the UUID in the send stream matches the UUID used as -p parent in layer
+// sends — enabling cross-node incremental restore.
 func (m *Manager) UploadTemplate(ctx context.Context, name string) (string, error) {
 	if m.cas == nil {
 		return "", fmt.Errorf("CAS store not configured, cannot upload template %q", name)
 	}
 	tmplPath := fmt.Sprintf("templates/%s", name)
-	snapPath := fmt.Sprintf("snapshots/%s", name)
 
 	if !m.btrfs.SubvolumeExists(ctx, tmplPath) {
 		return "", fmt.Errorf("template %q does not exist", name)
 	}
 
-	// Create a read-only snapshot for the send.
-	if m.btrfs.SubvolumeExists(ctx, snapPath) {
-		if err := m.btrfs.DeleteSubvolume(ctx, snapPath); err != nil {
-			return "", fmt.Errorf("delete stale upload snapshot: %w", err)
-		}
-	}
-	if err := m.btrfs.SnapshotSubvolume(ctx, tmplPath, snapPath, true); err != nil {
-		return "", fmt.Errorf("snapshot template for upload: %w", err)
-	}
-
-	// Ensure cleanup of the upload snapshot.
-	defer func() {
-		cleanCtx := context.Background()
-		if m.btrfs.SubvolumeExists(cleanCtx, snapPath) {
-			_ = m.btrfs.DeleteSubvolume(cleanCtx, snapPath)
-		}
-	}()
-
-	// Send → CAS PutBlob.
-	sendReader, err := m.btrfs.Send(ctx, snapPath, "")
+	// Send the template directly. Templates are already read-only (created
+	// by PromoteToTemplate or btrfs receive), so no snapshot is needed.
+	sendReader, err := m.btrfs.Send(ctx, tmplPath, "")
 	if err != nil {
 		return "", fmt.Errorf("btrfs send template: %w", err)
 	}
