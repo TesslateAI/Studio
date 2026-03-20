@@ -319,7 +319,7 @@ func (d *Driver) runHub(ctx context.Context) error {
 	nodeClientFactory := func(nodeName string) (*nodeops.Client, error) {
 		addr := resolver.Resolve(nodeName)
 		if addr == "" {
-			if refreshErr := resolver.Refresh(ctx); refreshErr != nil {
+			if _, refreshErr := resolver.Refresh(ctx); refreshErr != nil {
 				return nil, fmt.Errorf("resolve node %s (refresh failed: %w)", nodeName, refreshErr)
 			}
 			addr = resolver.Resolve(nodeName)
@@ -334,31 +334,15 @@ func (d *Driver) runHub(ctx context.Context) error {
 	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory, resolver.Resolve)
 	d.hubServer = hubSrv // store for CSI controller access
 
-	// Initial discovery + periodic refresh (30s) of node endpoints.
-	// After each successful refresh, re-run DiscoverNodes + RebuildRegistry
-	// to pick up new nodes and drop dead ones after CSI node restarts.
-	go func() {
-		for i := range 10 {
-			if refreshErr := resolver.Refresh(ctx); refreshErr != nil {
-				klog.Warningf("Node discovery attempt %d: %v", i+1, refreshErr)
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			break
-		}
+	// Watch K8s Endpoints for CSI node pod changes (~1s latency vs 30s polling).
+	// The watch loop's first iteration lists current state and calls onNodeChange,
+	// which handles initial discovery — no separate startup goroutine needed.
+	resolver.StartWatch(ctx, func() {
 		if discoverErr := hubSrv.DiscoverNodes(resolver); discoverErr != nil {
-			klog.Warningf("DiscoverNodes: %v", discoverErr)
+			klog.Warningf("DiscoverNodes after watch event: %v", discoverErr)
 		}
 		if rebuildErr := hubSrv.RebuildRegistry(ctx); rebuildErr != nil {
-			klog.Warningf("Registry rebuild: %v", rebuildErr)
-		}
-	}()
-	resolver.StartPeriodicRefresh(ctx, 30*time.Second, func() {
-		if discoverErr := hubSrv.DiscoverNodes(resolver); discoverErr != nil {
-			klog.Warningf("DiscoverNodes after refresh: %v", discoverErr)
-		}
-		if rebuildErr := hubSrv.RebuildRegistry(ctx); rebuildErr != nil {
-			klog.Warningf("RebuildRegistry after refresh: %v", rebuildErr)
+			klog.Warningf("RebuildRegistry after watch event: %v", rebuildErr)
 		}
 	})
 

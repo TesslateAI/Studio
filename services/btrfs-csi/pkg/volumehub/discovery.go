@@ -1,6 +1,7 @@
 package volumehub
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -16,17 +17,21 @@ import (
 )
 
 // NodeResolver maintains a mapping from K8s node names to CSI node pod IPs.
-// It queries the K8s Endpoints API using the in-cluster service account token —
-// no client-go dependency, just net/http.
+// It discovers nodes via the K8s Endpoints API using the in-cluster service
+// account token — no client-go dependency, just net/http.
+//
+// StartWatch establishes a long-lived HTTP watch connection that delivers
+// endpoint changes in ~1s (vs the old 30s polling approach).
 type NodeResolver struct {
 	mu         sync.RWMutex
 	nodeToAddr map[string]string // K8s node name → podIP:port
 	svcName    string            // headless service name (e.g. "tesslate-btrfs-csi-node-svc")
-	namespace  string            // namespace of the service (e.g. "kube-system")
-	port       int               // NodeOps gRPC port on the CSI node pods
-	apiHost    string            // K8s API server host (from KUBERNETES_SERVICE_HOST)
-	token      string            // service account token
-	httpClient *http.Client
+	namespace           string            // namespace of the service (e.g. "kube-system")
+	port                int               // NodeOps gRPC port on the CSI node pods
+	apiHost             string            // K8s API server host (from KUBERNETES_SERVICE_HOST)
+	token               string            // service account token
+	httpClient          *http.Client      // 10s timeout, for list requests
+	watchClient         *http.Client      // no timeout, for long-lived watch connections
 }
 
 // NewNodeResolver creates a NodeResolver that discovers CSI nodes via the
@@ -56,6 +61,8 @@ func NewNodeResolver(svcName, namespace string, port int) (*NodeResolver, error)
 		}
 	}
 
+	transport := &http.Transport{TLSClientConfig: tlsCfg}
+
 	return &NodeResolver{
 		nodeToAddr: make(map[string]string),
 		svcName:    svcName,
@@ -64,41 +71,72 @@ func NewNodeResolver(svcName, namespace string, port int) (*NodeResolver, error)
 		apiHost:    fmt.Sprintf("https://%s:%s", apiHost, apiPort),
 		token:      string(tokenBytes),
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: tlsCfg,
-			},
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		},
+		watchClient: &http.Client{
+			Timeout:   0, // no timeout for long-lived watch
+			Transport: transport,
 		},
 	}, nil
 }
 
-// Refresh queries the K8s Endpoints API and updates the node→addr map.
-func (r *NodeResolver) Refresh(ctx context.Context) error {
+// newTestNodeResolver creates a NodeResolver for unit tests, pointing at a
+// custom API host with no TLS or service account token.
+func newTestNodeResolver(apiHost, svcName, namespace string, port int) *NodeResolver {
+	return &NodeResolver{
+		nodeToAddr:  make(map[string]string),
+		svcName:     svcName,
+		namespace:   namespace,
+		port:        port,
+		apiHost:     apiHost,
+		token:       "test-token",
+		httpClient:  &http.Client{Timeout: 5 * time.Second},
+		watchClient: &http.Client{Timeout: 0},
+	}
+}
+
+// Refresh queries the K8s Endpoints API (list) and updates the node→addr map.
+// Returns the resourceVersion from the response, used to start a watch.
+func (r *NodeResolver) Refresh(ctx context.Context) (string, error) {
 	url := fmt.Sprintf("%s/api/v1/namespaces/%s/endpoints/%s", r.apiHost, r.namespace, r.svcName)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+r.token)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("endpoints API call: %w", err)
+		return "", fmt.Errorf("endpoints API call: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("endpoints API returned %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("endpoints API returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var ep endpointsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ep); err != nil {
-		return fmt.Errorf("decode endpoints: %w", err)
+		return "", fmt.Errorf("decode endpoints: %w", err)
 	}
 
+	newMap := r.parseEndpoints(&ep)
+
+	r.mu.Lock()
+	old := r.nodeToAddr
+	r.nodeToAddr = newMap
+	r.mu.Unlock()
+
+	r.logChanges(old, newMap)
+	return ep.Metadata.ResourceVersion, nil
+}
+
+// parseEndpoints builds a node→addr map from an endpoints response.
+func (r *NodeResolver) parseEndpoints(ep *endpointsResponse) map[string]string {
 	newMap := make(map[string]string)
 	for _, subset := range ep.Subsets {
 		for _, addr := range subset.Addresses {
@@ -107,13 +145,7 @@ func (r *NodeResolver) Refresh(ctx context.Context) error {
 			}
 		}
 	}
-
-	r.mu.Lock()
-	r.nodeToAddr = newMap
-	r.mu.Unlock()
-
-	klog.V(2).Infof("NodeResolver: refreshed %d nodes from endpoints/%s", len(newMap), r.svcName)
-	return nil
+	return newMap
 }
 
 // Resolve returns the gRPC address (podIP:port) for the given K8s node name.
@@ -135,34 +167,177 @@ func (r *NodeResolver) NodeNames() []string {
 	return names
 }
 
-// StartPeriodicRefresh runs Refresh every interval in a background goroutine.
-// If onRefresh is non-nil it is called after each successful Refresh — use
-// this to re-run DiscoverNodes + RebuildRegistry so the Hub picks up new
-// nodes and drops dead ones after CSI node pod restarts.
-// Stops when ctx is cancelled.
-func (r *NodeResolver) StartPeriodicRefresh(ctx context.Context, interval time.Duration, onRefresh func()) {
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := r.Refresh(ctx); err != nil {
-					klog.Warningf("NodeResolver periodic refresh: %v", err)
-				} else if onRefresh != nil {
-					onRefresh()
-				}
-			}
-		}
-	}()
+// ---------------------------------------------------------------------------
+// Watch — replaces polling with a streaming K8s watch connection
+// ---------------------------------------------------------------------------
+
+// StartWatch starts a background goroutine that maintains a long-lived watch
+// on the K8s Endpoints API. Changes are delivered in ~1s instead of 30s.
+// onNodeChange is called after each map update (use for DiscoverNodes +
+// RebuildRegistry). Stops when ctx is cancelled.
+func (r *NodeResolver) StartWatch(ctx context.Context, onNodeChange func()) {
+	go r.watchLoop(ctx, onNodeChange)
 }
 
+// watchLoop is the list-then-watch retry loop. On any failure it re-lists
+// with exponential backoff (1s → 30s cap).
+func (r *NodeResolver) watchLoop(ctx context.Context, onNodeChange func()) {
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		// List to get current state + resourceVersion.
+		rv, err := r.Refresh(ctx)
+		if err != nil {
+			klog.Warningf("NodeResolver: list failed: %v (retry in %v)", err, backoff)
+			if !sleepCtx(ctx, backoff) {
+				return
+			}
+			backoff = min(backoff*2, maxBackoff)
+			continue
+		}
+
+		// Successful list resets backoff.
+		backoff = time.Second
+
+		if onNodeChange != nil {
+			onNodeChange()
+		}
+
+		// Watch from the listed resourceVersion.
+		if err := r.doWatch(ctx, rv, onNodeChange); err != nil {
+			klog.Warningf("NodeResolver: watch disconnected: %v (re-listing)", err)
+		}
+	}
+}
+
+// doWatch opens a streaming watch connection and processes events until
+// disconnect, context cancellation, or an unrecoverable error (410 Gone).
+func (r *NodeResolver) doWatch(ctx context.Context, resourceVersion string, onNodeChange func()) error {
+	url := fmt.Sprintf(
+		"%s/api/v1/namespaces/%s/endpoints?watch=true&fieldSelector=metadata.name=%s&resourceVersion=%s&timeoutSeconds=300",
+		r.apiHost, r.namespace, r.svcName, resourceVersion,
+	)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("create watch request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+r.token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := r.watchClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("watch API call: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("watch API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	klog.V(2).Infof("NodeResolver: watch connected (rv=%s)", resourceVersion)
+
+	scanner := bufio.NewScanner(resp.Body)
+	// K8s watch events can be large; raise the default 64KB limit.
+	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		var event watchEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			klog.Warningf("NodeResolver: decode watch event: %v", err)
+			continue
+		}
+
+		switch event.Type {
+		case "ADDED", "MODIFIED":
+			newMap := r.parseEndpoints(&event.Object)
+			r.mu.Lock()
+			old := r.nodeToAddr
+			r.nodeToAddr = newMap
+			r.mu.Unlock()
+
+			r.logChanges(old, newMap)
+			if onNodeChange != nil {
+				onNodeChange()
+			}
+
+		case "DELETED":
+			newMap := make(map[string]string)
+			r.mu.Lock()
+			old := r.nodeToAddr
+			r.nodeToAddr = newMap
+			r.mu.Unlock()
+
+			r.logChanges(old, newMap)
+			if onNodeChange != nil {
+				onNodeChange()
+			}
+
+		case "ERROR":
+			// 410 Gone means our resourceVersion is too old — need to re-list.
+			return fmt.Errorf("watch ERROR event: %s", scanner.Text())
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("watch stream: %w", err)
+	}
+	return fmt.Errorf("watch stream closed")
+}
+
+// logChanges logs node IP changes at info level for observability.
+func (r *NodeResolver) logChanges(old, new map[string]string) {
+	for name, addr := range new {
+		oldAddr, existed := old[name]
+		if !existed {
+			klog.Infof("NodeResolver: node %s appeared (%s)", name, addr)
+		} else if oldAddr != addr {
+			klog.Infof("NodeResolver: node %s IP changed (%s → %s)", name, oldAddr, addr)
+		}
+	}
+	for name := range old {
+		if _, exists := new[name]; !exists {
+			klog.Infof("NodeResolver: node %s removed", name)
+		}
+	}
+	klog.V(2).Infof("NodeResolver: %d nodes in endpoints", len(new))
+}
+
+// sleepCtx sleeps for the given duration or until ctx is cancelled.
+// Returns false if ctx was cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// ---------------------------------------------------------------------------
+// K8s API response types
+// ---------------------------------------------------------------------------
+
 // endpointsResponse is a minimal struct for the K8s Endpoints API response.
-// Only the fields we need are decoded.
 type endpointsResponse struct {
-	Subsets []endpointSubset `json:"subsets"`
+	Metadata endpointsMeta    `json:"metadata"`
+	Subsets  []endpointSubset `json:"subsets"`
+}
+
+type endpointsMeta struct {
+	ResourceVersion string `json:"resourceVersion"`
 }
 
 type endpointSubset struct {
@@ -174,3 +349,8 @@ type endpointAddress struct {
 	NodeName string `json:"nodeName"`
 }
 
+// watchEvent is a single event from the K8s watch stream.
+type watchEvent struct {
+	Type   string            `json:"type"` // ADDED, MODIFIED, DELETED, ERROR
+	Object endpointsResponse `json:"object"`
+}
