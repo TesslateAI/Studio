@@ -649,11 +649,14 @@ func (s *Server) CreateVolumeOnNode(ctx context.Context, volumeID, template, hin
 	// Write-through CAS sync: ensure data is persisted to object storage
 	// before returning. If the node dies before this completes, we'd lose
 	// the volume data — so treat sync failure as a creation failure.
-	if err := client.SyncVolume(ctx, volumeID); err != nil {
-		klog.Errorf("CreateVolumeOnNode: initial CAS sync failed for %s on %s: %v — rolling back", volumeID, targetNode, err)
-		_ = client.UntrackVolume(ctx, volumeID)
-		_ = client.DeleteSubvolume(ctx, "volumes/"+volumeID)
-		return "", fmt.Errorf("initial CAS sync failed (volume rolled back): %w", err)
+	// Skip when CAS is not configured (e.g. minikube / local-only mode).
+	if s.cas != nil {
+		if err := client.SyncVolume(ctx, volumeID); err != nil {
+			klog.Errorf("CreateVolumeOnNode: initial CAS sync failed for %s on %s: %v — rolling back", volumeID, targetNode, err)
+			_ = client.UntrackVolume(ctx, volumeID)
+			_ = client.DeleteSubvolume(ctx, "volumes/"+volumeID)
+			return "", fmt.Errorf("initial CAS sync failed (volume rolled back): %w", err)
+		}
 	}
 
 	s.registry.RegisterVolume(volumeID)

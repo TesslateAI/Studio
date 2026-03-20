@@ -235,21 +235,28 @@ func (d *Driver) runNode(ctx context.Context) error {
 	go gcCollector.Start(ctx)
 
 	// Start drain HTTP server for preStop hook.
-	if d.syncer != nil {
+	// Always starts regardless of syncer — when syncer is nil (no CAS/S3),
+	// the handler writes the sentinel immediately so the preStop loop exits
+	// in seconds instead of polling for 580s.
+	{
 		// Clean up stale sentinel from a previous run (container restart).
 		_ = os.Remove(drainSentinelPath)
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("POST /drain", func(w http.ResponseWriter, r *http.Request) {
 			klog.Info("Drain request received via HTTP")
-			// Use background context — the HTTP client (wget in preStop) may
-			// disconnect before drain completes, which would cancel r.Context().
-			drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer drainCancel()
-			if err := d.syncer.DrainAll(drainCtx); err != nil {
-				klog.Errorf("Drain failed: %v", err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+			if d.syncer != nil {
+				// Use background context — the HTTP client (wget in preStop) may
+				// disconnect before drain completes, which would cancel r.Context().
+				drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer drainCancel()
+				if err := d.syncer.DrainAll(drainCtx); err != nil {
+					klog.Errorf("Drain failed: %v", err)
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else {
+				klog.Info("Drain: no syncer configured, nothing to drain")
 			}
 			// Write sentinel file for preStop polling.  Path is inside the CSI
 			// socket directory (mounted volume, not shared /tmp).

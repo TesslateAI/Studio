@@ -5,7 +5,7 @@
 #   1. Create a PVC (simulates a builder job's build volume)
 #   2. Populate it with files via a pod (simulates git clone + npm install)
 #   3. Get the CSI volume ID from the bound PV
-#   4. Promote the volume to a template (via kubectl exec into CSI pod)
+#   4. Promote the volume to a template (via kubectl exec into CSI node pod)
 #   5. Create a StorageClass referencing the template
 #   6. Create a new PVC from the template StorageClass
 #   7. Mount the new PVC and verify template files are present
@@ -71,9 +71,10 @@ echo ""
 cleanup_namespace
 cleanup_storageclass
 
-# Find CSI controller pod (used for kubectl exec later)
-CSI_POD=$($KUBECTL get pod -n kube-system -l app=tesslate-volume-hub -o jsonpath='{.items[0].metadata.name}')
-echo "Volume Hub pod: $CSI_POD"
+# Find CSI node pod (used for kubectl exec — btrfs operations run on the node,
+# not the hub which is storageless and runs non-root).
+CSI_NODE_POD=$($KUBECTL get pod -n kube-system -l app=tesslate-btrfs-csi-node -o jsonpath='{.items[0].metadata.name}')
+echo "CSI Node pod: $CSI_NODE_POD"
 echo ""
 
 # ===================================================================
@@ -186,18 +187,14 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-# Delete the PVC to release the volume (CSI DeleteVolume won't run because
-# we'll create the template snapshot before that). Actually, we need the volume
-# to still exist. The PVC deletion triggers CSI DeleteVolume which would delete
-# the subvolume. So we promote BEFORE deleting the PVC.
-
-# Promote via kubectl exec into CSI pod - this simulates what PromoteToTemplate does:
+# Promote via kubectl exec into CSI node pod (not the hub — the hub is storageless).
+# This simulates what PromoteToTemplate does:
 # 1. Snapshot volumes/{volID} -> templates/{templateName} (read-only)
 # 2. (In real flow, also uploads to S3 and deletes source - skipped in minikube)
 TMPL_NAME="e2e-test-template"
 
 echo "Promoting volume $VOL_ID to template $TMPL_NAME..."
-$KUBECTL exec -n kube-system "$CSI_POD" -c hub -- sh -c "
+$KUBECTL exec -n kube-system "$CSI_NODE_POD" -c tesslate-btrfs-csi -- sh -c "
     export PATH=\"\$PATH:/usr/sbin:/sbin\"
 
     VOL_PATH=\"/mnt/tesslate-pool/volumes/$VOL_ID\"
@@ -216,7 +213,7 @@ $KUBECTL exec -n kube-system "$CSI_POD" -c hub -- sh -c "
 "
 
 # Verify it worked
-PROMOTE_RESULT=$($KUBECTL exec -n kube-system "$CSI_POD" -c hub -- sh -c "
+PROMOTE_RESULT=$($KUBECTL exec -n kube-system "$CSI_NODE_POD" -c tesslate-btrfs-csi -- sh -c "
     [ -f /mnt/tesslate-pool/templates/$TMPL_NAME/package.json ] && echo 'FILES_OK' || echo 'FILES_MISSING'
 ")
 
@@ -280,7 +277,7 @@ if [ "$PHASE" != "Bound" ]; then
     echo "--- PVC details ---"
     $KUBECTL describe pvc project-from-template -n "$NS" || true
     echo "--- CSI controller logs ---"
-    $KUBECTL logs -n kube-system "$CSI_POD" -c hub --tail=30 || true
+    $KUBECTL logs -n kube-system deployment/tesslate-volume-hub -c hub --tail=30 || true
     fail "Template PVC never became Bound (phase=$PHASE)"
 fi
 
@@ -354,8 +351,8 @@ $KUBECTL delete pod project-reader -n "$NS" --grace-period=0 --force 2>/dev/null
 $KUBECTL delete pvc project-from-template -n "$NS" --wait=false 2>/dev/null || true
 cleanup_storageclass
 
-# Clean up template subvolume from the CSI pod
-$KUBECTL exec -n kube-system "$CSI_POD" -c hub -- sh -c "
+# Clean up template subvolume from the CSI node pod
+$KUBECTL exec -n kube-system "$CSI_NODE_POD" -c tesslate-btrfs-csi -- sh -c "
     export PATH=\"\$PATH:/usr/sbin:/sbin\"
     TMPL_PATH=\"/mnt/tesslate-pool/templates/$TMPL_NAME\"
     if [ -d \"\$TMPL_PATH\" ]; then

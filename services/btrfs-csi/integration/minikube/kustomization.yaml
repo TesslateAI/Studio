@@ -1,9 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Overlay on the base deploy/ manifests
+# Overlay on the base deploy/ manifests + Volume Hub
 resources:
   - ../../deploy
+  - ../../../../k8s/base/volume-hub
 
 namespace: kube-system
 
@@ -32,6 +33,40 @@ patches:
       - op: replace
         path: /spec/template/spec/securityContext
         value: {}
+      - op: replace
+        path: /spec/template/spec/initContainers/0/image
+        value: "tesslate-btrfs-csi:test"
+      - op: add
+        path: /spec/template/spec/initContainers/0/imagePullPolicy
+        value: "Never"
+
+  # Patch Volume Hub: test image, imagePullPolicy.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: tesslate-volume-hub
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: "tesslate-btrfs-csi:test"
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: "Never"
+
+  # Patch image-precache DaemonSet: skip devserver image (not built in CSI test profile).
+  - target:
+      group: apps
+      version: v1
+      kind: DaemonSet
+      name: tesslate-image-precache
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/initContainers/0/image
+        value: "registry.k8s.io/pause:3.10"
+      - op: add
+        path: /spec/template/spec/initContainers/0/imagePullPolicy
+        value: "IfNotPresent"
 
   # Replace the config secret with empty S3 values (not needed for PVC tests)
   - target:

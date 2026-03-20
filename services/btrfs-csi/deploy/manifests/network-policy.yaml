@@ -11,7 +11,7 @@ spec:
     - Egress
   ingress:
     # Allow nodeops gRPC (port 9741) and FileOps gRPC (port 9742)
-    # only from tesslate backend pods.
+    # from tesslate backend pods.
     - from:
         - namespaceSelector:
             matchLabels:
@@ -19,6 +19,19 @@ spec:
           podSelector:
             matchLabels:
               app: tesslate-backend
+      ports:
+        - protocol: TCP
+          port: 9741
+        - protocol: TCP
+          port: 9742
+    # Allow Volume Hub to call NodeOps gRPC (port 9741) and FileOps (port 9742).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app: tesslate-volume-hub
       ports:
         - protocol: TCP
           port: 9741

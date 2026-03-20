@@ -8,6 +8,7 @@ resources:
   - manifests/csi-driver.yaml
   - manifests/storage-class.yaml
   - manifests/snapshot-class.yaml
+  - manifests/config-secret.yaml
   - manifests/node.yaml
   - manifests/node-service.yaml
   - manifests/network-policy.yaml

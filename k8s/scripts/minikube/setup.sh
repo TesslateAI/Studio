@@ -33,6 +33,8 @@ MINIKUBE_CPUS=4
 MINIKUBE_MEMORY=8192  # 8GB
 MINIKUBE_DISK_SIZE="40g"
 K8S_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$K8S_DIR/.." && pwd)"
+CSI_DIR="$REPO_ROOT/services/btrfs-csi"
 
 echo -e "${BLUE}=============================================${NC}"
 echo -e "${BLUE}  Tesslate Studio - Minikube Setup${NC}"
@@ -118,7 +120,24 @@ kubectl config use-context "$MINIKUBE_PROFILE"
 log_info "Kubectl context set to '$MINIKUBE_PROFILE'"
 
 # =============================================================================
-# Step 3: Create Namespaces
+# Step 3: Build and load Docker images
+# =============================================================================
+
+log_info "Building Docker images..."
+docker build -t tesslate-backend:latest -f "$REPO_ROOT/orchestrator/Dockerfile" "$REPO_ROOT/orchestrator"
+docker build -t tesslate-frontend:latest -f "$REPO_ROOT/app/Dockerfile.prod" "$REPO_ROOT/app"
+docker build -t tesslate-devserver:latest -f "$REPO_ROOT/orchestrator/Dockerfile.devserver" "$REPO_ROOT/orchestrator"
+docker build -t tesslate-btrfs-csi:latest -f "$CSI_DIR/Dockerfile" "$CSI_DIR"
+log_success "Images built"
+
+log_info "Loading images into minikube..."
+for img in tesslate-backend:latest tesslate-frontend:latest tesslate-devserver:latest tesslate-btrfs-csi:latest; do
+    minikube -p "$MINIKUBE_PROFILE" image load "$img"
+done
+log_success "Images loaded"
+
+# =============================================================================
+# Step 4: Create Namespaces
 # =============================================================================
 
 log_info "Creating namespaces..."
@@ -142,7 +161,35 @@ EOF
 log_success "Namespaces created"
 
 # =============================================================================
-# Step 4: Deploy MinIO (S3 Simulation)
+# Step 4: Storage Classes + VolumeSnapshot CRDs + btrfs-CSI
+# =============================================================================
+
+log_info "Applying storage classes..."
+kubectl apply -f "$K8S_DIR/overlays/minikube/storage-class.yaml"
+
+log_info "Installing VolumeSnapshot CRDs (required by CSI snapshotter)..."
+SNAPSHOTTER_VERSION="v8.2.0"
+CRD_BASE="https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAPSHOTTER_VERSION}/client/config/crd"
+for crd in \
+    "snapshot.storage.k8s.io_volumesnapshotclasses.yaml" \
+    "snapshot.storage.k8s.io_volumesnapshotcontents.yaml" \
+    "snapshot.storage.k8s.io_volumesnapshots.yaml"; do
+    kubectl apply -f "${CRD_BASE}/${crd}" --server-side 2>/dev/null || \
+    kubectl apply -f "${CRD_BASE}/${crd}"
+done
+CONTROLLER_BASE="https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAPSHOTTER_VERSION}/deploy/kubernetes/snapshot-controller"
+kubectl apply -f "${CONTROLLER_BASE}/rbac-snapshot-controller.yaml" 2>/dev/null || true
+kubectl apply -f "${CONTROLLER_BASE}/setup-snapshot-controller.yaml" 2>/dev/null || true
+
+log_info "Deploying btrfs-CSI driver + Volume Hub..."
+kubectl apply -k "$CSI_DIR/overlays/minikube"
+kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
+
+log_success "Storage layer ready"
+
+# =============================================================================
+# Step 5: Deploy MinIO (S3 Simulation)
 # =============================================================================
 
 log_info "Deploying MinIO for S3 simulation..."
@@ -175,15 +222,7 @@ kubectl apply -f "$K8S_DIR/overlays/minikube/secrets/app-secrets.yaml"
 log_success "Secrets created"
 
 # =============================================================================
-# Step 6: Apply Storage Class
-# =============================================================================
-
-log_info "Creating storage class..."
-kubectl apply -f "$K8S_DIR/overlays/minikube/storage-class.yaml"
-log_success "Storage class created"
-
-# =============================================================================
-# Step 7: Deploy Application using Kustomize
+# Step 8: Deploy Application using Kustomize
 # =============================================================================
 
 log_info "Deploying Tesslate application..."
@@ -201,12 +240,6 @@ log_success "Application deployed"
 # =============================================================================
 
 log_info "Seeding database..."
-
-REPO_ROOT="$(cd "$K8S_DIR/../.." 2>/dev/null && pwd)" || REPO_ROOT="$(cd "$K8S_DIR/.." && pwd)"
-# Find repo root by looking for scripts/seed directory
-if [ ! -d "$REPO_ROOT/scripts/seed" ]; then
-    REPO_ROOT="$(cd "$K8S_DIR/.." && pwd)"
-fi
 
 # Wait for backend to be fully ready before seeding
 kubectl rollout status deployment/tesslate-backend -n tesslate --timeout=120s
