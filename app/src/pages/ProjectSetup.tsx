@@ -37,13 +37,20 @@ export default function ProjectSetup() {
   // Load existing config on mount
   useEffect(() => {
     if (!slug) return;
-    setupApi.getConfig(slug).then(res => {
-      if (res.exists) {
-        setConfig({ apps: res.apps, infrastructure: res.infrastructure, primaryApp: res.primaryApp });
-        setExistingConfig(true);
-        setAnalysisDone(true);
-      }
-    }).catch(() => {});
+    setupApi
+      .getConfig(slug)
+      .then((res) => {
+        if (res.exists) {
+          setConfig({
+            apps: res.apps,
+            infrastructure: res.infrastructure,
+            primaryApp: res.primaryApp,
+          });
+          setExistingConfig(true);
+          setAnalysisDone(true);
+        }
+      })
+      .catch(() => {});
   }, [slug]);
 
   const handleAnalyze = useCallback(async () => {
@@ -67,7 +74,9 @@ export default function ProjectSetup() {
       }
     } catch (error) {
       console.error('Analysis failed:', error);
-      const msg = error instanceof Error ? error.message : 'Analysis failed';
+      const err = error as { response?: { data?: { detail?: string } } };
+      const msg =
+        err?.response?.data?.detail || (error instanceof Error ? error.message : 'Analysis failed');
       toast.error(msg);
     } finally {
       setIsAnalyzing(false);
@@ -190,11 +199,10 @@ export default function ProjectSetup() {
             {!analysisDone && (
               <div className="bg-[var(--surface)] border border-white/5 rounded-2xl p-6 text-center">
                 <Robot size={48} className="text-[var(--primary)] mx-auto mb-4" />
-                <h2 className="text-lg font-bold text-[var(--text)] mb-2">
-                  Analyze Your Project
-                </h2>
+                <h2 className="text-lg font-bold text-[var(--text)] mb-2">Analyze Your Project</h2>
                 <p className="text-sm text-[var(--text)]/50 mb-6 max-w-md mx-auto">
-                  Our AI will scan your project files to detect frameworks, ports, and startup commands automatically.
+                  Our AI will scan your project files to detect frameworks, ports, and startup
+                  commands automatically.
                 </p>
                 <div className="flex items-center gap-3 justify-center">
                   <ModelSelector
@@ -234,7 +242,9 @@ export default function ProjectSetup() {
           /* Manual Tab */
           <div>
             <p className="text-sm text-[var(--text)]/50 mb-4">
-              Configure your project services manually:
+              {existingConfig
+                ? 'Configure your project services — prefilled from template:'
+                : 'Configure your project services manually:'}
             </p>
             <ServiceConfigForm config={config} onChange={setConfig} />
           </div>

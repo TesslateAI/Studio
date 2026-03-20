@@ -1881,7 +1881,8 @@ async def analyze_project(
 
         if not config:
             raise HTTPException(
-                status_code=500, detail="Failed to generate config. Please try again."
+                status_code=422,
+                detail="AI could not parse the project structure. Try a different model or use manual setup.",
             )
 
         # Convert to response format

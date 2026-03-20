@@ -147,19 +147,13 @@ export default function Dashboard() {
       if (taskId) {
         toast.loading('Setting up project...', { id: creatingToast });
         try {
-          const result = await tasksApi.pollUntilComplete(taskId);
+          await tasksApi.pollUntilComplete(taskId);
           toast.success('Project created!', { id: creatingToast, duration: 2000 });
           setShowCreateDialog(false);
           setIsCreating(false);
 
-          // Navigate to builder with container if available
-          const taskResult = result?.result as { container_id?: string } | undefined;
-          if (taskResult?.container_id) {
-            navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
-          } else {
-            // Fallback to builder without container param
-            navigate(`/project/${project.slug}/builder`);
-          }
+          // Navigate to setup page for user to review config
+          navigate(`/project/${project.slug}/setup`);
         } catch (taskError) {
           console.error('Project setup task failed:', taskError);
           const taskErrMsg = taskError instanceof Error ? taskError.message : 'Setup failed';
@@ -172,8 +166,8 @@ export default function Dashboard() {
         toast.success('Project created!', { id: creatingToast, duration: 2000 });
         setShowCreateDialog(false);
         setIsCreating(false);
-        // Navigate to builder without container
-        navigate(`/project/${project.slug}/builder`);
+        // Navigate to setup page
+        navigate(`/project/${project.slug}/setup`);
       }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
@@ -262,7 +256,7 @@ export default function Dashboard() {
 
   const clearSelection = () => setSelectedProjectIds(new Set());
 
-  const selectAllProjects = () => {
+  const _selectAllProjects = () => {
     setSelectedProjectIds(new Set(filteredProjects.map((p) => p.id)));
   };
 
@@ -571,14 +565,26 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex-shrink-0">
         {/* Title Row — with border below */}
-        <div className="h-10 flex items-center justify-between gap-[6px]" style={{ paddingLeft: '18px', paddingRight: '4px', borderBottom: 'var(--border-width) solid var(--border)' }}>
+        <div
+          className="h-10 flex items-center justify-between gap-[6px]"
+          style={{
+            paddingLeft: '18px',
+            paddingRight: '4px',
+            borderBottom: 'var(--border-width) solid var(--border)',
+          }}
+        >
           {/* Mobile hamburger — hidden on md+ */}
           <button
             onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
             className="mobile-only btn btn-icon mr-1"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
             </svg>
           </button>
 
@@ -595,11 +601,17 @@ export default function Dashboard() {
         </div>
 
         {/* Tab Bar — views left, filter/sort/display right */}
-        <div className="h-10 flex items-center justify-between" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
+        <div
+          className="h-10 flex items-center justify-between"
+          style={{ paddingLeft: '7px', paddingRight: '10px' }}
+        >
           {/* Left: View tabs */}
           <div className="flex items-center gap-1 flex-1 min-w-0">
             <button
-              onClick={() => { setFilterStatus('all'); setFilterEnvStatus('all'); }}
+              onClick={() => {
+                setFilterStatus('all');
+                setFilterEnvStatus('all');
+              }}
               className={`btn ${!hasActiveFilters ? 'btn-tab-active' : 'btn-tab'}`}
             >
               All projects
@@ -607,10 +619,7 @@ export default function Dashboard() {
 
             {/* Active filter pills */}
             {filterStatus !== 'all' && (
-              <button
-                onClick={() => setFilterStatus('all')}
-                className="btn btn-tab-active btn-sm"
-              >
+              <button onClick={() => setFilterStatus('all')} className="btn btn-tab-active btn-sm">
                 {filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)}
                 <X className="w-3 h-3 ml-0.5 opacity-60" />
               </button>
@@ -631,7 +640,10 @@ export default function Dashboard() {
             {/* Filter button */}
             <div ref={filterMenuRef} className="relative">
               <button
-                onClick={() => { setShowFilterMenu((v) => !v); setShowSortMenu(false); }}
+                onClick={() => {
+                  setShowFilterMenu((v) => !v);
+                  setShowSortMenu(false);
+                }}
                 className={`btn btn-icon ${hasActiveFilters ? 'btn-active' : ''}`}
                 aria-label="Filter"
               >
@@ -644,11 +656,16 @@ export default function Dashboard() {
                   style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
                 >
                   {/* Status filter */}
-                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Status</div>
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                    Status
+                  </div>
                   {(['all', 'idea', 'build', 'launch'] as const).map((status) => (
                     <button
                       key={status}
-                      onClick={() => { setFilterStatus(status); setShowFilterMenu(false); }}
+                      onClick={() => {
+                        setFilterStatus(status);
+                        setShowFilterMenu(false);
+                      }}
                       className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
                         filterStatus === status
                           ? 'text-[var(--text)] bg-[var(--surface-hover)]'
@@ -659,9 +676,15 @@ export default function Dashboard() {
                         'All statuses'
                       ) : (
                         <>
-                          <span className={`w-2 h-2 rounded-full ${
-                            status === 'idea' ? 'bg-purple-500' : status === 'build' ? 'bg-yellow-500' : 'bg-emerald-500'
-                          }`} />
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              status === 'idea'
+                                ? 'bg-purple-500'
+                                : status === 'build'
+                                  ? 'bg-yellow-500'
+                                  : 'bg-emerald-500'
+                            }`}
+                          />
                           {status.charAt(0).toUpperCase() + status.slice(1)}
                         </>
                       )}
@@ -677,32 +700,44 @@ export default function Dashboard() {
                   <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
 
                   {/* Environment filter */}
-                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Environment</div>
-                  {(['all', 'active', 'hibernated', 'stopped', 'creating'] as const).map((envStatus) => (
-                    <button
-                      key={envStatus}
-                      onClick={() => { setFilterEnvStatus(envStatus); setShowFilterMenu(false); }}
-                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
-                        filterEnvStatus === envStatus
-                          ? 'text-[var(--text)] bg-[var(--surface-hover)]'
-                          : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
-                      }`}
-                    >
-                      {envStatus === 'all' ? 'All environments' : envStatus.charAt(0).toUpperCase() + envStatus.slice(1)}
-                      {filterEnvStatus === envStatus && (
-                        <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
-                          <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                        </svg>
-                      )}
-                    </button>
-                  ))}
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                    Environment
+                  </div>
+                  {(['all', 'active', 'hibernated', 'stopped', 'creating'] as const).map(
+                    (envStatus) => (
+                      <button
+                        key={envStatus}
+                        onClick={() => {
+                          setFilterEnvStatus(envStatus);
+                          setShowFilterMenu(false);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                          filterEnvStatus === envStatus
+                            ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                            : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                        }`}
+                      >
+                        {envStatus === 'all'
+                          ? 'All environments'
+                          : envStatus.charAt(0).toUpperCase() + envStatus.slice(1)}
+                        {filterEnvStatus === envStatus && (
+                          <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                          </svg>
+                        )}
+                      </button>
+                    )
+                  )}
 
                   {/* Clear all filters */}
                   {hasActiveFilters && (
                     <>
                       <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
                       <button
-                        onClick={() => { clearFilters(); setShowFilterMenu(false); }}
+                        onClick={() => {
+                          clearFilters();
+                          setShowFilterMenu(false);
+                        }}
                         className="w-full text-left px-3 py-1.5 text-xs text-[var(--status-error)] hover:bg-[var(--surface-hover)] transition-colors"
                       >
                         Clear all filters
@@ -716,7 +751,10 @@ export default function Dashboard() {
             {/* Sort button */}
             <div ref={sortMenuRef} className="relative">
               <button
-                onClick={() => { setShowSortMenu((v) => !v); setShowFilterMenu(false); }}
+                onClick={() => {
+                  setShowSortMenu((v) => !v);
+                  setShowFilterMenu(false);
+                }}
                 className={`btn ${sortField !== 'updated_at' || sortDirection !== 'desc' ? 'btn-active' : ''}`}
                 aria-label="Sort"
                 style={{ gap: '4px' }}
@@ -735,7 +773,9 @@ export default function Dashboard() {
                   className="absolute right-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
                   style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
                 >
-                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Sort by</div>
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                    Sort by
+                  </div>
                   {(['updated_at', 'created_at', 'name'] as SortField[]).map((field) => (
                     <button
                       key={field}
@@ -770,11 +810,16 @@ export default function Dashboard() {
                   <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
 
                   {/* Direction toggle */}
-                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Direction</div>
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                    Direction
+                  </div>
                   {(['desc', 'asc'] as SortDirection[]).map((dir) => (
                     <button
                       key={dir}
-                      onClick={() => { setSortDirection(dir); setShowSortMenu(false); }}
+                      onClick={() => {
+                        setSortDirection(dir);
+                        setShowSortMenu(false);
+                      }}
                       className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
                         sortDirection === dir
                           ? 'text-[var(--text)] bg-[var(--surface-hover)]'
@@ -782,9 +827,13 @@ export default function Dashboard() {
                       }`}
                     >
                       {dir === 'desc' ? (
-                        <><SortDescending className="w-3.5 h-3.5" /> Descending</>
+                        <>
+                          <SortDescending className="w-3.5 h-3.5" /> Descending
+                        </>
                       ) : (
-                        <><SortAscending className="w-3.5 h-3.5" /> Ascending</>
+                        <>
+                          <SortAscending className="w-3.5 h-3.5" /> Ascending
+                        </>
                       )}
                       {sortDirection === dir && (
                         <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
@@ -824,11 +873,13 @@ export default function Dashboard() {
         {viewMode === 'cards' ? (
           /* ===== CARDS VIEW ===== */
           <div className="p-4 md:p-5">
-            <div className={
-              filteredProjects.length === 0
-                ? 'flex flex-wrap justify-center gap-4'
-                : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-            }>
+            <div
+              className={
+                filteredProjects.length === 0
+                  ? 'flex flex-wrap justify-center gap-4'
+                  : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+              }
+            >
               {/* Create New Project Card */}
               <button
                 onClick={() => setShowCreateDialog(true)}
@@ -847,8 +898,12 @@ export default function Dashboard() {
                   <FilePlus className="w-7 h-7 text-[var(--primary)]" weight="fill" />
                 </div>
                 <div className="text-center">
-                  <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">Create New Project</h3>
-                  <p className="text-xs text-[var(--text-muted)]">Start building something amazing</p>
+                  <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">
+                    Create New Project
+                  </h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Start building something amazing
+                  </p>
                 </div>
               </button>
 
@@ -868,40 +923,45 @@ export default function Dashboard() {
                   <GitBranch className="w-7 h-7 text-emerald-500" weight="fill" />
                 </div>
                 <div className="text-center">
-                  <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">Import from Repository</h3>
-                  <p className="text-xs text-[var(--text-muted)]">Connect a GitHub, GitLab, or Bitbucket repo</p>
+                  <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">
+                    Import from Repository
+                  </h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Connect a GitHub, GitLab, or Bitbucket repo
+                  </p>
                 </div>
               </button>
 
-            {/* Project Cards */}
-            {filteredProjects.map((project) => (
-              <ProjectCard
-                key={project.id}
-                project={{
-                  id: project.id,
-                  name: project.name,
-                  description: project.description || 'No description',
-                  status: project.status || 'build',
-                  agents: project.agents || [],
-                  lastUpdated: formatDate(project.updated_at),
-                  isLive: project.status === 'launch',
-                  slug: project.slug,
-                  compute_tier: project.compute_tier,
-                }}
-                onOpen={() => navigate(`/project/${project.slug}/builder`)}
-                onDelete={() => deleteProject(project.id)}
-                onStatusChange={(status) => updateProjectStatus(project.id, status)}
-                onFork={() => handleForkProject(project.id)}
-                onHibernate={
-                  project.compute_tier === 'environment' && project.environment_status === 'active'
-                    ? () => handleHibernateProject(project.slug)
-                    : undefined
-                }
-                isDeleting={deletingProjectIds.has(project.id)}
-                isSelected={selectedProjectIds.has(project.id)}
-                onSelectionToggle={() => toggleProjectSelection(project.id)}
-              />
-            ))}
+              {/* Project Cards */}
+              {filteredProjects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={{
+                    id: project.id,
+                    name: project.name,
+                    description: project.description || 'No description',
+                    status: project.status || 'build',
+                    agents: project.agents || [],
+                    lastUpdated: formatDate(project.updated_at),
+                    isLive: project.status === 'launch',
+                    slug: project.slug,
+                    compute_tier: project.compute_tier,
+                  }}
+                  onOpen={() => navigate(`/project/${project.slug}/builder`)}
+                  onDelete={() => deleteProject(project.id)}
+                  onStatusChange={(status) => updateProjectStatus(project.id, status)}
+                  onFork={() => handleForkProject(project.id)}
+                  onHibernate={
+                    project.compute_tier === 'environment' &&
+                    project.environment_status === 'active'
+                      ? () => handleHibernateProject(project.slug)
+                      : undefined
+                  }
+                  isDeleting={deletingProjectIds.has(project.id)}
+                  isSelected={selectedProjectIds.has(project.id)}
+                  onSelectionToggle={() => toggleProjectSelection(project.id)}
+                />
+              ))}
             </div>
           </div>
         ) : (
@@ -923,7 +983,9 @@ export default function Dashboard() {
                   <div
                     key={project.id}
                     className={`group h-12 flex items-center px-4 md:px-5 transition-colors cursor-pointer ${
-                      selectedProjectIds.has(project.id) ? 'bg-[var(--surface)]' : 'hover:bg-[var(--surface)]'
+                      selectedProjectIds.has(project.id)
+                        ? 'bg-[var(--surface)]'
+                        : 'hover:bg-[var(--surface)]'
                     } ${deletingProjectIds.has(project.id) ? 'opacity-40 pointer-events-none' : ''}`}
                     onClick={() => navigate(`/project/${project.slug}/builder`)}
                   >
@@ -932,7 +994,10 @@ export default function Dashboard() {
                       <button
                         role="checkbox"
                         aria-checked={selectedProjectIds.has(project.id)}
-                        onClick={(e) => { e.stopPropagation(); toggleProjectSelection(project.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleProjectSelection(project.id);
+                        }}
                         className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
                           selectedProjectIds.has(project.id)
                             ? 'bg-[var(--primary)] border-[var(--primary)]'
@@ -940,7 +1005,13 @@ export default function Dashboard() {
                         }`}
                       >
                         {selectedProjectIds.has(project.id) && (
-                          <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <svg
+                            className="w-2.5 h-2.5 text-white"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={3}
+                          >
                             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
                         )}
@@ -949,42 +1020,71 @@ export default function Dashboard() {
 
                     {/* Project icon + name + description */}
                     <div className="flex-1 min-w-0 flex items-center gap-3">
-                      <svg className="w-4 h-4 text-[var(--text-subtle)] flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
+                      <svg
+                        className="w-4 h-4 text-[var(--text-subtle)] flex-shrink-0"
+                        fill="currentColor"
+                        viewBox="0 0 256 256"
+                      >
                         <path d="M216,64H176V56a24,24,0,0,0-24-24H104A24,24,0,0,0,80,56v8H40A16,16,0,0,0,24,80V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V80A16,16,0,0,0,216,64ZM96,56a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Z" />
                       </svg>
-                      <span className="text-xs font-medium text-[var(--text)] truncate">{project.name}</span>
+                      <span className="text-xs font-medium text-[var(--text)] truncate">
+                        {project.name}
+                      </span>
                       {project.description && (
-                        <span className="hidden xl:inline text-xs text-[var(--text-subtle)] truncate max-w-[200px]">{project.description}</span>
+                        <span className="hidden xl:inline text-xs text-[var(--text-subtle)] truncate max-w-[200px]">
+                          {project.description}
+                        </span>
                       )}
                       {project.environment_status && project.environment_status !== 'active' && (
-                        <span className="text-[10px] text-[var(--text-subtle)] flex-shrink-0">{project.environment_status}</span>
+                        <span className="text-[10px] text-[var(--text-subtle)] flex-shrink-0">
+                          {project.environment_status}
+                        </span>
                       )}
                     </div>
 
                     {/* Status */}
                     <div className="hidden md:flex w-28 justify-end">
-                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
-                        project.status === 'launch'
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          : project.status === 'build'
-                            ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
-                            : 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-                      }`}>
-                        {(project.status || 'build').charAt(0).toUpperCase() + (project.status || 'build').slice(1)}
+                      <span
+                        className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                          project.status === 'launch'
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : project.status === 'build'
+                              ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                              : 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                        }`}
+                      >
+                        {(project.status || 'build').charAt(0).toUpperCase() +
+                          (project.status || 'build').slice(1)}
                       </span>
                     </div>
 
                     {/* Updated */}
                     <div className="hidden lg:block w-32 text-right">
-                      <span className="text-xs text-[var(--text-subtle)]">{formatDate(project.updated_at)}</span>
+                      <span className="text-xs text-[var(--text-subtle)]">
+                        {formatDate(project.updated_at)}
+                      </span>
                     </div>
 
                     {/* Row Actions */}
                     <div className="w-24 flex-shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={(e) => { e.stopPropagation(); handleForkProject(project.id); }} className="btn btn-icon btn-sm" title="Fork">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleForkProject(project.id);
+                        }}
+                        className="btn btn-icon btn-sm"
+                        title="Fork"
+                      >
                         <GitBranch className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); deleteProject(project.id); }} className="btn btn-icon btn-sm btn-danger" title="Delete">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteProject(project.id);
+                        }}
+                        className="btn btn-icon btn-sm btn-danger"
+                        title="Delete"
+                      >
                         <Trash className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -995,7 +1095,11 @@ export default function Dashboard() {
               <div className="text-center py-16 flex flex-col items-center gap-4">
                 <p className="text-[var(--text-muted)] text-xs">No projects yet</p>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setShowCreateDialog(true)} disabled={isCreating} className="btn">
+                  <button
+                    onClick={() => setShowCreateDialog(true)}
+                    disabled={isCreating}
+                    className="btn"
+                  >
                     <FilePlus className="w-4 h-4" />
                     Create project
                   </button>
@@ -1013,27 +1117,27 @@ export default function Dashboard() {
       {/* Floating Action Bar — Linear-style: "N selected" + clear + divider + actions */}
       {selectedProjectIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in duration-200 flex items-center gap-[2px]">
-            <button className="btn" style={{ fontVariantNumeric: 'tabular-nums' }} tabIndex={-1}>
-              <span>{selectedProjectIds.size}</span>&nbsp;selected
-            </button>
+          <button className="btn" style={{ fontVariantNumeric: 'tabular-nums' }} tabIndex={-1}>
+            <span>{selectedProjectIds.size}</span>&nbsp;selected
+          </button>
 
-            <button
-              onClick={clearSelection}
-              className="btn btn-icon"
-              aria-label="Clear selected"
-              tabIndex={-1}
-            >
-              <X className="w-4 h-4" />
-            </button>
+          <button
+            onClick={clearSelection}
+            className="btn btn-icon"
+            aria-label="Clear selected"
+            tabIndex={-1}
+          >
+            <X className="w-4 h-4" />
+          </button>
 
-            <button
-              onClick={() => setShowBulkDeleteDialog(true)}
-              className="btn btn-danger"
-              tabIndex={-1}
-            >
-              <Trash className="w-4 h-4" />
-              Delete
-            </button>
+          <button
+            onClick={() => setShowBulkDeleteDialog(true)}
+            className="btn btn-danger"
+            tabIndex={-1}
+          >
+            <Trash className="w-4 h-4" />
+            Delete
+          </button>
         </div>
       )}
 
@@ -1122,7 +1226,7 @@ export default function Dashboard() {
             if (taskId) {
               toast.loading('Setting up project...', { id: creatingToast });
               try {
-                const result = await tasksApi.pollUntilComplete(taskId);
+                await tasksApi.pollUntilComplete(taskId);
                 toast.success('Project imported successfully!', {
                   id: creatingToast,
                   duration: 2000,
@@ -1130,13 +1234,8 @@ export default function Dashboard() {
                 setShowImportDialog(false);
                 setIsCreating(false);
 
-                // Navigate to builder with container if available
-                const taskResult = result?.result as { container_id?: string } | undefined;
-                if (taskResult?.container_id) {
-                  navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
-                } else {
-                  navigate(`/project/${project.slug}/builder`);
-                }
+                // Navigate to setup page for user to review config
+                navigate(`/project/${project.slug}/setup`);
               } catch (taskError) {
                 console.error('Project import task failed:', taskError);
                 const taskErrMsg =
@@ -1152,7 +1251,7 @@ export default function Dashboard() {
               });
               setShowImportDialog(false);
               setIsCreating(false);
-              navigate(`/project/${project.slug}/builder`);
+              navigate(`/project/${project.slug}/setup`);
             }
           } catch (error: unknown) {
             const err = error as { response?: { data?: { detail?: string } } };

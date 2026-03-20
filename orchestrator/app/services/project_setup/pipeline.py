@@ -1,4 +1,4 @@
-"""Five-step project setup pipeline.
+"""Four-step project setup pipeline.
 
 Replaces the duplicated logic previously spread across
 ``_setup_base_project``, ``_setup_git_provider_project``, and
@@ -7,9 +7,11 @@ Replaces the duplicated logic previously spread across
 Steps:
 1. Build a :class:`SourceSpec` from the creation request.
 2. Acquire source files (template snapshot, cache, git clone, or archive).
-3. Resolve project configuration (.tesslate/config.json → LLM → fallback).
+3. Resolve project configuration (.tesslate/config.json → fallback).
 4. Place files into Docker volume or K8s btrfs volume.
-5. Create Container DB records from the resolved config.
+
+Container creation is deferred to the Setup page where the user
+can review and adjust the config before committing.
 """
 
 from __future__ import annotations
@@ -25,13 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models import MarketplaceBase, Project
 from ...schemas import ProjectCreate
 from .config_resolver import (
-    collect_project_files,
     fallback_config,
-    generate_config_via_llm,
     resolve_config,
     resolve_config_from_volume,
 )
-from .container_creation import create_containers
 from .file_placement import PlacedFiles, place_files
 from .source_acquisition import AcquiredSource, SourceSpec, acquire_source
 
@@ -237,17 +236,18 @@ async def setup_project(
     db: AsyncSession,
     task,
 ) -> SetupResult:
-    """Run the 5-step project creation pipeline.
+    """Run the 4-step project creation pipeline.
 
     Steps:
         1. Build source spec from creation request
         2. Acquire source files
-        3. Resolve config (.tesslate/config.json → LLM → fallback)
+        3. Resolve config (.tesslate/config.json → fallback)
         4. Place files (skip for template snapshots)
-        5. Create Container DB records
+
+    Container creation is deferred to the Setup page.
 
     Returns:
-        :class:`SetupResult` with ``container_id`` and ``container_ids``.
+        :class:`SetupResult` with ``container_id=None`` and empty ``container_ids``.
     """
     source: AcquiredSource | None = None
     try:
@@ -267,22 +267,17 @@ async def setup_project(
         # Step 3: Resolve config
         task.update_progress(55, 100, "Resolving project configuration...")
         config = None
+        config_from_template = False
 
         if source.local_path:
             config = await resolve_config(source.local_path)
         elif source.volume_id and source.node_name:
             config = await resolve_config_from_volume(source.volume_id, source.node_name)
 
-        if not config and source.local_path:  # noqa: SIM102
-            # No config.json found — try LLM analysis
-            logger.info("[PIPELINE] No config.json found, trying LLM analysis...")
-            task.update_progress(60, 100, "Analyzing project with AI...")
-            file_tree, config_files = await collect_project_files(source.local_path)
-            if file_tree:
-                config = await generate_config_via_llm(file_tree, config_files, user_id, db)
-
-        if not config:
-            # LLM failed or no files — use fallback
+        if config:
+            config_from_template = True
+        else:
+            # No config.json found — use fallback (user can run AI analysis from Setup page)
             logger.info("[PIPELINE] Using fallback config")
             config = fallback_config(db_project.name)
 
@@ -303,21 +298,15 @@ async def setup_project(
                     project_slug=db_project.slug,
                     deployment_mode=settings.deployment_mode,
                     task=task,
+                    write_config=config_from_template,
                 )
             else:
                 # Volume already created (shouldn't happen except template_snapshot above)
                 placed = PlacedFiles(volume_id=source.volume_id, node_name=source.node_name)
 
-        # Step 5: Create containers
-        task.update_progress(90, 100, "Creating containers...")
-        primary_id, all_ids = await create_containers(
-            config=config,
-            project_id=db_project.id,
-            project_slug=db_project.slug,
-            base_id=spec.base_id,
-            db=db,
-        )
-        logger.info(f"[PIPELINE] Created {len(all_ids)} containers, primary={primary_id}")
+        # Container creation deferred to Setup page
+        task.update_progress(90, 100, "Finalizing...")
+        primary_id, all_ids = None, []
 
         # Update project metadata
         if placed.volume_id:

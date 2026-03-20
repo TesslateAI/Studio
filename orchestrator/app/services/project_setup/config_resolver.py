@@ -107,36 +107,18 @@ async def resolve_config_from_volume(
 # 3. LLM path — generate config via AI analysis
 # ---------------------------------------------------------------------------
 
-_LLM_PROMPT_TEMPLATE = """\
-Analyze this project and generate a .tesslate/config.json file.
+_LLM_SYSTEM_PROMPT = """\
+You are a project analyzer. Analyze the project files and call the generate_config \
+tool with the correct configuration for running this project in containerized dev environments."""
 
-The config defines how to run this project in containerized dev environments.
+_LLM_USER_TEMPLATE = """\
+Analyze this project and generate a .tesslate/config.json by calling the generate_config tool.
 
 ## File tree:
 {file_tree_str}
 
 ## Config file contents:
 {config_contents_str}
-
-## Config format:
-The config has this structure:
-{{
-  "apps": {{
-    "<app-name>": {{
-      "directory": "<relative-dir or . for root>",
-      "port": <port-number or null for no-server>,
-      "start": "<shell command to install deps and start dev server>",
-      "env": {{"KEY": "value"}}
-    }}
-  }},
-  "infrastructure": {{
-    "<service-name>": {{
-      "image": "<docker-image:tag>",
-      "port": <internal-port>
-    }}
-  }},
-  "primaryApp": "<name of the main app to show in preview>"
-}}
 
 ## Rules:
 1. Every start command MUST bind to 0.0.0.0 (not localhost) for container networking
@@ -148,9 +130,70 @@ The config has this structure:
 7. For projects with no server (CLI tools, libraries), set port to null and start to "sleep infinity"
 8. Use common port conventions: Next.js=3000, Vite=5173, FastAPI=8001, Go=8080, Rails=3000, Django=8000
 9. primaryApp should be the frontend or the main user-facing app
-10. Only add infrastructure (postgres, redis, etc.) if the project clearly uses them
+10. Only add infrastructure (postgres, redis, etc.) if the project clearly uses them"""
 
-Return ONLY valid JSON, no markdown code blocks, no explanation."""
+_GENERATE_CONFIG_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "generate_config",
+        "description": "Generate .tesslate/config.json for a project's containerized dev environment",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "object",
+                    "description": "Map of app name to app config",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "directory": {
+                                "type": "string",
+                                "description": "Relative directory or '.' for root",
+                            },
+                            "port": {
+                                "type": ["integer", "null"],
+                                "description": "Port number or null for no server",
+                            },
+                            "start": {
+                                "type": "string",
+                                "description": "Shell command to install deps and start dev server",
+                            },
+                            "env": {
+                                "type": "object",
+                                "description": "Environment variables",
+                                "additionalProperties": {"type": "string"},
+                            },
+                        },
+                        "required": ["directory", "port", "start"],
+                    },
+                },
+                "infrastructure": {
+                    "type": "object",
+                    "description": "Map of service name to infra config (databases, caches, etc.)",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "image": {
+                                "type": "string",
+                                "description": "Docker image:tag",
+                            },
+                            "port": {
+                                "type": "integer",
+                                "description": "Internal port",
+                            },
+                        },
+                        "required": ["image", "port"],
+                    },
+                },
+                "primaryApp": {
+                    "type": "string",
+                    "description": "Name of the main app to show in preview",
+                },
+            },
+            "required": ["apps", "infrastructure", "primaryApp"],
+        },
+    },
+}
 
 
 async def generate_config_via_llm(
@@ -160,7 +203,9 @@ async def generate_config_via_llm(
     db: AsyncSession,
     model: str | None = None,
 ) -> TesslateProjectConfig | None:
-    """Analyse project files via LLM and generate config. Returns ``None`` on failure."""
+    """Analyse project files via LLM tool call and generate config. Returns ``None`` on failure."""
+    import json
+
     from ...agent.models import get_llm_client, resolve_model_name
     from ...config import get_settings
 
@@ -168,11 +213,10 @@ async def generate_config_via_llm(
 
     file_tree_str = "\n".join(file_tree)
     config_contents_str = "\n\n".join(
-        f"### {fname}\n```\n{content}\n```"
-        for fname, content in config_files_content.items()
+        f"### {fname}\n```\n{content}\n```" for fname, content in config_files_content.items()
     )
 
-    prompt = _LLM_PROMPT_TEMPLATE.format(
+    prompt = _LLM_USER_TEMPLATE.format(
         file_tree_str=file_tree_str,
         config_contents_str=config_contents_str,
     )
@@ -185,26 +229,25 @@ async def generate_config_via_llm(
         response = await client.chat.completions.create(
             model=resolved_model,
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are a project analyzer. Return only valid JSON.",
-                },
+                {"role": "system", "content": _LLM_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
+            tools=[_GENERATE_CONFIG_TOOL],
+            tool_choice={"type": "function", "function": {"name": "generate_config"}},
             temperature=0.1,
             max_tokens=2000,
         )
 
-        raw = (response.choices[0].message.content or "").strip()
+        message = response.choices[0].message
 
-        # Strip markdown code fences if the model wrapped the JSON
-        if raw.startswith("```"):
-            # Remove opening fence (```json or ```)
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        if raw.endswith("```"):
-            raw = raw[: -3].rstrip()
+        # Extract config from tool call arguments (guaranteed valid JSON by the API)
+        if not message.tool_calls:
+            logger.warning("[CONFIG-RESOLVER] LLM did not produce a tool call")
+            return None
 
-        return parse_tesslate_config(raw)
+        args_json = message.tool_calls[0].function.arguments
+        config_data = json.loads(args_json)
+        return parse_tesslate_config(json.dumps(config_data))
     except Exception as e:
         logger.warning(f"[CONFIG-RESOLVER] LLM config generation failed: {e}")
         return None
@@ -255,7 +298,7 @@ async def collect_project_files(
                 try:
                     size = os.path.getsize(full_path)
                     if size <= _MAX_CONFIG_FILE_SIZE:
-                        with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                        with open(full_path, encoding="utf-8", errors="replace") as fh:
                             config_files_content[rel_path] = fh.read()
                 except OSError:
                     pass  # Skip unreadable files silently
