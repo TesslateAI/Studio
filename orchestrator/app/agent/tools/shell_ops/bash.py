@@ -254,6 +254,39 @@ async def _run_environment(context: dict[str, Any], command: str, timeout: int) 
     )
 
 
+async def _run_docker(context: dict[str, Any], command: str, timeout: int) -> dict[str, Any]:
+    """Execute a command via the Docker orchestrator's execute_command."""
+    from ....services.orchestration import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    project_id = context.get("project_id")
+    user_id = context.get("user_id")
+    container_name = context.get("container_name")
+
+    try:
+        output = await orchestrator.execute_command(
+            user_id=user_id,
+            project_id=project_id,
+            container_name=container_name,
+            command=["bash", "-c", command],
+            timeout=timeout,
+        )
+        clean_output = strip_ansi_codes(output) if output else ""
+        return success_output(
+            message=f"Executed '{command}'",
+            output=clean_output,
+            details={"command": command, "exit_code": 0, "tier": "docker"},
+        )
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"[BASH-DOCKER] Command failed: {error_msg}")
+        return error_output(
+            message=f"Command failed: {error_msg}",
+            suggestion="Check if the container is running and the command is valid",
+            details={"command": command},
+        )
+
+
 async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
     Execute a single command via the orchestrator's one-shot execute_command.
@@ -279,6 +312,14 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
 
     logger.info(f"[BASH] Executing (one-shot): {command[:100]}...")
 
+    # Docker mode: delegate to orchestrator.execute_command
+    from ....config import get_settings
+
+    settings = get_settings()
+    if settings.is_docker_mode:
+        return await _run_docker(context, command, timeout)
+
+    # K8s mode: requires volume routing hints for pod scheduling
     if not _has_volume_hints(context):
         return error_output(
             message="Missing volume routing hints — cannot execute command",

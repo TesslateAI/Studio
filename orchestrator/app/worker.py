@@ -25,6 +25,37 @@ from arq.connections import RedisSettings
 logger = logging.getLogger(__name__)
 
 
+async def _auto_title_chat(chat, model_adapter, user_message: str, db) -> None:
+    """Generate and set a chat title from the user's first message. Non-blocking."""
+    if not chat or chat.title:
+        return
+    try:
+        title_text = ""
+        async for chunk in model_adapter.chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Generate a concise 3-6 word title for this chat based on "
+                        "the user's message. Return ONLY the title, no quotes or "
+                        "punctuation. Examples: 'Login page with OAuth', "
+                        "'Fix navbar responsive layout', 'Add dark mode toggle'."
+                    ),
+                },
+                {"role": "user", "content": user_message[:500]},
+            ],
+            max_tokens=20,
+        ):
+            title_text += chunk
+        title_text = title_text.strip().strip("\"'")[:100]
+        if title_text:
+            chat.title = title_text
+            await db.commit()
+            logger.info(f"[WORKER] Auto-titled chat {chat.id}: {title_text}")
+    except Exception as e:
+        logger.warning(f"[WORKER] Auto-title generation failed: {e}")
+
+
 def _build_step_dict(step_data: dict, _convert_uuids_to_strings) -> dict:
     """Build a normalized step dict from raw agent step data."""
     return {
@@ -122,15 +153,17 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
     async with AsyncSessionLocal() as db:
         try:
-            # 1. Load project
-            result = await db.execute(select(Project).where(Project.id == UUID(project_id)))
-            project = result.scalar_one_or_none()
-            if not project:
-                await _publish_error(pubsub, task_id, "Project not found")
-                return
+            # 1. Load project (optional for standalone chats)
+            project = None
+            if project_id:
+                result = await db.execute(select(Project).where(Project.id == UUID(project_id)))
+                project = result.scalar_one_or_none()
+                if not project:
+                    await _publish_error(pubsub, task_id, "Project not found")
+                    return
 
             # 2. Acquire per-chat lock (allows concurrent agents across sessions)
-            project_settings = project.settings or {}
+            project_settings = (project.settings or {}) if project else {}
             agent_lock_enabled = project_settings.get("agent_lock_enabled", True)
             chat_id = payload.chat_id
 
@@ -264,7 +297,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             container_name = payload.container_name
             container_directory = payload.container_directory
 
-            if container_id and (not container_name or container_directory is None):
+            if container_id and project_id and (not container_name or container_directory is None):
                 container_result = await db.execute(
                     select(Container).where(
                         Container.id == container_id,
@@ -283,7 +316,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             available_skills = await discover_skills(
                 agent_id=agent_model.id if agent_model else None,
                 user_id=UUID(payload.user_id),
-                project_id=project_id,
+                project_id=project_id if project_id else None,
                 container_name=container_name,
                 db=db,
             )
@@ -292,25 +325,28 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 UUID(payload.chat_id), db, limit=10
             )
 
-            project_context = payload.project_context or {
-                "project_name": project.name,
-                "project_description": project.description,
-            }
-            tesslate_context = await _build_tesslate_context(
-                project,
-                UUID(payload.user_id),
-                db,
-                container_name=container_name,
-                container_directory=container_directory,
-            )
-            if tesslate_context:
-                project_context["tesslate_context"] = tesslate_context
-            git_context = await _build_git_context(project, UUID(payload.user_id), db)
-            if git_context:
-                project_context["git_context"] = git_context
-            architecture_context = await _build_architecture_context(project, db)
-            if architecture_context:
-                project_context["architecture_context"] = architecture_context
+            if project:
+                project_context = payload.project_context or {
+                    "project_name": project.name,
+                    "project_description": project.description,
+                }
+                tesslate_context = await _build_tesslate_context(
+                    project,
+                    UUID(payload.user_id),
+                    db,
+                    container_name=container_name,
+                    container_directory=container_directory,
+                )
+                if tesslate_context:
+                    project_context["tesslate_context"] = tesslate_context
+                git_context = await _build_git_context(project, UUID(payload.user_id), db)
+                if git_context:
+                    project_context["git_context"] = git_context
+                architecture_context = await _build_architecture_context(project, db)
+                if architecture_context:
+                    project_context["architecture_context"] = architecture_context
+            else:
+                project_context = payload.project_context or {}
 
             # Add available skills to project_context (for prompt injection)
             if available_skills:
@@ -328,14 +364,14 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
             payload_context = {
                 "user_id": UUID(payload.user_id),
-                "project_id": UUID(project_id),
+                "project_id": UUID(project_id) if project_id else None,
             }
             active_plan = await PlanManager.get_plan(payload_context)
 
             # 8. Build execution context (same structure as chat.py)
             context = {
                 "user_id": UUID(payload.user_id),
-                "project_id": UUID(project_id),
+                "project_id": UUID(project_id) if project_id else None,
                 "project_slug": payload.project_slug,
                 "container_directory": container_directory,
                 "chat_id": UUID(payload.chat_id),
@@ -355,10 +391,11 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "agent_id": agent_model.id,
                 "_active_plan": active_plan,
                 "available_skills": available_skills,
+                "attachments": payload.attachments,
                 # Volume routing hints
-                "volume_id": project.volume_id,
-                "cache_node": project.cache_node,
-                "compute_tier": project.compute_tier,
+                "volume_id": project.volume_id if project else None,
+                "cache_node": project.cache_node if project else None,
+                "compute_tier": project.compute_tier if project else None,
             }
 
             # Inject MCP server configs so bridge executors can reconnect
@@ -494,7 +531,23 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     chat.status = "completed" if completion_reason != "cancelled" else "active"
                 await db.commit()
 
-            # 13. Publish done event
+            # 13. Auto-generate chat title on first message (non-blocking)
+            if completion_reason != "cancelled":
+                await _auto_title_chat(chat, model_adapter, payload.message, db)
+                # Publish title to SSE so frontend can update immediately
+                if pubsub and chat and chat.title:
+                    await pubsub.publish_agent_event(
+                        task_id,
+                        {
+                            "type": "chat_title",
+                            "data": {
+                                "chat_id": str(chat.id),
+                                "title": chat.title,
+                            },
+                        },
+                    )
+
+            # 14. Publish done event
             if pubsub:
                 await pubsub.publish_agent_event(
                     task_id, {"type": "done", "data": {"task_id": task_id}}

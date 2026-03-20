@@ -20,6 +20,7 @@ import {
   Plug,
   Rocket,
   Package,
+  MessagesSquare,
 } from 'lucide-react';
 import { User, CaretDown, Coins, CreditCard, Gear, SignOut } from '@phosphor-icons/react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
@@ -29,7 +30,7 @@ import { modKey } from '../../lib/keyboard-registry';
 import type { CreditBalanceResponse } from '../../types/billing';
 
 interface NavigationSidebarProps {
-  activePage: 'dashboard' | 'marketplace' | 'library' | 'feedback' | 'builder' | 'settings';
+  activePage: 'chat' | 'dashboard' | 'marketplace' | 'library' | 'feedback' | 'builder' | 'settings';
   showContent?: boolean;
   /** Render prop for injecting builder-specific items into the sidebar */
   builderSection?: (ctx: {
@@ -185,7 +186,7 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
     }`;
 
   const labelClass = (isActive: boolean) =>
-    `text-xs font-medium transition-colors ${
+    `text-[14px] font-medium transition-colors ${
       isActive
         ? 'text-[var(--sidebar-text)]'
         : 'text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)]'
@@ -195,7 +196,7 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
     'text-[var(--text-subtle)] group-hover:text-[var(--sidebar-text)] transition-colors';
 
   const inactiveLabelClass =
-    'text-xs font-medium text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)] transition-colors';
+    'text-[14px] font-medium text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)] transition-colors';
 
   // Sub-item styles for Library dropdown children
   // Sub-items indented under Library parent
@@ -253,7 +254,7 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
           )}
           {isExpanded && (
             <>
-              <span className="text-xs font-medium text-[var(--sidebar-text)] truncate flex-1 text-left">{userName}</span>
+              <span className="text-[14px] font-medium text-[var(--sidebar-text)] truncate flex-1 text-left">{userName}</span>
               <CaretDown
                 size={10}
                 className={`text-[var(--text-subtle)] transition-transform flex-shrink-0 ${showUserDropdown ? 'rotate-180' : ''}`}
@@ -343,6 +344,22 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
         {/* Standard Navigation Items — hidden in builder mode */}
         {activePage !== 'builder' && (
           <>
+            <Tooltip content="Chat" shortcut={`${modKey} J`} side="right" delay={200}>
+              <button
+                onClick={() => navigate('/chat')}
+                className={
+                  isExpanded
+                    ? navButtonClass(activePage === 'chat')
+                    : navButtonClassCollapsed(activePage === 'chat')
+                }
+              >
+                <MessagesSquare size={16} className={iconClass(activePage === 'chat')} />
+                {isExpanded && (
+                  <span className={labelClass(activePage === 'chat')}>Chat</span>
+                )}
+              </button>
+            </Tooltip>
+
             <Tooltip content="Projects" shortcut={`${modKey} D`} side="right" delay={200}>
               <button
                 onClick={() => navigate('/dashboard')}
@@ -487,10 +504,10 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
             <button
               ref={helpButtonRef}
               onClick={() => setShowHelpMenu(!showHelpMenu)}
-              className={`group flex items-center justify-center w-7 h-7 rounded-full border text-xs font-medium transition-colors ${
+              className={`group flex items-center justify-center w-8 h-8 rounded-full text-xs font-medium transition-colors ${
                 showHelpMenu
-                  ? 'bg-[var(--sidebar-active)] border-[var(--text-muted)] text-[var(--sidebar-text)]'
-                  : 'border-[var(--sidebar-border)] hover:border-[var(--text-muted)] hover:bg-[var(--sidebar-hover)] text-[var(--text-muted)] hover:text-[var(--sidebar-text)]'
+                  ? 'bg-[var(--sidebar-active)] text-[var(--sidebar-text)]'
+                  : 'bg-[var(--sidebar-hover)] hover:bg-[var(--sidebar-active)] text-[var(--text-muted)] hover:text-[var(--sidebar-text)]'
               }`}
             >
               ?
@@ -504,17 +521,17 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
               }`}
             >
               <ArrowUp size={12} strokeWidth={2} />
-              {tierLabel}
+              {tierLabel} Plan
             </button>
           </div>
         ) : (
           <button
             ref={helpButtonRef}
             onClick={() => setShowHelpMenu(!showHelpMenu)}
-            className={`group flex items-center justify-center h-8 w-full transition-colors flex-shrink-0 text-xs font-medium ${
+            className={`group flex items-center justify-center h-9 w-full rounded-lg transition-colors flex-shrink-0 text-xs font-medium ${
               showHelpMenu
-                ? 'bg-[var(--sidebar-hover)] text-[var(--sidebar-text)]'
-                : 'hover:bg-[var(--sidebar-hover)] text-[var(--text-muted)] hover:text-[var(--sidebar-text)]'
+                ? 'bg-[var(--sidebar-active)] text-[var(--sidebar-text)]'
+                : 'bg-[var(--sidebar-hover)] hover:bg-[var(--sidebar-active)] text-[var(--text-muted)] hover:text-[var(--sidebar-text)]'
             }`}
           >
             ?

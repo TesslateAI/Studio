@@ -196,12 +196,28 @@ const [activeChatId, setActiveChatId] = useState<string | null>(null);
 // List sessions for a project
 chatApi.getSessions(projectId): Promise<ChatSession[]>
 
+// List standalone sessions (paginated)
+chatApi.getUserSessions({ limit: 30, offset: 0 }): Promise<{ sessions: ChatSession[], has_more: boolean }>
+
 // Create new session
 chatApi.createSession(projectId, title?): Promise<ChatSession>
 
 // Delete session
 chatApi.deleteSession(sessionId): Promise<void>
 ```
+
+### Standalone Chat Page Hooks
+
+| Hook | File | Purpose |
+|------|------|---------|
+| `useAgentChat` | `hooks/useAgentChat.ts` | Agent message streaming with `overrideChatId` for race-free session creation |
+| `useChatSessions` | `hooks/useChatSessions.ts` | Session CRUD with optimistic temp-ID creation, pagination (limit=30) |
+
+**Key patterns:**
+- `sendMessage(message, overrideChatId?)` — pass explicit chatId to avoid stale-closure race conditions
+- `createSession()` — optimistic: inserts temp-ID session immediately, swaps for server ID on resolve, rolls back on error
+- No search — removed to eliminate N+1 backend query; re-add with debounce if needed later
+- Always loads messages via `GET /session/{chatId}/messages` (no standalone/project branching)
 
 ## Real-Time Agent Visibility
 

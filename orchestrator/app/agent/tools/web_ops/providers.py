@@ -101,19 +101,27 @@ class DuckDuckGoProvider(SearchProvider):
     """Search provider using DuckDuckGo (no API key required, always available)."""
 
     async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
-        from duckduckgo_search import AsyncDDGS
+        import asyncio
 
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
+
+        def _search():
+            with DDGS() as ddgs:
+                return list(ddgs.text(query, max_results=max_results))
+
+        search_results = await asyncio.to_thread(_search)
         results = []
-        async with AsyncDDGS() as ddgs:
-            search_results = await ddgs.atext(query, max_results=max_results)
-            for item in search_results:
-                results.append(
-                    SearchResult(
-                        title=item.get("title", ""),
-                        url=item.get("href", ""),
-                        snippet=item.get("body", "")[:500],
-                    )
+        for item in search_results:
+            results.append(
+                SearchResult(
+                    title=item.get("title", ""),
+                    url=item.get("href", ""),
+                    snippet=item.get("body", "")[:500],
                 )
+            )
         return results
 
 

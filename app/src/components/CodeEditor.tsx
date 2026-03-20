@@ -70,7 +70,7 @@ interface CodeEditorProps {
 function CodeEditor({
   projectId: _projectId,
   slug,
-  fileTree: fileTreeProp,
+  fileTree: fileTreeProp = [],
   containerDir,
   onFileUpdate,
   onFileCreate,

@@ -1776,7 +1776,7 @@ async def save_setup_config(
             container = existing_containers[app_name]
             container.directory = app_config.directory
             container.internal_port = app_config.port or 3000
-            container.environment_vars = app_config.env or {}
+            container.environment_vars = encode_secret_map(app_config.env) if app_config.env else {}
             container.exports = app_config.exports or None
             container.startup_command = app_config.start or None
             container.build_command = app_config.build or None
@@ -1795,7 +1795,7 @@ async def save_setup_config(
                 directory=app_config.directory,
                 container_name=f"{project.slug}-{app_name}",
                 internal_port=app_config.port or 3000,
-                environment_vars=app_config.env or {},
+                environment_vars=encode_secret_map(app_config.env) if app_config.env else {},
                 exports=app_config.exports or None,
                 startup_command=app_config.start or None,
                 build_command=app_config.build or None,
@@ -1819,7 +1819,7 @@ async def save_setup_config(
         if infra_name in existing_containers:
             container = existing_containers[infra_name]
             container.internal_port = infra_config.port
-            container.environment_vars = infra_config.env or container.environment_vars
+            container.environment_vars = encode_secret_map(infra_config.env) if infra_config.env else container.environment_vars
             container.exports = infra_config.exports or None
             container.deployment_mode = infra_config.infra_type if infra_config.infra_type == "external" else "container"
             container.external_endpoint = infra_config.endpoint
@@ -1835,7 +1835,7 @@ async def save_setup_config(
                 directory=".",
                 container_name=f"{project.slug}-{infra_name}",
                 internal_port=infra_config.port,
-                environment_vars=infra_config.env or {},
+                environment_vars=encode_secret_map(infra_config.env) if infra_config.env else {},
                 exports=infra_config.exports or None,
                 container_type="service",
                 service_slug=infra_name,

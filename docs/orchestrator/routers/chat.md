@@ -30,6 +30,68 @@ Returns all chat sessions for the authenticated user.
 
 **Response**: Array of Chat objects
 
+### List Standalone Sessions
+
+```
+GET /api/chat/sessions?limit=30&offset=0
+```
+
+Returns paginated standalone chat sessions for the authenticated user. Uses a single joined query with `outerjoin(Project)` to resolve project names — no N+1 queries.
+
+**Query Parameters**:
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `limit` | int | 30 | Max sessions to return |
+| `offset` | int | 0 | Pagination offset |
+
+**Filters**: Only `origin="standalone"` sessions, excludes `status="deleted"`.
+
+**Response**:
+```json
+{
+  "sessions": [
+    {
+      "id": "uuid",
+      "title": "My Chat",
+      "status": "active",
+      "origin": "standalone",
+      "project_id": "uuid-or-null",
+      "project_name": "My Project",
+      "created_at": "2026-03-20T10:00:00Z",
+      "updated_at": "2026-03-20T10:05:00Z"
+    }
+  ],
+  "has_more": true
+}
+```
+
+**Note**: `message_count` was removed from the response to eliminate the N+1 query pattern. Search was also removed — if needed in the future, implement with debounce on the frontend.
+
+### Update Chat Project (Rate Limited)
+
+```
+PATCH /api/chat/{chat_id}/project
+```
+
+Connect or disconnect a project from a standalone chat session.
+
+**Rate Limit**: 30 requests/minute per IP (via slowapi).
+
+**Request Body**:
+```json
+{
+  "project_id": "uuid-or-null"
+}
+```
+
+**Response**:
+```json
+{
+  "ok": true,
+  "project_id": "uuid-or-null"
+}
+```
+
 ### Create Chat
 
 ```

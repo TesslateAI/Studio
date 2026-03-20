@@ -22,6 +22,12 @@ export const chatApi = {
     return response.data;
   },
 
+  // List standalone sessions (paginated, no search)
+  getUserSessions: async (params?: { limit?: number; offset?: number }) => {
+    const response = await api.get('/api/chat/sessions', { params });
+    return response.data; // { sessions: [...], has_more: boolean }
+  },
+
   // Get messages for a project
   getProjectMessages: async (projectId: string) => {
     const response = await api.get(`/api/chat/${projectId}/messages`);

@@ -12,7 +12,7 @@ import { createWebSocket, chatApi, marketplaceApi } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
-import { type AgentMessageData, type DBMessage } from '../../types/agent';
+import { type AgentMessageData, type DBMessage, type SerializedAttachment } from '../../types/agent';
 import { type ChatAgent } from '../../types/chat';
 
 function formatAgentError(raw: string): string {
@@ -51,6 +51,7 @@ interface Message {
   toolName?: string;
   toolParameters?: Record<string, unknown>;
   toolDescription?: string;
+  attachments?: SerializedAttachment[];
 }
 
 interface StreamingFile {
@@ -235,6 +236,7 @@ export function ChatContainer({
                 id: `msg-${idx}`,
                 type: messageType,
                 content: msg.content,
+                attachments: msg.message_metadata?.attachments as SerializedAttachment[] | undefined,
               });
             }
             return;
@@ -1063,13 +1065,14 @@ export function ChatContainer({
     };
   }, [agentExecuting, stopAgentExecution]);
 
-  const sendAgentMessage = async (message: string) => {
-    if (!message.trim() || agentExecuting) return;
+  const sendAgentMessage = async (message: string, attachments?: SerializedAttachment[]) => {
+    if ((!message.trim() && (!attachments || attachments.length === 0)) || agentExecuting) return;
 
     const userMessage: Message = {
       id: `msg-${Date.now()}`,
       type: 'user',
       content: message,
+      attachments,
     };
     setMessages((prev) => [...prev, userMessage]);
     setAgentExecuting(true);
@@ -1107,6 +1110,7 @@ export function ChatContainer({
           max_iterations: null,
           edit_mode: editMode,
           view_context: viewContext, // UI view context for scoped tools
+          attachments,
         },
         (event) => {
           // Guard against state updates after unmount (orphaned SSE callbacks)
@@ -1355,10 +1359,10 @@ export function ChatContainer({
     }
   };
 
-  const handleSendMessage = (message: string) => {
+  const handleSendMessage = (message: string, attachments?: SerializedAttachment[]) => {
     // Use agent's mode to determine stream vs agent execution
     if (currentAgent.mode === 'agent') {
-      sendAgentMessage(message);
+      sendAgentMessage(message, attachments);
     } else {
       sendStreamMessage(message);
     }
@@ -1936,6 +1940,7 @@ export function ChatContainer({
                   content={message.content || ''}
                   agentIcon={message.agentIcon}
                   agentAvatarUrl={message.agentAvatarUrl}
+                  attachments={message.attachments}
                   toolCalls={message.toolCalls}
                   actions={message.actions}
                 />

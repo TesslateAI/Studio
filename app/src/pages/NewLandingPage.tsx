@@ -362,7 +362,7 @@ export default function NewLandingPage() {
     localStorage.setItem('landingPrompt', message.trim());
     const token = localStorage.getItem('token');
     if (token) {
-      navigate('/dashboard');
+      navigate('/chat');
     } else {
       navigate('/register');
     }

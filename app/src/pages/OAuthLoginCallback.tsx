@@ -25,7 +25,7 @@ export default function OAuthLoginCallback() {
 
   const handleOAuthCallback = async () => {
     // Read and consume saved redirect destination
-    const redirectTo = sessionStorage.getItem('oauth_redirect') || '/dashboard';
+    const redirectTo = sessionStorage.getItem('oauth_redirect') || '/chat';
     sessionStorage.removeItem('oauth_redirect');
 
     // Check for errors in URL

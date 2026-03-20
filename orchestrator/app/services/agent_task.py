@@ -29,10 +29,10 @@ class AgentTaskPayload:
 
     # User context
     user_id: str  # UUID string
-    project_id: str  # UUID string
-    project_slug: str
     chat_id: str  # UUID string
     message: str  # User's message
+    project_id: str = ""  # UUID string — empty for standalone chats
+    project_slug: str = ""
 
     # Agent configuration
     agent_id: str | None = None  # MarketplaceAgent ID (None = default agent)
@@ -56,6 +56,9 @@ class AgentTaskPayload:
     channel_config_id: str | None = None  # ChannelConfig UUID
     channel_jid: str | None = None  # Canonical address (e.g., "telegram:123456")
     channel_type: str | None = None  # "telegram", "slack", "discord", "whatsapp"
+
+    # Attachments (images, pasted text, file references)
+    attachments: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""

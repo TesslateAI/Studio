@@ -58,7 +58,14 @@ async def web_fetch_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
         )
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        _headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; TesslateBot/1.0; +https://tesslate.com)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        }
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=True, headers=_headers
+        ) as client:
             response = await client.get(url)
             response.raise_for_status()
 

@@ -1,6 +1,8 @@
 import { type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { SerializedAttachment } from '../../types/agent';
+import { AttachmentChip } from './AttachmentChip';
 
 interface ChatMessageProps {
   type: 'user' | 'ai';
@@ -8,6 +10,7 @@ interface ChatMessageProps {
   avatar?: ReactNode;
   agentIcon?: string;
   agentAvatarUrl?: string;
+  attachments?: SerializedAttachment[];
   actions?: Array<{
     label: string;
     onClick: () => void;
@@ -18,7 +21,7 @@ interface ChatMessageProps {
   }>;
 }
 
-export function ChatMessage({ type, content, avatar, agentAvatarUrl, actions, toolCalls }: ChatMessageProps) {
+export function ChatMessage({ type, content, avatar, agentAvatarUrl, attachments, actions, toolCalls }: ChatMessageProps) {
   const isUser = type === 'user';
 
   // 60-30-10: User avatar (10% accent), AI avatar (30% secondary surface)
@@ -49,6 +52,14 @@ export function ChatMessage({ type, content, avatar, agentAvatarUrl, actions, to
 
       {/* Content - 60-30-10: User message (10% accent orange), AI message (30% secondary surface) */}
       <div className="flex-1 max-w-[75%]">
+        {/* Attachments */}
+        {attachments && attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1.5">
+            {attachments.map((att, idx) => (
+              <AttachmentChip key={`${att.type}-${idx}`} attachment={att} />
+            ))}
+          </div>
+        )}
         <div
           className={`
             message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed

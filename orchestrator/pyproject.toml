@@ -51,7 +51,7 @@ dependencies = [
     "boto3>=1.34.0",
     # Web search providers
     "tavily-python>=0.5.0",
-    "duckduckgo-search>=7.0.0",
+    "ddgs>=9.0.0",
     # Redis for distributed caching, Pub/Sub, and horizontal scaling
     "redis[hiredis]>=5.0.0",
     # ARQ - async Redis task queue for agent worker fleet

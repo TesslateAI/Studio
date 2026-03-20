@@ -664,11 +664,27 @@ class AgentCommandStatsResponse(BaseModel):
 # Universal Agent Schemas
 
 
+class ChatAttachmentSchema(BaseModel):
+    """Attachment sent alongside a chat message."""
+    type: str  # "image", "pasted_text", "file_reference"
+    content: str | None = None  # base64 for images, full text for pasted_text
+    mime_type: str | None = None
+    file_path: str | None = None
+    label: str | None = None
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v):
+        if v not in ("image", "pasted_text", "file_reference"):
+            raise ValueError("type must be one of: image, pasted_text, file_reference")
+        return v
+
+
 class AgentChatRequest(BaseModel):
     """Request schema for agent chat."""
 
-    project_id: UUID
-    message: str
+    project_id: UUID | None = None
+    message: str = ""
     agent_id: UUID | None = None  # ID of the agent to use
     container_id: UUID | None = None  # If set, agent is scoped to this container (files at root)
     chat_id: UUID | None = None  # Target a specific chat session
@@ -676,15 +692,20 @@ class AgentChatRequest(BaseModel):
     minimal_prompts: bool | None = False
     edit_mode: str | None = "ask"  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)
     view_context: str | None = None  # UI view context: 'graph', 'builder', 'terminal', 'kanban'
+    attachments: list[ChatAttachmentSchema] | None = None
 
-    @field_validator("message")
-    @classmethod
-    def validate_message(cls, v):
-        if not v or not v.strip():
-            raise ValueError("Message cannot be empty")
-        if len(v) > 10000:
+    @model_validator(mode="after")
+    def validate_message_or_attachments(self):
+        has_message = self.message and self.message.strip()
+        has_attachments = self.attachments and len(self.attachments) > 0
+        if not has_message and not has_attachments:
+            raise ValueError("Message cannot be empty when no attachments are present")
+        if self.message and len(self.message) > 10000:
             raise ValueError("Message cannot exceed 10000 characters")
-        return v.strip()
+        self.message = self.message.strip() if self.message else ""
+        if self.attachments and len(self.attachments) > 10:
+            raise ValueError("Maximum 10 attachments allowed")
+        return self
 
     @field_validator("edit_mode")
     @classmethod

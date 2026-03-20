@@ -170,7 +170,7 @@ class RedisPubSub:
                         try:
                             event = json.loads(fields.get("data") or fields.get(b"data"))
                             yield event
-                            if event.get("type") in ("complete", "error", "done"):
+                            if event.get("type") == "done":
                                 return
                         except (json.JSONDecodeError, KeyError, TypeError):
                             logger.warning(f"Invalid data in agent stream entry: {entry_id}")
@@ -239,7 +239,7 @@ class RedisPubSub:
                         try:
                             event = json.loads(fields.get("data") or fields.get(b"data"))
                             yield event
-                            if event.get("type") in ("complete", "error", "done"):
+                            if event.get("type") == "done":
                                 return
                         except (json.JSONDecodeError, KeyError, TypeError):
                             logger.warning(f"Invalid data in agent stream entry: {entry_id}")

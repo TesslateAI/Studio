@@ -839,6 +839,24 @@ export const chatApi = {
     return response.data;
   },
 
+  // List standalone (project-less) chat sessions
+  getUserSessions: async (params?: { limit?: number; offset?: number }) => {
+    const response = await api.get('/api/chat/sessions', { params });
+    return response.data;
+  },
+
+  // Update a chat's connected project
+  updateChatProject: async (chatId: string, projectId: string | null) => {
+    const response = await api.patch(`/api/chat/${chatId}/project`, { project_id: projectId });
+    return response.data;
+  },
+
+  // Get messages for a standalone chat session
+  getStandaloneMessages: async (chatId: string) => {
+    const response = await api.get(`/api/chat/session/${chatId}/messages`);
+    return response.data;
+  },
+
   deleteChat: async (chatId: string) => {
     const response = await api.delete(`/api/chat/${chatId}`);
     return response.data;

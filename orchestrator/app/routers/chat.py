@@ -10,7 +10,7 @@ from uuid import UUID
 
 import aiofiles
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,12 +42,16 @@ from ..services.agent_context import (
     _get_chat_history,
     _resolve_container_name,
 )
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
 from ..users import current_active_user, current_superuser
 from ..utils.resource_naming import get_project_path
 
 settings = get_settings()
 router = APIRouter()
 logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ARQ Redis pool (lazy initialized)
@@ -114,7 +118,7 @@ async def create_chat(
         user_id=current_user.id,
         project_id=project_id,
         title=title,
-        origin="browser",
+        origin="standalone" if not project_id else "browser",
     )
     db.add(db_chat)
     await db.commit()
@@ -184,6 +188,148 @@ async def debug_tool_execute(
     registry = get_tool_registry()
     result = await registry.execute(body.tool_name, body.parameters, context)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Standalone chat session endpoints — defined BEFORE /{project_id} routes
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sessions")
+async def get_user_sessions(
+    limit: int = 30,
+    offset: int = 0,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List user's standalone chat sessions (may have a project connected later)."""
+    query = (
+        select(
+            Chat.id,
+            Chat.title,
+            Chat.status,
+            Chat.origin,
+            Chat.project_id,
+            Project.name.label("project_name"),
+            Chat.created_at,
+            Chat.updated_at,
+        )
+        .outerjoin(Project, Chat.project_id == Project.id)
+        .where(
+            Chat.user_id == current_user.id,
+            Chat.origin == "standalone",
+            Chat.status != "deleted",
+        )
+        .order_by(Chat.updated_at.desc().nullslast(), Chat.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    sessions = [
+        {
+            "id": str(row.id),
+            "title": row.title or "Untitled",
+            "status": row.status,
+            "origin": row.origin,
+            "project_id": str(row.project_id) if row.project_id else None,
+            "project_name": row.project_name,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in rows
+    ]
+
+    return {"sessions": sessions, "has_more": len(sessions) == limit}
+
+
+@router.get("/session/{chat_id}/messages")
+async def get_session_messages(
+    chat_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get messages for a standalone chat session (no project required)."""
+    # Verify user owns the chat
+    chat_result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == current_user.id)
+    )
+    chat = chat_result.scalar_one_or_none()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    # Fetch messages
+    messages_result = await db.execute(
+        select(Message)
+        .where(Message.chat_id == chat_id)
+        .order_by(Message.created_at.asc())
+    )
+    messages = messages_result.scalars().all()
+
+    # Fetch agent steps for messages that have them
+    result_list = []
+    for msg in messages:
+        msg_dict = {
+            "id": str(msg.id),
+            "chat_id": str(msg.chat_id),
+            "role": msg.role,
+            "content": msg.content or "",
+            "message_metadata": msg.message_metadata or {},
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        }
+
+        # If this is an agent message with steps_table, fetch steps
+        if msg.message_metadata and msg.message_metadata.get("steps_table"):
+            steps_result = await db.execute(
+                select(AgentStep)
+                .where(AgentStep.message_id == msg.id)
+                .order_by(AgentStep.step_index.asc())
+            )
+            steps = steps_result.scalars().all()
+            if steps:
+                msg_dict["message_metadata"]["steps"] = [s.step_data for s in steps]
+
+        result_list.append(msg_dict)
+
+    return result_list
+
+
+@router.patch("/{chat_id}/project")
+@limiter.limit("30/minute")
+async def update_chat_project(
+    request: Request,
+    chat_id: UUID,
+    data: dict,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Connect or disconnect a project from a chat session."""
+    # Verify user owns the chat
+    chat_result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == current_user.id)
+    )
+    chat = chat_result.scalar_one_or_none()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    project_id = data.get("project_id")
+    if project_id:
+        # Verify user owns the project
+        project_result = await db.execute(
+            select(Project).where(
+                Project.id == UUID(project_id), Project.owner_id == current_user.id
+            )
+        )
+        if not project_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Project not found")
+        chat.project_id = UUID(project_id)
+    else:
+        chat.project_id = None
+
+    await db.commit()
+    return {"ok": True, "project_id": str(chat.project_id) if chat.project_id else None}
 
 
 @router.get("/{project_id}/sessions")
@@ -852,7 +998,12 @@ async def agent_chat(
         # Save to chat history (chat was already created/fetched earlier)
         try:
             # Save user message
-            user_message = Message(chat_id=chat.id, role="user", content=request.message)
+            user_message = Message(
+                chat_id=chat.id,
+                role="user",
+                content=request.message,
+                message_metadata={"attachments": [a.model_dump() for a in request.attachments]} if request.attachments else None,
+            )
             db.add(user_message)
 
             # Increment usage_count for the agent
@@ -1024,61 +1175,62 @@ async def agent_chat_stream(
 
     async def event_generator():
         try:
-            # Verify project ownership
-            result = await db.execute(
-                select(Project).where(
-                    Project.id == request.project_id, Project.owner_id == current_user.id
-                )
-            )
-            project = result.scalar_one_or_none()
-
-            if not project:
-                error_event = {
-                    "type": "error",
-                    "data": {"message": "Project not found or access denied"},
-                }
-                yield f"data: {json.dumps(error_event)}\n\n"
-                return
-
-            # Track activity for idle cleanup (database-based)
-            from ..services.activity_tracker import track_project_activity
-
-            await track_project_activity(db, project.id, "agent")
-
-            # Fetch container info for multi-container project support
+            # --- Standalone (project-less) chat support ---
+            project = None
+            project_slug = ""
             container_id = None
             container_name = None
             container_directory = None
-            project_slug = project.slug
 
-            if request.container_id:
-                container_result = await db.execute(
-                    select(Container).where(
-                        Container.id == request.container_id,
-                        Container.project_id == request.project_id,
+            if request.project_id:
+                # Verify project ownership
+                result = await db.execute(
+                    select(Project).where(
+                        Project.id == request.project_id, Project.owner_id == current_user.id
                     )
                 )
-                container = container_result.scalar_one_or_none()
-                if container:
-                    container_id = container.id
-                    container_name = _resolve_container_name(container)
-                    # Capture container directory for scoped file operations
-                    if container.directory and container.directory != ".":
-                        container_directory = container.directory
-                    logger.info(
-                        f"[SSE-AGENT] Using container: {container_name} (id: {container_id}), directory: {container_directory}"
+                project = result.scalar_one_or_none()
+
+                if not project:
+                    error_event = {
+                        "type": "error",
+                        "data": {"message": "Project not found or access denied"},
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    return
+
+                # Track activity for idle cleanup (database-based)
+                from ..services.activity_tracker import track_project_activity
+
+                await track_project_activity(db, project.id, "agent")
+
+                project_slug = project.slug
+
+                # Fetch container info for multi-container project support
+                if request.container_id:
+                    container_result = await db.execute(
+                        select(Container).where(
+                            Container.id == request.container_id,
+                            Container.project_id == request.project_id,
+                        )
                     )
+                    container = container_result.scalar_one_or_none()
+                    if container:
+                        container_id = container.id
+                        container_name = _resolve_container_name(container)
+                        if container.directory and container.directory != ".":
+                            container_directory = container.directory
 
             # Get or create chat for message history persistence
             if request.chat_id:
                 # Use specific chat session when chat_id is provided
-                chat_result = await db.execute(
-                    select(Chat).where(
-                        Chat.id == request.chat_id,
-                        Chat.user_id == current_user.id,
-                        Chat.project_id == request.project_id,
-                    )
+                chat_query = select(Chat).where(
+                    Chat.id == request.chat_id,
+                    Chat.user_id == current_user.id,
                 )
+                if request.project_id:
+                    chat_query = chat_query.where(Chat.project_id == request.project_id)
+                chat_result = await db.execute(chat_query)
                 chat = chat_result.scalar_one_or_none()
                 if not chat:
                     error_event = {
@@ -1089,12 +1241,15 @@ async def agent_chat_stream(
                     return
             else:
                 # Fallback: get most recent chat or create new one
+                chat_query = select(Chat).where(
+                    Chat.user_id == current_user.id,
+                )
+                if request.project_id:
+                    chat_query = chat_query.where(Chat.project_id == request.project_id)
+                else:
+                    chat_query = chat_query.where(Chat.project_id.is_(None))
                 chat_result = await db.execute(
-                    select(Chat)
-                    .where(
-                        Chat.user_id == current_user.id,
-                        Chat.project_id == request.project_id,
-                    )
+                    chat_query
                     .order_by(Chat.updated_at.desc().nullslast(), Chat.created_at.desc())
                     .limit(1)
                 )
@@ -1110,7 +1265,12 @@ async def agent_chat_stream(
             chat_history = await _get_chat_history(chat.id, db, limit=10)
 
             # Save user message after fetching history
-            user_message = Message(chat_id=chat.id, role="user", content=request.message)
+            user_message = Message(
+                chat_id=chat.id,
+                role="user",
+                content=request.message,
+                message_metadata={"attachments": [a.model_dump() for a in request.attachments]} if request.attachments else None,
+            )
             db.add(user_message)
             await db.commit()
 
@@ -1218,37 +1378,33 @@ async def agent_chat_stream(
             if hasattr(agent_instance, "max_iterations"):
                 agent_instance.max_iterations = request.max_iterations
 
-            # Build project context with TESSLATE.md and Git info
-            project_context = {
-                "project_name": project.name,
-                "project_description": project.description,
-            }
-
-            # Build TESSLATE.md context
-            tesslate_context = await _build_tesslate_context(
-                project,
-                current_user.id,
-                db,
-                container_name=container_name,
-                container_directory=container_directory,
-            )
-            if tesslate_context:
-                project_context["tesslate_context"] = tesslate_context
-                logger.info(f"[SSE-AGENT] Added TESSLATE.md context for project {project.id}")
-
-            # Build Git context
-            git_context = await _build_git_context(project, current_user.id, db)
-            if git_context:
-                project_context["git_context"] = git_context
-                logger.info(f"[SSE-AGENT] Added Git context for project {project.id}")
+            # Build project context
+            project_context = {}
+            if project:
+                project_context = {
+                    "project_name": project.name,
+                    "project_description": project.description,
+                }
+                tesslate_context = await _build_tesslate_context(
+                    project,
+                    current_user.id,
+                    db,
+                    container_name=container_name,
+                    container_directory=container_directory,
+                )
+                if tesslate_context:
+                    project_context["tesslate_context"] = tesslate_context
+                git_context = await _build_git_context(project, current_user.id, db)
+                if git_context:
+                    project_context["git_context"] = git_context
 
             # Prepare execution context
             # Note: container_directory was already captured during initial container lookup above
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
-                "project_slug": project_slug,  # For shared volume file access
-                "container_directory": container_directory,  # Container subdirectory for file ops
+                "project_slug": project_slug,
+                "container_directory": container_directory,
                 "chat_id": chat.id,
                 "db": db,
                 "chat_history": chat_history,
@@ -1256,14 +1412,13 @@ async def agent_chat_stream(
                 "edit_mode": request.edit_mode,
                 "container_id": container_id,
                 "container_name": container_name,
-                "view_context": request.view_context,  # UI view for scoped tools
-                # Credit deduction context
+                "view_context": request.view_context,
                 "model_name": model_name,
                 "agent_id": agent_model.id if agent_model else None,
-                # v2 volume-first routing hints
-                "volume_id": project.volume_id,
-                "cache_node": project.cache_node,
-                "compute_tier": project.compute_tier,
+                "volume_id": project.volume_id if project else None,
+                "cache_node": project.cache_node if project else None,
+                "compute_tier": project.compute_tier if project else None,
+                "attachments": [a.model_dump() for a in request.attachments] if request.attachments else [],
             }
 
             # ================================================================
@@ -1285,7 +1440,7 @@ async def agent_chat_stream(
                 payload = AgentTaskPayload(
                     task_id=agent_task_id,
                     user_id=str(current_user.id),
-                    project_id=str(request.project_id),
+                    project_id=str(request.project_id) if request.project_id else "",
                     project_slug=project_slug,
                     chat_id=str(chat.id),
                     message=request.message,
@@ -1296,6 +1451,7 @@ async def agent_chat_stream(
                     container_id=str(container_id) if container_id else None,
                     container_name=container_name,
                     container_directory=container_directory,
+                    attachments=[a.model_dump() for a in request.attachments] if request.attachments else [],
                 )
 
                 # Enqueue the job
@@ -1310,7 +1466,7 @@ async def agent_chat_stream(
                     user_id=current_user.id,
                     task_type="agent_execution",
                     metadata={
-                        "project_id": str(request.project_id),
+                        "project_id": str(request.project_id) if request.project_id else "",
                         "chat_id": str(chat.id),
                         "message": request.message[:200],
                     },

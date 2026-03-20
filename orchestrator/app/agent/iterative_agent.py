@@ -175,7 +175,10 @@ class IterativeAgent(AbstractAgent):
         full_system_prompt = self._get_system_prompt(context)
 
         # Get user message with full [CONTEXT] section
-        user_message = await get_user_message_wrapper(user_request, project_context)
+        user_message = await get_user_message_wrapper(
+            user_request, project_context,
+            attachments=context.get("attachments"),
+        )
 
         # Build messages list starting with system prompt
         self.messages = [{"role": "system", "content": full_system_prompt}]

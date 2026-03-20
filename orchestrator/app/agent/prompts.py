@@ -4,6 +4,7 @@ Agent System Prompts
 System prompts that teach ANY language model how to use tools.
 """
 
+import os
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -142,12 +143,32 @@ async def get_file_listing_context(
         return None
 
 
+async def _read_project_file(user_id, project_id, file_path: str) -> str | None:
+    """Read a file from a user's project directory."""
+    import aiofiles
+
+    project_path = get_project_path(str(user_id), str(project_id))
+    full_path = os.path.join(project_path, file_path)
+    # Security: prevent path traversal
+    real_project = os.path.realpath(project_path)
+    real_file = os.path.realpath(full_path)
+    if not real_file.startswith(real_project):
+        return None
+    try:
+        async with aiofiles.open(real_file, "r", errors="replace") as f:
+            content = await f.read(100_000)  # Cap at 100KB
+        return content
+    except (FileNotFoundError, IsADirectoryError, PermissionError):
+        return None
+
+
 async def get_user_message_wrapper(
     user_request: str,
     project_context: dict | None = None,
     include_environment: bool = True,
     include_file_listing: bool = True,
-) -> str:
+    attachments: list[dict] | None = None,
+) -> str | list:
     """
     Wrap the user's request with helpful context.
 
@@ -207,7 +228,59 @@ async def get_user_message_wrapper(
     # 5. User request at the end
     message_parts.append(f"\n=== User Request ===\n{user_request}")
 
-    return "\n".join(message_parts)
+    # 6. Attachments
+    image_attachments = []
+    if attachments:
+        file_refs = []
+        pasted_texts = []
+        for att in attachments:
+            att_type = att.get("type")
+            if att_type == "file_reference":
+                file_path = att.get("file_path", "")
+                if file_path and project_context:
+                    file_refs.append(file_path)
+            elif att_type == "pasted_text":
+                content = att.get("content", "")
+                if content:
+                    pasted_texts.append(content)
+            elif att_type == "image":
+                content = att.get("content", "")
+                mime_type = att.get("mime_type", "image/png")
+                if content:
+                    image_attachments.append({"content": content, "mime_type": mime_type})
+
+        # Read file references from project directory
+        if file_refs and project_context:
+            user_id = project_context.get("user_id")
+            project_id = project_context.get("project_id")
+            if user_id and project_id:
+                file_sections = []
+                for fp in file_refs:
+                    try:
+                        file_content = await _read_project_file(user_id, project_id, fp)
+                        if file_content is not None:
+                            file_sections.append(f"--- {fp} ---\n{file_content}")
+                    except Exception:
+                        file_sections.append(f"--- {fp} ---\n[Could not read file]")
+                if file_sections:
+                    message_parts.append("\n=== ATTACHED FILES ===\n" + "\n\n".join(file_sections))
+
+        if pasted_texts:
+            message_parts.append("\n=== PASTED CONTEXT ===\n" + "\n---\n".join(pasted_texts))
+
+    text_content = "\n".join(message_parts)
+
+    # If images present, return multimodal content array
+    if image_attachments:
+        content_parts: list[dict] = [{"type": "text", "text": text_content}]
+        for img in image_attachments:
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{img['mime_type']};base64,{img['content']}"}
+            })
+        return content_parts
+
+    return text_content
 
 
 def render_skills_catalog(skills) -> str:

@@ -193,6 +193,8 @@ class BaseOrchestrator(ABC):
         file_path: str,
         project_slug: str = None,
         subdir: str = None,
+        volume_id: str | None = None,
+        cache_node: str | None = None,
     ) -> str | None:
         """
         Read a file from a container.
@@ -220,6 +222,8 @@ class BaseOrchestrator(ABC):
         content: str,
         project_slug: str = None,
         subdir: str = None,
+        volume_id: str | None = None,
+        cache_node: str | None = None,
     ) -> bool:
         """
         Write a file to a container.

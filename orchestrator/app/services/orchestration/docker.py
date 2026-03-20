@@ -709,6 +709,8 @@ class DockerOrchestrator(BaseOrchestrator):
         file_path: str,
         project_slug: str | None = None,
         subdir: str | None = None,
+        volume_id: str | None = None,
+        cache_node: str | None = None,
     ) -> str | None:
         """
         Read a file from a project directory.
@@ -750,6 +752,8 @@ class DockerOrchestrator(BaseOrchestrator):
         content: str,
         project_slug: str | None = None,
         subdir: str | None = None,
+        volume_id: str | None = None,
+        cache_node: str | None = None,
     ) -> bool:
         """
         Write a file to a project directory.

@@ -29,6 +29,7 @@ import AuthCallback from './pages/AuthCallback';
 import OAuthLoginCallback from './pages/OAuthLoginCallback';
 import Logout from './pages/Logout';
 import ImportRedirect from './pages/ImportRedirect';
+import Chat from './pages/Chat';
 import Referrals from './pages/Referrals';
 import { SettingsLayout } from './layouts/SettingsLayout';
 import { MarketplaceLayout } from './layouts/MarketplaceLayout';
@@ -78,6 +79,15 @@ function AppContent() {
     (e) => {
       e.preventDefault();
       navigate('/dashboard');
+    },
+    { enableOnFormTags: false }
+  );
+
+  useHotkeys(
+    'mod+j',
+    (e) => {
+      e.preventDefault();
+      navigate('/chat');
     },
     { enableOnFormTags: false }
   );
@@ -251,6 +261,7 @@ function AppContent() {
             </PrivateRoute>
           }
         >
+          <Route path="/chat" element={<Chat />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/marketplace/success" element={<MarketplaceSuccess />} />
           <Route path="/library" element={<Library />} />

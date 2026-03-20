@@ -14,8 +14,12 @@ import {
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
 import { type ChatAgent } from '../../types/chat';
+import { type SerializedAttachment } from '../../types/agent';
 import { projectsApi } from '../../lib/api';
 import { modKey } from '../../lib/keyboard-registry';
+import { useAttachments } from '../../hooks/useAttachments';
+import { AttachmentStrip } from './AttachmentStrip';
+import { FilePickerDropdown } from './FilePickerDropdown';
 
 // Width thresholds for responsive collapse
 // Below VERY_COMPACT: Only essential icons (agent icon, menu, send button)
@@ -25,12 +29,13 @@ import { modKey } from '../../lib/keyboard-registry';
 const VERY_COMPACT_WIDTH_THRESHOLD = 300;
 const COMPACT_WIDTH_THRESHOLD = 380;
 const EDIT_MODE_COMPACT_THRESHOLD = 480;
+const EMPTY_SKILLS: { name: string; description: string }[] = [];
 
 interface ChatInputProps {
   agents: ChatAgent[];
   currentAgent: ChatAgent;
   onSelectAgent: (agent: ChatAgent) => void;
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string, attachments?: SerializedAttachment[]) => void;
   slug?: string;
   projectName?: string;
   placeholder?: string;
@@ -96,6 +101,19 @@ export function ChatInput({
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const commandsRef = useRef<HTMLDivElement>(null);
   const commandsButtonRef = useRef<HTMLButtonElement>(null);
+
+  const {
+    attachments,
+    addImage,
+    addPastedText,
+    addFileReference,
+    removeAttachment,
+    clearAttachments,
+    serializeForSend,
+  } = useAttachments();
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [filePickerQuery, setFilePickerQuery] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
 
   // Derived compact states
   const isCompact = compactLevel === 'compact' || compactLevel === 'veryCompact';
@@ -177,18 +195,22 @@ export function ChatInput({
   }, [showSettings, showCommands]);
 
   // Available slash commands (built-in + installed skills)
+  // Stabilize the reference: avoid re-creating slashCommands when availableSkills
+  // is undefined/empty (which would cause an infinite render loop via the
+  // useEffect that depends on slashCommands).
+  const stableSkills = availableSkills ?? EMPTY_SKILLS;
   const slashCommands = useMemo(() => {
     const builtIn = [
       { command: '/clear', description: 'Clear chat history', isSkill: false },
       { command: '/plan', description: 'Toggle plan mode', isSkill: false },
     ];
-    const skillCommands = availableSkills.map((skill) => ({
+    const skillCommands = stableSkills.map((skill) => ({
       command: `/${skill.name}`,
       description: skill.description,
       isSkill: true,
     }));
     return [...builtIn, ...skillCommands];
-  }, [availableSkills]);
+  }, [stableSkills]);
 
   // Check for landing page prompt on component mount
   useEffect(() => {
@@ -220,8 +242,17 @@ export function ChatInput({
     } else {
       setShowCommands(false);
       setFilteredCommands([]);
+
+      // Detect @ file references
+      const atMatch = message.match(/@(\S*)$/);
+      if (atMatch && projectSlug) {
+        setFilePickerQuery(atMatch[1]);
+        setShowFilePicker(true);
+      } else {
+        setShowFilePicker(false);
+      }
     }
-  }, [message, slashCommands]);
+  }, [message, slashCommands, projectSlug]);
 
   // Auto-resize textarea as user types
   // Note: This causes a reflow but it's unavoidable for auto-sizing textareas
@@ -250,8 +281,9 @@ export function ChatInput({
     // Add more command handlers here
   };
 
-  const sendMessage = () => {
-    if (message.trim() && !disabled) {
+  const sendMessage = async () => {
+    const hasContent = message.trim() || attachments.length > 0;
+    if (hasContent && !disabled) {
       const trimmed = message.trim();
       // Check if it's a built-in slash command
       if (trimmed.startsWith('/')) {
@@ -261,15 +293,18 @@ export function ChatInput({
         } else {
           // Skill slash commands are sent as regular messages to the agent
           setMessageHistory((prev) => [...prev, trimmed]);
-          onSendMessage(trimmed);
+          const serialized = await serializeForSend();
+          onSendMessage(trimmed, serialized.length > 0 ? serialized : undefined);
         }
       } else {
         // Regular message
         setMessageHistory((prev) => [...prev, trimmed]);
-        onSendMessage(trimmed);
+        const serialized = await serializeForSend();
+        onSendMessage(trimmed, serialized.length > 0 ? serialized : undefined);
       }
       setMessage('');
       setHistoryIndex(-1);
+      clearAttachments();
     }
   };
 
@@ -359,11 +394,55 @@ export function ChatInput({
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const imageFiles = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      imageFiles.forEach(f => addImage(f));
+      return;
+    }
+    const text = e.clipboardData.getData('text/plain');
+    const lines = text.split('\n');
+    if (lines.length > 5) {
+      e.preventDefault();
+      addPastedText(text);
+      return;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Only trigger when leaving the form itself, not children
+    if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const imageFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    imageFiles.forEach(f => addImage(f));
+  };
+
+  const handleFileSelect = (filePath: string, fileName: string) => {
+    addFileReference(filePath, fileName);
+    setMessage(prev => prev.replace(/@\S*$/, ''));
+    setShowFilePicker(false);
+  };
+
   return (
     <form
       ref={containerRef}
-      className="chat-input-wrapper flex-shrink-0 relative"
+      className={`chat-input-wrapper flex-shrink-0 relative ${isDragging ? 'ring-2 ring-[var(--primary)]/40 rounded-[var(--radius-medium)]' : ''}`}
       onSubmit={handleSubmit}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       {/* Command suggestions bar - Minecraft style */}
       {showCommands && filteredCommands.length > 0 && (
@@ -398,6 +477,16 @@ export function ChatInput({
             </div>
           </div>
         </div>
+      )}
+
+      {/* @ file picker */}
+      {showFilePicker && projectSlug && (
+        <FilePickerDropdown
+          slug={projectSlug}
+          query={filePickerQuery}
+          onSelect={handleFileSelect}
+          onClose={() => setShowFilePicker(false)}
+        />
       )}
 
       {/* Settings / menu dropdown */}
@@ -503,7 +592,7 @@ export function ChatInput({
 
       {/* Two-row layout */}
       <div
-        className={`flex flex-col bg-[var(--surface)] w-full ${isDocked ? '' : isExpanded ? 'rounded-b-[var(--radius)]' : 'rounded-[var(--radius)]'} ${!isDocked ? 'max-md:rounded-b-none' : ''}`}
+        className={`flex flex-col bg-[var(--surface)] w-full ${isDocked ? '' : 'border border-[var(--border)] rounded-[var(--radius-medium)] shadow-sm'}`}
       >
         {/* First row: Growing textarea */}
         <div
@@ -517,6 +606,7 @@ export function ChatInput({
               setMessage(e.target.value);
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder=""
             rows={1}
             className="chat-input bg-transparent border-none w-full text-[var(--text)] text-sm !outline-none focus:!outline-none placeholder:text-[var(--text)]/40 resize-none overflow-hidden leading-relaxed my-2"
@@ -526,6 +616,11 @@ export function ChatInput({
             }}
           />
         </div>
+
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <AttachmentStrip attachments={attachments} onRemove={removeAttachment} />
+        )}
 
         {/* Second row: Agent selector and buttons */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 w-full min-w-0">
@@ -630,7 +725,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={isExecuting ? onStop : sendMessage}
-            disabled={!isExecuting && (!message.trim() || disabled)}
+            disabled={!isExecuting && ((!message.trim() && attachments.length === 0) || disabled)}
             className="btn btn-icon btn-sm"
             title={
               isExecuting ? 'Stop execution (Escape)' : `Send message (Enter or ${modKey}+Enter)`

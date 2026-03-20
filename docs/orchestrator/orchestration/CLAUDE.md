@@ -136,13 +136,15 @@ status = await orchestrator.get_container_status(
 # Read file
 content = await orchestrator.read_file(
     user_id, project_id, container_name, file_path,
-    project_slug=None, subdir=None
+    project_slug=None, subdir=None,
+    volume_id=None, cache_node=None,  # K8s volume routing hints (ignored by Docker)
 )
 
 # Write file
 success = await orchestrator.write_file(
     user_id, project_id, container_name, file_path, content,
-    project_slug=None, subdir=None
+    project_slug=None, subdir=None,
+    volume_id=None, cache_node=None,  # K8s volume routing hints (ignored by Docker)
 )
 
 # Delete file

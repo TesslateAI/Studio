@@ -1,7 +1,14 @@
 export { ChatContainer } from './ChatContainer';
 export { ChatMessage } from './ChatMessage';
 export { ChatInput } from './ChatInput';
+export { ChatMessageList } from './ChatMessageList';
+export { ChatSessionSidebar } from './ChatSessionSidebar';
+export { ChatTopBar } from './ChatTopBar';
+export { ProjectConnector } from './ProjectConnector';
 export { AgentSelector } from './AgentSelector';
+export { AttachmentChip } from './AttachmentChip';
+export { AttachmentStrip } from './AttachmentStrip';
+export { FilePickerDropdown } from './FilePickerDropdown';
 export { ToolDropdown } from './ToolDropdown';
 export { TypingIndicator } from './TypingIndicator';
 export { UsageRibbon } from './UsageRibbon';

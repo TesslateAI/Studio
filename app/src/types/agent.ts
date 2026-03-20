@@ -35,7 +35,7 @@ export interface AgentStep {
 }
 
 export interface AgentChatRequest {
-  project_id: string;
+  project_id?: string;
   message: string;
   agent_id?: string; // ID of the agent to use
   container_id?: string; // If set, agent is scoped to this container (files at root)
@@ -44,6 +44,7 @@ export interface AgentChatRequest {
   minimal_prompts?: boolean;
   edit_mode?: 'allow' | 'ask' | 'plan'; // Edit control mode
   view_context?: string; // UI view context: 'graph', 'builder', 'terminal', 'kanban'
+  attachments?: SerializedAttachment[];
 }
 
 export interface AgentChatResponse {
@@ -76,6 +77,7 @@ export interface DBMessage {
     iterations?: number;
     tool_calls_made?: number;
     completion_reason?: string;
+    attachments?: SerializedAttachment[];
   };
   created_at: string;
 }
@@ -120,4 +122,26 @@ export interface AgentCreate {
   icon?: string;
   mode?: 'stream' | 'agent';
   is_active?: boolean;
+}
+
+export type AttachmentType = 'image' | 'pasted_text' | 'file_reference';
+
+export interface ChatAttachment {
+  id: string;
+  type: AttachmentType;
+  file?: File;
+  previewUrl?: string;
+  mimeType?: string;
+  text?: string;
+  lineCount?: number;
+  filePath?: string;
+  fileName?: string;
+}
+
+export interface SerializedAttachment {
+  type: AttachmentType;
+  content?: string;
+  mime_type?: string;
+  file_path?: string;
+  label?: string;
 }

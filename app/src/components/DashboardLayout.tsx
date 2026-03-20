@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { NavigationSidebar } from './ui';
 import { MobileWarning } from './MobileWarning';
+import { List } from '@phosphor-icons/react';
 
 import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
@@ -10,6 +11,12 @@ export function DashboardLayout() {
   const fromLogin = location.state?.fromLogin === true;
   const [showSidebarContainer, setShowSidebarContainer] = useState(!fromLogin);
   const [showSidebarContent, setShowSidebarContent] = useState(!fromLogin);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Close mobile nav on route change
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     // Only run animation if coming from login
@@ -33,8 +40,9 @@ export function DashboardLayout() {
   }, [fromLogin]);
 
   // Determine active page based on current path
-  const getActivePage = (): 'dashboard' | 'marketplace' | 'library' | 'feedback' => {
+  const getActivePage = (): 'chat' | 'dashboard' | 'marketplace' | 'library' | 'feedback' => {
     const path = location.pathname;
+    if (path.includes('/chat')) return 'chat';
     if (path.includes('/marketplace')) return 'marketplace';
     if (path.includes('/library')) return 'library';
     if (path.includes('/feedback')) return 'feedback';
@@ -51,7 +59,33 @@ export function DashboardLayout() {
       {/* Mobile Warning */}
       <MobileWarning />
 
-      {/* Navigation Sidebar Container - Slides in and resizes */}
+      {/* Mobile hamburger button — fixed top-left */}
+      <button
+        onClick={() => setMobileNavOpen(true)}
+        className="md:hidden fixed top-2.5 left-2.5 z-40 p-1.5 rounded-[var(--radius-small)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+        aria-label="Open navigation"
+      >
+        <List size={18} weight="bold" />
+      </button>
+
+      {/* Mobile sidebar overlay */}
+      {mobileNavOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/40 z-50"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+      {mobileNavOpen && (
+        <div className="md:hidden fixed inset-y-0 left-0 z-50">
+          <NavigationSidebar
+            activePage={getActivePage()}
+            showContent
+            forceVisible
+          />
+        </div>
+      )}
+
+      {/* Navigation Sidebar Container - Slides in and resizes (desktop) */}
       {showSidebarContainer && (
         <motion.div
           key="sidebar-container"

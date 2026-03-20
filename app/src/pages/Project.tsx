@@ -21,6 +21,7 @@ import {
   Terminal,
   Books,
   LockSimple,
+  DeviceMobile,
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -229,6 +230,7 @@ export default function Project() {
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
   const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
+  const [viewportMode, setViewportMode] = useState<'desktop' | 'mobile'>('desktop');
   // Sync with NavigationSidebar's expanded state
   const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(() => {
     const saved = localStorage.getItem('navigationSidebarExpanded');
@@ -1692,10 +1694,18 @@ export default function Project() {
                                   >
                                     <ArrowsClockwise size={14} />
                                   </button>
+                                  <button
+                                    onClick={() => setViewportMode(viewportMode === 'desktop' ? 'mobile' : 'desktop')}
+                                    className={`btn btn-icon btn-sm ${viewportMode === 'mobile' ? 'btn-active text-[var(--primary)]' : ''}`}
+                                    title={viewportMode === 'desktop' ? 'Switch to mobile view' : 'Switch to desktop view'}
+                                  >
+                                    {viewportMode === 'desktop' ? <DeviceMobile size={14} /> : <Monitor size={14} />}
+                                  </button>
                                 </div>
                               </div>
                               <div
-                                className="w-full h-[calc(100%-40px)] bg-white"
+                                className={`flex-1 relative overflow-auto ${viewportMode === 'mobile' ? 'bg-[var(--bg)] flex items-center justify-center' : 'bg-white'}`}
+                                style={{ height: 'calc(100% - 40px)' }}
                                 onMouseEnter={() => {
                                   isPointerOverPreviewRef.current = true;
                                 }}
@@ -1703,13 +1713,15 @@ export default function Project() {
                                   isPointerOverPreviewRef.current = false;
                                 }}
                               >
-                                <iframe
-                                  ref={iframeRef}
-                                  id="preview-iframe"
-                                  src={devServerUrlWithAuth || devServerUrl}
-                                  className="w-full h-full"
-                                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                                />
+                                <div className={viewportMode === 'mobile' ? 'w-[375px] h-[667px] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden flex-shrink-0 bg-white' : 'w-full h-full'}>
+                                  <iframe
+                                    ref={iframeRef}
+                                    id="preview-iframe"
+                                    src={devServerUrlWithAuth || devServerUrl}
+                                    className="w-full h-full"
+                                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                                  />
+                                </div>
                               </div>
                             </>
                           )
@@ -1861,10 +1873,18 @@ export default function Project() {
                                 >
                                   <ArrowsClockwise size={14} />
                                 </button>
+                                <button
+                                  onClick={() => setViewportMode(viewportMode === 'desktop' ? 'mobile' : 'desktop')}
+                                  className={`btn btn-icon btn-sm ${viewportMode === 'mobile' ? 'btn-active text-[var(--primary)]' : ''}`}
+                                  title={viewportMode === 'desktop' ? 'Switch to mobile view' : 'Switch to desktop view'}
+                                >
+                                  {viewportMode === 'desktop' ? <DeviceMobile size={14} /> : <Monitor size={14} />}
+                                </button>
                               </div>
                             </div>
                             <div
-                              className="w-full h-[calc(100%-40px)] bg-white"
+                              className={`flex-1 relative overflow-auto ${viewportMode === 'mobile' ? 'bg-[var(--bg)] flex items-center justify-center' : 'bg-white'}`}
+                              style={{ height: 'calc(100% - 40px)' }}
                               onMouseEnter={() => {
                                 isPointerOverPreviewRef.current = true;
                               }}
@@ -1872,13 +1892,15 @@ export default function Project() {
                                 isPointerOverPreviewRef.current = false;
                               }}
                             >
-                              <iframe
-                                ref={iframeRef}
-                                id="preview-iframe"
-                                src={devServerUrlWithAuth || devServerUrl}
-                                className="w-full h-full"
-                                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                              <div className={viewportMode === 'mobile' ? 'w-[375px] h-[667px] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden flex-shrink-0 bg-white' : 'w-full h-full'}>
+                                <iframe
+                                  ref={iframeRef}
+                                  id="preview-iframe"
+                                  src={devServerUrlWithAuth || devServerUrl}
+                                  className="w-full h-full"
+                                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                               />
+                              </div>
                             </div>
                           </>
                         )

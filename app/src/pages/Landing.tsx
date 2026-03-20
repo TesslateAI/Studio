@@ -551,7 +551,7 @@ export default function Landing() {
   const handleGetStarted = () => {
     const token = localStorage.getItem('token');
     if (token) {
-      navigate('/dashboard');
+      navigate('/chat');
     } else {
       navigate('/login');
     }
