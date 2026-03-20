@@ -45,4 +45,4 @@ images:
 labels:
   - pairs:
       environment: minikube
-    includeSelectors: true
+    includeSelectors: false
