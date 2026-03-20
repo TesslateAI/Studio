@@ -46,7 +46,7 @@ class HubClient:
 
         async with HubClient("tesslate-volume-hub.kube-system.svc:9750") as client:
             vol_id = await client.create_volume(template="nextjs")
-            node = await client.ensure_cached(vol_id, hint_node="node-1")
+            node = await client.ensure_cached(vol_id, candidate_nodes=["node-1"])
     """
 
     def __init__(self, address: str) -> None:
@@ -130,19 +130,23 @@ class HubClient:
     async def ensure_cached(
         self,
         volume_id: str,
-        hint_node: str | None = None,
+        candidate_nodes: list[str] | None = None,
         *,
         timeout: float = 120.0,
     ) -> str:
-        """Ensure volume is cached on a compute node.
+        """Ensure volume is cached on a live, schedulable compute node.
 
-        Fast path: *hint_node* already has it (~0 ms).
-        Slow path: Hub transfers the volume to a node (~1-2 s).
+        The Hub validates candidates against its live node set and never
+        returns a dead node. If the volume is already cached on a live
+        candidate, it returns immediately (fast path). Otherwise it
+        peer-transfers or restores from CAS onto the best candidate.
 
         Args:
             volume_id: Volume to cache.
-            hint_node: Preferred node name.  If the volume is already
-                       cached there, no transfer happens.
+            candidate_nodes: K8s nodes the caller considers schedulable.
+                The Hub intersects this with its own live set and picks
+                the best one. Pass ``None`` to let the Hub choose from
+                all live nodes.
             timeout: gRPC deadline in seconds (default 120 s to cover
                      network transfers).
 
@@ -150,15 +154,15 @@ class HubClient:
             The node name where the volume is now cached.
         """
         request: dict = {"volume_id": volume_id}
-        if hint_node is not None:
-            request["hint_node"] = hint_node
+        if candidate_nodes is not None:
+            request["candidate_nodes"] = candidate_nodes
         resp = await self._call("EnsureCached", request, timeout=timeout)
         node_name = resp["node_name"]
         logger.info(
-            "EnsureCached succeeded: volume_id=%s node=%s (hint=%s)",
+            "EnsureCached succeeded: volume_id=%s node=%s (candidates=%s)",
             volume_id,
             node_name,
-            hint_node,
+            candidate_nodes,
         )
         return node_name
 

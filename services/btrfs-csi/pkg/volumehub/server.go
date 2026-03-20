@@ -35,6 +35,11 @@ type NodeClientFactory func(nodeName string) (*nodeops.Client, error)
 // Returns empty string if the node is unknown.
 type NodeAddrResolver func(nodeName string) string
 
+// LiveNodesFn returns the names of all K8s nodes that currently have a CSI
+// pod running (i.e. they appear in the Endpoints watch). Used by EnsureCached
+// to filter out stale registry entries for terminated nodes.
+type LiveNodesFn func() []string
+
 // Server implements the VolumeHub gRPC service as a storageless orchestrator.
 // It holds zero storage, zero btrfs — nodes handle all data. The Hub only
 // coordinates: volume→owner_node mapping, template→cached_nodes, node→capacity.
@@ -43,16 +48,18 @@ type Server struct {
 	cas         *cas.Store // for manifest reads (ListSnapshots, EnsureCached)
 	nodeClient  NodeClientFactory
 	resolveAddr NodeAddrResolver
+	liveNodes   LiveNodesFn
 	srv         *grpc.Server
 }
 
 // NewServer creates a VolumeHub Server.
-func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClientFactory, resolveAddr NodeAddrResolver) *Server {
+func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClientFactory, resolveAddr NodeAddrResolver, liveNodes LiveNodesFn) *Server {
 	return &Server{
 		registry:    registry,
 		cas:         casStore,
 		nodeClient:  nodeClient,
 		resolveAddr: resolveAddr,
+		liveNodes:   liveNodes,
 	}
 }
 
@@ -152,8 +159,9 @@ type (
 	}
 
 	EnsureCachedRequest struct {
-		VolumeID string `json:"volume_id"`
-		HintNode string `json:"hint_node,omitempty"`
+		VolumeID       string   `json:"volume_id"`
+		CandidateNodes []string `json:"candidate_nodes,omitempty"`
+		HintNode       string   `json:"hint_node,omitempty"` // deprecated, backward compat
 	}
 	EnsureCachedResponse struct {
 		NodeName string `json:"node_name"`
@@ -276,55 +284,87 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
-	// If hint_node already has it cached, return immediately.
-	if req.HintNode != "" && s.registry.IsCached(req.VolumeID, req.HintNode) {
-		return &EnsureCachedResponse{NodeName: req.HintNode}, nil
+	// Backward compat: treat deprecated hint_node as single-element candidate list.
+	candidates := req.CandidateNodes
+	if len(candidates) == 0 && req.HintNode != "" {
+		candidates = []string{req.HintNode}
 	}
 
-	// Check if any node already has it cached.
-	cachedNodes := s.registry.GetCachedNodes(req.VolumeID)
-	if len(cachedNodes) > 0 {
-		for _, n := range cachedNodes {
-			if n == req.HintNode {
-				return &EnsureCachedResponse{NodeName: n}, nil
+	// 1. Get live nodes from the K8s watch.
+	liveSet := make(map[string]struct{})
+	if s.liveNodes != nil {
+		for _, n := range s.liveNodes() {
+			liveSet[n] = struct{}{}
+		}
+	}
+
+	// 2. Build candidate set = intersection(caller candidates, live nodes).
+	//    If no candidates provided, all live nodes are candidates.
+	candidateSet := make(map[string]struct{})
+	if len(candidates) > 0 {
+		for _, c := range candidates {
+			if _, alive := liveSet[c]; alive {
+				candidateSet[c] = struct{}{}
 			}
 		}
-		return &EnsureCachedResponse{NodeName: cachedNodes[0]}, nil
-	}
-
-	// Volume not cached anywhere — need to transfer.
-	ownerNode := s.registry.GetOwner(req.VolumeID)
-
-	targetNode := req.HintNode
-	if targetNode == "" {
-		registeredNodes := s.registry.RegisteredNodes()
-		if len(registeredNodes) == 0 {
-			return nil, status.Error(codes.FailedPrecondition, "no compute nodes registered")
+		if len(candidateSet) == 0 {
+			return nil, status.Errorf(codes.FailedPrecondition, "all candidate nodes are dead or unknown (candidates=%v)", candidates)
 		}
-		targetNode = registeredNodes[0]
+	} else {
+		// No candidates specified — all live nodes are candidates.
+		for n := range liveSet {
+			candidateSet[n] = struct{}{}
+		}
+		if len(candidateSet) == 0 {
+			return nil, status.Error(codes.FailedPrecondition, "no live compute nodes available")
+		}
 	}
 
-	if ownerNode != "" && ownerNode != targetNode {
-		// Peer transfer: tell owner node to send volume to target.
-		ownerClient, err := s.nodeClient(ownerNode)
-		if err != nil {
-			klog.Warningf("EnsureCached: owner %s unavailable (%v), trying CAS restore", ownerNode, err)
+	// 3. Get cached nodes from registry, filter to live-only.
+	//    Proactively clean stale entries.
+	cachedNodes := s.registry.GetCachedNodes(req.VolumeID)
+	var liveCached []string
+	for _, n := range cachedNodes {
+		if _, alive := liveSet[n]; alive {
+			liveCached = append(liveCached, n)
 		} else {
-			defer ownerClient.Close()
+			klog.Infof("EnsureCached: removing stale cache entry for volume %s on dead node %s", req.VolumeID, n)
+			s.registry.RemoveCached(req.VolumeID, n)
+		}
+	}
+
+	// 4. Fast path: if any live cached node is in the candidate set, return it.
+	for _, n := range liveCached {
+		if _, ok := candidateSet[n]; ok {
+			klog.V(2).Infof("EnsureCached: fast path — volume %s already cached on candidate %s", req.VolumeID, n)
+			return &EnsureCachedResponse{NodeName: n}, nil
+		}
+	}
+
+	targetNode := s.pickBestCandidate(candidateSet)
+
+	// 5. Volume cached on a live non-candidate node → peer transfer.
+	if len(liveCached) > 0 {
+		sourceNode := liveCached[0]
+		sourceClient, err := s.nodeClient(sourceNode)
+		if err != nil {
+			klog.Warningf("EnsureCached: source %s unavailable (%v), trying CAS restore", sourceNode, err)
+		} else {
+			defer sourceClient.Close()
 			targetAddr := s.resolveAddr(targetNode)
 			if targetAddr == "" {
 				klog.Warningf("EnsureCached: cannot resolve address for target %s, trying CAS restore", targetNode)
-			} else if err := ownerClient.SendVolumeTo(ctx, req.VolumeID, targetAddr); err != nil {
-				klog.Warningf("EnsureCached: peer transfer from %s to %s failed: %v, trying CAS restore", ownerNode, targetNode, err)
+			} else if err := sourceClient.SendVolumeTo(ctx, req.VolumeID, targetAddr); err != nil {
+				klog.Warningf("EnsureCached: peer transfer from %s to %s failed: %v, trying CAS restore", sourceNode, targetNode, err)
 			} else {
 				s.registry.SetCached(req.VolumeID, targetNode)
-				klog.Infof("EnsureCached: peer-transferred volume %s from %s to %s", req.VolumeID, ownerNode, targetNode)
+				klog.Infof("EnsureCached: peer-transferred volume %s from %s to %s", req.VolumeID, sourceNode, targetNode)
 				return &EnsureCachedResponse{NodeName: targetNode}, nil
 			}
 		}
 	}
 
-	// Fallback: restore from CAS on target node.
+	// 6. No live cache (or peer transfer failed) → restore from CAS.
 	targetClient, err := s.nodeClient(targetNode)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "connect to target %s: %v", targetNode, err)
@@ -338,6 +378,21 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 	s.registry.SetCached(req.VolumeID, targetNode)
 	klog.Infof("EnsureCached: restored volume %s from CAS on %s", req.VolumeID, targetNode)
 	return &EnsureCachedResponse{NodeName: targetNode}, nil
+}
+
+// pickBestCandidate returns the candidate with the fewest cached volumes
+// (least-loaded). Deterministic tie-break by lexicographic order.
+func (s *Server) pickBestCandidate(candidateSet map[string]struct{}) string {
+	var best string
+	bestCount := -1
+	for n := range candidateSet {
+		count := s.registry.NodeVolumeCount(n)
+		if bestCount < 0 || count < bestCount || (count == bestCount && n < best) {
+			best = n
+			bestCount = count
+		}
+	}
+	return best
 }
 
 func (s *Server) handleTriggerSync(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -589,6 +644,16 @@ func (s *Server) CreateVolumeOnNode(ctx context.Context, volumeID, template, hin
 
 	if err := client.TrackVolume(ctx, volumeID, template, templateHash); err != nil {
 		klog.Warningf("CreateVolumeOnNode: track %s on %s: %v", volumeID, targetNode, err)
+	}
+
+	// Write-through CAS sync: ensure data is persisted to object storage
+	// before returning. If the node dies before this completes, we'd lose
+	// the volume data — so treat sync failure as a creation failure.
+	if err := client.SyncVolume(ctx, volumeID); err != nil {
+		klog.Errorf("CreateVolumeOnNode: initial CAS sync failed for %s on %s: %v — rolling back", volumeID, targetNode, err)
+		_ = client.UntrackVolume(ctx, volumeID)
+		_ = client.DeleteSubvolume(ctx, "volumes/"+volumeID)
+		return "", fmt.Errorf("initial CAS sync failed (volume rolled back): %w", err)
 	}
 
 	s.registry.RegisterVolume(volumeID)

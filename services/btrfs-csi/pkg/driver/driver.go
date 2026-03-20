@@ -331,7 +331,7 @@ func (d *Driver) runHub(ctx context.Context) error {
 	}
 
 	// Start VolumeHub gRPC server with CAS store for manifest reads.
-	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory, resolver.Resolve)
+	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory, resolver.Resolve, resolver.NodeNames)
 	d.hubServer = hubSrv // store for CSI controller access
 
 	// Watch K8s Endpoints for CSI node pod changes (~1s latency vs 30s polling).

@@ -1,0 +1,12 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tesslate-btrfs-csi-node
+  namespace: kube-system
+  labels:
+    app: tesslate-btrfs-csi-node
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: tesslate-btrfs-csi-node

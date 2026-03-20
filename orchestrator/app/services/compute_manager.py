@@ -93,49 +93,23 @@ class ComputeManager:
 
         return get_settings().compute_pool_namespace
 
-    async def _is_node_schedulable(self, node_name: str) -> bool:
-        """Check if a K8s node accepts new pods (Ready + not cordoned)."""
-        v1 = self._api()
-        try:
-            node = await asyncio.to_thread(v1.read_node, node_name)
-        except Exception:
-            logger.debug("[COMPUTE] Cannot read node %s, assuming unschedulable", node_name)
-            return False
-
-        # Cordoned nodes have spec.unschedulable = True
-        if node.spec and node.spec.unschedulable:
-            return False
-
-        # Check Ready condition
-        for cond in node.status.conditions or []:
-            if cond.type == "Ready":
-                return cond.status == "True"
-
-        return False
-
-    async def _find_schedulable_node(self, exclude: str = "") -> str | None:
-        """Return the name of a schedulable node, excluding the given one."""
+    async def _get_schedulable_nodes(self) -> list[str]:
+        """Return names of all K8s nodes that are Ready and not cordoned."""
         v1 = self._api()
         try:
             node_list = await asyncio.to_thread(v1.list_node)
         except Exception:
-            return None
-
+            logger.warning("[COMPUTE] Failed to list K8s nodes")
+            return []
+        result = []
         for node in node_list.items or []:
-            name = node.metadata.name
-            if name == exclude:
-                continue
             if node.spec and node.spec.unschedulable:
                 continue
-            # Check Ready condition
-            ready = False
             for cond in node.status.conditions or []:
                 if cond.type == "Ready" and cond.status == "True":
-                    ready = True
+                    result.append(node.metadata.name)
                     break
-            if ready:
-                return name
-        return None
+        return result
 
     # ------------------------------------------------------------------
     # Compute namespace lifecycle (lazy init)
@@ -861,24 +835,14 @@ class ComputeManager:
                         {"phase": phase, "message": message, "progress": progress}
                     )
 
-        # 1. Ensure volume is cached on a schedulable compute node
+        # 1. Ensure volume is cached on a schedulable compute node.
+        #    The Hub is authoritative for node liveness — we just tell it
+        #    which K8s nodes are schedulable and it picks the best one.
         vm = get_volume_manager()
-        node_name = await vm.ensure_cached(volume_id, hint_node=project.cache_node)
-
-        # Verify the node is schedulable. If cordoned/NotReady, find a
-        # schedulable node and ask the Hub to place the volume there
-        # (triggers S3 restore or peer transfer).
-        if node_name and not await self._is_node_schedulable(node_name):
-            logger.warning(
-                "[COMPUTE-T2] Node %s is unschedulable, finding alternative",
-                node_name,
-            )
-            alt_node = await self._find_schedulable_node(exclude=node_name)
-            if alt_node:
-                node_name = await vm.ensure_cached(volume_id, hint_node=alt_node)
-            else:
-                logger.error("[COMPUTE-T2] No schedulable nodes available")
-                raise RuntimeError("No schedulable compute nodes available")
+        candidate_nodes = await self._get_schedulable_nodes()
+        if not candidate_nodes:
+            raise RuntimeError("No schedulable compute nodes available")
+        node_name = await vm.ensure_cached(volume_id, candidate_nodes=candidate_nodes)
 
         if node_name != project.cache_node:
             project.cache_node = node_name

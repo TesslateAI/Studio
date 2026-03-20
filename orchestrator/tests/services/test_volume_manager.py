@@ -162,22 +162,24 @@ class TestDeleteVolume:
 class TestEnsureCached:
     """VolumeManager.ensure_cached()."""
 
-    async def test_with_hint_calls_hub(self, vm, mock_hub):
-        result = await vm.ensure_cached("vol-abc123def456", hint_node="node-2")
+    async def test_with_candidates_calls_hub(self, vm, mock_hub):
+        result = await vm.ensure_cached("vol-abc123def456", candidate_nodes=["node-2"])
 
         assert result == "node-1"
-        mock_hub.ensure_cached.assert_awaited_once_with("vol-abc123def456", hint_node="node-2")
+        mock_hub.ensure_cached.assert_awaited_once_with(
+            "vol-abc123def456", candidate_nodes=["node-2"]
+        )
 
-    async def test_without_hint_calls_hub(self, vm, mock_hub):
+    async def test_without_candidates_calls_hub(self, vm, mock_hub):
         result = await vm.ensure_cached("vol-abc123def456")
 
         assert result == "node-1"
-        mock_hub.ensure_cached.assert_awaited_once_with("vol-abc123def456", hint_node=None)
+        mock_hub.ensure_cached.assert_awaited_once_with("vol-abc123def456", candidate_nodes=None)
 
     async def test_returns_node_name_from_hub(self, vm, mock_hub):
         mock_hub.ensure_cached.return_value = "node-7"
 
-        result = await vm.ensure_cached("vol-abc123def456", hint_node="node-3")
+        result = await vm.ensure_cached("vol-abc123def456", candidate_nodes=["node-3"])
 
         assert result == "node-7"
 

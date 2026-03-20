@@ -63,18 +63,18 @@ class VolumeManager:
         await self._hub.delete_volume(volume_id)
         logger.info("[VOLUME] Deleted volume %s", volume_id)
 
-    async def ensure_cached(self, volume_id: str, hint_node: str | None = None) -> str:
-        """Ensure volume is cached on a compute node. Returns node_name.
+    async def ensure_cached(self, volume_id: str, candidate_nodes: list[str] | None = None) -> str:
+        """Ensure volume is cached on a live, schedulable compute node.
 
-        Fast path: hint_node already has it (~0ms).
-        Else: Hub coordinates peer transfer or S3 restore (~1-2s).
+        The Hub validates candidates against its live node set, picks the
+        best one, and never returns a dead node.
         """
-        node_name = await self._hub.ensure_cached(volume_id, hint_node=hint_node)
+        node_name = await self._hub.ensure_cached(volume_id, candidate_nodes=candidate_nodes)
         logger.info(
-            "[VOLUME] Volume %s cached on node %s (hint=%s)",
+            "[VOLUME] Volume %s cached on node %s (candidates=%s)",
             volume_id,
             node_name,
-            hint_node,
+            candidate_nodes,
         )
         return node_name
 

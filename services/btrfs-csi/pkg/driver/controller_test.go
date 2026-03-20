@@ -1026,7 +1026,7 @@ func newTestHubControllerServer() (*ControllerServer, *volumehub.NodeRegistry) {
 	registry := volumehub.NewNodeRegistry()
 	hub := volumehub.NewServer(registry, nil, func(nodeName string) (*nodeops.Client, error) {
 		return nil, fmt.Errorf("no test node %q", nodeName)
-	}, func(nodeName string) string { return "" })
+	}, func(nodeName string) string { return "" }, func() []string { return registry.RegisteredNodes() })
 
 	d := &Driver{
 		name:   "btrfs.csi.tesslate.io",

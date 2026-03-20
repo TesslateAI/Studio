@@ -279,6 +279,18 @@ func (r *NodeRegistry) LeastLoadedNode() string {
 	return best
 }
 
+// NodeVolumeCount returns the number of volumes cached on the given node.
+// Returns 0 for unknown nodes.
+func (r *NodeRegistry) NodeVolumeCount(nodeName string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if ne, ok := r.nodes[nodeName]; ok {
+		return len(ne.volumes)
+	}
+	return 0
+}
+
 // RegisterNode adds a node to the registry. Idempotent.
 func (r *NodeRegistry) RegisterNode(nodeName string) {
 	r.mu.Lock()
