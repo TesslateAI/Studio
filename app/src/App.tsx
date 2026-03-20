@@ -28,6 +28,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import AuthCallback from './pages/AuthCallback';
 import OAuthLoginCallback from './pages/OAuthLoginCallback';
 import Logout from './pages/Logout';
+import ImportRedirect from './pages/ImportRedirect';
 import Referrals from './pages/Referrals';
 import { SettingsLayout } from './layouts/SettingsLayout';
 import { MarketplaceLayout } from './layouts/MarketplaceLayout';
@@ -208,6 +209,7 @@ function AppContent() {
             </PublicOnlyRoute>
           }
         />
+        <Route path="/import" element={<ImportRedirect />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/logout" element={<Logout />} />

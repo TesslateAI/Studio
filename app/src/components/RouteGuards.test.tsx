@@ -67,6 +67,7 @@ const ROUTE_CONFIG: RouteSpec[] = [
   // --- Public pages (no guard) ---
   { path: '/', guard: 'public', label: 'Landing page' },
   { path: '/landing-old', guard: 'public', label: 'Old landing page' },
+  { path: '/import', guard: 'public', label: 'Import redirect (deep link)' },
   { path: '/forgot-password', guard: 'public', label: 'Forgot password' },
   { path: '/reset-password', guard: 'public', label: 'Reset password' },
   { path: '/logout', guard: 'public', label: 'Logout' },
@@ -392,6 +393,6 @@ describe('Route config sanity', () => {
   it('covers a minimum number of routes (catch missing entries)', () => {
     // Update this count when adding routes. If it fails, you added a route
     // to App.tsx but forgot to add it here.
-    expect(ROUTE_CONFIG.length).toBeGreaterThanOrEqual(27);
+    expect(ROUTE_CONFIG.length).toBeGreaterThanOrEqual(28);
   });
 });

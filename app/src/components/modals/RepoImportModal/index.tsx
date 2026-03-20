@@ -20,9 +20,10 @@ interface RepoImportModalProps {
   projectId?: number;
   onSuccess?: () => void;
   onCreateProject?: (provider: GitProvider, repoUrl: string, branch: string, projectName: string) => Promise<void>;
+  initialRepoUrl?: string;
 }
 
-export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreateProject }: RepoImportModalProps) {
+export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreateProject, initialRepoUrl }: RepoImportModalProps) {
   const [repoUrl, setRepoUrl] = useState('');
   const [projectName, setProjectName] = useState('');
   const [isImporting, setIsImporting] = useState(false);
@@ -37,6 +38,13 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
 
   const { state: resolver, resolveUrl, selectRepo, selectBranch, retryAfterAuth, reset } =
     useRepoResolver(providerStatus);
+
+  // Pre-fill repo URL from deep link
+  useEffect(() => {
+    if (isOpen && initialRepoUrl && !repoUrl) {
+      setRepoUrl(initialRepoUrl);
+    }
+  }, [isOpen, initialRepoUrl, repoUrl]);
 
   // Load provider status on open
   useEffect(() => {
@@ -338,4 +346,3 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
   );
 }
 
-export default RepoImportModal;

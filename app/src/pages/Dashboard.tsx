@@ -71,6 +71,7 @@ export default function Dashboard() {
   const autoCreateTriggered = useRef(false);
   const [createBaseId, setCreateBaseId] = useState<string | undefined>();
   const [createBaseVersion, setCreateBaseVersion] = useState<string | undefined>();
+  const [importRepoUrl, setImportRepoUrl] = useState<string | undefined>();
 
   useEffect(() => {
     loadProjects();
@@ -88,6 +89,15 @@ export default function Dashboard() {
       setCreateBaseId(baseId);
       setCreateBaseVersion(baseVersion || undefined);
       setShowCreateDialog(true);
+      return;
+    }
+
+    const importRepo = searchParams.get('import_repo');
+    if (importRepo) {
+      autoCreateTriggered.current = true;
+      setSearchParams({}, { replace: true });
+      setImportRepoUrl(importRepo);
+      setShowImportDialog(true);
     }
   }, [searchParams]);
 
@@ -1204,7 +1214,11 @@ export default function Dashboard() {
       {/* Import from Repository Modal */}
       <RepoImportModal
         isOpen={showImportDialog}
-        onClose={() => setShowImportDialog(false)}
+        onClose={() => {
+          setShowImportDialog(false);
+          setImportRepoUrl(undefined);
+        }}
+        initialRepoUrl={importRepoUrl}
         onCreateProject={async (provider, repoUrl, branch, projectName) => {
           setIsCreating(true);
           const creatingToast = toast.loading(`Importing from ${provider}...`);
