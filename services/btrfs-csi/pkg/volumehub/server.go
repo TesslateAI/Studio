@@ -708,16 +708,21 @@ func (s *Server) Registry() *NodeRegistry {
 // ---------------------------------------------------------------------------
 
 // DiscoverNodes uses the NodeResolver to find CSI nodes via K8s Endpoints API
-// and registers them by their stable K8s node names.
+// and reconciles the registry: new nodes are registered, stale nodes (e.g.
+// scaled-down instances) are removed along with their volume/template refs.
 func (s *Server) DiscoverNodes(resolver *NodeResolver) error {
 	names := resolver.NodeNames()
 	if len(names) == 0 {
 		return fmt.Errorf("no CSI nodes found in endpoints")
 	}
-	for _, name := range names {
-		s.registry.RegisterNode(name)
+	added, removed := s.registry.ReconcileNodes(names)
+	if len(removed) > 0 {
+		klog.Infof("DiscoverNodes: removed %d stale nodes: %v", len(removed), removed)
 	}
-	klog.Infof("DiscoverNodes: registered %d CSI nodes", len(names))
+	if len(added) > 0 {
+		klog.Infof("DiscoverNodes: added %d new nodes: %v", len(added), added)
+	}
+	klog.Infof("DiscoverNodes: %d live CSI nodes", len(names))
 	return nil
 }
 

@@ -1,6 +1,7 @@
 package volumehub
 
 import (
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -289,6 +290,67 @@ func (r *NodeRegistry) RegisterNode(nodeName string) {
 			volumes: make(map[string]struct{}),
 		}
 	}
+}
+
+// UnregisterNode removes a node and cleans up all references to it:
+// volume cache associations, volume ownership, and template cache entries.
+func (r *NodeRegistry) UnregisterNode(nodeName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ne, ok := r.nodes[nodeName]
+	if !ok {
+		return
+	}
+
+	// Remove this node from all volume cache associations.
+	for volID := range ne.volumes {
+		if ve, exists := r.volumes[volID]; exists {
+			delete(ve.cachedNodes, nodeName)
+			// If this node was the owner, clear ownership.
+			if ve.ownerNode == nodeName {
+				ve.ownerNode = ""
+			}
+		}
+	}
+
+	// Remove this node from all template cache sets.
+	for tmpl, nodes := range r.templateNodes {
+		delete(nodes, nodeName)
+		if len(nodes) == 0 {
+			delete(r.templateNodes, tmpl)
+		}
+	}
+
+	delete(r.nodes, nodeName)
+}
+
+// ReconcileNodes keeps only the given set of node names in the registry.
+// Nodes not in liveNodes are unregistered; new nodes are registered.
+func (r *NodeRegistry) ReconcileNodes(liveNodes []string) (added, removed []string) {
+	live := make(map[string]struct{}, len(liveNodes))
+	for _, n := range liveNodes {
+		live[n] = struct{}{}
+	}
+
+	// Find stale nodes (lock is taken per-call inside Register/Unregister,
+	// so we snapshot the current list first).
+	current := r.RegisteredNodes()
+	for _, n := range current {
+		if _, ok := live[n]; !ok {
+			r.UnregisterNode(n)
+			removed = append(removed, n)
+		}
+	}
+
+	// Register any new nodes.
+	for _, n := range liveNodes {
+		if !slices.Contains(current, n) {
+			r.RegisterNode(n)
+			added = append(added, n)
+		}
+	}
+	return added, removed
 }
 
 // RegisterTemplate records that a template is cached on a given node.
