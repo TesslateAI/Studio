@@ -1,0 +1,13 @@
+# MinIO for Minikube — S3 simulation for local development
+# Not used on AWS (real S3 instead)
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - minio-namespace.yaml
+  - minio-pvc.yaml
+  - minio-deployment.yaml
+  - minio-service.yaml
+  - minio-init-job.yaml
+  - credentials.yaml

@@ -1,0 +1,14 @@
+# VolumeSnapshot CRDs + Snapshot Controller (vendored from kubernetes-csi/external-snapshotter v8.2.0)
+# These are cluster-scoped prerequisites for any CSI snapshot driver.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # CRDs
+  - volumesnapshotclasses.yaml
+  - volumesnapshotcontents.yaml
+  - volumesnapshots.yaml
+  # Snapshot controller (runs in kube-system)
+  - rbac-snapshot-controller.yaml
+  - setup-snapshot-controller.yaml

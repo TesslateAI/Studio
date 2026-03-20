@@ -194,18 +194,10 @@ log_success "Storage layer ready"
 
 log_info "Deploying MinIO for S3 simulation..."
 
-# Apply MinIO manifests
-kubectl apply -f "$K8S_DIR/base/minio/minio-namespace.yaml" 2>/dev/null || true
-kubectl apply -f "$K8S_DIR/overlays/minikube/secrets/minio-credentials.yaml"
-kubectl apply -f "$K8S_DIR/base/minio/minio-pvc.yaml"
-kubectl apply -f "$K8S_DIR/base/minio/minio-deployment.yaml"
-kubectl apply -f "$K8S_DIR/base/minio/minio-service.yaml"
+kubectl apply -k "$K8S_DIR/overlays/minikube/minio"
 
 # Wait for MinIO to be ready
 wait_for_pods "minio-system" 120
-
-# Create bucket initialization job
-kubectl apply -f "$K8S_DIR/base/minio/minio-init-job.yaml"
 
 log_success "MinIO deployed"
 

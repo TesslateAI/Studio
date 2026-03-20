@@ -8,7 +8,7 @@
 #   down             Delete minikube cluster entirely
 #   restart [svc]    Restart pod(s) for a service
 #   rebuild <svc>    Rebuild image, load into minikube, restart pod
-#   rebuild --all    Rebuild all images (backend, frontend, devserver)
+#   rebuild --all    Rebuild all images (backend, frontend, devserver, btrfs-csi)
 #   logs [svc]       Tail pod logs for a service
 #   migrate          Run Alembic database migrations
 #   status           Show cluster state and URLs
@@ -37,6 +37,10 @@ header()  { echo -e "\n${BOLD}$*${NC}"; }
 
 PROFILE="tesslate"
 NAMESPACE="tesslate"
+
+# Configurable resource limits (override via env vars)
+MINIKUBE_CPUS="${MINIKUBE_CPUS:-4}"
+MINIKUBE_MEMORY="${MINIKUBE_MEMORY:-8192}"
 
 # Service short name -> K8s deployment name
 resolve_k8s() {
@@ -70,6 +74,7 @@ image_name() {
     backend)   echo "tesslate-backend" ;;
     frontend)  echo "tesslate-frontend" ;;
     devserver) echo "tesslate-devserver" ;;
+    btrfs-csi) echo "tesslate-btrfs-csi" ;;
     *) echo "" ;;
   esac
 }
@@ -79,6 +84,7 @@ image_dockerfile() {
     backend)   echo "orchestrator/Dockerfile" ;;
     frontend)  echo "app/Dockerfile.prod" ;;
     devserver) echo "orchestrator/Dockerfile.devserver" ;;
+    btrfs-csi) echo "services/btrfs-csi/Dockerfile" ;;
   esac
 }
 
@@ -87,6 +93,7 @@ image_context() {
     backend)   echo "orchestrator" ;;
     frontend)  echo "app" ;;
     devserver) echo "orchestrator" ;;
+    btrfs-csi) echo "services/btrfs-csi" ;;
   esac
 }
 
@@ -188,8 +195,8 @@ cmd_start() {
     minikube start \
       -p "$PROFILE" \
       --driver=docker \
-      --cpus=2 \
-      --memory=4096 \
+      --cpus="$MINIKUBE_CPUS" \
+      --memory="$MINIKUBE_MEMORY" \
       --disk-size=40g \
       --addons ingress \
       --addons storage-provisioner \
@@ -197,8 +204,8 @@ cmd_start() {
     success "Minikube cluster started"
   fi
 
-  # Ensure images are loaded
-  for svc in backend frontend devserver; do
+  # Ensure all images are loaded (app + infrastructure)
+  for svc in backend frontend devserver btrfs-csi; do
     local img
     img="$(image_name "$svc"):latest"
     if ! minikube -p "$PROFILE" ssh -- docker image inspect "$img" &>/dev/null 2>&1; then
@@ -221,11 +228,49 @@ cmd_start() {
     fi
   done
 
-  # Apply manifests
-  info "Applying Kubernetes manifests..."
+  # MinIO credentials live alongside the minio overlay
+  local minio_dir="$PROJECT_ROOT/k8s/overlays/minikube/minio"
+  if [[ ! -f "$minio_dir/credentials.yaml" ]]; then
+    if [[ -f "$minio_dir/credentials.example.yaml" ]]; then
+      cp "$minio_dir/credentials.example.yaml" "$minio_dir/credentials.yaml"
+      warn "Created minio credentials.yaml from example. Edit k8s/overlays/minikube/minio/credentials.yaml with your values."
+    else
+      error "Missing $minio_dir/credentials.yaml and no example found."
+      exit 1
+    fi
+  fi
+
+  # ── Deploy manifests in dependency order ──────────────────────────────
+  # Each layer is a standalone kustomization — no inline YAML or patching.
+
+  # 1. VolumeSnapshot CRDs + controller (cluster-scoped prereq for CSI)
+  header "Applying VolumeSnapshot CRDs"
+  kubectl apply -k k8s/overlays/minikube/snapshot-crds --server-side 2>/dev/null \
+    || kubectl apply -k k8s/overlays/minikube/snapshot-crds
+
+  # 2. btrfs-CSI driver + Volume Hub (kube-system namespace)
+  header "Applying btrfs-CSI + Volume Hub"
+  kubectl apply -k services/btrfs-csi/overlays/minikube
+  info "Waiting for Volume Hub..."
+  kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+  info "Waiting for CSI node..."
+  kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
+
+  # 3. MinIO (minio-system namespace — S3 simulation for local dev)
+  header "Applying MinIO"
+  kubectl apply -k k8s/overlays/minikube/minio
+
+  # 4. Compute pool namespace + isolation (tesslate-compute-pool)
+  header "Applying Compute Pool"
+  kubectl apply -k k8s/base/compute-pool
+
+  # 5. Main application (tesslate namespace)
+  header "Applying Tesslate application"
   kubectl apply -k k8s/overlays/minikube
 
-  # Wait for critical deployments
+  # ── Wait for critical deployments ─────────────────────────────────────
+  header "Waiting for services"
+  kubectl rollout status deployment/minio -n minio-system --timeout=120s
   wait_for_rollout "postgres" 120
   wait_for_rollout "tesslate-backend" 180
   wait_for_rollout "tesslate-frontend" 120
@@ -296,26 +341,30 @@ cmd_rebuild() {
   local target="${1:-}"
 
   if [[ "$target" == "--all" ]]; then
-    for svc in backend frontend devserver; do
+    for svc in backend frontend devserver btrfs-csi; do
       rebuild_image "$svc"
     done
     info "Restarting all pods..."
     kubectl delete pod -n "$NAMESPACE" --all
+    kubectl delete pod -n kube-system -l app=tesslate-volume-hub
+    kubectl delete pod -n kube-system -l app=tesslate-btrfs-csi-node
     wait_for_rollout "tesslate-backend" 180
     wait_for_rollout "tesslate-frontend" 120
+    kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+    kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
     success "Full rebuild complete"
     return
   fi
 
   if [[ -z "$target" ]]; then
-    error "Usage: minikube.sh rebuild <backend|frontend|devserver|--all>"
+    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|--all>"
     exit 1
   fi
 
   local img
   img=$(image_name "$target")
   if [[ -z "$img" ]]; then
-    error "No image build config for '$target'. Use: backend, frontend, devserver, --all"
+    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, --all"
     exit 1
   fi
 
@@ -324,6 +373,12 @@ cmd_rebuild() {
   # Restart relevant pods
   if [[ "$target" == "devserver" ]]; then
     success "Devserver image rebuilt and loaded (no pods to restart)"
+  elif [[ "$target" == "btrfs-csi" ]]; then
+    kubectl delete pod -n kube-system -l app=tesslate-volume-hub
+    kubectl delete pod -n kube-system -l app=tesslate-btrfs-csi-node
+    kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+    kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
+    success "btrfs-csi pods restarted"
   else
     local label
     label=$(resolve_label "$target")
@@ -410,7 +465,7 @@ _usage() {
   echo "  stop             Stop cluster (preserves state)"
   echo "  down             Delete cluster entirely"
   echo "  restart [svc]    Restart pod(s) for a service"
-  echo "  rebuild <svc>    Rebuild image, load, restart (backend|frontend|devserver|--all)"
+  echo "  rebuild <svc>    Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|--all)"
   echo "  logs [svc]       Tail pod logs (default: backend)"
   echo "  migrate          Run Alembic migrations"
   echo "  status           Show cluster state and URLs"
@@ -418,7 +473,7 @@ _usage() {
   echo "  tunnel           Start minikube tunnel"
   echo "  reset            Full teardown + rebuild from scratch"
   echo ""
-  echo "Services: backend, frontend, worker, postgres, redis, devserver"
+  echo "Services: backend, frontend, worker, postgres, redis, devserver, btrfs-csi"
 }
 
 main() {

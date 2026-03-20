@@ -1,0 +1,10 @@
+# Compute Pool - Isolated namespace for ephemeral user project containers
+# Namespace: tesslate-compute-pool
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - network-policy.yaml
+  - resource-quota.yaml
