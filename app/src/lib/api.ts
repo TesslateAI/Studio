@@ -787,6 +787,33 @@ export const chatApi = {
     const response = await api.delete(`/api/chat/${chatId}`);
     return response.data;
   },
+
+  // Debug: List available tools (admin only)
+  debugListTools: async (): Promise<
+    Array<{
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+      category: string;
+    }>
+  > => {
+    const response = await api.get('/api/chat/debug/tools');
+    return response.data;
+  },
+
+  // Debug: Execute a tool directly (admin only)
+  debugExecuteTool: async (
+    projectId: number | string,
+    toolName: string,
+    parameters: Record<string, unknown>
+  ): Promise<{ success: boolean; tool: string; result?: unknown; error?: string }> => {
+    const response = await api.post('/api/chat/debug/tool-execute', {
+      project_id: projectId,
+      tool_name: toolName,
+      parameters,
+    });
+    return response.data;
+  },
 };
 
 export const externalApi = {
@@ -1363,11 +1390,14 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  updateMcpServer: async (configId: string, data: {
-    credentials?: Record<string, string>;
-    enabled_capabilities?: string[];
-    is_active?: boolean;
-  }) => {
+  updateMcpServer: async (
+    configId: string,
+    data: {
+      credentials?: Record<string, string>;
+      enabled_capabilities?: string[];
+      is_active?: boolean;
+    }
+  ) => {
     const response = await api.patch(`/api/mcp/installed/${configId}`, data);
     return response.data;
   },

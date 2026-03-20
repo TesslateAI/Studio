@@ -5,11 +5,13 @@ import logging
 import os
 import re
 from datetime import UTC
+from typing import Any
 from uuid import UUID
 
 import aiofiles
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..agent import create_agent_from_db_model
 from ..agent.iterative_agent import _convert_uuids_to_strings
 from ..agent.models import create_model_adapter
+from ..agent.tools.registry import get_tool_registry
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
@@ -39,7 +42,7 @@ from ..services.agent_context import (
     _get_chat_history,
     _resolve_container_name,
 )
-from ..users import current_active_user
+from ..users import current_active_user, current_superuser
 from ..utils.resource_naming import get_project_path
 
 settings = get_settings()
@@ -127,6 +130,60 @@ async def create_chat(
         "created_at": db_chat.created_at.isoformat() if db_chat.created_at else None,
         "updated_at": db_chat.updated_at.isoformat() if db_chat.updated_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Admin debug endpoints — must be defined BEFORE /{project_id} routes
+# so FastAPI doesn't match "debug" as a project_id path parameter.
+# ---------------------------------------------------------------------------
+
+
+class ToolExecuteRequest(BaseModel):
+    project_id: str
+    tool_name: str
+    parameters: dict[str, Any]
+
+
+@router.get("/debug/tools")
+async def debug_list_tools(
+    _user: User = Depends(current_superuser),
+):
+    """List all registered agent tools (admin only)."""
+    registry = get_tool_registry()
+    tools = registry.list_tools()
+    return [
+        {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.parameters,
+            "category": t.category.value,
+        }
+        for t in tools
+    ]
+
+
+@router.post("/debug/tool-execute")
+async def debug_tool_execute(
+    body: ToolExecuteRequest,
+    user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+):
+    """Execute an agent tool directly against a project (admin only)."""
+    project = await db.get(Project, UUID(body.project_id))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    context = {
+        "project_id": project.id,
+        "project_slug": project.slug,
+        "user_id": str(user.id),
+        "edit_mode": "allow",
+        "db": db,
+    }
+
+    registry = get_tool_registry()
+    result = await registry.execute(body.tool_name, body.parameters, context)
+    return result
 
 
 @router.get("/{project_id}/sessions")

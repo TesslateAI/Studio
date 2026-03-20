@@ -7,7 +7,9 @@ import { ChatInput } from './ChatInput';
 import { type EditMode } from './EditModeStatus';
 import { ApprovalRequestCard } from './ApprovalRequestCard';
 import { ChatSessionPopover } from './ChatSessionPopover';
+import { ToolDebugModal } from './ToolDebugModal';
 import { createWebSocket, chatApi, marketplaceApi } from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
 import { type AgentMessageData, type DBMessage } from '../../types/agent';
@@ -101,6 +103,9 @@ export function ChatContainer({
   onEnvironmentStopped,
 }: ChatContainerProps) {
   const navigate = useNavigate();
+  const { hasRole } = useAuth();
+  const isAdmin = hasRole('admin');
+  const [showDebugModal, setShowDebugModal] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   useEffect(() => {
     onExpandedChange?.(isExpanded);
@@ -109,7 +114,9 @@ export function ChatContainer({
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
   const [toolCallsCollapsed, setToolCallsCollapsed] = useState(false);
-  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>(
+    []
+  );
   const [activeMcpServers, setActiveMcpServers] = useState<{ name: string; slug: string }[]>([]);
   const [editMode, setEditMode] = useState<EditMode>(() => {
     const stored = localStorage.getItem(`editMode:${projectId}`);
@@ -560,19 +567,29 @@ export function ChatContainer({
 
   // Fetch active MCP servers for current agent
   useEffect(() => {
-    if (!currentAgent.backendId) { setActiveMcpServers([]); return; }
+    if (!currentAgent.backendId) {
+      setActiveMcpServers([]);
+      return;
+    }
     let cancelled = false;
-    marketplaceApi.getAgentMcpServers(currentAgent.backendId.toString())
+    marketplaceApi
+      .getAgentMcpServers(currentAgent.backendId.toString())
       .then((data) => {
         if (!cancelled) {
-          setActiveMcpServers((data || []).map((s: { server_name?: string; server_slug?: string }) => ({
-            name: s.server_name || s.server_slug || 'MCP',
-            slug: s.server_slug || '',
-          })));
+          setActiveMcpServers(
+            (data || []).map((s: { server_name?: string; server_slug?: string }) => ({
+              name: s.server_name || s.server_slug || 'MCP',
+              slug: s.server_slug || '',
+            }))
+          );
         }
       })
-      .catch(() => { if (!cancelled) setActiveMcpServers([]); });
-    return () => { cancelled = true; };
+      .catch(() => {
+        if (!cancelled) setActiveMcpServers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [currentAgent.backendId]);
 
   // WebSocket connection with auto-reconnect and heartbeat
@@ -1644,7 +1661,6 @@ export function ChatContainer({
         `}
         style={containerStyle}
       >
-
         {/* Mobile header with close button - only shown when floating (not docked) */}
         {!isDocked && (
           <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
@@ -1717,15 +1733,19 @@ export function ChatContainer({
             {activeMcpServers.length > 0 && (
               <div className="flex items-center gap-1 mx-1">
                 {activeMcpServers.slice(0, 3).map((s) => (
-                  <span key={s.slug}
+                  <span
+                    key={s.slug}
                     className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                    title={s.name}>
+                    title={s.name}
+                  >
                     <Plug size={10} />
                     {s.slug}
                   </span>
                 ))}
                 {activeMcpServers.length > 3 && (
-                  <span className="text-[10px] text-[var(--text-muted)]">+{activeMcpServers.length - 3}</span>
+                  <span className="text-[10px] text-[var(--text-muted)]">
+                    +{activeMcpServers.length - 3}
+                  </span>
                 )}
               </div>
             )}
@@ -1961,9 +1981,20 @@ export function ChatContainer({
             toolCallsCollapsed={toolCallsCollapsed}
             onToggleToolCallsCollapsed={() => setToolCallsCollapsed((prev) => !prev)}
             availableSkills={availableSkills}
+            isAdmin={isAdmin}
+            onOpenDebugTools={() => setShowDebugModal(true)}
           />
         </div>
       </div>
+
+      {/* Admin-only debug modal */}
+      {isAdmin && (
+        <ToolDebugModal
+          isOpen={showDebugModal}
+          onClose={() => setShowDebugModal(false)}
+          projectId={projectId}
+        />
+      )}
     </>
   );
 }

@@ -9,6 +9,7 @@ import {
   ArrowsOutSimple,
   DownloadSimple,
   Trash,
+  Bug,
 } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
@@ -48,6 +49,8 @@ interface ChatInputProps {
   toolCallsCollapsed?: boolean;
   onToggleToolCallsCollapsed?: () => void;
   availableSkills?: { name: string; description: string }[];
+  isAdmin?: boolean;
+  onOpenDebugTools?: () => void;
 }
 
 export function ChatInput({
@@ -74,6 +77,8 @@ export function ChatInput({
   toolCallsCollapsed = false,
   onToggleToolCallsCollapsed,
   availableSkills = [],
+  isAdmin = false,
+  onOpenDebugTools,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -373,7 +378,9 @@ export function ChatInput({
                 }}
                 className="flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] cursor-pointer transition-colors"
               >
-                <span className="text-[var(--text)] font-mono text-xs font-semibold">{cmd.command}</span>
+                <span className="text-[var(--text)] font-mono text-xs font-semibold">
+                  {cmd.command}
+                </span>
                 <span className="text-[var(--text-muted)] text-xs">{cmd.description}</span>
                 {cmd.isSkill && (
                   <span className="ml-auto text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[var(--surface-hover)] text-[var(--text-muted)] border border-[var(--border)]">
@@ -442,6 +449,23 @@ export function ChatInput({
                 </button>
                 <div className="my-1 border-t border-[var(--border)]" />
               </>
+            )}
+
+            {/* Admin-only: Debug tools */}
+            {isAdmin && onOpenDebugTools && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenDebugTools();
+                  setShowSettings(false);
+                }}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
+              >
+                <span className="text-[var(--text)]/60">
+                  <Bug size={16} weight="bold" />
+                </span>
+                <span className="text-[var(--text)] text-sm">Debug Tools</span>
+              </button>
             )}
 
             {/* Always-visible items: download + clear */}
