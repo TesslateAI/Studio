@@ -33,16 +33,24 @@ func NewManager(btrfs *btrfs.Manager, casStore *cas.Store, poolPath string) *Man
 	}
 }
 
-// EnsureTemplate checks whether the template subvolume exists locally. If it
-// does not, the template is downloaded from the CAS store and received into
-// the pool.
+// EnsureTemplate checks whether the template subvolume exists locally and is
+// read-only. If missing, the template is downloaded from CAS. If present but
+// writable (e.g. created by a stale process), it is deleted and re-downloaded
+// so that btrfs send can use it as an incremental parent.
 func (m *Manager) EnsureTemplate(ctx context.Context, name string) error {
 	tmplPath := fmt.Sprintf("templates/%s", name)
 
-	// Fast path: already present.
+	// Fast path: present and read-only.
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
-		klog.V(4).Infof("Template %s already exists", name)
-		return nil
+		if ro, err := m.btrfs.IsReadOnly(ctx, tmplPath); err == nil && ro {
+			klog.V(4).Infof("Template %s already exists (ro=true)", name)
+			return nil
+		}
+		// Exists but writable — delete and re-download.
+		klog.Warningf("Template %s exists but is not read-only, replacing from CAS", name)
+		if err := m.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
+			return fmt.Errorf("delete writable template %q: %w", name, err)
+		}
 	}
 
 	// Acquire per-template lock to prevent concurrent downloads.
@@ -59,17 +67,22 @@ func (m *Manager) EnsureTemplate(ctx context.Context, name string) error {
 
 	// Re-check after acquiring lock.
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
-		klog.V(4).Infof("Template %s already exists (after lock)", name)
-		return nil
+		if ro, err := m.btrfs.IsReadOnly(ctx, tmplPath); err == nil && ro {
+			klog.V(4).Infof("Template %s already exists (after lock, ro=true)", name)
+			return nil
+		}
+		klog.Warningf("Template %s still writable after lock, deleting", name)
+		if err := m.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
+			return fmt.Errorf("delete writable template %q: %w", name, err)
+		}
 	}
 
 	klog.V(2).Infof("Template %s not found locally, downloading from CAS", name)
 	return m.downloadTemplate(ctx, name)
 }
 
-// EnsureTemplateByHash ensures a template exists locally and matches the
-// expected blob hash. If the template is missing, it is downloaded from the
-// CAS store. Used by sync/restore to ensure the exact version.
+// EnsureTemplateByHash ensures a template exists locally, is read-only, and
+// matches the expected blob hash. If missing or writable, downloaded from CAS.
 func (m *Manager) EnsureTemplateByHash(ctx context.Context, name, expectedHash string) error {
 	if name == "" {
 		return fmt.Errorf("template name required for EnsureTemplateByHash")
@@ -77,10 +90,15 @@ func (m *Manager) EnsureTemplateByHash(ctx context.Context, name, expectedHash s
 
 	tmplPath := fmt.Sprintf("templates/%s", name)
 
-	// If already present, trust it (templates are immutable read-only snapshots).
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
-		klog.V(4).Infof("Template %s exists locally (expected hash %s)", name, cas.ShortHash(expectedHash))
-		return nil
+		if ro, err := m.btrfs.IsReadOnly(ctx, tmplPath); err == nil && ro {
+			klog.V(4).Infof("Template %s exists locally (ro=true, expected hash %s)", name, cas.ShortHash(expectedHash))
+			return nil
+		}
+		klog.Warningf("Template %s exists but is not read-only, replacing from CAS", name)
+		if err := m.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
+			return fmt.Errorf("delete writable template %q: %w", name, err)
+		}
 	}
 
 	// Download by hash.
@@ -96,7 +114,12 @@ func (m *Manager) EnsureTemplateByHash(ctx context.Context, name, expectedHash s
 	defer lk.Unlock()
 
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
-		return nil
+		if ro, err := m.btrfs.IsReadOnly(ctx, tmplPath); err == nil && ro {
+			return nil
+		}
+		if err := m.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
+			return fmt.Errorf("delete writable template %q: %w", name, err)
+		}
 	}
 
 	klog.V(2).Infof("Downloading template %s by hash %s from CAS", name, cas.ShortHash(expectedHash))

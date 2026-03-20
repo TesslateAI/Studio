@@ -170,6 +170,36 @@ func (m *Manager) SubvolumeExists(ctx context.Context, name string) bool {
 	return err == nil
 }
 
+// IsReadOnly returns true if the named subvolume has the read-only flag set.
+func (m *Manager) IsReadOnly(ctx context.Context, name string) (bool, error) {
+	target, err := m.safePath(name)
+	if err != nil {
+		return false, err
+	}
+	out, err := m.run(ctx, "property", "get", target, "ro")
+	if err != nil {
+		return false, fmt.Errorf("property get ro %q: %w", name, err)
+	}
+	return strings.Contains(out, "ro=true"), nil
+}
+
+// SetReadOnly sets or clears the read-only flag on a subvolume.
+func (m *Manager) SetReadOnly(ctx context.Context, name string, readOnly bool) error {
+	target, err := m.safePath(name)
+	if err != nil {
+		return err
+	}
+	val := "false"
+	if readOnly {
+		val = "true"
+	}
+	_, err = m.run(ctx, "property", "set", target, "ro", val)
+	if err != nil {
+		return fmt.Errorf("property set ro=%s %q: %w", val, name, err)
+	}
+	return nil
+}
+
 // ListSubvolumes lists subvolumes under the pool whose path contains the
 // given prefix. It parses output from `btrfs subvolume list`.
 func (m *Manager) ListSubvolumes(ctx context.Context, prefix string) ([]SubvolumeInfo, error) {
