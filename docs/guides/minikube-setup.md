@@ -38,7 +38,7 @@ Follow these steps to get Tesslate Studio running on minikube from scratch.
 
 ```powershell
 # Start minikube with custom profile name
-minikube start -p tesslate --driver=docker --memory=4096 --cpus=2
+minikube start -p tesslate --driver=docker --memory=8192 --cpus=4
 
 # Enable ingress addon (required for routing)
 minikube -p tesslate addons enable ingress
@@ -60,7 +60,7 @@ Keep this terminal open while using the cluster. The tunnel allows `*.localhost`
 
 ### Step 3: Build All Docker Images
 
-Build all three images with `--no-cache` to ensure fresh builds:
+Build all four images with `--no-cache` to ensure fresh builds:
 
 ```powershell
 # Build backend image
@@ -71,6 +71,9 @@ docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
 
 # Build devserver image (for user project containers)
 docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+
+# Build btrfs-CSI driver image (for VolumeSnapshot support)
+docker build --no-cache -t tesslate-btrfs-csi:latest -f services/btrfs-csi/Dockerfile services/btrfs-csi/
 ```
 
 ### Step 4: Load Images into Minikube
@@ -81,9 +84,32 @@ Minikube runs its own Docker daemon. Load images into it:
 minikube -p tesslate image load tesslate-backend:latest
 minikube -p tesslate image load tesslate-frontend:latest
 minikube -p tesslate image load tesslate-devserver:latest
+minikube -p tesslate image load tesslate-btrfs-csi:latest
 ```
 
-### Step 5: Configure Secrets
+### Step 5: Install VolumeSnapshot CRDs and btrfs-CSI Driver
+
+Install the Kubernetes VolumeSnapshot CRDs and deploy the btrfs-CSI driver for snapshot support:
+
+```powershell
+# Install VolumeSnapshot CRDs from kubernetes-csi/external-snapshotter v8.2.0
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
+
+# Deploy snapshot controller (RBAC + controller deployment)
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+
+# Deploy btrfs-CSI driver and Volume Hub
+kubectl apply -k services/btrfs-csi/overlays/minikube
+```
+
+This deploys two components in the `kube-system` namespace:
+- **tesslate-btrfs-csi-node** (DaemonSet) - CSI driver for btrfs-based VolumeSnapshots
+- **tesslate-volume-hub** (Deployment) - Volume lifecycle management
+
+### Step 6: Configure Secrets
 
 Copy and configure the secrets file:
 
@@ -100,7 +126,7 @@ Required values in `.env.minikube`:
 - `SECRET_KEY` - JWT signing key (generate a random string)
 - `LITELLM_API_KEY` - Your LLM API key (OpenAI, Anthropic, etc.)
 
-### Step 6: Apply Kubernetes Manifests
+### Step 7: Apply Kubernetes Manifests
 
 ```powershell
 # Apply all manifests for minikube
@@ -112,7 +138,7 @@ kubectl rollout status deployment/tesslate-backend -n tesslate --timeout=120s
 kubectl rollout status deployment/tesslate-frontend -n tesslate --timeout=120s
 ```
 
-### Step 7: Run Seed Scripts
+### Step 8: Run Seed Scripts
 
 Seed the database with marketplace agents and bases:
 
@@ -131,7 +157,7 @@ kubectl exec -n tesslate $POD -- python /tmp/seed_opensource_agents.py
 kubectl exec -n tesslate $POD -- python /app/seed_bases.py
 ```
 
-### Step 8: Access the Application
+### Step 9: Access the Application
 
 With the tunnel running, access at:
 
@@ -145,9 +171,9 @@ User project containers will be accessible at `http://{project-slug}-{container}
 | Feature | Minikube | AWS EKS |
 |---------|----------|---------|
 | **Protocol** | HTTP (no TLS) | HTTPS (TLS) |
-| **VolumeSnapshots** | Not supported | EBS snapshots |
-| **Hibernation** | Pod stops, PVC persists | Snapshot created |
-| **Data persistence** | PVC survives restarts | Snapshot-based |
+| **VolumeSnapshots** | btrfs-CSI snapshots | EBS snapshots |
+| **Hibernation** | Snapshot created (via btrfs-CSI) | Snapshot created (via EBS) |
+| **Data persistence** | PVC survives restarts, snapshots for versioning | Snapshot-based |
 | **DNS resolution** | Via tunnel | Public DNS |
 
 ### What Works on Minikube
@@ -160,8 +186,6 @@ User project containers will be accessible at `http://{project-slug}-{container}
 
 ### What Doesn't Work on Minikube
 
-- **VolumeSnapshots/Timeline** - Minikube doesn't support EBS snapshots
-- **Hibernation with snapshots** - Projects just stop, no snapshot created
 - **HTTPS** - Local dev uses HTTP only
 
 ### Data Persistence on Minikube
@@ -315,7 +339,7 @@ minikube delete -p tesslate
 docker rmi tesslate-backend:latest tesslate-frontend:latest tesslate-devserver:latest
 
 # Start fresh
-minikube start -p tesslate --driver=docker --memory=4096 --cpus=2
+minikube start -p tesslate --driver=docker --memory=8192 --cpus=4
 minikube -p tesslate addons enable ingress
 
 # Follow "Fresh Start" steps above

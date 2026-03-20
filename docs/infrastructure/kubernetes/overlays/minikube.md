@@ -60,6 +60,15 @@ kubectl delete pod -n tesslate -l app=tesslate-backend
 - Size: 5Gi (per project)
 - Reclaim policy: Delete
 
+**btrfs-CSI Driver** (VolumeSnapshot support):
+- The btrfs-CSI driver provides VolumeSnapshot capability on Minikube
+- Deployed via `kubectl apply -k services/btrfs-csi/overlays/minikube`
+- Runs in `kube-system` namespace as two components:
+  - `tesslate-btrfs-csi-node` (DaemonSet) - CSI node driver for btrfs-based snapshots
+  - `tesslate-volume-hub` (Deployment) - Volume lifecycle and placement management
+- VolumeSnapshot CRDs from kubernetes-csi/external-snapshotter v8.2.0 must be installed
+- Enables Timeline UI and hibernation snapshots that were previously AWS-only
+
 ### S3 Storage (MinIO)
 
 **Namespace**: `minio-system` (separate from `tesslate`)
@@ -222,7 +231,7 @@ DEV_SERVER_BASE_URL=http://localhost
 ### 1. Start Minikube
 
 ```bash
-minikube start -p tesslate --driver=docker --memory=4096 --cpus=2
+minikube start -p tesslate --driver=docker --memory=8192 --cpus=4
 minikube -p tesslate addons enable ingress
 ```
 

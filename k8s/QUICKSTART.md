@@ -27,10 +27,12 @@ sudo install minikube-linux-amd64 /usr/local/bin/minikube
 
 ```bash
 # Create cluster with profile "tesslate"
-minikube start -p tesslate --driver=docker --memory=4096 --cpus=2
+minikube start -p tesslate --driver=docker --memory=8192 --cpus=4
 
-# Enable ingress addon
+# Enable required addons
 minikube -p tesslate addons enable ingress
+minikube -p tesslate addons enable storage-provisioner
+minikube -p tesslate addons enable metrics-server
 
 # Verify
 kubectl get nodes
@@ -85,14 +87,32 @@ eval $(minikube -p tesslate docker-env)
 docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
 docker build -t tesslate-frontend:latest -f app/Dockerfile.prod app/
 docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+docker build -t tesslate-btrfs-csi:latest -f services/btrfs-csi/Dockerfile services/btrfs-csi/
 
 # Load into Minikube
 minikube -p tesslate image load tesslate-backend:latest
 minikube -p tesslate image load tesslate-frontend:latest
 minikube -p tesslate image load tesslate-devserver:latest
+minikube -p tesslate image load tesslate-btrfs-csi:latest
 ```
 
-### 6. Deploy Application
+### 6. Install VolumeSnapshot CRDs and btrfs-CSI Driver
+
+```bash
+# Install VolumeSnapshot CRDs
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
+
+# Deploy snapshot controller
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.2.0/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+
+# Deploy btrfs-CSI driver and Volume Hub
+kubectl apply -k services/btrfs-csi/overlays/minikube
+```
+
+### 7. Deploy Application
 
 ```bash
 # Deploy everything with Kustomize
@@ -103,7 +123,7 @@ kubectl wait --for=condition=ready pod -l app=tesslate-backend -n tesslate --tim
 kubectl wait --for=condition=ready pod -l app=tesslate-frontend -n tesslate --timeout=120s
 ```
 
-### 7. Access the App
+### 8. Access the App
 
 ```bash
 # Start tunnel (run in separate terminal, keep it open)
@@ -112,7 +132,7 @@ minikube -p tesslate tunnel
 
 Open **http://localhost/** in your browser.
 
-### 8. Seed Marketplace Agents
+### 9. Seed Marketplace Agents
 
 ```bash
 kubectl exec -n tesslate deployment/tesslate-backend -- python -c "

@@ -131,7 +131,14 @@ kubectl get events -n tesslate
 
 ## Configuration
 
-Storage class for Minikube uses `k8s.io/minikube-hostpath` provisioner.
+Storage class for Minikube uses `k8s.io/minikube-hostpath` provisioner for PVCs.
+
+VolumeSnapshot support is provided by the **btrfs-CSI driver**, which is built and deployed during setup:
+- `tesslate-btrfs-csi-node` (DaemonSet in `kube-system`) - CSI node driver for btrfs-based snapshots
+- `tesslate-volume-hub` (Deployment in `kube-system`) - Volume lifecycle and placement management
+- VolumeSnapshot CRDs from kubernetes-csi/external-snapshotter v8.2.0
+
+This enables Timeline/hibernation snapshot features that previously only worked on AWS EKS.
 
 See `k8s/overlays/minikube/` for Minikube-specific configuration:
 - `storage-class.yaml` - StorageClass definition

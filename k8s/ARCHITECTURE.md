@@ -819,7 +819,7 @@ k8s/
 
 ```bash
 # 1. Start minikube
-minikube start -p tesslate --driver=docker --memory=4096
+minikube start -p tesslate --driver=docker --memory=8192 --cpus=4
 minikube -p tesslate addons enable ingress
 
 # 2. Build images

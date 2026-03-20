@@ -471,10 +471,9 @@ mcp_max_servers_per_user: int      # Max installed MCP servers per user (20)
 | `K8S_DEVSERVER_IMAGE` | `tesslate-devserver:latest` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
 | `K8S_IMAGE_PULL_SECRET` | `` (empty) | `ecr-credentials` |
 | `K8S_WILDCARD_TLS_SECRET` | `` (empty, use HTTP) | `tesslate-wildcard-tls` (use HTTPS) |
-| `K8S_SNAPSHOT_CLASS` | N/A (not supported) | `tesslate-ebs-snapshots` |
+| `K8S_SNAPSHOT_CLASS` | `tesslate-btrfs-snapshots` (via btrfs-CSI) | `tesslate-ebs-snapshots` |
 
 #### Minikube Limitations
-- **No VolumeSnapshots**: Minikube doesn't support EBS snapshots, so Timeline/hibernation features won't work
 - **HTTP only**: No TLS certificates, all URLs use `http://`
 - **Data persistence**: PVCs persist across restarts, but data is lost if cluster is deleted
 

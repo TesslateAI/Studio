@@ -83,7 +83,7 @@ Key Characteristics:
 Common Tasks:
 ```bash
 # Start cluster
-minikube start -p tesslate --driver=docker --memory=4096 --cpus=2
+minikube start -p tesslate --driver=docker --memory=8192 --cpus=4
 
 # Build and load image (CRITICAL: Delete old image first!)
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
