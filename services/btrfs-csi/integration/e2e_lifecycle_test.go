@@ -606,3 +606,141 @@ func TestRestoreToSnapshot(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Test 8: TestAutoPromote_TemplatelessVolume
+// Create a volume WITHOUT a template (simulates migration restore / blank
+// project), sync it, verify auto-promote creates a synthetic per-volume
+// template, then sync again and verify the second sync is incremental
+// (uses the synthetic template as parent). Finally, delete the volume and
+// verify the synthetic template is cleaned up.
+// ---------------------------------------------------------------------------
+
+func TestAutoPromote_TemplatelessVolume(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	// CAS infrastructure.
+	bucket := uniqueName("autopromote")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create a volume directly (no template).
+	volID := uniqueName("nontmpl-vol")
+	volPath := "volumes/" + volID
+	if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("CreateSubvolume: %v", err)
+	}
+
+	initialData := "initial-data-" + uniqueName("payload")
+	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", initialData)
+
+	daemon := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+	// Track with empty template — this is the template-less case.
+	daemon.TrackVolume(volID, "", "")
+
+	// ---- First sync: full send + auto-promote ----
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("first SyncVolume: %v", err)
+	}
+
+	// Verify manifest exists with 1 layer.
+	manifest, err := casStore.GetManifest(ctx, volID)
+	if err != nil {
+		t.Fatalf("GetManifest after first sync: %v", err)
+	}
+	if len(manifest.Layers) != 1 {
+		t.Fatalf("expected 1 layer after first sync, got %d", len(manifest.Layers))
+	}
+
+	// Verify auto-promote: manifest should now have a synthetic template name.
+	expectedTmplName := "_vol_" + volID
+	if manifest.TemplateName != expectedTmplName {
+		t.Fatalf("manifest.TemplateName = %q, want %q", manifest.TemplateName, expectedTmplName)
+	}
+	if manifest.Base == "" {
+		t.Fatal("manifest.Base should be set after auto-promote")
+	}
+
+	// Verify synthetic template subvolume exists locally.
+	syntheticTmplPath := "templates/" + expectedTmplName
+	if !mgr.SubvolumeExists(ctx, syntheticTmplPath) {
+		t.Fatalf("synthetic template %s should exist after auto-promote", syntheticTmplPath)
+	}
+
+	// Verify tracked state reflects the promotion.
+	states := daemon.GetTrackedState()
+	if len(states) != 1 {
+		t.Fatalf("expected 1 tracked volume, got %d", len(states))
+	}
+	if states[0].TemplateHash == "" {
+		t.Error("tracked TemplateHash should be set after auto-promote")
+	}
+
+	// ---- Second sync: should be incremental (uses synthetic template) ----
+	secondData := "second-sync-" + uniqueName("payload2")
+	writeTestFile(t, filepath.Join(pool, volPath), "second.txt", secondData)
+
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("second SyncVolume: %v", err)
+	}
+
+	// Verify manifest now has 2 layers, both parented to the synthetic template.
+	manifest, err = casStore.GetManifest(ctx, volID)
+	if err != nil {
+		t.Fatalf("GetManifest after second sync: %v", err)
+	}
+	if len(manifest.Layers) != 2 {
+		t.Fatalf("expected 2 layers after second sync, got %d", len(manifest.Layers))
+	}
+	for i, layer := range manifest.Layers {
+		if layer.Parent != manifest.Base {
+			t.Errorf("layer[%d].Parent = %q, want %q (synthetic template hash)", i, layer.Parent, manifest.Base)
+		}
+	}
+
+	// ---- Restore: delete volume, restore from CAS, verify data ----
+	if err := mgr.DeleteSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("delete volume for restore: %v", err)
+	}
+	// Clean up layer snapshots to simulate a fresh node.
+	layerSubs, _ := mgr.ListSubvolumes(ctx, "layers/"+volID)
+	for _, sub := range layerSubs {
+		mgr.DeleteSubvolume(ctx, sub.Path)
+	}
+
+	if err := daemon.RestoreVolume(ctx, volID); err != nil {
+		t.Fatalf("RestoreVolume: %v", err)
+	}
+
+	if !mgr.SubvolumeExists(ctx, volPath) {
+		t.Fatal("volume should exist after restore")
+	}
+	verifyFileContent(t, filepath.Join(pool, volPath, "data.txt"), initialData)
+	verifyFileContent(t, filepath.Join(pool, volPath, "second.txt"), secondData)
+
+	// ---- DeleteVolume: verify synthetic template cleanup ----
+	if err := daemon.DeleteVolume(ctx, volID); err != nil {
+		t.Fatalf("DeleteVolume: %v", err)
+	}
+	if mgr.SubvolumeExists(ctx, syntheticTmplPath) {
+		t.Errorf("synthetic template %s should be deleted after DeleteVolume", syntheticTmplPath)
+	}
+
+	// Cleanup.
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+		mgr.DeleteSubvolume(context.Background(), syntheticTmplPath)
+		subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
+		for _, sub := range subs {
+			mgr.DeleteSubvolume(context.Background(), sub.Path)
+		}
+	})
+}

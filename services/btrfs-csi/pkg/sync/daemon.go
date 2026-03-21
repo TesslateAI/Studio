@@ -27,9 +27,9 @@ type trackedVolume struct {
 // Daemon periodically snapshots tracked volumes, uploads incremental layers
 // to the CAS store, and maintains volume manifests.
 type Daemon struct {
-	btrfs    *btrfs.Manager
-	cas      *cas.Store
-	tmplMgr  *template.Manager
+	btrfs    btrfsOps
+	cas      casOps
+	tmplMgr  templateOps
 	interval time.Duration
 	mu       sync.Mutex
 	tracked  map[string]*trackedVolume
@@ -40,15 +40,38 @@ type Daemon struct {
 }
 
 // NewDaemon creates a sync Daemon that uses the CAS store for all storage.
-func NewDaemon(btrfs *btrfs.Manager, casStore *cas.Store, tmplMgr *template.Manager, interval time.Duration) *Daemon {
-	return &Daemon{
-		btrfs:     btrfs,
-		cas:       casStore,
-		tmplMgr:   tmplMgr,
+func NewDaemon(bm *btrfs.Manager, casStore *cas.Store, tmplMgr *template.Manager, interval time.Duration) *Daemon {
+	d := &Daemon{
 		interval:  interval,
 		tracked:   make(map[string]*trackedVolume),
 		volLocks:  make(map[string]*sync.Mutex),
 		stopCh:    make(chan struct{}),
+	}
+	// Store concrete types as interfaces for testability.
+	// nil checks preserve backward compatibility with callers that pass nil.
+	if bm != nil {
+		d.btrfs = bm
+	}
+	if casStore != nil {
+		d.cas = casStore
+	}
+	if tmplMgr != nil {
+		d.tmplMgr = tmplMgr
+	}
+	return d
+}
+
+// newDaemonWithInterfaces creates a Daemon with pre-built interface
+// implementations. Used by tests to inject fakes.
+func newDaemonWithInterfaces(b btrfsOps, c casOps, t templateOps, interval time.Duration) *Daemon {
+	return &Daemon{
+		btrfs:    b,
+		cas:      c,
+		tmplMgr:  t,
+		interval: interval,
+		tracked:  make(map[string]*trackedVolume),
+		volLocks: make(map[string]*sync.Mutex),
+		stopCh:   make(chan struct{}),
 	}
 }
 
@@ -244,6 +267,8 @@ func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
 		tv.lastLayerHash = hash
 		tv.lastSnapPath = newSnapPath
 		tv.lastSyncAt = time.Now()
+		tv.templateName = tvCopy.templateName
+		tv.templateHash = tvCopy.templateHash
 	}
 	d.mu.Unlock()
 	return nil
@@ -275,6 +300,8 @@ func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (st
 		tv.lastLayerHash = hash
 		tv.lastSnapPath = newSnapPath
 		tv.lastSyncAt = time.Now()
+		tv.templateName = tvCopy.templateName
+		tv.templateHash = tvCopy.templateHash
 	}
 	d.mu.Unlock()
 	return hash, nil
@@ -509,6 +536,14 @@ func (d *Daemon) DeleteVolume(ctx context.Context, volumeID string) error {
 		}
 	}
 
+	// Clean up synthetic per-volume template if present.
+	syntheticTmpl := "templates/_vol_" + volumeID
+	if d.btrfs.SubvolumeExists(ctx, syntheticTmpl) {
+		if delErr := d.btrfs.DeleteSubvolume(ctx, syntheticTmpl); delErr != nil {
+			klog.Warningf("DeleteVolume: failed to delete synthetic template %s: %v", syntheticTmpl, delErr)
+		}
+	}
+
 	klog.V(2).Infof("Cleaned up CAS data for volume %s", volumeID)
 	return nil
 }
@@ -560,6 +595,8 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 			tv.lastLayerHash = hash
 			tv.lastSnapPath = newSnapPath
 			tv.lastSyncAt = time.Now()
+			tv.templateName = item.tv.templateName
+			tv.templateHash = item.tv.templateHash
 		}
 		d.mu.Unlock()
 		metrics.SyncLag.WithLabelValues(item.tv.volumeID).Set(0)
@@ -629,6 +666,25 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 	if err != nil {
 		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 		return "", "", fmt.Errorf("put blob: %w", err)
+	}
+
+	// Auto-promote: template-less volumes get a synthetic per-volume template
+	// after their first successful sync. This converts the full send into a
+	// base layer so all future syncs are incremental diffs — same as
+	// template-based volumes.
+	if tv.templateName == "" {
+		syntheticName := "_vol_" + tv.volumeID
+		tmplPath := "templates/" + syntheticName
+		if snapErr := d.btrfs.SnapshotSubvolume(ctx, pendingPath, tmplPath, true); snapErr != nil {
+			klog.Warningf("Auto-promote: failed to create synthetic template for %s: %v (syncs will remain full sends)", tv.volumeID, snapErr)
+		} else if uploadHash, uploadErr := d.tmplMgr.UploadTemplate(ctx, syntheticName); uploadErr != nil {
+			klog.Warningf("Auto-promote: failed to upload synthetic template for %s: %v (syncs will remain full sends)", tv.volumeID, uploadErr)
+			_ = d.btrfs.DeleteSubvolume(ctx, tmplPath)
+		} else {
+			klog.Infof("Auto-promote: volume %s now has synthetic template %s (future syncs incremental)", tv.volumeID, syntheticName)
+			tv.templateName = syntheticName
+			tv.templateHash = uploadHash
+		}
 	}
 
 	// 4. Update manifest.
