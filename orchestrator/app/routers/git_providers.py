@@ -7,6 +7,7 @@ Provides OAuth authentication and repository management for GitHub, GitLab, and 
 import logging
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,6 +59,35 @@ def validate_provider(provider: str) -> GitProviderType:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid provider: {provider}. Valid providers: github, gitlab, bitbucket",
         ) from None
+
+
+def _map_provider_api_error(e: Exception, provider: str) -> HTTPException:
+    """Map upstream provider API errors to appropriate HTTP responses.
+
+    Inspects httpx.HTTPStatusError to propagate the correct status code
+    so the frontend can distinguish auth issues from server errors.
+    """
+    if isinstance(e, httpx.HTTPStatusError):
+        upstream = e.response.status_code
+        if upstream in (401, 403):
+            return HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"{provider.title()} token expired or revoked. Please reconnect your {provider.title()} account.",
+            )
+        if upstream == 404:
+            return HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Repository not found on {provider.title()}",
+            )
+        if upstream == 429:
+            return HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"{provider.title()} API rate limit exceeded. Please try again later.",
+            )
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=f"Failed to communicate with {provider.title()}. Please try again.",
+    )
 
 
 @router.get("/")
@@ -366,18 +396,7 @@ async def list_repositories(
 
     except Exception as e:
         logger.error(f"[GIT PROVIDERS] Failed to list {provider} repositories: {e}")
-
-        # Check if it's an auth error
-        if "401" in str(e) or "unauthorized" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"{provider.title()} token expired or invalid. Please reconnect your account.",
-            ) from e
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch repositories from {provider.title()}",
-        ) from e
+        raise _map_provider_api_error(e, provider) from e
 
 
 @router.get("/{provider}/repositories/{owner}/{repo}/branches")
@@ -431,16 +450,7 @@ async def list_repository_branches(
 
     except Exception as e:
         logger.error(f"[GIT PROVIDERS] Failed to list branches for {owner}/{repo}: {e}")
-
-        if "404" in str(e) or "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} not found"
-            ) from e
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch branches from {provider.title()}",
-        ) from e
+        raise _map_provider_api_error(e, provider) from e
 
 
 @router.get("/{provider}/repositories/{owner}/{repo}")
@@ -496,13 +506,4 @@ async def get_repository_info(
 
     except Exception as e:
         logger.error(f"[GIT PROVIDERS] Failed to get repo info for {owner}/{repo}: {e}")
-
-        if "404" in str(e) or "not found" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} not found"
-            ) from e
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch repository information from {provider.title()}",
-        ) from e
+        raise _map_provider_api_error(e, provider) from e
