@@ -74,6 +74,32 @@ resource "kubernetes_service_account" "btrfs_csi_node" {
 }
 
 # -----------------------------------------------------------------------------
+# Volume Hub ServiceAccount (IRSA for S3 manifest writes)
+# SA is NOT created in base kustomize — Terraform owns it with IRSA annotation.
+# Minikube overlay creates its own SA without IRSA.
+# -----------------------------------------------------------------------------
+resource "kubernetes_service_account" "volume_hub" {
+  metadata {
+    name      = "tesslate-volume-hub"
+    namespace = "kube-system"
+
+    annotations = {
+      "eks.amazonaws.com/role-arn" = module.volume_hub_irsa.iam_role_arn
+    }
+
+    labels = {
+      "app.kubernetes.io/name" = "tesslate-volume-hub"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [metadata[0].labels]
+  }
+
+  depends_on = [module.eks]
+}
+
+# -----------------------------------------------------------------------------
 # btrfs CSI Config Secret (S3 bucket + rclone settings)
 # -----------------------------------------------------------------------------
 resource "kubernetes_secret" "btrfs_csi_config" {
@@ -90,6 +116,7 @@ resource "kubernetes_secret" "btrfs_csi_config" {
     RCLONE_S3_ACCESS_KEY_ID     = ""  # Not needed with IRSA
     RCLONE_S3_SECRET_ACCESS_KEY = ""  # Not needed with IRSA
     RCLONE_S3_ENV_AUTH          = "true"
+    RCLONE_S3_NO_CHECK_BUCKET   = "true"
     SYNC_INTERVAL               = "60"
     POOL_PATH                   = "/mnt/tesslate-pool"
   }

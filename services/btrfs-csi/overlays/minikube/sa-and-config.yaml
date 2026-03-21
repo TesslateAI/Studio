@@ -1,10 +1,19 @@
-# ServiceAccount and config secret for minikube (no IRSA, no S3).
+# ServiceAccounts and config secret for minikube (no IRSA, no S3).
 # On AWS these are managed by Terraform with IRSA annotations and real S3 config.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: tesslate-btrfs-csi-node
   namespace: kube-system
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tesslate-volume-hub
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: tesslate-volume-hub
 
 ---
 apiVersion: v1

@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,6 +83,9 @@ func (d *Daemon) Start(ctx context.Context) {
 	d.wg.Add(1)
 	defer d.wg.Done()
 
+	// Auto-discover volumes on disk that aren't tracked yet.
+	d.discoverVolumes(ctx)
+
 	ticker := time.NewTicker(d.interval)
 	defer ticker.Stop()
 
@@ -98,6 +102,52 @@ func (d *Daemon) Start(ctx context.Context) {
 				klog.Errorf("Sync cycle error: %v", err)
 			}
 		}
+	}
+}
+
+// discoverVolumes scans volumes/ subvolumes on disk and tracks any that
+// aren't already tracked. This recovers sync tracking after a pod restart.
+// Template context is recovered from the CAS manifest if available.
+func (d *Daemon) discoverVolumes(ctx context.Context) {
+	if d.btrfs == nil {
+		return
+	}
+
+	subs, err := d.btrfs.ListSubvolumes(ctx, "volumes/")
+	if err != nil {
+		klog.Warningf("discoverVolumes: failed to list subvolumes: %v", err)
+		return
+	}
+
+	discovered := 0
+	for _, sub := range subs {
+		volID := strings.TrimPrefix(sub.Path, "volumes/")
+		if volID == "" || volID == sub.Path {
+			continue
+		}
+
+		d.mu.Lock()
+		_, alreadyTracked := d.tracked[volID]
+		d.mu.Unlock()
+		if alreadyTracked {
+			continue
+		}
+
+		// Try to recover template context from CAS manifest.
+		var templateName, templateHash string
+		if d.cas != nil {
+			if m, mErr := d.cas.GetManifest(ctx, volID); mErr == nil {
+				templateName = m.TemplateName
+				templateHash = m.Base
+			}
+		}
+
+		d.TrackVolume(volID, templateName, templateHash)
+		discovered++
+	}
+
+	if discovered > 0 {
+		klog.Infof("discoverVolumes: auto-tracked %d volume(s) from disk", discovered)
 	}
 }
 
@@ -675,7 +725,18 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 	if tv.templateName == "" {
 		syntheticName := "_vol_" + tv.volumeID
 		tmplPath := "templates/" + syntheticName
-		if snapErr := d.btrfs.SnapshotSubvolume(ctx, pendingPath, tmplPath, true); snapErr != nil {
+
+		if d.btrfs.SubvolumeExists(ctx, tmplPath) {
+			// Template already exists on disk (e.g. from a previous run before
+			// pod restart). Re-upload to get the hash and adopt it.
+			if uploadHash, uploadErr := d.tmplMgr.UploadTemplate(ctx, syntheticName); uploadErr != nil {
+				klog.Warningf("Auto-promote: failed to upload existing template for %s: %v (syncs will remain full sends)", tv.volumeID, uploadErr)
+			} else {
+				klog.Infof("Auto-promote: volume %s adopted existing synthetic template %s (future syncs incremental)", tv.volumeID, syntheticName)
+				tv.templateName = syntheticName
+				tv.templateHash = uploadHash
+			}
+		} else if snapErr := d.btrfs.SnapshotSubvolume(ctx, pendingPath, tmplPath, true); snapErr != nil {
 			klog.Warningf("Auto-promote: failed to create synthetic template for %s: %v (syncs will remain full sends)", tv.volumeID, snapErr)
 		} else if uploadHash, uploadErr := d.tmplMgr.UploadTemplate(ctx, syntheticName); uploadErr != nil {
 			klog.Warningf("Auto-promote: failed to upload synthetic template for %s: %v (syncs will remain full sends)", tv.volumeID, uploadErr)

@@ -107,6 +107,29 @@ module "btrfs_csi_irsa" {
   tags = local.common_tags
 }
 
+# -----------------------------------------------------------------------------
+# IRSA for Volume Hub (Manifest Storage)
+# -----------------------------------------------------------------------------
+module "volume_hub_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.30"
+
+  role_name = "${local.cluster_name}-volume-hub"
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:tesslate-volume-hub"]
+    }
+  }
+
+  role_policy_arns = {
+    s3_policy = aws_iam_policy.btrfs_csi_s3_access.arn
+  }
+
+  tags = local.common_tags
+}
+
 # S3 access policy for btrfs snapshot sync/restore
 resource "aws_iam_policy" "btrfs_csi_s3_access" {
   name        = "${local.cluster_name}-btrfs-csi-s3-access"
@@ -123,7 +146,6 @@ resource "aws_iam_policy" "btrfs_csi_s3_access" {
           "s3:DeleteObject",
           "s3:ListBucket",
           "s3:GetBucketLocation",
-          "s3:CreateBucket",
           "s3:ListMultipartUploadParts",
           "s3:AbortMultipartUpload"
         ]

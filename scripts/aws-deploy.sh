@@ -350,7 +350,7 @@ case "$COMMAND" in
         echo
 
         info "Waiting for CSI node daemonset..."
-        kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
+        kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=1800s
         info "Waiting for Volume Hub (includes CSI controller)..."
         kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
         success "✓ Compute infrastructure deployed"
@@ -573,7 +573,7 @@ case "$COMMAND" in
                 kubectl apply -k "$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/compute"
                 info "[compute] Rolling restart CSI node daemonset..."
                 kubectl rollout restart daemonset/tesslate-btrfs-csi-node -n kube-system
-                kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s &
+                kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=1800s &
                 ROLLOUT_PIDS+=($!)
                 ROLLOUT_IMGS+=("csi-node")
                 info "[compute] Rolling restart Volume Hub (after nodes are stable)..."
