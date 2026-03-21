@@ -2,7 +2,7 @@
 
 Amazon EKS cluster setup via Terraform.
 
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/terraform/aws/eks.tf`
+**File**: `k8s/terraform/aws/`
 
 ## Cluster Configuration
 
@@ -88,19 +88,32 @@ AWS pod networking
 
 ### EBS CSI Driver
 
-Persistent volume provisioning
+Persistent volume provisioning (used for platform PVCs and as a dependency for EBS VolumeSnapshots)
 - Version: Latest
 - IRSA: Enabled
 - Provisioner: `ebs.csi.aws.com`
 
-## Storage Class
+### CSI Snapshot Controller
 
-**Name**: `tesslate-block-storage`
-**Type**: EBS gp3
+Required for EBS CSI driver to create/restore VolumeSnapshots. Installed via Helm.
+- **Chart**: `snapshot-controller` (from `https://piraeus.io/helm-charts`)
+- **Version**: 3.0.6
+- **Namespace**: `kube-system`
+- **Defined in**: `k8s/terraform/aws/helm.tf`
+
+## Storage
+
+### Storage Classes
+
+#### `tesslate-block-storage` (EBS gp3)
+
+**Use case**: Platform PVCs (PostgreSQL, Redis, LiteLLM) and legacy fallback
+**Provisioner**: `ebs.csi.aws.com`
 **Access Mode**: ReadWriteOnce
 **Reclaim Policy**: Delete
 **Volume Binding**: WaitForFirstConsumer (provisions on first use)
 **Encryption**: Enabled
+**Defined in**: `k8s/terraform/aws/eks.tf` (`kubernetes_storage_class.gp3`)
 
 **Parameters**:
 ```hcl
@@ -108,6 +121,54 @@ type      = "gp3"
 fsType    = "ext4"
 encrypted = "true"
 ```
+
+#### `tesslate-btrfs` (btrfs CSI — primary for user projects)
+
+**Use case**: User project volumes and template builds. The btrfs CSI driver is the primary storage driver for user workloads, providing instant snapshot-clone for project creation from pre-built templates.
+
+The btrfs CSI driver itself is **not** managed by Terraform — it is deployed via Kustomize manifests. Terraform manages the supporting infrastructure:
+- IRSA role for S3 access (see below)
+- ServiceAccount with IRSA annotation (`tesslate-btrfs-csi-node` in `kube-system`)
+- Config secret with S3 bucket and rclone settings
+- ECR repository for the driver image (in the shared stack)
+- S3 bucket for snapshot persistence
+
+### btrfs CSI Snapshot S3 Bucket
+
+**Defined in**: `k8s/terraform/aws/s3.tf` (`aws_s3_bucket.btrfs_snapshots`)
+
+Stores btrfs send/receive streams (zstd-compressed) for volume persistence. The CSI sync daemon uploads snapshots here; cross-node restores download them.
+
+**Bucket name**: `{project_name}-btrfs-snapshots-{environment}-{suffix}`
+**Versioning**: Enabled
+**Encryption**: AES256 (SSE-S3, bucket key enabled)
+**Public access**: Fully blocked
+**TLS**: Enforced via bucket policy
+
+**Lifecycle rules**:
+- Non-current versions transition to STANDARD_IA after 30 days
+- Non-current versions transition to GLACIER after 90 days
+- Non-current versions expire after 365 days
+- Incomplete multipart uploads aborted after 7 days
+
+### VolumeSnapshotClass (EBS)
+
+**Name**: `tesslate-ebs-snapshots`
+**Driver**: `ebs.csi.aws.com`
+**Deletion Policy**: Retain (snapshots persist when VolumeSnapshotContent is deleted, enabling soft-delete recovery)
+**Defined in**: `k8s/terraform/aws/eks.tf` (`kubectl_manifest.ebs_snapshot_class`)
+**Depends on**: CSI Snapshot Controller Helm release
+
+### Volume Hub
+
+The Volume Hub is a storageless orchestrator that provides S3 gateway and cache orchestration for volumes.
+
+Terraform manages the IRSA role and ServiceAccount — the Volume Hub workload itself is deployed via Kustomize.
+
+**ServiceAccount**: `tesslate-volume-hub` (in `kube-system`)
+**IRSA Role**: `{cluster_name}-volume-hub`
+**Permissions**: Same S3 policy as btrfs CSI driver (read/write to btrfs snapshots bucket)
+**Defined in**: `k8s/terraform/aws/iam.tf` (IRSA), `k8s/terraform/aws/kubernetes.tf` (ServiceAccount)
 
 ## Security Groups
 
@@ -151,9 +212,25 @@ The `aws-deploy.sh` script automatically assumes this role for all cluster opera
 
 ### EBS CSI Driver Role
 
-**Purpose**: Provision EBS volumes
+**Purpose**: Provision EBS volumes and manage EBS snapshots
 **Service Account**: `ebs-csi-controller-sa` (kube-system namespace)
-**Permissions**: EBS CSI policy (create/attach/delete volumes)
+**Permissions**: EBS CSI policy (create/attach/delete volumes) + EBS snapshot policy (CreateSnapshot, DeleteSnapshot, DescribeSnapshots, DescribeVolumes, CreateTags)
+
+### btrfs CSI Driver Role
+
+**Purpose**: Sync/restore btrfs volume snapshots to/from S3
+**Service Account**: `tesslate-btrfs-csi-node` (kube-system namespace)
+**Role Name**: `{cluster_name}-btrfs-csi`
+**Permissions**: S3 read/write to the btrfs snapshots bucket (GetObject, PutObject, DeleteObject, ListBucket, multipart upload)
+**Defined in**: `k8s/terraform/aws/iam.tf` (`module.btrfs_csi_irsa`)
+
+### Volume Hub Role
+
+**Purpose**: S3 access for volume manifest storage and cache orchestration
+**Service Account**: `tesslate-volume-hub` (kube-system namespace)
+**Role Name**: `{cluster_name}-volume-hub`
+**Permissions**: Same S3 policy as btrfs CSI driver (shared `btrfs_csi_s3_access` policy)
+**Defined in**: `k8s/terraform/aws/iam.tf` (`module.volume_hub_irsa`)
 
 ### Backend Service Account Role
 
@@ -254,12 +331,27 @@ kubectl logs -n kube-system -l k8s-app=aws-node --tail=50
 # Check EBS CSI driver
 kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-ebs-csi-driver
 
-# View CSI driver logs
+# View EBS CSI driver logs
 kubectl logs -n kube-system -l app=ebs-csi-controller --tail=50
+
+# Check btrfs CSI driver pods
+kubectl get pods -n kube-system -l app=tesslate-btrfs-csi-node
+
+# View btrfs CSI driver logs
+kubectl logs -n kube-system -l app=tesslate-btrfs-csi-node --tail=50
+
+# Check Volume Hub
+kubectl get pods -n kube-system -l app.kubernetes.io/name=tesslate-volume-hub
+
+# View Volume Hub logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=tesslate-volume-hub --tail=50
 
 # Check PVCs
 kubectl get pvc --all-namespaces
 kubectl describe pvc {pvc-name} -n {namespace}
+
+# Check btrfs CSI config secret
+kubectl get secret -n kube-system tesslate-btrfs-csi-config -o yaml
 ```
 
 ## Cost Optimization

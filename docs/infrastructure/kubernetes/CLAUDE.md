@@ -148,17 +148,88 @@ spec:
 2. Add resource and verbs to `rules` section
 3. Apply: `kubectl apply -k k8s/overlays/{env}`
 
-## EBS VolumeSnapshot (Project Persistence)
+## Storage Architecture (Hub + btrfs CSI)
 
-**Storage**: Projects use persistent EBS volumes that survive pod restarts.
+Project storage uses a two-tier architecture: the **Volume Hub** (storageless orchestrator) coordinates **btrfs CSI node drivers** on each compute node. The Hub handles volume lifecycle, cache placement, and S3 sync; nodes handle local btrfs subvolume operations.
 
-**Snapshots**: Created via `snapshot_manager.py` using K8s VolumeSnapshot API with per-PVC support:
-- Function: `create_snapshot(pvc_name=...)` - Creates EBS snapshot for a specific PVC (non-blocking)
-- Function: `restore_from_snapshot(pvc_name=...)` - Creates PVC from snapshot
-- Function: `get_latest_ready_snapshots_by_pvc()` - Returns dict of PVC name to latest snapshot
-- Function: `cleanup_expired_snapshots()` - Removes old soft-deleted snapshots
-- Snapshot rotation (`_rotate_snapshots`) is scoped per PVC
-- `is_latest` tracking is per PVC
+### Volume Hub
+
+**Address**: `tesslate-volume-hub.kube-system.svc:9750` (gRPC, JSON codec)
+**Image**: `tesslate-btrfs-csi:latest` with `--mode=hub`
+**Namespace**: `kube-system`
+**Manifests**: `k8s/base/volume-hub/` (deployment, service, rbac)
+
+**Key RPCs** (service `volumehub.VolumeHub`):
+| RPC | Purpose |
+|-----|---------|
+| `CreateVolume(template?, hint_node?)` | Create volume from template or empty; returns `(volume_id, node_name)` |
+| `DeleteVolume(volume_id)` | Delete from Hub + S3 + all node caches (idempotent) |
+| `EnsureCached(volume_id, candidate_nodes?)` | Ensure volume is on a live, schedulable node; peer-transfers or restores from CAS |
+| `TriggerSync(volume_id)` | Trigger S3 sync on the owner node (non-blocking) |
+| `VolumeStatus(volume_id)` | Returns `volume_id`, `owner_node`, `cached_nodes`, `last_sync` |
+| `CreateServiceVolume(base_volume_id, service_name)` | Create ephemeral service subvolume (e.g. postgres data dir) |
+
+### btrfs CSI Node Driver
+
+**DaemonSet**: Runs on every compute node in `kube-system`
+**Manifests**: `services/btrfs-csi/deploy/`
+**CSI Driver name**: `btrfs.csi.tesslate.io`
+**Node Service**: `tesslate-btrfs-csi-node-svc.kube-system.svc` (headless)
+- Port `9741`: NodeOps gRPC (volume operations, template management)
+- Port `9742`: FileOps gRPC (file read/write/list directly on subvolumes)
+
+### Storage Classes
+
+| StorageClass | Provisioner | Purpose |
+|-------------|------------|---------|
+| `tesslate-btrfs` | `btrfs.csi.tesslate.io` | Default for user project volumes |
+| `tesslate-btrfs-nextjs` | `btrfs.csi.tesslate.io` | Pre-templated (parameter: `template: "nextjs"`) |
+| `tesslate-block-storage` | `ebs.csi.aws.com` (AWS) / `k8s.io/minikube-hostpath` (Minikube) | Legacy EBS-backed PVCs (being phased out) |
+
+### VolumeSnapshotClass
+
+| Class | Driver | Policy |
+|-------|--------|--------|
+| `tesslate-btrfs-snapshots` | `btrfs.csi.tesslate.io` | Delete |
+
+### Orchestrator Integration
+
+| File | Purpose |
+|------|---------|
+| `orchestrator/app/services/volume_manager.py` | Thin client wrapping HubClient; singleton via `get_volume_manager()` |
+| `orchestrator/app/services/hub_client.py` | Async gRPC client for Volume Hub RPCs |
+| `orchestrator/app/services/snapshot_manager.py` | Legacy EBS VolumeSnapshot manager (still used for EBS-backed projects) |
+
+### Config Settings (`config.py`)
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `volume_hub_address` | `tesslate-volume-hub.kube-system.svc:9750` | Hub gRPC endpoint |
+| `template_build_storage_class` | `tesslate-btrfs` | StorageClass for template builds (must be btrfs CSI) |
+| `template_build_nodeops_address` | `tesslate-btrfs-csi-node-svc.kube-system.svc:9741` | NodeOps gRPC for template operations |
+| `fileops_enabled` | `True` | Feature flag for v2 file operations via CSI |
+| `fileops_timeout` | `30` | gRPC timeout for file operations (seconds) |
+| `k8s_storage_class` | `tesslate-block-storage` | Legacy storage class (EBS-backed) |
+| `k8s_snapshot_class` | `tesslate-ebs-snapshots` | Legacy EBS snapshot class |
+
+### Deploy (Compute Stack)
+
+The btrfs CSI driver + Volume Hub are deployed as a separate compute overlay:
+```bash
+# AWS
+./scripts/aws-deploy.sh deploy-compute production
+
+# Kustomize path
+k8s/overlays/aws-production/compute/kustomization.yaml
+k8s/overlays/aws-beta/compute/kustomization.yaml
+```
+
+### Legacy: EBS VolumeSnapshot
+
+The `snapshot_manager.py` still handles EBS-backed VolumeSnapshots for projects that have not migrated to the Hub:
+- `create_snapshot(pvc_name=...)` - Creates EBS snapshot (non-blocking)
+- `restore_from_snapshot(pvc_name=...)` - Creates PVC from snapshot
+- `cleanup_expired_snapshots()` - Removes old soft-deleted snapshots
 
 **Cleanup cronjobs**: `k8s/base/core/`
 - `cleanup-cronjob.yaml` - Runs every 2 minutes, creates snapshots for idle projects

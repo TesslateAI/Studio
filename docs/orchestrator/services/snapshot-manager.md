@@ -1,19 +1,21 @@
 # Snapshot Manager Service
 
-The `SnapshotManager` service handles EBS VolumeSnapshot operations for project persistence in Kubernetes mode. It replaces the previous S3-based hibernation system with a faster, more reliable approach.
+The `SnapshotManager` service handles Kubernetes VolumeSnapshot operations for project persistence in Kubernetes mode. It replaced the previous S3-based hibernation system with a faster, more reliable approach using CSI-backed VolumeSnapshots.
 
 ## Overview
 
 **File**: `orchestrator/app/services/snapshot_manager.py`
 
-**Purpose**: Create, restore, and manage EBS VolumeSnapshots for project data persistence and versioning.
+**Purpose**: Create, restore, and manage Kubernetes VolumeSnapshots for project data persistence and versioning.
+
+> **Broader storage context**: The SnapshotManager handles *hibernation and user-facing timeline snapshots* using Kubernetes VolumeSnapshots. It operates alongside the Volume Hub/btrfs CSI architecture, which manages *project volume lifecycle* (creation from templates, cache placement, S3 sync). The SnapshotManager is CSI-agnostic — it works with any CSI driver that implements the VolumeSnapshot API (EBS CSI on AWS, btrfs CSI on self-hosted). The `k8s_snapshot_class` config setting determines which VolumeSnapshotClass is used.
 
 ## Key Features
 
 | Feature | Description |
 |---------|-------------|
 | **Non-blocking** | Snapshot creation returns immediately; frontend polls for status |
-| **Near-instant restore** | EBS lazy-loads data from snapshot for fast startup |
+| **Near-instant restore** | CSI driver lazy-loads data from snapshot for fast startup |
 | **Per-PVC snapshots** | Supports project-storage and service PVCs independently |
 | **Per-PVC rotation** | Snapshot rotation (`_rotate_snapshots`) is scoped to each PVC |
 | **Timeline UI** | Up to 5 snapshots per project for version history |
@@ -22,29 +24,42 @@ The `SnapshotManager` service handles EBS VolumeSnapshot operations for project 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    SnapshotManager                           │
-│                (Per-PVC Snapshot Management)                 │
-├─────────────────────────────────────────────────────────────┤
-│  create_snapshot(pvc_name)         │  Creates VolumeSnapshot │
-│  restore_from_snapshot(pvc_name)   │  Creates PVC from snap  │
-│  wait_for_snapshot_ready           │  Polls readyToUse: true │
-│  get_project_snapshots             │  Lists for Timeline UI  │
-│  get_latest_ready_snapshot(pvc)    │  Latest per specific PVC│
-│  get_latest_ready_snapshots_by_pvc │  Dict of PVC→snapshot   │
-│  soft_delete_project_snapshots     │  30-day retention       │
-│  cleanup_expired_snapshots         │  Deletes old soft-del   │
-│  _rotate_snapshots (per PVC)       │  Rotation scoped to PVC │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                    SnapshotManager                                │
+│                (Per-PVC Snapshot Management)                      │
+├──────────────────────────────────────────────────────────────────┤
+│  Public Methods                                                  │
+│  ─────────────────────────────────────────────────────────────── │
+│  create_snapshot(pvc_name)         │  Creates VolumeSnapshot     │
+│  restore_from_snapshot(pvc_name)   │  Creates PVC from snap      │
+│  wait_for_snapshot_ready           │  Polls readyToUse: true     │
+│  get_project_snapshots             │  Lists for Timeline UI      │
+│  get_latest_ready_snapshot(pvc)    │  Latest per specific PVC    │
+│  get_latest_ready_snapshots_by_pvc │  Dict of PVC→snapshot       │
+│  has_existing_snapshot             │  Check restore eligibility  │
+│  soft_delete_project_snapshots     │  30-day retention           │
+│  cleanup_expired_snapshots         │  Deletes old soft-del       │
+│                                                                  │
+│  Private Methods                                                 │
+│  ─────────────────────────────────────────────────────────────── │
+│  _get_project_namespace            │  Resolves proj-{id} ns      │
+│  _generate_snapshot_name           │  snap-/manual- + timestamp  │
+│  _rotate_snapshots (per PVC)       │  Rotation scoped to PVC     │
+│  _delete_snapshot                  │  Deletes VS + VSC + DB row  │
+│  _ensure_volumesnapshot_exists     │  Recreates VS from retained │
+│                                    │  VolumeSnapshotContent      │
+│  _get_pvc_size_bytes               │  Reads PVC storage size     │
+│  _parse_storage_size               │  Parses K8s size strings    │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Methods
 
 ### create_snapshot()
 
-Creates an EBS VolumeSnapshot from a project's PVC.
+Creates a Kubernetes VolumeSnapshot from a project's PVC.
 
-Before inserting the new record, marks all existing snapshots for the same PVC as `is_latest=False`, then sets `is_latest=True` on the new record. Snapshot rotation (`_rotate_snapshots`) is also scoped to the same PVC.
+After creating the VolumeSnapshot, the operation order is: (1) rotate old snapshots via `_rotate_snapshots()` (scoped to the same PVC), (2) mark all existing snapshots for the same PVC as `is_latest=False`, (3) insert the new record with `is_latest=True`.
 
 ```python
 async def create_snapshot(
@@ -88,6 +103,8 @@ async def wait_for_snapshot_ready(
     """
 ```
 
+When the snapshot becomes ready, this method also updates `project.latest_snapshot_id` to point to the new snapshot.
+
 Progress logging uses `logger.info` (not `logger.debug`) and includes `readyToUse`, `error`, and `boundVolumeSnapshotContentName` fields every 5 seconds.
 
 On timeout, the error message includes enhanced diagnostics: the last observed `readyToUse` value, any `error` from the VolumeSnapshot status, and the `boundVolumeSnapshotContentName` if present.
@@ -107,7 +124,7 @@ async def restore_from_snapshot(
     """
     Create PVC with dataSource pointing to VolumeSnapshot.
 
-    EBS lazy-loads data on first read - near-instant startup.
+    CSI driver lazy-loads data on first read - near-instant startup.
 
     Returns:
         (True, None) on success
@@ -157,11 +174,13 @@ Lists snapshots for a project (Timeline UI).
 ```python
 async def get_project_snapshots(
     project_id: UUID,
-    db: AsyncSession
-) -> List[ProjectSnapshot]:
+    db: AsyncSession,
+    include_soft_deleted: bool = False
+) -> list[ProjectSnapshot]:
     """
     Get all snapshots for project, ordered by created_at DESC.
     Maximum of 5 snapshots (older ones auto-rotated).
+    Optionally includes soft-deleted snapshots.
     """
 ```
 
@@ -216,6 +235,41 @@ async def has_existing_snapshot(
     Optional pvc_name and snapshot_type filters to narrow the check.
     """
 ```
+
+### _ensure_volumesnapshot_exists() (private)
+
+Handles cross-namespace snapshot restoration. When a project hibernates, its namespace and VolumeSnapshot are deleted, but the VolumeSnapshotContent is retained (due to `deletionPolicy: Retain`). On restore, this method recreates a pre-provisioned VolumeSnapshot from the retained content:
+
+1. Checks if VolumeSnapshot already exists in the target namespace
+2. If not, searches for the retained VolumeSnapshotContent by `volumeSnapshotRef`
+3. Extracts the underlying `snapshotHandle` (e.g., EBS snapshot ID)
+4. Creates a new pre-provisioned VolumeSnapshotContent pointing to the same underlying snapshot
+5. Creates a VolumeSnapshot bound to the new content
+6. Polls up to 10 times (1-second intervals) for `readyToUse: true`; if not ready after 10 iterations, proceeds optimistically (returns `True` and logs "created (may still be syncing)") since the snapshot should still work for PVC creation
+
+### _delete_snapshot() (private)
+
+Deletes a snapshot from both Kubernetes and the database. Because the VolumeSnapshotClass uses `deletionPolicy: Retain`, this method must explicitly clean up both the VolumeSnapshot and its bound VolumeSnapshotContent to avoid orphaned resources. The method:
+
+1. Reads the VolumeSnapshot to find its `boundVolumeSnapshotContentName`
+2. Deletes the VolumeSnapshot (namespaced)
+3. Deletes the VolumeSnapshotContent (cluster-scoped)
+4. Hard-deletes the database row via `db.delete(snapshot)`
+
+> **Deletion path asymmetry**: `_delete_snapshot()` hard-deletes the DB row (`db.delete()`), permanently removing it from the database. In contrast, `cleanup_expired_snapshots()` sets `status='deleted'` but keeps the DB row — it is a logical delete that preserves an audit trail of cleaned-up snapshots. These two methods use different deletion semantics intentionally.
+
+## API Endpoints
+
+The `routers/snapshots.py` router exposes four endpoints under `/api/projects/{project_id}/snapshots`:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | `GET` | List all snapshots for project (Timeline UI) |
+| `/` | `POST` | Create a manual snapshot (non-blocking, returns `pending`) |
+| `/{snapshot_id}` | `GET` | Get details of a specific snapshot (used for polling status) |
+| `/{snapshot_id}/restore` | `POST` | Set project to restore from a specific snapshot on next start |
+
+The restore endpoint does **not** perform the restore immediately. It sets `project.latest_snapshot_id` to the chosen snapshot. The actual PVC creation from snapshot happens when the project is started via `KubernetesOrchestrator._restore_from_snapshot()`.
 
 ## Usage Patterns
 
@@ -290,7 +344,7 @@ async def _restore_from_snapshot(self, project_id, user_id, namespace, db):
                 snapshot_id=snapshot.id, pvc_name=pvc_name
             )
 
-    return success  # PVCs ready immediately (EBS lazy-loads)
+    return success  # PVCs ready immediately (CSI lazy-loads)
 ```
 
 ## Configuration
@@ -298,10 +352,14 @@ async def _restore_from_snapshot(self, project_id, user_id, namespace, db):
 Settings in `config.py`:
 
 ```python
-k8s_snapshot_class: str = "tesslate-ebs-snapshots"  # VolumeSnapshotClass name
-k8s_snapshot_retention_days: int = 30               # Soft-delete retention
-k8s_max_snapshots_per_project: int = 5              # Timeline limit
-k8s_snapshot_ready_timeout_seconds: int = 300       # Wait timeout (increased for EBS/CSI under load)
+k8s_snapshot_class: str = "tesslate-ebs-snapshots"            # VolumeSnapshotClass name
+k8s_snapshot_retention_days: int = 30                          # Soft-delete retention
+k8s_max_snapshots_per_project: int = 5                         # Timeline limit (per PVC)
+k8s_snapshot_ready_timeout_seconds: int = 300                  # Wait timeout (EBS/CSI under load)
+k8s_pvc_size: str = "5Gi"                                     # PVC size on restore
+k8s_pvc_access_mode: str = "ReadWriteOnce"                     # PVC access mode on restore
+k8s_storage_class: str = "tesslate-block-storage"              # StorageClass for restored PVCs
+k8s_namespace_per_project: bool = True                         # Namespace isolation mode
 ```
 
 ## Database Model
@@ -311,8 +369,8 @@ class ProjectSnapshot(Base):
     __tablename__ = "project_snapshots"
 
     id = Column(UUID, primary_key=True)
-    project_id = Column(UUID, ForeignKey("projects.id", ondelete="SET NULL"))
-    user_id = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    project_id = Column(UUID, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # K8s references
     snapshot_name = Column(String(255), index=True)  # VolumeSnapshot name
@@ -324,20 +382,34 @@ class ProjectSnapshot(Base):
     status = Column(String(50))         # "pending", "ready", "error", "deleted"
     label = Column(String(255))         # User-provided label
     volume_size_bytes = Column(BigInteger)
-    is_latest = Column(Boolean, default=True)
+    is_latest = Column(Boolean, default=False)
 
     # Soft delete
     is_soft_deleted = Column(Boolean, default=False)
-    soft_delete_expires_at = Column(DateTime)
+    soft_delete_expires_at = Column(DateTime(timezone=True))
 
     # Timestamps
-    created_at = Column(DateTime, server_default=func.now())
-    ready_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    ready_at = Column(DateTime(timezone=True))
+
+    # Composite indexes
+    __table_args__ = (
+        Index("ix_project_snapshots_project_created", "project_id", "created_at"),
+        Index("ix_project_snapshots_soft_delete", "is_soft_deleted", "soft_delete_expires_at"),
+    )
 ```
 
 ## Kubernetes Resources
 
-### VolumeSnapshotClass
+The SnapshotManager is CSI-agnostic — it uses the standard `snapshot.storage.k8s.io/v1` API.
+The `k8s_snapshot_class` config setting determines the VolumeSnapshotClass:
+
+| Environment | `k8s_snapshot_class` | CSI Driver |
+|-------------|---------------------|------------|
+| AWS EKS | `tesslate-ebs-snapshots` | `ebs.csi.aws.com` |
+| Minikube | `tesslate-btrfs-snapshots` | btrfs CSI driver |
+
+### VolumeSnapshotClass (example — AWS)
 
 ```yaml
 apiVersion: snapshot.storage.k8s.io/v1
@@ -345,24 +417,34 @@ kind: VolumeSnapshotClass
 metadata:
   name: tesslate-ebs-snapshots
 driver: ebs.csi.aws.com
-deletionPolicy: Retain  # Keep EBS snapshot when VolumeSnapshot deleted
+deletionPolicy: Retain  # Keep underlying snapshot when VolumeSnapshot deleted
 ```
 
 ### VolumeSnapshot (Created by SnapshotManager)
+
+Snapshot names use the format `{prefix}-{project_id[:8]}-{timestamp}` where prefix is `snap` for hibernation or `manual` for manual snapshots.
 
 ```yaml
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata:
-  name: snap-{project_id}-{timestamp}
+  name: snap-{project_id[:8]}-{YYYYMMDD-HHMMSS}
   namespace: proj-{project_id}
+  labels:
+    app: tesslate
+    managed-by: tesslate-backend
+    project-id: "{project_id}"
+    user-id: "{user_id}"
+    snapshot-type: hibernation
 spec:
-  volumeSnapshotClassName: tesslate-ebs-snapshots
+  volumeSnapshotClassName: tesslate-ebs-snapshots  # from k8s_snapshot_class config
   source:
     persistentVolumeClaimName: project-storage
 ```
 
 ### PVC from Snapshot (Created on Restore)
+
+PVC size and access mode are read from `k8s_pvc_size` and `k8s_pvc_access_mode` config settings.
 
 ```yaml
 apiVersion: v1
@@ -371,15 +453,15 @@ metadata:
   name: project-storage
   namespace: proj-{project_id}
 spec:
-  storageClassName: tesslate-block-storage
+  storageClassName: tesslate-block-storage  # from k8s_storage_class config
   dataSource:
-    name: snap-{project_id}-{timestamp}
+    name: snap-{project_id[:8]}-{timestamp}
     kind: VolumeSnapshot
     apiGroup: snapshot.storage.k8s.io
-  accessModes: [ReadWriteOnce]
+  accessModes: [ReadWriteOnce]  # from k8s_pvc_access_mode config
   resources:
     requests:
-      storage: 10Gi
+      storage: 5Gi  # from k8s_pvc_size config
 ```
 
 ## Cleanup CronJobs
@@ -402,14 +484,16 @@ spec:
   2. Delete K8s VolumeSnapshot for each
   3. Update database record status to "deleted"
 
-## Performance Comparison
+## Performance
 
-| Metric | Old (S3 ZIP) | New (EBS Snapshot) |
-|--------|--------------|-------------------|
-| Hibernation time | 30-60 seconds | < 5 seconds |
-| Restore time | 30-90 seconds | < 10 seconds |
-| npm install on restore | Always (30-60s) | Never (preserved) |
+| Metric | Previous (S3 ZIP, removed) | Current (VolumeSnapshot) |
+|--------|---------------------------|--------------------------|
+| Hibernation time | 30-60 seconds | < 5 seconds to initiate |
+| Restore time | 30-90 seconds | < 10 seconds (lazy loading) |
+| npm install on restore | Always (30-60s) | Never (volume preserved) |
 | User-visible wait | "Restoring..." | "Starting..." |
+
+Note: Actual snapshot readiness time depends on CSI driver and volume size. The `wait_for_snapshot_ready` timeout defaults to 300 seconds to handle CSI drivers under load.
 
 ## Troubleshooting
 
@@ -448,8 +532,10 @@ kubectl logs -n tesslate -l job-name=snapshot-cleanup-<timestamp>
 ## Related Files
 
 - `orchestrator/app/routers/snapshots.py` - API endpoints for Timeline UI
-- `orchestrator/app/services/orchestration/kubernetes_orchestrator.py` - Integration
+- `orchestrator/app/services/orchestration/kubernetes_orchestrator.py` - Calls SnapshotManager for hibernation/restore
+- `orchestrator/app/routers/projects.py` - Calls `soft_delete_project_snapshots` on project deletion
 - `orchestrator/app/models.py` - ProjectSnapshot model
-- `k8s/base/core/cleanup-cronjob.yaml` - Hibernation cleanup
-- `k8s/base/core/snapshot-cleanup-cronjob.yaml` - Soft-delete cleanup
-- `k8s/terraform/aws/eks.tf` - VolumeSnapshotClass definition
+- `orchestrator/app/services/volume_manager.py` - Volume Hub client (parallel storage system for volume lifecycle)
+- `k8s/base/core/cleanup-cronjob.yaml` - Hibernation cleanup (idle project detection)
+- `k8s/base/core/snapshot-cleanup-cronjob.yaml` - Soft-delete cleanup (expired snapshot deletion)
+- `k8s/terraform/aws/eks.tf` - VolumeSnapshotClass definition (AWS)

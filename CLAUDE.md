@@ -71,6 +71,12 @@ AI-powered web application builder that lets users create, edit, deploy, and man
 │  PostgreSQL        │  Docker/Kubernetes Container Manager   │
 │  (User data,       │  (User project environments)           │
 │   projects, chat)  │  - Per-project isolation               │
+├─────────────────────────────────────────────────────────────┤
+│  Volume Hub (services/btrfs-csi)                            │
+│  - btrfs CSI driver (per-node subvolume mgmt)               │
+│  - Volume Hub (storageless orchestrator, cache placement)   │
+│  - S3/CAS sync (content-addressable object persistence)     │
+│  - Template builder (instant snapshot-clone for new projects)│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -83,6 +89,7 @@ AI-powered web application builder that lets users create, edit, deploy, and man
 | Database | PostgreSQL (asyncpg) |
 | Task Queue | Redis 7.x, ARQ |
 | Containers | Docker Compose (dev), Kubernetes (prod) |
+| Storage | btrfs CSI + Volume Hub (Go), S3/CAS persistence |
 | Routing | Traefik (Docker), NGINX Ingress (K8s) |
 | AI | LiteLLM → OpenAI/Anthropic models |
 | Payments | Stripe |
@@ -200,7 +207,9 @@ tesslate-studio/
 │       │   │   └── kubernetes/
 │       │   │       ├── client.py               # K8s API client wrapper
 │       │   │       └── helpers.py              # Deployment manifests
-│       │   ├── snapshot_manager.py             # EBS VolumeSnapshot for project persistence
+│       │   ├── snapshot_manager.py             # K8s VolumeSnapshot for project persistence
+│       │   ├── volume_manager.py              # Volume Hub thin client (create, delete, cache, sync)
+│       │   ├── hub_client.py                  # Hub gRPC/JSON client (VolumeHub RPC calls)
 │       │   ├── litellm_service.py              # AI model routing
 │       │   ├── pubsub.py                   # Cross-pod Redis pub/sub + streams
 │       │   ├── distributed_lock.py         # Redis-based distributed locks
@@ -266,14 +275,38 @@ tesslate-studio/
 │   │   │   ├── backend-patch.yaml   # K8S_DEVSERVER_IMAGE=local
 │   │   │   ├── frontend-patch.yaml
 │   │   │   └── secrets/      # Generated from .env.minikube
-│   │   └── production/       # DigitalOcean patches
+│   │   ├── aws-base/         # Shared AWS base patches
+│   │   ├── aws-beta/         # AWS beta environment
+│   │   ├── aws-production/   # AWS production environment
+│   │   ├── digitalocean/     # DigitalOcean patches
+│   │   └── gke/              # Google Kubernetes Engine patches
 │   ├── terraform/
-│   │   └── shared/           # Shared ECR stack (cross-environment)
+│   │   ├── aws/              # AWS environment stack (EKS, ECR locals, S3, IAM, Helm, DNS)
+│   │   └── shared/           # Shared platform stack (ECR repos, platform EKS, VPN, cert-manager, NGINX Ingress, Cloudflare DNS)
 │   ├── scripts/              # Helper scripts
 │   ├── .env.example          # Template for credentials
 │   ├── .env.minikube         # Local credentials (gitignored)
 │   ├── QUICKSTART.md         # Getting started guide
 │   └── ARCHITECTURE.md       # Detailed K8s architecture
+│
+├── services/                     # Standalone services (non-Python)
+│   └── btrfs-csi/               # btrfs CSI driver + Volume Hub (Go)
+│       ├── cmd/driver/          # Driver entrypoint
+│       ├── pkg/
+│       │   ├── btrfs/           # btrfs subvolume operations
+│       │   ├── driver/          # CSI identity/node/controller
+│       │   ├── cas/             # Content-addressable S3 store
+│       │   ├── fileops/         # File operations gRPC service
+│       │   ├── nodeops/         # Node operations gRPC service
+│       │   ├── volumehub/       # Volume Hub orchestrator (hub.go, registry, discovery)
+│       │   ├── sync/            # S3 sync daemon
+│       │   ├── gc/              # Garbage collector
+│       │   ├── objstore/        # Object storage (rclone)
+│       │   ├── template/        # Template manager
+│       │   └── metrics/         # Prometheus metrics
+│       ├── deploy/              # K8s manifests (kustomize)
+│       ├── overlays/            # Environment overlays (minikube, etc.)
+│       └── integration/         # Integration tests
 │
 ├── scripts/
 │   └── seed/                 # Database seed scripts
@@ -291,8 +324,8 @@ tesslate-studio/
 ## Key Database Models (models.py)
 
 - **User**: Auth, profile, subscription tier, theme_preset
-- **Project**: Name, slug, owner, files, containers
-- **ProjectSnapshot**: EBS VolumeSnapshot records for project versioning/timeline
+- **Project**: Name, slug, owner, files, containers, `volume_id`, `cache_node`, `compute_tier` (none/ephemeral/environment), `active_compute_pod`, `last_sync_at`, `template_storage_class`
+- **ProjectSnapshot**: VolumeSnapshot records for project versioning/timeline
 - **Container**: Individual service in a project (frontend, backend, db); includes `startup_command`
 - **ContainerConnection**: Dependencies between containers
 - **Chat/Message**: Conversation history with AI
@@ -411,6 +444,8 @@ Each `CLAUDE.md` file contains:
 | MCP server integration | `docs/orchestrator/routers/CLAUDE.md` → mcp.py, mcp_server.py |
 | Web search tool | `docs/orchestrator/agent/tools/CLAUDE.md` |
 | Universal project setup | `docs/orchestrator/routers/CLAUDE.md` → projects.py setup-config |
+| Volume/storage architecture | `services/btrfs-csi/` (Go driver) + `orchestrator/app/services/volume_manager.py` |
+| Volume Hub client | `orchestrator/app/services/hub_client.py` (gRPC client for Hub RPCs) |
 
 ## Deployment Modes
 
@@ -426,26 +461,48 @@ For Docker quick start, clean slate reset, and database seeding scripts, use the
 ### Kubernetes (Minikube/Production)
 - `DEPLOYMENT_MODE=kubernetes` in config
 - Per-project namespaces (`proj-{uuid}`) with NetworkPolicy isolation
-- EBS VolumeSnapshots for project persistence and versioning
+- btrfs CSI volumes with Volume Hub orchestration and S3/CAS persistence
 - NGINX Ingress for routing
 - Pod affinity for multi-container projects (same node)
 
-#### EBS VolumeSnapshot Pattern
-User project containers use persistent EBS block storage with snapshot-based versioning:
-1. **Storage**: Persistent EBS volumes (gp3) that survive pod restarts - no data loss
-2. **Snapshots**: Created on hibernation or manually via Timeline UI (non-blocking)
-3. **Restore**: PVC created from snapshot on project start (lazy-loading, near-instant)
-4. **Timeline**: Up to 5 snapshots per project for version history and restore points
+#### Volume Hub + btrfs CSI Architecture
+User project data lives on btrfs subvolumes managed by a two-layer system:
+
+1. **btrfs CSI Driver** (`services/btrfs-csi/`): Runs per-node as a DaemonSet. Manages btrfs subvolumes, instant snapshot-clone from templates, file operations (FileOps gRPC), and S3 sync via content-addressable storage (CAS).
+2. **Volume Hub** (`pkg/volumehub/`): Storageless orchestrator (single pod). Tracks volume ownership, coordinates cache placement across nodes, triggers S3 sync, and handles peer-transfer for volume migration between nodes.
+3. **Orchestrator client** (`volume_manager.py` / `hub_client.py`): Thin async client that calls Hub RPCs (CreateVolume, DeleteVolume, EnsureCached, TriggerSync, CreateServiceVolume, VolumeStatus).
+
+**Lifecycle**:
+- **Create**: Hub picks best node, creates btrfs subvolume (from template snapshot or empty)
+- **Compute**: Pod scheduled on cache_node with volume hostPath-mounted
+- **Hibernate**: S3 sync triggered, compute pod removed, volume stays cached on node
+- **Restore**: Hub ensures volume is cached (fast path if still on node, otherwise peer-transfer or S3 restore)
+- **Timeline**: Up to 5 K8s VolumeSnapshots per project for version history and restore points
 
 #### Key K8s Config Settings (config.py)
 ```python
-k8s_devserver_image: str           # Image for user containers (tesslate-devserver:latest)
-k8s_image_pull_secret: str         # Registry secret (empty for local images)
+k8s_devserver_image: str           # Image for user containers (registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest)
+k8s_image_pull_secret: str         # Registry secret (tesslate-container-registry-nyc3)
 k8s_storage_class: str             # StorageClass for PVCs (tesslate-block-storage)
 k8s_snapshot_class: str            # VolumeSnapshotClass (tesslate-ebs-snapshots)
 k8s_snapshot_retention_days: int   # Days to keep soft-deleted snapshots (30)
 k8s_max_snapshots_per_project: int # Max snapshots in timeline (5)
+k8s_snapshot_ready_timeout_seconds: int  # Snapshot readiness timeout (300)
+k8s_hibernation_idle_minutes: int  # Auto-hibernate after X idle minutes (10)
+k8s_pvc_size: str                  # Default PVC size per project (5Gi)
 k8s_enable_pod_affinity: bool      # Keep multi-container projects on same node
+
+# Volume Hub + btrfs CSI
+volume_hub_address: str            # Hub gRPC endpoint (tesslate-volume-hub.kube-system.svc:9750)
+template_build_storage_class: str  # btrfs CSI storage class for templates (tesslate-btrfs)
+template_build_nodeops_address: str # NodeOps gRPC endpoint for template builds
+fileops_enabled: bool              # Feature flag for v2 file operations via CSI (True)
+fileops_timeout: int               # gRPC timeout for file operations (30s)
+compute_max_concurrent_pods: int   # Max concurrent compute pods (5)
+compute_pod_timeout: int           # Compute pod readiness timeout (600s)
+compute_reaper_interval_seconds: int  # Orphaned-pod reaper interval (60s)
+compute_reaper_max_age_seconds: int   # Max pod age before reaping (900s)
+
 redis_url: str                     # Redis connection string (empty = in-memory fallback)
 worker_max_jobs: int               # Concurrent agent tasks per worker pod (10)
 worker_job_timeout: int            # Task timeout in seconds (600)
@@ -471,7 +528,10 @@ mcp_max_servers_per_user: int      # Max installed MCP servers per user (20)
 | `K8S_DEVSERVER_IMAGE` | `tesslate-devserver:latest` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
 | `K8S_IMAGE_PULL_SECRET` | `` (empty) | `ecr-credentials` |
 | `K8S_WILDCARD_TLS_SECRET` | `` (empty, use HTTP) | `tesslate-wildcard-tls` (use HTTPS) |
-| `K8S_SNAPSHOT_CLASS` | `tesslate-btrfs-snapshots` (via btrfs-CSI) | `tesslate-ebs-snapshots` |
+| `K8S_SNAPSHOT_CLASS` | `tesslate-btrfs-snapshots` (via btrfs CSI) | `tesslate-ebs-snapshots` |
+| `K8S_STORAGE_CLASS` | `tesslate-btrfs` (btrfs CSI) | `tesslate-block-storage` (EBS gp3) |
+| `TEMPLATE_BUILD_STORAGE_CLASS` | `tesslate-btrfs` | `tesslate-btrfs` |
+| `VOLUME_HUB_ADDRESS` | `tesslate-volume-hub.kube-system.svc:9750` | `tesslate-volume-hub.kube-system.svc:9750` |
 
 #### Minikube Limitations
 - **HTTP only**: No TLS certificates, all URLs use `http://`

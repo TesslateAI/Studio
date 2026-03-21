@@ -11,7 +11,7 @@ Tesslate Studio supports two deployment modes configured via the `DEPLOYMENT_MOD
 | Mode | Use Case | Routing | Storage | Complexity |
 |------|----------|---------|---------|------------|
 | **Docker** | Local development | Traefik (*.localhost) | Local filesystem | Low |
-| **Kubernetes** | Production (cloud) | NGINX Ingress | EBS + VolumeSnapshots | High |
+| **Kubernetes** | Production (cloud) | NGINX Ingress | Volume Hub + btrfs CSI + S3 CAS | High |
 
 **Key Setting** (from `config.py`):
 ```python
@@ -199,7 +199,7 @@ volumes:
 **Docker Mode Does NOT Support**:
 - ❌ Multi-container user projects (removed - legacy system)
 - ❌ Container isolation via NetworkPolicy (only K8s)
-- ❌ EBS VolumeSnapshot pattern (no hibernation/restore)
+- ❌ Volume Hub / btrfs storage (no hibernation/restore)
 - ❌ Horizontal scaling (single orchestrator instance)
 - ❌ Automatic SSL certificates (localhost only)
 
@@ -213,7 +213,7 @@ volumes:
 
 ### Overview
 
-Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and EBS VolumeSnapshots for storage persistence. Each user project gets a dedicated namespace with strict isolation.
+Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and a 3-layer storage architecture (Volume Hub, btrfs CSI nodes, S3 CAS persistence) for project storage. Each user project gets a dedicated namespace with strict isolation.
 
 ### Architecture
 
@@ -239,9 +239,10 @@ Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and EBS Vol
 │  │    Pod     │  │    Pod     │  │    Pod     │           │
 │  └────────────┘  └────────────┘  └────────────┘           │
 │  ┌────────────────────────────────────────────────┐        │
-│  │  PVC (10Gi EBS Block Storage)                  │        │
+│  │  CSI PV+PVC (btrfs subvolume on compute node) │        │
 │  │  - Shared by all pods in namespace             │        │
-│  │  - Persisted via VolumeSnapshot on hibernation │        │
+│  │  - Volume Hub manages lifecycle + node cache   │        │
+│  │  - Sync daemon pushes changes to S3 CAS        │        │
 │  └────────────────────────────────────────────────┘        │
 │  ┌────────────────────────────────────────────────┐        │
 │  │  NetworkPolicy (Zero cross-project traffic)    │        │
@@ -262,16 +263,26 @@ Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and EBS Vol
 └─────────────────────────────────────────────────────────────┘
                          │
                          ↓
-                ┌─────────────────┐
-                │  EBS Volume     │
-                │  Snapshots      │
-                │  - Auto-created │
-                │    on hibernate │
-                │  - Max 5 per    │
-                │    project      │
-                │  - 30-day soft  │
-                │    delete       │
-                └─────────────────┘
+     ┌───────────────────────────────────────────────┐
+     │          3-Layer Storage Architecture          │
+     ├───────────────────────────────────────────────┤
+     │  Volume Hub (kube-system, gRPC :9750)         │
+     │  - Storageless orchestrator                   │
+     │  - Volume lifecycle: create, delete, cache    │
+     │  - Node placement + peer transfer             │
+     │  - Triggers S3 sync on owning node            │
+     ├───────────────────────────────────────────────┤
+     │  btrfs CSI Nodes (compute nodes)              │
+     │  - Local NVMe/SSD btrfs volumes               │
+     │  - CoW snapshot-clone from templates           │
+     │  - FileOps gRPC :9742 (local I/O, ~0.01ms)   │
+     │  - Sync daemon pushes to S3 CAS               │
+     ├───────────────────────────────────────────────┤
+     │  S3 CAS (Content-Addressable Store)           │
+     │  - Incremental, deduplicated layer store      │
+     │  - Durable persistence across node failures   │
+     │  - Restore = pull CAS layers → btrfs subvol   │
+     └───────────────────────────────────────────────┘
 ```
 
 ### Routing (NGINX Ingress)
@@ -281,51 +292,34 @@ Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and EBS Vol
 **Examples**:
 - Frontend: `https://your-domain.com`
 - Backend: `https://api.your-domain.com`
-- User project (frontend): `https://frontend.proj-{uuid}.your-domain.com`
-- User project (backend): `https://backend.proj-{uuid}.your-domain.com`
+- User project (frontend): `https://{project_slug}-frontend.your-domain.com`
+- User project (backend): `https://{project_slug}-backend.your-domain.com`
 
 **Ingress Configuration** (from `kubernetes/helpers.py`):
 ```python
 def create_ingress_manifest(
-    project_id: str,
-    container_name: str,
-    subdomain: str,
-    service_port: int
-):
-    return {
-        "apiVersion": "networking.k8s.io/v1",
-        "kind": "Ingress",
-        "metadata": {
-            "name": f"{container_name}-ingress",
-            "annotations": {
-                "cert-manager.io/cluster-issuer": "letsencrypt-prod",
-                "nginx.ingress.kubernetes.io/ssl-redirect": "true",
-                "nginx.ingress.kubernetes.io/proxy-hide-headers": "X-Frame-Options",
-            }
-        },
-        "spec": {
-            "ingressClassName": "nginx",
-            "tls": [{
-                "hosts": [f"{subdomain}.proj-{project_id}.your-domain.com"],
-                "secretName": "tesslate-wildcard-tls"
-            }],
-            "rules": [{
-                "host": f"{subdomain}.proj-{project_id}.your-domain.com",
-                "http": {
-                    "paths": [{
-                        "path": "/",
-                        "pathType": "Prefix",
-                        "backend": {
-                            "service": {
-                                "name": f"{container_name}-service",
-                                "port": {"number": service_port}
-                            }
-                        }
-                    }]
-                }
-            }]
-        }
+    namespace: str,
+    project_id: UUID,
+    container_id: UUID,
+    container_directory: str,
+    project_slug: str,
+    port: int,
+    domain: str,
+    ingress_class: str = "nginx",
+    tls_secret: str = None,
+) -> client.V1Ingress:
+    # Host pattern: {project_slug}-{container_directory}.{domain}
+    host = f"{project_slug}-{container_directory}.{domain}"
+
+    # Annotations: WebSocket support for HMR (no cert-manager / ssl-redirect)
+    annotations = {
+        "nginx.ingress.kubernetes.io/proxy-http-version": "1.1",
+        "nginx.ingress.kubernetes.io/proxy-read-timeout": "3600",
+        "nginx.ingress.kubernetes.io/proxy-send-timeout": "3600",
     }
+
+    # TLS added only if tls_secret is provided (production)
+    # ...
 ```
 
 **SSL Certificates**:
@@ -336,141 +330,214 @@ def create_ingress_manifest(
 
 **File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/base/ingress/certificate.yaml`
 
-### Storage (EBS VolumeSnapshot Pattern)
+### Storage (Volume Hub + btrfs CSI + S3 CAS)
 
-**Concept**: EBS block storage with VolumeSnapshots for persistence
+**Concept**: 3-layer storage architecture where a storageless Volume Hub orchestrates btrfs subvolumes on compute nodes, with S3 CAS (Content-Addressable Store) for durable persistence.
+
+**Architecture Layers**:
+
+| Layer | Component | Role |
+|-------|-----------|------|
+| **Control Plane** | Volume Hub (`kube-system`, gRPC `:9750`) | Storageless orchestrator: volume lifecycle, node selection, cache placement, S3 sync triggers |
+| **Data Plane** | btrfs CSI nodes (compute nodes) | Local NVMe/SSD btrfs filesystems, CoW snapshot-clone from templates, FileOps gRPC `:9742` |
+| **Persistence** | S3 CAS (Content-Addressable Store) | Incremental, deduplicated layer store for durable cross-node persistence |
+
+**Orchestrator Integration**: The orchestrator talks to the Hub via a thin `VolumeManager` client (`volume_manager.py` / `hub_client.py`). It never touches btrfs or S3 directly.
 
 **Lifecycle**:
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  1. PROJECT OPEN (Restore)                              │
+│  1. PROJECT CREATION                                    │
 │                                                         │
-│  User opens project                                     │
+│  VolumeManager.create_volume(template="nextjs")         │
 │    ↓                                                    │
-│  Create namespace                                       │
+│  Hub picks the best available compute node              │
 │    ↓                                                    │
-│  Check for existing VolumeSnapshot                      │
-│    - If yes: Create PVC with dataSource pointing to     │
-│              snapshot (EBS lazy-loads data on access)   │
-│    - If no: Create empty PVC, copy template files       │
+│  Node creates btrfs subvolume via CoW clone of template │
+│    - Instant: no file copies, shared extents            │
+│    - node_modules, lock files already installed          │
 │    ↓                                                    │
-│  File manager pod starts (< 10 seconds)                 │
-│    ↓                                                    │
-│  Dev containers start (optional)                        │
+│  Hub returns (volume_id, node_name)                     │
+│    - Stored on Project.volume_id / Project.cache_node   │
 │                                                         │
-│  ✅ Project ready - deps installed on first boot!        │
+│  ✅ Volume ready — zero npm install on first boot       │
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│  2. RUNTIME (Fast Local I/O)                            │
+│  2. PROJECT OPEN (Start Environment)                    │
+│                                                         │
+│  ComputeManager.start_environment() calls:              │
+│    VolumeManager.ensure_cached(volume_id, candidates)   │
+│    ↓                                                    │
+│  Hub validates candidates against live node set         │
+│    - Fast path: already cached on a live node → return  │
+│    - Slow path: peer-transfer or restore from S3 CAS   │
+│    ↓                                                    │
+│  Create namespace proj-{uuid}                           │
+│    ↓                                                    │
+│  Create CSI PV+PVC pointing to btrfs subvolume on node  │
+│    - driver: btrfs.csi.tesslate.io                     │
+│    - volumeHandle: {volume_id}                          │
+│    - nodeAffinity: locked to the cache_node             │
+│    ↓                                                    │
+│  Deploy dev containers + service containers             │
+│    - All pods mount the same CSI PVC (pod affinity)     │
+│                                                         │
+│  ✅ Project running with local btrfs I/O                │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  3. RUNTIME (Fast Local I/O + Background Sync)          │
 │                                                         │
 │  User edits files via:                                  │
 │    - Monaco editor (write_file tool)                    │
 │    - Agent commands (bash, git)                         │
 │    - Manual uploads                                     │
 │    ↓                                                    │
-│  File manager pod writes to PVC                         │
-│    - Local EBS disk speed                               │
-│    - All containers share same PVC (pod affinity)       │
+│  FileOps gRPC (port 9742) on the compute node           │
+│    - Direct btrfs I/O, ~0.01ms latency                 │
+│    - All containers share same CSI PVC (pod affinity)   │
+│    ↓                                                    │
+│  Sync daemon on the node pushes changes to S3 CAS       │
+│    - Incremental: only changed blocks/layers            │
+│    - Content-addressed: automatic deduplication          │
+│    - Non-blocking: runs in background on the node       │
 │                                                         │
 │  User can manually create snapshots (Timeline UI)       │
-│    - Up to 5 snapshots per project                      │
+│    - Up to 5 K8s VolumeSnapshots per project            │
+│    - SnapshotManager creates btrfs-backed snapshots     │
 │    - Non-blocking: returns immediately, polls for ready │
 │                                                         │
-│  ✅ Fast I/O, instant manual saves                      │
+│  ✅ Fast local I/O + durable S3 persistence             │
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│  3. PROJECT HIBERNATION (Snapshot)                      │
+│  4. PROJECT STOP / HIBERNATION                          │
 │                                                         │
 │  User leaves project OR project idles for 10+ min       │
 │    ↓                                                    │
-│  Cleanup CronJob triggers:                              │
-│    - Create VolumeSnapshot from PVC (< 5 seconds)       │
-│    - Wait for snapshot.status.readyToUse: true          │
-│    - Delete namespace (cascades to all resources)       │
+│  hibernate_project_bg() orchestrates the full flow:      │
+│    - ComputeManager.stop_environment():                  │
+│      - Delete namespace (cascades pods, services, PVC)  │
+│      - Delete cluster-scoped PVs (Retain policy keeps   │
+│        btrfs subvolumes intact on the node)             │
+│    - VolumeManager.trigger_sync(volume_id) — final S3   │
+│      push to ensure all data is persisted (separate     │
+│      step in hibernate.py, NOT in stop_environment)     │
 │                                                         │
-│  VolumeSnapshot stored in EBS                           │
-│    - Same AZ, fast restore                              │
-│    - deletionPolicy: Retain                             │
+│  Data remains in two places:                            │
+│    1. btrfs subvolume on the node (fast local cache)    │
+│    2. S3 CAS layers (durable, cross-node)              │
 │                                                         │
-│  ✅ Project hibernated, cluster resources freed         │
+│  ✅ Cluster resources freed, data persisted             │
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│  4. PROJECT DELETION (Soft Delete)                      │
+│  5. PROJECT DELETION (Soft Delete)                      │
 │                                                         │
 │  User deletes project                                   │
 │    ↓                                                    │
-│  Mark all snapshots as soft-deleted                     │
+│  VolumeManager.delete_volume(volume_id)                 │
+│    - Hub deletes from S3 + all node caches              │
+│    - Idempotent                                         │
+│    ↓                                                    │
+│  SnapshotManager marks K8s snapshots as soft-deleted    │
 │    - Set soft_delete_expires_at to 30 days from now     │
 │    - VolumeSnapshots NOT deleted immediately            │
 │    ↓                                                    │
-│  Daily cleanup CronJob (3 AM UTC):                      │
-│    - Find snapshots where soft_delete_expires_at < now  │
-│    - Delete K8s VolumeSnapshot resources                │
+│  Daily cleanup CronJob:                                 │
+│    - Delete expired K8s VolumeSnapshot resources        │
 │    - Update database record status to "deleted"         │
 │                                                         │
 │  ✅ 30-day recovery window for accidental deletions     │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**VolumeSnapshot Creation** (from SnapshotManager):
+**Volume Hub API** (from `VolumeManager` / `HubClient`):
 ```python
-# orchestrator/app/services/snapshot_manager.py
-async def create_snapshot(project_id, user_id, db, snapshot_type="hibernation"):
-    """Create EBS VolumeSnapshot (non-blocking, < 1 second to initiate)."""
-    snapshot_manifest = {
-        "apiVersion": "snapshot.storage.k8s.io/v1",
-        "kind": "VolumeSnapshot",
-        "metadata": {
-            "name": f"snap-{project_id}-{timestamp}",
-            "namespace": f"proj-{project_id}"
-        },
-        "spec": {
-            "volumeSnapshotClassName": "tesslate-ebs-snapshots",
-            "source": {
-                "persistentVolumeClaimName": "project-storage"
-            }
-        }
-    }
-    # Returns immediately - frontend polls for 'ready' status
+# orchestrator/app/services/volume_manager.py (thin client)
+# orchestrator/app/services/hub_client.py (gRPC transport)
+
+vm = get_volume_manager()
+
+# Create a volume (CoW clone from template on best node)
+volume_id, node_name = await vm.create_volume(template="nextjs")
+
+# Ensure volume is cached on a live, schedulable node
+node_name = await vm.ensure_cached(volume_id, candidate_nodes=["node-1", "node-2"])
+
+# Trigger S3 sync on the owning node (non-blocking)
+await vm.trigger_sync(volume_id)
+
+# Create service-specific subvolume (e.g. postgres data dir)
+svc_vol_id = await vm.create_service_volume(volume_id, "postgres")
+
+# Delete volume from Hub + S3 + all node caches
+await vm.delete_volume(volume_id)
 ```
 
-**PVC Restore from Snapshot**:
+**CSI PV+PVC** (created by `ComputeManager.start_environment()`):
 ```yaml
-# Created by snapshot_manager.restore_from_snapshot()
+# PV — cluster-scoped, locked to a specific node
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-{volume_id}
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain   # btrfs subvolumes survive PV deletion
+  csi:
+    driver: btrfs.csi.tesslate.io
+    volumeHandle: "{volume_id}"
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values: ["{node_name}"]
+---
+# PVC — namespaced, binds to the PV above
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: project-storage
+  name: project-source
   namespace: proj-{project_id}
 spec:
-  storageClassName: tesslate-block-storage
-  dataSource:
-    name: snap-{project_id}-{timestamp}
-    kind: VolumeSnapshot
-    apiGroup: snapshot.storage.k8s.io
+  storageClassName: ""       # Pre-bound to specific PV
+  volumeName: pv-{volume_id}
   accessModes: [ReadWriteOnce]
   resources:
     requests:
-      storage: 10Gi
+      storage: 10Gi           # Function default; config.k8s_pvc_size overrides (default "5Gi")
 ```
 
+**SnapshotManager** (K8s VolumeSnapshot API — Timeline UI):
+
+SnapshotManager (`snapshot_manager.py`) still manages K8s VolumeSnapshots for the Timeline UI, but snapshots now use btrfs under the hood (via the btrfs CSI driver's VolumeSnapshotClass) instead of EBS. The same create/restore/rotate/soft-delete logic applies:
+- Up to 5 snapshots per project (configurable via `K8S_MAX_SNAPSHOTS_PER_PROJECT`)
+- Hibernation snapshots created automatically on stop
+- Manual snapshots created via Timeline UI
+- 30-day soft-delete retention for recovery
+- VolumeSnapshotClass: `tesslate-ebs-snapshots` (name retained for compatibility; backed by btrfs CSI)
+
 **Advantages**:
-- ✅ Near-instant restore (< 10 seconds) - EBS lazy-loads data
-- ✅ Fast restore (EBS lazy-loads data on access)
-- ✅ Fast I/O (EBS block storage)
-- ✅ Non-blocking snapshot creation (returns immediately)
-- ✅ Timeline UI - up to 5 snapshots for version history
-- ✅ 30-day soft delete retention for recovery
-- ✅ Same AZ storage - fast and cost-effective
+- Instant project creation via btrfs CoW template cloning (no npm install)
+- Fast local I/O (~0.01ms via FileOps gRPC on compute node)
+- Durable persistence via S3 CAS (survives node failures)
+- Incremental, deduplicated storage (CAS only stores changed blocks)
+- Hub handles node failures transparently (peer-transfer or S3 restore)
+- Service subvolumes for stateful containers (e.g. postgres data dir)
+- Timeline UI with up to 5 btrfs-backed VolumeSnapshots
+- 30-day soft-delete retention for recovery
 
-**Disadvantages**:
-- ❌ Single AZ (snapshots don't replicate across AZs)
-- ❌ Storage costs (mitigated by soft-delete cleanup)
-
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/snapshot_manager.py`
+**Key Files**:
+- `orchestrator/app/services/volume_manager.py` — Thin VolumeManager client
+- `orchestrator/app/services/hub_client.py` — gRPC client for Volume Hub
+- `orchestrator/app/services/compute_manager.py` — Start/stop environment, creates CSI PV+PVC
+- `orchestrator/app/services/snapshot_manager.py` — K8s VolumeSnapshot API (Timeline UI)
 
 ### Namespace Isolation
 
@@ -488,38 +555,10 @@ metadata:
     tesslate.io/user-id: "123e4567-e89b-12d3-a456-426614174000"
 
 ---
-# PVC (10Gi EBS block storage)
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: project-storage
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: tesslate-block-storage
-  resources:
-    requests:
-      storage: 10Gi
-
----
-# File Manager Deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: file-manager
-spec:
-  replicas: 1
-  template:
-    spec:
-      containers:
-      - name: file-manager
-        image: tesslate-devserver:latest
-        volumeMounts:
-        - name: project-source
-          mountPath: /app
-      volumes:
-      - name: project-source
-        persistentVolumeClaim:
-          claimName: project-storage
+# CSI PV+PVC (btrfs subvolume on compute node)
+# Created by ComputeManager.start_environment() — see Storage section above.
+# PV is cluster-scoped with nodeAffinity; PVC is namespace-scoped and pre-bound.
+# All pods in the namespace share this PVC via pod affinity.
 
 ---
 # Dev Container Deployment (example: frontend)
@@ -531,12 +570,12 @@ spec:
   replicas: 1
   template:
     spec:
-      affinity:  # Pod affinity to share RWO storage
+      affinity:  # Pod affinity keeps all containers on the same node as the CSI volume
         podAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchLabels:
-                app: file-manager
+                tesslate.io/project-id: "550e8400-e29b-41d4-a716-446655440000"
             topologyKey: kubernetes.io/hostname
       containers:
       - name: dev-server
@@ -548,7 +587,7 @@ spec:
       volumes:
       - name: project-source
         persistentVolumeClaim:
-          claimName: project-storage
+          claimName: project-source
 
 ---
 # NetworkPolicy (Zero cross-project traffic)
@@ -578,9 +617,9 @@ spec:
 
 ### Pod Affinity (Multi-Container Projects)
 
-**Problem**: Kubernetes PVCs with `ReadWriteOnce` (RWO) can only be mounted by pods on the same node.
+**Problem**: CSI PVs with node affinity pin the btrfs subvolume to a specific compute node. All pods must run on that node to access the volume.
 
-**Solution**: Pod affinity ensures all containers in a project run on the same node.
+**Solution**: Pod affinity ensures all containers in a project run on the same node as the CSI volume.
 
 **Configuration** (from `config.py`):
 ```python
@@ -590,12 +629,12 @@ k8s_affinity_topology_key: str = "kubernetes.io/hostname"
 
 **Pod Affinity Manifest** (from `kubernetes/helpers.py`):
 ```python
-# All dev containers affine to file-manager
+# All dev containers affine to the same project (same node for shared RWO PVC)
 affinity = {
     "podAffinity": {
         "requiredDuringSchedulingIgnoredDuringExecution": [{
             "labelSelector": {
-                "matchLabels": {"app": "file-manager"}
+                "matchLabels": {"tesslate.io/project-id": str(project_id)}
             },
             "topologyKey": "kubernetes.io/hostname"
         }]
@@ -604,9 +643,9 @@ affinity = {
 ```
 
 **Benefits**:
-- ✅ All containers share same PVC (RWO storage)
-- ✅ Faster inter-container communication (same node)
-- ✅ Simpler storage management (no need for RWX)
+- All containers share same CSI PVC (btrfs subvolume)
+- Faster inter-container communication (same node)
+- Volume Hub manages node placement; pod affinity follows
 
 **Trade-offs**:
 - ⚠️ Node resource constraints (all pods must fit on one node)
@@ -630,11 +669,18 @@ K8S_DEVSERVER_IMAGE=<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-de
 K8S_IMAGE_PULL_SECRET=ecr-credentials
 K8S_STORAGE_CLASS=tesslate-block-storage
 
-# Snapshots
+# Volume Hub (3-layer storage)
+VOLUME_HUB_ADDRESS=tesslate-volume-hub.kube-system.svc:9750
+
+# Snapshots (Timeline UI, still uses K8s VolumeSnapshot API)
 K8S_SNAPSHOT_CLASS=tesslate-ebs-snapshots
 K8S_SNAPSHOT_RETENTION_DAYS=30
 K8S_MAX_SNAPSHOTS_PER_PROJECT=5
-K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=90
+K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=300
+
+# Template Builder (btrfs CoW cloning)
+TEMPLATE_BUILD_STORAGE_CLASS=tesslate-btrfs
+TEMPLATE_BUILD_NODEOPS_ADDRESS=tesslate-btrfs-csi-node-svc.kube-system.svc:9741
 
 # App Domain
 APP_DOMAIN=your-domain.com
@@ -646,7 +692,7 @@ COOKIE_DOMAIN=.your-domain.com
 # Kubernetes Advanced
 K8S_ENABLE_POD_AFFINITY=true
 K8S_ENABLE_NETWORK_POLICIES=true
-K8S_PVC_SIZE=10Gi
+K8S_PVC_SIZE=5Gi
 K8S_HIBERNATION_IDLE_MINUTES=10
 
 # Ingress
@@ -668,7 +714,7 @@ k8s/
     database/                 # PostgreSQL deployment
     ingress/                  # NGINX Ingress, SSL cert
     security/                 # RBAC, network policies
-    storage/                  # VolumeSnapshotClass (EBS snapshots)
+    storage/                  # VolumeSnapshotClass (btrfs CSI snapshots)
 
   overlays/
     minikube/                 # Local dev patches
@@ -699,8 +745,10 @@ kubectl apply -k k8s/overlays/aws
 | **DEV_SERVER_BASE_URL** | `http://localhost` | N/A | N/A |
 | **K8S_DEVSERVER_IMAGE** | N/A | `tesslate-devserver:latest` | `<ECR>.../tesslate-devserver:latest` |
 | **K8S_IMAGE_PULL_SECRET** | N/A | `` (empty - local image) | `ecr-credentials` |
-| **K8S_STORAGE_CLASS** | N/A | `standard` (minikube) | `tesslate-block-storage` (AWS EBS) |
-| **K8S_SNAPSHOT_CLASS** | N/A | `tesslate-ebs-snapshots` | `tesslate-ebs-snapshots` |
+| **K8S_STORAGE_CLASS** | N/A | `standard` (minikube) | `tesslate-block-storage` |
+| **K8S_SNAPSHOT_CLASS** | N/A | `tesslate-btrfs-snapshots` | `tesslate-ebs-snapshots` |
+| **VOLUME_HUB_ADDRESS** | N/A | `tesslate-volume-hub.kube-system.svc:9750` | `tesslate-volume-hub.kube-system.svc:9750` |
+| **TEMPLATE_BUILD_STORAGE_CLASS** | N/A | `tesslate-btrfs` | `tesslate-btrfs` |
 | **APP_DOMAIN** | `localhost` | `localhost` | `your-domain.com` |
 | **COOKIE_DOMAIN** | `` (empty) | `` (empty) | `.your-domain.com` |
 | **K8S_WILDCARD_TLS_SECRET** | N/A | `` (no TLS) | `tesslate-wildcard-tls` |
@@ -747,10 +795,16 @@ K8S_DEVSERVER_IMAGE=tesslate-devserver:latest
 K8S_IMAGE_PULL_SECRET=
 K8S_STORAGE_CLASS=standard
 
-# Snapshots
-K8S_SNAPSHOT_CLASS=tesslate-ebs-snapshots
+# Volume Hub
+VOLUME_HUB_ADDRESS=tesslate-volume-hub.kube-system.svc:9750
+
+# Snapshots (Timeline UI)
+K8S_SNAPSHOT_CLASS=tesslate-btrfs-snapshots
 K8S_SNAPSHOT_RETENTION_DAYS=30
 K8S_MAX_SNAPSHOTS_PER_PROJECT=5
+
+# Template Builder
+TEMPLATE_BUILD_STORAGE_CLASS=tesslate-btrfs
 
 # App Domain
 APP_DOMAIN=localhost
@@ -777,11 +831,18 @@ K8S_DEVSERVER_IMAGE=<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-de
 K8S_IMAGE_PULL_SECRET=ecr-credentials
 K8S_STORAGE_CLASS=tesslate-block-storage
 
-# Snapshots
+# Volume Hub (3-layer storage)
+VOLUME_HUB_ADDRESS=tesslate-volume-hub.kube-system.svc:9750
+
+# Snapshots (Timeline UI)
 K8S_SNAPSHOT_CLASS=tesslate-ebs-snapshots
 K8S_SNAPSHOT_RETENTION_DAYS=30
 K8S_MAX_SNAPSHOTS_PER_PROJECT=5
-K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=90
+K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=300
+
+# Template Builder
+TEMPLATE_BUILD_STORAGE_CLASS=tesslate-btrfs
+TEMPLATE_BUILD_NODEOPS_ADDRESS=tesslate-btrfs-csi-node-svc.kube-system.svc:9741
 
 # App Domain
 APP_DOMAIN=your-domain.com
@@ -829,13 +890,13 @@ await orchestrator.write_file(project_id, path, content)
 ### Infrastructure Changes Required
 
 **Docker → Kubernetes**:
-1. ✅ Set up Kubernetes cluster (Minikube, EKS, GKE, etc.)
-2. ✅ Install EBS CSI driver and snapshot controller
-3. ✅ Create VolumeSnapshotClass (`tesslate-ebs-snapshots`)
-4. ✅ Build and push images to registry
-5. ✅ Create Kubernetes manifests (or use provided in `k8s/`)
-6. ✅ Deploy with `kubectl apply -k k8s/overlays/{env}`
-7. ✅ Update `.env` with K8s-specific settings
+1. Set up Kubernetes cluster (Minikube, EKS, GKE, etc.)
+2. Deploy btrfs CSI driver + Volume Hub (kube-system)
+3. Create VolumeSnapshotClass (btrfs-backed)
+4. Build and push images to registry (devserver, backend, frontend)
+5. Create Kubernetes manifests (or use provided in `k8s/`)
+6. Deploy with `kubectl apply -k k8s/overlays/{env}`
+7. Update `.env` with K8s-specific settings (Volume Hub address, template builder, etc.)
 
 **Kubernetes → Docker**:
 1. ✅ Stop Kubernetes cluster
@@ -858,8 +919,8 @@ await orchestrator.write_file(project_id, path, content)
 - ✅ Deploying to production
 - ✅ Need horizontal scaling (multiple orchestrator replicas)
 - ✅ Want container isolation (NetworkPolicy)
-- ✅ Need EBS snapshot durability (project persistence)
-- ✅ Want Timeline UI for version history
+- ✅ Need durable project persistence (Volume Hub + S3 CAS)
+- ✅ Want Timeline UI for version history (btrfs-backed VolumeSnapshots)
 - ✅ Serving multiple users concurrently
 - ✅ Require SSL/TLS certificates
 
