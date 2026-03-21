@@ -200,6 +200,18 @@ func (m *Manager) SetReadOnly(ctx context.Context, name string, readOnly bool) e
 	return nil
 }
 
+// EnsureReadOnly checks whether a subvolume is read-only and sets it if not.
+func (m *Manager) EnsureReadOnly(ctx context.Context, name string) error {
+	ro, err := m.IsReadOnly(ctx, name)
+	if err != nil {
+		return err
+	}
+	if ro {
+		return nil
+	}
+	return m.SetReadOnly(ctx, name, true)
+}
+
 // ListSubvolumes lists subvolumes under the pool whose path contains the
 // given prefix. It parses output from `btrfs subvolume list`.
 func (m *Manager) ListSubvolumes(ctx context.Context, prefix string) ([]SubvolumeInfo, error) {

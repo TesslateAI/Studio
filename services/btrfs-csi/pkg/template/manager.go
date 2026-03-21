@@ -34,23 +34,18 @@ func NewManager(btrfs *btrfs.Manager, casStore *cas.Store, poolPath string) *Man
 }
 
 // EnsureTemplate checks whether the template subvolume exists locally and is
-// read-only. If missing, the template is downloaded from CAS. If present but
-// writable (e.g. created by a stale process), it is deleted and re-downloaded
-// so that btrfs send can use it as an incremental parent.
+// read-only. If present but writable, it is set read-only in place. If
+// missing, the template is downloaded from CAS.
 func (m *Manager) EnsureTemplate(ctx context.Context, name string) error {
 	tmplPath := fmt.Sprintf("templates/%s", name)
 
-	// Fast path: present and read-only.
+	// Fast path: already present — ensure read-only.
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
-		if ro, err := m.btrfs.IsReadOnly(ctx, tmplPath); err == nil && ro {
-			klog.V(4).Infof("Template %s already exists (ro=true)", name)
-			return nil
+		if err := m.btrfs.EnsureReadOnly(ctx, tmplPath); err != nil {
+			return fmt.Errorf("ensure template %q read-only: %w", name, err)
 		}
-		// Exists but writable — delete and re-download.
-		klog.Warningf("Template %s exists but is not read-only, replacing from CAS", name)
-		if err := m.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
-			return fmt.Errorf("delete writable template %q: %w", name, err)
-		}
+		klog.V(4).Infof("Template %s ready (ensured ro)", name)
+		return nil
 	}
 
 	// Acquire per-template lock to prevent concurrent downloads.
@@ -67,22 +62,20 @@ func (m *Manager) EnsureTemplate(ctx context.Context, name string) error {
 
 	// Re-check after acquiring lock.
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
-		if ro, err := m.btrfs.IsReadOnly(ctx, tmplPath); err == nil && ro {
-			klog.V(4).Infof("Template %s already exists (after lock, ro=true)", name)
-			return nil
+		if err := m.btrfs.EnsureReadOnly(ctx, tmplPath); err != nil {
+			return fmt.Errorf("ensure template %q read-only: %w", name, err)
 		}
-		klog.Warningf("Template %s still writable after lock, deleting", name)
-		if err := m.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
-			return fmt.Errorf("delete writable template %q: %w", name, err)
-		}
+		klog.V(4).Infof("Template %s ready after lock (ensured ro)", name)
+		return nil
 	}
 
 	klog.V(2).Infof("Template %s not found locally, downloading from CAS", name)
 	return m.downloadTemplate(ctx, name)
 }
 
-// EnsureTemplateByHash ensures a template exists locally, is read-only, and
-// matches the expected blob hash. If missing or writable, downloaded from CAS.
+// EnsureTemplateByHash ensures a template exists locally and is read-only.
+// If present but writable, it is set read-only in place. If missing,
+// downloaded from CAS by hash.
 func (m *Manager) EnsureTemplateByHash(ctx context.Context, name, expectedHash string) error {
 	if name == "" {
 		return fmt.Errorf("template name required for EnsureTemplateByHash")
@@ -90,15 +83,13 @@ func (m *Manager) EnsureTemplateByHash(ctx context.Context, name, expectedHash s
 
 	tmplPath := fmt.Sprintf("templates/%s", name)
 
+	// Fast path: already present — ensure read-only.
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
-		if ro, err := m.btrfs.IsReadOnly(ctx, tmplPath); err == nil && ro {
-			klog.V(4).Infof("Template %s exists locally (ro=true, expected hash %s)", name, cas.ShortHash(expectedHash))
-			return nil
+		if err := m.btrfs.EnsureReadOnly(ctx, tmplPath); err != nil {
+			return fmt.Errorf("ensure template %q read-only: %w", name, err)
 		}
-		klog.Warningf("Template %s exists but is not read-only, replacing from CAS", name)
-		if err := m.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
-			return fmt.Errorf("delete writable template %q: %w", name, err)
-		}
+		klog.V(4).Infof("Template %s ready (ensured ro, expected hash %s)", name, cas.ShortHash(expectedHash))
+		return nil
 	}
 
 	// Download by hash.
@@ -113,13 +104,12 @@ func (m *Manager) EnsureTemplateByHash(ctx context.Context, name, expectedHash s
 	lk.Lock()
 	defer lk.Unlock()
 
+	// Re-check after acquiring lock.
 	if m.btrfs.SubvolumeExists(ctx, tmplPath) {
-		if ro, err := m.btrfs.IsReadOnly(ctx, tmplPath); err == nil && ro {
-			return nil
+		if err := m.btrfs.EnsureReadOnly(ctx, tmplPath); err != nil {
+			return fmt.Errorf("ensure template %q read-only: %w", name, err)
 		}
-		if err := m.btrfs.DeleteSubvolume(ctx, tmplPath); err != nil {
-			return fmt.Errorf("delete writable template %q: %w", name, err)
-		}
+		return nil
 	}
 
 	klog.V(2).Infof("Downloading template %s by hash %s from CAS", name, cas.ShortHash(expectedHash))
