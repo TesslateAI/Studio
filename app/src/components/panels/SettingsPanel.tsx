@@ -1,13 +1,55 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Check, Layers, Package, Download, Lock, Cpu } from 'lucide-react';
-import { ChatCentered } from '@phosphor-icons/react';
-import { projectsApi, setupApi } from '../../lib/api';
+import { Settings, Monitor, Check, Layers, Package, Download, Lock, Cpu, Cloud, ExternalLink } from 'lucide-react';
+import { ChatCentered, Spinner } from '@phosphor-icons/react';
+import { projectsApi, setupApi, deploymentCredentialsApi } from '../../lib/api';
 import { ServiceConfigForm } from '../ServiceConfigForm';
 import type { TesslateConfig } from '../../types/tesslateConfig';
 import { ToggleSwitch } from '../ui/ToggleSwitch';
 import { useChatPosition, type ChatPosition } from '../../contexts/ChatPositionContext';
 import { ExportTemplateModal } from '../modals/ExportTemplateModal';
+import { ProviderConnectModal } from '../modals/ProviderConnectModal';
 import toast from 'react-hot-toast';
+
+interface DeploymentCredential {
+  id: string;
+  provider: string;
+  project_id: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  is_default: boolean;
+}
+
+interface ProviderDisplay {
+  name: string;
+  display_name: string;
+  icon: string;
+  color: string;
+}
+
+const PROVIDER_DISPLAY: Record<string, ProviderDisplay> = {
+  vercel: { name: 'vercel', display_name: 'Vercel', icon: '▲', color: '#000000' },
+  netlify: { name: 'netlify', display_name: 'Netlify', icon: '◆', color: '#00C7B7' },
+  cloudflare: { name: 'cloudflare', display_name: 'Cloudflare', icon: '🔥', color: '#F38020' },
+  railway: { name: 'railway', display_name: 'Railway', icon: '🚂', color: '#0B0D0E' },
+  heroku: { name: 'heroku', display_name: 'Heroku', icon: '🟣', color: '#430098' },
+  render: { name: 'render', display_name: 'Render', icon: '🔷', color: '#46E3B7' },
+  koyeb: { name: 'koyeb', display_name: 'Koyeb', icon: '🟢', color: '#121212' },
+  zeabur: { name: 'zeabur', display_name: 'Zeabur', icon: '⚡', color: '#6C5CE7' },
+  northflank: { name: 'northflank', display_name: 'Northflank', icon: '🔶', color: '#01E277' },
+  surge: { name: 'surge', display_name: 'Surge.sh', icon: '🌊', color: '#D93472' },
+  'deno-deploy': { name: 'deno-deploy', display_name: 'Deno Deploy', icon: '🦕', color: '#000000' },
+  firebase: { name: 'firebase', display_name: 'Firebase', icon: '🔥', color: '#FFCA28' },
+  'github-pages': { name: 'github-pages', display_name: 'GitHub Pages', icon: '📄', color: '#222222' },
+  digitalocean: { name: 'digitalocean', display_name: 'DigitalOcean', icon: '🌊', color: '#0080FF' },
+  'aws-apprunner': { name: 'aws-apprunner', display_name: 'AWS App Runner', icon: '☁️', color: '#FF9900' },
+  'gcp-cloudrun': { name: 'gcp-cloudrun', display_name: 'GCP Cloud Run', icon: '☁️', color: '#4285F4' },
+  'azure-container-apps': { name: 'azure-container-apps', display_name: 'Azure Container Apps', icon: '☁️', color: '#0078D4' },
+  'do-container': { name: 'do-container', display_name: 'DO Container', icon: '🌊', color: '#0080FF' },
+  fly: { name: 'fly', display_name: 'Fly.io', icon: '✈️', color: '#7B3FE4' },
+  dockerhub: { name: 'dockerhub', display_name: 'Docker Hub', icon: '🐳', color: '#2496ED' },
+  ghcr: { name: 'ghcr', display_name: 'GHCR', icon: '📦', color: '#222222' },
+  download: { name: 'download', display_name: 'Download', icon: '💾', color: '#6B7280' },
+};
 
 interface SettingsPanelProps {
   projectSlug: string;
@@ -30,8 +72,14 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
   const [savingServices, setSavingServices] = useState(false);
   const { chatPosition, setChatPosition } = useChatPosition();
 
+  // Deployment credentials state
+  const [deployCredentials, setDeployCredentials] = useState<DeploymentCredential[]>([]);
+  const [deployLoading, setDeployLoading] = useState(false);
+  const [showConnectModal, setShowConnectModal] = useState(false);
+
   useEffect(() => {
     loadSettings();
+    loadDeployCredentials();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSlug]);
 
@@ -58,6 +106,18 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
       console.error('Failed to load settings:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadDeployCredentials = async () => {
+    setDeployLoading(true);
+    try {
+      const data = await deploymentCredentialsApi.list();
+      setDeployCredentials(data.credentials || []);
+    } catch (error) {
+      console.error('Failed to load deployment credentials:', error);
+    } finally {
+      setDeployLoading(false);
     }
   };
 
@@ -455,6 +515,90 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
         {/* Divider */}
         <div className="border-t border-[var(--text)]/10 my-6" />
 
+        {/* Deployment Credentials */}
+        <div className="space-y-4">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Cloud size={18} className="text-[var(--text)]/60" />
+                <h3 className="text-sm font-medium text-[var(--text)]">Deployments</h3>
+              </div>
+              <button
+                onClick={() => setShowConnectModal(true)}
+                className="text-xs text-[var(--primary)] hover:text-[var(--primary)]/80 transition-colors flex items-center gap-1"
+              >
+                <ExternalLink size={12} />
+                Connect Provider
+              </button>
+            </div>
+            <p className="text-xs text-[var(--text)]/60 mb-4">
+              Provider credentials used for deploying this project
+            </p>
+
+            {deployLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Spinner size={20} className="animate-spin text-[var(--primary)]" />
+              </div>
+            ) : deployCredentials.length > 0 ? (
+              <div className="space-y-2">
+                {deployCredentials.map((cred) => {
+                  const display = PROVIDER_DISPLAY[cred.provider] || {
+                    name: cred.provider,
+                    display_name: cred.provider,
+                    icon: '🚀',
+                    color: '#6B7280',
+                  };
+                  return (
+                    <div
+                      key={cred.id}
+                      className="flex items-center gap-3 p-3 rounded-lg border border-[var(--text)]/10 bg-white/5"
+                    >
+                      <div
+                        className="w-8 h-8 rounded-md flex items-center justify-center text-sm font-bold text-white"
+                        style={{ backgroundColor: display.color }}
+                      >
+                        {display.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--text)] truncate">
+                          {display.display_name}
+                        </p>
+                        <p className="text-xs text-[var(--text)]/40">
+                          {(cred.metadata as Record<string, string>)?.account_name || 'Connected'}
+                        </p>
+                      </div>
+                      <span
+                        className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                          cred.is_default
+                            ? 'bg-blue-500/15 text-blue-400'
+                            : 'bg-green-500/15 text-green-400'
+                        }`}
+                      >
+                        {cred.is_default ? 'Account Default' : 'Project-Specific'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-4 rounded-lg border-2 border-dashed border-[var(--text)]/10 text-center">
+                <p className="text-xs text-[var(--text)]/40">
+                  No deployment providers connected yet
+                </p>
+                <button
+                  onClick={() => setShowConnectModal(true)}
+                  className="mt-2 text-xs text-[var(--primary)] hover:text-[var(--primary)]/80 transition-colors"
+                >
+                  Connect a provider
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-[var(--text)]/10 my-6" />
+
         {/* Template Export */}
         <div className="space-y-4">
           <div>
@@ -538,6 +682,15 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
         onClose={() => setShowExportModal(false)}
         onSuccess={() => {}}
         projectSlug={projectSlug}
+      />
+
+      <ProviderConnectModal
+        isOpen={showConnectModal}
+        onClose={() => setShowConnectModal(false)}
+        onConnected={async () => {
+          await loadDeployCredentials();
+        }}
+        connectedProviders={deployCredentials.map((c) => c.provider)}
       />
     </div>
   );

@@ -1,11 +1,11 @@
 """
-Tests for Phase 5: Registration & Wiring.
+Tests for Deployment Provider Registration & Wiring.
 
 Covers:
-- Task 15: All providers registered in __init__.py and DeploymentManager
-- Task 16: All providers have guard capabilities
-- Task 17: Container-push and export endpoint request/response models
-- Task 18: Credential metadata fields and config settings
+- All providers registered in __init__.py and DeploymentManager
+- All providers have guard capabilities
+- Container-push and export endpoint request/response models
+- Credential metadata fields and config settings
 - prepare_provider_credentials delegation to _build_provider_credentials
 """
 
@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 # =============================================================================
-# Task 15: Provider Registration Tests
+# Provider Registration Tests
 # =============================================================================
 
 
@@ -146,7 +146,7 @@ class TestProviderRegistration:
 
 
 # =============================================================================
-# Task 16: Guard Capabilities Tests
+# Guard Capabilities Tests
 # =============================================================================
 
 
@@ -235,7 +235,7 @@ class TestGuardCapabilities:
 
 
 # =============================================================================
-# Task 17: Endpoint Request/Response Model Tests
+# Endpoint Request/Response Model Tests
 # =============================================================================
 
 
@@ -332,7 +332,7 @@ class TestExportResponseModel:
 
 
 # =============================================================================
-# Task 17: Container Deploy Endpoint Validation Tests
+# Container Deploy Endpoint Validation Tests
 # =============================================================================
 
 
@@ -378,7 +378,7 @@ class TestExportEndpointValidation:
 
 
 # =============================================================================
-# Task 18: Credential Metadata Tests
+# Credential Metadata Tests
 # =============================================================================
 
 

@@ -2161,9 +2161,9 @@ export const deploymentCredentialsApi = {
   },
 
   // List user's connected credentials
-  list: async (provider?: string) => {
+  list: async (provider?: string, projectId?: string) => {
     const response = await api.get('/api/deployment-credentials', {
-      params: { provider },
+      params: { provider, project_id: projectId },
     });
     return response.data;
   },

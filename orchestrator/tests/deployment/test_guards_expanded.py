@@ -10,7 +10,7 @@ from app.services.deployment.guards import (
     validate_deployment_connection,
 )
 
-# All expected providers after Phase 4
+# All expected providers (22 total)
 ALL_PROVIDERS = [
     "vercel", "netlify", "cloudflare", "digitalocean", "railway", "fly",
     "heroku", "render", "koyeb", "zeabur", "northflank",
