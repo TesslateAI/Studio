@@ -17,6 +17,7 @@ from .marketplace_bases import seed_marketplace_bases
 from .opensource_agents import seed_opensource_agents
 from .skills import seed_skills
 from .themes import seed_themes
+from .deployment_targets import seed_deployment_targets
 from .workflow_templates import WORKFLOW_TEMPLATES, seed_workflow_templates
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ __all__ = [
     "seed_skills",
     "seed_themes",
     "seed_workflow_templates",
+    "seed_deployment_targets",
     "auto_add_tesslate_agent_to_users",
     "auto_add_librarian_agent_to_users",
     "get_or_create_tesslate_account",
@@ -116,6 +118,14 @@ async def run_all_seeds():
             logger.info("Seed workflow templates: %d new", count)
         except Exception:
             logger.exception("Failed to seed workflow templates")
+            await db.rollback()
+
+        # 9. Deployment targets (item_type='deployment_target')
+        try:
+            count = await seed_deployment_targets(db)
+            logger.info("Seed deployment targets: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed deployment targets")
             await db.rollback()
 
     logger.info("All database seeds completed")
