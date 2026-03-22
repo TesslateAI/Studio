@@ -24,6 +24,8 @@ import {
   Article,
   Kanban,
   TreeStructure,
+  FloppyDisk,
+  ArrowsClockwise,
 } from '@phosphor-icons/react';
 import { ContainerNode } from '../components/ContainerNode';
 import { BrowserPreviewNode } from '../components/BrowserPreviewNode';
@@ -42,7 +44,7 @@ import { ChatContainer } from '../components/chat/ChatContainer';
 
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, deploymentTargetsApi, marketplaceApi } from '../lib/api';
+import api, { projectsApi, deploymentTargetsApi, marketplaceApi, configSyncApi, setupApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { type ChatAgent } from '../types/chat';
 import { fileEvents } from '../utils/fileEvents';
@@ -1617,6 +1619,36 @@ const ProjectGraphCanvasInner = () => {
     }
   };
 
+  const handleSaveConfig = async () => {
+    if (!slug) return;
+    try {
+      toast.loading('Saving config to .tesslate/config.json...', { id: 'save-config' });
+      const result = await configSyncApi.save(slug);
+      const total = Object.values(result.sections).reduce((sum, n) => sum + n, 0);
+      toast.success(`Config saved (${total} items)`, { id: 'save-config', duration: 2000 });
+    } catch (error) {
+      toast.error('Failed to save configuration', { id: 'save-config' });
+    }
+  };
+
+  const handleLoadConfig = async () => {
+    if (!slug) return;
+    try {
+      toast.loading('Loading config from .tesslate/config.json...', { id: 'load-config' });
+      const configResponse = await setupApi.getConfig(slug);
+      if (!configResponse.exists) {
+        toast.error('No .tesslate/config.json found', { id: 'load-config' });
+        return;
+      }
+      const { exists, ...config } = configResponse;
+      const result = await configSyncApi.load(slug, config);
+      toast.success(`Config loaded (${result.container_ids.length} containers)`, { id: 'load-config', duration: 2000 });
+      await fetchProjectData();
+    } catch (error) {
+      toast.error('Failed to load configuration', { id: 'load-config' });
+    }
+  };
+
   // Stable callback - uses ref for slug
   const handleOpenBuilder = useCallback(
     (containerId: string) => {
@@ -1951,6 +1983,26 @@ const ProjectGraphCanvasInner = () => {
 
           {/* Control buttons */}
           <div className="flex items-center gap-[2px]">
+            {/* Config Sync Buttons */}
+            <Tooltip content="Save canvas state to .tesslate/config.json" side="bottom">
+              <button
+                onClick={handleSaveConfig}
+                className="hidden md:flex btn"
+              >
+                <FloppyDisk size={16} />
+                <span className="hidden lg:inline">Save Config</span>
+              </button>
+            </Tooltip>
+            <Tooltip content="Load .tesslate/config.json into canvas" side="bottom">
+              <button
+                onClick={handleLoadConfig}
+                className="hidden md:flex btn"
+              >
+                <ArrowsClockwise size={16} />
+                <span className="hidden lg:inline">Load Config</span>
+              </button>
+            </Tooltip>
+
             {/* Builder Button */}
             <button
               onClick={() => navigate(`/project/${slug}/builder`)}

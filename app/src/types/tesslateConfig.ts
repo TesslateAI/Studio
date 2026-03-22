@@ -60,3 +60,14 @@ export interface SetupConfigSyncResponse {
   container_ids: string[];
   primary_container_id: string | null;
 }
+
+export interface ConfigSyncSaveResponse {
+  status: string;
+  sections: {
+    apps: number;
+    infrastructure: number;
+    connections: number;
+    deployments: number;
+    previews: number;
+  };
+}

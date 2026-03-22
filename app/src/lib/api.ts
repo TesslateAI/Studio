@@ -20,6 +20,7 @@ import type {
   TesslateConfig,
   TesslateConfigResponse,
   SetupConfigSyncResponse,
+  ConfigSyncSaveResponse,
 } from '../types/tesslateConfig';
 import { config } from '../config';
 
@@ -1867,6 +1868,18 @@ export const setupApi = {
   analyzeProject: async (slug: string, model?: string): Promise<TesslateConfigResponse> => {
     const params = model ? { model } : {};
     const response = await api.post(`/api/projects/${slug}/analyze`, null, { params });
+    return response.data;
+  },
+};
+
+export const configSyncApi = {
+  save: async (slug: string): Promise<ConfigSyncSaveResponse> => {
+    const response = await api.post(`/api/projects/${slug}/sync-config`);
+    return response.data;
+  },
+
+  load: async (slug: string, config: TesslateConfig): Promise<SetupConfigSyncResponse> => {
+    const response = await api.post(`/api/projects/${slug}/setup-config`, config);
     return response.data;
   },
 };
