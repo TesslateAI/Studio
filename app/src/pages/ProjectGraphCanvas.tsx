@@ -44,7 +44,8 @@ import { ChatContainer } from '../components/chat/ChatContainer';
 
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, deploymentTargetsApi, marketplaceApi, configSyncApi, setupApi } from '../lib/api';
+import { ProviderConnectModal } from '../components/modals/ProviderConnectModal';
+import api, { projectsApi, deploymentTargetsApi, deploymentCredentialsApi, marketplaceApi, configSyncApi, setupApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { type ChatAgent } from '../types/chat';
 import { fileEvents } from '../utils/fileEvents';
@@ -164,6 +165,14 @@ const ProjectGraphCanvasInner = () => {
     item: Record<string, unknown> | null;
     position: { x: number; y: number } | null;
   }>({ isOpen: false, item: null, position: null });
+
+  // Provider connect modal state for deployment targets
+  const [providerConnectModal, setProviderConnectModal] = useState<{
+    isOpen: boolean;
+    targetId: string | null;
+    provider: string | null;
+  }>({ isOpen: false, targetId: null, provider: null });
+  const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
 
   // Keep refs in sync with state - this allows callbacks to access latest values without re-creating
   useEffect(() => {
@@ -450,6 +459,7 @@ const ProjectGraphCanvasInner = () => {
           environment: target.environment,
           name: target.name,
           isConnected: target.is_connected,
+          providerInfo: target.provider_info,
           connectedContainers: target.connected_containers || [],
           deploymentHistory: (target.deployment_history || []).map((d) => ({
             id: d.id,
@@ -461,6 +471,7 @@ const ProjectGraphCanvasInner = () => {
           })),
           onDeploy: handleDeployFromTarget,
           onConnect: handleConnectDeploymentTarget,
+          onEnvironmentChange: handleEnvironmentChange,
           onDelete: handleDeleteDeploymentTarget,
           onRollback: handleRollbackDeployment,
         },
@@ -676,33 +687,79 @@ const ProjectGraphCanvasInner = () => {
     [setNodes]
   );
 
-  // Stable callback for connecting OAuth to deployment target
+  // Stable callback for connecting a deployment target — OAuth for vercel/netlify, modal for API token providers
   const handleConnectDeploymentTarget = useCallback(async (targetId: string) => {
     try {
-      // This will return the OAuth URL to redirect to
-      const result = await deploymentTargetsApi.startOAuth(slugRef.current!, targetId);
+      const target = await deploymentTargetsApi.get(slugRef.current!, targetId);
+      const provider = target.provider;
 
-      // Check for error response (provider doesn't support OAuth)
-      if (result.error) {
-        toast.error(result.error);
+      // OAuth providers: open popup directly
+      const oauthProviders = ['vercel', 'netlify'];
+      if (oauthProviders.includes(provider)) {
+        const result = await deploymentCredentialsApi.startOAuth(provider);
+        const oauthUrl = result.auth_url;
+        if (oauthUrl) {
+          window.open(oauthUrl, '_blank', 'width=600,height=700');
+          toast.success('Complete OAuth in the popup window');
+        } else {
+          toast.error('No OAuth URL returned. Please check provider configuration.');
+        }
         return;
       }
 
-      const oauthUrl = result.oauth_url || result.auth_url;
-      if (oauthUrl) {
-        // Open OAuth in a popup window
-        window.open(oauthUrl, '_blank', 'width=600,height=700');
-        toast.success('Complete OAuth in the popup window');
-      } else {
-        toast.error('No OAuth URL returned. Please check provider configuration.');
-      }
+      // API token providers: open the ProviderConnectModal
+      setProviderConnectModal({ isOpen: true, targetId, provider });
     } catch (error) {
-      console.error('Failed to start OAuth:', error);
+      console.error('Failed to connect deployment target:', error);
       const axiosError = error as { response?: { data?: { detail?: string } } };
-      const errorMessage = axiosError.response?.data?.detail || 'Failed to start OAuth connection';
-      toast.error(errorMessage);
+      toast.error(axiosError.response?.data?.detail || 'Failed to connect');
     }
   }, []);
+
+  // Callback when provider credential is saved via the modal
+  const handleProviderConnected = useCallback(async (provider: string) => {
+    const { targetId } = providerConnectModal;
+    if (!targetId || !slugRef.current) return;
+
+    // Refresh the target to get updated is_connected status
+    try {
+      const updatedTarget = await deploymentTargetsApi.get(slugRef.current, targetId);
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === targetId
+            ? { ...node, data: { ...node.data, isConnected: updatedTarget.is_connected } }
+            : node
+        )
+      );
+      setConnectedProviders((prev) =>
+        prev.includes(provider) ? prev : [...prev, provider]
+      );
+    } catch {
+      // Target might have been refreshed already
+    }
+  }, [providerConnectModal, setNodes]);
+
+  // Stable callback for changing environment on a deployment target
+  const handleEnvironmentChange = useCallback(
+    async (targetId: string, environment: 'production' | 'staging' | 'preview') => {
+      // Optimistically update the node
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === targetId
+            ? { ...node, data: { ...node.data, environment } }
+            : node
+        )
+      );
+
+      try {
+        await deploymentTargetsApi.update(slugRef.current!, targetId, { environment });
+      } catch (error) {
+        console.error('Failed to update environment:', error);
+        toast.error('Failed to update environment');
+      }
+    },
+    [setNodes]
+  );
 
   // Stable callback for rolling back a deployment
   const handleRollbackDeployment = useCallback(
@@ -978,6 +1035,7 @@ const ProjectGraphCanvasInner = () => {
             deploymentHistory: [],
             onDeploy: handleDeployFromTarget,
             onConnect: handleConnectDeploymentTarget,
+            onEnvironmentChange: handleEnvironmentChange,
             onDelete: handleDeleteDeploymentTarget,
             onRollback: handleRollbackDeployment,
           },
@@ -1005,8 +1063,10 @@ const ProjectGraphCanvasInner = () => {
                     data: {
                       ...node.data,
                       isConnected: newTarget.is_connected,
+                      providerInfo: newTarget.provider_info,
                       onDeploy: handleDeployFromTarget,
                       onConnect: handleConnectDeploymentTarget,
+                      onEnvironmentChange: handleEnvironmentChange,
                       onDelete: handleDeleteDeploymentTarget,
                       onRollback: handleRollbackDeployment,
                     },
@@ -2210,6 +2270,15 @@ const ProjectGraphCanvasInner = () => {
           onSubmit={handleExternalServiceCredentialSubmit}
         />
       )}
+
+      {/* Provider Connect Modal for deployment targets */}
+      <ProviderConnectModal
+        isOpen={providerConnectModal.isOpen}
+        onClose={() => setProviderConnectModal({ isOpen: false, targetId: null, provider: null })}
+        onConnected={handleProviderConnected}
+        defaultProvider={providerConnectModal.provider || undefined}
+        connectedProviders={connectedProviders}
+      />
     </div>
   );
 };

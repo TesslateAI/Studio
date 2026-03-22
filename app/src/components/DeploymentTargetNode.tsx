@@ -61,6 +61,7 @@ interface DeploymentTargetNodeData extends Record<string, unknown> {
   onDeployContainer?: (targetId: string) => void;
   onExport?: (targetId: string) => void;
   onConnect?: (targetId: string) => void;
+  onEnvironmentChange?: (targetId: string, environment: 'production' | 'staging' | 'preview') => void;
   onDelete?: (targetId: string) => void;
   onRollback?: (targetId: string, deploymentId: string) => void;
   onDisconnectContainer?: (targetId: string, containerId: string) => void;
@@ -118,6 +119,32 @@ const PROVIDER_LOGOS: Record<string, string> = {
   dockerhub: '🐳',
   ghcr: '📦',
   download: '💾',
+};
+
+// Provider display names
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  vercel: 'Vercel',
+  netlify: 'Netlify',
+  cloudflare: 'Cloudflare Pages',
+  digitalocean: 'DigitalOcean App Platform',
+  railway: 'Railway',
+  fly: 'Fly.io',
+  heroku: 'Heroku',
+  render: 'Render',
+  koyeb: 'Koyeb',
+  zeabur: 'Zeabur',
+  northflank: 'Northflank',
+  'github-pages': 'GitHub Pages',
+  surge: 'Surge',
+  'deno-deploy': 'Deno Deploy',
+  firebase: 'Firebase Hosting',
+  'aws-apprunner': 'AWS App Runner',
+  'gcp-cloudrun': 'GCP Cloud Run',
+  'azure-container-apps': 'Azure Container Apps',
+  'do-container': 'DO Container Apps',
+  dockerhub: 'Docker Hub',
+  ghcr: 'GitHub Container Registry',
+  download: 'Download / Export',
 };
 
 // Provider colors
@@ -217,7 +244,7 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
 
   const providerLogo = PROVIDER_LOGOS[data.provider] || '🚀';
   const providerColor = PROVIDER_COLORS[data.provider] || '#888888';
-  const providerName = data.providerInfo?.display_name || data.provider;
+  const providerName = data.providerInfo?.display_name || PROVIDER_DISPLAY_NAMES[data.provider] || data.provider;
 
   // Get the latest deployment (first in history)
   const latestDeployment = data.deploymentHistory?.[0];
@@ -280,8 +307,20 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
           <div className="flex items-center gap-2">
             <span className="text-lg">{providerLogo}</span>
             <div>
-              <div className="text-sm font-medium text-[var(--text)]">Deploy Target</div>
-              <div className="text-xs text-[var(--text-muted)]">{data.environment}</div>
+              <div className="text-sm font-medium text-[var(--text)]">{providerName}</div>
+              <div
+                className="text-xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text)] transition-colors"
+                title="Click to change environment"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const envs: Array<'production' | 'staging' | 'preview'> = ['production', 'staging', 'preview'];
+                  const currentIdx = envs.indexOf(data.environment);
+                  const nextEnv = envs[(currentIdx + 1) % envs.length];
+                  data.onEnvironmentChange?.(id, nextEnv);
+                }}
+              >
+                {data.environment}
+              </div>
             </div>
           </div>
 

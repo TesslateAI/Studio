@@ -18,7 +18,7 @@ interface ProviderConnectModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConnected: (provider: string) => void | Promise<void>;
-  defaultProvider?: 'vercel' | 'netlify' | 'cloudflare';
+  defaultProvider?: string;
   connectedProviders?: string[];
   projectId?: string;
   accountCredentials?: string[];
@@ -28,6 +28,25 @@ const PROVIDER_INFO: Record<string, { icon: string; color: string; bgColor: stri
   vercel: { icon: '▲', color: 'text-black', bgColor: 'bg-white' },
   netlify: { icon: '◆', color: 'text-white', bgColor: 'bg-[#00C7B7]' },
   cloudflare: { icon: '🔥', color: 'text-white', bgColor: 'bg-[#F38020]' },
+  digitalocean: { icon: '🌊', color: 'text-white', bgColor: 'bg-[#0080FF]' },
+  railway: { icon: '🚂', color: 'text-white', bgColor: 'bg-[#0B0D0E]' },
+  fly: { icon: '✈️', color: 'text-white', bgColor: 'bg-[#7B3FE4]' },
+  heroku: { icon: '🟣', color: 'text-white', bgColor: 'bg-[#430098]' },
+  render: { icon: '🔷', color: 'text-white', bgColor: 'bg-[#46E3B7]' },
+  koyeb: { icon: '🟢', color: 'text-white', bgColor: 'bg-[#121212]' },
+  zeabur: { icon: '⚡', color: 'text-white', bgColor: 'bg-[#6C5CE7]' },
+  northflank: { icon: '🔶', color: 'text-white', bgColor: 'bg-[#01E277]' },
+  'github-pages': { icon: '📄', color: 'text-white', bgColor: 'bg-[#222222]' },
+  surge: { icon: '🌊', color: 'text-white', bgColor: 'bg-[#D93472]' },
+  'deno-deploy': { icon: '🦕', color: 'text-white', bgColor: 'bg-[#000000]' },
+  firebase: { icon: '🔥', color: 'text-black', bgColor: 'bg-[#FFCA28]' },
+  'aws-apprunner': { icon: '☁️', color: 'text-white', bgColor: 'bg-[#FF9900]' },
+  'gcp-cloudrun': { icon: '☁️', color: 'text-white', bgColor: 'bg-[#4285F4]' },
+  'azure-container-apps': { icon: '☁️', color: 'text-white', bgColor: 'bg-[#0078D4]' },
+  'do-container': { icon: '🌊', color: 'text-white', bgColor: 'bg-[#0080FF]' },
+  dockerhub: { icon: '🐳', color: 'text-white', bgColor: 'bg-[#2496ED]' },
+  ghcr: { icon: '📦', color: 'text-white', bgColor: 'bg-[#222222]' },
+  download: { icon: '💾', color: 'text-white', bgColor: 'bg-[#6B7280]' },
 };
 
 export function ProviderConnectModal({
