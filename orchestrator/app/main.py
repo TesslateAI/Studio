@@ -54,6 +54,7 @@ from .routers import (
     webhooks,
 )
 from .schemas_auth import UserCreate, UserRead, UserUpdate
+from .services.volume_manager import VolumeRestoringError, VolumeUnavailableError
 from .users import bearer_backend, cookie_backend, fastapi_users, get_user_manager
 
 settings = get_settings()
@@ -87,6 +88,24 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     return JSONResponse(
         status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"detail": exc.errors()},
+    )
+
+
+@app.exception_handler(VolumeRestoringError)
+async def volume_restoring_handler(request: Request, exc: VolumeRestoringError):
+    """Volume is being restored from S3 — tell client to retry."""
+    return JSONResponse(
+        status_code=http_status.HTTP_202_ACCEPTED,
+        content={"status": "restoring", "message": "Project storage is being restored"},
+    )
+
+
+@app.exception_handler(VolumeUnavailableError)
+async def volume_unavailable_handler(request: Request, exc: VolumeUnavailableError):
+    """Volume restore failed or data doesn't exist."""
+    return JSONResponse(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"status": "unavailable", "message": "Project storage is unavailable"},
     )
 
 

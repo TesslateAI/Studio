@@ -24,7 +24,7 @@ from fastapi import (
     WebSocket,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,10 +59,8 @@ from ..schemas import (
     ContainerUpdate,
     DeploymentTargetAssignment,
     DirectoryCreateRequest,
-    FileContentResponse,
     FileDeleteRequest,
     FileRenameRequest,
-    FileTreeEntry,
     ProjectCreate,
     SetupConfigSyncResponse,
     TemplateExportRequest,
@@ -487,7 +485,7 @@ async def get_project(
     return project
 
 
-@router.get("/{project_slug}/files/tree", response_model=list[FileTreeEntry])
+@router.get("/{project_slug}/files/tree")
 async def get_file_tree(
     project_slug: str,
     container_dir: str | None = None,
@@ -495,22 +493,43 @@ async def get_file_tree(
     db: AsyncSession = Depends(get_db),
 ):
     """Get recursive filtered file tree (metadata only, no content)."""
+    from ..services.volume_manager import VolumeRestoringError, VolumeUnavailableError
+
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     from ..services.orchestration import get_orchestrator
 
     orchestrator = get_orchestrator()
 
-    entries = await orchestrator.list_tree(
-        user_id=current_user.id,
-        project_id=project.id,
-        container_name=None,
-        subdir=container_dir,
-    )
-    return entries
+    try:
+        entries = await orchestrator.list_tree(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            subdir=container_dir,
+        )
+        return {"status": "ready", "files": entries}
+    except VolumeRestoringError:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "restoring",
+                "files": [],
+                "message": "Project storage is being restored",
+            },
+        )
+    except VolumeUnavailableError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unavailable",
+                "files": [],
+                "message": "Project storage is unavailable",
+            },
+        )
 
 
-@router.get("/{project_slug}/files/content", response_model=FileContentResponse)
+@router.get("/{project_slug}/files/content")
 async def get_file_content(
     project_slug: str,
     path: str,
@@ -519,22 +538,45 @@ async def get_file_content(
     db: AsyncSession = Depends(get_db),
 ):
     """Get content of a single file."""
+    from ..services.volume_manager import VolumeRestoringError, VolumeUnavailableError
+
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     from ..services.orchestration import get_orchestrator
 
     orchestrator = get_orchestrator()
 
-    result = await orchestrator.read_file_content(
-        user_id=current_user.id,
-        project_id=project.id,
-        container_name=None,
-        file_path=path,
-        subdir=container_dir,
-    )
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"File not found: {path}")
-    return result
+    try:
+        result = await orchestrator.read_file_content(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            file_path=path,
+            subdir=container_dir,
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"File not found: {path}")
+        return (
+            {"status": "ready", **result}
+            if isinstance(result, dict)
+            else {"status": "ready", "content": result}
+        )
+    except VolumeRestoringError:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "restoring",
+                "message": "Project storage is being restored",
+            },
+        )
+    except VolumeUnavailableError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unavailable",
+                "message": "Project storage is unavailable",
+            },
+        )
 
 
 @router.post("/{project_slug}/files/content/batch")
@@ -546,20 +588,43 @@ async def get_files_content_batch(
     db: AsyncSession = Depends(get_db),
 ):
     """Batch-read multiple files in one request."""
+    from ..services.volume_manager import VolumeRestoringError, VolumeUnavailableError
+
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     from ..services.orchestration import get_orchestrator
 
     orchestrator = get_orchestrator()
 
-    files, errors = await orchestrator.read_files_batch(
-        user_id=current_user.id,
-        project_id=project.id,
-        container_name=None,
-        paths=body.paths,
-        subdir=container_dir,
-    )
-    return {"files": files, "errors": errors}
+    try:
+        files, errors = await orchestrator.read_files_batch(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            paths=body.paths,
+            subdir=container_dir,
+        )
+        return {"status": "ready", "files": files, "errors": errors}
+    except VolumeRestoringError:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "restoring",
+                "files": [],
+                "errors": [],
+                "message": "Project storage is being restored",
+            },
+        )
+    except VolumeUnavailableError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unavailable",
+                "files": [],
+                "errors": [],
+                "message": "Project storage is unavailable",
+            },
+        )
 
 
 @router.get("/{project_slug}/files", response_model=list[ProjectFileSchema])

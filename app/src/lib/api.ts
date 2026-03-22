@@ -451,20 +451,63 @@ export const projectsApi = {
   },
   getFileTree: async (slug: string, containerDir?: string) => {
     const params = containerDir ? { container_dir: containerDir } : {};
-    const response = await api.get(`/api/projects/${slug}/files/tree`, { params });
-    return response.data as Array<{
-      path: string;
-      name: string;
-      is_dir: boolean;
-      size: number;
-      mod_time: number;
-    }>;
+
+    const poll = async (
+      retries: number
+    ): Promise<
+      Array<{
+        path: string;
+        name: string;
+        is_dir: boolean;
+        size: number;
+        mod_time: number;
+      }>
+    > => {
+      const response = await api.get(`/api/projects/${slug}/files/tree`, { params });
+      const data = response.data;
+
+      // Envelope response: {status, files, message}
+      if (data && typeof data === 'object' && 'status' in data) {
+        if (data.status === 'restoring' && retries > 0) {
+          await new Promise((r) => setTimeout(r, 3000));
+          return poll(retries - 1);
+        }
+        if (data.status === 'unavailable') {
+          throw new Error(data.message || 'Project storage is unavailable');
+        }
+        return data.files || [];
+      }
+
+      // Backward compat: plain array (Docker mode)
+      if (Array.isArray(data)) {
+        return data;
+      }
+
+      return [];
+    };
+
+    return poll(20);
   },
   getFileContent: async (slug: string, path: string, containerDir?: string) => {
     const params: Record<string, string> = { path };
     if (containerDir) params.container_dir = containerDir;
     const response = await api.get(`/api/projects/${slug}/files/content`, { params });
-    return response.data as { path: string; content: string; size: number };
+    const data = response.data;
+
+    // Envelope response
+    if (data && typeof data === 'object' && 'status' in data) {
+      if (data.status === 'restoring') {
+        throw new Error(data.message || 'Project storage is being restored');
+      }
+      if (data.status === 'unavailable') {
+        throw new Error(data.message || 'Project storage is unavailable');
+      }
+      // Strip status envelope for ready response
+      const { status: _s, message: _m, ...rest } = data;
+      return rest as { path: string; content: string; size: number };
+    }
+
+    return data as { path: string; content: string; size: number };
   },
   getFileContentBatch: async (slug: string, paths: string[], containerDir?: string) => {
     const params = containerDir ? { container_dir: containerDir } : {};
@@ -473,7 +516,19 @@ export const projectsApi = {
       { paths },
       { params }
     );
-    return response.data as {
+    const data = response.data;
+
+    // Envelope response
+    if (data && typeof data === 'object' && 'status' in data) {
+      if (data.status === 'restoring') {
+        throw new Error(data.message || 'Project storage is being restored');
+      }
+      if (data.status === 'unavailable') {
+        throw new Error(data.message || 'Project storage is unavailable');
+      }
+    }
+
+    return data as {
       files: Array<{ path: string; content: string; size: number }>;
       errors: string[];
     };

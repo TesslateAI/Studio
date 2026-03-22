@@ -376,10 +376,20 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
 	}
 
-	// Ensure base template exists locally.
-	if manifest.Base != "" && manifest.TemplateName != "" {
-		if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
-			return fmt.Errorf("ensure base template %s: %w", manifest.TemplateName, err)
+	// Ensure base template exists locally. If manifest.Base is empty but
+	// layers have a parent hash (auto-promoted volumes with stale manifest),
+	// use the layer parent as the effective base.
+	effectiveBase := manifest.Base
+	effectiveTmpl := manifest.TemplateName
+	if effectiveBase == "" && len(manifest.Layers) > 0 && manifest.Layers[0].Parent != "" {
+		effectiveBase = manifest.Layers[0].Parent
+		effectiveTmpl = "_vol_" + volumeID
+		klog.Infof("RestoreVolume: manifest.Base empty, using layer parent %s as base for %s",
+			cas.ShortHash(effectiveBase), volumeID)
+	}
+	if effectiveBase != "" && effectiveTmpl != "" {
+		if err := d.tmplMgr.EnsureTemplateByHash(ctx, effectiveTmpl, effectiveBase); err != nil {
+			return fmt.Errorf("ensure base template %s: %w", effectiveTmpl, err)
 		}
 	}
 
@@ -757,6 +767,15 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 			Base:         tv.templateHash,
 			TemplateName: tv.templateName,
 		}
+	} else if manifest.Base == "" && tv.templateHash != "" {
+		// Auto-promote adopted or created a synthetic template but the
+		// manifest was created before the template existed (e.g. pod restart).
+		// Backfill Base/TemplateName so RestoreVolume can download the
+		// template for cross-node restores.
+		manifest.Base = tv.templateHash
+		manifest.TemplateName = tv.templateName
+		klog.Infof("Backfilled manifest Base for %s: template=%s hash=%s",
+			tv.volumeID, tv.templateName, cas.ShortHash(tv.templateHash))
 	}
 
 	parentHash := tv.templateHash

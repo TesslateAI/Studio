@@ -3,18 +3,36 @@ Volume Manager — thin client for the Volume Hub.
 
 All intelligence lives in the Hub (storageless orchestrator that coordinates
 nodes for volume lifecycle, cache placement, S3 sync).
-The orchestrator only needs: create, delete, ensure_cached, trigger_sync.
+The orchestrator only needs: create, delete, ensure_cached, trigger_sync,
+resolve_volume, get_fileops_client.
 No local state machine, no node selection, no S3 interaction.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from ..config import get_settings
 from .hub_client import HubClient
 
+if TYPE_CHECKING:
+    from .fileops_client import FileOpsClient
+
 logger = logging.getLogger(__name__)
+
+
+class VolumeRestoringError(Exception):
+    """Volume is being restored from S3 — retry shortly."""
+
+    pass
+
+
+class VolumeUnavailableError(Exception):
+    """Volume restore failed or no CAS data exists."""
+
+    pass
 
 
 class VolumeManager:
@@ -106,6 +124,65 @@ class VolumeManager:
             service_name,
         )
         return service_volume_id
+
+    # ------------------------------------------------------------------
+    # Volume routing (Hub as single source of truth)
+    # ------------------------------------------------------------------
+
+    async def resolve_volume(self, volume_id: str) -> dict:
+        """Non-blocking volume resolution via Hub.
+
+        Returns dict with ``node_name``, ``fileops_address``,
+        ``nodeops_address``, ``state`` (cached/restoring/unavailable).
+
+        Raises:
+            VolumeRestoringError: If volume is being restored from S3.
+            VolumeUnavailableError: If restore failed or no CAS data.
+        """
+        resp = await self._hub.resolve_volume(volume_id)
+        state = resp.get("state", "unavailable")
+
+        if state == "cached":
+            asyncio.create_task(self._safe_update_cache_node(volume_id, resp.get("node_name", "")))
+            return resp
+
+        if state == "restoring":
+            raise VolumeRestoringError(volume_id)
+
+        raise VolumeUnavailableError(volume_id)
+
+    async def get_fileops_client(self, volume_id: str) -> FileOpsClient:
+        """Get a ready-to-use FileOps client routed via the Hub.
+
+        Raises:
+            VolumeRestoringError: If volume is being restored from S3.
+            VolumeUnavailableError: If restore failed or no CAS data.
+        """
+        from .fileops_client import FileOpsClient
+
+        resp = await self.resolve_volume(volume_id)
+        address = resp.get("fileops_address", "")
+        if not address:
+            raise VolumeUnavailableError(f"No fileops address for {volume_id}")
+        return FileOpsClient(address)
+
+    async def _safe_update_cache_node(self, volume_id: str, node_name: str) -> None:
+        """Fire-and-forget DB write-behind for cache_node."""
+        try:
+            from sqlalchemy import update as sa_update
+
+            from ..database import AsyncSessionLocal
+            from ..models import Project
+
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    sa_update(Project)
+                    .where(Project.volume_id == volume_id)
+                    .values(cache_node=node_name)
+                )
+                await db.commit()
+        except Exception:
+            logger.warning("[VOLUME] Failed to update cache_node for %s", volume_id)
 
 
 # ------------------------------------------------------------------

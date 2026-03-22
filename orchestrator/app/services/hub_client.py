@@ -60,6 +60,10 @@ class HubClient:
                 options=[
                     ("grpc.max_send_message_length", _MAX_MESSAGE_SIZE),
                     ("grpc.max_receive_message_length", _MAX_MESSAGE_SIZE),
+                    # Keepalive: detect dead connections and trigger reconnect.
+                    ("grpc.keepalive_time_ms", 30_000),
+                    ("grpc.keepalive_timeout_ms", 10_000),
+                    ("grpc.keepalive_permit_without_calls", 1),
                 ],
             )
         return self._channel
@@ -72,7 +76,9 @@ class HubClient:
             request_serializer=_serialize,
             response_deserializer=_deserialize,
         )
-        return await call(request, timeout=timeout, metadata=_JSON_METADATA)
+        # wait_for_ready: if channel is reconnecting after a transient failure,
+        # wait up to `timeout` instead of failing immediately.
+        return await call(request, timeout=timeout, metadata=_JSON_METADATA, wait_for_ready=True)
 
     # ------------------------------------------------------------------
     # Volume lifecycle
@@ -209,6 +215,32 @@ class HubClient:
             or ``None``).
         """
         resp = await self._call("VolumeStatus", {"volume_id": volume_id}, timeout=timeout)
+        return resp
+
+    # ------------------------------------------------------------------
+    # Volume routing
+    # ------------------------------------------------------------------
+
+    async def resolve_volume(self, volume_id: str, *, timeout: float = 10.0) -> dict:
+        """Non-blocking volume resolution via Hub.
+
+        Returns the volume's current state and routing addresses.
+
+        Args:
+            volume_id: Volume to resolve.
+            timeout: gRPC deadline in seconds.
+
+        Returns:
+            Dict with ``node_name``, ``fileops_address``,
+            ``nodeops_address``, ``state`` (cached/restoring/unavailable).
+        """
+        resp = await self._call("ResolveVolume", {"volume_id": volume_id}, timeout=timeout)
+        logger.info(
+            "ResolveVolume: volume_id=%s state=%s node=%s",
+            volume_id,
+            resp.get("state"),
+            resp.get("node_name", ""),
+        )
         return resp
 
     # ------------------------------------------------------------------

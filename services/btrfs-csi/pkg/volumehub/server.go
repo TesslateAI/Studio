@@ -11,6 +11,8 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -40,6 +42,14 @@ type NodeAddrResolver func(nodeName string) string
 // to filter out stale registry entries for terminated nodes.
 type LiveNodesFn func() []string
 
+// inflightRestore tracks a background CAS restore so concurrent callers can
+// wait on the same channel instead of spawning duplicate restores.
+type inflightRestore struct {
+	done chan struct{}
+	node string
+	err  error
+}
+
 // Server implements the VolumeHub gRPC service as a storageless orchestrator.
 // It holds zero storage, zero btrfs — nodes handle all data. The Hub only
 // coordinates: volume→owner_node mapping, template→cached_nodes, node→capacity.
@@ -50,6 +60,9 @@ type Server struct {
 	resolveAddr NodeAddrResolver
 	liveNodes   LiveNodesFn
 	srv         *grpc.Server
+
+	mu       sync.Mutex
+	inflight map[string]*inflightRestore
 }
 
 // NewServer creates a VolumeHub Server.
@@ -60,6 +73,7 @@ func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClien
 		nodeClient:  nodeClient,
 		resolveAddr: resolveAddr,
 		liveNodes:   liveNodes,
+		inflight:    make(map[string]*inflightRestore),
 	}
 }
 
@@ -204,6 +218,16 @@ type (
 		TargetHash string `json:"target_hash"`
 	}
 
+	ResolveVolumeRequest struct {
+		VolumeID string `json:"volume_id"`
+	}
+	ResolveVolumeResponse struct {
+		NodeName       string `json:"node_name,omitempty"`
+		FileopsAddress string `json:"fileops_address,omitempty"`
+		NodeopsAddress string `json:"nodeops_address,omitempty"`
+		State          string `json:"state"` // "cached", "restoring", "unavailable"
+	}
+
 	Empty struct{}
 )
 
@@ -231,6 +255,7 @@ func registerVolumeHubServer(srv *grpc.Server, s *Server) {
 			{MethodName: "CreateSnapshot", Handler: s.handleCreateSnapshot},
 			{MethodName: "ListSnapshots", Handler: s.handleListSnapshots},
 			{MethodName: "RestoreToSnapshot", Handler: s.handleRestoreToSnapshot},
+			{MethodName: "ResolveVolume", Handler: s.handleResolveVolume},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -364,20 +389,80 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		}
 	}
 
-	// 6. No live cache (or peer transfer failed) → restore from CAS.
-	targetClient, err := s.nodeClient(targetNode)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "connect to target %s: %v", targetNode, err)
+	// 6. No live cache (or peer transfer failed) → restore from CAS (background).
+	s.mu.Lock()
+	if existing, ok := s.inflight[req.VolumeID]; ok {
+		s.mu.Unlock()
+		klog.Infof("EnsureCached: joining inflight restore for volume %s", req.VolumeID)
+		select {
+		case <-existing.done:
+			if existing.err != nil {
+				return nil, status.Errorf(codes.Internal, "restore volume %s: %v", req.VolumeID, existing.err)
+			}
+			return &EnsureCachedResponse{NodeName: existing.node}, nil
+		case <-ctx.Done():
+			return nil, status.Errorf(codes.DeadlineExceeded, "restore in progress for volume %s", req.VolumeID)
+		}
 	}
-	defer targetClient.Close()
 
-	if err := targetClient.RestoreVolume(ctx, req.VolumeID); err != nil {
-		return nil, status.Errorf(codes.Internal, "restore volume %s on %s: %v", req.VolumeID, targetNode, err)
+	entry := &inflightRestore{done: make(chan struct{})}
+	s.inflight[req.VolumeID] = entry
+	s.mu.Unlock()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.mu.Lock()
+				entry.err = fmt.Errorf("panic during restore: %v", r)
+				close(entry.done)
+				delete(s.inflight, req.VolumeID)
+				s.mu.Unlock()
+				klog.Errorf("EnsureCached: panic during background restore of %s: %v", req.VolumeID, r)
+			}
+		}()
+
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		targetClient, cErr := s.nodeClient(targetNode)
+		if cErr != nil {
+			s.mu.Lock()
+			entry.err = fmt.Errorf("connect to target %s: %w", targetNode, cErr)
+			close(entry.done)
+			delete(s.inflight, req.VolumeID)
+			s.mu.Unlock()
+			return
+		}
+		defer targetClient.Close()
+
+		if rErr := targetClient.RestoreVolume(bgCtx, req.VolumeID); rErr != nil {
+			s.mu.Lock()
+			entry.err = fmt.Errorf("restore volume %s on %s: %w", req.VolumeID, targetNode, rErr)
+			close(entry.done)
+			delete(s.inflight, req.VolumeID)
+			s.mu.Unlock()
+			return
+		}
+
+		s.registry.SetCached(req.VolumeID, targetNode)
+		klog.Infof("EnsureCached: restored volume %s from CAS on %s (background)", req.VolumeID, targetNode)
+
+		s.mu.Lock()
+		entry.node = targetNode
+		close(entry.done)
+		delete(s.inflight, req.VolumeID)
+		s.mu.Unlock()
+	}()
+
+	select {
+	case <-entry.done:
+		if entry.err != nil {
+			return nil, status.Errorf(codes.Internal, "restore volume %s: %v", req.VolumeID, entry.err)
+		}
+		return &EnsureCachedResponse{NodeName: entry.node}, nil
+	case <-ctx.Done():
+		return nil, status.Errorf(codes.DeadlineExceeded, "restore in progress for volume %s", req.VolumeID)
 	}
-
-	s.registry.SetCached(req.VolumeID, targetNode)
-	klog.Infof("EnsureCached: restored volume %s from CAS on %s", req.VolumeID, targetNode)
-	return &EnsureCachedResponse{NodeName: targetNode}, nil
 }
 
 // pickBestCandidate returns the candidate with the fewest cached volumes
@@ -583,6 +668,59 @@ func (s *Server) handleRestoreToSnapshot(_ interface{}, ctx context.Context, dec
 	s.registry.SetLatestHash(req.VolumeID, req.TargetHash)
 	klog.Infof("RestoreToSnapshot: volume %s → %s", req.VolumeID, cas.ShortHash(req.TargetHash))
 	return &Empty{}, nil
+}
+
+func (s *Server) handleResolveVolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req ResolveVolumeRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+
+	// 1. Check inflight map — if a restore is already running, return immediately.
+	s.mu.Lock()
+	_, restoring := s.inflight[req.VolumeID]
+	s.mu.Unlock()
+	if restoring {
+		return &ResolveVolumeResponse{State: "restoring"}, nil
+	}
+
+	// 2. Call EnsureCached internally with a 15s budget.
+	internalCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	ecDec := func(v interface{}) error {
+		b, _ := json.Marshal(EnsureCachedRequest{VolumeID: req.VolumeID})
+		return json.Unmarshal(b, v)
+	}
+	resp, err := s.handleEnsureCached(nil, internalCtx, ecDec, nil)
+	if err != nil {
+		st, ok := status.FromError(err)
+		if ok && st.Code() == codes.DeadlineExceeded {
+			return &ResolveVolumeResponse{State: "restoring"}, nil
+		}
+		klog.Warningf("ResolveVolume: EnsureCached failed for %s: %v", req.VolumeID, err)
+		return &ResolveVolumeResponse{State: "unavailable"}, nil
+	}
+
+	// 3. Build addresses from the returned node name.
+	ecResp := resp.(*EnsureCachedResponse)
+	nodeopsAddr := s.resolveAddr(ecResp.NodeName)
+	fileopsAddr := ""
+	if nodeopsAddr != "" {
+		if idx := strings.LastIndex(nodeopsAddr, ":"); idx > 0 {
+			fileopsAddr = nodeopsAddr[:idx] + ":9742"
+		}
+	}
+
+	return &ResolveVolumeResponse{
+		NodeName:       ecResp.NodeName,
+		FileopsAddress: fileopsAddr,
+		NodeopsAddress: nodeopsAddr,
+		State:          "cached",
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -811,7 +949,29 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 			continue
 		}
 
-		// Get sync state to find tracked volumes with template context.
+		// List subvolumes first to build the set of physically-present volumes.
+		// Only volumes that exist on disk should be marked as cached.
+		diskVolumes := make(map[string]struct{})
+		subs, err := client.ListSubvolumes(ctx, "volumes/")
+		if err != nil {
+			klog.Warningf("RebuildRegistry: ListSubvolumes on %s: %v", nodeName, err)
+		} else {
+			for _, sub := range subs {
+				volID := strings.TrimPrefix(sub.Path, "volumes/")
+				if volID != "" && volID != sub.Path {
+					diskVolumes[volID] = struct{}{}
+					s.registry.RegisterVolume(volID)
+					s.registry.SetCached(volID, nodeName)
+					if s.registry.GetOwner(volID) == "" {
+						s.registry.SetOwner(volID, nodeName)
+					}
+				}
+			}
+		}
+
+		// Get sync state for template context and ownership, but only mark
+		// cached if the subvolume physically exists on disk. A tracked volume
+		// with no subvolume means the data was deleted — don't lie about it.
 		states, err := client.GetSyncState(ctx)
 		if err != nil {
 			klog.Warningf("RebuildRegistry: GetSyncState on %s: %v", nodeName, err)
@@ -820,27 +980,16 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 		}
 		for _, st := range states {
 			s.registry.RegisterVolume(st.VolumeID)
-			s.registry.SetOwner(st.VolumeID, nodeName)
-			s.registry.SetCached(st.VolumeID, nodeName)
+			if _, onDisk := diskVolumes[st.VolumeID]; onDisk {
+				s.registry.SetOwner(st.VolumeID, nodeName)
+				s.registry.SetCached(st.VolumeID, nodeName)
+			} else {
+				klog.Infof("RebuildRegistry: volume %s tracked on %s but subvolume missing — not marking cached", st.VolumeID, nodeName)
+				// Still set owner for sync/metadata purposes, just don't claim cached.
+				s.registry.SetOwner(st.VolumeID, nodeName)
+			}
 			if st.TemplateHash != "" {
 				s.registry.SetVolumeTemplate(st.VolumeID, "", st.TemplateHash)
-			}
-		}
-
-		// List subvolumes to find cached volumes not in sync tracking.
-		subs, err := client.ListSubvolumes(ctx, "volumes/")
-		if err != nil {
-			klog.Warningf("RebuildRegistry: ListSubvolumes on %s: %v", nodeName, err)
-		} else {
-			for _, sub := range subs {
-				volID := strings.TrimPrefix(sub.Path, "volumes/")
-				if volID != "" && volID != sub.Path {
-					s.registry.RegisterVolume(volID)
-					s.registry.SetCached(volID, nodeName)
-					if s.registry.GetOwner(volID) == "" {
-						s.registry.SetOwner(volID, nodeName)
-					}
-				}
 			}
 		}
 

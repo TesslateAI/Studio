@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from ..fileops_client import FileOpsClient
 
 from ..snapshot_manager import get_snapshot_manager
+from ..volume_manager import VolumeRestoringError, VolumeUnavailableError
 from .base import BaseOrchestrator
 from .deployment_mode import DeploymentMode
 from .kubernetes.client import KubernetesClient, get_k8s_client
@@ -184,41 +185,18 @@ class KubernetesOrchestrator(BaseOrchestrator):
     async def _get_fileops_client(
         self, cache_node: str | None = None, volume_id: str | None = None
     ) -> "FileOpsClient":
-        """Get a FileOps client routed to a compute node.
+        """Get a FileOps client routed via the Volume Hub.
 
-        Connects to the compute node's FileOps :9742 (local btrfs, ~0.01ms).
-        If the node is unavailable and a volume_id is provided, calls
-        ensure_cached to migrate the volume to an available node and retries.
+        The Hub is the single source of truth for node liveness and
+        volume placement.  cache_node is accepted for signature compat
+        but ignored — the Hub decides the node.
         """
-        from ..fileops_client import FileOpsClient
+        if not volume_id:
+            raise RuntimeError("volume_id is required for FileOps routing")
 
-        # Try node fast path first
-        if cache_node:
-            try:
-                from ..node_discovery import NodeDiscovery
+        from ..volume_manager import get_volume_manager
 
-                discovery = NodeDiscovery()
-                address = await discovery.get_fileops_address(cache_node)
-                return FileOpsClient(address)
-            except Exception:
-                logger.debug(
-                    "[K8S] Node %s FileOps unavailable, attempting re-cache",
-                    cache_node,
-                )
-
-        # Re-cache the volume onto an available node and retry
-        if volume_id:
-            from ..volume_manager import get_volume_manager
-
-            vm = get_volume_manager()
-            new_node = await vm.ensure_cached(volume_id)
-            from ..node_discovery import NodeDiscovery
-
-            discovery = NodeDiscovery()
-            address = await discovery.get_fileops_address(new_node)
-            return FileOpsClient(address)
-
-        raise RuntimeError("No cache_node available and no volume_id for re-cache")
+        return await get_volume_manager().get_fileops_client(volume_id)
 
     async def _get_project_volume_info(self, project_id: UUID) -> tuple[str | None, str | None]:
         """Look up volume fields from DB.
@@ -1327,6 +1305,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 return None
             logger.error(f"[K8S] FileOps read_file error: {e}")
             return None
+        except (VolumeRestoringError, VolumeUnavailableError):
+            raise
         except Exception as e:
             logger.error(f"[K8S] FileOps read_file error: {e}")
             return None
@@ -1407,6 +1387,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 return True  # Already gone
             logger.error(f"[K8S] FileOps delete_file error: {e}")
             return False
+        except (VolumeRestoringError, VolumeUnavailableError):
+            raise
         except Exception as e:
             logger.error(f"[K8S] FileOps delete_file error: {e}")
             return False
@@ -1445,6 +1427,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 return []
             logger.error(f"[K8S] FileOps list_files error: {e}")
             return []
+        except (VolumeRestoringError, VolumeUnavailableError):
+            raise
         except Exception as e:
             logger.error(f"[K8S] FileOps list_files error: {e}")
             return []
@@ -1490,6 +1474,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 return []
             logger.error(f"[K8S] FileOps list_tree error: {e}")
             return []
+        except (VolumeRestoringError, VolumeUnavailableError):
+            raise
         except Exception as e:
             logger.error(f"[K8S] FileOps list_tree error: {e}")
             return []
@@ -1521,6 +1507,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 return None
             logger.error(f"[K8S] FileOps read_file_content error: {e}")
             return None
+        except (VolumeRestoringError, VolumeUnavailableError):
+            raise
         except Exception as e:
             logger.error(f"[K8S] FileOps read_file_content error: {e}")
             return None
@@ -1556,6 +1544,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 ]
                 errors = [vol_to_orig.get(e, e) for e in rpc_errors]
                 return files, errors
+        except (VolumeRestoringError, VolumeUnavailableError):
+            raise
         except Exception as e:
             logger.error(f"[K8S] FileOps read_files_batch error: {e}")
             return [], list(paths)
@@ -1819,6 +1809,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     for entry in entries
                     if not entry.is_dir and fnmatch.fnmatch(entry.name, pattern)
                 ]
+        except (VolumeRestoringError, VolumeUnavailableError):
+            raise
         except Exception as e:
             logger.error(f"[K8S] FileOps glob_files error: {e}")
             return []
@@ -1873,6 +1865,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     except Exception:
                         continue
                 return results
+        except (VolumeRestoringError, VolumeUnavailableError):
+            raise
         except Exception as e:
             logger.error(f"[K8S] FileOps grep_files error: {e}")
             return []
