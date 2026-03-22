@@ -125,9 +125,9 @@ class TestIsExportProvider:
 class TestListAvailableProviders:
     """Tests for list_available_providers including new providers."""
 
-    def test_returns_23(self):
+    def test_returns_22(self):
         providers = DeploymentManager.list_available_providers()
-        assert len(providers) == 23
+        assert len(providers) == 22
 
     def test_all_names_present(self):
         providers = DeploymentManager.list_available_providers()
@@ -245,6 +245,7 @@ class TestGetProviderReturnsCorrectClass:
             "tenant_id": "t", "client_id": "c", "client_secret": "s",
             "subscription_id": "sub", "resource_group": "rg",
             "registry_name": "reg", "azure_region": "eastus",
+            "container_app_environment_id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.App/managedEnvironments/env",
         })
         assert isinstance(provider, AzureContainerProvider)
 

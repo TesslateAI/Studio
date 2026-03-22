@@ -366,6 +366,7 @@ class TestAzureContainerProvider:
                 "tenant_id": "t", "client_id": "c", "client_secret": "s",
                 "subscription_id": "sub", "resource_group": "rg",
                 "registry_name": "acr", "azure_region": "eastus",
+                "container_app_environment_id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.App/managedEnvironments/env",
             }
         )
         assert provider.credentials["tenant_id"] == "t"
