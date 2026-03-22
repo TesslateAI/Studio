@@ -390,6 +390,12 @@ variable "deployment_encryption_key" {
   default     = ""
 }
 
+variable "kaniko_image" {
+  description = "Kaniko executor image for container builds"
+  type        = string
+  default     = "gcr.io/kaniko-project/executor:latest"
+}
+
 variable "container_push_timeout" {
   description = "Timeout in seconds for container image export + push + deploy"
   type        = number

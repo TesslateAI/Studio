@@ -147,6 +147,22 @@ class DeploymentManager:
         # Get provider instance
         provider = cls.get_provider(provider_name, credentials)
 
+        # Container-push providers use push_image + deploy_image, not file-based deploy
+        if cls.is_container_provider(provider_name) and isinstance(provider, BaseContainerDeploymentProvider):
+            from .container_base import ContainerDeployConfig
+
+            container_config = ContainerDeployConfig(
+                image_ref=config.env_vars.get("_TESSLATE_IMAGE_REF", ""),
+                port=int(config.env_vars.get("_TESSLATE_PORT", "8080")),
+                cpu=config.env_vars.get("_TESSLATE_CPU", "0.25"),
+                memory=config.env_vars.get("_TESSLATE_MEMORY", "512Mi"),
+                env_vars={k: v for k, v in config.env_vars.items() if not k.startswith("_TESSLATE_")},
+                region=config.env_vars.get("_TESSLATE_REGION", "us-east-1"),
+            )
+            pushed_uri = await provider.push_image(container_config.image_ref)
+            container_config = ContainerDeployConfig(**{**container_config.model_dump(), "image_ref": pushed_uri})
+            return await provider.deploy_image(container_config)
+
         # Collect files from build output
         files = await provider.collect_files_from_container(project_path, build_output_dir)
 

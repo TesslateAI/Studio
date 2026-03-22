@@ -211,7 +211,7 @@ class GCPContainerProvider(BaseContainerDeploymentProvider):
                     logs.append(f"Operation started: {op_name}")
                     final = await poll_until_terminal(
                         check_fn=lambda: self._poll_operation(op_name, token),
-                        terminal_states={"true", "false"},
+                        terminal_states={"true"},
                         status_key="done",
                         interval=5,
                         timeout=300,

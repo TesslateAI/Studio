@@ -203,7 +203,7 @@ class AWSContainerProvider(BaseContainerDeploymentProvider):
         """
         repo, tag = _parse_image_ref(image_ref)
 
-        url = f"https://api.ecr.{self._region}.amazonaws.com/"
+        url = f"https://ecr.{self._region}.amazonaws.com/"
         body = json.dumps({"registryIds": []})
         content_headers = {
             "Content-Type": "application/x-amz-json-1.1",

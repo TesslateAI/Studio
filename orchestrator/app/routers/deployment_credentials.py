@@ -45,6 +45,7 @@ class CredentialMetadata(BaseModel):
     org_slug: str | None = Field(None, description="Organization slug (Fly.io, Deno Deploy)")
 
     # Cloud providers
+    client_id: str | None = Field(None, description="App (Client) ID (Azure)")
     project_id: str | None = Field(None, description="Project ID (GCP, Firebase)")
     aws_region: str | None = Field(None, description="AWS region (aws-apprunner)")
     gcp_region: str | None = Field(None, description="GCP region (gcp-cloudrun)")

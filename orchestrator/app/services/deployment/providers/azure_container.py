@@ -37,6 +37,7 @@ class AzureContainerProvider(BaseContainerDeploymentProvider):
             "subscription_id",
             "resource_group",
             "registry_name",
+            "container_app_environment_id",
         )
         missing = [k for k in required if not self.credentials.get(k)]
         if missing:

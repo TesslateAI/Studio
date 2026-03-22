@@ -213,7 +213,18 @@ class DenoDeployProvider(BaseDeploymentProvider):
         )
 
         if resp.status_code == 409:
-            logs.append(f"Project '{name}' already exists, reusing")
+            logs.append(f"Project '{name}' already exists, fetching ID...")
+            get_resp = await client.get(
+                f"{API_BASE}/organizations/{self._org_id}/projects",
+                headers=self._get_headers(),
+                params={"q": name, "limit": "10"},
+            )
+            if get_resp.status_code == 200:
+                for proj in get_resp.json():
+                    if proj.get("name") == name:
+                        logs.append(f"Found existing project: {proj['id']}")
+                        return proj["id"]
+            logs.append(f"Could not resolve project ID, falling back to name")
             return name
 
         resp.raise_for_status()

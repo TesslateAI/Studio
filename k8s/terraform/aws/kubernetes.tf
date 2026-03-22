@@ -247,6 +247,7 @@ resource "kubernetes_secret" "app_secrets" {
     DIGITALOCEAN_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/digitalocean/callback"
 
     # Container Push Configuration
+    KANIKO_IMAGE                  = var.kaniko_image
     CONTAINER_PUSH_TIMEOUT        = tostring(var.container_push_timeout)
     CONTAINER_PUSH_DEFAULT_CPU    = var.container_push_default_cpu
     CONTAINER_PUSH_DEFAULT_MEMORY = var.container_push_default_memory

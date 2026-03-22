@@ -105,7 +105,7 @@ class SurgeProvider(BaseDeploymentProvider):
                     content=tarball,
                     headers={
                         **self._get_headers(),
-                        "Content-Type": "application/tar",
+                        "Content-Type": "application/x-tar",
                     },
                 )
 

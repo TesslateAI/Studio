@@ -30,11 +30,11 @@ from app.services.deployment.providers.ghcr_export import GHCRExportProvider
 from app.services.deployment.providers.download_export import DownloadExportProvider
 
 
-# All 22 provider keys expected in _providers
+# All 23 provider keys expected in _providers (includes digitalocean alias)
 ALL_PROVIDER_KEYS = [
     "cloudflare", "vercel", "netlify",
     "heroku", "koyeb", "zeabur", "surge", "deno-deploy", "firebase",
-    "railway", "render", "northflank", "github-pages",
+    "railway", "render", "northflank", "github-pages", "digitalocean",
     "aws-apprunner", "gcp-cloudrun", "azure-container-apps", "do-container", "fly",
     "dockerhub", "ghcr", "download",
 ]
@@ -125,9 +125,9 @@ class TestIsExportProvider:
 class TestListAvailableProviders:
     """Tests for list_available_providers including new providers."""
 
-    def test_returns_22(self):
+    def test_returns_23(self):
         providers = DeploymentManager.list_available_providers()
-        assert len(providers) == 22
+        assert len(providers) == 23
 
     def test_all_names_present(self):
         providers = DeploymentManager.list_available_providers()

@@ -216,7 +216,7 @@ class KoyebProvider(BaseDeploymentProvider):
         """Create a Koyeb service with archive source and return its ID."""
         port = 8000
         env_list = [
-            {"key": k, "value": v, "scopes": ["region:*"]}
+            {"key": k, "value": v, "scope": "region:was"}
             for k, v in config.env_vars.items()
         ]
 

@@ -10,7 +10,7 @@ from ..container_base import BaseContainerDeploymentProvider, ContainerDeployCon
 
 logger = logging.getLogger(__name__)
 
-MACHINES_API = "https://api.machines.dev/v1"
+MACHINES_API = "https://api.machines.dev"
 
 
 class FlyProvider(BaseContainerDeploymentProvider):
@@ -22,7 +22,7 @@ class FlyProvider(BaseContainerDeploymentProvider):
 
     async def test_credentials(self) -> dict:
         headers = {"Authorization": f"Bearer {self.credentials['api_token']}"}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(f"{MACHINES_API}/v1/apps", headers=headers)
             resp.raise_for_status()
             apps = resp.json()
@@ -139,7 +139,7 @@ class FlyProvider(BaseContainerDeploymentProvider):
         app_name, machine_id = parts
         headers = {"Authorization": f"Bearer {self.credentials['api_token']}"}
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
                 f"{MACHINES_API}/v1/apps/{app_name}/machines/{machine_id}",
                 headers=headers,
@@ -157,7 +157,7 @@ class FlyProvider(BaseContainerDeploymentProvider):
         app_name, _machine_id = parts
         headers = {"Authorization": f"Bearer {self.credentials['api_token']}"}
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.delete(
                 f"{MACHINES_API}/v1/apps/{app_name}",
                 headers=headers,
@@ -172,7 +172,7 @@ class FlyProvider(BaseContainerDeploymentProvider):
         app_name, machine_id = parts
         headers = {"Authorization": f"Bearer {self.credentials['api_token']}"}
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
                 f"{MACHINES_API}/v1/apps/{app_name}/machines/{machine_id}/logs",
                 headers=headers,

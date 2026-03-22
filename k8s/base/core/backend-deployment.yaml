@@ -274,6 +274,12 @@ spec:
               optional: true
 
         # Container Push Configuration
+        - name: KANIKO_IMAGE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: KANIKO_IMAGE
+              optional: true
         - name: CONTAINER_PUSH_TIMEOUT
           valueFrom:
             secretKeyRef:

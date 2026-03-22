@@ -225,7 +225,7 @@ class GitHubPagesProvider(BaseDeploymentProvider):
     async def _get_branch_head(self, client: httpx.AsyncClient, repo_path: str, branch: str) -> str | None:
         """Get the HEAD commit SHA for a branch, or None if it doesn't exist."""
         resp = await client.get(
-            f"{API_BASE}/repos/{repo_path}/git/ref/heads/{branch}",
+            f"{API_BASE}/repos/{repo_path}/git/refs/heads/{branch}",
             headers=self._get_headers(),
         )
         if resp.status_code == 404:
