@@ -212,7 +212,8 @@ func (d *Driver) runNode(ctx context.Context) error {
 	}()
 
 	// Start FileOps gRPC server for Tier 0 file operations.
-	d.fileOpsSrv = fileops.NewServer(d.poolPath)
+	// Pass the sync daemon so writes mark volumes as dirty for sync.
+	d.fileOpsSrv = fileops.NewServer(d.poolPath, d.syncer)
 	go func() {
 		if err := d.fileOpsSrv.Start(":9742", nil); err != nil {
 			klog.Errorf("FileOps server failed: %v", err)

@@ -440,6 +440,8 @@ func (s *Server) handleRestoreVolume(_ interface{}, ctx context.Context, dec fun
 	if err := s.syncer.RestoreVolume(ctx, req.VolumeID); err != nil {
 		return nil, status.Errorf(codes.Internal, "restore volume: %v", err)
 	}
+	// Volume contents changed — mark dirty so next sync persists the state.
+	s.syncer.MarkDirty(req.VolumeID)
 	return &Empty{}, nil
 }
 
@@ -596,6 +598,8 @@ func (s *Server) handleRestoreFromSnapshot(_ interface{}, ctx context.Context, d
 	if err := s.syncer.RestoreToSnapshot(ctx, req.VolumeID, req.TargetHash); err != nil {
 		return nil, status.Errorf(codes.Internal, "restore to snapshot: %v", err)
 	}
+	// Volume contents changed — mark dirty so next sync persists the state.
+	s.syncer.MarkDirty(req.VolumeID)
 	return &Empty{}, nil
 }
 
@@ -904,6 +908,10 @@ func (s *Server) handleReceiveVolumeStream(srv interface{}, stream grpc.ServerSt
 		_ = s.btrfs.DeleteSubvolume(ctx, receivedPath)
 	}
 
+	// Volume contents changed — mark dirty so next sync persists the state.
+	if s.syncer != nil {
+		s.syncer.MarkDirty(volumeID)
+	}
 	klog.Infof("ReceiveVolumeStream: received volume %s", volumeID)
 	return stream.SendMsg(&Empty{})
 }

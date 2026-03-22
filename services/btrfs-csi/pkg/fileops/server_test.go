@@ -59,7 +59,7 @@ var nilInterceptor grpc.UnaryServerInterceptor
 
 func TestVolumePath_Valid(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 
 	got, err := s.volumePath("vol1", "src/main.go")
 	if err != nil {
@@ -73,7 +73,7 @@ func TestVolumePath_Valid(t *testing.T) {
 
 func TestVolumePath_TraversalBlocked(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 
 	cases := []struct {
 		name     string
@@ -102,7 +102,7 @@ func TestVolumePath_TraversalBlocked(t *testing.T) {
 
 func TestReadFile_Success(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	want := []byte("hello world")
@@ -122,7 +122,7 @@ func TestReadFile_Success(t *testing.T) {
 
 func TestReadFile_NotFound(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	setupVolume(t, pool, "v1")
 
 	_, err := s.handleReadFile(nil, ctx, makeDec(ReadFileRequest{VolumeID: "v1", Path: "nope.txt"}), nilInterceptor)
@@ -131,7 +131,7 @@ func TestReadFile_NotFound(t *testing.T) {
 
 func TestReadFile_MissingArgs(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 
 	cases := []struct {
 		name string
@@ -151,7 +151,7 @@ func TestReadFile_MissingArgs(t *testing.T) {
 
 func TestReadFile_PathTraversal(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	setupVolume(t, pool, "v1")
 
 	_, err := s.handleReadFile(nil, ctx, makeDec(ReadFileRequest{VolumeID: "v1", Path: "../../etc/passwd"}), nilInterceptor)
@@ -164,7 +164,7 @@ func TestReadFile_PathTraversal(t *testing.T) {
 
 func TestWriteFile_NewFile(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	data := []byte("new content")
@@ -186,7 +186,7 @@ func TestWriteFile_NewFile(t *testing.T) {
 
 func TestWriteFile_Overwrite(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	original := []byte("original")
@@ -213,7 +213,7 @@ func TestWriteFile_Overwrite(t *testing.T) {
 
 func TestWriteFile_DefaultMode(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	_, err := s.handleWriteFile(nil, ctx, makeDec(WriteFileRequest{
@@ -236,7 +236,7 @@ func TestWriteFile_DefaultMode(t *testing.T) {
 
 func TestWriteFile_CreatesParentDirs(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	_, err := s.handleWriteFile(nil, ctx, makeDec(WriteFileRequest{
@@ -257,7 +257,7 @@ func TestWriteFile_CreatesParentDirs(t *testing.T) {
 
 func TestWriteFile_MissingArgs(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 
 	cases := []struct {
 		name string
@@ -280,7 +280,7 @@ func TestWriteFile_MissingArgs(t *testing.T) {
 
 func TestListDir_NonRecursive(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	// Create files and a subdir.
@@ -316,7 +316,7 @@ func TestListDir_NonRecursive(t *testing.T) {
 
 func TestListDir_Recursive(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	if err := os.MkdirAll(filepath.Join(volDir, "d1", "d2"), 0755); err != nil {
@@ -354,7 +354,7 @@ func TestListDir_Recursive(t *testing.T) {
 
 func TestListDir_EmptyDir(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	setupVolume(t, pool, "v1")
 
 	resp, err := s.handleListDir(nil, ctx, makeDec(ListDirRequest{VolumeID: "v1", Path: "."}), nilInterceptor)
@@ -369,7 +369,7 @@ func TestListDir_EmptyDir(t *testing.T) {
 
 func TestListDir_NotFound(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	setupVolume(t, pool, "v1")
 
 	_, err := s.handleListDir(nil, ctx, makeDec(ListDirRequest{VolumeID: "v1", Path: "nonexistent"}), nilInterceptor)
@@ -378,7 +378,7 @@ func TestListDir_NotFound(t *testing.T) {
 
 func TestListDir_DefaultPath(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	if err := os.WriteFile(filepath.Join(volDir, "hello.txt"), []byte("hi"), 0644); err != nil {
@@ -405,7 +405,7 @@ func TestListDir_DefaultPath(t *testing.T) {
 
 func TestStatPath_File(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	data := []byte("stat me")
@@ -435,7 +435,7 @@ func TestStatPath_File(t *testing.T) {
 
 func TestStatPath_Directory(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	if err := os.MkdirAll(filepath.Join(volDir, "mydir"), 0755); err != nil {
@@ -458,7 +458,7 @@ func TestStatPath_Directory(t *testing.T) {
 
 func TestStatPath_NotFound(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	setupVolume(t, pool, "v1")
 
 	_, err := s.handleStatPath(nil, ctx, makeDec(StatPathRequest{VolumeID: "v1", Path: "ghost"}), nilInterceptor)
@@ -471,7 +471,7 @@ func TestStatPath_NotFound(t *testing.T) {
 
 func TestDeletePath_File(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	target := filepath.Join(volDir, "bye.txt")
@@ -491,7 +491,7 @@ func TestDeletePath_File(t *testing.T) {
 
 func TestDeletePath_Directory(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	dir := filepath.Join(volDir, "tree", "branch")
@@ -518,7 +518,7 @@ func TestDeletePath_Directory(t *testing.T) {
 
 func TestMkdirAll_Nested(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	_, err := s.handleMkdirAll(nil, ctx, makeDec(MkdirAllRequest{VolumeID: "v1", Path: "a/b/c/d"}), nilInterceptor)
@@ -541,7 +541,7 @@ func TestMkdirAll_Nested(t *testing.T) {
 
 func TestTarCreate_Directory(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	// Build a directory tree to tar.
@@ -589,7 +589,7 @@ func TestTarCreate_Directory(t *testing.T) {
 
 func TestTarExtract_Success(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	volDir := setupVolume(t, pool, "v1")
 
 	// Build a tar with two files and a directory.
@@ -645,7 +645,7 @@ func TestTarExtract_Success(t *testing.T) {
 
 func TestTarExtract_TraversalInEntries(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	setupVolume(t, pool, "v1")
 
 	// Build a tar with a path-traversal entry and a legitimate entry.
@@ -699,7 +699,7 @@ func TestTarExtract_TraversalInEntries(t *testing.T) {
 
 func TestTarExtract_SizeLimitExceeded(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	setupVolume(t, pool, "v1")
 
 	// Build a tar with a header claiming Size > 1<<30 (1GB limit).
@@ -723,7 +723,7 @@ func TestTarExtract_SizeLimitExceeded(t *testing.T) {
 
 func TestTarExtract_EmptyData(t *testing.T) {
 	pool := t.TempDir()
-	s := NewServer(pool)
+	s := NewServer(pool, nil)
 	setupVolume(t, pool, "v1")
 
 	_, err := s.handleTarExtract(nil, ctx, makeDec(TarRequest{

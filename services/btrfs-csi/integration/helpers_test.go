@@ -151,6 +151,12 @@ func startNodeOpsServer(t *testing.T, bm *btrfs.Manager, syncer *bsync.Daemon, t
 // It returns the address string ("localhost:PORT") and registers a cleanup
 // function that stops the server when the test completes.
 func startFileOpsServer(t *testing.T, poolPath string) string {
+	return startFileOpsServerWithSyncer(t, poolPath, nil)
+}
+
+// startFileOpsServerWithSyncer starts a fileops gRPC server with an optional
+// DirtySyncer for dirty-tracking integration tests.
+func startFileOpsServerWithSyncer(t *testing.T, poolPath string, syncer fileops.DirtySyncer) string {
 	t.Helper()
 
 	// Find a free port.
@@ -161,7 +167,7 @@ func startFileOpsServer(t *testing.T, poolPath string) string {
 	addr := lis.Addr().String()
 	lis.Close()
 
-	srv := fileops.NewServer(poolPath)
+	srv := fileops.NewServer(poolPath, syncer)
 	go func() {
 		// Start blocks; ignore "use of closed" errors on shutdown.
 		_ = srv.Start(addr, nil)

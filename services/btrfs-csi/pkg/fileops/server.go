@@ -27,10 +27,17 @@ func init() {
 	encoding.RegisterCodec(jsonCodec{})
 }
 
+// DirtySyncer is the subset of sync.Daemon used by FileOps to mark
+// volumes as dirty after writes. Optional — nil when CAS sync is disabled.
+type DirtySyncer interface {
+	MarkDirty(volumeID string)
+}
+
 // Server exposes file operations over gRPC on port 9742.
 // Access is restricted by NetworkPolicy to the tesslate namespace.
 type Server struct {
 	poolPath string
+	syncer   DirtySyncer // optional, nil-safe
 	srv      *grpc.Server
 }
 
@@ -42,8 +49,9 @@ type TLSConfig struct {
 }
 
 // NewServer creates a FileOps server that operates on the given btrfs pool.
-func NewServer(poolPath string) *Server {
-	return &Server{poolPath: poolPath}
+// syncer is optional — when non-nil, write operations mark volumes as dirty.
+func NewServer(poolPath string, syncer DirtySyncer) *Server {
+	return &Server{poolPath: poolPath, syncer: syncer}
 }
 
 // Start begins serving FileOps gRPC on the given address (e.g., ":9742").
@@ -215,6 +223,14 @@ type (
 	}
 )
 
+// markDirty notifies the sync daemon that a volume has been modified.
+// No-op when syncer is nil (CAS sync disabled).
+func (s *Server) markDirty(volumeID string) {
+	if s.syncer != nil && volumeID != "" {
+		s.syncer.MarkDirty(volumeID)
+	}
+}
+
 // chownNewParents chowns directories from child up to (but not including) root.
 // Best-effort: stops on first error or after 256 iterations.
 func chownNewParents(dir, root string, uid, gid int) {
@@ -318,6 +334,7 @@ func (s *Server) handleWriteFile(_ interface{}, ctx context.Context, dec func(in
 		chownNewParents(dir, volDir, req.Uid, req.Gid)
 	}
 
+	s.markDirty(req.VolumeID)
 	return &Empty{}, nil
 }
 
@@ -444,6 +461,7 @@ func (s *Server) handleDeletePath(_ interface{}, ctx context.Context, dec func(i
 		return nil, status.Errorf(codes.Internal, "delete: %v", err)
 	}
 
+	s.markDirty(req.VolumeID)
 	return &Empty{}, nil
 }
 
@@ -470,6 +488,7 @@ func (s *Server) handleMkdirAll(_ interface{}, ctx context.Context, dec func(int
 		chownNewParents(fullPath, volDir, req.Uid, req.Gid)
 	}
 
+	s.markDirty(req.VolumeID)
 	return &Empty{}, nil
 }
 
@@ -747,5 +766,6 @@ func (s *Server) handleTarExtract(_ interface{}, ctx context.Context, dec func(i
 		}
 	}
 
+	s.markDirty(req.VolumeID)
 	return &Empty{}, nil
 }

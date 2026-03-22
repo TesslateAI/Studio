@@ -552,3 +552,194 @@ func TestSyncOne_AutoPromote_OnlyOnFirstSync(t *testing.T) {
 		t.Errorf("auto-promote ran twice: uploads went from %d to %d", uploadCountAfterFirst, len(ft.uploaded))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Dirty tracking tests
+// ---------------------------------------------------------------------------
+
+func TestTrackVolume_StartsDirty(t *testing.T) {
+	d := setupDaemon(newFakeBtrfs(), newFakeCAS(), newFakeTemplate())
+	d.TrackVolume("vol-1", "", "")
+
+	d.mu.Lock()
+	tv := d.tracked["vol-1"]
+	d.mu.Unlock()
+
+	if !tv.dirty {
+		t.Error("newly tracked volume should start dirty")
+	}
+}
+
+func TestSyncVolume_ClearsDirty(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-dirty-clear"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	// Volume starts dirty.
+	d.mu.Lock()
+	if !d.tracked[volID].dirty {
+		t.Fatal("expected dirty=true before sync")
+	}
+	d.mu.Unlock()
+
+	if err := d.SyncVolume(context.Background(), volID); err != nil {
+		t.Fatalf("SyncVolume: %v", err)
+	}
+
+	// After successful sync, volume should be clean.
+	d.mu.Lock()
+	if d.tracked[volID].dirty {
+		t.Error("expected dirty=false after successful sync")
+	}
+	d.mu.Unlock()
+}
+
+func TestMarkDirty_SetsDirtyFlag(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-mark"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	// Sync to clear dirty.
+	if err := d.SyncVolume(context.Background(), volID); err != nil {
+		t.Fatalf("SyncVolume: %v", err)
+	}
+
+	d.mu.Lock()
+	if d.tracked[volID].dirty {
+		t.Fatal("expected clean after sync")
+	}
+	d.mu.Unlock()
+
+	// Mark dirty.
+	d.MarkDirty(volID)
+
+	d.mu.Lock()
+	if !d.tracked[volID].dirty {
+		t.Error("expected dirty=true after MarkDirty")
+	}
+	d.mu.Unlock()
+}
+
+func TestMarkDirty_UntrackedVolume_NoPanic(t *testing.T) {
+	d := setupDaemon(newFakeBtrfs(), newFakeCAS(), newFakeTemplate())
+	// Should not panic on untracked volume.
+	d.MarkDirty("nonexistent")
+}
+
+func TestSyncAll_SkipsCleanVolumes(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	// Create 3 volumes: all start dirty.
+	for _, id := range []string{"vol-a", "vol-b", "vol-c"} {
+		fb.subvolumes["volumes/"+id] = true
+		d.TrackVolume(id, "", "")
+	}
+
+	// Sync all — all are dirty, so all 3 should sync.
+	if err := d.syncAll(context.Background()); err != nil {
+		t.Fatalf("first syncAll: %v", err)
+	}
+
+	// All should now be clean.
+	d.mu.Lock()
+	for _, id := range []string{"vol-a", "vol-b", "vol-c"} {
+		if d.tracked[id].dirty {
+			t.Errorf("volume %s should be clean after syncAll", id)
+		}
+	}
+	d.mu.Unlock()
+
+	// Reset putCount to track new syncs.
+	initialPutCount := fc.putCount
+
+	// Mark only vol-b dirty.
+	d.MarkDirty("vol-b")
+
+	// Second syncAll — only vol-b should sync.
+	if err := d.syncAll(context.Background()); err != nil {
+		t.Fatalf("second syncAll: %v", err)
+	}
+
+	// Exactly 1 new blob put (for vol-b).
+	if fc.putCount-initialPutCount != 1 {
+		t.Errorf("expected 1 blob put for dirty volume, got %d", fc.putCount-initialPutCount)
+	}
+}
+
+func TestDrainAll_SkipsCleanVolumes(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	// Create 5 volumes.
+	ids := []string{"vol-1", "vol-2", "vol-3", "vol-4", "vol-5"}
+	for _, id := range ids {
+		fb.subvolumes["volumes/"+id] = true
+		d.TrackVolume(id, "", "")
+	}
+
+	// Sync all to make them clean.
+	for _, id := range ids {
+		if err := d.SyncVolume(context.Background(), id); err != nil {
+			t.Fatalf("SyncVolume %s: %v", id, err)
+		}
+	}
+
+	initialPutCount := fc.putCount
+
+	// Mark only vol-2 and vol-4 dirty.
+	d.MarkDirty("vol-2")
+	d.MarkDirty("vol-4")
+
+	// DrainAll should only sync the 2 dirty volumes.
+	if err := d.DrainAll(context.Background()); err != nil {
+		t.Fatalf("DrainAll: %v", err)
+	}
+
+	if fc.putCount-initialPutCount != 2 {
+		t.Errorf("expected 2 blob puts for dirty volumes, got %d", fc.putCount-initialPutCount)
+	}
+}
+
+func TestGetTrackedState_ReportsDirty(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	fb.subvolumes["volumes/vol-1"] = true
+	d.TrackVolume("vol-1", "", "")
+
+	// Newly tracked — dirty.
+	states := d.GetTrackedState()
+	if len(states) != 1 {
+		t.Fatalf("expected 1 state, got %d", len(states))
+	}
+	if !states[0].Dirty {
+		t.Error("newly tracked volume should report Dirty=true")
+	}
+
+	// Sync to clean.
+	if err := d.SyncVolume(context.Background(), "vol-1"); err != nil {
+		t.Fatalf("SyncVolume: %v", err)
+	}
+
+	states = d.GetTrackedState()
+	if states[0].Dirty {
+		t.Error("synced volume should report Dirty=false")
+	}
+}

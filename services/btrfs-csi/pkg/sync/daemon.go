@@ -23,6 +23,7 @@ type trackedVolume struct {
 	lastLayerHash string // hash of most recent layer (parent for next send)
 	lastSnapPath  string // local path of last layer snapshot (for -p parent)
 	lastSyncAt    time.Time
+	dirty         bool // true = volume has changed since last successful sync
 }
 
 // Daemon periodically snapshots tracked volumes, uploads incremental layers
@@ -162,10 +163,10 @@ func (d *Daemon) Stop() {
 	klog.Info("Sync daemon stopped")
 }
 
-// DrainAll performs a final CAS sync for all tracked volumes, then stops
+// DrainAll performs a final CAS sync for dirty tracked volumes, then stops
 // the daemon. Used during node drain to persist unsaved data before
-// DaemonSet pod termination. Volumes are synced sequentially to avoid
-// contending on disk I/O and S3 bandwidth.
+// DaemonSet pod termination. Clean volumes are skipped — their data is
+// already in S3 from the last successful sync.
 func (d *Daemon) DrainAll(ctx context.Context) error {
 	d.mu.Lock()
 	type drainItem struct {
@@ -173,34 +174,39 @@ func (d *Daemon) DrainAll(ctx context.Context) error {
 		templateName string
 		templateHash string
 	}
-	items := make([]drainItem, 0, len(d.tracked))
+	var items []drainItem
+	skipped := 0
 	for _, tv := range d.tracked {
+		if !tv.dirty {
+			skipped++
+			continue
+		}
 		items = append(items, drainItem{
 			volumeID:     tv.volumeID,
 			templateName: tv.templateName,
 			templateHash: tv.templateHash,
 		})
 	}
+	total := len(d.tracked)
 	d.mu.Unlock()
 
-	total := len(items)
-	klog.Infof("Drain: starting final sync for %d volumes", total)
+	klog.Infof("Drain: %d dirty volumes to sync, %d clean (skipped), %d total", len(items), skipped, total)
 
 	for i, item := range items {
 		select {
 		case <-ctx.Done():
-			klog.Warningf("Drain: context cancelled after syncing %d/%d volumes", i, total)
+			klog.Warningf("Drain: context cancelled after syncing %d/%d dirty volumes", i, len(items))
 			return ctx.Err()
 		default:
 		}
 
 		if err := d.SyncVolume(ctx, item.volumeID); err != nil {
-			klog.Errorf("Drain: failed to sync volume %d/%d %s: %v", i+1, total, item.volumeID, err)
+			klog.Errorf("Drain: failed to sync volume %d/%d %s: %v", i+1, len(items), item.volumeID, err)
 			// Continue draining remaining volumes — partial drain > no drain.
 			continue
 		}
 		d.UntrackVolume(item.volumeID)
-		klog.Infof("Drain: synced volume %d/%d: %s", i+1, total, item.volumeID)
+		klog.Infof("Drain: synced volume %d/%d: %s", i+1, len(items), item.volumeID)
 	}
 
 	d.Stop()
@@ -220,9 +226,20 @@ func (d *Daemon) TrackVolume(volumeID, templateName, templateHash string) {
 		volumeID:     volumeID,
 		templateName: templateName,
 		templateHash: templateHash,
+		dirty:        true, // new volumes always need initial sync
 	}
 	klog.V(2).Infof("Tracking volume %s for CAS sync (template=%s, base=%s)",
 		volumeID, templateName, cas.ShortHash(templateHash))
+}
+
+// MarkDirty flags a tracked volume as needing sync. Safe to call from any
+// goroutine; no-op if the volume isn't tracked.
+func (d *Daemon) MarkDirty(volumeID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if tv, ok := d.tracked[volumeID]; ok {
+		tv.dirty = true
+	}
 }
 
 // UntrackVolume removes a volume from sync tracking and cleans up the last
@@ -255,6 +272,7 @@ type TrackedVolumeState struct {
 	VolumeID     string `json:"volume_id"`
 	TemplateHash string `json:"template_hash,omitempty"`
 	LastSyncAt   string `json:"last_sync_at,omitempty"`
+	Dirty        bool   `json:"dirty"`
 }
 
 // GetTrackedState returns the current sync state for all tracked volumes.
@@ -268,6 +286,7 @@ func (d *Daemon) GetTrackedState() []TrackedVolumeState {
 		s := TrackedVolumeState{
 			VolumeID:     tv.volumeID,
 			TemplateHash: tv.templateHash,
+			Dirty:        tv.dirty,
 		}
 		if !tv.lastSyncAt.IsZero() {
 			s.LastSyncAt = tv.lastSyncAt.UTC().Format(time.RFC3339)
@@ -319,6 +338,7 @@ func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
 		tv.lastSyncAt = time.Now()
 		tv.templateName = tvCopy.templateName
 		tv.templateHash = tvCopy.templateHash
+		tv.dirty = false
 	}
 	d.mu.Unlock()
 	return nil
@@ -614,24 +634,33 @@ func (d *Daemon) GetManifest(ctx context.Context, volumeID string) (*cas.Manifes
 	return d.cas.GetManifest(ctx, volumeID)
 }
 
-// syncAll iterates over all tracked volumes and syncs each one.
+// syncAll iterates over all tracked volumes and syncs dirty ones.
 func (d *Daemon) syncAll(ctx context.Context) error {
 	d.mu.Lock()
 	type syncItem struct {
 		tv trackedVolume // copy
 	}
 	items := make([]syncItem, 0, len(d.tracked))
+	skipped := 0
 	for _, tv := range d.tracked {
+		if !tv.dirty {
+			skipped++
+			continue
+		}
 		items = append(items, syncItem{tv: *tv})
 	}
 	d.mu.Unlock()
 
 	if len(items) == 0 {
-		klog.V(5).Info("No volumes to sync")
+		if skipped > 0 {
+			klog.V(5).Infof("No dirty volumes to sync (%d clean, skipped)", skipped)
+		} else {
+			klog.V(5).Info("No volumes to sync")
+		}
 		return nil
 	}
 
-	klog.V(4).Infof("Starting CAS sync cycle for %d volumes", len(items))
+	klog.V(4).Infof("Starting CAS sync cycle for %d dirty volumes (%d clean, skipped)", len(items), skipped)
 	var firstErr error
 	for _, item := range items {
 		select {
@@ -657,6 +686,7 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 			tv.lastSyncAt = time.Now()
 			tv.templateName = item.tv.templateName
 			tv.templateHash = item.tv.templateHash
+			tv.dirty = false
 		}
 		d.mu.Unlock()
 		metrics.SyncLag.WithLabelValues(item.tv.volumeID).Set(0)
