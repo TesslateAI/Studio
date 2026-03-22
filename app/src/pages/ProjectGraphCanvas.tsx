@@ -957,8 +957,9 @@ const ProjectGraphCanvasInner = () => {
           y: event.clientY,
         });
 
-        // Extract provider name from the deployment target slug (e.g., 'vercel-deploy' -> 'vercel')
-        const provider = item.slug.replace('-deploy', '');
+        // Extract provider key from item config or slug
+        // Seed items have config.provider_key; legacy service items have slug like 'vercel-deploy'
+        const provider = item.provider_key || item.slug.replace('deploy-', '').replace('-deploy', '');
 
         // Generate temporary ID for optimistic update
         const tempId = `temp-target-${Date.now()}`;
