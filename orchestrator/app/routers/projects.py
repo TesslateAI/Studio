@@ -1925,6 +1925,64 @@ async def save_setup_config(
     )
 
 
+@router.post("/{project_slug}/sync-config")
+async def sync_config_to_file(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save current canvas state (DB) to .tesslate/config.json.
+
+    Reads all Container, ContainerConnection, DeploymentTarget, and BrowserPreview
+    records for the project and writes a complete config.json.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    await track_project_activity(project.id, db)
+    settings = get_settings()
+
+    from ..services.config_sync import build_config_from_db
+    from ..services.base_config_parser import (
+        serialize_config_to_json,
+        write_tesslate_config,
+    )
+
+    config = await build_config_from_db(db, project.id)
+
+    # Write to filesystem (Docker) or FileOps (K8s)
+    if settings.deployment_mode == "docker":
+        project_path = f"/projects/{project.slug}"
+        write_tesslate_config(project_path, config)
+    else:
+        from ..services.orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+        volume_hints = {
+            "volume_id": project.volume_id,
+            "cache_node": project.cache_node,
+        }
+        config_json = serialize_config_to_json(config)
+        await orchestrator.write_file(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            file_path=".tesslate/config.json",
+            content=config_json,
+            project_slug=project.slug,
+            **volume_hints,
+        )
+
+    return {
+        "status": "saved",
+        "sections": {
+            "apps": len(config.apps),
+            "infrastructure": len(config.infrastructure),
+            "connections": len(config.connections),
+            "deployments": len(config.deployments),
+            "previews": len(config.previews),
+        },
+    }
+
+
 @router.post("/{project_slug}/analyze", response_model=TesslateConfigResponse)
 async def analyze_project(
     project_slug: str,

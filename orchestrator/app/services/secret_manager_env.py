@@ -86,6 +86,31 @@ def resolve_connection_env_vars(
     return resolved
 
 
+def _resolve_via_exports(source_container: "Container") -> dict[str, str]:
+    """Resolve env vars using the new export-based system.
+
+    When a container has .exports populated, resolve ${} placeholders
+    against the container's own env vars, HOST (container_name), and PORT.
+
+    Returns resolved export key-value pairs ready for injection.
+    """
+    from .export_resolver import resolve_node_exports
+
+    decoded_env = decode_secret_map(source_container.environment_vars or {})
+    effective_port = (
+        source_container.internal_port
+        or source_container.port
+        or 3000
+    )
+
+    return resolve_node_exports(
+        node_name=source_container.container_name or source_container.name or "",
+        exports=source_container.exports,
+        env=decoded_env,
+        port=effective_port,
+    )
+
+
 def _substitute_template(template: str, context: dict[str, str]) -> str:
     """Replace {placeholder} tokens in *template* with values from *context*.
 
@@ -164,14 +189,19 @@ async def get_injected_env_vars_for_container(
         if not source:
             continue
 
-        service_def = get_service(source.service_slug) if source.service_slug else None
+        # New export-based path: if source has .exports, use the export resolver
+        if source.exports:
+            resolved = _resolve_via_exports(source)
+        else:
+            # Fallback to legacy template-based resolution
+            service_def = get_service(source.service_slug) if source.service_slug else None
 
-        # Decrypt credentials for external services
-        creds = None
-        if source.deployment_mode == "external" and source.credentials_id:
-            creds = await _decrypt_container_credentials(db, source)
+            # Decrypt credentials for external services
+            creds = None
+            if source.deployment_mode == "external" and source.credentials_id:
+                creds = await _decrypt_container_credentials(db, source)
 
-        resolved = resolve_connection_env_vars(source, service_def, decrypted_credentials=creds)
+            resolved = resolve_connection_env_vars(source, service_def, decrypted_credentials=creds)
 
         for env_key in resolved:
             injected.append(
@@ -228,14 +258,19 @@ async def build_env_overrides(
                 continue
             container_map[source.id] = source
 
-        service_def = get_service(source.service_slug) if source.service_slug else None
+        # New export-based path: if source has .exports, use the export resolver
+        if source.exports:
+            resolved = _resolve_via_exports(source)
+        else:
+            # Fallback to legacy template-based resolution
+            service_def = get_service(source.service_slug) if source.service_slug else None
 
-        # Decrypt credentials for external services
-        creds = None
-        if source.deployment_mode == "external" and source.credentials_id:
-            creds = await _decrypt_container_credentials(db, source)
+            # Decrypt credentials for external services
+            creds = None
+            if source.deployment_mode == "external" and source.credentials_id:
+                creds = await _decrypt_container_credentials(db, source)
 
-        resolved = resolve_connection_env_vars(source, service_def, decrypted_credentials=creds)
+            resolved = resolve_connection_env_vars(source, service_def, decrypted_credentials=creds)
 
         if resolved:
             target_id = conn.target_container_id
