@@ -124,6 +124,10 @@ func loadServerTLS(cfg *TLSConfig) (credentials.TransportCredentials, error) {
 	return credentials.NewTLS(tlsConfig), nil
 }
 
+// GrpcServer returns the underlying gRPC server for external shutdown control.
+// Returns nil if Start() hasn't been called yet.
+func (s *Server) GrpcServer() *grpc.Server { return s.srv }
+
 // Stop gracefully stops the nodeops server.
 func (s *Server) Stop() {
 	if s.srv != nil {

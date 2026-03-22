@@ -209,8 +209,10 @@ func (d *Daemon) DrainAll(ctx context.Context) error {
 		klog.Infof("Drain: synced volume %d/%d: %s", i+1, len(items), item.volumeID)
 	}
 
-	d.Stop()
-	klog.Info("Drain: complete")
+	// Don't call d.Stop() here — the syncer must remain available for RPCs
+	// that arrive between drain completion and SIGTERM. Context cancellation
+	// from main.go will stop the syncer naturally via Start()'s ctx.Done.
+	klog.Info("Drain: complete (syncer remains active for late RPCs)")
 	return nil
 }
 

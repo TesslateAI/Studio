@@ -249,6 +249,8 @@ func (d *Driver) runNode(ctx context.Context) error {
 			if d.syncer != nil {
 				// Use background context — the HTTP client (wget in preStop) may
 				// disconnect before drain completes, which would cancel r.Context().
+				// Background context ensures drain runs to completion even if the
+				// process receives SIGTERM during drain (best-effort data safety).
 				drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				defer drainCancel()
 				if err := d.syncer.DrainAll(drainCtx); err != nil {
@@ -377,9 +379,8 @@ func (d *Driver) runHub(ctx context.Context) error {
 	// Block until context is cancelled (signal handler in main.go).
 	<-ctx.Done()
 	hubSrv.Stop()
-	if d.srv != nil {
-		d.srv.GracefulStop()
-	}
+	// Don't call d.srv.GracefulStop() here — driver.Stop() owns shutdown
+	// with a bounded timeout to prevent zombie states.
 	klog.Info("Hub mode stopped")
 	return nil
 }
@@ -426,31 +427,55 @@ func (d *Driver) startCSIServer(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		klog.Info("Context cancelled, stopping gRPC server")
-		d.srv.GracefulStop()
+		klog.Info("Context cancelled, CSI server will be stopped by driver.Stop()")
+		<-errCh // Wait for Serve() to return after Stop() kills it
 		return nil
 	case err := <-errCh:
 		return err
 	}
 }
 
-// Stop performs a graceful shutdown of the driver.
+// Stop performs a graceful shutdown of the driver. Each gRPC server gets a
+// bounded grace period before being force-killed to prevent zombie states
+// where the Unix socket is deleted but the process hangs on in-flight RPCs.
 func (d *Driver) Stop() {
 	if d.drainSrv != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
 		d.drainSrv.Shutdown(shutdownCtx)
 	}
+	const grpcTimeout = 10 * time.Second
 	if d.fileOpsSrv != nil {
-		d.fileOpsSrv.Stop()
+		gracefulStopWithTimeout(d.fileOpsSrv.GrpcServer(), grpcTimeout)
 	}
 	if d.nodeOpsSrv != nil {
-		d.nodeOpsSrv.Stop()
+		gracefulStopWithTimeout(d.nodeOpsSrv.GrpcServer(), grpcTimeout)
 	}
-	if d.srv != nil {
-		d.srv.GracefulStop()
-	}
+	gracefulStopWithTimeout(d.srv, grpcTimeout)
 	klog.Info("Driver stopped")
+}
+
+// gracefulStopWithTimeout attempts GracefulStop on a gRPC server. If it
+// doesn't complete within the timeout, it calls Stop() to force-kill all
+// connections. This prevents zombie states where GracefulStop deletes the
+// Unix socket file (via listener.Close) but blocks indefinitely waiting
+// for in-flight RPCs.
+func gracefulStopWithTimeout(srv *grpc.Server, timeout time.Duration) {
+	if srv == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		srv.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		klog.Warningf("gRPC GracefulStop did not complete in %v, forcing Stop()", timeout)
+		srv.Stop()
+		<-done // Wait for GracefulStop goroutine to return (Stop unblocks it)
+	}
 }
 
 // loggingInterceptor logs all gRPC calls with their method name and duration.

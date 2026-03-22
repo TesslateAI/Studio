@@ -140,7 +140,8 @@ func main() {
 	select {
 	case sig := <-sigCh:
 		klog.Infof("Received signal %v, shutting down", sig)
-		drv.Stop()
+		cancel()   // Cancel context first — propagates to all goroutines
+		drv.Stop() // Then shut down servers with bounded timeouts
 	case err := <-errCh:
 		if err != nil {
 			klog.Fatalf("Driver exited with error: %v", err)
