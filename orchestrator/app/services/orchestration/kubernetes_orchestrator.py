@@ -198,6 +198,47 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         return await get_volume_manager().get_fileops_client(volume_id)
 
+    async def _fileops_call(self, volume_id: str, fn, *args, **kwargs):
+        """Execute a FileOps RPC with automatic volume-miss recovery.
+
+        If the FileOps server returns FAILED_PRECONDITION (volume subvolume
+        missing from disk), re-resolve through the Hub — which triggers a
+        CAS restore — then retry the call once with a fresh client.
+
+        This gives every file operation the same guarantee: either you get
+        your data, or you get a clear VolumeRestoringError/VolumeUnavailableError.
+        """
+        from ..volume_manager import get_volume_manager
+
+        vm = get_volume_manager()
+        client = await vm.get_fileops_client(volume_id)
+        try:
+            async with client:
+                return await fn(client, *args, **kwargs)
+        except grpc.aio.AioRpcError as e:
+            if e.code() != grpc.StatusCode.FAILED_PRECONDITION:
+                raise
+            logger.warning(
+                "[K8S] FileOps volume missing (FAILED_PRECONDITION) for %s — re-resolving via Hub",
+                volume_id,
+            )
+        # Re-resolve triggers CAS restore in the Hub if volume is gone.
+        # This will raise VolumeRestoringError or VolumeUnavailableError
+        # if the volume can't be made ready immediately.
+        retry_client = await vm.get_fileops_client(volume_id)
+        try:
+            async with retry_client:
+                return await fn(retry_client, *args, **kwargs)
+        except grpc.aio.AioRpcError as retry_err:
+            if retry_err.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                # Volume still not on disk — restore is in progress.
+                logger.info(
+                    "[K8S] FileOps volume %s still restoring after re-resolve — signaling restoring",
+                    volume_id,
+                )
+                raise VolumeRestoringError(volume_id) from retry_err
+            raise
+
     async def _get_project_volume_info(self, project_id: UUID) -> tuple[str | None, str | None]:
         """Look up volume fields from DB.
 
@@ -1298,8 +1339,10 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         vol_path = self._build_volume_path(file_path, subdir)
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                return await client.read_file_text(volume_id, vol_path)
+            return await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_path: c.read_file_text(vid, vp),
+            )
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 return None
@@ -1332,8 +1375,10 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         vol_path = self._build_volume_path(file_path, subdir)
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                await client.write_file_text(volume_id, vol_path, content)
+            await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_path, ct=content: c.write_file_text(vid, vp, ct),
+            )
             return True
         except Exception as e:
             logger.error(f"[K8S] FileOps write_file error: {e}")
@@ -1354,8 +1399,10 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         vol_path = self._build_volume_path(file_path)
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                await client.write_file(volume_id, vol_path, data)
+            await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_path, d=data: c.write_file(vid, vp, d),
+            )
             return True
         except Exception as e:
             logger.error(f"[K8S] FileOps write_binary error: {e}")
@@ -1379,8 +1426,10 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         vol_path = self._build_volume_path(file_path)
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                await client.delete_path(volume_id, vol_path)
+            await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_path: c.delete_path(vid, vp),
+            )
             return True
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
@@ -1411,17 +1460,19 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         vol_path = self._build_volume_path(directory) if directory != "." else "."
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                entries = await client.list_dir(volume_id, vol_path)
-                return [
-                    {
-                        "name": entry.name,
-                        "type": "directory" if entry.is_dir else "file",
-                        "size": entry.size,
-                        "permissions": "",
-                    }
-                    for entry in entries
-                ]
+            entries = await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_path: c.list_dir(vid, vp),
+            )
+            return [
+                {
+                    "name": entry.name,
+                    "type": "directory" if entry.is_dir else "file",
+                    "size": entry.size,
+                    "permissions": "",
+                }
+                for entry in entries
+            ]
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 return []
@@ -1451,24 +1502,26 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         vol_path = self._build_volume_path(subdir) if subdir else "."
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                entries = await client.list_tree(
-                    volume_id,
-                    vol_path,
+            entries = await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_path: c.list_tree(
+                    vid,
+                    vp,
                     exclude_dirs=_TREE_EXCLUDE_DIRS,
                     exclude_files=_TREE_EXCLUDE_FILES,
                     exclude_extensions=_TREE_EXCLUDE_EXTS,
-                )
-                return [
-                    {
-                        "path": entry.path,
-                        "name": entry.name,
-                        "is_dir": entry.is_dir,
-                        "size": entry.size,
-                        "mod_time": entry.mod_time,
-                    }
-                    for entry in entries
-                ]
+                ),
+            )
+            return [
+                {
+                    "path": entry.path,
+                    "name": entry.name,
+                    "is_dir": entry.is_dir,
+                    "size": entry.size,
+                    "mod_time": entry.mod_time,
+                }
+                for entry in entries
+            ]
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 return []
@@ -1499,9 +1552,11 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         vol_path = self._build_volume_path(file_path, subdir)
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                content = await client.read_file_text(volume_id, vol_path)
-                return {"path": file_path, "content": content, "size": len(content)}
+            content = await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_path: c.read_file_text(vid, vp),
+            )
+            return {"path": file_path, "content": content, "size": len(content)}
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 return None
@@ -1534,16 +1589,16 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         # Map volume paths back to original caller paths for the response.
         vol_to_orig = dict(zip(vol_paths, paths, strict=True))
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                file_contents, rpc_errors = await client.read_files(
-                    volume_id, vol_paths, max_file_size=100_000
-                )
-                files = [
-                    {"path": vol_to_orig.get(fc.path, fc.path), "content": fc.data, "size": fc.size}
-                    for fc in file_contents
-                ]
-                errors = [vol_to_orig.get(e, e) for e in rpc_errors]
-                return files, errors
+            file_contents, rpc_errors = await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_paths: c.read_files(vid, vp, max_file_size=100_000),
+            )
+            files = [
+                {"path": vol_to_orig.get(fc.path, fc.path), "content": fc.data, "size": fc.size}
+                for fc in file_contents
+            ]
+            errors = [vol_to_orig.get(e, e) for e in rpc_errors]
+            return files, errors
         except (VolumeRestoringError, VolumeUnavailableError):
             raise
         except Exception as e:
@@ -1797,18 +1852,20 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
         vol_path = self._build_volume_path(directory) if directory != "." else "."
         try:
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                entries = await client.list_dir(volume_id, vol_path, recursive=True)
-                return [
-                    {
-                        "name": entry.name,
-                        "path": entry.path,
-                        "type": "directory" if entry.is_dir else "file",
-                        "size": entry.size,
-                    }
-                    for entry in entries
-                    if not entry.is_dir and fnmatch.fnmatch(entry.name, pattern)
-                ]
+            entries = await self._fileops_call(
+                volume_id,
+                lambda c, vid=volume_id, vp=vol_path: c.list_dir(vid, vp, recursive=True),
+            )
+            return [
+                {
+                    "name": entry.name,
+                    "path": entry.path,
+                    "type": "directory" if entry.is_dir else "file",
+                    "size": entry.size,
+                }
+                for entry in entries
+                if not entry.is_dir and fnmatch.fnmatch(entry.name, pattern)
+            ]
         except (VolumeRestoringError, VolumeUnavailableError):
             raise
         except Exception as e:
@@ -1839,32 +1896,35 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             volume_id, cache_node = await self._get_project_volume_info(project_id)
 
         vol_path = self._build_volume_path(directory) if directory != "." else "."
-        try:
+
+        async def _grep(client):
             regex = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
-            async with await self._get_fileops_client(cache_node, volume_id) as client:
-                entries = await client.list_dir(volume_id, vol_path, recursive=True)
-                results = []
-                for entry in entries:
-                    if entry.is_dir:
-                        continue
-                    if file_pattern != "*" and not fnmatch.fnmatch(entry.name, file_pattern):
-                        continue
-                    try:
-                        content = await client.read_file_text(volume_id, entry.path)
-                        for line_no, line in enumerate(content.splitlines(), 1):
-                            if regex.search(line):
-                                results.append(
-                                    {
-                                        "file": entry.path,
-                                        "line": line_no,
-                                        "content": line.rstrip(),
-                                    }
-                                )
-                                if len(results) >= max_results:
-                                    return results
-                    except Exception:
-                        continue
-                return results
+            entries = await client.list_dir(volume_id, vol_path, recursive=True)
+            results = []
+            for entry in entries:
+                if entry.is_dir:
+                    continue
+                if file_pattern != "*" and not fnmatch.fnmatch(entry.name, file_pattern):
+                    continue
+                try:
+                    content = await client.read_file_text(volume_id, entry.path)
+                    for line_no, line in enumerate(content.splitlines(), 1):
+                        if regex.search(line):
+                            results.append(
+                                {
+                                    "file": entry.path,
+                                    "line": line_no,
+                                    "content": line.rstrip(),
+                                }
+                            )
+                            if len(results) >= max_results:
+                                return results
+                except Exception:
+                    continue
+            return results
+
+        try:
+            return await self._fileops_call(volume_id, _grep)
         except (VolumeRestoringError, VolumeUnavailableError):
             raise
         except Exception as e:

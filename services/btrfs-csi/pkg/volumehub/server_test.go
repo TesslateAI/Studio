@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -16,6 +18,52 @@ import (
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
+
+// fakeNodeOpsServer is a minimal gRPC server that responds to SubvolumeExists.
+// volumeExists controls whether volumes are reported as present on disk.
+type fakeNodeOpsServer struct {
+	addr          string
+	volumeExists  bool
+	existsCalls   atomic.Int32
+	srv           *grpc.Server
+}
+
+func startFakeNodeOps(t *testing.T, volumeExists bool) *fakeNodeOpsServer {
+	t.Helper()
+	lis, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	f := &fakeNodeOpsServer{
+		addr:         lis.Addr().String(),
+		volumeExists: volumeExists,
+	}
+	f.srv = grpc.NewServer(grpc.ForceServerCodec(jsonCodecTest{}))
+	f.srv.RegisterService(&grpc.ServiceDesc{
+		ServiceName: "nodeops.NodeOps",
+		HandlerType: (*interface{})(nil),
+		Methods: []grpc.MethodDesc{
+			{MethodName: "SubvolumeExists", Handler: f.handleSubvolumeExists},
+		},
+	}, f)
+	go f.srv.Serve(lis)
+	t.Cleanup(func() { f.srv.Stop() })
+	return f
+}
+
+func (f *fakeNodeOpsServer) handleSubvolumeExists(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req map[string]interface{}
+	if err := dec(&req); err != nil {
+		return nil, err
+	}
+	f.existsCalls.Add(1)
+	return map[string]interface{}{"exists": f.volumeExists}, nil
+}
+
+type jsonCodecTest struct{}
+func (jsonCodecTest) Marshal(v interface{}) ([]byte, error)     { return json.Marshal(v) }
+func (jsonCodecTest) Unmarshal(data []byte, v interface{}) error { return json.Unmarshal(data, v) }
+func (jsonCodecTest) Name() string                              { return "json" }
 
 // newTestServer creates a Server with a registry, no CAS, and a nodeClient
 // factory that always returns an error (no real nodes). liveNodeNames controls
@@ -32,6 +80,24 @@ func newTestServer(liveNodeNames []string) (*Server, *NodeRegistry) {
 		func() []string { return liveNodeNames },
 	)
 	return srv, registry
+}
+
+// newTestServerWithFakeNodes creates a Server backed by fake NodeOps servers
+// that respond to SubvolumeExists. All nodes share the same fake server.
+func newTestServerWithFakeNodes(t *testing.T, liveNodeNames []string, volumeExists bool) (*Server, *NodeRegistry, *fakeNodeOpsServer) {
+	t.Helper()
+	fake := startFakeNodeOps(t, volumeExists)
+	registry := NewNodeRegistry()
+	srv := NewServer(
+		registry,
+		nil, // no CAS
+		func(nodeName string) (*nodeops.Client, error) {
+			return nodeops.NewClient(fake.addr, nil)
+		},
+		func(nodeName string) string { return fake.addr },
+		func() []string { return liveNodeNames },
+	)
+	return srv, registry, fake
 }
 
 // callEnsureCached invokes handleEnsureCached via the Server's method with
@@ -76,7 +142,7 @@ func TestNodeVolumeCount(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestEnsureCached_FastPath_LiveCachedCandidate(t *testing.T) {
-	srv, reg := newTestServer([]string{"node-a", "node-b"})
+	srv, reg, fake := newTestServerWithFakeNodes(t, []string{"node-a", "node-b"}, true)
 	reg.RegisterNode("node-a")
 	reg.RegisterNode("node-b")
 	reg.RegisterVolume("vol-1")
@@ -92,6 +158,10 @@ func TestEnsureCached_FastPath_LiveCachedCandidate(t *testing.T) {
 	}
 	if resp.NodeName != "node-a" {
 		t.Errorf("got node %q, want node-a (fast path)", resp.NodeName)
+	}
+	// Verify the fast path actually checked the node.
+	if fake.existsCalls.Load() == 0 {
+		t.Error("expected SubvolumeExists call on fast path")
 	}
 }
 
@@ -121,7 +191,7 @@ func TestEnsureCached_StaleNode_ReturnsError(t *testing.T) {
 func TestEnsureCached_StaleNode_CleansCacheEntry(t *testing.T) {
 	// Volume cached on dead-node and live-node. After the call, the stale
 	// cache entry for dead-node should be removed from the registry.
-	srv, reg := newTestServer([]string{"live-node"})
+	srv, reg, _ := newTestServerWithFakeNodes(t, []string{"live-node"}, true)
 	reg.RegisterNode("dead-node")
 	reg.RegisterNode("live-node")
 	reg.RegisterVolume("vol-1")
@@ -175,7 +245,7 @@ func TestEnsureCached_LiveCachedNotInCandidates_TriesPeerTransfer(t *testing.T) 
 func TestEnsureCached_NoCandidates_UsesAllLiveNodes(t *testing.T) {
 	// No candidates specified — Hub picks from all live nodes.
 	// Volume cached on live-node-a → should return it (fast path).
-	srv, reg := newTestServer([]string{"live-node-a", "live-node-b"})
+	srv, reg, _ := newTestServerWithFakeNodes(t, []string{"live-node-a", "live-node-b"}, true)
 	reg.RegisterNode("live-node-a")
 	reg.RegisterNode("live-node-b")
 	reg.RegisterVolume("vol-1")
@@ -189,6 +259,31 @@ func TestEnsureCached_NoCandidates_UsesAllLiveNodes(t *testing.T) {
 	}
 	if resp.NodeName != "live-node-a" {
 		t.Errorf("got %q, want live-node-a", resp.NodeName)
+	}
+}
+
+func TestEnsureCached_FastPath_VolumeMissing_EvictsAndRestores(t *testing.T) {
+	// Volume is in the registry as cached, but not actually on disk.
+	// The fast path should detect this, evict the stale entry, and fall
+	// through to CAS restore (which fails here → error).
+	srv, reg, fake := newTestServerWithFakeNodes(t, []string{"node-a"}, false) // volumeExists=false
+	reg.RegisterNode("node-a")
+	reg.RegisterVolume("vol-1")
+	reg.SetCached("vol-1", "node-a")
+
+	_, err := callEnsureCached(srv, EnsureCachedRequest{
+		VolumeID: "vol-1",
+	})
+	// CAS restore fails (no CAS configured), so we get an error.
+	// The key assertion: the stale cache entry should be evicted.
+	if err == nil {
+		t.Fatal("expected error (CAS not configured)")
+	}
+	if reg.IsCached("vol-1", "node-a") {
+		t.Error("stale cache entry should have been evicted after SubvolumeExists=false")
+	}
+	if fake.existsCalls.Load() == 0 {
+		t.Error("expected SubvolumeExists call")
 	}
 }
 
@@ -211,7 +306,7 @@ func TestEnsureCached_AllCandidatesDead_FailedPrecondition(t *testing.T) {
 func TestEnsureCached_BackwardCompat_HintNodeAsSingleCandidate(t *testing.T) {
 	// Old caller sends hint_node only (no candidate_nodes).
 	// Should be treated as a single-element candidate list.
-	srv, reg := newTestServer([]string{"node-a"})
+	srv, reg, _ := newTestServerWithFakeNodes(t, []string{"node-a"}, true)
 	reg.RegisterNode("node-a")
 	reg.RegisterVolume("vol-1")
 	reg.SetCached("vol-1", "node-a")

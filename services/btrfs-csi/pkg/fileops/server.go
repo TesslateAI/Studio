@@ -138,6 +138,18 @@ func (s *Server) volumePath(volumeID, filePath string) (string, error) {
 	return clean, nil
 }
 
+// checkVolumeExists verifies the volume subvolume directory exists on disk.
+// Returns a gRPC FailedPrecondition error if the volume is missing — distinct
+// from NotFound (file/dir missing inside a valid volume) so callers can
+// trigger a CAS restore.
+func (s *Server) checkVolumeExists(volumeID string) error {
+	volDir := filepath.Join(s.poolPath, "volumes", volumeID)
+	if _, err := os.Stat(volDir); os.IsNotExist(err) {
+		return status.Errorf(codes.FailedPrecondition, "volume not found: %s", volumeID)
+	}
+	return nil
+}
+
 // --- Request/response types ---
 
 type (
@@ -281,6 +293,9 @@ func (s *Server) handleReadFile(_ interface{}, ctx context.Context, dec func(int
 	if req.VolumeID == "" || req.Path == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
 	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
+	}
 
 	fullPath, err := s.volumePath(req.VolumeID, req.Path)
 	if err != nil {
@@ -304,6 +319,9 @@ func (s *Server) handleWriteFile(_ interface{}, ctx context.Context, dec func(in
 	}
 	if req.VolumeID == "" || req.Path == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
 	}
 
 	fullPath, err := s.volumePath(req.VolumeID, req.Path)
@@ -345,6 +363,9 @@ func (s *Server) handleListDir(_ interface{}, ctx context.Context, dec func(inte
 	}
 	if req.VolumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
 	}
 
 	dirPath := req.Path
@@ -420,6 +441,9 @@ func (s *Server) handleStatPath(_ interface{}, ctx context.Context, dec func(int
 	if req.VolumeID == "" || req.Path == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
 	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
+	}
 
 	fullPath, err := s.volumePath(req.VolumeID, req.Path)
 	if err != nil {
@@ -451,6 +475,9 @@ func (s *Server) handleDeletePath(_ interface{}, ctx context.Context, dec func(i
 	if req.VolumeID == "" || req.Path == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
 	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
+	}
 
 	fullPath, err := s.volumePath(req.VolumeID, req.Path)
 	if err != nil {
@@ -472,6 +499,9 @@ func (s *Server) handleMkdirAll(_ interface{}, ctx context.Context, dec func(int
 	}
 	if req.VolumeID == "" || req.Path == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
 	}
 
 	fullPath, err := s.volumePath(req.VolumeID, req.Path)
@@ -499,6 +529,9 @@ func (s *Server) handleListTree(_ interface{}, ctx context.Context, dec func(int
 	}
 	if req.VolumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
 	}
 
 	walkPath := req.Path
@@ -589,6 +622,9 @@ func (s *Server) handleReadFiles(_ interface{}, ctx context.Context, dec func(in
 	if req.VolumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
+	}
 	if len(req.Paths) == 0 {
 		return &ReadFilesResponse{}, nil
 	}
@@ -638,6 +674,9 @@ func (s *Server) handleTarCreate(_ interface{}, ctx context.Context, dec func(in
 	}
 	if req.VolumeID == "" || req.Path == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
 	}
 
 	fullPath, err := s.volumePath(req.VolumeID, req.Path)
@@ -703,6 +742,9 @@ func (s *Server) handleTarExtract(_ interface{}, ctx context.Context, dec func(i
 	}
 	if req.VolumeID == "" || req.Path == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume_id and path are required")
+	}
+	if err := s.checkVolumeExists(req.VolumeID); err != nil {
+		return nil, err
 	}
 	if len(req.Data) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "tar data is required")

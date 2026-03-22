@@ -358,11 +358,37 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		}
 	}
 
-	// 4. Fast path: if any live cached node is in the candidate set, return it.
+	// 4. Fast path: if any live cached node is in the candidate set, verify
+	//    the subvolume actually exists on disk before returning. This catches
+	//    stale registry entries (e.g. volume deleted while node was live).
+	volPath := fmt.Sprintf("volumes/%s", req.VolumeID)
 	for _, n := range liveCached {
-		if _, ok := candidateSet[n]; ok {
-			klog.V(2).Infof("EnsureCached: fast path — volume %s already cached on candidate %s", req.VolumeID, n)
-			return &EnsureCachedResponse{NodeName: n}, nil
+		if _, ok := candidateSet[n]; !ok {
+			continue
+		}
+		// Quick verification via NodeOps SubvolumeExists (~5ms).
+		client, cErr := s.nodeClient(n)
+		if cErr != nil {
+			klog.Warningf("EnsureCached: fast path verify — cannot connect to %s: %v, evicting", n, cErr)
+			s.registry.RemoveCached(req.VolumeID, n)
+			continue
+		}
+		exists, vErr := client.SubvolumeExists(ctx, volPath)
+		client.Close()
+		if vErr != nil || !exists {
+			klog.Infof("EnsureCached: volume %s not on disk at %s (exists=%v, err=%v) — evicting stale cache entry", req.VolumeID, n, exists, vErr)
+			s.registry.RemoveCached(req.VolumeID, n)
+			continue
+		}
+		klog.V(2).Infof("EnsureCached: fast path — volume %s verified on candidate %s", req.VolumeID, n)
+		return &EnsureCachedResponse{NodeName: n}, nil
+	}
+
+	// Re-check liveCached after evictions — some may have been removed above.
+	liveCached = nil
+	for _, n := range s.registry.GetCachedNodes(req.VolumeID) {
+		if _, alive := liveSet[n]; alive {
+			liveCached = append(liveCached, n)
 		}
 	}
 
