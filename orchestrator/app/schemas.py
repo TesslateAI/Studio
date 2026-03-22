@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 class UserBase(BaseModel):
@@ -263,6 +263,7 @@ class AppConfigSchema(BaseModel):
     port: int | None = 3000
     start: str
     env: dict[str, str] = {}
+    exports: dict[str, str] = {}
     x: float | None = None
     y: float | None = None
 
@@ -270,8 +271,40 @@ class AppConfigSchema(BaseModel):
 class InfraConfigSchema(BaseModel):
     """Schema for an infrastructure service in .tesslate/config.json."""
 
-    image: str
-    port: int
+    image: str | None = None
+    port: int | None = None
+    env: dict[str, str] = {}
+    exports: dict[str, str] = {}
+    type: str | None = None  # "container" | "external"
+    provider: str | None = None  # for external services
+    endpoint: str | None = None  # for external services
+    x: float | None = None
+    y: float | None = None
+
+
+class ConnectionConfigSchema(BaseModel):
+    """Schema for a connection between two nodes."""
+
+    from_node: str = Field(..., alias="from")
+    to_node: str = Field(..., alias="to")
+
+    model_config = {"populate_by_name": True, "serialize_by_alias": True}
+
+
+class DeploymentTargetConfigSchema(BaseModel):
+    """Schema for a deployment target in config."""
+
+    provider: str
+    targets: list[str] = []
+    env: dict[str, str] = {}
+    x: float | None = None
+    y: float | None = None
+
+
+class PreviewConfigSchema(BaseModel):
+    """Schema for a browser preview in config."""
+
+    target: str
     x: float | None = None
     y: float | None = None
 
@@ -281,6 +314,9 @@ class TesslateConfigCreate(BaseModel):
 
     apps: dict[str, AppConfigSchema]
     infrastructure: dict[str, InfraConfigSchema] = {}
+    connections: list[ConnectionConfigSchema] = []
+    deployments: dict[str, DeploymentTargetConfigSchema] = {}
+    previews: dict[str, PreviewConfigSchema] = {}
     primaryApp: str
 
     @field_validator("primaryApp")

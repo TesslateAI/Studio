@@ -7,13 +7,38 @@ export interface AppConfig {
   port: number | null;
   start: string;
   env: Record<string, string>;
+  exports?: Record<string, string>;
   x?: number;
   y?: number;
 }
 
 export interface InfraConfig {
-  image: string;
-  port: number;
+  image?: string;
+  port?: number;
+  env?: Record<string, string>;
+  exports?: Record<string, string>;
+  type?: "container" | "external";
+  provider?: string;
+  endpoint?: string;
+  x?: number;
+  y?: number;
+}
+
+export interface ConnectionConfig {
+  from: string;
+  to: string;
+}
+
+export interface DeploymentTargetConfig {
+  provider: string;
+  targets: string[];
+  env?: Record<string, string>;
+  x?: number;
+  y?: number;
+}
+
+export interface PreviewConfig {
+  target: string;
   x?: number;
   y?: number;
 }
@@ -21,6 +46,9 @@ export interface InfraConfig {
 export interface TesslateConfig {
   apps: Record<string, AppConfig>;
   infrastructure: Record<string, InfraConfig>;
+  connections?: ConnectionConfig[];
+  deployments?: Record<string, DeploymentTargetConfig>;
+  previews?: Record<string, PreviewConfig>;
   primaryApp: string;
 }
 

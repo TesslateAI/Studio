@@ -180,6 +180,7 @@ class AppConfig:
     port: int | None = 3000
     start: str = ""
     env: dict[str, str] = field(default_factory=dict)
+    exports: dict[str, str] = field(default_factory=dict)
     x: float | None = None
     y: float | None = None
 
@@ -189,6 +190,36 @@ class InfraConfig:
     """Configuration for an infrastructure service in .tesslate/config.json."""
     image: str = ""
     port: int = 5432
+    env: dict[str, str] = field(default_factory=dict)
+    exports: dict[str, str] = field(default_factory=dict)
+    infra_type: str = "container"  # "container" | "external"
+    provider: str | None = None  # for external services
+    endpoint: str | None = None  # for external services
+    x: float | None = None
+    y: float | None = None
+
+
+@dataclass
+class ConnectionConfig:
+    """A connection between two nodes in the config."""
+    from_node: str = ""
+    to_node: str = ""
+
+
+@dataclass
+class DeploymentConfig:
+    """A deployment target in the config."""
+    provider: str = ""
+    targets: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+    x: float | None = None
+    y: float | None = None
+
+
+@dataclass
+class PreviewConfig:
+    """A browser preview node in the config."""
+    target: str = ""
     x: float | None = None
     y: float | None = None
 
@@ -198,6 +229,9 @@ class TesslateProjectConfig:
     """Parsed .tesslate/config.json configuration."""
     apps: dict[str, AppConfig] = field(default_factory=dict)
     infrastructure: dict[str, InfraConfig] = field(default_factory=dict)
+    connections: list[ConnectionConfig] = field(default_factory=list)
+    deployments: dict[str, DeploymentConfig] = field(default_factory=dict)
+    previews: dict[str, PreviewConfig] = field(default_factory=dict)
     primaryApp: str = ""
 
 
@@ -234,17 +268,49 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             port=app_data.get("port", 3000),
             start=start_cmd,
             env=app_data.get("env", {}),
+            exports=app_data.get("exports", {}),
             x=app_data.get("x"),
             y=app_data.get("y"),
         )
 
     # Parse infrastructure
     for name, infra_data in data.get("infrastructure", {}).items():
+        infra_type = infra_data.get("type", "container")
         config.infrastructure[name] = InfraConfig(
             image=infra_data.get("image", ""),
             port=infra_data.get("port", 5432),
+            env=infra_data.get("env", {}),
+            exports=infra_data.get("exports", {}),
+            infra_type=infra_type,
+            provider=infra_data.get("provider"),
+            endpoint=infra_data.get("endpoint"),
             x=infra_data.get("x"),
             y=infra_data.get("y"),
+        )
+
+    # Parse connections
+    for conn_data in data.get("connections", []):
+        config.connections.append(ConnectionConfig(
+            from_node=conn_data.get("from", ""),
+            to_node=conn_data.get("to", ""),
+        ))
+
+    # Parse deployments
+    for name, deploy_data in data.get("deployments", {}).items():
+        config.deployments[name] = DeploymentConfig(
+            provider=deploy_data.get("provider", ""),
+            targets=deploy_data.get("targets", []),
+            env=deploy_data.get("env", {}),
+            x=deploy_data.get("x"),
+            y=deploy_data.get("y"),
+        )
+
+    # Parse previews
+    for name, preview_data in data.get("previews", {}).items():
+        config.previews[name] = PreviewConfig(
+            target=preview_data.get("target", ""),
+            x=preview_data.get("x"),
+            y=preview_data.get("y"),
         )
 
     config.primaryApp = data.get("primaryApp", "")
@@ -286,19 +352,8 @@ def read_tesslate_config(project_path: str) -> TesslateProjectConfig | None:
         return None
 
 
-def write_tesslate_config(project_path: str, config: TesslateProjectConfig) -> None:
-    """
-    Write .tesslate/config.json to a project directory.
-
-    Args:
-        project_path: Absolute path to project root
-        config: TesslateProjectConfig to serialize
-    """
-    config_dir = Path(project_path) / ".tesslate"
-    config_dir.mkdir(parents=True, exist_ok=True)
-
-    config_path = config_dir / "config.json"
-
+def _config_to_dict(config: TesslateProjectConfig) -> dict[str, Any]:
+    """Convert a TesslateProjectConfig to a serializable dict."""
     data: dict[str, Any] = {
         "apps": {},
         "infrastructure": {},
@@ -312,6 +367,8 @@ def write_tesslate_config(project_path: str, config: TesslateProjectConfig) -> N
             "start": app.start,
             "env": app.env,
         }
+        if app.exports:
+            app_data["exports"] = app.exports
         if app.x is not None:
             app_data["x"] = app.x
         if app.y is not None:
@@ -319,17 +376,81 @@ def write_tesslate_config(project_path: str, config: TesslateProjectConfig) -> N
         data["apps"][name] = app_data
 
     for name, infra in config.infrastructure.items():
-        infra_data: dict[str, Any] = {
-            "image": infra.image,
-            "port": infra.port,
-        }
+        infra_data: dict[str, Any] = {}
+        if infra.infra_type == "external":
+            infra_data["type"] = "external"
+            if infra.provider:
+                infra_data["provider"] = infra.provider
+            if infra.endpoint:
+                infra_data["endpoint"] = infra.endpoint
+        else:
+            infra_data["image"] = infra.image
+            infra_data["port"] = infra.port
+        if infra.env:
+            infra_data["env"] = infra.env
+        if infra.exports:
+            infra_data["exports"] = infra.exports
         if infra.x is not None:
             infra_data["x"] = infra.x
         if infra.y is not None:
             infra_data["y"] = infra.y
         data["infrastructure"][name] = infra_data
 
-    config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    if config.connections:
+        data["connections"] = [
+            {"from": c.from_node, "to": c.to_node}
+            for c in config.connections
+        ]
+
+    if config.deployments:
+        deployments: dict[str, Any] = {}
+        for name, dep in config.deployments.items():
+            dep_data: dict[str, Any] = {
+                "provider": dep.provider,
+                "targets": dep.targets,
+            }
+            if dep.env:
+                dep_data["env"] = dep.env
+            if dep.x is not None:
+                dep_data["x"] = dep.x
+            if dep.y is not None:
+                dep_data["y"] = dep.y
+            deployments[name] = dep_data
+        data["deployments"] = deployments
+
+    if config.previews:
+        previews: dict[str, Any] = {}
+        for name, prev in config.previews.items():
+            prev_data: dict[str, Any] = {"target": prev.target}
+            if prev.x is not None:
+                prev_data["x"] = prev.x
+            if prev.y is not None:
+                prev_data["y"] = prev.y
+            previews[name] = prev_data
+        data["previews"] = previews
+
+    return data
+
+
+def serialize_config_to_json(config: TesslateProjectConfig) -> str:
+    """Serialize config to JSON string without writing to disk."""
+    data = _config_to_dict(config)
+    return json.dumps(data, indent=2) + "\n"
+
+
+def write_tesslate_config(project_path: str, config: TesslateProjectConfig) -> None:
+    """
+    Write .tesslate/config.json to a project directory.
+
+    Args:
+        project_path: Absolute path to project root
+        config: TesslateProjectConfig to serialize
+    """
+    config_dir = Path(project_path) / ".tesslate"
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = config_dir / "config.json"
+    config_path.write_text(serialize_config_to_json(config), encoding="utf-8")
     logger.info(f"[CONFIG] Wrote .tesslate/config.json to {config_path}")
 
 
