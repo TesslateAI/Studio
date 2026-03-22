@@ -28,8 +28,24 @@ const DEFAULT_CHECKOUT_DOMAINS = [
 const DEFAULT_DEPLOYMENT_DOMAINS = [
   'vercel.app',
   'netlify.app',
-  'pages.dev',  // Cloudflare Pages
-  'workers.dev', // Cloudflare Workers
+  'pages.dev',       // Cloudflare Pages
+  'workers.dev',     // Cloudflare Workers
+  'up.railway.app',  // Railway
+  'onrender.com',    // Render
+  'herokuapp.com',   // Heroku
+  'koyeb.app',       // Koyeb
+  'fly.dev',         // Fly.io
+  'ondigitalocean.app', // DigitalOcean
+  'zeabur.app',      // Zeabur
+  'northflank.app',  // Northflank
+  'github.io',       // GitHub Pages
+  'surge.sh',        // Surge.sh
+  'deno.dev',        // Deno Deploy
+  'web.app',         // Firebase Hosting
+  'firebaseapp.com', // Firebase Hosting (legacy)
+  'awsapprunner.com',        // AWS App Runner
+  'run.app',                  // GCP Cloud Run
+  'azurecontainerapps.io',   // Azure Container Apps
 ];
 
 // Allowed Git provider domains for clone URLs

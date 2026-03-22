@@ -1,6 +1,7 @@
 """Deployment services package."""
 
 from .base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
+from .container_base import BaseContainerDeploymentProvider, ContainerDeployConfig
 from .guards import (
     PROVIDER_CAPABILITIES,
     ValidationResult,
@@ -13,6 +14,8 @@ from .manager import DeploymentManager, deployment_manager
 
 __all__ = [
     "BaseDeploymentProvider",
+    "BaseContainerDeploymentProvider",
+    "ContainerDeployConfig",
     "DeploymentConfig",
     "DeploymentFile",
     "DeploymentResult",

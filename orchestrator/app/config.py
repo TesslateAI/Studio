@@ -184,6 +184,22 @@ class Settings(BaseSettings):
     netlify_client_secret: str = ""
     netlify_oauth_redirect_uri: str = ""  # Backend callback URL
 
+    # Heroku OAuth (for deployments)
+    heroku_client_id: str = ""
+    heroku_client_secret: str = ""
+    heroku_oauth_redirect_uri: str = ""
+
+    # DigitalOcean OAuth (for deployments)
+    digitalocean_client_id: str = ""
+    digitalocean_client_secret: str = ""
+    digitalocean_oauth_redirect_uri: str = ""
+
+    # Container Push Configuration
+    container_push_timeout: int = 900  # 15 minutes for image export + push + deploy
+    kaniko_image: str = "gcr.io/kaniko-project/executor:latest"
+    container_push_default_cpu: str = "0.25"
+    container_push_default_memory: str = "512Mi"
+
     # CSRF Protection
     csrf_secret_key: str = ""  # Separate secret for CSRF tokens (defaults to secret_key if not set)
     csrf_token_max_age: int = 86400  # CSRF token expiration in seconds (default: 24 hours)

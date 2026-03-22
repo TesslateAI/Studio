@@ -50,7 +50,7 @@ interface DeploymentHistoryEntry {
 
 // Node data interface
 interface DeploymentTargetNodeData extends Record<string, unknown> {
-  provider: 'vercel' | 'netlify' | 'cloudflare' | 'digitalocean' | 'railway' | 'fly';
+  provider: string;
   environment: 'production' | 'staging' | 'preview';
   name?: string;
   isConnected: boolean;
@@ -77,6 +77,22 @@ const PROVIDER_LOGOS: Record<string, string> = {
   digitalocean: '🌊',
   railway: '🚂',
   fly: '✈️',
+  heroku: '🟣',
+  render: '🔷',
+  koyeb: '🟢',
+  zeabur: '⚡',
+  northflank: '🔶',
+  'github-pages': '📄',
+  surge: '🌊',
+  'deno-deploy': '🦕',
+  firebase: '🔥',
+  'aws-apprunner': '☁️',
+  'gcp-cloudrun': '☁️',
+  'azure-container-apps': '☁️',
+  'do-container': '🌊',
+  dockerhub: '🐳',
+  ghcr: '📦',
+  download: '💾',
 };
 
 // Provider colors
@@ -87,6 +103,22 @@ const PROVIDER_COLORS: Record<string, string> = {
   digitalocean: '#0080FF',
   railway: '#0B0D0E',
   fly: '#7B3FE4',
+  heroku: '#430098',
+  render: '#46E3B7',
+  koyeb: '#121212',
+  zeabur: '#6C5CE7',
+  northflank: '#01E277',
+  'github-pages': '#222222',
+  surge: '#D93472',
+  'deno-deploy': '#000000',
+  firebase: '#FFCA28',
+  'aws-apprunner': '#FF9900',
+  'gcp-cloudrun': '#4285F4',
+  'azure-container-apps': '#0078D4',
+  'do-container': '#0080FF',
+  dockerhub: '#2496ED',
+  ghcr: '#222222',
+  download: '#6B7280',
 };
 
 // Status colors and icons

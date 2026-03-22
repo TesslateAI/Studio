@@ -40,6 +40,25 @@ class CredentialMetadata(BaseModel):
     dispatch_namespace: str | None = Field(None, description="Dispatch namespace (Cloudflare)")
     account_name: str | None = Field(None, description="Account name for display")
 
+    # Git-repo providers
+    repo_owner: str | None = Field(None, description="Repository owner (GitHub Pages)")
+    org_slug: str | None = Field(None, description="Organization slug (Fly.io, Deno Deploy)")
+
+    # Cloud providers
+    project_id: str | None = Field(None, description="Project ID (GCP, Firebase)")
+    aws_region: str | None = Field(None, description="AWS region (aws-apprunner)")
+    gcp_region: str | None = Field(None, description="GCP region (gcp-cloudrun)")
+    azure_region: str | None = Field(None, description="Azure region (azure-container-apps)")
+    subscription_id: str | None = Field(None, description="Azure subscription ID")
+    resource_group: str | None = Field(None, description="Azure resource group")
+    registry_name: str | None = Field(None, description="Container registry name (ACR, DOCR)")
+    tenant_id: str | None = Field(None, description="Azure tenant ID")
+    site_id: str | None = Field(None, description="Firebase site ID")
+    org_id: str | None = Field(None, description="Deno Deploy organization ID")
+
+    # Token refresh
+    refresh_token: str | None = Field(None, description="OAuth refresh token (Heroku)")
+
 
 class CreateCredentialRequest(BaseModel):
     """Request to create a new deployment credential."""
@@ -106,6 +125,72 @@ class ProviderListResponse(BaseModel):
     """Response containing list of providers."""
 
     providers: list[ProviderInfo]
+
+
+# ============================================================================
+# Helpers
+# ============================================================================
+
+
+def _build_provider_credentials(
+    provider: str, access_token: str, metadata: dict | None
+) -> dict[str, str]:
+    """Build the credentials dict for a provider from the stored token and metadata."""
+    meta = metadata or {}
+    creds: dict[str, str] = {"token": access_token}
+
+    if provider == "cloudflare":
+        creds["api_token"] = access_token
+        if "account_id" in meta:
+            creds["account_id"] = meta["account_id"]
+        if "dispatch_namespace" in meta:
+            creds["dispatch_namespace"] = meta["dispatch_namespace"]
+    elif provider in ("vercel", "netlify"):
+        if "team_id" in meta:
+            creds["team_id"] = meta["team_id"]
+    elif provider == "heroku":
+        creds["api_key"] = access_token
+    elif provider == "render":
+        creds["api_key"] = access_token
+    elif provider in ("railway", "github-pages"):
+        pass  # token key is sufficient
+    elif provider in ("koyeb", "northflank", "fly"):
+        creds["api_token"] = access_token
+        if "org_slug" in meta:
+            creds["org_slug"] = meta["org_slug"]
+    elif provider == "deno-deploy":
+        if "org_id" in meta:
+            creds["org_id"] = meta["org_id"]
+    elif provider == "surge":
+        creds["email"] = meta.get("account_name", "")
+    elif provider == "zeabur":
+        creds["api_key"] = access_token
+    elif provider == "firebase":
+        creds["service_account_json"] = access_token
+        if "site_id" in meta:
+            creds["site_id"] = meta["site_id"]
+    elif provider == "aws-apprunner":
+        creds["aws_access_key_id"] = access_token
+        creds["aws_secret_access_key"] = meta.get("aws_secret_access_key", "")
+        creds["aws_region"] = meta.get("aws_region", "us-east-1")
+    elif provider == "gcp-cloudrun":
+        creds["service_account_json"] = access_token
+        creds["gcp_region"] = meta.get("gcp_region", "us-central1")
+    elif provider == "azure-container-apps":
+        creds["client_secret"] = access_token
+        for key in ("tenant_id", "client_id", "subscription_id", "resource_group", "registry_name", "azure_region"):
+            if key in meta:
+                creds[key] = meta[key]
+    elif provider == "do-container":
+        creds["api_token"] = access_token
+        if "registry_name" in meta:
+            creds["registry_name"] = meta["registry_name"]
+    elif provider in ("dockerhub", "ghcr"):
+        creds["username"] = meta.get("account_name", "")
+    elif provider == "download":
+        pass  # no credentials needed
+
+    return creds
 
 
 # ============================================================================
@@ -480,17 +565,9 @@ async def test_credential(
         access_token = encryption_service.decrypt(credential.access_token_encrypted)
 
         # Prepare credentials dict for provider
-        provider_credentials = {"token": access_token}
-
-        # Add metadata to credentials
-        if credential.provider_metadata:
-            if credential.provider == "cloudflare":
-                provider_credentials["api_token"] = access_token
-                if "account_id" in credential.provider_metadata:
-                    provider_credentials["account_id"] = credential.provider_metadata["account_id"]
-            elif credential.provider in ["vercel", "netlify"]:
-                if "team_id" in credential.provider_metadata:
-                    provider_credentials["team_id"] = credential.provider_metadata["team_id"]
+        provider_credentials = _build_provider_credentials(
+            credential.provider, access_token, credential.provider_metadata
+        )
 
         # Get provider instance and test credentials with real API call
         try:
