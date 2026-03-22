@@ -6,6 +6,9 @@ export interface AppConfig {
   directory: string;
   port: number | null;
   start: string;
+  build?: string;
+  output?: string;
+  framework?: string;
   env: Record<string, string>;
   exports?: Record<string, string>;
   x?: number;

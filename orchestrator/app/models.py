@@ -214,6 +214,9 @@ class Container(Base):
     environment_vars = Column(JSON, nullable=True)  # Environment variables
     exports = Column(JSON, nullable=True)  # Exported env vars for connected consumers
     startup_command = Column(String, nullable=True)  # Shell command to start the dev server
+    build_command = Column(String, nullable=True)  # Build command (e.g. "npm run build")
+    output_directory = Column(String, nullable=True)  # Build output dir (e.g. "dist", "out")
+    framework = Column(String, nullable=True)  # Framework hint for deploy providers (e.g. "nextjs", "vite")
     dockerfile_path = Column(String, nullable=True)  # Relative path to Dockerfile
     volume_name = Column(String, nullable=True)  # Docker volume name for container files
 

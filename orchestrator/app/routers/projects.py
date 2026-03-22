@@ -1582,6 +1582,9 @@ async def get_setup_config(
                     "directory": app.directory,
                     "port": app.port,
                     "start": app.start,
+                    **({"build": app.build} if app.build else {}),
+                    **({"output": app.output} if app.output else {}),
+                    **({"framework": app.framework} if app.framework else {}),
                     "env": app.env,
                     **({"exports": app.exports} if app.exports else {}),
                     "x": app.x,
@@ -1773,6 +1776,9 @@ async def save_setup_config(
             container.environment_vars = app_config.env or {}
             container.exports = app_config.exports or None
             container.startup_command = app_config.start or None
+            container.build_command = app_config.build or None
+            container.output_directory = app_config.output or None
+            container.framework = app_config.framework or None
             if app_config.x is not None:
                 container.position_x = app_config.x
             if app_config.y is not None:
@@ -1789,6 +1795,9 @@ async def save_setup_config(
                 environment_vars=app_config.env or {},
                 exports=app_config.exports or None,
                 startup_command=app_config.start or None,
+                build_command=app_config.build or None,
+                output_directory=app_config.output or None,
+                framework=app_config.framework or None,
                 container_type="base",
                 status="stopped",
                 position_x=app_config.x or 200,
@@ -2139,6 +2148,9 @@ async def analyze_project(
                     "directory": app.directory,
                     "port": app.port,
                     "start": app.start,
+                    **({"build": app.build} if app.build else {}),
+                    **({"output": app.output} if app.output else {}),
+                    **({"framework": app.framework} if app.framework else {}),
                     "env": app.env,
                 }
                 for name, app in config.apps.items()

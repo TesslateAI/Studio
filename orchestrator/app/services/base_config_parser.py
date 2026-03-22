@@ -179,6 +179,9 @@ class AppConfig:
     directory: str = "."
     port: int | None = 3000
     start: str = ""
+    build: str | None = None
+    output: str | None = None
+    framework: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     exports: dict[str, str] = field(default_factory=dict)
     x: float | None = None
@@ -267,6 +270,9 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             directory=app_data.get("directory", "."),
             port=app_data.get("port", 3000),
             start=start_cmd,
+            build=app_data.get("build") or None,
+            output=app_data.get("output") or None,
+            framework=app_data.get("framework") or None,
             env=app_data.get("env", {}),
             exports=app_data.get("exports", {}),
             x=app_data.get("x"),

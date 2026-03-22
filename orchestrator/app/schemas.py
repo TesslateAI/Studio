@@ -262,6 +262,9 @@ class AppConfigSchema(BaseModel):
     directory: str = "."
     port: int | None = 3000
     start: str
+    build: str | None = None  # Build command (e.g. "npm run build")
+    output: str | None = None  # Build output directory (e.g. "dist", "out")
+    framework: str | None = None  # Framework hint for providers (e.g. "nextjs", "vite")
     env: dict[str, str] = {}
     exports: dict[str, str] = {}
     x: float | None = None

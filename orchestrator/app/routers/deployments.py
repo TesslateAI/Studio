@@ -24,7 +24,6 @@ from ..services.deployment_encryption import (
     DeploymentEncryptionError,
     get_deployment_encryption_service,
 )
-from ..services.framework_detector import FrameworkDetector
 from ..services.orchestration import get_orchestrator
 from ..users import current_active_user
 
@@ -48,9 +47,9 @@ class DeploymentRequest(BaseModel):
     )
     custom_domain: str | None = Field(None, description="Custom domain")
     env_vars: dict[str, str] = Field(default_factory=dict, description="Environment variables")
-    build_command: str | None = Field(None, description="Custom build command override")
+    build_command: str | None = Field(None, description="Build command override (primary source is container.build_command)")
     framework: str | None = Field(
-        None, description="Framework override (auto-detected if not provided)"
+        None, description="Framework override (primary source is container.framework)"
     )
 
 
@@ -110,29 +109,18 @@ class DeployAllResponse(BaseModel):
 
 def resolve_container_directory(container) -> str:
     """
-    Resolve the actual on-disk directory for a container.
+    Resolve the actual on-disk working directory for a container.
 
-    Docker vs K8s path conventions differ:
-    - K8s: PVC mounted at /app, each container's files live in /app/{sanitized_name}/
-      so when container.directory is ".", we use container.name as the subdirectory.
-    - Docker: Volume subpathed per-project at /app, files are at /app/ directly
-      when container.directory is ".", so we return "." to keep work_dir as /app.
+    Must match compute_manager.resolve_k8s_container_dir / helpers.py logic:
+    - directory="." or "" or None → working_dir is /app (return ".")
+    - directory="frontend"       → working_dir is /app/frontend/
 
-    For explicit directories (e.g. "frontend"), both modes agree: /app/frontend/.
+    Both Docker and K8s agree: "." means project root (/app).
     """
-    from ..config import get_settings
-
-    settings = get_settings()
-
-    # Explicit subdirectory — both platforms agree
     if container.directory not in (".", "", None):
         raw = container.directory
-    elif settings.is_docker_mode:
-        # Docker: volume is already subpathed to the project, files at /app/
-        return "."
     else:
-        # K8s: PVC shared, use container name as subdirectory
-        raw = container.name
+        return "."
 
     # Replicate _sanitize_name from KubernetesOrchestrator
     safe = raw.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
@@ -297,39 +285,8 @@ async def deploy_project(
 
         logger.info(f"Created deployment {deployment.id} for project {project.slug}")
 
-        # 5. Detect framework with caching
+        # 5. Get builder
         builder = get_deployment_builder()
-        project_path = builder._get_project_path(str(current_user.id), str(project.id))
-
-        # Initialize project settings if not exists
-        if not project.settings:
-            project.settings = {}
-
-        # Priority: request > cached > auto-detect
-        framework = request.framework
-
-        if not framework:
-            # Try cached framework first
-            if project.settings.get("framework"):
-                framework = project.settings["framework"]
-                logger.info(f"Using cached framework: {framework}")
-            else:
-                # Fallback: Auto-detect from package.json
-                import os
-
-                package_json_path = os.path.join(project_path, "package.json")
-                if os.path.exists(package_json_path):
-                    with open(package_json_path) as f:
-                        package_json_content = f.read()
-                    framework, _ = FrameworkDetector.detect_from_package_json(package_json_content)
-                    logger.info(f"Auto-detected framework: {framework}")
-                else:
-                    framework = "vite"
-                    logger.warning("No package.json found, defaulting to vite")
-
-                # Cache the detected framework
-                project.settings["framework"] = framework
-                await db.commit()
 
         # 6. Determine deployment mode (source vs pre-built)
         # Default modes per provider:
@@ -417,8 +374,14 @@ async def deploy_project(
             await db.commit()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
+        # Resolve framework from container fields, with request override
+        framework = request.framework or primary_container.framework or "static"
+
         # 8. Run build (skip if source mode - provider will build)
         use_source_deployment = deployment_mode == "source"
+
+        # Resolve build command: request override > container field
+        effective_build_command = request.build_command or primary_container.build_command
 
         if use_source_deployment:
             deployment.logs.append(
@@ -435,10 +398,9 @@ async def deploy_project(
                     project_id=str(project.id),
                     project_slug=project.slug,
                     framework=framework,
-                    custom_build_command=request.build_command,
-                    project_settings=project.settings,
+                    custom_build_command=effective_build_command,
                     container_name=build_container_name,
-                    volume_name=project.slug,  # Use project.slug for shared volume path
+                    volume_name=project.slug,
                     container_directory=build_directory,
                     deployment_mode=deployment_mode,
                 )
@@ -470,7 +432,7 @@ async def deploy_project(
             user_id=str(current_user.id),
             project_id=str(project.id),
             framework=framework,
-            project_settings=project.settings,
+            custom_output_dir=primary_container.output_directory,
             collect_source=use_source_deployment,
             container_directory=build_directory,
             volume_name=project.slug,
@@ -489,7 +451,7 @@ async def deploy_project(
             project_name=project.name,
             framework=framework,
             deployment_mode=deployment_mode,
-            build_command=request.build_command,
+            build_command=effective_build_command,
             env_vars=request.env_vars,
             custom_domain=request.custom_domain,
         )
@@ -691,29 +653,9 @@ async def deploy_all_containers(
             await db.commit()
             await db.refresh(deployment)
 
-            # Get builder and framework
+            # Get builder and framework from container fields
             builder = get_deployment_builder()
-
-            # Determine framework from container's base
-            framework = "vite"  # Default
-            if container.base and container.base.tech_stack:
-                tech_stack = container.base.tech_stack
-                if isinstance(tech_stack, list) and len(tech_stack) > 0:
-                    # Prefix match: "Next.js 16" -> "nextjs", "React 19" -> "vite", etc.
-                    framework_prefixes = [
-                        ("Next.js", "nextjs"),
-                        ("React", "vite"),
-                        ("Vue", "vite"),
-                        ("Svelte", "vite"),
-                        ("Astro", "astro"),
-                        ("FastAPI", "static"),
-                    ]
-                    primary = tech_stack[0]
-                    framework = "vite"  # default
-                    for prefix, fw in framework_prefixes:
-                        if primary.startswith(prefix):
-                            framework = fw
-                            break
+            framework = container.framework or "static"
 
             # Determine deployment mode
             default_modes = {
@@ -724,17 +666,17 @@ async def deploy_all_containers(
             deployment_mode = default_modes.get(provider, "pre-built")
 
             # Build if needed
+            resolved_directory = resolve_container_directory(container)
             if deployment_mode == "pre-built":
                 deployment.logs.append(f"Building {container.name} locally...")
                 await db.commit()
 
-                resolved_directory = resolve_container_directory(container)
                 success, build_output = await builder.trigger_build(
                     user_id=str(current_user.id),
                     project_id=str(project.id),
                     project_slug=project.slug,
                     framework=framework,
-                    custom_build_command=None,
+                    custom_build_command=container.build_command,
                     container_name=container.container_name,
                     volume_name=project.slug,
                     container_directory=resolved_directory,
@@ -781,6 +723,7 @@ async def deploy_all_containers(
                 user_id=str(current_user.id),
                 project_id=str(project.id),
                 framework=framework,
+                custom_output_dir=container.output_directory,
                 collect_source=(deployment_mode == "source"),
                 container_directory=resolved_directory,
                 volume_name=project.slug,
@@ -1175,11 +1118,13 @@ async def export_project(
             # Download export: collect files and create ZIP
             builder = get_deployment_builder()
             resolved_directory = resolve_container_directory(container)
+            framework = container.framework or "static"
 
             files = await builder.collect_deployment_files(
                 user_id=str(current_user.id),
                 project_id=str(project.id),
-                framework="vite",
+                framework=framework,
+                custom_output_dir=container.output_directory,
                 collect_source=True,
                 container_directory=resolved_directory,
                 volume_name=project.slug,
@@ -1189,7 +1134,7 @@ async def export_project(
             config = DeploymentConfig(
                 project_id=str(project.id),
                 project_name=f"{project.slug}-{container.name}",
-                framework="vite",
+                framework=framework,
                 deployment_mode="pre-built",
             )
 
@@ -1399,22 +1344,9 @@ async def deploy_single_container_endpoint(
     logger.info(f"Created deployment {deployment.id} for container {container.name} to {provider_name}")
 
     try:
-        # 7. Get builder and determine framework
+        # 7. Get builder and framework from container fields
         builder = get_deployment_builder()
-
-        framework = "vite"  # Default
-        if container.base and container.base.tech_stack:
-            tech_stack = container.base.tech_stack
-            if isinstance(tech_stack, list) and len(tech_stack) > 0:
-                framework_map = {
-                    "Next.js": "nextjs",
-                    "React": "vite",
-                    "Vue": "vite",
-                    "Svelte": "vite",
-                    "Astro": "astro",
-                    "FastAPI": "static",  # For backends, we just serve static files
-                }
-                framework = framework_map.get(tech_stack[0], "vite")
+        framework = container.framework or "static"
 
         # 8. Determine deployment mode
         default_modes = {
@@ -1436,7 +1368,7 @@ async def deploy_single_container_endpoint(
                 project_id=str(project.id),
                 project_slug=project.slug,
                 framework=framework,
-                custom_build_command=None,
+                custom_build_command=container.build_command,
                 container_name=container.container_name,
                 volume_name=project.slug,
                 container_directory=resolved_directory,
@@ -1491,6 +1423,7 @@ async def deploy_single_container_endpoint(
             user_id=str(current_user.id),
             project_id=str(project.id),
             framework=framework,
+            custom_output_dir=container.output_directory,
             collect_source=(deployment_mode == "source"),
             container_directory=resolved_directory,
             volume_name=project.slug,

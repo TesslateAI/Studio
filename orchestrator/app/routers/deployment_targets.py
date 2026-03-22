@@ -845,27 +845,8 @@ async def deploy_target(
             provider_info = get_provider_info(target.provider)
             deployment_mode = provider_info["deployment_mode"] if provider_info else "source"
 
-            # Determine framework: connection settings > container base tech_stack > default
-            framework = (
-                conn.deployment_settings.get("framework") if conn.deployment_settings else None
-            )
-            if not framework and container.base and container.base.tech_stack:
-                tech_stack = container.base.tech_stack
-                if isinstance(tech_stack, list) and len(tech_stack) > 0:
-                    # Prefix match: "Next.js 16" -> "nextjs", "React 19" -> "vite", etc.
-                    framework_prefixes = [
-                        ("Next.js", "nextjs"),
-                        ("React", "vite"),
-                        ("Vue", "vite"),
-                        ("Svelte", "vite"),
-                        ("Astro", "astro"),
-                    ]
-                    primary = tech_stack[0]
-                    framework = "vite"  # default
-                    for prefix, fw in framework_prefixes:
-                        if primary.startswith(prefix):
-                            framework = fw
-                            break
+            # Framework comes directly from the container model
+            framework = container.framework or "static"
 
             from .deployments import resolve_container_directory
 
@@ -873,16 +854,11 @@ async def deploy_target(
 
             # Build if needed
             if deployment_mode == "pre-built":
-                custom_build_cmd = request.build_command or (
-                    conn.deployment_settings.get("build_command")
-                    if conn.deployment_settings
-                    else None
-                )
+                custom_build_cmd = request.build_command or container.build_command
                 success, build_output = await builder.trigger_build(
                     user_id=str(user.id),
                     project_id=str(project.id),
                     project_slug=project.slug,
-                    framework=framework,
                     custom_build_command=custom_build_cmd,
                     container_name=container.container_name,
                     volume_name=project.slug,
@@ -901,11 +877,11 @@ async def deploy_target(
             files = await builder.collect_deployment_files(
                 user_id=str(user.id),
                 project_id=str(project.id),
-                framework=framework,
                 collect_source=(deployment_mode == "source"),
                 container_directory=resolved_directory,
                 volume_name=project.slug,
                 container_name=container.container_name,
+                custom_output_dir=container.output_directory,
             )
 
             # Deploy to provider
@@ -921,7 +897,7 @@ async def deploy_target(
             config = DeploymentConfig(
                 project_id=str(project.id),
                 project_name=f"{project.slug}-{container.name}",
-                framework=framework or "vite",
+                framework=framework,
                 deployment_mode=deployment_mode,
                 build_command=request.build_command,
                 env_vars=env_vars,

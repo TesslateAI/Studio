@@ -9,4 +9,4 @@ data:
   # Empty = relative URLs (works from any origin: localhost, CF tunnel, etc.)
   api-url: ""
   # PostHog host (same for all environments)
-  posthog-host: "https://app.posthog.com"
+  posthog-host: "https://us.i.posthog.com"
