@@ -96,6 +96,29 @@ async def _get_cached_model_pricing() -> dict[str, dict[str, float]]:
     return await get_cached_model_pricing_map()
 
 
+async def _get_cached_model_vision_support() -> dict[str, bool]:
+    """Build a model-id → supports_vision map using litellm's model metadata."""
+    cache_key = "model_vision_support"
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    import litellm
+
+    litellm_models = await _get_cached_litellm_models()
+    vision_map: dict[str, bool] = {}
+    for model in litellm_models:
+        model_id = model.get("id", "")
+        if model_id:
+            try:
+                vision_map[model_id] = litellm.supports_vision(model=model_id)
+            except Exception:
+                vision_map[model_id] = False
+
+    await cache.set(cache_key, vision_map, ttl=_MODELS_CACHE_TTL)
+    return vision_map
+
+
 # ============================================================================
 # Models Configuration
 # ============================================================================
@@ -114,8 +137,9 @@ async def get_available_models(
     from ..models import UserAPIKey, UserCustomModel, UserProvider
 
     # Get models, pricing, and health from LiteLLM in parallel (all cached independently)
-    litellm_models, pricing_map, health_map = await asyncio.gather(
-        _get_cached_litellm_models(), _get_cached_model_pricing(), _get_cached_model_health()
+    litellm_models, pricing_map, health_map, vision_map = await asyncio.gather(
+        _get_cached_litellm_models(), _get_cached_model_pricing(), _get_cached_model_health(),
+        _get_cached_model_vision_support()
     )
 
     # Convert LiteLLM models to response format with pricing and health
@@ -129,6 +153,7 @@ async def get_available_models(
             "pricing": pricing_map.get(model.get("id", ""), {"input": 1.00, "output": 3.00}),
             "available": True,
             "health": health_map.get(model.get("id", ""), {}).get("status"),
+            "supports_vision": vision_map.get(model.get("id", ""), False),
         }
         for model in litellm_models
         if model.get("id")
@@ -176,6 +201,7 @@ async def get_available_models(
             "available": True,
             "custom_id": model.id,
             "health": None,
+            "supports_vision": vision_map.get(_prefixed_model_id(model), False),
         }
         for model in custom_models
     ]
@@ -207,6 +233,7 @@ async def get_available_models(
                     "pricing": None,
                     "available": cp.slug in user_providers_set,
                     "health": None,
+                    "supports_vision": vision_map.get(full_id, False),
                 }
             )
 
@@ -238,6 +265,7 @@ async def get_available_models(
                 "pricing": pricing_map.get(m.strip(), {"input": 0.0, "output": 0.0}),
                 "available": True,
                 "health": health_map.get(m.strip(), {}).get("status"),
+                "supports_vision": vision_map.get(m.strip(), False),
             }
             for m in models_str.split(",")
             if m.strip()

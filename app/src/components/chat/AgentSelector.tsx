@@ -13,6 +13,7 @@ interface ModelInfo {
   pricing: { input: number; output: number } | null;
   health?: 'healthy' | 'unhealthy' | 'timeout' | null;
   disabled?: boolean;
+  supports_vision?: boolean;
 }
 
 interface AgentSelectorProps {

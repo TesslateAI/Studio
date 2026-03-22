@@ -753,6 +753,15 @@ async def agent_chat(
         if not has_credits:
             raise HTTPException(status_code=402, detail=credit_error)
 
+        # 2c. Check vision support if request contains image attachments
+        if request.attachments and any(a.type == "image" for a in request.attachments):
+            import litellm as _litellm
+            if not _litellm.supports_vision(model=model_name):
+                raise HTTPException(
+                    status_code=400,
+                    detail="The selected model does not support image input. Please switch to a vision-capable model.",
+                )
+
         # 3. Create model adapter for IterativeAgent
         logger.info(
             f"[HTTP-AGENT] Creating model adapter for user_id: {current_user.id}, model: {model_name}"
@@ -1347,6 +1356,20 @@ async def agent_chat_stream(
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"
                 return
+
+            # 2c. Check vision support if request contains image attachments
+            if request.attachments and any(a.type == "image" for a in request.attachments):
+                import litellm as _litellm
+                if not _litellm.supports_vision(model=model_name):
+                    error_event = {
+                        "type": "error",
+                        "data": {
+                            "message": "The selected model does not support image input. Please switch to a vision-capable model.",
+                            "code": "model_no_vision",
+                        },
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    return
 
             # 3. Create model adapter
             model_adapter = await create_model_adapter(

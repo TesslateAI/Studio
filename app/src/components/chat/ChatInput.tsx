@@ -56,6 +56,7 @@ interface ChatInputProps {
   availableSkills?: { name: string; description: string }[];
   isAdmin?: boolean;
   onOpenDebugTools?: () => void;
+  currentModelSupportsVision?: boolean;
 }
 
 export function ChatInput({
@@ -84,6 +85,7 @@ export function ChatInput({
   availableSkills = [],
   isAdmin = false,
   onOpenDebugTools,
+  currentModelSupportsVision,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -395,12 +397,41 @@ export function ChatInput({
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
+    // Check clipboardData.files first (works for most drag/paste)
     const imageFiles = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'));
     if (imageFiles.length > 0) {
+      if (currentModelSupportsVision === false) {
+        e.preventDefault();
+        toast.error('The current model does not support images. Switch to a vision-capable model to attach images.');
+        return;
+      }
       e.preventDefault();
       imageFiles.forEach(f => addImage(f));
       return;
     }
+
+    // Fallback: check clipboardData.items (some browsers put images here instead)
+    if (e.clipboardData.items) {
+      const imageItems: File[] = [];
+      for (const item of Array.from(e.clipboardData.items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) imageItems.push(file);
+        }
+      }
+      if (imageItems.length > 0) {
+        if (currentModelSupportsVision === false) {
+          e.preventDefault();
+          toast.error('The current model does not support images. Switch to a vision-capable model to attach images.');
+          return;
+        }
+        e.preventDefault();
+        imageItems.forEach(f => addImage(f));
+        return;
+      }
+    }
+
+    // Check for long text paste
     const text = e.clipboardData.getData('text/plain');
     const lines = text.split('\n');
     if (lines.length > 5) {
@@ -426,7 +457,13 @@ export function ChatInput({
     e.preventDefault();
     setIsDragging(false);
     const imageFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-    imageFiles.forEach(f => addImage(f));
+    if (imageFiles.length > 0) {
+      if (currentModelSupportsVision === false) {
+        toast.error('The current model does not support images. Switch to a vision-capable model to attach images.');
+        return;
+      }
+      imageFiles.forEach(f => addImage(f));
+    }
   };
 
   const handleFileSelect = (filePath: string, fileName: string) => {

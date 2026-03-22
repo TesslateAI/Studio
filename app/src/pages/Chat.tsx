@@ -27,6 +27,25 @@ export default function Chat() {
     icon: '',
   });
 
+  // Vision support map (fetched once from models endpoint)
+  const [modelVisionMap, setModelVisionMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    marketplaceApi.getAvailableModels().then((data) => {
+      if (cancelled) return;
+      const map: Record<string, boolean> = {};
+      for (const m of data.models || []) {
+        map[m.id] = m.supports_vision ?? false;
+      }
+      setModelVisionMap(map);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const currentModelId = currentAgent.selectedModel || currentAgent.model;
+  const currentModelSupportsVision = currentModelId ? modelVisionMap[currentModelId] : undefined;
+
   // Edit mode (persisted)
   const [editMode, setEditMode] = useState<EditMode>(() => {
     const stored = localStorage.getItem('chatPageEditMode');
@@ -291,6 +310,7 @@ export default function Chat() {
                 editMode={editMode}
                 onModeChange={setEditMode}
                 onModelChange={handleModelChange}
+                currentModelSupportsVision={currentModelSupportsVision}
               />
             </div>
             <div className="flex flex-wrap gap-2 mt-4 max-w-2xl justify-center">
@@ -328,6 +348,7 @@ export default function Chat() {
                 onModeChange={setEditMode}
                 onModelChange={handleModelChange}
                 isDocked
+                currentModelSupportsVision={currentModelSupportsVision}
               />
             </div>
           </>

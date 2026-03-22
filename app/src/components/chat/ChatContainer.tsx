@@ -119,6 +119,24 @@ export function ChatContainer({
     []
   );
   const [activeMcpServers, setActiveMcpServers] = useState<{ name: string; slug: string }[]>([]);
+  const [modelVisionMap, setModelVisionMap] = useState<Record<string, boolean>>({});
+
+  // Fetch model vision support map once
+  useEffect(() => {
+    let cancelled = false;
+    marketplaceApi.getAvailableModels().then((data) => {
+      if (cancelled) return;
+      const map: Record<string, boolean> = {};
+      for (const m of data.models || []) {
+        map[m.id] = m.supports_vision ?? false;
+      }
+      setModelVisionMap(map);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const currentModelId = currentAgent.selectedModel || currentAgent.model;
+  const currentModelSupportsVision = currentModelId ? modelVisionMap[currentModelId] : undefined;
   const [editMode, setEditMode] = useState<EditMode>(() => {
     const stored = localStorage.getItem(`editMode:${projectId}`);
     return stored === 'ask' || stored === 'allow' || stored === 'plan' ? stored : 'ask';
@@ -1988,6 +2006,7 @@ export function ChatContainer({
             availableSkills={availableSkills}
             isAdmin={isAdmin}
             onOpenDebugTools={() => setShowDebugModal(true)}
+            currentModelSupportsVision={currentModelSupportsVision}
           />
         </div>
       </div>
