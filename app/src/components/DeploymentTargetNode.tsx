@@ -58,6 +58,8 @@ interface DeploymentTargetNodeData extends Record<string, unknown> {
   connectedContainers: ConnectedContainer[];
   deploymentHistory: DeploymentHistoryEntry[];
   onDeploy?: (targetId: string) => void;
+  onDeployContainer?: (targetId: string) => void;
+  onExport?: (targetId: string) => void;
   onConnect?: (targetId: string) => void;
   onDelete?: (targetId: string) => void;
   onRollback?: (targetId: string, deploymentId: string) => void;
@@ -68,6 +70,29 @@ type DeploymentTargetNodeProps = Node<DeploymentTargetNodeData> & {
   id: string;
   data: DeploymentTargetNodeData;
 };
+
+// Provider deploy type classification — mirrors backend DeploymentManager sets
+export type DeployType = 'source' | 'container' | 'export';
+
+const CONTAINER_PUSH_PROVIDERS = new Set([
+  'aws-apprunner',
+  'gcp-cloudrun',
+  'azure-container-apps',
+  'do-container',
+  'fly',
+]);
+
+const EXPORT_PROVIDERS = new Set([
+  'dockerhub',
+  'ghcr',
+  'download',
+]);
+
+export function getDeployType(provider: string): DeployType {
+  if (EXPORT_PROVIDERS.has(provider)) return 'export';
+  if (CONTAINER_PUSH_PROVIDERS.has(provider)) return 'container';
+  return 'source';
+}
 
 // Provider logos/icons
 const PROVIDER_LOGOS: Record<string, string> = {
@@ -198,19 +223,39 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
   const latestDeployment = data.deploymentHistory?.[0];
   const isLive = latestDeployment?.status === 'success';
 
-  // Handle deploy click
+  // Route deploy action based on provider type
+  const deployType = getDeployType(data.provider);
+
   const handleDeploy = async () => {
-    if (isDeploying || !data.onDeploy) return;
+    if (isDeploying) return;
+
+    const handler =
+      deployType === 'container' ? (data.onDeployContainer ?? data.onDeploy) :
+      deployType === 'export'    ? (data.onExport ?? data.onDeploy) :
+      data.onDeploy;
+
+    if (!handler) return;
+
     setIsDeploying(true);
     try {
-      await data.onDeploy(id);
+      await handler(id);
     } finally {
       setIsDeploying(false);
     }
   };
 
-  // Determine if deploy is possible
-  const canDeploy = data.isConnected && data.connectedContainers.length > 0 && !isDeploying;
+  // Determine if deploy is possible — check that the appropriate handler exists
+  const hasHandler =
+    deployType === 'container' ? !!(data.onDeployContainer ?? data.onDeploy) :
+    deployType === 'export'    ? !!(data.onExport ?? data.onDeploy) :
+    !!data.onDeploy;
+  const canDeploy = data.isConnected && data.connectedContainers.length > 0 && !isDeploying && hasHandler;
+
+  // Button label based on deploy type
+  const deployLabel =
+    deployType === 'export' ? 'Export' :
+    deployType === 'container' ? 'Push & Deploy' :
+    'Deploy';
 
   return (
     <div className="group" style={{ contain: 'layout style' }}>
@@ -410,12 +455,12 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
             {isDeploying ? (
               <>
                 <CircleNotch size={16} weight="bold" className="animate-spin" />
-                <span>Deploying...</span>
+                <span>{deployType === 'export' ? 'Exporting...' : 'Deploying...'}</span>
               </>
             ) : (
               <>
                 <Rocket size={16} weight="fill" />
-                <span>Deploy</span>
+                <span>{deployLabel}</span>
               </>
             )}
           </button>

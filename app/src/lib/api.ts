@@ -2344,6 +2344,61 @@ export const deploymentsApi = {
     return response.data;
   },
 
+  // Deploy via container-push (AWS App Runner, GCP Cloud Run, Azure, Fly, DO)
+  deployContainerPush: async (
+    projectSlug: string,
+    data: {
+      provider: string;
+      container_id?: string;
+      port?: number;
+      cpu?: string;
+      memory?: string;
+      region?: string;
+      env_vars?: Record<string, string>;
+    }
+  ): Promise<{
+    id: string;
+    project_id: string;
+    provider: string;
+    deployment_id: string | null;
+    deployment_url: string | null;
+    status: string;
+    logs: string[] | null;
+    error: string | null;
+    created_at: string;
+    updated_at: string;
+    completed_at: string | null;
+  }> => {
+    const response = await api.post(`/api/deployments/${projectSlug}/deploy-container`, data);
+    return response.data;
+  },
+
+  // Export project image (Docker Hub, GHCR, Download)
+  exportProject: async (
+    projectSlug: string,
+    data: {
+      provider: string;
+      container_id?: string;
+      image_name?: string;
+      tag?: string;
+    }
+  ): Promise<{
+    id: string;
+    project_id: string;
+    provider: string;
+    status: string;
+    image_ref: string | null;
+    pull_command: string | null;
+    download_url: string | null;
+    logs: string[] | null;
+    error: string | null;
+    created_at: string;
+    completed_at: string | null;
+  }> => {
+    const response = await api.post(`/api/deployments/${projectSlug}/export`, data);
+    return response.data;
+  },
+
   // Stream deployment progress (SSE)
   streamProgress: (
     deploymentId: string,
