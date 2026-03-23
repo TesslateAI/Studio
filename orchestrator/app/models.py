@@ -44,6 +44,12 @@ class Project(Base):
     )  # URL-safe identifier (e.g., "my-awesome-app-k3x8n2")
     description = Column(Text)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    team_id = Column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True
+    )  # nullable during migration, then NOT NULL
+    visibility = Column(
+        String(20), nullable=False, default="team"
+    )  # 'team' (all members see) or 'private' (explicit access only)
     has_git_repo = Column(Boolean, default=False)
     git_remote_url = Column(String(500), nullable=True)
     architecture_diagram = Column(Text, nullable=True)  # Stored Mermaid diagram
@@ -89,6 +95,10 @@ class Project(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     owner = relationship("User", back_populates="projects")
+    team = relationship("Team", back_populates="projects", lazy="selectin")
+    project_memberships = relationship(
+        "ProjectMembership", back_populates="project", cascade="all, delete-orphan", lazy="noload"
+    )
     files = relationship("ProjectFile", back_populates="project", cascade="all, delete-orphan")
     assets = relationship("ProjectAsset", back_populates="project", cascade="all, delete-orphan")
     asset_directories = relationship(
@@ -1442,6 +1452,9 @@ class CreditPurchase(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    team_id = Column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+    )  # Which team received credits
 
     # Purchase details
     amount_cents = Column(Integer, nullable=False)  # Amount purchased in cents ($5 = 500)
@@ -1467,6 +1480,9 @@ class UsageLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    team_id = Column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+    )  # Which team was billed
     agent_id = Column(
         UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
@@ -1890,3 +1906,13 @@ class TemplateBuild(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     base = relationship("MarketplaceBase", backref="template_builds")
+
+
+# Import team models so they're included in Base.metadata (same pattern as models_kanban)
+from .models_team import (  # noqa: F401, E402
+    AuditLog,
+    ProjectMembership,
+    Team,
+    TeamInvitation,
+    TeamMembership,
+)

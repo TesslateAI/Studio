@@ -84,6 +84,13 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     # Support tier flag (community, email, priority)
     support_tier: Mapped[str] = mapped_column(String(20), default="community")
 
+    # RBAC: user's active/default team
+    default_team_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("teams.id", ondelete="SET NULL", use_alter=True, name="fk_users_default_team"),
+        nullable=True,
+    )
+
     @property
     def total_credits(self) -> int:
         """Total available credits (daily + bundled + signup_bonus + purchased)."""
