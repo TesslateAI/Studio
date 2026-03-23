@@ -1,21 +1,12 @@
 #!/bin/bash
 # =============================================================================
-# Tesslate Studio - Minikube Setup Script
+# DEPRECATED: Use scripts/minikube.sh instead
 # =============================================================================
-# This script sets up a local Minikube environment for testing the
-# S3 Sandwich architecture with MinIO for S3 simulation.
+#   scripts/minikube.sh start       — equivalent to this script
+#   scripts/minikube.sh seed        — database seeding
+#   scripts/minikube.sh reset       — equivalent to ./setup.sh --clean
 #
-# Prerequisites:
-#   - Docker (running)
-#   - minikube (installed)
-#   - kubectl (installed)
-#   - kustomize (optional, kubectl has built-in support)
-#
-# Usage:
-#   ./setup.sh [--clean]
-#
-# Options:
-#   --clean   Delete existing Minikube cluster and start fresh
+# This script is kept for reference only. It will be removed in a future release.
 # =============================================================================
 
 set -e

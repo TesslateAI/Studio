@@ -1,14 +1,11 @@
 #!/bin/bash
 # =============================================================================
-# Tesslate Studio - Minikube Teardown Script
+# DEPRECATED: Use scripts/minikube.sh instead
 # =============================================================================
-# This script cleans up the Minikube environment.
+#   scripts/minikube.sh down        — equivalent to ./teardown.sh --all
+#   scripts/minikube.sh reset       — full teardown + rebuild
 #
-# Usage:
-#   ./teardown.sh [--all]
-#
-# Options:
-#   --all   Delete the entire Minikube cluster (not just resources)
+# This script is kept for reference only. It will be removed in a future release.
 # =============================================================================
 
 set -e

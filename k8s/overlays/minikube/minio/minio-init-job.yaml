@@ -27,14 +27,15 @@ spec:
           # Configure MinIO client
           mc alias set myminio http://minio.minio-system.svc.cluster.local:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
 
-          # Create bucket if it doesn't exist
+          # Create buckets if they don't exist
           mc mb --ignore-existing myminio/tesslate-projects
+          mc mb --ignore-existing myminio/tesslate-btrfs-snapshots
 
           # Set bucket policy to allow downloads (for hydration)
           mc anonymous set download myminio/tesslate-projects
 
           echo "MinIO initialized successfully!"
-          echo "Bucket: tesslate-projects created"
+          echo "Buckets: tesslate-projects, tesslate-btrfs-snapshots created"
         env:
         - name: MINIO_ROOT_USER
           valueFrom:

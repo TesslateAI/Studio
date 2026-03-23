@@ -156,6 +156,7 @@ k8s/manifests/security/s3-credentials.yaml
 k8s/manifests/secrets/s3-credentials.yaml
 k8s/manifests/database/postgres-secret.yaml
 k8s/overlays/minikube/minio/credentials.yaml
+services/btrfs-csi/overlays/minikube/csi-credentials.yaml
 k8s/.env
 k8s/.env.*
 !k8s/.env.example

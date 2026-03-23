@@ -1,20 +1,28 @@
 #!/usr/bin/env bash
-# Tesslate Studio - Minikube/Kubernetes Management
+# Tesslate Studio - Minikube Management (Swiss Knife)
 # Usage: scripts/minikube.sh <command> [options]
 #
-# Commands:
-#   start            Start minikube cluster and deploy services
-#   stop             Stop minikube (preserves state)
-#   down             Delete minikube cluster entirely
-#   restart [svc]    Restart pod(s) for a service
-#   rebuild <svc>    Rebuild image, load into minikube, restart pod
-#   rebuild --all    Rebuild all images (backend, frontend, devserver, btrfs-csi)
-#   logs [svc]       Tail pod logs for a service
-#   migrate          Run Alembic database migrations
-#   status           Show cluster state and URLs
-#   shell [svc]      Open interactive shell in pod (default: backend)
-#   tunnel           Start minikube tunnel (foreground, blocks)
-#   reset            Full teardown: delete cluster, rebuild, redeploy
+# Lifecycle:
+#   start              Start minikube cluster and deploy all services
+#   stop               Stop minikube (preserves state)
+#   down               Delete minikube cluster entirely
+#   reset              Full teardown: delete cluster, rebuild, redeploy
+#
+# Deploy:
+#   deploy-k8s         Reapply app manifests and restart pods
+#   deploy-compute     Reapply btrfs-CSI + Volume Hub manifests
+#   rebuild <svc>      Rebuild image, load into minikube, restart pod
+#   rebuild --all      Rebuild all images (backend, frontend, devserver, btrfs-csi)
+#   restart [svc]      Restart pod(s) for a service
+#
+# Operations:
+#   migrate            Run Alembic database migrations
+#   seed               Seed database with marketplace data
+#   logs [svc]         Tail pod logs for a service
+#   shell [svc]        Open interactive shell in pod (default: backend)
+#   status             Show cluster state and URLs
+#   tunnel             Start minikube tunnel (foreground, blocks)
+#   test [name]        Run integration tests (s3-sandwich|pod-affinity)
 
 set -euo pipefail
 
@@ -38,9 +46,10 @@ header()  { echo -e "\n${BOLD}$*${NC}"; }
 PROFILE="tesslate"
 NAMESPACE="tesslate"
 
-# Configurable resource limits (override via env vars)
+# Configurable via env vars (e.g., MINIKUBE_DRIVER=docker, MINIKUBE_MEMORY=6144)
 MINIKUBE_CPUS="${MINIKUBE_CPUS:-4}"
 MINIKUBE_MEMORY="${MINIKUBE_MEMORY:-8192}"
+# MINIKUBE_DRIVER — leave unset to auto-detect (OrbStack, Docker Desktop, etc.)
 
 # Service short name -> K8s deployment name
 resolve_k8s() {
@@ -99,10 +108,7 @@ image_context() {
 
 ensure_docker() {
   if ! docker info &>/dev/null; then
-    error "Docker daemon is not reachable."
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      echo "  Run: colima start --cpu 4 --memory 8 --disk 60"
-    fi
+    error "Docker daemon is not reachable. Start your Docker runtime (OrbStack, Docker Desktop, etc.)."
     exit 1
   fi
 }
@@ -176,25 +182,21 @@ build_and_load() {
 cmd_start() {
   header "Starting Tesslate Studio (Minikube)"
 
-  # Auto-start Colima on macOS
-  if [[ "$(uname -s)" == "Darwin" ]] && command -v colima &>/dev/null; then
-    if ! colima status 2>/dev/null | grep -q "Running"; then
-      info "Starting Colima..."
-      colima start --cpu 4 --memory 8 --disk 60
-      success "Colima started"
-    fi
-  fi
-
   ensure_docker
 
-  # Start or resume minikube
+  # Start or resume minikube (driver auto-detected or set via MINIKUBE_DRIVER)
   if minikube status -p "$PROFILE" 2>/dev/null | grep -q "Running"; then
     info "Minikube cluster '$PROFILE' is already running"
   else
+    local driver_flag=""
+    if [[ -n "${MINIKUBE_DRIVER:-}" ]]; then
+      driver_flag="--driver=$MINIKUBE_DRIVER"
+    fi
+
     info "Starting minikube cluster..."
     minikube start \
       -p "$PROFILE" \
-      --driver=docker \
+      $driver_flag \
       --cpus="$MINIKUBE_CPUS" \
       --memory="$MINIKUBE_MEMORY" \
       --disk-size=40g \
@@ -240,25 +242,44 @@ cmd_start() {
     fi
   fi
 
+  # CSI credentials (MinIO S3 config for btrfs-csi)
+  local csi_dir="$PROJECT_ROOT/services/btrfs-csi/overlays/minikube"
+  if [[ ! -f "$csi_dir/csi-credentials.yaml" ]]; then
+    if [[ -f "$csi_dir/csi-credentials.example.yaml" ]]; then
+      cp "$csi_dir/csi-credentials.example.yaml" "$csi_dir/csi-credentials.yaml"
+      warn "Created csi-credentials.yaml from example. Edit services/btrfs-csi/overlays/minikube/csi-credentials.yaml with your values."
+    else
+      error "Missing $csi_dir/csi-credentials.yaml and no example found."
+      exit 1
+    fi
+  fi
+
   # ── Deploy manifests in dependency order ──────────────────────────────
   # Each layer is a standalone kustomization — no inline YAML or patching.
+  # Order matters: MinIO must be ready before CSI (CSI syncs to MinIO on startup).
 
-  # 1. VolumeSnapshot CRDs + controller (cluster-scoped prereq for CSI)
-  header "Applying VolumeSnapshot CRDs"
+  # 1. Cluster-scoped prereqs (StorageClass + VolumeSnapshot CRDs)
+  header "Applying cluster prereqs"
+  kubectl apply -f k8s/overlays/minikube/storage-class.yaml
   kubectl apply -k k8s/overlays/minikube/snapshot-crds --server-side 2>/dev/null \
     || kubectl apply -k k8s/overlays/minikube/snapshot-crds
 
-  # 2. btrfs-CSI driver + Volume Hub (kube-system namespace)
+  # 2. MinIO (minio-system namespace — S3 simulation for local dev)
+  #    Must be ready before CSI since btrfs-csi syncs snapshots to MinIO.
+  header "Applying MinIO"
+  kubectl apply -k k8s/overlays/minikube/minio
+  info "Waiting for MinIO..."
+  kubectl rollout status deployment/minio -n minio-system --timeout=120s
+  info "Waiting for MinIO init job (bucket creation)..."
+  kubectl wait --for=condition=complete job/minio-init -n minio-system --timeout=120s
+
+  # 3. btrfs-CSI driver + Volume Hub (kube-system namespace)
   header "Applying btrfs-CSI + Volume Hub"
   kubectl apply -k services/btrfs-csi/overlays/minikube
   info "Waiting for Volume Hub..."
   kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
   info "Waiting for CSI node..."
-  kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
-
-  # 3. MinIO (minio-system namespace — S3 simulation for local dev)
-  header "Applying MinIO"
-  kubectl apply -k k8s/overlays/minikube/minio
+  kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=180s
 
   # 4. Compute pool namespace + isolation (tesslate-compute-pool)
   header "Applying Compute Pool"
@@ -270,7 +291,6 @@ cmd_start() {
 
   # ── Wait for critical deployments ─────────────────────────────────────
   header "Waiting for services"
-  kubectl rollout status deployment/minio -n minio-system --timeout=120s
   wait_for_rollout "postgres" 120
   wait_for_rollout "tesslate-backend" 180
   wait_for_rollout "tesslate-frontend" 120
@@ -407,8 +427,12 @@ cmd_logs() {
 
 cmd_status() {
   ensure_minikube
-  header "Pod Status"
+  header "Application Pods ($NAMESPACE)"
   kubectl get pods -n "$NAMESPACE" -o wide
+  echo ""
+  header "Storage Pods (kube-system)"
+  kubectl get pods -n kube-system -l 'app in (tesslate-btrfs-csi-node,tesslate-volume-hub)' -o wide 2>/dev/null \
+    || echo "  No storage pods found"
   echo ""
   header "Ingress"
   kubectl get ingress -n "$NAMESPACE" 2>/dev/null || echo "  No ingress found"
@@ -433,6 +457,136 @@ cmd_migrate() {
   success "Migrations complete"
 }
 
+
+cmd_seed() {
+  ensure_minikube
+  wait_for_backend_ready
+
+  header "Seeding database"
+  local backend_pod
+  backend_pod=$(kubectl get pods -n "$NAMESPACE" -l app=tesslate-backend -o jsonpath='{.items[0].metadata.name}')
+  if [[ -z "$backend_pod" ]]; then
+    error "No backend pod found"
+    exit 1
+  fi
+
+  local seed_dir="$PROJECT_ROOT/scripts/seed"
+  if [[ ! -d "$seed_dir" ]]; then
+    error "Seed directory not found: $seed_dir"
+    exit 1
+  fi
+
+  local scripts=(
+    seed_marketplace_bases.py
+    seed_marketplace_agents.py
+    seed_opensource_agents.py
+    seed_skills.py
+    seed_themes.py
+    seed_mcp_servers.py
+    seed_community_bases.py
+  )
+
+  for script in "${scripts[@]}"; do
+    if [[ -f "$seed_dir/$script" ]]; then
+      info "Running $script..."
+      kubectl cp "$seed_dir/$script" "$NAMESPACE/${backend_pod}:/tmp/$script"
+      kubectl exec -n "$NAMESPACE" "$backend_pod" -- python "/tmp/$script" 2>&1 || {
+        warn "$script failed (non-fatal), continuing..."
+      }
+    fi
+  done
+
+  success "Database seeded"
+}
+
+cmd_deploy_compute() {
+  ensure_docker
+  ensure_minikube
+
+  header "Deploying compute stack (btrfs-CSI + Volume Hub)"
+
+  # Ensure btrfs-csi image is loaded
+  local img="tesslate-btrfs-csi:latest"
+  if ! minikube -p "$PROFILE" ssh -- docker image inspect "$img" &>/dev/null 2>&1; then
+    warn "Image $img not found in minikube. Building..."
+    build_and_load "btrfs-csi"
+  fi
+
+  # VolumeSnapshot CRDs
+  info "Applying VolumeSnapshot CRDs..."
+  kubectl apply -k k8s/overlays/minikube/snapshot-crds --server-side 2>/dev/null \
+    || kubectl apply -k k8s/overlays/minikube/snapshot-crds
+
+  # btrfs-CSI + Volume Hub
+  info "Applying btrfs-CSI + Volume Hub manifests..."
+  kubectl apply -k services/btrfs-csi/overlays/minikube
+
+  info "Waiting for Volume Hub..."
+  kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+  info "Waiting for CSI node..."
+  kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
+
+  success "Compute stack deployed"
+  echo ""
+  info "Verify: kubectl get pods -n kube-system -l 'app in (tesslate-btrfs-csi-node,tesslate-volume-hub)'"
+}
+
+cmd_deploy_k8s() {
+  ensure_minikube
+
+  header "Applying application manifests"
+  kubectl apply -k k8s/overlays/minikube
+  success "Manifests applied"
+
+  info "Restarting pods..."
+  kubectl rollout restart deployment/tesslate-backend -n "$NAMESPACE"
+  kubectl rollout restart deployment/tesslate-frontend -n "$NAMESPACE"
+  kubectl rollout restart deployment/tesslate-worker -n "$NAMESPACE"
+
+  wait_for_rollout "tesslate-backend" 180
+  wait_for_rollout "tesslate-frontend" 120
+  wait_for_rollout "tesslate-worker" 120
+
+  success "Application redeployed"
+}
+
+cmd_test() {
+  ensure_minikube
+  local name="${1:-}"
+  local test_dir="$PROJECT_ROOT/k8s/scripts/minikube"
+
+  if [[ -z "$name" ]]; then
+    echo "Available tests:"
+    echo "  s3-sandwich     Test S3 Sandwich storage pattern"
+    echo "  pod-affinity    Test multi-container pod scheduling"
+    echo ""
+    echo "Usage: $(basename "$0") test <name>"
+    return
+  fi
+
+  case "$name" in
+    s3-sandwich)
+      if [[ ! -f "$test_dir/test-s3-sandwich.sh" ]]; then
+        error "Test script not found: $test_dir/test-s3-sandwich.sh"
+        exit 1
+      fi
+      header "Running S3 Sandwich test"
+      bash "$test_dir/test-s3-sandwich.sh"
+      ;;
+    pod-affinity)
+      if [[ ! -f "$test_dir/test-pod-affinity.sh" ]]; then
+        error "Test script not found: $test_dir/test-pod-affinity.sh"
+        exit 1
+      fi
+      header "Running Pod Affinity test"
+      bash "$test_dir/test-pod-affinity.sh"
+      ;;
+    *)
+      error "Unknown test: $name. Available: s3-sandwich, pod-affinity"
+      exit 1
+      ;;
+  esac
+}
 
 cmd_reset() {
   warn "This will delete the entire cluster and rebuild from scratch."
@@ -460,18 +614,26 @@ _print_mk_urls() {
 _usage() {
   echo "Usage: $(basename "$0") <command> [options]"
   echo ""
-  echo "Commands:"
-  echo "  start            Start minikube cluster and deploy"
-  echo "  stop             Stop cluster (preserves state)"
-  echo "  down             Delete cluster entirely"
-  echo "  restart [svc]    Restart pod(s) for a service"
-  echo "  rebuild <svc>    Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|--all)"
-  echo "  logs [svc]       Tail pod logs (default: backend)"
-  echo "  migrate          Run Alembic migrations"
-  echo "  status           Show cluster state and URLs"
-  echo "  shell [svc]      Open shell in pod (default: backend)"
-  echo "  tunnel           Start minikube tunnel"
-  echo "  reset            Full teardown + rebuild from scratch"
+  echo "Lifecycle:"
+  echo "  start              Start minikube cluster and deploy all services"
+  echo "  stop               Stop cluster (preserves state)"
+  echo "  down               Delete cluster entirely"
+  echo "  reset              Full teardown + rebuild from scratch"
+  echo ""
+  echo "Deploy:"
+  echo "  deploy-k8s         Reapply app manifests and restart pods"
+  echo "  deploy-compute     Reapply btrfs-CSI + Volume Hub manifests"
+  echo "  rebuild <svc>      Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|--all)"
+  echo "  restart [svc]      Restart pod(s) for a service"
+  echo ""
+  echo "Operations:"
+  echo "  migrate            Run Alembic database migrations"
+  echo "  seed               Seed database with marketplace data"
+  echo "  logs [svc]         Tail pod logs (default: backend)"
+  echo "  shell [svc]        Open shell in pod (default: backend)"
+  echo "  status             Show cluster state and URLs"
+  echo "  tunnel             Start minikube tunnel (foreground)"
+  echo "  test [name]        Run integration tests (s3-sandwich|pod-affinity)"
   echo ""
   echo "Services: backend, frontend, worker, postgres, redis, devserver, btrfs-csi"
 }
@@ -481,18 +643,22 @@ main() {
   shift || true
 
   case "$cmd" in
-    start)   cmd_start "$@" ;;
-    stop)    cmd_stop "$@" ;;
-    down)    cmd_down "$@" ;;
-    restart) cmd_restart "$@" ;;
-    rebuild) cmd_rebuild "$@" ;;
-    logs)    cmd_logs "$@" ;;
-    migrate) cmd_migrate "$@" ;;
-    status)  cmd_status "$@" ;;
-    shell)   cmd_shell "$@" ;;
-    tunnel)  cmd_tunnel "$@" ;;
-    reset)   cmd_reset "$@" ;;
-    --help|-h|"")  _usage ;;
+    start)          cmd_start "$@" ;;
+    stop)           cmd_stop "$@" ;;
+    down)           cmd_down "$@" ;;
+    restart)        cmd_restart "$@" ;;
+    rebuild)        cmd_rebuild "$@" ;;
+    deploy-k8s)     cmd_deploy_k8s "$@" ;;
+    deploy-compute) cmd_deploy_compute "$@" ;;
+    seed)           cmd_seed "$@" ;;
+    logs)           cmd_logs "$@" ;;
+    migrate)        cmd_migrate "$@" ;;
+    status)         cmd_status "$@" ;;
+    shell)          cmd_shell "$@" ;;
+    tunnel)         cmd_tunnel "$@" ;;
+    test)           cmd_test "$@" ;;
+    reset)          cmd_reset "$@" ;;
+    --help|-h|"")   _usage ;;
     *)
       error "Unknown command: $cmd"
       _usage
