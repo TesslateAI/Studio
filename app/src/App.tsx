@@ -39,6 +39,11 @@ import SecuritySettings from './pages/settings/SecuritySettings';
 import DeploymentSettings from './pages/settings/DeploymentSettings';
 import BillingSettings from './pages/settings/BillingSettings';
 import ApiKeysSettings from './pages/settings/ApiKeysSettings';
+import TeamSettingsPage from './pages/settings/TeamSettingsPage';
+import TeamMembersPage from './pages/settings/TeamMembersPage';
+import TeamBillingPage from './pages/settings/TeamBillingPage';
+import AuditLogPage from './pages/settings/AuditLogPage';
+import InviteAcceptPage from './pages/InviteAcceptPage';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
 import { CommandPalette } from './components/CommandPalette';
@@ -350,6 +355,10 @@ function AppContent() {
           <Route path="deployment" element={<DeploymentSettings />} />
           <Route path="api-keys" element={<ApiKeysSettings />} />
           <Route path="billing" element={<BillingSettings />} />
+          <Route path="team" element={<TeamSettingsPage />} />
+          <Route path="team/members" element={<TeamMembersPage />} />
+          <Route path="team/billing" element={<TeamBillingPage />} />
+          <Route path="team/audit-log" element={<AuditLogPage />} />
         </Route>
 
         {/* Billing redirect - all billing is now in /settings/billing */}
@@ -363,6 +372,7 @@ function AppContent() {
           }
         />
         <Route path="/oauth/callback" element={<OAuthLoginCallback />} />
+        <Route path="/invite/:token" element={<InviteAcceptPage />} />
       </Routes>
 
       {/* WALKTHROUGH DISABLED - Was causing logout issues */}
