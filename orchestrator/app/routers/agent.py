@@ -103,22 +103,12 @@ async def execute_command(
                 detail=f"Rate limit exceeded. Maximum {RATE_LIMIT_COMMANDS} commands per minute.",
             )
 
-        # 2. Verify project ownership
-        result = await db.execute(
-            select(Project).where(
-                Project.id == request.project_id, Project.owner_id == current_user.id
-            )
-        )
-        project = result.scalar_one_or_none()
+        # 2. Verify project access via RBAC
+        from ..permissions import Permission, get_project_with_access
 
-        if not project:
-            logger.warning(
-                f"User {current_user.id} attempted to access project {request.project_id} "
-                f"(not found or access denied)"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or access denied"
-            )
+        project, _role = await get_project_with_access(
+            db, str(request.project_id), current_user.id, Permission.CHAT_SEND
+        )
 
         # 3. Validate command
         validator = get_command_validator(allow_network=False)
@@ -301,16 +291,12 @@ async def get_command_history(
     Returns:
         List of command log entries
     """
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
+    # Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
 
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or access denied"
-        )
+    project, _role = await get_project_with_access(
+        db, str(project_id), current_user.id, Permission.PROJECT_VIEW
+    )
 
     # Enforce limit cap
     limit = min(limit, 200)

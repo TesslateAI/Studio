@@ -270,20 +270,23 @@ async def verify_dev_environment_access(
                     status_code=status.HTTP_401_UNAUTHORIZED, detail="Project not found"
                 )
 
-            # Verify current user owns this project
-            if current_user.id != project.owner_id:
-                failure_reason = f"User {current_user.id} attempted to access project {project_slug} owned by {project.owner_id}"
+            # Verify current user has access to this project via RBAC
+            from ..permissions import Permission, get_effective_project_role
+
+            effective_role = await get_effective_project_role(db, project, current_user.id)
+            if effective_role is None:
+                failure_reason = f"User {current_user.id} attempted to access project {project_slug} without RBAC access"
                 logger.warning(
                     f"[SECURITY] User {current_user.id} ({current_user.username}) attempted to access "
-                    f"project {project_slug} owned by user {project.owner_id}. "
+                    f"project {project_slug} without RBAC access. "
                     f"Host: {request_host}, IP: {ip_address}"
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Access denied - you do not own this project",
+                    detail="Access denied - you do not have access to this project",
                 )
 
-            # Set expected_user_id for audit logging
+            # Set expected_user_id for audit logging (use project owner for attribution)
             expected_user_id = project.owner_id
             project_id = project.id
 

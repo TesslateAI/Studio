@@ -2062,14 +2062,12 @@ async def get_available_agents_for_project(
     """
     Get agents that the user owns and can add to this project.
     """
-    # Verify project ownership
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
-    )
-    project = project_result.scalar_one_or_none()
+    # Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
 
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await get_project_with_access(
+        db, str(project_id), current_user.id, Permission.PROJECT_VIEW
+    )
 
     # Get user's purchased agents (all agents in library, regardless of enabled/disabled status)
     purchased_result = await db.execute(
@@ -2118,14 +2116,12 @@ async def add_agent_to_project(
     """
     Add an agent from user's library to a project.
     """
-    # Verify project ownership
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
-    )
-    project = project_result.scalar_one_or_none()
+    # Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
 
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await get_project_with_access(
+        db, str(project_id), current_user.id, Permission.PROJECT_EDIT
+    )
 
     # Verify user owns the agent
     purchase_result = await db.execute(
@@ -2186,14 +2182,12 @@ async def remove_agent_from_project(
     """
     Remove an agent from a project.
     """
-    # Verify project ownership
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
-    )
-    project = project_result.scalar_one_or_none()
+    # Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
 
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await get_project_with_access(
+        db, str(project_id), current_user.id, Permission.PROJECT_EDIT
+    )
 
     # Find and disable the agent
     result = await db.execute(
@@ -2223,14 +2217,12 @@ async def get_project_agents(
     """
     Get all active agents for a project.
     """
-    # Verify project ownership
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
-    )
-    project = project_result.scalar_one_or_none()
+    # Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
 
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await get_project_with_access(
+        db, str(project_id), current_user.id, Permission.PROJECT_VIEW
+    )
 
     # Get project's agents
     result = await db.execute(
@@ -3221,13 +3213,12 @@ async def re_export_template(
     if not base.source_project_id:
         raise HTTPException(status_code=400, detail="Template has no linked source project")
 
-    # Verify source project exists and is owned by user
-    result = await db.execute(select(Project).where(Project.id == base.source_project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Source project no longer exists")
-    if project.owner_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You don't own the source project")
+    # Verify source project exists and user has access
+    from ..permissions import Permission, get_project_with_access
+
+    project, _role = await get_project_with_access(
+        db, str(base.source_project_id), current_user.id, Permission.PROJECT_EDIT
+    )
 
     # Capture values from ORM objects before request session closes
     project_slug = project.slug

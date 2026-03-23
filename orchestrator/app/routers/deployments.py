@@ -313,16 +313,12 @@ async def deploy_project(
     deployment = None
 
     try:
-        # 1. Verify project ownership
-        result = await db.execute(
-            select(Project).where(
-                and_(Project.slug == project_slug, Project.owner_id == current_user.id)
-            )
-        )
-        project = result.scalar_one_or_none()
+        # 1. Verify project access via RBAC
+        from ..permissions import Permission, get_project_with_access
 
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        project, _role = await get_project_with_access(
+            db, project_slug, current_user.id, Permission.DEPLOYMENT_CREATE
+        )
 
         # 2. Fetch credentials
         provider_lower = request.provider.lower()
@@ -625,22 +621,12 @@ async def deploy_all_containers(
 
     from sqlalchemy.orm import selectinload
 
-    # 1. Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            and_(
-                Project.slug == project_slug,
-                Project.owner_id == current_user.id
-            )
-        )
-    )
-    project = result.scalar_one_or_none()
+    # 1. Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
 
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
+    project, _role = await get_project_with_access(
+        db, project_slug, current_user.id, Permission.DEPLOYMENT_CREATE
+    )
 
     # 2. Get all containers with deployment targets
     result = await db.execute(
@@ -1343,22 +1329,12 @@ async def deploy_single_container_endpoint(
     """
     from sqlalchemy.orm import selectinload
 
-    # 1. Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            and_(
-                Project.slug == project_slug,
-                Project.owner_id == current_user.id,
-            )
-        )
-    )
-    project = result.scalar_one_or_none()
+    # 1. Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
 
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    project, _role = await get_project_with_access(
+        db, project_slug, current_user.id, Permission.DEPLOYMENT_CREATE
+    )
 
     # 2. Get the container with its base loaded
     result = await db.execute(
@@ -1606,16 +1582,12 @@ async def list_project_deployments(
         List of deployments
     """
     try:
-        # Verify project ownership
-        result = await db.execute(
-            select(Project).where(
-                and_(Project.slug == project_slug, Project.owner_id == current_user.id)
-            )
-        )
-        project = result.scalar_one_or_none()
+        # Verify project access via RBAC
+        from ..permissions import Permission, get_project_with_access
 
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        project, _role = await get_project_with_access(
+            db, project_slug, current_user.id, Permission.DEPLOYMENT_VIEW
+        )
 
         # Build query
         query = select(Deployment).where(Deployment.project_id == project.id)

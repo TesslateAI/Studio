@@ -52,17 +52,12 @@ async def _ws_db():
 
 
 async def _get_project(db: AsyncSession, project_slug: str, user_id: UUID) -> Project:
-    """Resolve project by slug/UUID, verify ownership."""
-    try:
-        pid = UUID(project_slug)
-        result = await db.execute(select(Project).where(Project.id == pid))
-    except ValueError:
-        result = await db.execute(select(Project).where(Project.slug == project_slug))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if project.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    """Resolve project by slug/UUID, verify access via RBAC."""
+    from ..permissions import Permission, get_project_with_access
+
+    project, _role = await get_project_with_access(
+        db, project_slug, user_id, Permission.TERMINAL_ACCESS
+    )
     return project
 
 

@@ -397,18 +397,13 @@ async def create_channel_config(
     Encrypts credentials, generates a webhook secret, and optionally
     auto-registers the webhook with the platform (e.g., Telegram setWebhook).
     """
-    # Validate project ownership if project_id supplied
+    # Validate project access if project_id supplied
     if payload.project_id:
-        proj_result = await db.execute(
-            select(Project).where(
-                Project.id == payload.project_id,
-                Project.owner_id == user.id,
-            )
+        from ..permissions import Permission, get_project_with_access
+
+        await get_project_with_access(
+            db, str(payload.project_id), user.id, Permission.CHANNEL_MANAGE
         )
-        if not proj_result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=404, detail="Project not found or access denied"
-            )
 
     # Encrypt credentials and generate webhook secret
     encrypted = encrypt_credentials(payload.credentials)

@@ -115,8 +115,12 @@ async def get_project_id_from_slug_or_id(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.owner_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this project")
+    # Verify access via RBAC
+    from ..permissions import Permission, get_project_with_access
+
+    project, _role = await get_project_with_access(
+        db, project_slug_or_id, current_user.id, Permission.KANBAN_VIEW
+    )
 
     return project.id
 
@@ -125,13 +129,12 @@ async def get_board_with_auth(
     project_id: UUID, db: AsyncSession, current_user: User, create_if_missing: bool = True
 ) -> KanbanBoard:
     """Get kanban board for project with authorization check."""
-    # Verify project ownership
-    project_result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
+    # Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
+
+    project, _role = await get_project_with_access(
+        db, str(project_id), current_user.id, Permission.KANBAN_VIEW
     )
-    project = project_result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
 
     # Get or create board
     board_result = await db.execute(

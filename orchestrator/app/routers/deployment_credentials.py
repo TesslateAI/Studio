@@ -317,19 +317,13 @@ async def create_credential(
                 detail=f"Unknown provider: {request.provider}. Available: {available}",
             )
 
-        # Validate project ownership if project_id is provided
+        # Validate project access if project_id is provided
         if request.project_id:
-            project_result = await db.execute(
-                select(Project).where(
-                    and_(Project.id == request.project_id, Project.owner_id == current_user.id)
-                )
+            from ..permissions import Permission, get_project_with_access
+
+            await get_project_with_access(
+                db, str(request.project_id), current_user.id, Permission.CREDENTIALS_MANAGE
             )
-            project = project_result.scalar_one_or_none()
-            if not project:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Project not found or access denied",
-                )
 
         # Encrypt the access token
         encryption_service = get_deployment_encryption_service()

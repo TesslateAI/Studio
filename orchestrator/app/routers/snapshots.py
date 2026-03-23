@@ -32,16 +32,12 @@ router = APIRouter(prefix="/projects/{project_id}/snapshots", tags=["snapshots"]
 
 
 async def get_project_for_user(project_id: UUID, user: User, db: AsyncSession) -> Project:
-    """Get a project and verify the user has access to it."""
-    project = await db.get(Project, project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Project {project_id} not found"
-        )
-    if project.owner_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this project"
-        )
+    """Get a project and verify the user has access to it via RBAC."""
+    from ..permissions import Permission, get_project_with_access
+
+    project, _role = await get_project_with_access(
+        db, str(project_id), user.id, Permission.SNAPSHOT_VIEW
+    )
     return project
 
 

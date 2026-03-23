@@ -219,53 +219,26 @@ async def _check_repo_size_limit(
 
 
 async def get_project_by_slug(
-    db: AsyncSession, project_slug: str, user_id_or_user: UUID | User
+    db: AsyncSession, project_slug: str, user_id: UUID
 ) -> Project:
     """
-    Get a project by its slug or numeric ID and verify ownership.
+    Fetch project and verify access via RBAC. Raises 403/404.
 
     Args:
         db: Database session
-        project_slug: Project slug (e.g., "my-awesome-app-k3x8n2") or numeric ID as string (e.g., "4")
-        user_id_or_user: User ID (UUID) or User object to verify ownership.
-            When a User object is passed, API-key scope enforcement is applied.
+        project_slug: Project slug (e.g., "my-awesome-app-k3x8n2") or UUID string
+        user_id: User ID to verify access
 
     Returns:
-        Project object if found and owned by user
+        Project object if found and user has access
 
     Raises:
         HTTPException 404 if project not found
-        HTTPException 403 if user doesn't own the project or API key lacks scope
+        HTTPException 403 if user lacks permission
     """
-    user_obj: User | None = None
-    if isinstance(user_id_or_user, User):
-        user_obj = user_id_or_user
-        user_id = user_id_or_user.id
-    else:
-        user_id = user_id_or_user
+    from ..permissions import Permission, get_project_with_access
 
-    # Try to parse as UUID first (for direct ID access)
-    try:
-        from uuid import UUID as _UUID
-
-        project_id = _UUID(project_slug)
-        result = await db.execute(select(Project).where(Project.id == project_id))
-        project = result.scalar_one_or_none()
-    except ValueError:
-        # Not a UUID, treat as slug (recommended for URLs)
-        result = await db.execute(select(Project).where(Project.slug == project_slug))
-        project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    if project.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this project")
-
-    # Enforce API-key project scope when a User object is available
-    if user_obj is not None:
-        enforce_project_scope(user_obj, project.id)
-
+    project, _role = await get_project_with_access(db, project_slug, user_id, Permission.PROJECT_VIEW)
     return project
 
 
@@ -286,9 +259,63 @@ async def track_project_activity(project_id: UUID, db: AsyncSession) -> None:
 
 @router.get("/", response_model=list[ProjectSchema])
 async def get_projects(
-    current_user: User = Depends(get_authenticated_user), db: AsyncSession = Depends(get_db)
+    team: str | None = Query(None),
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Project).where(Project.owner_id == current_user.id))
+    from ..models_team import Team, TeamMembership, ProjectMembership
+
+    # Resolve active team
+    if team:
+        team_result = await db.execute(select(Team).where(Team.slug == team))
+        active_team = team_result.scalar_one_or_none()
+        if not active_team:
+            raise HTTPException(status_code=404, detail="Team not found")
+        team_id = active_team.id
+    else:
+        team_id = current_user.default_team_id
+
+    if not team_id:
+        return []
+
+    # Check team membership
+    membership_result = await db.execute(
+        select(TeamMembership).where(
+            and_(
+                TeamMembership.team_id == team_id,
+                TeamMembership.user_id == current_user.id,
+                TeamMembership.is_active == True,
+            )
+        )
+    )
+    member = membership_result.scalar_one_or_none()
+    if not member and not getattr(current_user, "is_superuser", False):
+        return []
+
+    # Admins / superusers see all projects in the team
+    if (member and member.role == "admin") or getattr(current_user, "is_superuser", False):
+        result = await db.execute(select(Project).where(Project.team_id == team_id))
+    else:
+        # Non-admin: team-visible projects + projects with explicit membership
+        result = await db.execute(
+            select(Project).where(
+                and_(
+                    Project.team_id == team_id,
+                    or_(
+                        Project.visibility == "team",
+                        Project.id.in_(
+                            select(ProjectMembership.project_id).where(
+                                and_(
+                                    ProjectMembership.user_id == current_user.id,
+                                    ProjectMembership.is_active == True,
+                                )
+                            )
+                        ),
+                    ),
+                )
+            )
+        )
+
     projects = result.scalars().all()
     return projects
 
@@ -296,7 +323,15 @@ async def get_projects(
 async def enforce_project_limit(user: User, db: AsyncSession) -> None:
     """Raise 403 if user has reached their tier's project limit."""
     settings = get_settings()
-    result = await db.execute(select(func.count(Project.id)).where(Project.owner_id == user.id))
+    team_id = user.default_team_id
+    if team_id:
+        result = await db.execute(
+            select(func.count(Project.id)).where(Project.team_id == team_id)
+        )
+    else:
+        result = await db.execute(
+            select(func.count(Project.id)).where(Project.owner_id == user.id)
+        )
     current_count = result.scalar()
     tier = user.subscription_tier or "free"
     max_projects = settings.get_tier_max_projects(tier)
@@ -427,8 +462,21 @@ async def create_project(
                     slug=project_slug,
                     description=project.description,
                     owner_id=current_user.id,
+                    team_id=current_user.default_team_id,
                 )
                 db.add(db_project)
+                await db.flush()
+
+                # Create ProjectMembership for the creator
+                from ..models_team import ProjectMembership
+
+                creator_membership = ProjectMembership(
+                    project_id=db_project.id,
+                    user_id=current_user.id,
+                    role="admin",
+                    granted_by_id=current_user.id,
+                )
+                db.add(creator_membership)
                 await db.commit()
                 await db.refresh(db_project)
                 break
@@ -2542,13 +2590,12 @@ async def fork_project(
     Fork (duplicate) a project with all its files.
     Creates a new project with the same files as the original.
     """
-    # Get source project
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
+    # Get source project (RBAC check)
+    from ..permissions import Permission, get_project_with_access
+
+    source_project, _role = await get_project_with_access(
+        db, project_id, current_user.id, Permission.PROJECT_VIEW
     )
-    source_project = result.scalar_one_or_none()
-    if not source_project:
-        raise HTTPException(status_code=404, detail="Project not found")
 
     # Enforce project limit (same check as create_project)
     await enforce_project_limit(current_user, db)
@@ -2570,6 +2617,7 @@ async def fork_project(
                     slug=project_slug,
                     description=f"Forked from: {source_project.description or source_project.name}",
                     owner_id=current_user.id,
+                    team_id=current_user.default_team_id,
                 )
                 db.add(forked_project)
                 await db.flush()
@@ -3501,12 +3549,20 @@ async def deploy_project(
 
     settings = get_settings()
 
-    # Count current deployed projects
-    deployed_count_result = await db.execute(
-        select(func.count(Project.id)).where(
-            and_(Project.owner_id == current_user.id, Project.is_deployed)
+    # Count current deployed projects (team-scoped)
+    _team_id = current_user.default_team_id
+    if _team_id:
+        deployed_count_result = await db.execute(
+            select(func.count(Project.id)).where(
+                and_(Project.team_id == _team_id, Project.is_deployed)
+            )
         )
-    )
+    else:
+        deployed_count_result = await db.execute(
+            select(func.count(Project.id)).where(
+                and_(Project.owner_id == current_user.id, Project.is_deployed)
+            )
+        )
     deployed_count = deployed_count_result.scalar()
 
     # Determine max deploys based on tier
@@ -3588,12 +3644,20 @@ async def get_deployment_limits(
 
     settings = get_settings()
 
-    # Count deployed projects
-    deployed_count_result = await db.execute(
-        select(func.count(Project.id)).where(
-            and_(Project.owner_id == current_user.id, Project.is_deployed)
+    # Count deployed projects (team-scoped)
+    _team_id = current_user.default_team_id
+    if _team_id:
+        deployed_count_result = await db.execute(
+            select(func.count(Project.id)).where(
+                and_(Project.team_id == _team_id, Project.is_deployed)
+            )
         )
-    )
+    else:
+        deployed_count_result = await db.execute(
+            select(func.count(Project.id)).where(
+                and_(Project.owner_id == current_user.id, Project.is_deployed)
+            )
+        )
     deployed_count = deployed_count_result.scalar()
 
     # Determine limits based on tier
@@ -3605,10 +3669,15 @@ async def get_deployment_limits(
     additional_slots = current_user.total_spend // settings.additional_deploy_price
     effective_max_deploys = base_max_deploys + additional_slots
 
-    # Count total projects
-    total_projects_result = await db.execute(
-        select(func.count(Project.id)).where(Project.owner_id == current_user.id)
-    )
+    # Count total projects (team-scoped)
+    if _team_id:
+        total_projects_result = await db.execute(
+            select(func.count(Project.id)).where(Project.team_id == _team_id)
+        )
+    else:
+        total_projects_result = await db.execute(
+            select(func.count(Project.id)).where(Project.owner_id == current_user.id)
+        )
     total_projects = total_projects_result.scalar()
 
     return {

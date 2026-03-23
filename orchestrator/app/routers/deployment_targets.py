@@ -204,16 +204,12 @@ class DeployRequest(BaseModel):
 
 
 async def get_project_or_404(slug: str, db: AsyncSession, user: User) -> Project:
-    """Get project by slug or raise 404."""
-    result = await db.execute(
-        select(Project).where(and_(Project.slug == slug, Project.owner_id == user.id))
+    """Get project by slug or raise 404 (RBAC-checked)."""
+    from ..permissions import Permission, get_project_with_access
+
+    project, _role = await get_project_with_access(
+        db, slug, user.id, Permission.DEPLOYMENT_VIEW
     )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project '{slug}' not found",
-        )
     return project
 
 

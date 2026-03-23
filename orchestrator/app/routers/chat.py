@@ -650,18 +650,13 @@ async def agent_chat(
         f"[HTTP-AGENT] Starting agent chat - user: {current_user.id}, project: {request.project_id}"
     )
     try:
-        # Verify project ownership
+        # Verify project access via RBAC
         try:
-            result = await db.execute(
-                select(Project).where(
-                    Project.id == request.project_id, Project.owner_id == current_user.id
-                )
-            )
-            project = result.scalar_one_or_none()
+            from ..permissions import Permission, get_project_with_access
 
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found or access denied")
-            enforce_project_scope(current_user, project.id)
+            project, _role = await get_project_with_access(
+                db, str(request.project_id), current_user.id, Permission.CHAT_SEND
+            )
         except HTTPException:
             raise
         except Exception as e:
@@ -1196,15 +1191,14 @@ async def agent_chat_stream(
             container_directory = None
 
             if request.project_id:
-                # Verify project ownership
-                result = await db.execute(
-                    select(Project).where(
-                        Project.id == request.project_id, Project.owner_id == current_user.id
-                    )
-                )
-                project = result.scalar_one_or_none()
+                # Verify project access via RBAC
+                from ..permissions import Permission, get_project_with_access
 
-                if not project:
+                try:
+                    project, _role = await get_project_with_access(
+                        db, str(request.project_id), current_user.id, Permission.CHAT_SEND
+                    )
+                except HTTPException:
                     error_event = {
                         "type": "error",
                         "data": {"message": "Project not found or access denied"},

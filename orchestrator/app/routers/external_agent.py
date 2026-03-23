@@ -106,17 +106,12 @@ async def invoke_agent(
     Returns task_id for polling status or subscribing to SSE events.
     """
 
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == request.project_id,
-            Project.owner_id == user.id,
-        )
-    )
-    project = result.scalar_one_or_none()
+    # Verify project access via RBAC
+    from ..permissions import Permission, get_project_with_access
 
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found or access denied")
+    project, _role = await get_project_with_access(
+        db, str(request.project_id), user.id, Permission.CHAT_SEND
+    )
 
     # Check API key project restrictions (if any)
     api_key_record = getattr(user, "_api_key_record", None)

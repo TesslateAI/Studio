@@ -40,16 +40,12 @@ router = APIRouter(prefix="/projects/{project_id}/git", tags=["git"])
 
 
 async def verify_project_access(project_id: UUID, current_user: User, db: AsyncSession) -> Project:
-    """Verify that the user has access to the project."""
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
+    """Verify that the user has access to the project via RBAC."""
+    from ..permissions import Permission, get_project_with_access
+
+    project, _role = await get_project_with_access(
+        db, str(project_id), current_user.id, Permission.GIT_VIEW
     )
-    project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-    enforce_project_scope(current_user, project.id)
     return project
 
 
