@@ -5,6 +5,7 @@ import { useHotkeys } from 'react-hotkeys-hook';
 import { ThemeProvider, useTheme } from './theme';
 import { AuthProvider } from './contexts/AuthContext';
 import { ChatPositionProvider } from './contexts/ChatPositionContext';
+import { TeamProvider } from './contexts/TeamContext';
 import { CommandProvider } from './contexts/CommandContext';
 import { DashboardLayout } from './components/DashboardLayout';
 import { PrivateRoute, PublicOnlyRoute } from './components/RouteGuards';
@@ -373,6 +374,7 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <TeamProvider>
         <ChatPositionProvider>
           <CommandProvider>
             <style>{`
@@ -386,6 +388,7 @@ function App() {
             </BrowserRouter>
           </CommandProvider>
         </ChatPositionProvider>
+        </TeamProvider>
       </AuthProvider>
     </ThemeProvider>
   );

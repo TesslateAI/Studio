@@ -2871,4 +2871,156 @@ export const createLogStreamWebSocket = (projectSlug: string): WebSocket => {
   return new WebSocket(`${wsUrl}/api/projects/${projectSlug}/logs/stream`);
 };
 
+// ── Teams & RBAC ──────────────────────────────────────────────────────────
+
+export interface Team {
+  id: string;
+  name: string;
+  slug: string;
+  avatar_url: string | null;
+  is_personal: boolean;
+  subscription_tier: string;
+  total_credits: number;
+  daily_credits: number;
+  bundled_credits: number;
+  purchased_credits: number;
+  signup_bonus_credits: number;
+  deployed_projects_count: number;
+  support_tier: string;
+  created_at: string;
+}
+
+export interface TeamList {
+  id: string;
+  name: string;
+  slug: string;
+  avatar_url: string | null;
+  is_personal: boolean;
+  subscription_tier: string;
+  role: string | null;
+}
+
+export interface TeamMember {
+  id: string;
+  user_id: string;
+  role: string;
+  is_active: boolean;
+  joined_at: string;
+  user_name: string | null;
+  user_email: string | null;
+  user_avatar_url: string | null;
+}
+
+export interface TeamInvitation {
+  id: string;
+  email: string;
+  role: string;
+  invite_type: string;
+  token: string;
+  expires_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  max_uses: number | null;
+  use_count: number;
+  created_at: string;
+}
+
+export interface InviteDetail {
+  team_name: string;
+  team_slug: string;
+  team_avatar_url: string | null;
+  role: string;
+  invite_type: string;
+  expires_at: string;
+  is_valid: boolean;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  team_id: string;
+  project_id: string | null;
+  user_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  details: Record<string, unknown> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export const teamsApi = {
+  async list(): Promise<TeamList[]> {
+    const response = await api.get('/api/teams');
+    return response.data;
+  },
+  async get(slug: string): Promise<Team> {
+    const response = await api.get(`/api/teams/${slug}`);
+    return response.data;
+  },
+  async create(data: { name: string; slug: string }): Promise<Team> {
+    const response = await api.post('/api/teams', data);
+    return response.data;
+  },
+  async update(slug: string, data: Partial<{ name: string; slug: string; avatar_url: string }>): Promise<Team> {
+    const response = await api.patch(`/api/teams/${slug}`, data);
+    return response.data;
+  },
+  async delete(slug: string) {
+    await api.delete(`/api/teams/${slug}`);
+  },
+  async switch(slug: string) {
+    await api.post(`/api/teams/${slug}/switch`);
+  },
+
+  // Members
+  async listMembers(slug: string): Promise<TeamMember[]> {
+    const response = await api.get(`/api/teams/${slug}/members`);
+    return response.data;
+  },
+  async inviteByEmail(slug: string, data: { email: string; role: string }) {
+    const response = await api.post(`/api/teams/${slug}/members/invite`, data);
+    return response.data;
+  },
+  async createInviteLink(slug: string, data: { role: string; max_uses?: number; expires_in_days?: number }): Promise<TeamInvitation> {
+    const response = await api.post(`/api/teams/${slug}/members/link`, data);
+    return response.data;
+  },
+  async removeMember(slug: string, userId: string) {
+    await api.delete(`/api/teams/${slug}/members/${userId}`);
+  },
+  async updateMemberRole(slug: string, userId: string, data: { role: string }) {
+    await api.patch(`/api/teams/${slug}/members/${userId}`, data);
+  },
+  async leave(slug: string) {
+    await api.post(`/api/teams/${slug}/leave`);
+  },
+
+  // Invitations
+  async listInvitations(slug: string): Promise<TeamInvitation[]> {
+    const response = await api.get(`/api/teams/${slug}/invitations`);
+    return response.data;
+  },
+  async revokeInvitation(slug: string, id: string) {
+    await api.delete(`/api/teams/${slug}/invitations/${id}`);
+  },
+  async acceptInvite(token: string) {
+    const response = await api.post(`/api/teams/invitations/${token}/accept`);
+    return response.data;
+  },
+  async getInviteDetails(token: string): Promise<InviteDetail> {
+    const response = await api.get(`/api/teams/invitations/${token}`);
+    return response.data;
+  },
+
+  // Audit log
+  async getAuditLog(slug: string, params?: Record<string, string | number>): Promise<AuditLogEntry[]> {
+    const response = await api.get(`/api/teams/${slug}/audit-log`, { params });
+    return response.data;
+  },
+  async getProjectAuditLog(teamSlug: string, projectSlug: string, params?: Record<string, string | number>): Promise<AuditLogEntry[]> {
+    const response = await api.get(`/api/teams/${teamSlug}/projects/${projectSlug}/audit-log`, { params });
+    return response.data;
+  },
+};
+
 export default api;
