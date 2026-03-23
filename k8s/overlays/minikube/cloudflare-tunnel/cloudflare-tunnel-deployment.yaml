@@ -1,0 +1,81 @@
+# Cloudflare Tunnel Connector
+# Runs cloudflared to connect this minikube cluster to the Cloudflare network.
+# All routing configuration is done in the Cloudflare Zero Trust dashboard.
+#
+# Dashboard setup:
+#   1. Go to https://one.dash.cloudflare.com → Networks → Tunnels
+#   2. Create a tunnel, copy the token
+#   3. Add a public hostname:
+#      - Subdomain/Domain: e.g. studio.your-domain.com
+#      - Type: HTTP
+#      - URL: ingress-nginx-controller.ingress-nginx.svc.cluster.local:80
+#   4. Under "Additional application settings" → "HTTP Settings":
+#      - Set "HTTP Host Header" to: localhost
+#   5. Save
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: cloudflare-tunnel
+  labels:
+    app: cloudflared
+    component: networking
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+        component: networking
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+      - name: cloudflared
+        image: cloudflare/cloudflared:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+        args:
+        - tunnel
+        - --no-autoupdate
+        - --metrics
+        - 0.0.0.0:2000
+        - run
+        - --token
+        - $(TUNNEL_TOKEN)
+        env:
+        - name: TUNNEL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: cloudflare-tunnel-credentials
+              key: TUNNEL_TOKEN
+        ports:
+        - containerPort: 2000
+          name: metrics
+          protocol: TCP
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 2000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /ready
+            port: 2000
+          initialDelaySeconds: 10
+          periodSeconds: 15

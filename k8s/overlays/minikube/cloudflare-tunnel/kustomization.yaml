@@ -1,0 +1,11 @@
+# Cloudflare Tunnel for Minikube — Public internet access via cloudflared
+# Optional addon, not part of main deployment
+# Apply with: kubectl apply -k k8s/overlays/minikube/cloudflare-tunnel
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - cloudflare-tunnel-namespace.yaml
+  - cloudflare-tunnel-deployment.yaml
+  - credentials.yaml

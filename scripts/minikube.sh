@@ -2,6 +2,9 @@
 # Tesslate Studio - Minikube Management (Swiss Knife)
 # Usage: scripts/minikube.sh <command> [options]
 #
+# Setup:
+#   init               Generate secret files from examples (run first)
+#
 # Lifecycle:
 #   start              Start minikube cluster and deploy all services
 #   stop               Stop minikube (preserves state)
@@ -23,6 +26,12 @@
 #   status             Show cluster state and URLs
 #   tunnel             Start minikube tunnel (foreground, blocks)
 #   test [name]        Run integration tests (s3-sandwich|pod-affinity)
+#
+# Cloudflare Tunnel (optional):
+#   cf start           Deploy cloudflared tunnel connector
+#   cf stop            Remove tunnel connector
+#   cf status          Show tunnel connector status
+#   cf logs            Tail cloudflared logs
 
 set -euo pipefail
 
@@ -179,10 +188,90 @@ build_and_load() {
   success "$img loaded"
 }
 
+# ── Init (secret generation) ──────────────────────────────────────────
+
+# All secret files that must exist before 'start' can run.
+# Format: "source_example_path:destination_path:short_label"
+STACK_SECRETS=(
+  "k8s/overlays/minikube/secrets/postgres-secret.example.yaml:k8s/overlays/minikube/secrets/postgres-secret.yaml:postgres-secret"
+  "k8s/overlays/minikube/secrets/s3-credentials.example.yaml:k8s/overlays/minikube/secrets/s3-credentials.yaml:s3-credentials"
+  "k8s/overlays/minikube/secrets/app-secrets.example.yaml:k8s/overlays/minikube/secrets/app-secrets.yaml:app-secrets"
+  "k8s/overlays/minikube/minio/credentials.example.yaml:k8s/overlays/minikube/minio/credentials.yaml:minio-credentials"
+  "services/btrfs-csi/overlays/minikube/csi-credentials.example.yaml:services/btrfs-csi/overlays/minikube/csi-credentials.yaml:csi-credentials"
+)
+
+# Generate secret files from examples. Returns number of NEW files created.
+_init_secrets() {
+  local -n entries=$1
+  local created=0
+  local skipped=0
+
+  for entry in "${entries[@]}"; do
+    IFS=':' read -r src dst label <<< "$entry"
+    if [[ -f "$PROJECT_ROOT/$dst" ]]; then
+      skipped=$((skipped + 1))
+    elif [[ -f "$PROJECT_ROOT/$src" ]]; then
+      cp "$PROJECT_ROOT/$src" "$PROJECT_ROOT/$dst"
+      warn "Created $label → $dst"
+      created=$((created + 1))
+    else
+      error "Example file not found: $src"
+      exit 1
+    fi
+  done
+
+  if [[ $created -eq 0 ]]; then
+    info "All secret files already exist ($skipped skipped)"
+  else
+    echo ""
+    warn "$created file(s) created from examples. Edit them with your values before running 'start'."
+  fi
+  return $created
+}
+
+# Validate that all secrets exist and none contain obvious placeholders.
+_ensure_secrets() {
+  local -n entries=$1
+  local missing=()
+
+  for entry in "${entries[@]}"; do
+    IFS=':' read -r _ dst label <<< "$entry"
+    if [[ ! -f "$PROJECT_ROOT/$dst" ]]; then
+      missing+=("$label ($dst)")
+    fi
+  done
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    error "Missing secret files. Run 'scripts/minikube.sh init' first."
+    for m in "${missing[@]}"; do
+      echo "  - $m"
+    done
+    exit 1
+  fi
+}
+
+cmd_init() {
+  header "Initializing Tesslate Studio secrets"
+  _init_secrets STACK_SECRETS
+
+  echo ""
+  info "Files to edit:"
+  echo "  k8s/overlays/minikube/secrets/app-secrets.yaml        (LiteLLM, OAuth, Stripe, domain)"
+  echo "  k8s/overlays/minikube/secrets/postgres-secret.yaml    (database password)"
+  echo "  k8s/overlays/minikube/secrets/s3-credentials.yaml     (S3/MinIO keys)"
+  echo "  k8s/overlays/minikube/minio/credentials.yaml          (MinIO root password)"
+  echo "  services/btrfs-csi/overlays/minikube/csi-credentials.yaml  (CSI S3 config)"
+  echo ""
+  info "Then run: scripts/minikube.sh start"
+}
+
 cmd_start() {
   header "Starting Tesslate Studio (Minikube)"
 
   ensure_docker
+
+  # Validate secrets exist (no auto-copy — user must run 'init' first)
+  _ensure_secrets STACK_SECRETS
 
   # Start or resume minikube (driver auto-detected or set via MINIKUBE_DRIVER)
   if minikube status -p "$PROFILE" 2>/dev/null | grep -q "Running"; then
@@ -215,44 +304,6 @@ cmd_start() {
       build_and_load "$svc"
     fi
   done
-
-  # Ensure K8s secrets exist (gitignored, must be generated from examples)
-  local secrets_dir="$PROJECT_ROOT/k8s/overlays/minikube/secrets"
-  for secret in postgres-secret s3-credentials app-secrets; do
-    if [[ ! -f "$secrets_dir/${secret}.yaml" ]]; then
-      if [[ -f "$secrets_dir/${secret}.example.yaml" ]]; then
-        cp "$secrets_dir/${secret}.example.yaml" "$secrets_dir/${secret}.yaml"
-        warn "Created ${secret}.yaml from example. Edit k8s/overlays/minikube/secrets/${secret}.yaml with your values."
-      else
-        error "Missing $secrets_dir/${secret}.yaml and no example found."
-        exit 1
-      fi
-    fi
-  done
-
-  # MinIO credentials live alongside the minio overlay
-  local minio_dir="$PROJECT_ROOT/k8s/overlays/minikube/minio"
-  if [[ ! -f "$minio_dir/credentials.yaml" ]]; then
-    if [[ -f "$minio_dir/credentials.example.yaml" ]]; then
-      cp "$minio_dir/credentials.example.yaml" "$minio_dir/credentials.yaml"
-      warn "Created minio credentials.yaml from example. Edit k8s/overlays/minikube/minio/credentials.yaml with your values."
-    else
-      error "Missing $minio_dir/credentials.yaml and no example found."
-      exit 1
-    fi
-  fi
-
-  # CSI credentials (MinIO S3 config for btrfs-csi)
-  local csi_dir="$PROJECT_ROOT/services/btrfs-csi/overlays/minikube"
-  if [[ ! -f "$csi_dir/csi-credentials.yaml" ]]; then
-    if [[ -f "$csi_dir/csi-credentials.example.yaml" ]]; then
-      cp "$csi_dir/csi-credentials.example.yaml" "$csi_dir/csi-credentials.yaml"
-      warn "Created csi-credentials.yaml from example. Edit services/btrfs-csi/overlays/minikube/csi-credentials.yaml with your values."
-    else
-      error "Missing $csi_dir/csi-credentials.yaml and no example found."
-      exit 1
-    fi
-  fi
 
   # ── Deploy manifests in dependency order ──────────────────────────────
   # Each layer is a standalone kustomization — no inline YAML or patching.
@@ -602,6 +653,150 @@ cmd_reset() {
   success "Reset complete"
 }
 
+# ── Cloudflare Tunnel (optional addon) ─────────────────────────────────
+
+cmd_cf() {
+  local subcmd="${1:-}"
+  shift || true
+
+  case "$subcmd" in
+    init)   cmd_cf_init "$@" ;;
+    start)  cmd_cf_start "$@" ;;
+    stop)   cmd_cf_stop "$@" ;;
+    status) cmd_cf_status "$@" ;;
+    logs)   cmd_cf_logs "$@" ;;
+    *)
+      echo "Usage: $(basename "$0") cf <init|start|stop|status|logs>"
+      echo ""
+      echo "Cloudflare Tunnel (optional addon):"
+      echo "  cf init     Generate credentials file (run first)"
+      echo "  cf start    Deploy cloudflared connector"
+      echo "  cf stop     Remove cloudflared connector"
+      echo "  cf status   Show tunnel pod status"
+      echo "  cf logs     Tail cloudflared logs"
+      ;;
+  esac
+}
+
+CF_SECRETS=(
+  "k8s/overlays/minikube/cloudflare-tunnel/credentials.example.yaml:k8s/overlays/minikube/cloudflare-tunnel/credentials.yaml:cloudflare-tunnel"
+)
+
+cmd_cf_init() {
+  header "Initializing Cloudflare Tunnel credentials"
+  _init_secrets CF_SECRETS
+
+  echo ""
+  info "Step 1: Cloudflare Dashboard"
+  echo "  1. Go to https://one.dash.cloudflare.com → Networks → Tunnels"
+  echo "  2. Create a tunnel, copy the token"
+  echo "  3. Paste the token into: k8s/overlays/minikube/cloudflare-tunnel/credentials.yaml"
+  echo "  4. Add a public hostname in the tunnel config:"
+  echo "       Type: HTTP"
+  echo "       URL:  ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+  echo "       HTTP Host Header: localhost"
+  echo ""
+  info "Step 2: Update app-secrets for your tunnel domain"
+  echo "  Edit: k8s/overlays/minikube/secrets/app-secrets.yaml"
+  echo ""
+  echo "  APP_DOMAIN:          \"your-tunnel-domain.com\""
+  echo "  APP_BASE_URL:        \"https://your-tunnel-domain.com\""
+  echo "  DEV_SERVER_BASE_URL: \"https://your-tunnel-domain.com\""
+  echo "  CORS_ORIGINS:        \"http://localhost,https://your-tunnel-domain.com\""
+  echo "  ALLOWED_HOSTS:       \"localhost,your-tunnel-domain.com\""
+  echo "  COOKIE_DOMAIN:       \"\"  (empty — works for any domain)"
+  echo "  COOKIE_SECURE:       \"true\"  (CF tunnel uses HTTPS)"
+  echo ""
+  warn "After editing secrets, restart the backend: scripts/minikube.sh restart backend"
+  echo ""
+  info "Then run: scripts/minikube.sh cf start"
+}
+
+cmd_cf_start() {
+  ensure_docker
+  ensure_minikube
+
+  header "Starting Cloudflare Tunnel"
+
+  # Validate credentials exist (no auto-copy — user must run 'cf init' first)
+  _ensure_secrets CF_SECRETS
+
+  # Check that the token has been changed from the placeholder
+  local cf_dir="$PROJECT_ROOT/k8s/overlays/minikube/cloudflare-tunnel"
+  if grep -q "your-tunnel-token-here" "$cf_dir/credentials.yaml"; then
+    error "Tunnel token is still the placeholder value."
+    echo "  Edit: k8s/overlays/minikube/cloudflare-tunnel/credentials.yaml"
+    exit 1
+  fi
+
+  # Verify ingress-nginx is running (cloudflared routes through it)
+  if ! kubectl get service ingress-nginx-controller -n ingress-nginx &>/dev/null; then
+    error "ingress-nginx is not deployed. Ensure minikube was started with --addons ingress."
+    echo "  Run: minikube addons enable ingress -p $PROFILE"
+    exit 1
+  fi
+
+  # Apply manifests
+  kubectl apply -k k8s/overlays/minikube/cloudflare-tunnel
+  info "Waiting for cloudflared..."
+  kubectl rollout status deployment/cloudflared -n cloudflare-tunnel --timeout=60s
+
+  success "Cloudflare Tunnel is running"
+  echo ""
+  info "Ensure your Cloudflare dashboard route points to:"
+  echo "  Service URL:    http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+  echo "  Host Header:    localhost"
+}
+
+cmd_cf_stop() {
+  ensure_minikube
+
+  header "Stopping Cloudflare Tunnel"
+
+  if kubectl get namespace cloudflare-tunnel &>/dev/null; then
+    kubectl delete -k k8s/overlays/minikube/cloudflare-tunnel
+    success "Cloudflare Tunnel removed"
+  else
+    info "Cloudflare Tunnel is not deployed"
+  fi
+}
+
+cmd_cf_status() {
+  ensure_minikube
+
+  header "Cloudflare Tunnel Status"
+
+  if ! kubectl get namespace cloudflare-tunnel &>/dev/null; then
+    info "Cloudflare Tunnel is not deployed"
+    echo "  Run: scripts/minikube.sh cf start"
+    return
+  fi
+
+  kubectl get pods -n cloudflare-tunnel -o wide
+  echo ""
+
+  # Show pod readiness
+  local ready
+  ready=$(kubectl get pods -n cloudflare-tunnel -l app=cloudflared -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+  if [[ "$ready" == "True" ]]; then
+    success "Tunnel connector is healthy"
+  else
+    warn "Tunnel connector is not ready (status: $ready)"
+  fi
+}
+
+cmd_cf_logs() {
+  ensure_minikube
+
+  if ! kubectl get namespace cloudflare-tunnel &>/dev/null; then
+    error "Cloudflare Tunnel is not deployed"
+    echo "  Run: scripts/minikube.sh cf start"
+    exit 1
+  fi
+
+  kubectl logs -f -n cloudflare-tunnel deployment/cloudflared
+}
+
 _print_mk_urls() {
   header "Access URLs"
   echo "  Frontend:        http://localhost"
@@ -613,6 +808,9 @@ _print_mk_urls() {
 
 _usage() {
   echo "Usage: $(basename "$0") <command> [options]"
+  echo ""
+  echo "Setup:"
+  echo "  init               Generate secret files from examples (run first)"
   echo ""
   echo "Lifecycle:"
   echo "  start              Start minikube cluster and deploy all services"
@@ -635,6 +833,13 @@ _usage() {
   echo "  tunnel             Start minikube tunnel (foreground)"
   echo "  test [name]        Run integration tests (s3-sandwich|pod-affinity)"
   echo ""
+  echo "Cloudflare Tunnel (optional):"
+  echo "  cf init            Generate tunnel credentials file"
+  echo "  cf start           Deploy cloudflared tunnel connector"
+  echo "  cf stop            Remove tunnel connector"
+  echo "  cf status          Show tunnel status"
+  echo "  cf logs            Tail cloudflared logs"
+  echo ""
   echo "Services: backend, frontend, worker, postgres, redis, devserver, btrfs-csi"
 }
 
@@ -643,6 +848,7 @@ main() {
   shift || true
 
   case "$cmd" in
+    init)           cmd_init "$@" ;;
     start)          cmd_start "$@" ;;
     stop)           cmd_stop "$@" ;;
     down)           cmd_down "$@" ;;
@@ -658,6 +864,7 @@ main() {
     tunnel)         cmd_tunnel "$@" ;;
     test)           cmd_test "$@" ;;
     reset)          cmd_reset "$@" ;;
+    cf)             cmd_cf "$@" ;;
     --help|-h|"")   _usage ;;
     *)
       error "Unknown command: $cmd"

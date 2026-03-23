@@ -6,7 +6,7 @@ metadata:
   name: frontend-config
   namespace: tesslate
 data:
-  # Local API URL (minikube doesn't use domain variable)
-  api-url: "http://localhost"
+  # Empty = relative URLs (works from any origin: localhost, CF tunnel, etc.)
+  api-url: ""
   # PostHog host (same for all environments)
   posthog-host: "https://app.posthog.com"

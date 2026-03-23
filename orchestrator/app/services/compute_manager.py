@@ -1059,7 +1059,11 @@ class ComputeManager:
             )
             await k8s.create_ingress(ingress, namespace)
 
-            protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+            protocol = (
+                "https"
+                if (settings.k8s_wildcard_tls_secret or settings.app_base_url.startswith("https"))
+                else "http"
+            )
             hostname = f"{project.slug}-{container_directory}.{settings.app_domain}"
             preview_url = f"{protocol}://{hostname}"
             container_urls[container_directory] = preview_url
