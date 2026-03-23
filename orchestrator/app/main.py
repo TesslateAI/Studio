@@ -47,6 +47,7 @@ from .routers import (
     shell,
     snapshots,
     tasks,
+    teams,
     terminal,
     themes,
     two_fa,
@@ -1136,6 +1137,7 @@ app.include_router(external_agent.router)  # /api/external - External agent API 
 app.include_router(channels.router, tags=["channels"])  # /api/channels - Messaging channels
 app.include_router(mcp.router, tags=["mcp"])  # /api/mcp - MCP server management
 app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoint
+app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 app.include_router(internal.router, prefix="/api")  # /api/internal - Cluster-internal endpoints
 
