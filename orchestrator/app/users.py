@@ -234,6 +234,87 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             except Exception as e:
                 logger.error(f"Failed to track referral conversion: {e}")
 
+        # Create personal team (RBAC)
+        await self._create_personal_team(user)
+
+        # Auto-accept any pending team invitations matching this email
+        await self._auto_accept_pending_invites(user)
+
+    async def _create_personal_team(self, user):
+        """Create a personal team for a newly registered user."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        try:
+            from .models_team import Team, TeamMembership
+
+            team = Team(
+                name=f"{user.name}'s Team",
+                slug=f"{user.slug}-team",
+                is_personal=True,
+                created_by_id=user.id,
+                subscription_tier=user.subscription_tier or "free",
+                daily_credits=user.daily_credits or 0,
+                signup_bonus_credits=user.signup_bonus_credits or 0,
+                signup_bonus_expires_at=user.signup_bonus_expires_at,
+            )
+            self.user_db.session.add(team)
+            await self.user_db.session.flush()
+
+            membership = TeamMembership(
+                team_id=team.id,
+                user_id=user.id,
+                role="admin",
+            )
+            self.user_db.session.add(membership)
+            user.default_team_id = team.id
+            await self.user_db.session.commit()
+            logger.info(f"Created personal team for user {user.username}: {team.slug}")
+        except Exception as e:
+            logger.error(f"Failed to create personal team for {user.username}: {e}")
+
+    async def _auto_accept_pending_invites(self, user):
+        """Auto-accept any pending team invitations matching this user's email."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        try:
+            from datetime import UTC, datetime
+
+            from sqlalchemy import and_, select
+
+            from .models_team import TeamInvitation, TeamMembership
+
+            result = await self.user_db.session.execute(
+                select(TeamInvitation).where(
+                    and_(
+                        TeamInvitation.email == user.email,
+                        TeamInvitation.accepted_at.is_(None),
+                        TeamInvitation.revoked_at.is_(None),
+                        TeamInvitation.expires_at > datetime.now(UTC),
+                    )
+                )
+            )
+            invites = result.scalars().all()
+            for invite in invites:
+                if invite.max_uses is not None and invite.use_count >= invite.max_uses:
+                    continue
+                membership = TeamMembership(
+                    team_id=invite.team_id,
+                    user_id=user.id,
+                    role=invite.role,
+                    invited_by_id=invite.invited_by_id,
+                )
+                self.user_db.session.add(membership)
+                invite.accepted_at = datetime.now(UTC)
+                invite.accepted_by_id = user.id
+                invite.use_count += 1
+            if invites:
+                await self.user_db.session.commit()
+                logger.info(f"Auto-accepted {len(invites)} pending invite(s) for {user.email}")
+        except Exception as e:
+            logger.error(f"Failed to auto-accept invites for {user.email}: {e}")
+
     async def on_after_login(
         self, user: User, request: Request | None = None, response: Response | None = None
     ):
