@@ -995,7 +995,7 @@ fi
             )
 
             # Build URL helper
-            protocol = "https" if self.settings.k8s_wildcard_tls_secret else "http"
+            protocol = self.settings.k8s_container_url_protocol
             app_domain = self.settings.app_domain
 
             container_statuses = {}

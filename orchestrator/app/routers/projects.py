@@ -940,7 +940,7 @@ async def get_container_status(
                     .replace("_", "-")
                     .replace(".", "-")
                 )
-                protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+                protocol = settings.k8s_container_url_protocol
                 container_url = f"{protocol}://{container_dir}.{project_slug}.{settings.app_domain}"
 
             return {
@@ -5032,7 +5032,7 @@ async def _start_container_background_task(
                     # Docker mode always uses HTTP on localhost
                     container_url = f"http://{project.slug}-{svc}.{settings.app_domain}"
                 else:
-                    protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+                    protocol = settings.k8s_container_url_protocol
                     container_url = f"{protocol}://{project.slug}-{svc}.{settings.app_domain}"
             task.add_log(f"Container '{container.name}' is already running at {container_url}")
             logger.info(f"[COMPOSE] Container {container.name} already running, skipping startup")
@@ -5152,7 +5152,7 @@ async def _start_container_background_task(
                     # Docker mode always uses HTTP on localhost
                     container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
                 else:
-                    protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+                    protocol = settings.k8s_container_url_protocol
                     container_url = (
                         f"{protocol}://{project.slug}-{sanitized_name}.{settings.app_domain}"
                     )
@@ -5622,7 +5622,7 @@ async def _restart_container_background_task(
                 # Docker mode always uses HTTP on localhost
                 container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
             else:
-                protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+                protocol = settings.k8s_container_url_protocol
                 container_url = (
                     f"{protocol}://{project.slug}-{sanitized_name}.{settings.app_domain}"
                 )

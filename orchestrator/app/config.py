@@ -410,8 +410,12 @@ class Settings(BaseSettings):
 
     @property
     def k8s_container_url_protocol(self) -> str:
-        """Get the protocol for container URLs based on TLS configuration."""
-        return "https" if self.k8s_wildcard_tls_secret else "http"
+        """Get the protocol for container URLs based on TLS or external proxy (e.g. CF tunnel)."""
+        if self.k8s_wildcard_tls_secret:
+            return "https"
+        if self.app_base_url.startswith("https"):
+            return "https"
+        return "http"
 
     # Kubernetes Namespace Configuration
     k8s_default_namespace: str = "tesslate"
