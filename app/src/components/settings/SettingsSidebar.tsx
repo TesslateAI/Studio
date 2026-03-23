@@ -5,10 +5,13 @@ import { Tooltip } from '../ui/Tooltip';
 import {
   ArrowLeft,
   User,
+  Users,
   Settings,
   Shield,
   Cloud,
   CreditCard,
+  Coins,
+  FileText,
   ChevronLeft,
   ChevronRight,
   KeyRound,
@@ -37,6 +40,15 @@ const navSections: NavSection[] = [
       { label: 'Profile', path: '/settings/profile', icon: User },
       { label: 'Preferences', path: '/settings/preferences', icon: Settings },
       { label: 'Security', path: '/settings/security', icon: Shield },
+    ],
+  },
+  {
+    title: 'TEAM',
+    items: [
+      { label: 'General', path: '/settings/team', icon: Users },
+      { label: 'Members', path: '/settings/team/members', icon: User },
+      { label: 'Team Billing', path: '/settings/team/billing', icon: Coins },
+      { label: 'Audit Log', path: '/settings/team/audit-log', icon: FileText },
     ],
   },
   {
