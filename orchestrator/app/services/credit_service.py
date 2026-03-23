@@ -50,9 +50,12 @@ def is_byok_model(model_name: str) -> bool:
     return any(model_name.startswith(p) for p in _get_byok_prefixes())
 
 
-async def check_credits(user, model_name: str) -> tuple[bool, str]:
+async def check_credits(user, model_name: str, team=None) -> tuple[bool, str]:
     """
-    Pre-request guard: verify user has credits before making an LLM call.
+    Pre-request guard: verify credits before making an LLM call.
+
+    Checks team credits first (if team provided), falls back to user credits
+    for backward compatibility during migration.
 
     Returns:
         (True, "") if user can proceed.
@@ -61,7 +64,9 @@ async def check_credits(user, model_name: str) -> tuple[bool, str]:
     if is_byok_model(model_name):
         return True, ""
 
-    if user.total_credits <= 0:
+    # Check team credits if available, otherwise fall back to user
+    credit_source = team if team is not None else user
+    if credit_source.total_credits <= 0:
         return False, (
             "You have no credits remaining. "
             "Please purchase credits or upgrade your plan to continue using AI features."
@@ -78,9 +83,13 @@ async def deduct_credits(
     tokens_out: int,
     agent_id: UUID | None = None,
     project_id: UUID | None = None,
+    team_id: UUID | None = None,
 ) -> dict:
     """
-    Deduct credits from user balance and create a UsageLog entry.
+    Deduct credits from team (or user) balance and create a UsageLog entry.
+
+    When team_id is provided, locks and deducts from the Team row.
+    Falls back to user-level deduction for backward compatibility.
 
     Uses SELECT FOR UPDATE to prevent race conditions on concurrent requests.
     Deduction priority: daily → bundled → signup_bonus → purchased.
@@ -88,6 +97,7 @@ async def deduct_credits(
     Returns dict with cost_total, credits_deducted, new_balance, usage_log_id.
     """
     from ..models import UsageLog, User
+    from ..models_team import Team
 
     byok = is_byok_model(model_name)
 
@@ -99,58 +109,78 @@ async def deduct_credits(
             model_name, tokens_in, tokens_out
         )
 
+    # Resolve team_id from project or user if not explicitly provided
+    resolved_team_id = team_id
+    if not resolved_team_id and project_id:
+        from ..models import Project
+
+        proj_result = await db.execute(select(Project.team_id).where(Project.id == project_id))
+        resolved_team_id = proj_result.scalar_one_or_none()
+    if not resolved_team_id:
+        user_result = await db.execute(select(User.default_team_id).where(User.id == user_id))
+        resolved_team_id = user_result.scalar_one_or_none()
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # Lock the user row to prevent concurrent deduction races
-            result = await db.execute(select(User).where(User.id == user_id).with_for_update())
-            user = result.scalar_one()
-
             credits_deducted = 0
+
+            # Deduct from team if we have one, otherwise fall back to user
+            if resolved_team_id:
+                result = await db.execute(
+                    select(Team).where(Team.id == resolved_team_id).with_for_update()
+                )
+                credit_source = result.scalar_one()
+            else:
+                result = await db.execute(
+                    select(User).where(User.id == user_id).with_for_update()
+                )
+                credit_source = result.scalar_one()
 
             if not byok and cost_total > 0:
                 remaining = cost_total
 
                 # 1. Daily credits first
-                daily = user.daily_credits or 0
+                daily = credit_source.daily_credits or 0
                 if daily > 0 and remaining > 0:
                     take = min(daily, remaining)
-                    user.daily_credits = daily - take
+                    credit_source.daily_credits = daily - take
                     remaining -= take
                     credits_deducted += take
 
                 # 2. Bundled credits (monthly allowance)
-                bundled = user.bundled_credits or 0
+                bundled = credit_source.bundled_credits or 0
                 if bundled > 0 and remaining > 0:
                     take = min(bundled, remaining)
-                    user.bundled_credits = bundled - take
+                    credit_source.bundled_credits = bundled - take
                     remaining -= take
                     credits_deducted += take
 
                 # 3. Signup bonus credits (if not expired)
-                bonus = user.signup_bonus_credits or 0
+                bonus = credit_source.signup_bonus_credits or 0
                 if bonus > 0 and remaining > 0:
                     expired = (
-                        user.signup_bonus_expires_at
-                        and datetime.now(UTC) > user.signup_bonus_expires_at
+                        credit_source.signup_bonus_expires_at
+                        and datetime.now(UTC) > credit_source.signup_bonus_expires_at
                     )
                     if not expired:
                         take = min(bonus, remaining)
-                        user.signup_bonus_credits = bonus - take
+                        credit_source.signup_bonus_credits = bonus - take
                         remaining -= take
                         credits_deducted += take
 
                 # 4. Purchased credits (permanent, last resort)
-                purchased = user.purchased_credits or 0
+                purchased = credit_source.purchased_credits or 0
                 if purchased > 0 and remaining > 0:
                     take = min(purchased, remaining)
-                    user.purchased_credits = purchased - take
+                    credit_source.purchased_credits = purchased - take
                     remaining -= take
                     credits_deducted += take
 
-            # Create UsageLog entry (always, even for BYOK and 0-cost)
+            # Create UsageLog entry with both user_id (attribution) and team_id (billing)
             usage_log = UsageLog(
                 user_id=user_id,
+                team_id=resolved_team_id,
                 agent_id=agent_id,
                 project_id=project_id,
                 model=model_name,
@@ -179,10 +209,10 @@ async def deduct_credits(
             logger.error(f"Credit deduction failed after {max_retries} retries for user={user_id}")
             raise
 
-    new_balance = user.total_credits
+    new_balance = credit_source.total_credits
 
     logger.info(
-        f"Credit deduction: user={user_id} model={model_name} "
+        f"Credit deduction: user={user_id} team={resolved_team_id} model={model_name} "
         f"tokens_in={tokens_in} tokens_out={tokens_out} "
         f"cost={cost_total}¢ deducted={credits_deducted}¢ "
         f"balance={new_balance} byok={byok}"
