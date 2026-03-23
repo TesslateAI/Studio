@@ -1637,14 +1637,22 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             container = "file-manager"
 
             if not pod_name:
-                # Fall back to dev container
-                return await self.k8s_client.execute_command_in_pod(
-                    user_id=user_id,
-                    project_id=str(project_id),
-                    command=full_command,
-                    timeout=timeout,
-                    container_name=container_name,
+                # Fall back to any running dev container in the project namespace
+                pods = await asyncio.to_thread(
+                    self.k8s_client.core_v1.list_namespaced_pod,
+                    namespace=namespace,
+                    label_selector="app=dev-container",
                 )
+                running = [
+                    p for p in pods.items
+                    if p.status.phase == "Running"
+                ]
+                if not running:
+                    raise RuntimeError(
+                        "No running container found. Please start the development server first."
+                    )
+                pod_name = running[0].metadata.name
+                container = "dev-server"
 
             return await asyncio.to_thread(
                 self.k8s_client._exec_in_pod,

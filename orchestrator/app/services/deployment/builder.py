@@ -56,13 +56,19 @@ class DeploymentBuilder:
         container_name: str | None = None,
         volume_name: str | None = None,
         container_directory: str | None = None,
+        volume_id: str | None = None,
+        cache_node: str | None = None,
         # Deprecated params kept for backwards compat — ignored
         framework: str | None = None,
         project_settings: dict | None = None,
         deployment_mode: str | None = None,
     ) -> tuple[bool, str]:
         """
-        Trigger a build inside the project container.
+        Trigger a build in an ephemeral pod (K8s) or via exec (Docker).
+
+        In K8s mode, builds run in a separate ephemeral pod so the dev server
+        isn't interrupted and lock files don't conflict. The pod mounts the
+        same project volume and is cleaned up after the build completes.
 
         Args:
             user_id: User ID
@@ -72,6 +78,8 @@ class DeploymentBuilder:
             container_name: Specific container name to build in
             volume_name: Docker volume name
             container_directory: Subdirectory within the project
+            volume_id: Project volume ID (K8s — for ephemeral build pod)
+            cache_node: Node where volume is cached (K8s — for pod scheduling)
 
         Returns:
             Tuple of (success: bool, output: str)
@@ -92,47 +100,62 @@ class DeploymentBuilder:
             else:
                 work_dir = "/app"
 
-            # Execute build command in container using orchestrator
+            # Install deps safety net (only if node_modules is missing)
+            install_cmd = (
+                "if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install --frozen-lockfile; "
+                "elif [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; "
+                "else npm install --prefer-offline --no-audit; fi"
+            )
+
+            from ..orchestration import get_orchestrator, is_kubernetes_mode
+
+            orchestrator = get_orchestrator()
+            effective_container = container_name or project_slug
+
+            # Resolve actual project root on disk — container.directory
+            # may not match where files were cloned (e.g. directory="."
+            # but files live in /app/next-js-16/).
+            work_dir = await self._find_project_root(
+                orchestrator, user_id, project_id, effective_container, work_dir
+            )
+            logger.info(
+                f"Running build command: {build_command} (work_dir: {work_dir})"
+            )
+
+            full_cmd = (
+                f"set -e && mkdir -p {work_dir} && cd {work_dir} "
+                f"&& export NODE_ENV=production "
+                f"&& ([ -d node_modules ] || ({install_cmd})) "
+                f"&& {build_command} "
+                f"&& echo BUILD_EXIT_CODE=0"
+            )
+
             try:
-                from ..orchestration import get_orchestrator
+                if is_kubernetes_mode() and volume_id and cache_node:
+                    # K8s: run build in an ephemeral pod so it doesn't conflict
+                    # with the running dev server (no lock files, no port conflicts)
+                    from ..compute_manager import get_compute_manager
 
-                orchestrator = get_orchestrator()
-                effective_container = container_name or project_slug
-                logger.info(f"Executing build in container: {effective_container}")
-
-                # Resolve actual project root on disk — container.directory
-                # may not match where files were cloned (e.g. directory="."
-                # but files live in /app/next-js-16/).
-                work_dir = await self._find_project_root(
-                    orchestrator, user_id, project_id, effective_container, work_dir
-                )
-                logger.info(
-                    f"Running build command in container: {build_command} (work_dir: {work_dir})"
-                )
-
-                # Install deps safety net (only if node_modules is missing)
-                # Detect package manager from lockfile: bun.lock → bun, pnpm-lock.yaml → pnpm, else npm
-                install_cmd = (
-                    "if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install --frozen-lockfile; "
-                    "elif [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; "
-                    "else npm install --prefer-offline --no-audit; fi"
-                )
-
-                full_cmd = (
-                    f"set -e && mkdir -p {work_dir} && cd {work_dir} "
-                    f"&& ([ -d node_modules ] || ({install_cmd})) "
-                    f"&& {build_command} "
-                    f"&& echo BUILD_EXIT_CODE=0"
-                )
-
-                # Use orchestrator's execute_command method which handles both Docker and K8s
-                output = await orchestrator.execute_command(
-                    user_id=UUID(user_id),
-                    project_id=UUID(project_id),
-                    container_name=effective_container,
-                    command=["/bin/sh", "-c", full_cmd],
-                    timeout=300,
-                )
+                    cm = get_compute_manager()
+                    logger.info(
+                        f"[BUILD] Using ephemeral pod for build (volume={volume_id}, node={cache_node})"
+                    )
+                    output, exit_code, pod_name = await cm.run_command(
+                        volume_id=volume_id,
+                        node_name=cache_node,
+                        command=["/bin/sh", "-c", full_cmd],
+                        timeout=300,
+                    )
+                    logger.info(f"[BUILD] Ephemeral pod {pod_name} finished (exit={exit_code})")
+                else:
+                    # Docker mode: exec into the running container
+                    output = await orchestrator.execute_command(
+                        user_id=UUID(user_id),
+                        project_id=UUID(project_id),
+                        container_name=effective_container,
+                        command=["/bin/sh", "-c", full_cmd],
+                        timeout=300,
+                    )
             except RuntimeError as e:
                 error_msg = f"Build failed: {str(e)}"
                 logger.error(error_msg)

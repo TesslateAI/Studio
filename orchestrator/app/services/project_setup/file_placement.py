@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
-from ...services.base_config_parser import TesslateProjectConfig, write_tesslate_config
+from ...services.base_config_parser import TesslateProjectConfig, serialize_config_to_json, write_tesslate_config
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +137,7 @@ async def _place_kubernetes(
         if write_config:
             import json
 
-            config_data = _config_to_dict(config)
-            config_json = json.dumps(config_data, indent=2) + "\n"
+            config_json = serialize_config_to_json(config)
             await client.write_file(volume_id, ".tesslate/config.json", config_json.encode("utf-8"))
 
     logger.info(f"[PLACEMENT] Wrote {files_written} files to volume {volume_id}")
@@ -149,26 +148,3 @@ async def _place_kubernetes(
     return PlacedFiles(volume_id=volume_id, node_name=node_name)
 
 
-def _config_to_dict(config: TesslateProjectConfig) -> dict:
-    """Convert TesslateProjectConfig to dict for JSON serialization."""
-    data = {"apps": {}, "infrastructure": {}, "primaryApp": config.primaryApp}
-    for name, app in config.apps.items():
-        app_data = {
-            "directory": app.directory,
-            "port": app.port,
-            "start": app.start,
-            "env": app.env,
-        }
-        if app.x is not None:
-            app_data["x"] = app.x
-        if app.y is not None:
-            app_data["y"] = app.y
-        data["apps"][name] = app_data
-    for name, infra in config.infrastructure.items():
-        infra_data = {"image": infra.image, "port": infra.port}
-        if infra.x is not None:
-            infra_data["x"] = infra.x
-        if infra.y is not None:
-            infra_data["y"] = infra.y
-        data["infrastructure"][name] = infra_data
-    return data

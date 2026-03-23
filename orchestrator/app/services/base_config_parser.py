@@ -373,6 +373,12 @@ def _config_to_dict(config: TesslateProjectConfig) -> dict[str, Any]:
             "start": app.start,
             "env": app.env,
         }
+        if app.build:
+            app_data["build"] = app.build
+        if app.output:
+            app_data["output"] = app.output
+        if app.framework:
+            app_data["framework"] = app.framework
         if app.exports:
             app_data["exports"] = app.exports
         if app.x is not None:

@@ -403,6 +403,8 @@ async def deploy_project(
                     volume_name=project.slug,
                     container_directory=build_directory,
                     deployment_mode=deployment_mode,
+                    volume_id=project.volume_id,
+                    cache_node=project.cache_node,
                 )
 
                 if not success:
@@ -681,6 +683,8 @@ async def deploy_all_containers(
                     volume_name=project.slug,
                     container_directory=resolved_directory,
                     deployment_mode=deployment_mode,
+                    volume_id=project.volume_id,
+                    cache_node=project.cache_node,
                 )
 
                 if not success:
@@ -1373,6 +1377,8 @@ async def deploy_single_container_endpoint(
                 volume_name=project.slug,
                 container_directory=resolved_directory,
                 deployment_mode=deployment_mode,
+                volume_id=project.volume_id,
+                cache_node=project.cache_node,
             )
 
             if not success:

@@ -239,6 +239,10 @@ class Container(ContainerBase):
     credentials_id: UUID | None = None
     injected_env_vars: list[InjectedEnvVar] | None = None
     service_outputs: dict[str, str] | None = None
+    startup_command: str | None = None
+    build_command: str | None = None
+    output_directory: str | None = None
+    framework: str | None = None
     deployment_provider: str | None = None  # 'vercel' | 'netlify' | 'cloudflare' | None
     icon: str | None = None
     tech_stack: list[str] | None = None

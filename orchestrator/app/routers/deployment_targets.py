@@ -202,16 +202,21 @@ def build_target_response(
     connected_containers: list[ContainerSummary],
     deployment_history: list[DeploymentSummary],
     is_connected_override: bool | None = None,
+    created_at_override=None,
+    updated_at_override=None,
 ) -> DeploymentTargetResponse:
     """Build a response object for a deployment target.
 
     Args:
         is_connected_override: If provided, uses this value instead of target.is_connected.
-            Used to reflect live credential status rather than the stale stored value.
+        created_at_override: Pre-fetched created_at to avoid lazy-load after mutation.
+        updated_at_override: Pre-fetched updated_at to avoid lazy-load after mutation.
     """
     is_connected = (
         is_connected_override if is_connected_override is not None else target.is_connected
     )
+    created_at = created_at_override if created_at_override is not None else target.created_at
+    updated_at = updated_at_override if updated_at_override is not None else target.updated_at
     provider_info = get_provider_info(target.provider)
     return DeploymentTargetResponse(
         id=target.id,
@@ -236,8 +241,8 @@ def build_target_response(
         ),
         connected_containers=connected_containers,
         deployment_history=deployment_history,
-        created_at=target.created_at.isoformat() if target.created_at else "",
-        updated_at=target.updated_at.isoformat() if target.updated_at else "",
+        created_at=created_at.isoformat() if created_at else "",
+        updated_at=updated_at.isoformat() if updated_at else "",
     )
 
 
@@ -332,13 +337,17 @@ async def list_deployment_targets(
         # Dynamically compute is_connected from live credentials
         live_is_connected = target.provider in connected_providers
 
+        # Capture timestamps before any modification (mutations expire attributes
+        # in async SQLAlchemy, causing MissingGreenlet on later access)
+        target_created_at = target.created_at
+        target_updated_at = target.updated_at
+
         # Sync stale DB value if it diverged (credential added/removed after target creation)
         if target.is_connected != live_is_connected:
             target.is_connected = live_is_connected
             target.credential_id = (
                 connected_providers.get(target.provider) if live_is_connected else None
             )
-            # Non-blocking: commit happens at end
         # Get connected containers
         connected = []
         for conn in target.connected_containers:
@@ -391,7 +400,10 @@ async def list_deployment_targets(
 
         responses.append(
             build_target_response(
-                target, connected, history, is_connected_override=live_is_connected
+                target, connected, history,
+                is_connected_override=live_is_connected,
+                created_at_override=target_created_at,
+                updated_at_override=target_updated_at,
             )
         )
 
@@ -864,6 +876,8 @@ async def deploy_target(
                     volume_name=project.slug,
                     container_directory=resolved_directory,
                     deployment_mode=deployment_mode,
+                    volume_id=project.volume_id,
+                    cache_node=project.cache_node,
                 )
                 if not success:
                     raise Exception(f"Build failed: {build_output}")

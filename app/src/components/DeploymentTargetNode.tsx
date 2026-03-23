@@ -1,5 +1,6 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type Node } from '@xyflow/react';
+import { DEPLOYMENT_PROVIDERS, getProviderConfig } from '../lib/deployment-providers';
 import {
   Rocket,
   X,
@@ -95,83 +96,16 @@ export function getDeployType(provider: string): DeployType {
   return 'source';
 }
 
-// Provider logos/icons
-const PROVIDER_LOGOS: Record<string, string> = {
-  vercel: '▲',
-  netlify: '◆',
-  cloudflare: '🔥',
-  digitalocean: '🌊',
-  railway: '🚂',
-  fly: '✈️',
-  heroku: '🟣',
-  render: '🔷',
-  koyeb: '🟢',
-  zeabur: '⚡',
-  northflank: '🔶',
-  'github-pages': '📄',
-  surge: '🌊',
-  'deno-deploy': '🦕',
-  firebase: '🔥',
-  'aws-apprunner': '☁️',
-  'gcp-cloudrun': '☁️',
-  'azure-container-apps': '☁️',
-  'do-container': '🌊',
-  dockerhub: '🐳',
-  ghcr: '📦',
-  download: '💾',
-};
-
-// Provider display names
-const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  vercel: 'Vercel',
-  netlify: 'Netlify',
-  cloudflare: 'Cloudflare Pages',
-  digitalocean: 'DigitalOcean App Platform',
-  railway: 'Railway',
-  fly: 'Fly.io',
-  heroku: 'Heroku',
-  render: 'Render',
-  koyeb: 'Koyeb',
-  zeabur: 'Zeabur',
-  northflank: 'Northflank',
-  'github-pages': 'GitHub Pages',
-  surge: 'Surge',
-  'deno-deploy': 'Deno Deploy',
-  firebase: 'Firebase Hosting',
-  'aws-apprunner': 'AWS App Runner',
-  'gcp-cloudrun': 'GCP Cloud Run',
-  'azure-container-apps': 'Azure Container Apps',
-  'do-container': 'DO Container Apps',
-  dockerhub: 'Docker Hub',
-  ghcr: 'GitHub Container Registry',
-  download: 'Download / Export',
-};
-
-// Provider colors
-const PROVIDER_COLORS: Record<string, string> = {
-  vercel: '#000000',
-  netlify: '#00C7B7',
-  cloudflare: '#F38020',
-  digitalocean: '#0080FF',
-  railway: '#0B0D0E',
-  fly: '#7B3FE4',
-  heroku: '#430098',
-  render: '#46E3B7',
-  koyeb: '#121212',
-  zeabur: '#6C5CE7',
-  northflank: '#01E277',
-  'github-pages': '#222222',
-  surge: '#D93472',
-  'deno-deploy': '#000000',
-  firebase: '#FFCA28',
-  'aws-apprunner': '#FF9900',
-  'gcp-cloudrun': '#4285F4',
-  'azure-container-apps': '#0078D4',
-  'do-container': '#0080FF',
-  dockerhub: '#2496ED',
-  ghcr: '#222222',
-  download: '#6B7280',
-};
+// Derived from centralized provider config
+const PROVIDER_LOGOS: Record<string, string> = Object.fromEntries(
+  Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [k, v.icon])
+);
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = Object.fromEntries(
+  Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [k, v.displayName])
+);
+const PROVIDER_COLORS: Record<string, string> = Object.fromEntries(
+  Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [k, v.color])
+);
 
 // Status colors and icons
 const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
