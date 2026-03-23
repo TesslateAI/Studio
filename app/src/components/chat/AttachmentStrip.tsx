@@ -11,8 +11,8 @@ export function AttachmentStrip({ attachments, onRemove }: AttachmentStripProps)
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-[var(--border)]">
-      {attachments.map((att) => {
-        const key = 'id' in att ? att.id : `${att.type}-${att.file_path || att.label || Math.random()}`;
+      {attachments.map((att, idx) => {
+        const key = 'id' in att ? att.id : `${att.type}-${att.file_path || att.label || idx}`;
         return (
           <AttachmentChip
             key={key}

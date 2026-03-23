@@ -98,25 +98,28 @@ async def _get_cached_model_pricing() -> dict[str, dict[str, float]]:
 
 async def _get_cached_model_vision_support() -> dict[str, bool]:
     """Build a model-id → supports_vision map using litellm's model metadata."""
-    cache_key = "model_vision_support"
-    cached = await cache.get(cache_key)
-    if cached is not None:
-        return cached
+    try:
+        cache_key = "model_vision_support"
+        cached = await cache.get(cache_key)
+        if cached is not None:
+            return cached
 
-    import litellm
+        import litellm
 
-    litellm_models = await _get_cached_litellm_models()
-    vision_map: dict[str, bool] = {}
-    for model in litellm_models:
-        model_id = model.get("id", "")
-        if model_id:
-            try:
-                vision_map[model_id] = litellm.supports_vision(model=model_id)
-            except Exception:
-                vision_map[model_id] = False
+        litellm_models = await _get_cached_litellm_models()
+        vision_map: dict[str, bool] = {}
+        for model in litellm_models:
+            model_id = model.get("id", "")
+            if model_id:
+                try:
+                    vision_map[model_id] = litellm.supports_vision(model=model_id)
+                except Exception:
+                    vision_map[model_id] = False
 
-    await cache.set(cache_key, vision_map, ttl=_MODELS_CACHE_TTL)
-    return vision_map
+        await cache.set(cache_key, vision_map, ttl=_MODELS_CACHE_TTL)
+        return vision_map
+    except Exception:
+        return {}
 
 
 # ============================================================================

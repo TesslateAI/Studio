@@ -23,6 +23,11 @@ export function useChatSessions({ standalone = true }: UseChatSessionsOptions = 
   const [isLoading, setIsLoading] = useState(true);
 
   const mountedRef = useRef(true);
+  const currentSessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -111,7 +116,7 @@ export function useChatSessions({ standalone = true }: UseChatSessionsOptions = 
       setSessions((prev) => {
         const remaining = prev.filter((s) => s.id !== sessionId);
         // If we deleted the current session, switch to the first remaining
-        if (sessionId === currentSessionId && remaining.length > 0) {
+        if (sessionId === currentSessionIdRef.current && remaining.length > 0) {
           setCurrentSessionId(remaining[0].id);
         } else if (remaining.length === 0) {
           setCurrentSessionId(null);
@@ -121,7 +126,7 @@ export function useChatSessions({ standalone = true }: UseChatSessionsOptions = 
     } catch (err) {
       console.error('[SESSIONS] Failed to delete session:', err);
     }
-  }, [currentSessionId]);
+  }, []);
 
   const switchSession = useCallback((sessionId: string) => {
     setCurrentSessionId(sessionId);

@@ -21,10 +21,7 @@ export function FilePickerDropdown({ slug, query, onSelect, onClose }: FilePicke
 
   // Fetch file tree once
   useEffect(() => {
-    if (filesCache.current) {
-      setFiles(filesCache.current);
-      return;
-    }
+    filesCache.current = null;
     let cancelled = false;
     projectsApi.getFileTree(slug).then((tree) => {
       if (cancelled) return;

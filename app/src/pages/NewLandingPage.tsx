@@ -359,11 +359,11 @@ export default function NewLandingPage() {
       return;
     }
 
-    localStorage.setItem('landingPrompt', message.trim());
     const token = localStorage.getItem('token');
     if (token) {
-      navigate('/chat');
+      navigate('/chat', { state: { landingPrompt: message.trim() } });
     } else {
+      localStorage.setItem('landingPrompt', message.trim());
       navigate('/register');
     }
   }, [message, navigate]);

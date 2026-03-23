@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { ChatAttachment, SerializedAttachment, AttachmentType } from '../types/agent';
 
 export function useAttachments() {
@@ -59,6 +59,13 @@ export function useAttachments() {
     objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     objectUrlsRef.current = [];
     setAttachments([]);
+  }, []);
+
+  // Revoke any remaining object URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    };
   }, []);
 
   const serializeForSend = useCallback(async (): Promise<SerializedAttachment[]> => {

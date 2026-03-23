@@ -200,7 +200,7 @@ export function ChatInput({
   // Stabilize the reference: avoid re-creating slashCommands when availableSkills
   // is undefined/empty (which would cause an infinite render loop via the
   // useEffect that depends on slashCommands).
-  const stableSkills = availableSkills ?? EMPTY_SKILLS;
+  const stableSkills = availableSkills?.length ? availableSkills : EMPTY_SKILLS;
   const slashCommands = useMemo(() => {
     const builtIn = [
       { command: '/clear', description: 'Clear chat history', isSkill: false },
@@ -213,16 +213,6 @@ export function ChatInput({
     }));
     return [...builtIn, ...skillCommands];
   }, [stableSkills]);
-
-  // Check for landing page prompt on component mount
-  useEffect(() => {
-    const landingPrompt = localStorage.getItem('landingPrompt');
-    if (landingPrompt) {
-      setMessage(landingPrompt);
-      // Clear the prompt after using it
-      localStorage.removeItem('landingPrompt');
-    }
-  }, []);
 
   // Handle prefill message from external triggers (e.g. "Ask Agent" button)
   useEffect(() => {
@@ -318,8 +308,9 @@ export function ChatInput({
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Up arrow - navigate backwards through history
     if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      if (messageHistory.length > 0) {
+      const atStart = !textareaRef.current || textareaRef.current.selectionStart === 0;
+      if (atStart && messageHistory.length > 0) {
+        e.preventDefault();
         const newIndex =
           historyIndex === -1 ? messageHistory.length - 1 : Math.max(0, historyIndex - 1);
         setHistoryIndex(newIndex);
@@ -328,8 +319,9 @@ export function ChatInput({
     }
     // Down arrow - navigate forwards through history
     else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      if (historyIndex > -1) {
+      const atEnd = !textareaRef.current || textareaRef.current.selectionStart === textareaRef.current.value.length;
+      if (atEnd && historyIndex > -1) {
+        e.preventDefault();
         const newIndex = historyIndex + 1;
         if (newIndex >= messageHistory.length) {
           setHistoryIndex(-1);

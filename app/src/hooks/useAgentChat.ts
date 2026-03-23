@@ -72,8 +72,36 @@ export function useAgentChat({
     return () => { isMountedRef.current = false; };
   }, []);
 
-  // Load chat history when chatId changes
+  // Active task reconnection EventSource ref
+  const activeEventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevChatIdRef = useRef<string | null>(null);
+
+  // Load chat history + reconnect to active agent task when chatId changes
   useEffect(() => {
+    const prevChatId = prevChatIdRef.current;
+    prevChatIdRef.current = chatId;
+
+    // Only abort/reset when switching BETWEEN sessions (oldId → newId),
+    // NOT on initial session creation (null → newId) which may coincide
+    // with an in-flight sendMessage that already set the controller.
+    if (prevChatId !== null && prevChatId !== chatId) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      if (activeEventSourceRef.current) {
+        activeEventSourceRef.current.close();
+        activeEventSourceRef.current = null;
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      isExecutingRef.current = false;
+      setIsExecuting(false);
+    }
+
     if (!chatId) {
       setMessages([]);
       return;
@@ -85,12 +113,12 @@ export function useAgentChat({
 
     let cancelled = false;
 
-    const loadHistory = async () => {
+    const loadHistory = async (): Promise<ChatMessage[]> => {
       setIsLoadingHistory(true);
       try {
         const dbMessages = await chatApi.getStandaloneMessages(chatId);
 
-        if (cancelled) return;
+        if (cancelled) return [];
 
         const expandedMessages: ChatMessage[] = [];
         dbMessages.forEach((msg, idx) => {
@@ -158,25 +186,235 @@ export function useAgentChat({
         });
 
         setMessages(expandedMessages);
+        return expandedMessages;
       } catch (err) {
         console.error('[CHAT] Failed to load history:', err);
         if (!cancelled) setMessages([]);
+        return [];
       } finally {
         if (!cancelled) setIsLoadingHistory(false);
       }
     };
 
-    loadHistory();
+    // Check for active agent task and reconnect to its SSE stream
+    const checkActiveTask = async (currentMessages: ChatMessage[]) => {
+      if (cancelled) return;
+      try {
+        // Use empty string for projectId — backend accepts it for standalone chats
+        const activeTask = await chatApi.getActiveTask('', chatId);
+        if (!activeTask?.task_id || cancelled) return;
 
-    return () => { cancelled = true; };
-  }, [chatId, projectId]);
+        isExecutingRef.current = true;
+        setIsExecuting(true);
+        agentTaskIdRef.current = activeTask.task_id;
+
+        const thinkingId = `reconnect-${activeTask.task_id}`;
+
+        // Only add thinking placeholder if history didn't already have one
+        const alreadyHasPlaceholder = currentMessages.some(
+          (m) => m.agentData?.completion_reason === 'in_progress'
+        );
+        if (!alreadyHasPlaceholder) {
+          setMessages((prev) => [...prev, {
+            id: thinkingId,
+            type: 'ai',
+            content: '',
+            agentData: {
+              steps: [],
+              iterations: 0,
+              tool_calls_made: 0,
+              completion_reason: 'in_progress',
+            },
+            agentIcon: agent.icon,
+            agentAvatarUrl: agent.avatar_url,
+            agentType: agent.name,
+          }]);
+        }
+
+        // Subscribe to live events via EventSource (SSE)
+        const eventSource = chatApi.subscribeToTask(activeTask.task_id);
+        activeEventSourceRef.current = eventSource;
+
+        const cleanupReconnect = () => {
+          if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+          eventSource.close();
+          activeEventSourceRef.current = null;
+          if (!cancelled) {
+            isExecutingRef.current = false;
+            setIsExecuting(false);
+            agentTaskIdRef.current = null;
+          }
+        };
+
+        // Safety timeout: if no events within 30s, task is likely stale
+        const resetSafetyTimeout = () => {
+          if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            cleanupReconnect();
+            if (!cancelled) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === thinkingId && m.agentData?.completion_reason === 'in_progress'
+                    ? { ...m, agentData: { ...m.agentData!, completion_reason: 'error' } }
+                    : m
+                )
+              );
+            }
+          }, 30000);
+        };
+        resetSafetyTimeout();
+
+        eventSource.onmessage = (event) => {
+          if (cancelled) return;
+          try {
+            const data = JSON.parse(event.data);
+            resetSafetyTimeout();
+
+            if (data.type === 'agent_step') {
+              const transformedStep = {
+                ...data.data,
+                tool_calls:
+                  (data.data.tool_calls as Array<{ name: string; parameters: unknown }>)?.map(
+                    (tc: { name: string; parameters: unknown }, index: number) => ({
+                      name: tc.name,
+                      parameters: tc.parameters,
+                      result: (data.data.tool_results as unknown[])?.[index] || {},
+                    })
+                  ) || [],
+              };
+              delete transformedStep.tool_results;
+
+              const stepMessage: ChatMessage = {
+                id: `msg-${crypto.randomUUID()}-step-${data.data.iteration}`,
+                type: 'ai',
+                content: '',
+                agentData: {
+                  steps: [transformedStep],
+                  iterations: (data.data.iteration as number) || 0,
+                  tool_calls_made: (data.data.tool_calls as unknown[])?.length || 0,
+                  completion_reason: 'step_complete',
+                },
+                agentIcon: agent.icon,
+                agentAvatarUrl: agent.avatar_url,
+                agentType: agent.name,
+              };
+              setMessages((prev) => {
+                const withoutThinking = prev.filter((m) => m.id !== thinkingId);
+                return [...withoutThinking, stepMessage, {
+                  id: thinkingId,
+                  type: 'ai',
+                  content: '',
+                  agentData: { steps: [], iterations: 0, tool_calls_made: 0, completion_reason: 'in_progress' },
+                  agentIcon: agent.icon,
+                  agentAvatarUrl: agent.avatar_url,
+                  agentType: agent.name,
+                }];
+              });
+            } else if (data.type === 'approval_required') {
+              const approvalData = data.data || data;
+              if (editModeRef.current === 'allow') {
+                chatApi.sendApprovalResponse(approvalData.approval_id, 'allow_all')
+                  .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
+              } else {
+                setMessages((prev) => [...prev, {
+                  id: `approval-${crypto.randomUUID()}`,
+                  type: 'approval_request',
+                  content: '',
+                  approvalId: approvalData.approval_id,
+                  toolName: approvalData.tool_name,
+                  toolParameters: approvalData.tool_parameters,
+                  toolDescription: approvalData.tool_description,
+                }]);
+              }
+            } else if (data.type === 'chat_title') {
+              const title = data.data.title as string;
+              const titleChatId = data.data.chat_id as string;
+              if (title && titleChatId && onTitleGeneratedRef.current) {
+                onTitleGeneratedRef.current(titleChatId, title);
+              }
+            } else if (data.type === 'credits_used') {
+              window.dispatchEvent(
+                new CustomEvent('credits-updated', {
+                  detail: { newBalance: data.data.new_balance, creditsUsed: data.data.credits_deducted },
+                })
+              );
+            } else if (data.type === 'complete') {
+              setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+              const completeData = data.data || {};
+              const finalContent = completeData.final_response || '';
+              if (finalContent && finalContent.trim()) {
+                setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.agentData) {
+                    return [...prev.slice(0, -1), { ...lastMsg, content: finalContent }];
+                  }
+                  return [...prev, {
+                    id: `msg-${crypto.randomUUID()}-result`,
+                    type: 'ai',
+                    content: finalContent,
+                    agentData: { steps: [], iterations: 0, tool_calls_made: 0, completion_reason: 'complete' },
+                    agentIcon: agent.icon,
+                    agentAvatarUrl: agent.avatar_url,
+                    agentType: agent.name,
+                  }];
+                });
+              }
+              cleanupReconnect();
+            } else if (data.type === 'error') {
+              const errorMsg = data.data?.message || 'Agent execution failed';
+              setMessages((prev) => {
+                const withoutThinking = prev.filter((m) => m.id !== thinkingId);
+                return [...withoutThinking, {
+                  id: `msg-${crypto.randomUUID()}-error`,
+                  type: 'ai',
+                  content: `I encountered an error: ${errorMsg}`,
+                  agentData: { steps: [], iterations: 0, tool_calls_made: 0, completion_reason: 'error' },
+                  agentIcon: agent.icon,
+                  agentAvatarUrl: agent.avatar_url,
+                  agentType: agent.name,
+                }];
+              });
+              cleanupReconnect();
+            } else if (data.type === 'done') {
+              cleanupReconnect();
+            }
+          } catch {
+            // ignore parse errors
+          }
+        };
+
+        eventSource.onerror = () => {
+          cleanupReconnect();
+          if (!cancelled) {
+            setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+          }
+        };
+      } catch {
+        // No active task — that's fine
+      }
+    };
+
+    // Sequential: load history first, then check for active task
+    loadHistory().then((msgs) => {
+      if (!cancelled) checkActiveTask(msgs);
+    });
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (activeEventSourceRef.current) {
+        activeEventSourceRef.current.close();
+        activeEventSourceRef.current = null;
+      }
+    };
+  }, [chatId, agent]);
 
   const sendMessage = useCallback(async (message: string, overrideChatId?: string, attachments?: SerializedAttachment[]) => {
     const effectiveChatId = overrideChatId || chatId;
     if ((!message.trim() && (!attachments || attachments.length === 0)) || isExecuting || !effectiveChatId) return;
 
     const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: `msg-${crypto.randomUUID()}`,
       type: 'user',
       content: message,
       attachments,
@@ -188,7 +426,7 @@ export function useAgentChat({
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    const thinkingMessageId = `msg-${Date.now()}-thinking`;
+    const thinkingMessageId = `msg-${crypto.randomUUID()}-thinking`;
     const thinkingMessage: ChatMessage = {
       id: thinkingMessageId,
       type: 'ai',
@@ -238,7 +476,7 @@ export function useAgentChat({
             delete transformedStep.tool_results;
 
             const stepMessage: ChatMessage = {
-              id: `msg-${Date.now()}-step-${event.data.iteration}`,
+              id: `msg-${crypto.randomUUID()}-step-${event.data.iteration}`,
               type: 'ai',
               content: '',
               agentData: {
@@ -284,7 +522,7 @@ export function useAgentChat({
                 return [
                   ...prev,
                   {
-                    id: `msg-${Date.now()}-error`,
+                    id: `msg-${crypto.randomUUID()}-error`,
                     type: 'ai',
                     content: errorContent,
                     agentData: {
@@ -310,7 +548,7 @@ export function useAgentChat({
                   return [
                     ...prev,
                     {
-                      id: `msg-${Date.now()}-result`,
+                      id: `msg-${crypto.randomUUID()}-result`,
                       type: 'ai',
                       content: finalContent,
                       agentData: {
@@ -359,7 +597,7 @@ export function useAgentChat({
                 .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
             } else {
               const approvalMessage: ChatMessage = {
-                id: `approval-${Date.now()}`,
+                id: `approval-${crypto.randomUUID()}`,
                 type: 'approval_request',
                 content: '',
                 approvalId: event.data.approval_id as string,
@@ -399,7 +637,7 @@ export function useAgentChat({
         return [
           ...withoutThinking,
           {
-            id: `msg-${Date.now()}-error`,
+            id: `msg-${crypto.randomUUID()}-error`,
             type: 'ai',
             content: 'I encountered an error while working on your request. Please try again.',
           },

@@ -65,7 +65,8 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
   const location = useLocation();
   const [isExpanded, setIsExpanded] = useState(() => {
     const saved = localStorage.getItem('navigationSidebarExpanded');
-    return saved !== null ? JSON.parse(saved) : true;
+    if (saved === null) return true;
+    try { return JSON.parse(saved); } catch { return true; }
   });
   const [subscriptionTier, setSubscriptionTier] = useState<string>('free');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);

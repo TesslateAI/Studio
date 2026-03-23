@@ -93,6 +93,7 @@ function AgentConfigPanel({
                   pricing: (obj.pricing as { input: number; output: number }) || null,
                   health: (obj.health as ModelInfo['health']) ?? undefined,
                   disabled: (obj.disabled as boolean) ?? false,
+                  supports_vision: (obj.supports_vision as boolean) ?? undefined,
                 }
               : null;
           })

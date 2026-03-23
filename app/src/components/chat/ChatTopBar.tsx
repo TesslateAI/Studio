@@ -1,4 +1,5 @@
-import { PanelLeft } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { PanelLeft, House } from 'lucide-react';
 import { ProjectConnector } from './ProjectConnector';
 
 interface ChatTopBarProps {
@@ -27,6 +28,13 @@ export function ChatTopBar({
     >
       {/* Left: sidebar toggle + title */}
       <div className="flex items-center gap-2 min-w-0">
+        <Link
+          to="/dashboard"
+          className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
+          aria-label="Back to Dashboard"
+        >
+          <House size={14} />
+        </Link>
         {!isSidebarOpen && (
           <button
             onClick={onToggleSidebar}

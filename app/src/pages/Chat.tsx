@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ChatSessionSidebar } from '../components/chat/ChatSessionSidebar';
 import { ChatTopBar } from '../components/chat/ChatTopBar';
@@ -27,6 +28,12 @@ export default function Chat() {
     icon: '',
   });
 
+  // Landing prompt from router state (replaces localStorage)
+  const location = useLocation();
+  const [landingPrompt] = useState<string | null>(
+    () => (location.state as Record<string, unknown>)?.landingPrompt as string || null
+  );
+
   // Vision support map (fetched once from models endpoint)
   const [modelVisionMap, setModelVisionMap] = useState<Record<string, boolean>>({});
 
@@ -46,23 +53,11 @@ export default function Chat() {
   const currentModelId = currentAgent.selectedModel || currentAgent.model;
   const currentModelSupportsVision = currentModelId ? modelVisionMap[currentModelId] : undefined;
 
-  // Edit mode (persisted)
-  const [editMode, setEditMode] = useState<EditMode>(() => {
-    const stored = localStorage.getItem('chatPageEditMode');
-    return stored === 'ask' || stored === 'allow' || stored === 'plan' ? stored : 'ask';
-  });
-  useEffect(() => {
-    localStorage.setItem('chatPageEditMode', editMode);
-  }, [editMode]);
+  // Edit mode
+  const [editMode, setEditMode] = useState<EditMode>('ask');
 
-  // Sidebar state (persisted)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    const stored = localStorage.getItem('chatSessionSidebarOpen');
-    return stored !== null ? JSON.parse(stored) : true;
-  });
-  useEffect(() => {
-    localStorage.setItem('chatSessionSidebarOpen', JSON.stringify(isSidebarOpen));
-  }, [isSidebarOpen]);
+  // Sidebar state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Auto-close sidebar on mobile
   useEffect(() => {
@@ -138,20 +133,42 @@ export default function Chat() {
         }));
         if (agentList.length > 0) {
           setAgents(agentList);
-          // Restore last-used agent from localStorage, fall back to first
-          const savedSlug = localStorage.getItem('chatPageAgentSlug');
-          const restored = savedSlug ? agentList.find((a) => a.id === savedSlug) : null;
-          setCurrentAgent(restored || agentList[0]);
+          setCurrentAgent(agentList[0]);
         }
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
-  // Persist agent selection
+  // Fetch installed skills for the current agent (slash command autocomplete)
+  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
+
+  useEffect(() => {
+    if (!currentAgent.backendId) {
+      setAvailableSkills([]);
+      return;
+    }
+    let cancelled = false;
+    marketplaceApi
+      .getAgentSkills(currentAgent.backendId.toString())
+      .then((data) => {
+        if (!cancelled) {
+          setAvailableSkills(
+            (data.skills || []).map((s: { name: string; description: string }) => ({
+              name: s.name,
+              description: s.description,
+            }))
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableSkills([]);
+      });
+    return () => { cancelled = true; };
+  }, [currentAgent.backendId]);
+
   const handleSelectAgent = useCallback((agent: ChatAgent) => {
     setCurrentAgent(agent);
-    localStorage.setItem('chatPageAgentSlug', agent.id);
   }, []);
 
   // Handle new session
@@ -260,11 +277,11 @@ export default function Chat() {
       {/* Session Sidebar — overlay on mobile, inline on desktop */}
       {isSidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/40 z-40 md:hidden"
+          className="fixed inset-0 bg-black/40 z-20 md:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
-      <div className={`${isSidebarOpen ? 'fixed inset-y-0 left-0 z-50 md:relative md:inset-auto' : ''}`}>
+      <div className={`${isSidebarOpen ? 'fixed inset-y-0 left-0 z-30 md:relative md:inset-auto' : ''}`}>
         <ChatSessionSidebar
           sessions={sessions}
           currentSessionId={currentSessionId}
@@ -305,12 +322,16 @@ export default function Chat() {
                 onSelectAgent={handleSelectAgent}
                 onSendMessage={handleSendMessage}
                 disabled={isLoadingSessions}
-                isExecuting={false}
+                isExecuting={isExecuting}
                 onStop={stopExecution}
+                onClearHistory={clearMessages}
                 editMode={editMode}
                 onModeChange={setEditMode}
                 onModelChange={handleModelChange}
                 currentModelSupportsVision={currentModelSupportsVision}
+                availableSkills={availableSkills}
+                prefillMessage={landingPrompt}
+                onPrefillConsumed={() => {}}
               />
             </div>
             <div className="flex flex-wrap gap-2 mt-4 max-w-2xl justify-center">
@@ -344,11 +365,13 @@ export default function Chat() {
                 disabled={isLoadingHistory || isLoadingSessions}
                 isExecuting={isExecuting}
                 onStop={stopExecution}
+                onClearHistory={clearMessages}
                 editMode={editMode}
                 onModeChange={setEditMode}
                 onModelChange={handleModelChange}
-                isDocked
                 currentModelSupportsVision={currentModelSupportsVision}
+                availableSkills={availableSkills}
+                isDocked
               />
             </div>
           </>
