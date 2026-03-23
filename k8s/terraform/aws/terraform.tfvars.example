@@ -183,6 +183,18 @@ smtp_sender_email = ""
 two_fa_enabled    = false
 
 # -----------------------------------------------------------------------------
+# Email Compliance (Optional)
+# -----------------------------------------------------------------------------
+# Allowlist: comma-separated exact domains (e.g., "acme.com,partner.org").
+# When non-empty, ONLY these domains can register/login. Empty = open.
+allowed_email_domains = ""
+
+# Blocklist: comma-separated domain suffix patterns to block.
+# Supports TLD suffixes (.xx), exact domains (blocked.example), or any combo.
+# Empty = no blocking (default for open-source).
+blocked_email_domains = ""
+
+# -----------------------------------------------------------------------------
 # Frontend Configuration (Optional - Analytics)
 # -----------------------------------------------------------------------------
 # posthog_host = "https://app.posthog.com"

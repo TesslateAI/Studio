@@ -453,6 +453,18 @@ class Settings(BaseSettings):
     compute_reaper_max_age_seconds: int = 900  # 15 min — max pod age before reaping
 
     # ==========================================================================
+    # Email Compliance
+    # ==========================================================================
+    # Allowlist: comma-separated exact domains (e.g., "acme.com,partner.org").
+    # When non-empty, ONLY these domains can register/login. Empty = open.
+    allowed_email_domains: str = ""
+
+    # Blocklist: comma-separated domain suffix patterns to block.
+    # Supports TLD suffixes (.xx), exact domains (blocked.example), or any combo.
+    # When empty (default), no emails are blocked.
+    blocked_email_domains: str = ""
+
+    # ==========================================================================
     # SMTP Configuration (for 2FA email codes)
     # ==========================================================================
     smtp_host: str = ""

@@ -455,6 +455,21 @@ variable "posthog_key" {
 }
 
 # -----------------------------------------------------------------------------
+# Email Compliance
+# -----------------------------------------------------------------------------
+variable "allowed_email_domains" {
+  description = "Comma-separated exact email domains allowed to register/login (empty = open to all)"
+  type        = string
+  default     = ""
+}
+
+variable "blocked_email_domains" {
+  description = "Comma-separated email domain patterns to block at login/registration (empty = disabled)"
+  type        = string
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
 # Discord Notifications
 # -----------------------------------------------------------------------------
 variable "discord_webhook_url" {

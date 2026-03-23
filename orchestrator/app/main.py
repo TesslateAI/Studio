@@ -821,6 +821,10 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
                     detail="OAUTH_NOT_AVAILABLE_EMAIL",
                 )
 
+            from .compliance import enforce_email_compliance
+
+            enforce_email_compliance(account_email)
+
             # Fetch profile picture URL from OAuth provider (non-blocking)
             avatar_url: str | None = None
             try:

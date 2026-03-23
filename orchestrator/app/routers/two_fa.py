@@ -56,6 +56,10 @@ async def custom_login(
     Accepts form-encoded username (email) and password,
     matching the fastapi-users login format.
     """
+    from ..compliance import enforce_email_compliance
+
+    enforce_email_compliance(username)
+
     from sqlalchemy import select
 
     from ..models_auth import User

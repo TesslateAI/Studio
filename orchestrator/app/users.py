@@ -293,6 +293,10 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         - Generate a referral code
         - Track referrer if provided
         """
+        from .compliance import enforce_email_compliance
+
+        enforce_email_compliance(user_create.email)
+
         # Call parent create to handle password hashing and validation
         await self.validate_password(user_create.password, user_create)
 
@@ -367,7 +371,11 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         """
         import logging
 
+        from .compliance import enforce_email_compliance
+
         logger = logging.getLogger(__name__)
+
+        enforce_email_compliance(account_email)
 
         # Try to get existing user by OAuth account
         # get_by_oauth_account returns the User object directly, not the OAuthAccount

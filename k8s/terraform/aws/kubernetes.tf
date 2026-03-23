@@ -254,6 +254,10 @@ resource "kubernetes_secret" "app_secrets" {
     # Database SSL (enabled when using RDS)
     DATABASE_SSL = tostring(var.create_rds)
 
+    # Email compliance (empty = disabled)
+    ALLOWED_EMAIL_DOMAINS = var.allowed_email_domains
+    BLOCKED_EMAIL_DOMAINS = var.blocked_email_domains
+
     # Discord notifications (empty = disabled, no PII sent)
     DISCORD_WEBHOOK_URL = var.discord_webhook_url
 
