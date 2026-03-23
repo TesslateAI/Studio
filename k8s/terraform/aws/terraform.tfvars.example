@@ -237,3 +237,33 @@ coredns_replicas       = 2
 # eks_admin_iam_arns = [
 #   "arn:aws:iam::123456789012:user/your-user"
 # ]
+
+# -----------------------------------------------------------------------------
+# Team Access Roles (no variables needed)
+# -----------------------------------------------------------------------------
+# Four scoped roles are created automatically: observer, deployer, debugger, admin.
+# Grant access via IAM groups -- no Terraform changes needed.
+#
+# After terraform apply, get the policy ARNs:
+#   terraform output assume_team_deployer_policy_arn
+#   terraform output assume_team_observer_policy_arn
+#   terraform output assume_team_debugger_policy_arn
+#
+# Onboard a team member:
+#   aws iam create-user --user-name tesslate-alice --path /team/
+#   aws iam create-access-key --user-name tesslate-alice
+#   aws iam add-user-to-group --user-name tesslate-alice \
+#     --group-name tesslate-beta-deployers
+#
+# Groups per environment (created by Terraform):
+#   tesslate-{env}-observers   -- read-only + logs
+#   tesslate-{env}-deployers   -- observer + deploy + ECR push
+#   tesslate-{env}-debuggers   -- deployer + kubectl exec
+#   tesslate-{env}-admins      -- full cluster admin
+#
+# Hierarchy: observer < deployer < debugger < admin
+# One group per user per environment is enough.
+#
+# Then they configure kubectl:
+#   aws eks update-kubeconfig --name <cluster> --region us-east-1 \
+#     --role-arn $(terraform output -raw team_deployer_role_arn)

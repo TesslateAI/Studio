@@ -166,6 +166,9 @@ locals {
     : module.vpc.private_subnets
   )
 
+  # EKS cluster ARN (used by team access role IAM policies)
+  cluster_arn = "arn:aws:eks:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/${local.cluster_name}"
+
   common_tags = {
     Project     = var.project_name
     Environment = var.environment

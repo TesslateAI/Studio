@@ -199,7 +199,34 @@ module "eks" {
           }
         }
       }
-    } : {}
+    } : {},
+    # Team access roles — mapped to K8s groups for custom RBAC
+    # Access controlled by attaching assume-policies to IAM users (no tfvars needed)
+    {
+      team_deployer = {
+        principal_arn     = aws_iam_role.team_deployer.arn
+        kubernetes_groups = ["tesslate:observers", "tesslate:deployers"]
+      }
+      team_observer = {
+        principal_arn     = aws_iam_role.team_observer.arn
+        kubernetes_groups = ["tesslate:observers"]
+      }
+      team_debugger = {
+        principal_arn     = aws_iam_role.team_debugger.arn
+        kubernetes_groups = ["tesslate:observers", "tesslate:deployers", "tesslate:debuggers"]
+      }
+      team_admin = {
+        principal_arn = aws_iam_role.team_admin.arn
+        policy_associations = {
+          admin = {
+            policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = {
+              type = "cluster"
+            }
+          }
+        }
+      }
+    },
   )
 
   # Node security group additional rules

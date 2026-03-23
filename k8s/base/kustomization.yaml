@@ -48,6 +48,7 @@ resources:
   # Security & RBAC
   - security/network-policies.yaml
   - security/rbac.yaml
+  - security/team-rbac.yaml
   - security/resource-quotas.yaml
 
 # Images that can be overridden by overlays

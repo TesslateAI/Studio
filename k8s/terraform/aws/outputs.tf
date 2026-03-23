@@ -43,6 +43,59 @@ output "eks_deployer_role_arn" {
   value       = aws_iam_role.eks_deployer.arn
 }
 
+# -----------------------------------------------------------------------------
+# Team Access Role Outputs
+# -----------------------------------------------------------------------------
+output "team_deployer_role_arn" {
+  description = "IAM role ARN for team deployer (deploy platform + read all)"
+  value       = aws_iam_role.team_deployer.arn
+}
+
+output "team_observer_role_arn" {
+  description = "IAM role ARN for team observer (read-only + CloudWatch Logs)"
+  value       = aws_iam_role.team_observer.arn
+}
+
+output "team_debugger_role_arn" {
+  description = "IAM role ARN for team debugger (observer + kubectl exec)"
+  value       = aws_iam_role.team_debugger.arn
+}
+
+output "assume_team_deployer_policy_arn" {
+  description = "Managed policy ARN -- attach to IAM users to grant deployer access"
+  value       = aws_iam_policy.assume_team_deployer.arn
+}
+
+output "assume_team_observer_policy_arn" {
+  description = "Managed policy ARN -- attach to IAM users to grant observer access"
+  value       = aws_iam_policy.assume_team_observer.arn
+}
+
+output "assume_team_debugger_policy_arn" {
+  description = "Managed policy ARN -- attach to IAM users to grant debugger access"
+  value       = aws_iam_policy.assume_team_debugger.arn
+}
+
+output "team_admin_role_arn" {
+  description = "IAM role ARN for team admin (full cluster admin)"
+  value       = aws_iam_role.team_admin.arn
+}
+
+output "assume_team_admin_policy_arn" {
+  description = "Managed policy ARN -- attach to IAM users to grant admin access"
+  value       = aws_iam_policy.assume_team_admin.arn
+}
+
+output "team_groups" {
+  description = "IAM group names for team access -- add users to these groups"
+  value = {
+    observers = aws_iam_group.team_observers.name
+    deployers = aws_iam_group.team_deployers.name
+    debuggers = aws_iam_group.team_debuggers.name
+    admins    = aws_iam_group.team_admins.name
+  }
+}
+
 output "cluster_certificate_authority_data" {
   description = "Base64 encoded certificate data for cluster authentication"
   value       = module.eks.cluster_certificate_authority_data

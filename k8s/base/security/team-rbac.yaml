@@ -1,0 +1,129 @@
+# RBAC Configuration for Team Access Roles
+# Defines scoped roles for team members: observer (read), deployer (deploy), debugger (exec)
+# IAM roles map to K8s groups via EKS access entries (see terraform/aws/eks.tf)
+
+---
+# ClusterRole: read-only access across all namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tesslate-team-reader
+  labels:
+    app: tesslate-studio
+    component: team-rbac
+rules:
+# Core resources
+- apiGroups: [""]
+  resources:
+    - pods
+    - pods/log
+    - services
+    - configmaps
+    - persistentvolumeclaims
+    - events
+    - namespaces
+    - nodes
+  verbs: ["get", "list", "watch"]
+# App resources
+- apiGroups: ["apps"]
+  resources:
+    - deployments
+    - replicasets
+  verbs: ["get", "list", "watch"]
+# Networking
+- apiGroups: ["networking.k8s.io"]
+  resources:
+    - ingresses
+  verbs: ["get", "list", "watch"]
+
+---
+# ClusterRoleBinding: observers group gets read-only everywhere
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tesslate-team-reader-binding
+  labels:
+    app: tesslate-studio
+    component: team-rbac
+subjects:
+- kind: Group
+  name: tesslate:observers
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: tesslate-team-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole: deploy actions (bound to tesslate namespace via RoleBinding)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tesslate-team-deployer
+  labels:
+    app: tesslate-studio
+    component: team-rbac
+rules:
+- apiGroups: ["apps"]
+  resources:
+    - deployments
+    - deployments/scale
+  verbs: ["patch", "update"]
+# Manual eviction of stuck pods during deploy troubleshooting
+- apiGroups: [""]
+  resources:
+    - pods
+  verbs: ["delete"]
+
+---
+# RoleBinding: deployers group gets deploy verbs in tesslate namespace only
+# Uses ClusterRole referenced by namespaced RoleBinding = permissions scoped to this namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tesslate-team-deployer-binding
+  namespace: tesslate
+  labels:
+    app: tesslate-studio
+    component: team-rbac
+subjects:
+- kind: Group
+  name: tesslate:deployers
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: tesslate-team-deployer
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole: kubectl exec into pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tesslate-team-debugger
+  labels:
+    app: tesslate-studio
+    component: team-rbac
+rules:
+- apiGroups: [""]
+  resources:
+    - pods/exec
+  verbs: ["create"]
+
+---
+# ClusterRoleBinding: debuggers group gets exec everywhere (including proj-* namespaces)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tesslate-team-debugger-binding
+  labels:
+    app: tesslate-studio
+    component: team-rbac
+subjects:
+- kind: Group
+  name: tesslate:debuggers
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: tesslate-team-debugger
+  apiGroup: rbac.authorization.k8s.io

@@ -280,6 +280,474 @@ resource "aws_iam_role" "eks_deployer" {
 }
 
 # =============================================================================
+# Team Access Roles -- scoped roles for team members per environment
+# =============================================================================
+# Four roles: observer, deployer, debugger, admin. Each maps to K8s groups
+# via EKS access entries (no EKS policy_associations -- custom K8s RBAC).
+# Deployer and debugger automatically include observer read permissions via
+# multi-group mapping in eks.tf access_entries.
+#
+# Trust policy: account root. Access is controlled by attaching the
+# corresponding "assume" managed policy to IAM users -- no Terraform needed
+# to onboard/offboard team members.
+#
+# Onboarding:
+#   1. aws iam create-user --user-name tesslate-alice --path /team/
+#   2. aws iam create-access-key --user-name tesslate-alice
+#   3. aws iam add-user-to-group --user-name tesslate-alice \
+#        --group-name tesslate-{env}-deployers
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Team Deployer -- deploy platform + read all
+# -----------------------------------------------------------------------------
+resource "aws_iam_role" "team_deployer" {
+  name = "${local.cluster_name}-team-deployer"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${local.cluster_name}-team-deployer"
+  })
+}
+
+resource "aws_iam_policy" "team_deployer" {
+  name        = "${local.cluster_name}-team-deployer"
+  description = "Team deployer: EKS describe + ECR push/pull"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "EKSDescribe"
+        Effect   = "Allow"
+        Action   = ["eks:DescribeCluster"]
+        Resource = local.cluster_arn
+      },
+      {
+        Sid      = "EKSList"
+        Effect   = "Allow"
+        Action   = ["eks:ListClusters"]
+        Resource = "*"
+      },
+      {
+        Sid      = "ECRAuth"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPushPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+        Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/tesslate-*"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "team_deployer" {
+  role       = aws_iam_role.team_deployer.name
+  policy_arn = aws_iam_policy.team_deployer.arn
+}
+
+# Managed policy: attach to IAM users to grant deployer access
+resource "aws_iam_policy" "assume_team_deployer" {
+  name        = "${local.cluster_name}-assume-team-deployer"
+  description = "Allows assuming the team deployer role for ${local.cluster_name}"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = aws_iam_role.team_deployer.arn
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+# -----------------------------------------------------------------------------
+# Team Observer -- read-only + CloudWatch Logs
+# -----------------------------------------------------------------------------
+resource "aws_iam_role" "team_observer" {
+  name = "${local.cluster_name}-team-observer"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${local.cluster_name}-team-observer"
+  })
+}
+
+resource "aws_iam_policy" "team_observer" {
+  name        = "${local.cluster_name}-team-observer"
+  description = "Team observer: EKS describe + CloudWatch Logs read"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "EKSDescribe"
+        Effect   = "Allow"
+        Action   = ["eks:DescribeCluster"]
+        Resource = local.cluster_arn
+      },
+      {
+        Sid      = "EKSList"
+        Effect   = "Allow"
+        Action   = ["eks:ListClusters"]
+        Resource = "*"
+      },
+      {
+        Sid      = "CloudWatchLogsDiscover"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+      },
+      {
+        Sid    = "CloudWatchLogsRead"
+        Effect = "Allow"
+        Action = [
+          "logs:GetLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:FilterLogEvents",
+        ]
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/${local.cluster_name}/*"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "team_observer" {
+  role       = aws_iam_role.team_observer.name
+  policy_arn = aws_iam_policy.team_observer.arn
+}
+
+# Managed policy: attach to IAM users to grant observer access
+resource "aws_iam_policy" "assume_team_observer" {
+  name        = "${local.cluster_name}-assume-team-observer"
+  description = "Allows assuming the team observer role for ${local.cluster_name}"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = aws_iam_role.team_observer.arn
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+# -----------------------------------------------------------------------------
+# Team Debugger -- deployer + kubectl exec (highest non-admin tier)
+# -----------------------------------------------------------------------------
+resource "aws_iam_role" "team_debugger" {
+  name = "${local.cluster_name}-team-debugger"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${local.cluster_name}-team-debugger"
+  })
+}
+
+resource "aws_iam_policy" "team_debugger" {
+  name        = "${local.cluster_name}-team-debugger"
+  description = "Team debugger: EKS describe + ECR push/pull + CloudWatch Logs read"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "EKSDescribe"
+        Effect   = "Allow"
+        Action   = ["eks:DescribeCluster"]
+        Resource = local.cluster_arn
+      },
+      {
+        Sid      = "EKSList"
+        Effect   = "Allow"
+        Action   = ["eks:ListClusters"]
+        Resource = "*"
+      },
+      {
+        Sid      = "ECRAuth"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPushPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+        Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/tesslate-*"
+      },
+      {
+        Sid      = "CloudWatchLogsDiscover"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+      },
+      {
+        Sid    = "CloudWatchLogsRead"
+        Effect = "Allow"
+        Action = [
+          "logs:GetLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:FilterLogEvents",
+        ]
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/${local.cluster_name}/*"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "team_debugger" {
+  role       = aws_iam_role.team_debugger.name
+  policy_arn = aws_iam_policy.team_debugger.arn
+}
+
+# Managed policy: attach to IAM users to grant debugger access
+resource "aws_iam_policy" "assume_team_debugger" {
+  name        = "${local.cluster_name}-assume-team-debugger"
+  description = "Allows assuming the team debugger role for ${local.cluster_name}"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = aws_iam_role.team_debugger.arn
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+# -----------------------------------------------------------------------------
+# Team Admin -- full cluster admin (debugger + secrets, RBAC, namespace mgmt)
+# -----------------------------------------------------------------------------
+# Hierarchy: observer < deployer < debugger < admin
+# Uses EKS AmazonEKSClusterAdminPolicy (same as eks_deployer) instead of
+# kubernetes_groups, so it gets full cluster admin without custom RBAC.
+# The existing eks_deployer role + eks_admin_iam_arns trust policy is kept
+# for backwards compatibility -- remove after verifying policy-attached model.
+# -----------------------------------------------------------------------------
+resource "aws_iam_role" "team_admin" {
+  name = "${local.cluster_name}-team-admin"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${local.cluster_name}-team-admin"
+  })
+}
+
+resource "aws_iam_policy" "team_admin" {
+  name        = "${local.cluster_name}-team-admin"
+  description = "Team admin: full cluster admin (EKS + ECR + CloudWatch Logs)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "EKSDescribe"
+        Effect   = "Allow"
+        Action   = ["eks:DescribeCluster"]
+        Resource = local.cluster_arn
+      },
+      {
+        Sid      = "EKSList"
+        Effect   = "Allow"
+        Action   = ["eks:ListClusters"]
+        Resource = "*"
+      },
+      {
+        Sid      = "ECRAuth"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPushPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+        Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/tesslate-*"
+      },
+      {
+        Sid      = "CloudWatchLogsDiscover"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+      },
+      {
+        Sid    = "CloudWatchLogsRead"
+        Effect = "Allow"
+        Action = [
+          "logs:GetLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:FilterLogEvents",
+        ]
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/${local.cluster_name}/*"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "team_admin" {
+  role       = aws_iam_role.team_admin.name
+  policy_arn = aws_iam_policy.team_admin.arn
+}
+
+# Managed policy: attach to IAM users to grant admin access
+resource "aws_iam_policy" "assume_team_admin" {
+  name        = "${local.cluster_name}-assume-team-admin"
+  description = "Allows assuming the team admin role for ${local.cluster_name}"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = aws_iam_role.team_admin.arn
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+# =============================================================================
+# Team Access Groups -- add users to groups instead of attaching policies directly
+# =============================================================================
+# Onboarding workflow:
+#   aws iam add-user-to-group --user-name alice \
+#     --group-name tesslate-production-deployers
+#
+# Hierarchy is built into the roles (observer < deployer < debugger < admin),
+# so a user only needs one group membership per environment.
+# =============================================================================
+
+resource "aws_iam_group" "team_observers" {
+  name = "${var.project_name}-${var.environment}-observers"
+  path = "/team/"
+}
+
+resource "aws_iam_group_policy_attachment" "team_observers" {
+  group      = aws_iam_group.team_observers.name
+  policy_arn = aws_iam_policy.assume_team_observer.arn
+}
+
+resource "aws_iam_group" "team_deployers" {
+  name = "${var.project_name}-${var.environment}-deployers"
+  path = "/team/"
+}
+
+resource "aws_iam_group_policy_attachment" "team_deployers" {
+  group      = aws_iam_group.team_deployers.name
+  policy_arn = aws_iam_policy.assume_team_deployer.arn
+}
+
+resource "aws_iam_group" "team_debuggers" {
+  name = "${var.project_name}-${var.environment}-debuggers"
+  path = "/team/"
+}
+
+resource "aws_iam_group_policy_attachment" "team_debuggers" {
+  group      = aws_iam_group.team_debuggers.name
+  policy_arn = aws_iam_policy.assume_team_debugger.arn
+}
+
+resource "aws_iam_group" "team_admins" {
+  name = "${var.project_name}-${var.environment}-admins"
+  path = "/team/"
+}
+
+resource "aws_iam_group_policy_attachment" "team_admins" {
+  group      = aws_iam_group.team_admins.name
+  policy_arn = aws_iam_policy.assume_team_admin.arn
+}
+
+# =============================================================================
 # GitHub Actions CI/CD IAM User
 # =============================================================================
 # Creates an IAM user with access keys for GitHub Actions deploy workflows.
