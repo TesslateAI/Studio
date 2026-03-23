@@ -33,6 +33,7 @@ class UserLogin(BaseModel):
 class User(UserBase):
     id: UUID
     is_active: bool
+    default_team_id: UUID | None = None
     created_at: datetime
 
     class Config:
@@ -144,6 +145,8 @@ class Project(ProjectBase):
     id: UUID
     slug: str  # URL-safe identifier for routing
     owner_id: UUID
+    team_id: UUID | None = None
+    visibility: str = "team"  # 'private' | 'team' | 'public'
     network_name: str | None = None
     created_at: datetime
     updated_at: datetime | None
