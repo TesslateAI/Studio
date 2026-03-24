@@ -97,6 +97,38 @@ class EmailService:
         except Exception as e:
             logger.error(f"Failed to send password reset email to {to_email}: {e}")
 
+    async def send_team_invite(
+        self, to_email: str, invite_url: str, team_name: str, inviter_name: str, role: str
+    ) -> None:
+        """
+        Send a team invitation email.
+
+        If SMTP is not configured, logs the invite URL to the console instead.
+        This is non-blocking and safe to fire-and-forget via asyncio.create_task.
+        """
+        subject = f"You've been invited to {team_name} on Tesslate"
+
+        if not self.is_configured:
+            logger.info(
+                f"[EMAIL-DEV] Team invite for {to_email}: {invite_url} "
+                f"(team={team_name}, role={role}, invited_by={inviter_name}) "
+                "(SMTP not configured, printing to console)"
+            )
+            return
+
+        try:
+            html = _build_team_invite_html(invite_url, team_name, inviter_name, role)
+            plain = (
+                f"{inviter_name} invited you to join {team_name} on Tesslate as {role}.\n\n"
+                f"Accept the invitation:\n{invite_url}\n\n"
+                "This invitation expires in 7 days.\n"
+                "If you weren't expecting this, you can safely ignore this email."
+            )
+            await self._send(to_email, subject, plain, html)
+            logger.info(f"Team invite email sent to {to_email} for team {team_name}")
+        except Exception as e:
+            logger.error(f"Failed to send team invite email to {to_email}: {e}")
+
     async def _send(self, to_email: str, subject: str, plain: str, html: str | None = None) -> None:
         """Send an email via SMTP with optional HTML body."""
         msg = EmailMessage()
@@ -163,6 +195,38 @@ def _build_password_reset_html(reset_url: str) -> str:
         f'<p style="color: #666; font-size: 12px; word-break: break-all;">{safe_url}</p>'
         '<p style="color: #999; font-size: 12px; margin-top: 24px;">'
         "If you didn&#39;t request this, you can safely ignore this email."
+        "</p>"
+        "</div>"
+    )
+
+
+def _build_team_invite_html(invite_url: str, team_name: str, inviter_name: str, role: str) -> str:
+    """Build a styled HTML email for team invitations."""
+    safe_url = html_escape(invite_url, quote=True)
+    safe_team = html_escape(team_name)
+    safe_inviter = html_escape(inviter_name)
+    safe_role = html_escape(role)
+    return (
+        '<div style="font-family: -apple-system, BlinkMacSystemFont,'
+        " 'Segoe UI', Roboto, sans-serif; max-width: 480px;"
+        ' margin: 0 auto; padding: 40px 20px;">'
+        f'<h2 style="color: #111; margin-bottom: 8px;">Join {safe_team}</h2>'
+        f'<p style="color: #666; font-size: 14px; margin-bottom: 24px;">'
+        f"{safe_inviter} invited you to join <strong>{safe_team}</strong>"
+        f" as <strong>{safe_role}</strong>."
+        "</p>"
+        '<div style="text-align: center; margin-bottom: 24px;">'
+        f'<a href="{safe_url}" style="display: inline-block; background: #111;'
+        " color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none;"
+        ' font-weight: 600; font-size: 14px;">Accept Invitation</a>'
+        "</div>"
+        '<p style="color: #999; font-size: 12px; margin-bottom: 16px;">'
+        "If the button doesn&#39;t work, copy and paste this link into your browser:"
+        "</p>"
+        f'<p style="color: #666; font-size: 12px; word-break: break-all;">{safe_url}</p>'
+        '<p style="color: #999; font-size: 12px; margin-top: 24px;">'
+        "This invitation expires in 7 days. "
+        "If you weren&#39;t expecting this, you can safely ignore this email."
         "</p>"
         "</div>"
     )

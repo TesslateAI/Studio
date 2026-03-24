@@ -2,6 +2,7 @@
 Teams API router — CRUD, membership management, invitations, project members, and audit logs.
 """
 
+import asyncio
 import csv
 import io
 import logging
@@ -49,7 +50,9 @@ from ..schemas_team import (
     TeamRead,
     TeamUpdate,
 )
+from ..config import get_settings
 from ..services.audit_service import log_event
+from ..services.email_service import get_email_service
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -318,9 +321,6 @@ async def invite_by_email(
     team = await _resolve_team(db, team_slug)
     await check_team_permission(db, team.id, user.id, Permission.TEAM_INVITE)
 
-    if team.is_personal:
-        raise HTTPException(status_code=400, detail="Cannot invite to a personal team")
-
     # Check for existing active member with this email
     existing_user = await db.execute(select(User).where(User.email == body.email))
     existing_user_obj = existing_user.scalar_one_or_none()
@@ -383,6 +383,16 @@ async def invite_by_email(
     )
     await db.commit()
     await db.refresh(invitation)
+
+    # Send invitation email (non-blocking)
+    base_url = get_settings().get_app_base_url
+    invite_url = f"{base_url}/invite/{invitation.token}"
+    inviter_name = user.name or user.email or "A team member"
+    email_svc = get_email_service()
+    asyncio.create_task(
+        email_svc.send_team_invite(body.email, invite_url, team.name, inviter_name, body.role)
+    )
+
     return invitation
 
 
@@ -397,9 +407,6 @@ async def create_invite_link(
     """Create an invite link. Admin only. Max 10 active links per team."""
     team = await _resolve_team(db, team_slug)
     await check_team_permission(db, team.id, user.id, Permission.TEAM_INVITE)
-
-    if team.is_personal:
-        raise HTTPException(status_code=400, detail="Cannot create invite link for a personal team")
 
     # Max 10 active links
     active_links = await db.execute(

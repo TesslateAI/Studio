@@ -41,7 +41,6 @@ import BillingSettings from './pages/settings/BillingSettings';
 import ApiKeysSettings from './pages/settings/ApiKeysSettings';
 import TeamSettingsPage from './pages/settings/TeamSettingsPage';
 import TeamMembersPage from './pages/settings/TeamMembersPage';
-import TeamBillingPage from './pages/settings/TeamBillingPage';
 import AuditLogPage from './pages/settings/AuditLogPage';
 import InviteAcceptPage from './pages/InviteAcceptPage';
 import { useReferralTracking } from './hooks/useReferralTracking';
@@ -354,15 +353,15 @@ function AppContent() {
           <Route path="security" element={<SecuritySettings />} />
           <Route path="deployment" element={<DeploymentSettings />} />
           <Route path="api-keys" element={<ApiKeysSettings />} />
-          <Route path="billing" element={<BillingSettings />} />
+          <Route path="billing" element={<Navigate to="/settings/team/billing" replace />} />
           <Route path="team" element={<TeamSettingsPage />} />
           <Route path="team/members" element={<TeamMembersPage />} />
-          <Route path="team/billing" element={<TeamBillingPage />} />
+          <Route path="team/billing" element={<BillingSettings />} />
           <Route path="team/audit-log" element={<AuditLogPage />} />
         </Route>
 
-        {/* Billing redirect - all billing is now in /settings/billing */}
-        <Route path="/billing/*" element={<Navigate to="/settings/billing" replace />} />
+        {/* Billing redirect - all billing is now under team */}
+        <Route path="/billing/*" element={<Navigate to="/settings/team/billing" replace />} />
         <Route
           path="/auth/github/callback"
           element={

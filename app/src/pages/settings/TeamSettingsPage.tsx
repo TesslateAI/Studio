@@ -23,7 +23,7 @@ export default function TeamSettingsPage() {
   const loadTeam = useCallback(async () => {
     if (!activeTeam) return;
     try {
-      const data = await teamsApi.getTeam(activeTeam.slug);
+      const data = await teamsApi.get(activeTeam.slug);
       setTeam(data);
       setName(data.name);
       setSlug(data.slug);
@@ -48,7 +48,7 @@ export default function TeamSettingsPage() {
     if (!team) return;
     setSaving(true);
     try {
-      const updated = await teamsApi.updateTeam(team.slug, {
+      const updated = await teamsApi.update(team.slug, {
         name: name !== team.name ? name : undefined,
         slug: slug !== team.slug ? slug : undefined,
         avatar_url: avatarUrl !== team.avatar_url ? avatarUrl : undefined,
@@ -68,7 +68,7 @@ export default function TeamSettingsPage() {
     if (!team || deleteConfirmText !== team.slug) return;
     setDeleting(true);
     try {
-      await teamsApi.deleteTeam(team.slug);
+      await teamsApi.delete(team.slug);
       toast.success('Team deleted');
       window.location.href = '/dashboard';
     } catch (error) {
@@ -107,13 +107,13 @@ export default function TeamSettingsPage() {
     >
       {/* Personal Team Badge */}
       {team.is_personal && (
-        <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+        <div className="p-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
           <div className="flex items-start gap-3">
-            <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 flex-shrink-0" />
-            <div className="text-sm text-blue-400">
-              <p className="font-semibold">Personal Team</p>
-              <p className="text-xs mt-0.5">
-                This is your personal workspace. It cannot be deleted or renamed.
+            <div className="w-2 h-2 rounded-full bg-[var(--primary)] mt-1.5 flex-shrink-0" />
+            <div className="text-xs text-[var(--text-muted)]">
+              <p className="font-medium text-[var(--text)]">Personal Team</p>
+              <p className="mt-0.5">
+                Your default workspace, created automatically. Invite members and collaborate just like any team.
               </p>
             </div>
           </div>
@@ -157,7 +157,7 @@ export default function TeamSettingsPage() {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              disabled={!canEdit || team.is_personal}
+              disabled={!canEdit}
               placeholder="My Team"
               className="w-full sm:w-64 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
@@ -171,7 +171,7 @@ export default function TeamSettingsPage() {
               type="text"
               value={slug}
               onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-              disabled={!canEdit || team.is_personal}
+              disabled={!canEdit}
               placeholder="my-team"
               className="w-full sm:w-64 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
@@ -189,7 +189,7 @@ export default function TeamSettingsPage() {
       </SettingsGroup>
 
       {/* Save Button */}
-      {canEdit && !team.is_personal && (
+      {canEdit && (
         <div className="flex justify-end">
           <button
             onClick={handleSave}
@@ -215,7 +215,7 @@ export default function TeamSettingsPage() {
       )}
 
       {/* Danger Zone */}
-      {canEdit && !team.is_personal && (
+      {canEdit && !team.is_personal && /* Only personal teams can't be deleted */ (
         <SettingsGroup title="Danger Zone">
           <div className="px-4 py-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

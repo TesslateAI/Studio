@@ -2950,7 +2950,7 @@ export interface AuditLogEntry {
 
 export const teamsApi = {
   async list(): Promise<TeamList[]> {
-    const response = await api.get('/api/teams');
+    const response = await api.get('/api/teams/');
     return response.data;
   },
   async get(slug: string): Promise<Team> {
@@ -3009,6 +3009,12 @@ export const teamsApi = {
   },
   async getInviteDetails(token: string): Promise<InviteDetail> {
     const response = await api.get(`/api/teams/invitations/${token}`);
+    return response.data;
+  },
+
+  // Billing
+  async getTeamBilling(slug: string) {
+    const response = await api.get(`/api/teams/${slug}/billing`);
     return response.data;
   },
 

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { teamsApi } from '../lib/api';
 import type { TeamList } from '../lib/api';
+import { useAuth } from './AuthContext';
 
 /** Client-side mirror of backend ROLE_PERMISSIONS for UX-only gating. */
 const ROLE_PERMISSIONS: Record<string, Set<string>> = {
@@ -37,24 +38,31 @@ interface TeamContextValue {
 const TeamContext = createContext<TeamContextValue | undefined>(undefined);
 
 export function TeamProvider({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const [teams, setTeams] = useState<TeamList[]>([]);
   const [activeTeam, setActiveTeam] = useState<TeamList | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadTeams = useCallback(async () => {
+    if (!isAuthenticated) {
+      setTeams([]);
+      setActiveTeam(null);
+      setLoading(false);
+      return;
+    }
     try {
       const data = await teamsApi.list();
       setTeams(data);
 
       const savedSlug = localStorage.getItem('tesslate_active_team');
-      const saved = data.find((t) => t.slug === savedSlug);
+      const saved = data.find((t: TeamList) => t.slug === savedSlug);
       setActiveTeam(saved || data[0] || null);
     } catch {
-      // Not logged in or API error — silently ignore
+      // API error — silently ignore
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     loadTeams();

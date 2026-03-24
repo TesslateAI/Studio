@@ -52,7 +52,7 @@ export default function InviteAcceptPage() {
     if (!authLoading) {
       if (!user) {
         // Redirect to login with invite token preserved
-        navigate(`/auth/login?invite=${token}`, { replace: true });
+        navigate('/login', { replace: true, state: { from: `/invite/${token}` } });
         return;
       }
       loadInvite();

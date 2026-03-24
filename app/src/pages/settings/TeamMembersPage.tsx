@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { teamsApi } from '../../lib/api';
 import type { TeamMember } from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../contexts/TeamContext';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { SettingsSection, SettingsGroup } from '../../components/settings';
@@ -34,6 +35,7 @@ interface Invitation {
 type InviteMode = 'email' | 'link' | null;
 
 export default function TeamMembersPage() {
+  const { user } = useAuth();
   const { activeTeam, can, loading: teamLoading } = useTeam();
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -62,9 +64,9 @@ export default function TeamMembersPage() {
     if (!activeTeam) return;
     try {
       const [membersData, invitationsData] = await Promise.all([
-        teamsApi.getTeamMembers(activeTeam.slug),
+        teamsApi.listMembers(activeTeam.slug),
         can('team.invite')
-          ? teamsApi.getInvitations(activeTeam.slug)
+          ? teamsApi.listInvitations(activeTeam.slug)
           : Promise.resolve([]),
       ]);
       setMembers(membersData);
@@ -89,7 +91,7 @@ export default function TeamMembersPage() {
     if (!activeTeam || !inviteEmail) return;
     setInviting(true);
     try {
-      await teamsApi.inviteMember(activeTeam.slug, {
+      await teamsApi.inviteByEmail(activeTeam.slug, {
         email: inviteEmail,
         role: inviteRole,
       });
@@ -409,7 +411,7 @@ export default function TeamMembersPage() {
                 </div>
 
                 {/* Role */}
-                {canRemove && member.role !== 'owner' ? (
+                {canRemove && member.user_id !== user?.id ? (
                   <div className="relative">
                     <select
                       value={member.role}
@@ -435,7 +437,7 @@ export default function TeamMembersPage() {
                 )}
 
                 {/* Remove button */}
-                {canRemove && member.role !== 'owner' && (
+                {canRemove && member.user_id !== user?.id && (
                   <button
                     onClick={() => handleRemoveMember(member.user_id)}
                     disabled={removingMember === member.user_id}
