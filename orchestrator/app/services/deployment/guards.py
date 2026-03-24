@@ -20,6 +20,7 @@ class ProviderCapability(TypedDict):
     deployment_mode: str  # source (provider builds) or pre-built (upload built files)
     icon: str  # Provider icon/emoji
     color: str  # Brand color for UI
+    auth_type: str  # oauth, token, or none
 
 
 # Provider compatibility definitions
@@ -44,6 +45,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "▲",
         "color": "#000000",
+        "auth_type": "oauth",
     },
     "netlify": {
         "display_name": "Netlify",
@@ -65,6 +67,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "pre-built",
         "icon": "◆",
         "color": "#00C7B7",
+        "auth_type": "oauth",
     },
     "cloudflare": {
         "display_name": "Cloudflare",
@@ -76,6 +79,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "pre-built",
         "icon": "🔥",
         "color": "#F38020",
+        "auth_type": "token",
     },
     "digitalocean": {
         "display_name": "DigitalOcean K8s",
@@ -87,6 +91,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "🌊",
         "color": "#0080FF",
+        "auth_type": "token",
     },
     "railway": {
         "display_name": "Railway",
@@ -98,6 +103,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "🚂",
         "color": "#0B0D0E",
+        "auth_type": "token",
     },
     "fly": {
         "display_name": "Fly.io",
@@ -109,6 +115,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "container",
         "icon": "✈️",
         "color": "#7B3FE4",
+        "auth_type": "token",
     },
     "heroku": {
         "display_name": "Heroku",
@@ -120,6 +127,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "🟣",
         "color": "#430098",
+        "auth_type": "token",
     },
     "render": {
         "display_name": "Render",
@@ -131,6 +139,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "🔷",
         "color": "#46E3B7",
+        "auth_type": "token",
     },
     "koyeb": {
         "display_name": "Koyeb",
@@ -142,6 +151,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "🟢",
         "color": "#121212",
+        "auth_type": "token",
     },
     "zeabur": {
         "display_name": "Zeabur",
@@ -153,6 +163,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "⚡",
         "color": "#6C5CE7",
+        "auth_type": "token",
     },
     "northflank": {
         "display_name": "Northflank",
@@ -164,6 +175,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "🔶",
         "color": "#01E277",
+        "auth_type": "token",
     },
     "github-pages": {
         "display_name": "GitHub Pages",
@@ -175,6 +187,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "pre-built",
         "icon": "📄",
         "color": "#222222",
+        "auth_type": "token",
     },
     "surge": {
         "display_name": "Surge.sh",
@@ -186,6 +199,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "pre-built",
         "icon": "🌊",
         "color": "#D93472",
+        "auth_type": "token",
     },
     "deno-deploy": {
         "display_name": "Deno Deploy",
@@ -197,6 +211,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "source",
         "icon": "🦕",
         "color": "#000000",
+        "auth_type": "token",
     },
     "firebase": {
         "display_name": "Firebase Hosting",
@@ -208,6 +223,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "pre-built",
         "icon": "🔥",
         "color": "#FFCA28",
+        "auth_type": "token",
     },
     "aws-apprunner": {
         "display_name": "AWS App Runner",
@@ -219,6 +235,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "container",
         "icon": "☁️",
         "color": "#FF9900",
+        "auth_type": "token",
     },
     "gcp-cloudrun": {
         "display_name": "GCP Cloud Run",
@@ -230,6 +247,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "container",
         "icon": "☁️",
         "color": "#4285F4",
+        "auth_type": "token",
     },
     "azure-container-apps": {
         "display_name": "Azure Container Apps",
@@ -241,6 +259,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "container",
         "icon": "☁️",
         "color": "#0078D4",
+        "auth_type": "token",
     },
     "do-container": {
         "display_name": "DigitalOcean App Platform (Container)",
@@ -252,6 +271,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "container",
         "icon": "🌊",
         "color": "#0080FF",
+        "auth_type": "token",
     },
     "dockerhub": {
         "display_name": "Docker Hub",
@@ -263,6 +283,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "export",
         "icon": "🐳",
         "color": "#2496ED",
+        "auth_type": "token",
     },
     "ghcr": {
         "display_name": "GitHub Container Registry",
@@ -274,6 +295,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "export",
         "icon": "📦",
         "color": "#222222",
+        "auth_type": "token",
     },
     "download": {
         "display_name": "Download Export",
@@ -285,6 +307,7 @@ PROVIDER_CAPABILITIES: dict[str, ProviderCapability] = {
         "deployment_mode": "export",
         "icon": "💾",
         "color": "#6B7280",
+        "auth_type": "none",
     },
 }
 

@@ -2218,13 +2218,22 @@ export const deploymentCredentialsApi = {
 
   // Save manual credentials (alias for create for better semantics)
   saveManual: async (provider: string, credentials: Record<string, string>) => {
-    // Extract the token field (different providers use different names)
-    const tokenField = credentials.api_token || credentials.access_token || credentials.token;
+    // Maps each provider's primary secret field to access_token for storage.
+    // Must stay in sync with PROVIDER_CREDENTIAL_SCHEMA.token_alias in
+    // orchestrator/app/routers/deployment_credentials.py
+    const tokenFieldNames = [
+      'api_token', 'access_token', 'token', 'api_key',
+      'client_secret', 'service_account_json', 'aws_access_key_id',
+    ];
+    // Extract the first matching token field
+    const tokenField = tokenFieldNames.reduce<string | undefined>(
+      (found, key) => found || credentials[key], undefined
+    );
 
     // Extract other fields as metadata
     const metadata: Record<string, string> = {};
     for (const [key, value] of Object.entries(credentials)) {
-      if (!['api_token', 'access_token', 'token'].includes(key)) {
+      if (!tokenFieldNames.includes(key)) {
         metadata[key] = value;
       }
     }
@@ -2445,6 +2454,7 @@ export interface DeploymentTargetProviderInfo {
   supports_static: boolean;
   supports_fullstack: boolean;
   deployment_mode: string;
+  auth_type: 'oauth' | 'token' | 'none';
 }
 
 export interface DeploymentTargetConnectedContainer {
@@ -2469,7 +2479,7 @@ export interface DeploymentTargetDeploymentHistory {
 export interface DeploymentTarget {
   id: string;
   project_id: string;
-  provider: 'vercel' | 'netlify' | 'cloudflare' | 'digitalocean' | 'railway' | 'fly';
+  provider: string;
   environment: 'production' | 'staging' | 'preview';
   name?: string;
   position_x: number;
@@ -2669,13 +2679,12 @@ export const deploymentTargetsApi = {
     projectSlug: string,
     targetId: string
   ): Promise<{ oauth_url?: string; auth_url?: string; error?: string }> => {
-    // First get the target to determine the provider
+    // Get the target to determine provider and auth_type from provider_info
     const target = await deploymentTargetsApi.get(projectSlug, targetId);
     const provider = target.provider;
 
-    // Map provider to OAuth endpoint (only Vercel and Netlify support OAuth)
-    const oauthProviders = ['vercel', 'netlify'];
-    if (!oauthProviders.includes(provider)) {
+    // Check auth_type from provider_info (driven by backend PROVIDER_CAPABILITIES)
+    if (target.provider_info?.auth_type !== 'oauth') {
       return {
         error: `${provider} does not support OAuth. Please configure credentials manually.`,
       };

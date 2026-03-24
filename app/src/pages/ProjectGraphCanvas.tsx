@@ -700,15 +700,14 @@ const ProjectGraphCanvasInner = () => {
     [setNodes]
   );
 
-  // Stable callback for connecting a deployment target — OAuth for vercel/netlify, modal for API token providers
+  // Stable callback for connecting a deployment target — OAuth for oauth providers, modal for API token providers
   const handleConnectDeploymentTarget = useCallback(async (targetId: string) => {
     try {
       const target = await deploymentTargetsApi.get(slugRef.current!, targetId);
       const provider = target.provider;
 
-      // OAuth providers: open popup directly
-      const oauthProviders = ['vercel', 'netlify'];
-      if (oauthProviders.includes(provider)) {
+      // Check auth_type from provider_info (driven by backend PROVIDER_CAPABILITIES)
+      if (target.provider_info?.auth_type === 'oauth') {
         const result = await deploymentCredentialsApi.startOAuth(provider);
         const oauthUrl = result.auth_url;
         if (oauthUrl) {

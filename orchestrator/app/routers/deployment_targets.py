@@ -115,6 +115,7 @@ class ProviderInfo(BaseModel):
     supports_static: bool
     supports_fullstack: bool
     deployment_mode: str
+    auth_type: str = "token"  # oauth, token, or none
 
 
 class DeploymentTargetResponse(BaseModel):
@@ -238,6 +239,7 @@ def build_target_response(
             supports_static=provider_info["supports_static"] if provider_info else True,
             supports_fullstack=provider_info["supports_fullstack"] if provider_info else False,
             deployment_mode=provider_info["deployment_mode"] if provider_info else "source",
+            auth_type=provider_info["auth_type"] if provider_info else "token",
         ),
         connected_containers=connected_containers,
         deployment_history=deployment_history,

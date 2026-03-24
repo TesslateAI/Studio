@@ -57,6 +57,13 @@ class CredentialMetadata(BaseModel):
     site_id: str | None = Field(None, description="Firebase site ID")
     org_id: str | None = Field(None, description="Deno Deploy organization ID")
 
+    # AWS
+    aws_secret_access_key: str | None = Field(None, description="AWS secret access key (aws-apprunner)")
+
+    # Credentials that are stored as metadata (not the primary token)
+    email: str | None = Field(None, description="Account email (Surge)")
+    username: str | None = Field(None, description="Account username (DockerHub, GHCR)")
+
     # Token refresh
     refresh_token: str | None = Field(None, description="OAuth refresh token (Heroku)")
 
@@ -133,6 +140,40 @@ class ProviderListResponse(BaseModel):
 # ============================================================================
 
 
+# ---------------------------------------------------------------------------
+# Declarative credential schema: maps (access_token, metadata) → provider creds
+#
+# token_alias  – extra key name for the access_token (always available as "token" too)
+# meta_keys    – metadata keys copied verbatim into creds
+# meta_defaults – fallback values when a meta_key is absent
+# meta_remap   – metadata_key → credential_key rename (e.g. account_name → email)
+# ---------------------------------------------------------------------------
+PROVIDER_CREDENTIAL_SCHEMA: dict[str, dict] = {
+    "cloudflare":           {"token_alias": "api_token", "meta_keys": ["account_id", "dispatch_namespace"]},
+    "vercel":               {"meta_keys": ["team_id"]},
+    "netlify":              {"meta_keys": ["team_id"]},
+    "heroku":               {"token_alias": "api_key"},
+    "render":               {"token_alias": "api_key"},
+    "railway":              {},
+    "github-pages":         {},
+    "koyeb":                {"token_alias": "api_token", "meta_keys": ["org_slug"]},
+    "northflank":           {"token_alias": "api_token", "meta_keys": ["org_slug"]},
+    "fly":                  {"token_alias": "api_token", "meta_keys": ["org_slug"]},
+    "deno-deploy":          {"meta_keys": ["org_id"]},
+    "surge":                {"meta_keys": ["email"]},
+    "zeabur":               {"token_alias": "api_key"},
+    "firebase":             {"token_alias": "service_account_json", "meta_keys": ["site_id"]},
+    "aws-apprunner":        {"token_alias": "aws_access_key_id", "meta_keys": ["aws_secret_access_key", "aws_region"], "meta_defaults": {"aws_secret_access_key": "", "aws_region": "us-east-1"}},
+    "gcp-cloudrun":         {"token_alias": "service_account_json", "meta_keys": ["gcp_region"], "meta_defaults": {"gcp_region": "us-central1"}},
+    "azure-container-apps": {"token_alias": "client_secret", "meta_keys": ["tenant_id", "client_id", "subscription_id", "resource_group", "registry_name", "azure_region"]},
+    "do-container":         {"token_alias": "api_token", "meta_keys": ["registry_name"]},
+    "digitalocean":         {"token_alias": "api_token", "meta_keys": ["registry_name"]},
+    "dockerhub":            {"meta_keys": ["username"]},
+    "ghcr":                 {"meta_keys": ["username"]},
+    "download":             {},
+}
+
+
 def _build_provider_credentials(
     provider: str, access_token: str, metadata: dict | None
 ) -> dict[str, str]:
@@ -140,56 +181,23 @@ def _build_provider_credentials(
     meta = metadata or {}
     creds: dict[str, str] = {"token": access_token}
 
-    if provider == "cloudflare":
-        creds["api_token"] = access_token
-        if "account_id" in meta:
-            creds["account_id"] = meta["account_id"]
-        if "dispatch_namespace" in meta:
-            creds["dispatch_namespace"] = meta["dispatch_namespace"]
-    elif provider in ("vercel", "netlify"):
-        if "team_id" in meta:
-            creds["team_id"] = meta["team_id"]
-    elif provider == "heroku":
-        creds["api_key"] = access_token
-    elif provider == "render":
-        creds["api_key"] = access_token
-    elif provider in ("railway", "github-pages"):
-        pass  # token key is sufficient
-    elif provider in ("koyeb", "northflank", "fly"):
-        creds["api_token"] = access_token
-        if "org_slug" in meta:
-            creds["org_slug"] = meta["org_slug"]
-    elif provider == "deno-deploy":
-        if "org_id" in meta:
-            creds["org_id"] = meta["org_id"]
-    elif provider == "surge":
-        creds["email"] = meta.get("account_name", "")
-    elif provider == "zeabur":
-        creds["api_key"] = access_token
-    elif provider == "firebase":
-        creds["service_account_json"] = access_token
-        if "site_id" in meta:
-            creds["site_id"] = meta["site_id"]
-    elif provider == "aws-apprunner":
-        creds["aws_access_key_id"] = access_token
-        creds["aws_secret_access_key"] = meta.get("aws_secret_access_key", "")
-        creds["aws_region"] = meta.get("aws_region", "us-east-1")
-    elif provider == "gcp-cloudrun":
-        creds["service_account_json"] = access_token
-        creds["gcp_region"] = meta.get("gcp_region", "us-central1")
-    elif provider == "azure-container-apps":
-        creds["client_secret"] = access_token
-        for key in ("tenant_id", "client_id", "subscription_id", "resource_group", "registry_name", "azure_region"):
-            if key in meta:
-                creds[key] = meta[key]
-    elif provider == "do-container":
-        creds["api_token"] = access_token
-        if "registry_name" in meta:
-            creds["registry_name"] = meta["registry_name"]
-    elif provider in ("dockerhub", "ghcr"):
-        creds["username"] = meta.get("account_name", "")
-    elif provider == "download":
-        pass  # no credentials needed
+    schema = PROVIDER_CREDENTIAL_SCHEMA.get(provider, {})
+
+    # Add aliased token key (e.g. api_token, api_key, service_account_json)
+    if "token_alias" in schema:
+        creds[schema["token_alias"]] = access_token
+
+    # Copy metadata fields directly, falling back to defaults
+    defaults = schema.get("meta_defaults", {})
+    for key in schema.get("meta_keys", []):
+        if key in meta:
+            creds[key] = meta[key]
+        elif key in defaults:
+            creds[key] = defaults[key]
+
+    # Remap metadata fields (e.g. account_name → email, account_name → username)
+    for meta_key, cred_key in schema.get("meta_remap", {}).items():
+        creds[cred_key] = meta.get(meta_key, "")
 
     return creds
 

@@ -391,8 +391,8 @@ export function ProviderConnectModal({
                 Cancel
               </button>
             </div>
-          ) : selectedProvider?.auth_type === 'api_token' ? (
-            // Manual credential form
+          ) : selectedProvider ? (
+            // Manual credential form (any non-OAuth provider that was selected)
             <div className="space-y-4">
               {selectedProvider.required_fields.map((field) => (
                 <div key={field}>

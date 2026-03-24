@@ -20,7 +20,7 @@ interface DeploymentsDropdownProps {
   onClose: () => void;
   onOpenDeployModal: () => void;
   onDeploymentChange?: () => void;
-  assignedDeploymentTarget?: 'vercel' | 'netlify' | 'cloudflare' | null;
+  assignedDeploymentTarget?: string | null;
   containerName?: string;
 }
 
