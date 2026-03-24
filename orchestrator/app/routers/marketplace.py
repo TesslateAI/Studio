@@ -3400,16 +3400,16 @@ async def get_user_marketplace_items(
         )
 
     # Add all services (available to all users by default)
+    # Only include non-deployment-target services from hardcoded definitions;
+    # deployment targets come from the MarketplaceAgent table (seeded data).
     services = get_all_services()
     for service in services:
         service_data = service_to_dict(service)
-        # Deployment targets should have type "deployment" for proper frontend categorization
-        item_type = (
-            "deployment" if service_data["service_type"] == "deployment_target" else "service"
-        )
+        if service_data["service_type"] == "deployment_target":
+            continue  # Handled below from DB seed data
         items.append(
             {
-                "id": f"service-{service.slug}",  # Unique ID for services
+                "id": f"service-{service.slug}",
                 "name": service.name,
                 "slug": service.slug,
                 "description": service.description,
@@ -3417,22 +3417,49 @@ async def get_user_marketplace_items(
                 "category": service.category,
                 "tech_stack": [service.docker_image] if service.docker_image else [],
                 "features": list(service.outputs.keys()) if service.outputs else [],
-                "type": item_type,
-                # Service type (container, external, hybrid, deployment_target)
+                "type": "service",
                 "service_type": service_data["service_type"],
-                # Container-specific fields
                 "docker_image": service.docker_image,
                 "default_port": service.default_port,
                 "internal_port": service.internal_port,
                 "environment_vars": service.environment_vars,
                 "volumes": service.volumes,
-                # External service fields
                 "credential_fields": service_data["credential_fields"],
                 "auth_type": service_data["auth_type"],
                 "docs_url": service.docs_url,
-                # Connection configuration
                 "connection_template": service.connection_template,
                 "outputs": service.outputs,
+            }
+        )
+
+    # Add deployment targets from database (seeded MarketplaceAgent records)
+    deploy_result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.item_type == "deployment_target",
+            MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.is_published.is_(True),
+        )
+    )
+    deploy_targets = deploy_result.scalars().all()
+    for dt in deploy_targets:
+        dt_config = dt.config or {}
+        items.append(
+            {
+                "id": str(dt.id),
+                "name": dt.name,
+                "slug": dt.slug,
+                "description": dt.description,
+                "icon": dt.icon,
+                "category": dt.category,
+                "tech_stack": dt.tags or [],
+                "features": dt.features or [],
+                "type": "deployment",
+                "service_type": "deployment_target",
+                "provider_key": dt_config.get("provider_key"),
+                "deployment_mode": dt_config.get("deployment_mode"),
+                "brand_color": dt_config.get("brand_color"),
+                "is_featured": dt.is_featured,
+                "pricing_type": dt.pricing_type,
             }
         )
 

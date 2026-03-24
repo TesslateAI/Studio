@@ -115,6 +115,7 @@ class ProviderInfo(BaseModel):
     supports_static: bool
     supports_fullstack: bool
     deployment_mode: str
+    auth_type: str = "token"  # oauth, token, or none
 
 
 class DeploymentTargetResponse(BaseModel):
@@ -202,16 +203,21 @@ def build_target_response(
     connected_containers: list[ContainerSummary],
     deployment_history: list[DeploymentSummary],
     is_connected_override: bool | None = None,
+    created_at_override=None,
+    updated_at_override=None,
 ) -> DeploymentTargetResponse:
     """Build a response object for a deployment target.
 
     Args:
         is_connected_override: If provided, uses this value instead of target.is_connected.
-            Used to reflect live credential status rather than the stale stored value.
+        created_at_override: Pre-fetched created_at to avoid lazy-load after mutation.
+        updated_at_override: Pre-fetched updated_at to avoid lazy-load after mutation.
     """
     is_connected = (
         is_connected_override if is_connected_override is not None else target.is_connected
     )
+    created_at = created_at_override if created_at_override is not None else target.created_at
+    updated_at = updated_at_override if updated_at_override is not None else target.updated_at
     provider_info = get_provider_info(target.provider)
     return DeploymentTargetResponse(
         id=target.id,
@@ -233,11 +239,12 @@ def build_target_response(
             supports_static=provider_info["supports_static"] if provider_info else True,
             supports_fullstack=provider_info["supports_fullstack"] if provider_info else False,
             deployment_mode=provider_info["deployment_mode"] if provider_info else "source",
+            auth_type=provider_info["auth_type"] if provider_info else "token",
         ),
         connected_containers=connected_containers,
         deployment_history=deployment_history,
-        created_at=target.created_at.isoformat() if target.created_at else "",
-        updated_at=target.updated_at.isoformat() if target.updated_at else "",
+        created_at=created_at.isoformat() if created_at else "",
+        updated_at=updated_at.isoformat() if updated_at else "",
     )
 
 
@@ -332,13 +339,17 @@ async def list_deployment_targets(
         # Dynamically compute is_connected from live credentials
         live_is_connected = target.provider in connected_providers
 
+        # Capture timestamps before any modification (mutations expire attributes
+        # in async SQLAlchemy, causing MissingGreenlet on later access)
+        target_created_at = target.created_at
+        target_updated_at = target.updated_at
+
         # Sync stale DB value if it diverged (credential added/removed after target creation)
         if target.is_connected != live_is_connected:
             target.is_connected = live_is_connected
             target.credential_id = (
                 connected_providers.get(target.provider) if live_is_connected else None
             )
-            # Non-blocking: commit happens at end
         # Get connected containers
         connected = []
         for conn in target.connected_containers:
@@ -391,7 +402,10 @@ async def list_deployment_targets(
 
         responses.append(
             build_target_response(
-                target, connected, history, is_connected_override=live_is_connected
+                target, connected, history,
+                is_connected_override=live_is_connected,
+                created_at_override=target_created_at,
+                updated_at_override=target_updated_at,
             )
         )
 
@@ -845,27 +859,8 @@ async def deploy_target(
             provider_info = get_provider_info(target.provider)
             deployment_mode = provider_info["deployment_mode"] if provider_info else "source"
 
-            # Determine framework: connection settings > container base tech_stack > default
-            framework = (
-                conn.deployment_settings.get("framework") if conn.deployment_settings else None
-            )
-            if not framework and container.base and container.base.tech_stack:
-                tech_stack = container.base.tech_stack
-                if isinstance(tech_stack, list) and len(tech_stack) > 0:
-                    # Prefix match: "Next.js 16" -> "nextjs", "React 19" -> "vite", etc.
-                    framework_prefixes = [
-                        ("Next.js", "nextjs"),
-                        ("React", "vite"),
-                        ("Vue", "vite"),
-                        ("Svelte", "vite"),
-                        ("Astro", "astro"),
-                    ]
-                    primary = tech_stack[0]
-                    framework = "vite"  # default
-                    for prefix, fw in framework_prefixes:
-                        if primary.startswith(prefix):
-                            framework = fw
-                            break
+            # Framework comes directly from the container model
+            framework = container.framework or "static"
 
             from .deployments import resolve_container_directory
 
@@ -873,21 +868,18 @@ async def deploy_target(
 
             # Build if needed
             if deployment_mode == "pre-built":
-                custom_build_cmd = request.build_command or (
-                    conn.deployment_settings.get("build_command")
-                    if conn.deployment_settings
-                    else None
-                )
+                custom_build_cmd = request.build_command or container.build_command
                 success, build_output = await builder.trigger_build(
                     user_id=str(user.id),
                     project_id=str(project.id),
                     project_slug=project.slug,
-                    framework=framework,
                     custom_build_command=custom_build_cmd,
                     container_name=container.container_name,
                     volume_name=project.slug,
                     container_directory=resolved_directory,
                     deployment_mode=deployment_mode,
+                    volume_id=project.volume_id,
+                    cache_node=project.cache_node,
                 )
                 if not success:
                     raise Exception(f"Build failed: {build_output}")
@@ -901,11 +893,11 @@ async def deploy_target(
             files = await builder.collect_deployment_files(
                 user_id=str(user.id),
                 project_id=str(project.id),
-                framework=framework,
                 collect_source=(deployment_mode == "source"),
                 container_directory=resolved_directory,
                 volume_name=project.slug,
                 container_name=container.container_name,
+                custom_output_dir=container.output_directory,
             )
 
             # Deploy to provider
@@ -921,7 +913,7 @@ async def deploy_target(
             config = DeploymentConfig(
                 project_id=str(project.id),
                 project_name=f"{project.slug}-{container.name}",
-                framework=framework or "vite",
+                framework=framework,
                 deployment_mode=deployment_mode,
                 build_command=request.build_command,
                 env_vars=env_vars,

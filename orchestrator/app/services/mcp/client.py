@@ -111,11 +111,10 @@ async def _connect_streamable_http(
             read_stream,
             write_stream,
             _,
-        ):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                logger.info("MCP streamable-http session initialised for %s", url)
-                yield session
+        ), ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            logger.info("MCP streamable-http session initialised for %s", url)
+            yield session
     except BaseExceptionGroup as eg:
         # The mcp SDK's streamable-http transport can raise ExceptionGroup
         # during cleanup (e.g. cancelled background listeners). These are
@@ -123,7 +122,7 @@ async def _connect_streamable_http(
         # We only suppress if all sub-exceptions are cancellations.
         non_cancelled = eg.subgroup(lambda e: not isinstance(e, asyncio.CancelledError))
         if non_cancelled:
-            raise non_cancelled
+            raise non_cancelled from eg
         logger.debug("Suppressed benign TaskGroup cleanup errors for %s", url)
     finally:
         await http_client.aclose()

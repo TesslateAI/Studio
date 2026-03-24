@@ -20,6 +20,7 @@ import type {
   TesslateConfig,
   TesslateConfigResponse,
   SetupConfigSyncResponse,
+  ConfigSyncSaveResponse,
 } from '../types/tesslateConfig';
 import { config } from '../config';
 
@@ -1871,6 +1872,18 @@ export const setupApi = {
   },
 };
 
+export const configSyncApi = {
+  save: async (slug: string): Promise<ConfigSyncSaveResponse> => {
+    const response = await api.post(`/api/projects/${slug}/sync-config`);
+    return response.data;
+  },
+
+  load: async (slug: string, config: TesslateConfig): Promise<SetupConfigSyncResponse> => {
+    const response = await api.post(`/api/projects/${slug}/setup-config`, config);
+    return response.data;
+  },
+};
+
 export const assetsApi = {
   // List all directories that contain assets
   listDirectories: async (projectSlug: string) => {
@@ -2148,9 +2161,9 @@ export const deploymentCredentialsApi = {
   },
 
   // List user's connected credentials
-  list: async (provider?: string) => {
+  list: async (provider?: string, projectId?: string) => {
     const response = await api.get('/api/deployment-credentials', {
-      params: { provider },
+      params: { provider, project_id: projectId },
     });
     return response.data;
   },
@@ -2205,13 +2218,22 @@ export const deploymentCredentialsApi = {
 
   // Save manual credentials (alias for create for better semantics)
   saveManual: async (provider: string, credentials: Record<string, string>) => {
-    // Extract the token field (different providers use different names)
-    const tokenField = credentials.api_token || credentials.access_token || credentials.token;
+    // Maps each provider's primary secret field to access_token for storage.
+    // Must stay in sync with PROVIDER_CREDENTIAL_SCHEMA.token_alias in
+    // orchestrator/app/routers/deployment_credentials.py
+    const tokenFieldNames = [
+      'api_token', 'access_token', 'token', 'api_key',
+      'client_secret', 'service_account_json', 'aws_access_key_id',
+    ];
+    // Extract the first matching token field
+    const tokenField = tokenFieldNames.reduce<string | undefined>(
+      (found, key) => found || credentials[key], undefined
+    );
 
     // Extract other fields as metadata
     const metadata: Record<string, string> = {};
     for (const [key, value] of Object.entries(credentials)) {
-      if (!['api_token', 'access_token', 'token'].includes(key)) {
+      if (!tokenFieldNames.includes(key)) {
         metadata[key] = value;
       }
     }
@@ -2331,6 +2353,61 @@ export const deploymentsApi = {
     return response.data;
   },
 
+  // Deploy via container-push (AWS App Runner, GCP Cloud Run, Azure, Fly, DO)
+  deployContainerPush: async (
+    projectSlug: string,
+    data: {
+      provider: string;
+      container_id?: string;
+      port?: number;
+      cpu?: string;
+      memory?: string;
+      region?: string;
+      env_vars?: Record<string, string>;
+    }
+  ): Promise<{
+    id: string;
+    project_id: string;
+    provider: string;
+    deployment_id: string | null;
+    deployment_url: string | null;
+    status: string;
+    logs: string[] | null;
+    error: string | null;
+    created_at: string;
+    updated_at: string;
+    completed_at: string | null;
+  }> => {
+    const response = await api.post(`/api/deployments/${projectSlug}/deploy-container`, data);
+    return response.data;
+  },
+
+  // Export project image (Docker Hub, GHCR, Download)
+  exportProject: async (
+    projectSlug: string,
+    data: {
+      provider: string;
+      container_id?: string;
+      image_name?: string;
+      tag?: string;
+    }
+  ): Promise<{
+    id: string;
+    project_id: string;
+    provider: string;
+    status: string;
+    image_ref: string | null;
+    pull_command: string | null;
+    download_url: string | null;
+    logs: string[] | null;
+    error: string | null;
+    created_at: string;
+    completed_at: string | null;
+  }> => {
+    const response = await api.post(`/api/deployments/${projectSlug}/export`, data);
+    return response.data;
+  },
+
   // Stream deployment progress (SSE)
   streamProgress: (
     deploymentId: string,
@@ -2377,6 +2454,7 @@ export interface DeploymentTargetProviderInfo {
   supports_static: boolean;
   supports_fullstack: boolean;
   deployment_mode: string;
+  auth_type: 'oauth' | 'token' | 'none';
 }
 
 export interface DeploymentTargetConnectedContainer {
@@ -2401,7 +2479,7 @@ export interface DeploymentTargetDeploymentHistory {
 export interface DeploymentTarget {
   id: string;
   project_id: string;
-  provider: 'vercel' | 'netlify' | 'cloudflare' | 'digitalocean' | 'railway' | 'fly';
+  provider: string;
   environment: 'production' | 'staging' | 'preview';
   name?: string;
   position_x: number;
@@ -2601,13 +2679,12 @@ export const deploymentTargetsApi = {
     projectSlug: string,
     targetId: string
   ): Promise<{ oauth_url?: string; auth_url?: string; error?: string }> => {
-    // First get the target to determine the provider
+    // Get the target to determine provider and auth_type from provider_info
     const target = await deploymentTargetsApi.get(projectSlug, targetId);
     const provider = target.provider;
 
-    // Map provider to OAuth endpoint (only Vercel and Netlify support OAuth)
-    const oauthProviders = ['vercel', 'netlify'];
-    if (!oauthProviders.includes(provider)) {
+    // Check auth_type from provider_info (driven by backend PROVIDER_CAPABILITIES)
+    if (target.provider_info?.auth_type !== 'oauth') {
       return {
         error: `${provider} does not support OAuth. Please configure credentials manually.`,
       };

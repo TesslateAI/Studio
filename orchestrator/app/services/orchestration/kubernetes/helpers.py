@@ -308,10 +308,7 @@ def create_container_deployment(
     # Working directory inside container
     # working_directory overrides container_directory for the actual filesystem path
     effective_dir = working_directory or container_directory
-    if effective_dir in (".", ""):
-        working_dir = "/app"
-    else:
-        working_dir = f"/app/{effective_dir}"
+    working_dir = "/app" if effective_dir in (".", "") else f"/app/{effective_dir}"
 
     # Dev server container
     # Use exec to replace shell process - prevents exit when stdin closes
@@ -1368,10 +1365,7 @@ def create_v2_dev_deployment(
 
     # Working directory inside container
     effective_dir = working_directory or container_directory
-    if effective_dir in (".", ""):
-        working_dir = "/app"
-    else:
-        working_dir = f"/app/{effective_dir}"
+    working_dir = "/app" if effective_dir in (".", "") else f"/app/{effective_dir}"
 
     # Environment variables
     env_vars = [

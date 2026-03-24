@@ -104,7 +104,7 @@ class AbstractChannel(ABC):
         """
         ...
 
-    async def set_typing(self, jid: str, on: bool = True) -> None:
+    async def set_typing(self, jid: str, on: bool = True) -> None:  # noqa: B027
         """Send typing indicator. Default no-op; override per platform."""
         pass
 

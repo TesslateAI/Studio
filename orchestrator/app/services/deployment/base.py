@@ -27,7 +27,7 @@ class DeploymentConfig(BaseModel):
 
     project_id: str = Field(..., description="Unique project identifier")
     project_name: str = Field(..., description="Human-readable project name")
-    framework: str = Field(..., description="Framework type (vite, nextjs, react, etc.)")
+    framework: str = Field(default="static", description="Framework hint for providers (e.g. nextjs, vite, static)")
     deployment_mode: str = Field(
         default="pre-built", description="Deployment mode: 'source' or 'pre-built'"
     )

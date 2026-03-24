@@ -130,7 +130,10 @@ Analyze this project and generate a .tesslate/config.json by calling the generat
 7. For projects with no server (CLI tools, libraries), set port to null and start to "sleep infinity"
 8. Use common port conventions: Next.js=3000, Vite=5173, FastAPI=8001, Go=8080, Rails=3000, Django=8000
 9. primaryApp should be the frontend or the main user-facing app
-10. Only add infrastructure (postgres, redis, etc.) if the project clearly uses them"""
+10. Only add infrastructure (postgres, redis, etc.) if the project clearly uses them
+11. Set "build" to the production build command (e.g. "npm run build", "go build -o main"). Omit if no build step.
+12. Set "output" to the build output directory (e.g. "dist", "out", "build", ".next/standalone"). Omit if no build step.
+13. Set "framework" to the framework identifier (e.g. "nextjs", "vite", "react", "vue", "svelte", "astro", "fastapi", "go"). This helps deployment providers configure correctly."""
 
 _GENERATE_CONFIG_TOOL = {
     "type": "function",
@@ -157,6 +160,18 @@ _GENERATE_CONFIG_TOOL = {
                             "start": {
                                 "type": "string",
                                 "description": "Shell command to install deps and start dev server",
+                            },
+                            "build": {
+                                "type": "string",
+                                "description": "Production build command (e.g. 'npm run build'). Omit if no build step.",
+                            },
+                            "output": {
+                                "type": "string",
+                                "description": "Build output directory (e.g. 'dist', 'out', 'build'). Omit if no build step.",
+                            },
+                            "framework": {
+                                "type": "string",
+                                "description": "Framework identifier (e.g. 'nextjs', 'vite', 'react', 'vue', 'fastapi', 'go')",
                             },
                             "env": {
                                 "type": "object",

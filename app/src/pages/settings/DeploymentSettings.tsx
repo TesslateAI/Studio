@@ -4,6 +4,7 @@ import { X, Trash, Plus, Key, ShieldCheck, Check, LinkSimple, Info } from '@phos
 import { deploymentCredentialsApi } from '../../lib/api';
 import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
+import { getProviderConfig } from '../../lib/deployment-providers';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { SettingsSection } from '../../components/settings';
 import { useCancellableParallelRequests } from '../../hooks/useCancellableRequest';
@@ -203,29 +204,12 @@ export default function DeploymentSettings() {
   };
 
   const getProviderIcon = (providerName: string) => {
-    switch (providerName.toLowerCase()) {
-      case 'cloudflare':
-        return '☁️';
-      case 'vercel':
-        return '▲';
-      case 'netlify':
-        return '◆';
-      default:
-        return '🚀';
-    }
+    return getProviderConfig(providerName.toLowerCase()).icon;
   };
 
   const getProviderColor = (providerName: string) => {
-    switch (providerName.toLowerCase()) {
-      case 'cloudflare':
-        return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
-      case 'vercel':
-        return 'bg-white/20 text-white border-white/30';
-      case 'netlify':
-        return 'bg-teal-500/20 text-teal-400 border-teal-500/30';
-      default:
-        return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
-    }
+    const config = getProviderConfig(providerName.toLowerCase());
+    return `bg-[${config.color}]/20 ${config.textColor} border-[${config.color}]/30`;
   };
 
   const isProviderConnected = (providerName: string) => {

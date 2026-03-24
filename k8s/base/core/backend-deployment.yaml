@@ -233,6 +233,72 @@ spec:
               key: NETLIFY_OAUTH_REDIRECT_URI
               optional: true
 
+        # Deployment Providers - Heroku OAuth
+        - name: HEROKU_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: HEROKU_CLIENT_ID
+              optional: true
+        - name: HEROKU_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: HEROKU_CLIENT_SECRET
+              optional: true
+        - name: HEROKU_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: HEROKU_OAUTH_REDIRECT_URI
+              optional: true
+
+        # Deployment Providers - DigitalOcean OAuth
+        - name: DIGITALOCEAN_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: DIGITALOCEAN_CLIENT_ID
+              optional: true
+        - name: DIGITALOCEAN_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: DIGITALOCEAN_CLIENT_SECRET
+              optional: true
+        - name: DIGITALOCEAN_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: DIGITALOCEAN_OAUTH_REDIRECT_URI
+              optional: true
+
+        # Container Push Configuration
+        - name: KANIKO_IMAGE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: KANIKO_IMAGE
+              optional: true
+        - name: CONTAINER_PUSH_TIMEOUT
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: CONTAINER_PUSH_TIMEOUT
+              optional: true
+        - name: CONTAINER_PUSH_DEFAULT_CPU
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: CONTAINER_PUSH_DEFAULT_CPU
+              optional: true
+        - name: CONTAINER_PUSH_DEFAULT_MEMORY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: CONTAINER_PUSH_DEFAULT_MEMORY
+              optional: true
+
         # S3 Storage (Required for K8s - MinIO locally, real S3 in production)
         - name: S3_ACCESS_KEY_ID
           valueFrom:

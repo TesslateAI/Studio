@@ -3,6 +3,7 @@ Discord webhook service for sending notifications.
 """
 
 import logging
+import os
 from datetime import datetime
 
 import aiohttp
@@ -140,8 +141,6 @@ class DiscordWebhookService:
 # Global instance — webhook URL must be set via DISCORD_WEBHOOK_URL env var.
 # No hardcoded URL: prevents leaking PII (emails, names) to a third-party
 # Discord server when self-hosted or running locally.
-import os
-
 discord_service = DiscordWebhookService(
     webhook_url=os.environ.get("DISCORD_WEBHOOK_URL", "")
 )

@@ -236,6 +236,22 @@ resource "kubernetes_secret" "app_secrets" {
     NETLIFY_CLIENT_SECRET      = var.netlify_client_secret
     NETLIFY_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/netlify/callback"
 
+    # Deployment Providers - Heroku
+    HEROKU_CLIENT_ID          = var.heroku_client_id
+    HEROKU_CLIENT_SECRET      = var.heroku_client_secret
+    HEROKU_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/heroku/callback"
+
+    # Deployment Providers - DigitalOcean
+    DIGITALOCEAN_CLIENT_ID          = var.digitalocean_client_id
+    DIGITALOCEAN_CLIENT_SECRET      = var.digitalocean_client_secret
+    DIGITALOCEAN_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/digitalocean/callback"
+
+    # Container Push Configuration
+    KANIKO_IMAGE                  = var.kaniko_image
+    CONTAINER_PUSH_TIMEOUT        = tostring(var.container_push_timeout)
+    CONTAINER_PUSH_DEFAULT_CPU    = var.container_push_default_cpu
+    CONTAINER_PUSH_DEFAULT_MEMORY = var.container_push_default_memory
+
     # Deployment credential encryption
     DEPLOYMENT_ENCRYPTION_KEY = var.deployment_encryption_key
 

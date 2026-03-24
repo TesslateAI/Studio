@@ -7,8 +7,7 @@ Keys are SHA-256 hashed and stored in the external_api_keys table.
 
 import hashlib
 import logging
-from datetime import datetime, timezone
-from uuid import UUID
+from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
@@ -54,12 +53,12 @@ async def get_external_api_user(
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     # Check expiration
-    if api_key_record.expires_at and api_key_record.expires_at < datetime.now(timezone.utc):
+    if api_key_record.expires_at and api_key_record.expires_at < datetime.now(UTC):
         raise HTTPException(status_code=401, detail="API key expired")
 
     # Update last_used_at (non-blocking, don't fail on error)
     try:
-        api_key_record.last_used_at = datetime.now(timezone.utc)
+        api_key_record.last_used_at = datetime.now(UTC)
         await db.commit()
     except Exception:
         pass

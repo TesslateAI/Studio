@@ -1211,7 +1211,7 @@ def is_deployment_compatible(
 def get_compatible_providers(container_type: str, service_slug: str | None, tech_stack: list[str]) -> list[str]:
     """Get list of compatible deployment providers for a container"""
     compatible = []
-    for provider in DEPLOYMENT_COMPATIBILITY.keys():
+    for provider in DEPLOYMENT_COMPATIBILITY:
         is_compatible, _ = is_deployment_compatible(container_type, service_slug, tech_stack, provider)
         if is_compatible:
             compatible.append(provider)

@@ -206,6 +206,45 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
                       />
                     </div>
 
+                    {/* Build Command */}
+                    <div>
+                      <label className="text-xs text-[var(--text)]/50 block mb-1">Build Command</label>
+                      <input
+                        type="text"
+                        value={app.build ?? ''}
+                        onChange={(e) => updateApp(name, 'build', e.target.value || undefined)}
+                        disabled={readOnly}
+                        className="w-full bg-[var(--background)] border border-white/10 rounded-lg px-3 py-2 text-sm text-[var(--text)] font-mono focus:border-[var(--primary)]/50 focus:outline-none disabled:opacity-50"
+                        placeholder="npm run build"
+                      />
+                    </div>
+
+                    {/* Output Directory */}
+                    <div>
+                      <label className="text-xs text-[var(--text)]/50 block mb-1">Output Directory</label>
+                      <input
+                        type="text"
+                        value={app.output ?? ''}
+                        onChange={(e) => updateApp(name, 'output', e.target.value || undefined)}
+                        disabled={readOnly}
+                        className="w-full bg-[var(--background)] border border-white/10 rounded-lg px-3 py-2 text-sm text-[var(--text)] font-mono focus:border-[var(--primary)]/50 focus:outline-none disabled:opacity-50"
+                        placeholder="dist"
+                      />
+                    </div>
+
+                    {/* Framework */}
+                    <div>
+                      <label className="text-xs text-[var(--text)]/50 block mb-1">Framework</label>
+                      <input
+                        type="text"
+                        value={app.framework ?? ''}
+                        onChange={(e) => updateApp(name, 'framework', e.target.value || undefined)}
+                        disabled={readOnly}
+                        className="w-full bg-[var(--background)] border border-white/10 rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:border-[var(--primary)]/50 focus:outline-none disabled:opacity-50"
+                        placeholder="nextjs, vite, react, etc."
+                      />
+                    </div>
+
                     {/* Env Vars */}
                     <div>
                       <label className="text-xs text-[var(--text)]/50 block mb-1">Environment Variables</label>

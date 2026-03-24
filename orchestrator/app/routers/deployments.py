@@ -24,7 +24,6 @@ from ..services.deployment_encryption import (
     DeploymentEncryptionError,
     get_deployment_encryption_service,
 )
-from ..services.framework_detector import FrameworkDetector
 from ..services.orchestration import get_orchestrator
 from ..users import current_active_user
 
@@ -48,9 +47,9 @@ class DeploymentRequest(BaseModel):
     )
     custom_domain: str | None = Field(None, description="Custom domain")
     env_vars: dict[str, str] = Field(default_factory=dict, description="Environment variables")
-    build_command: str | None = Field(None, description="Custom build command override")
+    build_command: str | None = Field(None, description="Build command override (primary source is container.build_command)")
     framework: str | None = Field(
-        None, description="Framework override (auto-detected if not provided)"
+        None, description="Framework override (primary source is container.framework)"
     )
 
 
@@ -110,29 +109,18 @@ class DeployAllResponse(BaseModel):
 
 def resolve_container_directory(container) -> str:
     """
-    Resolve the actual on-disk directory for a container.
+    Resolve the actual on-disk working directory for a container.
 
-    Docker vs K8s path conventions differ:
-    - K8s: PVC mounted at /app, each container's files live in /app/{sanitized_name}/
-      so when container.directory is ".", we use container.name as the subdirectory.
-    - Docker: Volume subpathed per-project at /app, files are at /app/ directly
-      when container.directory is ".", so we return "." to keep work_dir as /app.
+    Must match compute_manager.resolve_k8s_container_dir / helpers.py logic:
+    - directory="." or "" or None → working_dir is /app (return ".")
+    - directory="frontend"       → working_dir is /app/frontend/
 
-    For explicit directories (e.g. "frontend"), both modes agree: /app/frontend/.
+    Both Docker and K8s agree: "." means project root (/app).
     """
-    from ..config import get_settings
-
-    settings = get_settings()
-
-    # Explicit subdirectory — both platforms agree
     if container.directory not in (".", "", None):
         raw = container.directory
-    elif settings.is_docker_mode:
-        # Docker: volume is already subpathed to the project, files at /app/
-        return "."
     else:
-        # K8s: PVC shared, use container name as subdirectory
-        raw = container.name
+        return "."
 
     # Replicate _sanitize_name from KubernetesOrchestrator
     safe = raw.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
@@ -207,6 +195,9 @@ def prepare_provider_credentials(
     """
     Prepare credentials dict for a provider.
 
+    Delegates to the canonical credential builder in deployment_credentials
+    to keep all 22 providers' field mappings in one place.
+
     Args:
         provider: Provider name
         decrypted_token: Decrypted access token
@@ -215,28 +206,9 @@ def prepare_provider_credentials(
     Returns:
         Provider-specific credentials dict
     """
-    credentials = {}
+    from .deployment_credentials import _build_provider_credentials
 
-    if provider == "cloudflare":
-        credentials["api_token"] = decrypted_token
-        if metadata and "account_id" in metadata:
-            credentials["account_id"] = metadata["account_id"]
-        if metadata and "dispatch_namespace" in metadata:
-            credentials["dispatch_namespace"] = metadata["dispatch_namespace"]
-
-    elif provider == "vercel":
-        credentials["token"] = decrypted_token
-        if metadata and "team_id" in metadata:
-            credentials["team_id"] = metadata["team_id"]
-
-    elif provider == "netlify":
-        credentials["token"] = decrypted_token
-
-    else:
-        # Default: just pass token
-        credentials["token"] = decrypted_token
-
-    return credentials
+    return _build_provider_credentials(provider, decrypted_token, metadata)
 
 
 # ============================================================================
@@ -313,39 +285,8 @@ async def deploy_project(
 
         logger.info(f"Created deployment {deployment.id} for project {project.slug}")
 
-        # 5. Detect framework with caching
+        # 5. Get builder
         builder = get_deployment_builder()
-        project_path = builder._get_project_path(str(current_user.id), str(project.id))
-
-        # Initialize project settings if not exists
-        if not project.settings:
-            project.settings = {}
-
-        # Priority: request > cached > auto-detect
-        framework = request.framework
-
-        if not framework:
-            # Try cached framework first
-            if project.settings.get("framework"):
-                framework = project.settings["framework"]
-                logger.info(f"Using cached framework: {framework}")
-            else:
-                # Fallback: Auto-detect from package.json
-                import os
-
-                package_json_path = os.path.join(project_path, "package.json")
-                if os.path.exists(package_json_path):
-                    with open(package_json_path) as f:
-                        package_json_content = f.read()
-                    framework, _ = FrameworkDetector.detect_from_package_json(package_json_content)
-                    logger.info(f"Auto-detected framework: {framework}")
-                else:
-                    framework = "vite"
-                    logger.warning("No package.json found, defaulting to vite")
-
-                # Cache the detected framework
-                project.settings["framework"] = framework
-                await db.commit()
 
         # 6. Determine deployment mode (source vs pre-built)
         # Default modes per provider:
@@ -433,8 +374,14 @@ async def deploy_project(
             await db.commit()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
+        # Resolve framework from container fields, with request override
+        framework = request.framework or primary_container.framework or "static"
+
         # 8. Run build (skip if source mode - provider will build)
         use_source_deployment = deployment_mode == "source"
+
+        # Resolve build command: request override > container field
+        effective_build_command = request.build_command or primary_container.build_command
 
         if use_source_deployment:
             deployment.logs.append(
@@ -451,12 +398,13 @@ async def deploy_project(
                     project_id=str(project.id),
                     project_slug=project.slug,
                     framework=framework,
-                    custom_build_command=request.build_command,
-                    project_settings=project.settings,
+                    custom_build_command=effective_build_command,
                     container_name=build_container_name,
-                    volume_name=project.slug,  # Use project.slug for shared volume path
+                    volume_name=project.slug,
                     container_directory=build_directory,
                     deployment_mode=deployment_mode,
+                    volume_id=project.volume_id,
+                    cache_node=project.cache_node,
                 )
 
                 if not success:
@@ -486,7 +434,7 @@ async def deploy_project(
             user_id=str(current_user.id),
             project_id=str(project.id),
             framework=framework,
-            project_settings=project.settings,
+            custom_output_dir=primary_container.output_directory,
             collect_source=use_source_deployment,
             container_directory=build_directory,
             volume_name=project.slug,
@@ -505,7 +453,7 @@ async def deploy_project(
             project_name=project.name,
             framework=framework,
             deployment_mode=deployment_mode,
-            build_command=request.build_command,
+            build_command=effective_build_command,
             env_vars=request.env_vars,
             custom_domain=request.custom_domain,
         )
@@ -604,6 +552,7 @@ async def deploy_all_containers(
     Service containers (databases, caches) are skipped.
     """
     import asyncio
+
     from sqlalchemy.orm import selectinload
 
     # 1. Verify project ownership
@@ -646,7 +595,7 @@ async def deploy_all_containers(
         )
 
     # 3. Group containers by provider to validate credentials
-    providers_needed = set(c.deployment_provider for c in containers_with_targets)
+    providers_needed = {c.deployment_provider for c in containers_with_targets}
     encryption_service = get_deployment_encryption_service()
 
     # Validate credentials for each provider
@@ -707,29 +656,9 @@ async def deploy_all_containers(
             await db.commit()
             await db.refresh(deployment)
 
-            # Get builder and framework
+            # Get builder and framework from container fields
             builder = get_deployment_builder()
-
-            # Determine framework from container's base
-            framework = "vite"  # Default
-            if container.base and container.base.tech_stack:
-                tech_stack = container.base.tech_stack
-                if isinstance(tech_stack, list) and len(tech_stack) > 0:
-                    # Prefix match: "Next.js 16" -> "nextjs", "React 19" -> "vite", etc.
-                    framework_prefixes = [
-                        ("Next.js", "nextjs"),
-                        ("React", "vite"),
-                        ("Vue", "vite"),
-                        ("Svelte", "vite"),
-                        ("Astro", "astro"),
-                        ("FastAPI", "static"),
-                    ]
-                    primary = tech_stack[0]
-                    framework = "vite"  # default
-                    for prefix, fw in framework_prefixes:
-                        if primary.startswith(prefix):
-                            framework = fw
-                            break
+            framework = container.framework or "static"
 
             # Determine deployment mode
             default_modes = {
@@ -740,21 +669,23 @@ async def deploy_all_containers(
             deployment_mode = default_modes.get(provider, "pre-built")
 
             # Build if needed
+            resolved_directory = resolve_container_directory(container)
             if deployment_mode == "pre-built":
                 deployment.logs.append(f"Building {container.name} locally...")
                 await db.commit()
 
-                resolved_directory = resolve_container_directory(container)
                 success, build_output = await builder.trigger_build(
                     user_id=str(current_user.id),
                     project_id=str(project.id),
                     project_slug=project.slug,
                     framework=framework,
-                    custom_build_command=None,
+                    custom_build_command=container.build_command,
                     container_name=container.container_name,
                     volume_name=project.slug,
                     container_directory=resolved_directory,
                     deployment_mode=deployment_mode,
+                    volume_id=project.volume_id,
+                    cache_node=project.cache_node,
                 )
 
                 if not success:
@@ -797,6 +728,7 @@ async def deploy_all_containers(
                 user_id=str(current_user.id),
                 project_id=str(project.id),
                 framework=framework,
+                custom_output_dir=container.output_directory,
                 collect_source=(deployment_mode == "source"),
                 container_directory=resolved_directory,
                 volume_name=project.slug,
@@ -852,6 +784,461 @@ async def deploy_all_containers(
         skipped=skipped,
         results=results
     )
+
+
+class ContainerDeployRequest(BaseModel):
+    """Request to deploy a project via container-push (ECR, Cloud Run, etc.)."""
+
+    provider: str = Field(..., description="Container-push provider name")
+    container_id: UUID | None = Field(
+        None, description="Specific container to deploy (uses primary if omitted)"
+    )
+    port: int = Field(default=8080, description="Container port to expose")
+    cpu: str = Field(default="0.25", description="CPU allocation")
+    memory: str = Field(default="512Mi", description="Memory allocation")
+    region: str = Field(default="us-east-1", description="Deploy region")
+    env_vars: dict[str, str] = Field(default_factory=dict, description="Environment variables")
+
+
+class ExportRequest(BaseModel):
+    """Request to export a project image (Docker Hub, GHCR, Download)."""
+
+    provider: str = Field(..., description="Export provider name (dockerhub, ghcr, download)")
+    container_id: UUID | None = Field(
+        None, description="Specific container to export (uses primary if omitted)"
+    )
+    image_name: str | None = Field(None, description="Target image name override")
+    tag: str = Field(default="latest", description="Image tag")
+
+
+class ExportResponse(BaseModel):
+    """Response containing export information."""
+
+    id: UUID
+    project_id: UUID
+    provider: str
+    status: str
+    image_ref: str | None = None
+    pull_command: str | None = None
+    download_url: str | None = None
+    logs: list[str] | None = None
+    error: str | None = None
+    created_at: str
+    completed_at: str | None = None
+
+
+@router.post("/{project_slug}/deploy-container", response_model=DeploymentResponse)
+async def deploy_container(
+    project_slug: str,
+    request: ContainerDeployRequest,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Deploy a project via container-push (export image, push to registry, deploy to compute).
+
+    For container-push providers: AWS App Runner, GCP Cloud Run, Azure Container Apps,
+    DigitalOcean App Platform (container), Fly.io.
+
+    Flow:
+    1. Verify project and container are running
+    2. Resolve credentials
+    3. Call provider.push_image() to push to provider's registry
+    4. Call provider.deploy_image() to create/update compute service
+    5. Return deployment result with live URL
+    """
+    deployment = None
+
+    try:
+        # 1. Validate this is a container-push provider
+        provider_lower = request.provider.lower()
+        if not DeploymentManager.is_container_provider(provider_lower):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{request.provider}' is not a container-push provider. "
+                "Use POST /deploy for source-push providers or POST /export for export providers.",
+            )
+
+        # 2. Verify project ownership
+        result = await db.execute(
+            select(Project).where(
+                and_(Project.slug == project_slug, Project.owner_id == current_user.id)
+            )
+        )
+        project = result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+        # 3. Get the target container
+        if request.container_id:
+            result = await db.execute(
+                select(Container).where(
+                    and_(Container.id == request.container_id, Container.project_id == project.id)
+                )
+            )
+        else:
+            result = await db.execute(
+                select(Container)
+                .where(Container.project_id == project.id)
+                .order_by(Container.created_at.asc())
+            )
+        container = result.scalars().first()
+        if not container:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No containers found for this project.",
+            )
+
+        # 4. Check that container is running
+        orchestrator = get_orchestrator()
+        container_status = await orchestrator.get_container_status(
+            project_slug=project.slug,
+            project_id=project.id,
+            container_name=container.container_name,
+            user_id=current_user.id,
+        )
+        if container_status.get("status") != "running":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Container must be running to export. Start the project first.",
+            )
+
+        # 5. Fetch and decrypt credentials
+        credential = await get_credential_for_deployment(
+            db, current_user.id, project.id, provider_lower
+        )
+        encryption_service = get_deployment_encryption_service()
+        decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
+        provider_credentials = prepare_provider_credentials(
+            provider_lower, decrypted_token, credential.provider_metadata
+        )
+
+        # 6. Create deployment record
+        deployment = Deployment(
+            project_id=project.id,
+            user_id=current_user.id,
+            provider=provider_lower,
+            status="pushing",
+            logs=[f"Container deploy to {provider_lower} started"],
+            deployment_metadata={
+                "container_id": str(container.id),
+                "container_name": container.name,
+                "deploy_type": "container",
+            },
+        )
+        db.add(deployment)
+        await db.commit()
+        await db.refresh(deployment)
+
+        # 7. Get container-push provider
+        from ..services.deployment.container_base import (
+            BaseContainerDeploymentProvider,
+            ContainerDeployConfig,
+        )
+
+        provider = DeploymentManager.get_provider(provider_lower, provider_credentials)
+        if not isinstance(provider, BaseContainerDeploymentProvider):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Provider {provider_lower} is registered as container but doesn't implement container interface.",
+            )
+
+        # 8. Push image to registry
+        image_name = f"{project.slug}-{container.name}"
+        image_ref = f"{image_name}:latest"
+        deployment.logs = [*deployment.logs, f"Pushing image {image_ref} to registry..."]
+        await db.commit()
+
+        pushed_uri = await provider.push_image(image_ref)
+        deployment.logs = [*deployment.logs, f"Image pushed: {pushed_uri}"]
+        await db.commit()
+
+        # 9. Deploy image to compute
+        deployment.status = "deploying"
+        deployment.logs = [*deployment.logs, "Deploying image to compute service..."]
+        await db.commit()
+
+        # Filter out internal env vars
+        env_vars = {k: v for k, v in request.env_vars.items() if not k.startswith("_TESSLATE_")}
+
+        container_config = ContainerDeployConfig(
+            image_ref=pushed_uri,
+            port=request.port,
+            cpu=request.cpu,
+            memory=request.memory,
+            env_vars=env_vars,
+            region=request.region,
+        )
+
+        deploy_result = await provider.deploy_image(container_config)
+
+        # 10. Update deployment record
+        deployment.status = "success" if deploy_result.success else "failed"
+        deployment.deployment_id = deploy_result.deployment_id
+        deployment.deployment_url = deploy_result.deployment_url
+        deployment.error = deploy_result.error
+        deployment.logs = [*deployment.logs, *(deploy_result.logs or [])]
+        deployment.deployment_metadata = {
+            **(deployment.deployment_metadata or {}),
+            **(deploy_result.metadata or {}),
+        }
+        deployment.completed_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(deployment)
+
+        return DeploymentResponse(
+            id=deployment.id,
+            project_id=deployment.project_id,
+            user_id=deployment.user_id,
+            provider=deployment.provider,
+            deployment_id=deployment.deployment_id,
+            deployment_url=deployment.deployment_url,
+            status=deployment.status,
+            logs=deployment.logs,
+            error=deployment.error,
+            created_at=deployment.created_at.isoformat(),
+            updated_at=deployment.updated_at.isoformat(),
+            completed_at=deployment.completed_at.isoformat() if deployment.completed_at else None,
+        )
+
+    except HTTPException:
+        raise
+    except DeploymentEncryptionError as e:
+        logger.error(f"Encryption error in deploy-container: {e}", exc_info=True)
+        if deployment:
+            deployment.status = "failed"
+            deployment.error = "Failed to decrypt credentials"
+            deployment.completed_at = datetime.utcnow()
+            await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to decrypt credentials",
+        ) from e
+    except Exception as e:
+        logger.error(f"Container deployment failed: {e}", exc_info=True)
+        if deployment:
+            deployment.status = "failed"
+            deployment.error = str(e)
+            deployment.completed_at = datetime.utcnow()
+            await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Container deployment failed: {str(e)}",
+        ) from e
+
+
+@router.post("/{project_slug}/export", response_model=ExportResponse)
+async def export_project(
+    project_slug: str,
+    request: ExportRequest,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export a project image to a registry or as a downloadable archive.
+
+    For export providers: Docker Hub, GHCR, Download.
+
+    Flow:
+    1. Verify project
+    2. For dockerhub/ghcr: push image to registry, return pull command
+    3. For download: collect files, create ZIP archive, return download info
+    """
+    deployment = None
+
+    try:
+        # 1. Validate this is an export provider
+        provider_lower = request.provider.lower()
+        if not DeploymentManager.is_export_provider(provider_lower):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{request.provider}' is not an export provider. "
+                "Use POST /deploy for source-push or POST /deploy-container for container-push.",
+            )
+
+        # 2. Verify project ownership
+        result = await db.execute(
+            select(Project).where(
+                and_(Project.slug == project_slug, Project.owner_id == current_user.id)
+            )
+        )
+        project = result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+        # 3. Get the target container
+        if request.container_id:
+            result = await db.execute(
+                select(Container).where(
+                    and_(Container.id == request.container_id, Container.project_id == project.id)
+                )
+            )
+        else:
+            result = await db.execute(
+                select(Container)
+                .where(Container.project_id == project.id)
+                .order_by(Container.created_at.asc())
+            )
+        container = result.scalars().first()
+        if not container:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No containers found for this project.",
+            )
+
+        # 4. Fetch credentials (skip for download provider)
+        provider_credentials: dict[str, str] = {}
+        if provider_lower != "download":
+            credential = await get_credential_for_deployment(
+                db, current_user.id, project.id, provider_lower
+            )
+            encryption_service = get_deployment_encryption_service()
+            decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
+            provider_credentials = prepare_provider_credentials(
+                provider_lower, decrypted_token, credential.provider_metadata
+            )
+
+        # 5. Create deployment record
+        deployment = Deployment(
+            project_id=project.id,
+            user_id=current_user.id,
+            provider=provider_lower,
+            status="exporting",
+            logs=[f"Export to {provider_lower} started"],
+            deployment_metadata={
+                "container_id": str(container.id),
+                "container_name": container.name,
+                "deploy_type": "export",
+            },
+        )
+        db.add(deployment)
+        await db.commit()
+        await db.refresh(deployment)
+
+        # 6. Get provider instance
+        provider = DeploymentManager.get_provider(provider_lower, provider_credentials)
+
+        # 7. Handle based on provider type
+        if provider_lower == "download":
+            # Download export: collect files and create ZIP
+            builder = get_deployment_builder()
+            resolved_directory = resolve_container_directory(container)
+            framework = container.framework or "static"
+
+            files = await builder.collect_deployment_files(
+                user_id=str(current_user.id),
+                project_id=str(project.id),
+                framework=framework,
+                custom_output_dir=container.output_directory,
+                collect_source=True,
+                container_directory=resolved_directory,
+                volume_name=project.slug,
+                container_name=container.container_name,
+            )
+
+            config = DeploymentConfig(
+                project_id=str(project.id),
+                project_name=f"{project.slug}-{container.name}",
+                framework=framework,
+                deployment_mode="pre-built",
+            )
+
+            deploy_result = await provider.deploy(files, config)
+        else:
+            # Registry export (dockerhub, ghcr): push image
+            from ..services.deployment.container_base import (
+                BaseContainerDeploymentProvider,
+                ContainerDeployConfig,
+            )
+
+            if not isinstance(provider, BaseContainerDeploymentProvider):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Provider {provider_lower} doesn't implement container push interface.",
+                )
+
+            # Check container is running for image-based export
+            orchestrator = get_orchestrator()
+            container_status_result = await orchestrator.get_container_status(
+                project_slug=project.slug,
+                project_id=project.id,
+                container_name=container.container_name,
+                user_id=current_user.id,
+            )
+            if container_status_result.get("status") != "running":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Container must be running to export. Start the project first.",
+                )
+
+            image_name = request.image_name or f"{project.slug}-{container.name}"
+            image_ref = f"{image_name}:{request.tag}"
+
+            deployment.logs = [*deployment.logs, f"Pushing image {image_ref}..."]
+            await db.commit()
+
+            pushed_uri = await provider.push_image(image_ref)
+
+            # For export providers, deploy_image returns metadata (pull command, etc.)
+            container_config = ContainerDeployConfig(
+                image_ref=pushed_uri,
+                port=container.internal_port or 8080,
+            )
+            deploy_result = await provider.deploy_image(container_config)
+
+        # 8. Update deployment record
+        deployment.status = "success" if deploy_result.success else "failed"
+        deployment.deployment_id = deploy_result.deployment_id
+        deployment.deployment_url = deploy_result.deployment_url
+        deployment.error = deploy_result.error
+        deployment.logs = [*deployment.logs, *(deploy_result.logs or [])]
+        deployment.deployment_metadata = {
+            **(deployment.deployment_metadata or {}),
+            **(deploy_result.metadata or {}),
+        }
+        deployment.completed_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(deployment)
+
+        result_meta = deploy_result.metadata or {}
+        return ExportResponse(
+            id=deployment.id,
+            project_id=deployment.project_id,
+            provider=deployment.provider,
+            status=deployment.status,
+            image_ref=result_meta.get("image_ref"),
+            pull_command=result_meta.get("pull_command"),
+            download_url=result_meta.get("download_url"),
+            logs=deployment.logs,
+            error=deployment.error,
+            created_at=deployment.created_at.isoformat(),
+            completed_at=deployment.completed_at.isoformat() if deployment.completed_at else None,
+        )
+
+    except HTTPException:
+        raise
+    except DeploymentEncryptionError as e:
+        logger.error(f"Encryption error in export: {e}", exc_info=True)
+        if deployment:
+            deployment.status = "failed"
+            deployment.error = "Failed to decrypt credentials"
+            deployment.completed_at = datetime.utcnow()
+            await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to decrypt credentials",
+        ) from e
+    except Exception as e:
+        logger.error(f"Export failed: {e}", exc_info=True)
+        if deployment:
+            deployment.status = "failed"
+            deployment.error = str(e)
+            deployment.completed_at = datetime.utcnow()
+            await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Export failed: {str(e)}",
+        ) from e
 
 
 @router.post("/{project_slug}/containers/{container_id}/deploy", response_model=DeploymentResponse)
@@ -944,7 +1331,7 @@ async def deploy_single_container_endpoint(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"No credentials found for {provider_name}. Please connect your {provider_name} account first.",
-        )
+        ) from None
 
     # 6. Create deployment record
     deployment = Deployment(
@@ -962,22 +1349,9 @@ async def deploy_single_container_endpoint(
     logger.info(f"Created deployment {deployment.id} for container {container.name} to {provider_name}")
 
     try:
-        # 7. Get builder and determine framework
+        # 7. Get builder and framework from container fields
         builder = get_deployment_builder()
-
-        framework = "vite"  # Default
-        if container.base and container.base.tech_stack:
-            tech_stack = container.base.tech_stack
-            if isinstance(tech_stack, list) and len(tech_stack) > 0:
-                framework_map = {
-                    "Next.js": "nextjs",
-                    "React": "vite",
-                    "Vue": "vite",
-                    "Svelte": "vite",
-                    "Astro": "astro",
-                    "FastAPI": "static",  # For backends, we just serve static files
-                }
-                framework = framework_map.get(tech_stack[0], "vite")
+        framework = container.framework or "static"
 
         # 8. Determine deployment mode
         default_modes = {
@@ -999,11 +1373,13 @@ async def deploy_single_container_endpoint(
                 project_id=str(project.id),
                 project_slug=project.slug,
                 framework=framework,
-                custom_build_command=None,
+                custom_build_command=container.build_command,
                 container_name=container.container_name,
                 volume_name=project.slug,
                 container_directory=resolved_directory,
                 deployment_mode=deployment_mode,
+                volume_id=project.volume_id,
+                cache_node=project.cache_node,
             )
 
             if not success:
@@ -1054,6 +1430,7 @@ async def deploy_single_container_endpoint(
             user_id=str(current_user.id),
             project_id=str(project.id),
             framework=framework,
+            custom_output_dir=container.output_directory,
             collect_source=(deployment_mode == "source"),
             container_directory=resolved_directory,
             volume_name=project.slug,

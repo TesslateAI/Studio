@@ -357,11 +357,61 @@ variable "netlify_client_secret" {
   default     = ""
 }
 
+variable "heroku_client_id" {
+  description = "Heroku OAuth client ID for deployment integration"
+  type        = string
+  default     = ""
+}
+
+variable "heroku_client_secret" {
+  description = "Heroku OAuth client secret for deployment integration"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "digitalocean_client_id" {
+  description = "DigitalOcean OAuth client ID for deployment integration"
+  type        = string
+  default     = ""
+}
+
+variable "digitalocean_client_secret" {
+  description = "DigitalOcean OAuth client secret for deployment integration"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "deployment_encryption_key" {
   description = "Base64-encoded Fernet key for encrypting deployment OAuth tokens. Falls back to SECRET_KEY if empty."
   type        = string
   sensitive   = true
   default     = ""
+}
+
+variable "kaniko_image" {
+  description = "Kaniko executor image for container builds"
+  type        = string
+  default     = "gcr.io/kaniko-project/executor:latest"
+}
+
+variable "container_push_timeout" {
+  description = "Timeout in seconds for container image export + push + deploy"
+  type        = number
+  default     = 900
+}
+
+variable "container_push_default_cpu" {
+  description = "Default CPU allocation for container-push deployments"
+  type        = string
+  default     = "0.25"
+}
+
+variable "container_push_default_memory" {
+  description = "Default memory allocation for container-push deployments"
+  type        = string
+  default     = "512Mi"
 }
 
 # -----------------------------------------------------------------------------

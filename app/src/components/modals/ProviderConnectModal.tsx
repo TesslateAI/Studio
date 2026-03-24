@@ -3,6 +3,7 @@ import { X, Check, Key, ShieldCheck, LinkSimple, Spinner } from '@phosphor-icons
 import { deploymentCredentialsApi } from '../../lib/api';
 import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
+import { DEPLOYMENT_PROVIDERS, getProviderConfig } from '../../lib/deployment-providers';
 import toast from 'react-hot-toast';
 
 interface Provider {
@@ -18,15 +19,19 @@ interface ProviderConnectModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConnected: (provider: string) => void | Promise<void>;
-  defaultProvider?: 'vercel' | 'netlify' | 'cloudflare';
+  defaultProvider?: string;
   connectedProviders?: string[];
+  projectId?: string;
+  accountCredentials?: string[];
 }
 
-const PROVIDER_INFO: Record<string, { icon: string; color: string; bgColor: string }> = {
-  vercel: { icon: '▲', color: 'text-black', bgColor: 'bg-white' },
-  netlify: { icon: '◆', color: 'text-white', bgColor: 'bg-[#00C7B7]' },
-  cloudflare: { icon: '🔥', color: 'text-white', bgColor: 'bg-[#F38020]' },
-};
+const PROVIDER_INFO: Record<string, { icon: string; color: string; bgColor: string }> = Object.fromEntries(
+  Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [k, {
+    icon: v.icon,
+    color: v.textColor,
+    bgColor: `bg-[${v.color}]`,
+  }])
+);
 
 export function ProviderConnectModal({
   isOpen,
@@ -34,6 +39,8 @@ export function ProviderConnectModal({
   onConnected,
   defaultProvider,
   connectedProviders = [],
+  projectId,
+  accountCredentials = [],
 }: ProviderConnectModalProps) {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +48,8 @@ export function ProviderConnectModal({
   const [manualCredentials, setManualCredentials] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isOAuthPending, setIsOAuthPending] = useState(false);
+  const [showCredentialChoice, setShowCredentialChoice] = useState(false);
+  const [pendingChoiceProvider, setPendingChoiceProvider] = useState<Provider | null>(null);
 
   // Use ref for interval to prevent race conditions and ensure proper cleanup
   const oauthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -192,6 +201,40 @@ export function ProviderConnectModal({
     }
   };
 
+  const handleUseAccountCredential = async () => {
+    if (!pendingChoiceProvider) return;
+    toast.success(`Using account credentials for ${pendingChoiceProvider.display_name}`);
+    await onConnected(pendingChoiceProvider.name);
+    setShowCredentialChoice(false);
+    setPendingChoiceProvider(null);
+    onClose();
+  };
+
+  const handleConnectNewForProject = (provider: Provider) => {
+    setShowCredentialChoice(false);
+    setPendingChoiceProvider(null);
+    if (provider.auth_type === 'oauth') {
+      handleOAuthConnect(provider);
+    } else {
+      handleSelectProvider(provider);
+    }
+  };
+
+  const handleProviderClick = (provider: Provider) => {
+    // If this is a project-level connect and the user already has an account credential
+    if (projectId && accountCredentials.includes(provider.name)) {
+      setPendingChoiceProvider(provider);
+      setShowCredentialChoice(true);
+      return;
+    }
+    // Normal flow
+    if (provider.auth_type === 'oauth') {
+      handleOAuthConnect(provider);
+    } else {
+      handleSelectProvider(provider);
+    }
+  };
+
   const handleSaveManualCredentials = async () => {
     if (!selectedProvider) return;
 
@@ -271,6 +314,64 @@ export function ProviderConnectModal({
             <div className="flex items-center justify-center py-8">
               <Spinner size={24} className="animate-spin text-[var(--primary)]" />
             </div>
+          ) : showCredentialChoice && pendingChoiceProvider ? (
+            <div className="space-y-4">
+              <p className="text-sm text-[var(--text)]/80">
+                You already have account credentials for{' '}
+                <span className="font-medium text-[var(--text)]">
+                  {pendingChoiceProvider.display_name}
+                </span>
+                . How would you like to connect this project?
+              </p>
+
+              <button
+                onClick={handleUseAccountCredential}
+                className="w-full p-4 rounded-xl border border-white/10 bg-white/5 hover:border-[var(--primary)] hover:bg-white/10 transition-all text-left"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-blue-500/20">
+                    <LinkSimple size={18} className="text-blue-400" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-[var(--text)]">
+                      Use account credentials
+                    </p>
+                    <p className="text-xs text-[var(--text)]/50 mt-0.5">
+                      Deploy this project using your existing account-level connection
+                    </p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => handleConnectNewForProject(pendingChoiceProvider)}
+                className="w-full p-4 rounded-xl border border-white/10 bg-white/5 hover:border-[var(--primary)] hover:bg-white/10 transition-all text-left"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-purple-500/20">
+                    <Key size={18} className="text-purple-400" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-[var(--text)]">
+                      Sign in with different account
+                    </p>
+                    <p className="text-xs text-[var(--text)]/50 mt-0.5">
+                      Use a separate credential just for this project
+                    </p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowCredentialChoice(false);
+                  setPendingChoiceProvider(null);
+                }}
+                className="w-full text-center text-xs text-[var(--text)]/50 hover:text-[var(--text)] transition-colors py-2"
+              >
+                Cancel
+              </button>
+            </div>
           ) : isOAuthPending ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Spinner size={32} className="animate-spin text-[var(--primary)] mb-4" />
@@ -290,8 +391,8 @@ export function ProviderConnectModal({
                 Cancel
               </button>
             </div>
-          ) : selectedProvider?.auth_type === 'api_token' ? (
-            // Manual credential form
+          ) : selectedProvider ? (
+            // Manual credential form (any non-OAuth provider that was selected)
             <div className="space-y-4">
               {selectedProvider.required_fields.map((field) => (
                 <div key={field}>
@@ -368,11 +469,7 @@ export function ProviderConnectModal({
                     key={provider.name}
                     onClick={() => {
                       if (connected || isComingSoon) return;
-                      if (provider.auth_type === 'oauth') {
-                        handleOAuthConnect(provider);
-                      } else {
-                        handleSelectProvider(provider);
-                      }
+                      handleProviderClick(provider);
                     }}
                     disabled={connected || isComingSoon}
                     className={`w-full p-3 rounded-xl border transition-all flex items-center gap-3 ${

@@ -9,7 +9,7 @@ discovering server capabilities.
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -342,7 +342,7 @@ async def discover_mcp_server(
             raise HTTPException(
                 status_code=500,
                 detail="Failed to decrypt stored credentials",
-            )
+            ) from None
 
     try:
         return await _discover_server(agent, credentials)
@@ -351,7 +351,7 @@ async def discover_mcp_server(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to connect to MCP server: {e}",
-        )
+        ) from e
 
 
 # ---------------------------------------------------------------------------

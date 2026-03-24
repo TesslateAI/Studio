@@ -1,5 +1,6 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type Node } from '@xyflow/react';
+import { DEPLOYMENT_PROVIDERS, getProviderConfig } from '../lib/deployment-providers';
 import {
   Rocket,
   X,
@@ -50,7 +51,7 @@ interface DeploymentHistoryEntry {
 
 // Node data interface
 interface DeploymentTargetNodeData extends Record<string, unknown> {
-  provider: 'vercel' | 'netlify' | 'cloudflare' | 'digitalocean' | 'railway' | 'fly';
+  provider: string;
   environment: 'production' | 'staging' | 'preview';
   name?: string;
   isConnected: boolean;
@@ -58,7 +59,10 @@ interface DeploymentTargetNodeData extends Record<string, unknown> {
   connectedContainers: ConnectedContainer[];
   deploymentHistory: DeploymentHistoryEntry[];
   onDeploy?: (targetId: string) => void;
+  onDeployContainer?: (targetId: string) => void;
+  onExport?: (targetId: string) => void;
   onConnect?: (targetId: string) => void;
+  onEnvironmentChange?: (targetId: string, environment: 'production' | 'staging' | 'preview') => void;
   onDelete?: (targetId: string) => void;
   onRollback?: (targetId: string, deploymentId: string) => void;
   onDisconnectContainer?: (targetId: string, containerId: string) => void;
@@ -69,25 +73,39 @@ type DeploymentTargetNodeProps = Node<DeploymentTargetNodeData> & {
   data: DeploymentTargetNodeData;
 };
 
-// Provider logos/icons
-const PROVIDER_LOGOS: Record<string, string> = {
-  vercel: '▲',
-  netlify: '◆',
-  cloudflare: '🔥',
-  digitalocean: '🌊',
-  railway: '🚂',
-  fly: '✈️',
-};
+// Provider deploy type classification — mirrors backend DeploymentManager sets
+export type DeployType = 'source' | 'container' | 'export';
 
-// Provider colors
-const PROVIDER_COLORS: Record<string, string> = {
-  vercel: '#000000',
-  netlify: '#00C7B7',
-  cloudflare: '#F38020',
-  digitalocean: '#0080FF',
-  railway: '#0B0D0E',
-  fly: '#7B3FE4',
-};
+const CONTAINER_PUSH_PROVIDERS = new Set([
+  'aws-apprunner',
+  'gcp-cloudrun',
+  'azure-container-apps',
+  'do-container',
+  'fly',
+]);
+
+const EXPORT_PROVIDERS = new Set([
+  'dockerhub',
+  'ghcr',
+  'download',
+]);
+
+export function getDeployType(provider: string): DeployType {
+  if (EXPORT_PROVIDERS.has(provider)) return 'export';
+  if (CONTAINER_PUSH_PROVIDERS.has(provider)) return 'container';
+  return 'source';
+}
+
+// Derived from centralized provider config
+const PROVIDER_LOGOS: Record<string, string> = Object.fromEntries(
+  Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [k, v.icon])
+);
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = Object.fromEntries(
+  Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [k, v.displayName])
+);
+const PROVIDER_COLORS: Record<string, string> = Object.fromEntries(
+  Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [k, v.color])
+);
 
 // Status colors and icons
 const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
@@ -160,25 +178,45 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
 
   const providerLogo = PROVIDER_LOGOS[data.provider] || '🚀';
   const providerColor = PROVIDER_COLORS[data.provider] || '#888888';
-  const providerName = data.providerInfo?.display_name || data.provider;
+  const providerName = data.providerInfo?.display_name || PROVIDER_DISPLAY_NAMES[data.provider] || data.provider;
 
   // Get the latest deployment (first in history)
   const latestDeployment = data.deploymentHistory?.[0];
   const isLive = latestDeployment?.status === 'success';
 
-  // Handle deploy click
+  // Route deploy action based on provider type
+  const deployType = getDeployType(data.provider);
+
   const handleDeploy = async () => {
-    if (isDeploying || !data.onDeploy) return;
+    if (isDeploying) return;
+
+    const handler =
+      deployType === 'container' ? (data.onDeployContainer ?? data.onDeploy) :
+      deployType === 'export'    ? (data.onExport ?? data.onDeploy) :
+      data.onDeploy;
+
+    if (!handler) return;
+
     setIsDeploying(true);
     try {
-      await data.onDeploy(id);
+      await handler(id);
     } finally {
       setIsDeploying(false);
     }
   };
 
-  // Determine if deploy is possible
-  const canDeploy = data.isConnected && data.connectedContainers.length > 0 && !isDeploying;
+  // Determine if deploy is possible — check that the appropriate handler exists
+  const hasHandler =
+    deployType === 'container' ? !!(data.onDeployContainer ?? data.onDeploy) :
+    deployType === 'export'    ? !!(data.onExport ?? data.onDeploy) :
+    !!data.onDeploy;
+  const canDeploy = data.isConnected && data.connectedContainers.length > 0 && !isDeploying && hasHandler;
+
+  // Button label based on deploy type
+  const deployLabel =
+    deployType === 'export' ? 'Export' :
+    deployType === 'container' ? 'Push & Deploy' :
+    'Deploy';
 
   return (
     <div className="group" style={{ contain: 'layout style' }}>
@@ -203,8 +241,20 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
           <div className="flex items-center gap-2">
             <span className="text-lg">{providerLogo}</span>
             <div>
-              <div className="text-sm font-medium text-[var(--text)]">Deploy Target</div>
-              <div className="text-xs text-[var(--text-muted)]">{data.environment}</div>
+              <div className="text-sm font-medium text-[var(--text)]">{providerName}</div>
+              <div
+                className="text-xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text)] transition-colors"
+                title="Click to change environment"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const envs: Array<'production' | 'staging' | 'preview'> = ['production', 'staging', 'preview'];
+                  const currentIdx = envs.indexOf(data.environment);
+                  const nextEnv = envs[(currentIdx + 1) % envs.length];
+                  data.onEnvironmentChange?.(id, nextEnv);
+                }}
+              >
+                {data.environment}
+              </div>
             </div>
           </div>
 
@@ -378,12 +428,12 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
             {isDeploying ? (
               <>
                 <CircleNotch size={16} weight="bold" className="animate-spin" />
-                <span>Deploying...</span>
+                <span>{deployType === 'export' ? 'Exporting...' : 'Deploying...'}</span>
               </>
             ) : (
               <>
                 <Rocket size={16} weight="fill" />
-                <span>Deploy</span>
+                <span>{deployLabel}</span>
               </>
             )}
           </button>

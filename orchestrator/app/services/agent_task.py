@@ -8,7 +8,6 @@ Contains all context needed to reconstruct and run an agent on a worker pod.
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from typing import Any
 
 logger = logging.getLogger(__name__)
 

@@ -24,6 +24,8 @@ import {
   Article,
   Kanban,
   TreeStructure,
+  FloppyDisk,
+  ArrowsClockwise,
 } from '@phosphor-icons/react';
 import { ContainerNode } from '../components/ContainerNode';
 import { BrowserPreviewNode } from '../components/BrowserPreviewNode';
@@ -42,7 +44,8 @@ import { ChatContainer } from '../components/chat/ChatContainer';
 
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, deploymentTargetsApi, marketplaceApi } from '../lib/api';
+import { ProviderConnectModal } from '../components/modals/ProviderConnectModal';
+import api, { projectsApi, deploymentTargetsApi, deploymentCredentialsApi, marketplaceApi, configSyncApi, setupApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { type ChatAgent } from '../types/chat';
 import { fileEvents } from '../utils/fileEvents';
@@ -93,6 +96,10 @@ interface Container {
   icon?: string | null;
   tech_stack?: string[] | null;
   deployment_mode?: string;
+  startup_command?: string | null;
+  build_command?: string | null;
+  output_directory?: string | null;
+  framework?: string | null;
   deployment_provider?: string | null;
 }
 
@@ -131,6 +138,7 @@ const ProjectGraphCanvasInner = () => {
     (containerId: string) => runtimeUrlsRef.current.get(containerId) || '',
     []
   );
+  const [configDirty, setConfigDirty] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [activeView, setActiveView] = useState<MainViewType>('graph');
   const [kanbanMounted, setKanbanMounted] = useState(false);
@@ -162,6 +170,14 @@ const ProjectGraphCanvasInner = () => {
     item: Record<string, unknown> | null;
     position: { x: number; y: number } | null;
   }>({ isOpen: false, item: null, position: null });
+
+  // Provider connect modal state for deployment targets
+  const [providerConnectModal, setProviderConnectModal] = useState<{
+    isOpen: boolean;
+    targetId: string | null;
+    provider: string | null;
+  }>({ isOpen: false, targetId: null, provider: null });
+  const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
 
   // Keep refs in sync with state - this allows callbacks to access latest values without re-creating
   useEffect(() => {
@@ -195,6 +211,7 @@ const ProjectGraphCanvasInner = () => {
       fetchProjectData();
       loadFiles();
       loadAgents();
+      setupApi.getConfig(slug).then(r => { if (!r.exists) setConfigDirty(true); }).catch(() => {});
     }
   }, [slug]);
 
@@ -448,6 +465,7 @@ const ProjectGraphCanvasInner = () => {
           environment: target.environment,
           name: target.name,
           isConnected: target.is_connected,
+          providerInfo: target.provider_info,
           connectedContainers: target.connected_containers || [],
           deploymentHistory: (target.deployment_history || []).map((d) => ({
             id: d.id,
@@ -459,6 +477,7 @@ const ProjectGraphCanvasInner = () => {
           })),
           onDeploy: handleDeployFromTarget,
           onConnect: handleConnectDeploymentTarget,
+          onEnvironmentChange: handleEnvironmentChange,
           onDelete: handleDeleteDeploymentTarget,
           onRollback: handleRollbackDeployment,
         },
@@ -609,6 +628,7 @@ const ProjectGraphCanvasInner = () => {
           eds.filter((edge) => edge.source !== browserId && edge.target !== browserId)
         );
         toast.success('Browser removed');
+        setConfigDirty(true);
       } catch (error) {
         console.error('Failed to delete browser preview:', error);
         toast.error('Failed to delete browser preview');
@@ -633,6 +653,7 @@ const ProjectGraphCanvasInner = () => {
           eds.filter((edge) => edge.source !== targetId && edge.target !== targetId)
         );
         toast.success('Deployment target removed');
+        setConfigDirty(true);
       } catch (error) {
         console.error('Failed to delete deployment target:', error);
         toast.error('Failed to delete deployment target');
@@ -652,15 +673,6 @@ const ProjectGraphCanvasInner = () => {
           toast.success(`Deployed ${result.success} container(s) successfully!`, {
             id: `deploy-${targetId}`,
           });
-          // Refresh the deployment history
-          const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
-          setNodes((nds) =>
-            nds.map((node) =>
-              node.id === targetId
-                ? { ...node, data: { ...node.data, deploymentHistory: history } }
-                : node
-            )
-          );
         } else {
           const failedResults = result.results.filter((r) => r.status === 'failed');
           const errorMsg = failedResults[0]?.error || 'Unknown error';
@@ -669,38 +681,98 @@ const ProjectGraphCanvasInner = () => {
       } catch (error) {
         console.error('Failed to deploy:', error);
         toast.error('Deployment failed', { id: `deploy-${targetId}` });
+      } finally {
+        // Always refresh deployment history — backend creates records for both success and failure
+        try {
+          const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === targetId
+                ? { ...node, data: { ...node.data, deploymentHistory: history } }
+                : node
+            )
+          );
+        } catch {
+          // History refresh is best-effort
+        }
       }
     },
     [setNodes]
   );
 
-  // Stable callback for connecting OAuth to deployment target
+  // Stable callback for connecting a deployment target — OAuth for oauth providers, modal for API token providers
   const handleConnectDeploymentTarget = useCallback(async (targetId: string) => {
     try {
-      // This will return the OAuth URL to redirect to
-      const result = await deploymentTargetsApi.startOAuth(slugRef.current!, targetId);
+      const target = await deploymentTargetsApi.get(slugRef.current!, targetId);
+      const provider = target.provider;
 
-      // Check for error response (provider doesn't support OAuth)
-      if (result.error) {
-        toast.error(result.error);
+      // Check auth_type from provider_info (driven by backend PROVIDER_CAPABILITIES)
+      if (target.provider_info?.auth_type === 'oauth') {
+        const result = await deploymentCredentialsApi.startOAuth(provider);
+        const oauthUrl = result.auth_url;
+        if (oauthUrl) {
+          window.open(oauthUrl, '_blank', 'width=600,height=700');
+          toast.success('Complete OAuth in the popup window');
+        } else {
+          toast.error('No OAuth URL returned. Please check provider configuration.');
+        }
         return;
       }
 
-      const oauthUrl = result.oauth_url || result.auth_url;
-      if (oauthUrl) {
-        // Open OAuth in a popup window
-        window.open(oauthUrl, '_blank', 'width=600,height=700');
-        toast.success('Complete OAuth in the popup window');
-      } else {
-        toast.error('No OAuth URL returned. Please check provider configuration.');
-      }
+      // API token providers: open the ProviderConnectModal
+      setProviderConnectModal({ isOpen: true, targetId, provider });
     } catch (error) {
-      console.error('Failed to start OAuth:', error);
+      console.error('Failed to connect deployment target:', error);
       const axiosError = error as { response?: { data?: { detail?: string } } };
-      const errorMessage = axiosError.response?.data?.detail || 'Failed to start OAuth connection';
-      toast.error(errorMessage);
+      toast.error(axiosError.response?.data?.detail || 'Failed to connect');
     }
   }, []);
+
+  // Callback when provider credential is saved via the modal
+  const handleProviderConnected = useCallback(async (provider: string) => {
+    const { targetId } = providerConnectModal;
+    if (!targetId || !slugRef.current) return;
+
+    // Refresh the target to get updated is_connected status
+    try {
+      const updatedTarget = await deploymentTargetsApi.get(slugRef.current, targetId);
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === targetId
+            ? { ...node, data: { ...node.data, isConnected: updatedTarget.is_connected } }
+            : node
+        )
+      );
+      setConnectedProviders((prev) =>
+        prev.includes(provider) ? prev : [...prev, provider]
+      );
+    } catch {
+      // Target might have been refreshed already
+    }
+  }, [providerConnectModal, setNodes]);
+
+  // Stable callback for changing environment on a deployment target
+  const handleEnvironmentChange = useCallback(
+    async (targetId: string, environment: 'production' | 'staging' | 'preview') => {
+      // Optimistically update the node
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === targetId
+            ? { ...node, data: { ...node.data, environment } }
+            : node
+        )
+      );
+
+      try {
+        await deploymentTargetsApi.update(slugRef.current!, targetId, { environment });
+        setConfigDirty(true);
+      } catch (error) {
+        console.error('Failed to update environment:', error);
+        toast.error('Failed to update environment');
+      }
+    },
+    [setNodes]
+  );
 
   // Stable callback for rolling back a deployment
   const handleRollbackDeployment = useCallback(
@@ -717,15 +789,6 @@ const ProjectGraphCanvasInner = () => {
 
         if (result.status === 'success') {
           toast.success('Rollback successful!', { id: `rollback-${deploymentId}` });
-          // Refresh the deployment history
-          const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
-          setNodes((nds) =>
-            nds.map((node) =>
-              node.id === targetId
-                ? { ...node, data: { ...node.data, deploymentHistory: history } }
-                : node
-            )
-          );
         } else {
           toast.error(`Rollback failed: ${result.error || 'Unknown error'}`, {
             id: `rollback-${deploymentId}`,
@@ -734,6 +797,20 @@ const ProjectGraphCanvasInner = () => {
       } catch (error) {
         console.error('Failed to rollback:', error);
         toast.error('Rollback failed', { id: `rollback-${deploymentId}` });
+      } finally {
+        // Always refresh deployment history — backend creates records for both success and failure
+        try {
+          const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === targetId
+                ? { ...node, data: { ...node.data, deploymentHistory: history } }
+                : node
+            )
+          );
+        } catch {
+          // History refresh is best-effort
+        }
       }
     },
     [setNodes]
@@ -809,6 +886,7 @@ const ProjectGraphCanvasInner = () => {
           );
 
           toast.success(`Connected ${containerName} to browser`);
+          setConfigDirty(true);
         } catch (error) {
           console.error('Failed to connect browser to container:', error);
           toast.error('Failed to connect browser to container');
@@ -873,6 +951,7 @@ const ProjectGraphCanvasInner = () => {
           );
 
           toast.success(`Connected ${containerName} to ${provider}`);
+          setConfigDirty(true);
         } catch (error) {
           console.error('Failed to connect container to deployment target:', error);
           const axiosError = error as { response?: { data?: { detail?: string } } };
@@ -923,6 +1002,7 @@ const ProjectGraphCanvasInner = () => {
         toast.success(
           isSourceService ? 'Connected — env vars will be injected' : 'Connection created'
         );
+        setConfigDirty(true);
       } catch (error) {
         console.error('Failed to create connection:', error);
         toast.error('Failed to create connection');
@@ -955,8 +1035,9 @@ const ProjectGraphCanvasInner = () => {
           y: event.clientY,
         });
 
-        // Extract provider name from the deployment target slug (e.g., 'vercel-deploy' -> 'vercel')
-        const provider = item.slug.replace('-deploy', '');
+        // Extract provider key from item config or slug
+        // Seed items have config.provider_key; legacy service items have slug like 'vercel-deploy'
+        const provider = item.provider_key || item.slug.replace('deploy-', '').replace('-deploy', '');
 
         // Generate temporary ID for optimistic update
         const tempId = `temp-target-${Date.now()}`;
@@ -975,6 +1056,7 @@ const ProjectGraphCanvasInner = () => {
             deploymentHistory: [],
             onDeploy: handleDeployFromTarget,
             onConnect: handleConnectDeploymentTarget,
+            onEnvironmentChange: handleEnvironmentChange,
             onDelete: handleDeleteDeploymentTarget,
             onRollback: handleRollbackDeployment,
           },
@@ -1002,8 +1084,10 @@ const ProjectGraphCanvasInner = () => {
                     data: {
                       ...node.data,
                       isConnected: newTarget.is_connected,
+                      providerInfo: newTarget.provider_info,
                       onDeploy: handleDeployFromTarget,
                       onConnect: handleConnectDeploymentTarget,
+                      onEnvironmentChange: handleEnvironmentChange,
                       onDelete: handleDeleteDeploymentTarget,
                       onRollback: handleRollbackDeployment,
                     },
@@ -1013,6 +1097,7 @@ const ProjectGraphCanvasInner = () => {
           );
 
           toast.success(`${item.name} added to canvas`);
+          setConfigDirty(true);
         } catch (error: unknown) {
           console.error('Failed to create deployment target:', error);
           // Remove the optimistic node on error
@@ -1048,6 +1133,7 @@ const ProjectGraphCanvasInner = () => {
           };
           setNodes((nds) => [...nds, browserNode]);
           toast.success('Browser preview added');
+          setConfigDirty(true);
         } catch (error) {
           console.error('Failed to create browser preview:', error);
           toast.error('Failed to create browser preview');
@@ -1361,6 +1447,7 @@ const ProjectGraphCanvasInner = () => {
           )
         );
         toast.success(`Added ${item.name}`);
+        setConfigDirty(true);
       } catch (error) {
         console.error('Failed to add container:', error);
         // Remove the optimistic node on error
@@ -1430,6 +1517,7 @@ const ProjectGraphCanvasInner = () => {
         );
 
         toast.success('Container deleted');
+        setConfigDirty(true);
 
         // Ask if user wants to delete associated files
         const deleteFiles = confirm(
@@ -1617,6 +1705,40 @@ const ProjectGraphCanvasInner = () => {
     }
   };
 
+  const handleSaveConfig = async () => {
+    if (!slug) return;
+    try {
+      toast.loading('Saving config to .tesslate/config.json...', { id: 'save-config' });
+      const result = await configSyncApi.save(slug);
+      const total = Object.values(result.sections).reduce((sum, n) => sum + n, 0);
+      toast.success(`Config saved (${total} items)`, { id: 'save-config', duration: 2000 });
+      setConfigDirty(false);
+      loadFiles();
+      fileEvents.emit('file-updated', '.tesslate/config.json');
+    } catch (error) {
+      toast.error('Failed to save configuration', { id: 'save-config' });
+    }
+  };
+
+  const handleLoadConfig = async () => {
+    if (!slug) return;
+    try {
+      toast.loading('Loading config from .tesslate/config.json...', { id: 'load-config' });
+      const configResponse = await setupApi.getConfig(slug);
+      if (!configResponse.exists) {
+        toast.error('No .tesslate/config.json found', { id: 'load-config' });
+        return;
+      }
+      const { exists, ...config } = configResponse;
+      const result = await configSyncApi.load(slug, config);
+      toast.success(`Config loaded (${result.container_ids.length} containers)`, { id: 'load-config', duration: 2000 });
+      await fetchProjectData();
+      setConfigDirty(false);
+    } catch (error) {
+      toast.error('Failed to load configuration', { id: 'load-config' });
+    }
+  };
+
   // Stable callback - uses ref for slug
   const handleOpenBuilder = useCallback(
     (containerId: string) => {
@@ -1752,6 +1874,7 @@ const ProjectGraphCanvasInner = () => {
       }
 
       toast.success(`Deleted ${deletedEdges.length} connection(s)`);
+      setConfigDirty(true);
     },
     [setNodes, setEdges]
   );
@@ -1951,6 +2074,36 @@ const ProjectGraphCanvasInner = () => {
 
           {/* Control buttons */}
           <div className="flex items-center gap-[2px]">
+            {/* Config Sync Buttons */}
+            <Tooltip content="Save canvas state to .tesslate/config.json" side="bottom">
+              <button
+                onClick={handleSaveConfig}
+                className="hidden md:flex btn"
+              >
+                <span className="relative">
+                  <FloppyDisk size={16} />
+                  {configDirty && (
+                    <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--status-warning)]" />
+                  )}
+                </span>
+                <span className="hidden lg:inline">Save Config</span>
+              </button>
+            </Tooltip>
+            <Tooltip content="Load .tesslate/config.json into canvas" side="bottom">
+              <button
+                onClick={handleLoadConfig}
+                className="hidden md:flex btn"
+              >
+                <span className="relative">
+                  <ArrowsClockwise size={16} />
+                  {configDirty && (
+                    <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--status-warning)]" />
+                  )}
+                </span>
+                <span className="hidden lg:inline">Load Config</span>
+              </button>
+            </Tooltip>
+
             {/* Builder Button */}
             <button
               onClick={() => navigate(`/project/${slug}/builder`)}
@@ -2157,6 +2310,15 @@ const ProjectGraphCanvasInner = () => {
           onSubmit={handleExternalServiceCredentialSubmit}
         />
       )}
+
+      {/* Provider Connect Modal for deployment targets */}
+      <ProviderConnectModal
+        isOpen={providerConnectModal.isOpen}
+        onClose={() => setProviderConnectModal({ isOpen: false, targetId: null, provider: null })}
+        onConnected={handleProviderConnected}
+        defaultProvider={providerConnectModal.provider || undefined}
+        connectedProviders={connectedProviders}
+      />
     </div>
   );
 };

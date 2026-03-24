@@ -39,6 +39,8 @@ from ..models import (
     Container,
     ContainerConnection,
     DeploymentCredential,
+    DeploymentTarget,
+    DeploymentTargetConnection,
     MarketplaceBase,
     Project,
     ProjectAsset,
@@ -1573,14 +1575,18 @@ async def get_setup_config(
             logger.debug(f"[SETUP-CONFIG] Could not read config from K8s: {e}")
 
     if config_data:
-        return {
+        response: dict = {
             "exists": True,
             "apps": {
                 name: {
                     "directory": app.directory,
                     "port": app.port,
                     "start": app.start,
+                    **({"build": app.build} if app.build else {}),
+                    **({"output": app.output} if app.output else {}),
+                    **({"framework": app.framework} if app.framework else {}),
                     "env": app.env,
+                    **({"exports": app.exports} if app.exports else {}),
                     "x": app.x,
                     "y": app.y,
                 }
@@ -1588,8 +1594,13 @@ async def get_setup_config(
             },
             "infrastructure": {
                 name: {
-                    "image": infra.image,
-                    "port": infra.port,
+                    **({"image": infra.image} if infra.image else {}),
+                    **({"port": infra.port} if infra.port else {}),
+                    **({"env": infra.env} if infra.env else {}),
+                    **({"exports": infra.exports} if infra.exports else {}),
+                    **({"type": infra.infra_type} if infra.infra_type != "container" else {}),
+                    **({"provider": infra.provider} if infra.provider else {}),
+                    **({"endpoint": infra.endpoint} if infra.endpoint else {}),
                     "x": infra.x,
                     "y": infra.y,
                 }
@@ -1597,6 +1608,28 @@ async def get_setup_config(
             },
             "primaryApp": config_data.primaryApp,
         }
+        if config_data.connections:
+            response["connections"] = [
+                {"from": c.from_node, "to": c.to_node}
+                for c in config_data.connections
+            ]
+        if config_data.deployments:
+            response["deployments"] = {
+                name: {
+                    "provider": dep.provider,
+                    "targets": dep.targets,
+                    **({"env": dep.env} if dep.env else {}),
+                    "x": dep.x,
+                    "y": dep.y,
+                }
+                for name, dep in config_data.deployments.items()
+            }
+        if config_data.previews:
+            response["previews"] = {
+                name: {"target": prev.target, "x": prev.x, "y": prev.y}
+                for name, prev in config_data.previews.items()
+            }
+        return response
 
     # Nothing found
     return {
@@ -1624,8 +1657,12 @@ async def save_setup_config(
 
     from ..services.base_config_parser import (
         AppConfig,
+        ConnectionConfig,
+        DeploymentConfig,
         InfraConfig,
+        PreviewConfig,
         TesslateProjectConfig,
+        serialize_config_to_json,
         validate_startup_command,
         write_tesslate_config,
     )
@@ -1647,7 +1684,11 @@ async def save_setup_config(
                 directory=app.directory,
                 port=app.port,
                 start=app.start,
+                build=app.build or None,
+                output=app.output or None,
+                framework=app.framework or None,
                 env=app.env,
+                exports=app.exports,
                 x=app.x,
                 y=app.y,
             )
@@ -1655,12 +1696,39 @@ async def save_setup_config(
         },
         infrastructure={
             name: InfraConfig(
-                image=infra.image,
-                port=infra.port,
+                image=infra.image or "",
+                port=infra.port or 5432,
+                env=infra.env,
+                exports=infra.exports,
+                infra_type=infra.type or "container",
+                provider=infra.provider,
+                endpoint=infra.endpoint,
                 x=infra.x,
                 y=infra.y,
             )
             for name, infra in config_data.infrastructure.items()
+        },
+        connections=[
+            ConnectionConfig(from_node=c.from_node, to_node=c.to_node)
+            for c in config_data.connections
+        ],
+        deployments={
+            name: DeploymentConfig(
+                provider=dep.provider,
+                targets=dep.targets,
+                env=dep.env,
+                x=dep.x,
+                y=dep.y,
+            )
+            for name, dep in config_data.deployments.items()
+        },
+        previews={
+            name: PreviewConfig(
+                target=prev.target,
+                x=prev.x,
+                y=prev.y,
+            )
+            for name, prev in config_data.previews.items()
         },
         primaryApp=config_data.primaryApp,
     )
@@ -1671,8 +1739,6 @@ async def save_setup_config(
         write_tesslate_config(project_path, config)
     else:
         # K8s: write config via orchestrator (FileOps)
-        import json as json_mod
-
         from ..services.orchestration import get_orchestrator
 
         orchestrator = get_orchestrator()
@@ -1683,27 +1749,7 @@ async def save_setup_config(
             "cache_node": project.cache_node,
         }
 
-        config_json = json_mod.dumps(
-            {
-                "apps": {
-                    name: {
-                        "directory": a.directory,
-                        "port": a.port,
-                        "start": a.start,
-                        "env": a.env,
-                        "x": a.x,
-                        "y": a.y,
-                    }
-                    for name, a in config.apps.items()
-                },
-                "infrastructure": {
-                    name: {"image": i.image, "port": i.port, "x": i.x, "y": i.y}
-                    for name, i in config.infrastructure.items()
-                },
-                "primaryApp": config.primaryApp,
-            },
-            indent=2,
-        )
+        config_json = serialize_config_to_json(config)
 
         await orchestrator.write_file(
             user_id=current_user.id,
@@ -1731,7 +1777,11 @@ async def save_setup_config(
             container.directory = app_config.directory
             container.internal_port = app_config.port or 3000
             container.environment_vars = app_config.env or {}
+            container.exports = app_config.exports or None
             container.startup_command = app_config.start or None
+            container.build_command = app_config.build or None
+            container.output_directory = app_config.output or None
+            container.framework = app_config.framework or None
             if app_config.x is not None:
                 container.position_x = app_config.x
             if app_config.y is not None:
@@ -1746,7 +1796,11 @@ async def save_setup_config(
                 container_name=f"{project.slug}-{app_name}",
                 internal_port=app_config.port or 3000,
                 environment_vars=app_config.env or {},
+                exports=app_config.exports or None,
                 startup_command=app_config.start or None,
+                build_command=app_config.build or None,
+                output_directory=app_config.output or None,
+                framework=app_config.framework or None,
                 container_type="base",
                 status="stopped",
                 position_x=app_config.x or 200,
@@ -1765,6 +1819,10 @@ async def save_setup_config(
         if infra_name in existing_containers:
             container = existing_containers[infra_name]
             container.internal_port = infra_config.port
+            container.environment_vars = infra_config.env or container.environment_vars
+            container.exports = infra_config.exports or None
+            container.deployment_mode = infra_config.infra_type if infra_config.infra_type == "external" else "container"
+            container.external_endpoint = infra_config.endpoint
             if infra_config.x is not None:
                 container.position_x = infra_config.x
             if infra_config.y is not None:
@@ -1777,8 +1835,12 @@ async def save_setup_config(
                 directory=".",
                 container_name=f"{project.slug}-{infra_name}",
                 internal_port=infra_config.port,
+                environment_vars=infra_config.env or {},
+                exports=infra_config.exports or None,
                 container_type="service",
                 service_slug=infra_name,
+                deployment_mode="external" if infra_config.infra_type == "external" else "container",
+                external_endpoint=infra_config.endpoint,
                 status="stopped",
                 position_x=infra_config.x or 400,
                 position_y=infra_config.y or 400,
@@ -1794,12 +1856,143 @@ async def save_setup_config(
         logger.info(f"[SETUP-CONFIG] Deleting orphaned container: {orphan_name}")
         await db.delete(orphan_container)
 
+    # Build name→container lookup for connection/deployment/preview sync
+    all_containers_result = await db.execute(
+        select(Container).where(Container.project_id == project.id)
+    )
+    container_by_name = {c.name: c for c in all_containers_result.scalars().all()}
+
+    # Sync connections (full replace — always delete, then re-create)
+    existing_conns = await db.execute(
+        select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+    )
+    for conn in existing_conns.scalars().all():
+        await db.delete(conn)
+
+    for conn_config in config.connections:
+        source = container_by_name.get(conn_config.from_node)
+        target = container_by_name.get(conn_config.to_node)
+        if source and target:
+            db.add(ContainerConnection(
+                project_id=project.id,
+                source_container_id=source.id,
+                target_container_id=target.id,
+                connector_type="env_injection",
+                connection_type="depends_on",
+            ))
+
+    # Sync deployment targets (full replace — always delete, then re-create)
+    existing_targets = await db.execute(
+        select(DeploymentTarget).where(DeploymentTarget.project_id == project.id)
+    )
+    for target in existing_targets.scalars().all():
+        await db.delete(target)
+    await db.flush()
+
+    for dep_name, dep_config in config.deployments.items():
+        dep_target = DeploymentTarget(
+            project_id=project.id,
+            provider=dep_config.provider,
+            name=dep_name,
+            deployment_env=dep_config.env or None,
+            position_x=dep_config.x or 0,
+            position_y=dep_config.y or 0,
+        )
+        db.add(dep_target)
+        await db.flush()
+        await db.refresh(dep_target)
+
+        for target_app_name in dep_config.targets:
+            target_container = container_by_name.get(target_app_name)
+            if target_container:
+                db.add(DeploymentTargetConnection(
+                    project_id=project.id,
+                    container_id=target_container.id,
+                    deployment_target_id=dep_target.id,
+                    deployment_settings=dep_config.env or {},
+                ))
+
+    # Sync previews (full replace — always delete, then re-create)
+    existing_previews = await db.execute(
+        select(BrowserPreview).where(BrowserPreview.project_id == project.id)
+    )
+    for preview in existing_previews.scalars().all():
+        await db.delete(preview)
+
+    for _preview_name, preview_config in config.previews.items():
+        target_container = container_by_name.get(preview_config.target)
+        db.add(BrowserPreview(
+            project_id=project.id,
+            connected_container_id=target_container.id if target_container else None,
+            position_x=preview_config.x or 0,
+            position_y=preview_config.y or 0,
+            current_path="/",
+        ))
+
     await db.commit()
 
     return SetupConfigSyncResponse(
         container_ids=container_ids,
         primary_container_id=primary_container_id,
     )
+
+
+@router.post("/{project_slug}/sync-config")
+async def sync_config_to_file(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save current canvas state (DB) to .tesslate/config.json.
+
+    Reads all Container, ContainerConnection, DeploymentTarget, and BrowserPreview
+    records for the project and writes a complete config.json.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    await track_project_activity(project.id, db)
+    settings = get_settings()
+
+    from ..services.base_config_parser import (
+        serialize_config_to_json,
+        write_tesslate_config,
+    )
+    from ..services.config_sync import build_config_from_db
+
+    config = await build_config_from_db(db, project.id)
+
+    # Write to filesystem (Docker) or FileOps (K8s)
+    if settings.deployment_mode == "docker":
+        project_path = f"/projects/{project.slug}"
+        write_tesslate_config(project_path, config)
+    else:
+        from ..services.orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+        volume_hints = {
+            "volume_id": project.volume_id,
+            "cache_node": project.cache_node,
+        }
+        config_json = serialize_config_to_json(config)
+        await orchestrator.write_file(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            file_path=".tesslate/config.json",
+            content=config_json,
+            project_slug=project.slug,
+            **volume_hints,
+        )
+
+    return {
+        "status": "saved",
+        "sections": {
+            "apps": len(config.apps),
+            "infrastructure": len(config.infrastructure),
+            "connections": len(config.connections),
+            "deployments": len(config.deployments),
+            "previews": len(config.previews),
+        },
+    }
 
 
 @router.post("/{project_slug}/analyze", response_model=TesslateConfigResponse)
@@ -1958,6 +2151,9 @@ async def analyze_project(
                     "directory": app.directory,
                     "port": app.port,
                     "start": app.start,
+                    **({"build": app.build} if app.build else {}),
+                    **({"output": app.output} if app.output else {}),
+                    **({"framework": app.framework} if app.framework else {}),
                     "env": app.env,
                 }
                 for name, app in config.apps.items()

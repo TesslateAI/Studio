@@ -55,7 +55,7 @@ async def send_message_executor(params: dict[str, Any], context: dict[str, Any])
         # The message content is returned as part of the tool result,
         # which the agent will include in its response
         return success_output(
-            message=f"Message sent to chat",
+            message="Message sent to chat",
             notification=message,
             channel="chat",
         )
@@ -155,8 +155,9 @@ async def send_message_executor(params: dict[str, Any], context: dict[str, Any])
                     suggestion="This is an internal error — please report it",
                 )
 
-            from ....models import ChannelConfig
             from sqlalchemy import select
+
+            from ....models import ChannelConfig
 
             result = await db.execute(
                 select(ChannelConfig).where(ChannelConfig.id == channel_config_id)

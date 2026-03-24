@@ -9,8 +9,8 @@ Converts markdown-style text to platform-specific formatting:
 """
 
 import html
-import re
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 

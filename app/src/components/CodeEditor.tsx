@@ -18,6 +18,7 @@ import {
 import Editor from '@monaco-editor/react';
 import { useTheme } from '../theme/ThemeContext';
 import { projectsApi } from '../lib/api';
+import { fileEvents } from '../utils/fileEvents';
 
 interface FileNode {
   name: string;
@@ -384,6 +385,27 @@ function CodeEditor({
       cancelled = true;
     };
   }, [selectedFile, slug, containerDir]);
+
+  // Invalidate content cache when files are updated externally (e.g. Save Config)
+  useEffect(() => {
+    const unsubscribe = fileEvents.on((detail) => {
+      if (detail.type === 'file-updated' && detail.filePath) {
+        localContentRef.current.delete(detail.filePath);
+        // Re-fetch if this is the currently selected file
+        if (selectedFileRef.current === detail.filePath) {
+          setLoadingContent(true);
+          projectsApi
+            .getFileContent(slug, detail.filePath, containerDir)
+            .then((res) => {
+              localContentRef.current.set(detail.filePath!, res.content);
+              setLoadingContent(false);
+            })
+            .catch(() => setLoadingContent(false));
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [slug, containerDir]);
 
   // ── Directory toggle ──────────────────────────────────────────────
 

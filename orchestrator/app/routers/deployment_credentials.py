@@ -40,6 +40,33 @@ class CredentialMetadata(BaseModel):
     dispatch_namespace: str | None = Field(None, description="Dispatch namespace (Cloudflare)")
     account_name: str | None = Field(None, description="Account name for display")
 
+    # Git-repo providers
+    repo_owner: str | None = Field(None, description="Repository owner (GitHub Pages)")
+    org_slug: str | None = Field(None, description="Organization slug (Fly.io, Deno Deploy)")
+
+    # Cloud providers
+    client_id: str | None = Field(None, description="App (Client) ID (Azure)")
+    project_id: str | None = Field(None, description="Project ID (GCP, Firebase)")
+    aws_region: str | None = Field(None, description="AWS region (aws-apprunner)")
+    gcp_region: str | None = Field(None, description="GCP region (gcp-cloudrun)")
+    azure_region: str | None = Field(None, description="Azure region (azure-container-apps)")
+    subscription_id: str | None = Field(None, description="Azure subscription ID")
+    resource_group: str | None = Field(None, description="Azure resource group")
+    registry_name: str | None = Field(None, description="Container registry name (ACR, DOCR)")
+    tenant_id: str | None = Field(None, description="Azure tenant ID")
+    site_id: str | None = Field(None, description="Firebase site ID")
+    org_id: str | None = Field(None, description="Deno Deploy organization ID")
+
+    # AWS
+    aws_secret_access_key: str | None = Field(None, description="AWS secret access key (aws-apprunner)")
+
+    # Credentials that are stored as metadata (not the primary token)
+    email: str | None = Field(None, description="Account email (Surge)")
+    username: str | None = Field(None, description="Account username (DockerHub, GHCR)")
+
+    # Token refresh
+    refresh_token: str | None = Field(None, description="OAuth refresh token (Heroku)")
+
 
 class CreateCredentialRequest(BaseModel):
     """Request to create a new deployment credential."""
@@ -106,6 +133,73 @@ class ProviderListResponse(BaseModel):
     """Response containing list of providers."""
 
     providers: list[ProviderInfo]
+
+
+# ============================================================================
+# Helpers
+# ============================================================================
+
+
+# ---------------------------------------------------------------------------
+# Declarative credential schema: maps (access_token, metadata) → provider creds
+#
+# token_alias  – extra key name for the access_token (always available as "token" too)
+# meta_keys    – metadata keys copied verbatim into creds
+# meta_defaults – fallback values when a meta_key is absent
+# meta_remap   – metadata_key → credential_key rename (e.g. account_name → email)
+# ---------------------------------------------------------------------------
+PROVIDER_CREDENTIAL_SCHEMA: dict[str, dict] = {
+    "cloudflare":           {"token_alias": "api_token", "meta_keys": ["account_id", "dispatch_namespace"]},
+    "vercel":               {"meta_keys": ["team_id"]},
+    "netlify":              {"meta_keys": ["team_id"]},
+    "heroku":               {"token_alias": "api_key"},
+    "render":               {"token_alias": "api_key"},
+    "railway":              {},
+    "github-pages":         {},
+    "koyeb":                {"token_alias": "api_token", "meta_keys": ["org_slug"]},
+    "northflank":           {"token_alias": "api_token", "meta_keys": ["org_slug"]},
+    "fly":                  {"token_alias": "api_token", "meta_keys": ["org_slug"]},
+    "deno-deploy":          {"meta_keys": ["org_id"]},
+    "surge":                {"meta_keys": ["email"], "meta_remap": {"account_name": "email"}},
+    "zeabur":               {"token_alias": "api_key"},
+    "firebase":             {"token_alias": "service_account_json", "meta_keys": ["site_id"]},
+    "aws-apprunner":        {"token_alias": "aws_access_key_id", "meta_keys": ["aws_secret_access_key", "aws_region"], "meta_defaults": {"aws_secret_access_key": "", "aws_region": "us-east-1"}},
+    "gcp-cloudrun":         {"token_alias": "service_account_json", "meta_keys": ["gcp_region"], "meta_defaults": {"gcp_region": "us-central1"}},
+    "azure-container-apps": {"token_alias": "client_secret", "meta_keys": ["tenant_id", "client_id", "subscription_id", "resource_group", "registry_name", "azure_region"]},
+    "do-container":         {"token_alias": "api_token", "meta_keys": ["registry_name"]},
+    "digitalocean":         {"token_alias": "api_token", "meta_keys": ["registry_name"]},
+    "dockerhub":            {"meta_keys": ["username"], "meta_remap": {"account_name": "username"}},
+    "ghcr":                 {"meta_keys": ["username"], "meta_remap": {"account_name": "username"}},
+    "download":             {},
+}
+
+
+def _build_provider_credentials(
+    provider: str, access_token: str, metadata: dict | None
+) -> dict[str, str]:
+    """Build the credentials dict for a provider from the stored token and metadata."""
+    meta = metadata or {}
+    creds: dict[str, str] = {"token": access_token}
+
+    schema = PROVIDER_CREDENTIAL_SCHEMA.get(provider, {})
+
+    # Add aliased token key (e.g. api_token, api_key, service_account_json)
+    if "token_alias" in schema:
+        creds[schema["token_alias"]] = access_token
+
+    # Copy metadata fields directly, falling back to defaults
+    defaults = schema.get("meta_defaults", {})
+    for key in schema.get("meta_keys", []):
+        if key in meta:
+            creds[key] = meta[key]
+        elif key in defaults:
+            creds[key] = defaults[key]
+
+    # Remap metadata fields (e.g. account_name → email, account_name → username)
+    for meta_key, cred_key in schema.get("meta_remap", {}).items():
+        creds[cred_key] = meta.get(meta_key, "")
+
+    return creds
 
 
 # ============================================================================
@@ -480,17 +574,9 @@ async def test_credential(
         access_token = encryption_service.decrypt(credential.access_token_encrypted)
 
         # Prepare credentials dict for provider
-        provider_credentials = {"token": access_token}
-
-        # Add metadata to credentials
-        if credential.provider_metadata:
-            if credential.provider == "cloudflare":
-                provider_credentials["api_token"] = access_token
-                if "account_id" in credential.provider_metadata:
-                    provider_credentials["account_id"] = credential.provider_metadata["account_id"]
-            elif credential.provider in ["vercel", "netlify"]:
-                if "team_id" in credential.provider_metadata:
-                    provider_credentials["team_id"] = credential.provider_metadata["team_id"]
+        provider_credentials = _build_provider_credentials(
+            credential.provider, access_token, credential.provider_metadata
+        )
 
         # Get provider instance and test credentials with real API call
         try:

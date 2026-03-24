@@ -115,8 +115,8 @@ async def _discover_file_skills(
     user_id: UUID, project_id: str, container_name: str
 ) -> list[SkillCatalogEntry]:
     """Discover SKILL.md files in the project's .agents/skills/ directory."""
-    from .orchestration import is_kubernetes_mode
     from ..utils.resource_naming import get_container_name
+    from .orchestration import is_kubernetes_mode
 
     try:
         # Find SKILL.md files in the container
@@ -161,8 +161,8 @@ async def _parse_skill_frontmatter(
     """Parse only the YAML frontmatter from a SKILL.md file (name + description)."""
     import shlex
 
-    from .orchestration import is_kubernetes_mode
     from ..utils.resource_naming import get_container_name
+    from .orchestration import is_kubernetes_mode
 
     try:
         safe_path = shlex.quote(file_path)
