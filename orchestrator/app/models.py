@@ -95,7 +95,7 @@ class Project(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     owner = relationship("User", back_populates="projects")
-    team = relationship("Team", back_populates="projects", lazy="selectin")
+    team = relationship("Team", back_populates="projects", foreign_keys=[team_id], lazy="selectin")
     project_memberships = relationship(
         "ProjectMembership", back_populates="project", cascade="all, delete-orphan", lazy="noload"
     )

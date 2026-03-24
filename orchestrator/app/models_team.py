@@ -63,7 +63,9 @@ class Team(Base):
 
     # Relationships
     memberships = relationship("TeamMembership", back_populates="team", lazy="selectin")
-    projects = relationship("Project", back_populates="team", lazy="noload")
+    projects = relationship(
+        "Project", back_populates="team", foreign_keys="[Project.team_id]", lazy="noload"
+    )
     invitations = relationship("TeamInvitation", back_populates="team", lazy="noload")
 
     @property
