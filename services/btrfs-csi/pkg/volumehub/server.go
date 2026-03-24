@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 
@@ -105,6 +106,22 @@ func (s *Server) Start(addr string, tlsCfg *TLSConfig) error {
 
 	// ForceServerCodec makes all RPCs use JSON regardless of content-type.
 	opts = append(opts, grpc.ForceServerCodec(jsonCodec{}))
+
+	// Keepalive: the Python HubClient sends PINGs every 30s with
+	// permit_without_calls=1. Without an explicit enforcement policy the
+	// gRPC-Go default (5 min min-time, no pings without streams) causes
+	// GOAWAY ENHANCE_YOUR_CALM → connection drops.
+	opts = append(opts,
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second, // allow pings as fast as 10s
+			PermitWithoutStream: true,             // allow pings on idle connections
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    60 * time.Second, // server pings client after 60s idle
+			Timeout: 10 * time.Second, // wait 10s for ping ack
+		}),
+	)
+
 	s.srv = grpc.NewServer(opts...)
 	registerVolumeHubServer(s.srv, s)
 

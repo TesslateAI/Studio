@@ -221,7 +221,7 @@ class HubClient:
     # Volume routing
     # ------------------------------------------------------------------
 
-    async def resolve_volume(self, volume_id: str, *, timeout: float = 10.0) -> dict:
+    async def resolve_volume(self, volume_id: str, *, timeout: float = 20.0) -> dict:
         """Non-blocking volume resolution via Hub.
 
         Returns the volume's current state and routing addresses.

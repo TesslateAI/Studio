@@ -109,6 +109,16 @@ spec:
             - name: drain
               containerPort: 9743
               protocol: TCP
+          livenessProbe:
+            exec:
+              command:
+                - test
+                - -S
+                - /run/csi/csi.sock
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
           env:
             - name: NODE_NAME
               valueFrom:

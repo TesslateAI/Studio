@@ -431,6 +431,27 @@ func (d *Driver) startCSIServer(ctx context.Context) error {
 		errCh <- d.srv.Serve(listener)
 	}()
 
+	// Socket watchdog: Serve() keeps running on the open fd even if the
+	// socket inode is deleted externally (kubelet cleanup, node maintenance).
+	// Kubelet can no longer dial the path, so all volume mounts fail silently.
+	// Detect this and force-stop so the container restarts with a fresh socket.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+					klog.Errorf("CSI socket %s disappeared — forcing shutdown so kubelet restarts the container", socketPath)
+					d.srv.Stop() // causes Serve() to return → errCh fires → process exits
+					return
+				}
+			}
+		}
+	}()
+
 	select {
 	case <-ctx.Done():
 		klog.Info("Context cancelled, CSI server will be stopped by driver.Stop()")
