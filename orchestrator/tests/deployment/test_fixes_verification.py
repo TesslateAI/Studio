@@ -9,9 +9,9 @@ import inspect
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-pytestmark = pytest.mark.mocked
-
 import pytest
+
+pytestmark = pytest.mark.mocked
 
 # =============================================================================
 # Fix #1: Fly.io double /v1 in API URLs
