@@ -5,7 +5,11 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
-from ...services.base_config_parser import TesslateProjectConfig, serialize_config_to_json, write_tesslate_config
+from ...services.base_config_parser import (
+    TesslateProjectConfig,
+    serialize_config_to_json,
+    write_tesslate_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +139,6 @@ async def _place_kubernetes(
 
         # Write resolved config to volume (skip for fallback — let Setup page handle it)
         if write_config:
-            import json
 
             config_json = serialize_config_to_json(config)
             await client.write_file(volume_id, ".tesslate/config.json", config_json.encode("utf-8"))

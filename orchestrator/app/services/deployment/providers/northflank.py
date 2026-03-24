@@ -132,7 +132,7 @@ class NorthflankProvider(BaseDeploymentProvider):
                 # Step 2 - Create combined service
                 logs.append("Creating combined service...")
                 build_cmd = config.build_command or framework_config.get("build_command", "npm run build")
-                start_cmd = config.start_command or "npm start"
+                _start_cmd = config.start_command or "npm start"
 
                 service_payload: dict = {
                     "name": "web",

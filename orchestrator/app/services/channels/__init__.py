@@ -6,7 +6,7 @@ Telegram, Slack, Discord, and WhatsApp platforms.
 """
 
 from .base import AbstractChannel, InboundMessage
-from .registry import get_channel, encrypt_credentials, decrypt_credentials, CHANNEL_MAP
+from .registry import CHANNEL_MAP, decrypt_credentials, encrypt_credentials, get_channel
 
 __all__ = [
     "AbstractChannel",

@@ -6,18 +6,18 @@ All seed functions are idempotent and safe to run on every startup.
 
 import logging
 
+from .community_bases import seed_community_bases
+from .deployment_targets import seed_deployment_targets
 from .marketplace_agents import (
     auto_add_librarian_agent_to_users,
     auto_add_tesslate_agent_to_users,
     get_or_create_tesslate_account,
     seed_marketplace_agents,
 )
-from .community_bases import seed_community_bases
 from .marketplace_bases import seed_marketplace_bases
 from .opensource_agents import seed_opensource_agents
 from .skills import seed_skills
 from .themes import seed_themes
-from .deployment_targets import seed_deployment_targets
 from .workflow_templates import WORKFLOW_TEMPLATES, seed_workflow_templates
 
 logger = logging.getLogger(__name__)

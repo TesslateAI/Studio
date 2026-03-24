@@ -74,8 +74,8 @@ class DiscordBotChannel(AbstractChannel):
             return False
 
         try:
-            from nacl.signing import VerifyKey
             from nacl.exceptions import BadSignatureError
+            from nacl.signing import VerifyKey
 
             verify_key = VerifyKey(bytes.fromhex(self.public_key))
             message = timestamp.encode() + body

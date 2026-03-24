@@ -145,7 +145,7 @@ class GCPContainerProvider(BaseContainerDeploymentProvider):
         repo, tag = _parse_image_ref(image_ref)
 
         try:
-            token = await self._get_access_token()
+            await self._get_access_token()
             registry_host = f"{self._region}-docker.pkg.dev"
             pushed_uri = f"{registry_host}/{self._project_id}/{repo}:{tag}"
 

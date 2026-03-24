@@ -140,8 +140,8 @@ async def _acquire_from_git(spec: SourceSpec, task) -> AcquiredSource:
 
 
 async def _acquire_from_archive(spec: SourceSpec, task) -> AcquiredSource:
-    from ...services.template_storage import get_template_storage
     from ...services.template_export import extract_archive_to_directory
+    from ...services.template_storage import get_template_storage
 
     if not spec.archive_path:
         raise ValueError("archive_path is required for archive source")

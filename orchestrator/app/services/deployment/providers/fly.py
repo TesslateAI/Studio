@@ -5,7 +5,7 @@ import logging
 
 import httpx
 
-from ..base import DeploymentConfig, DeploymentFile, DeploymentResult
+from ..base import DeploymentResult
 from ..container_base import BaseContainerDeploymentProvider, ContainerDeployConfig
 
 logger = logging.getLogger(__name__)

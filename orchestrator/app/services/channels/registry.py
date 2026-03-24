@@ -11,7 +11,6 @@ from typing import Any
 from cryptography.fernet import Fernet
 
 from ...config import get_settings
-
 from .base import AbstractChannel
 
 logger = logging.getLogger(__name__)
@@ -30,9 +29,9 @@ def _register_channels() -> None:
         return
     _registered = True
 
-    from .telegram import TelegramChannel
-    from .slack import SlackChannel
     from .discord_bot import DiscordBotChannel
+    from .slack import SlackChannel
+    from .telegram import TelegramChannel
     from .whatsapp import WhatsAppChannel
 
     CHANNEL_MAP["telegram"] = TelegramChannel

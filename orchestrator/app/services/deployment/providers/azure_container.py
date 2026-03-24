@@ -148,7 +148,7 @@ class AzureContainerProvider(BaseContainerDeploymentProvider):
 
         try:
             # Validate ACR access by fetching a catalog listing
-            token = await self._get_acr_token(repo)
+            await self._get_acr_token(repo)
             logger.info(
                 "ACR push target: %s (full push requires Docker client)", pushed_uri
             )

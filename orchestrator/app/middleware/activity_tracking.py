@@ -60,11 +60,12 @@ def _extract_project_slug(path: str) -> str | None:
 async def _update_activity(slug: str) -> None:
     """Non-blocking DB update for project last_activity."""
     try:
+        from datetime import UTC, datetime
+
+        from sqlalchemy import update
+
         from ..database import AsyncSessionLocal
         from ..models import Project
-
-        from datetime import UTC, datetime
-        from sqlalchemy import update
 
         async with AsyncSessionLocal() as db:
             await db.execute(

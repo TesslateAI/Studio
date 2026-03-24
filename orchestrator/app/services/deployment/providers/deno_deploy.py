@@ -121,9 +121,7 @@ class DenoDeployProvider(BaseDeploymentProvider):
                 logs.append(f"Entry point: {entry_point}")
 
                 # Step 4: Create deployment
-                env_vars = {
-                    k: v for k, v in config.env_vars.items()
-                } if config.env_vars else {}
+                env_vars = dict(config.env_vars) if config.env_vars else {}
 
                 deploy_payload = {
                     "entryPointUrl": f"file:///{entry_point}",
@@ -224,7 +222,7 @@ class DenoDeployProvider(BaseDeploymentProvider):
                     if proj.get("name") == name:
                         logs.append(f"Found existing project: {proj['id']}")
                         return proj["id"]
-            logs.append(f"Could not resolve project ID, falling back to name")
+            logs.append("Could not resolve project ID, falling back to name")
             return name
 
         resp.raise_for_status()
@@ -276,10 +274,7 @@ class DenoDeployProvider(BaseDeploymentProvider):
             ".md", ".txt", ".yaml", ".yml", ".toml", ".xml", ".svg",
             ".sh", ".bash", ".env", ".cfg", ".ini", ".py", ".rs",
         }
-        for ext in text_extensions:
-            if path.endswith(ext):
-                return True
-        return False
+        return any(path.endswith(ext) for ext in text_extensions)
 
     @staticmethod
     def _find_entry_point(files: list[DeploymentFile]) -> str:

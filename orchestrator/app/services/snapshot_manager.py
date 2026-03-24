@@ -15,6 +15,7 @@ Deleting the PVC before the snapshot is ready will result in data corruption.
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from kubernetes import client, config

@@ -2,10 +2,11 @@
 
 import asyncio
 import io
-import tarfile
 import logging
+import tarfile
 import zipfile
-from typing import Callable, Awaitable, Any
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx
 

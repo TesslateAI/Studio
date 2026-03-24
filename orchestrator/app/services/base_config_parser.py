@@ -254,7 +254,7 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
     try:
         data = json.loads(json_str)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in .tesslate/config.json: {e}")
+        raise ValueError(f"Invalid JSON in .tesslate/config.json: {e}") from e
 
     config = TesslateProjectConfig()
 

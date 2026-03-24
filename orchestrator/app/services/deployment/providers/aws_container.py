@@ -5,13 +5,11 @@ Pushes container images to ECR and deploys them via AWS App Runner.
 Uses minimal SigV4 signing for authentication (boto3 preferred in production).
 """
 
-import base64
 import datetime
 import hashlib
 import hmac
 import json
 import logging
-from urllib.parse import quote
 
 import httpx
 
@@ -80,7 +78,7 @@ def _sign_v4(
     def _hmac_sha256(key: bytes, msg: str) -> bytes:
         return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
-    k_date = _hmac_sha256(f"AWS4{secret_key}".encode("utf-8"), datestamp)
+    k_date = _hmac_sha256(f"AWS4{secret_key}".encode(), datestamp)
     k_region = _hmac_sha256(k_date, region)
     k_service = _hmac_sha256(k_region, service)
     k_signing = _hmac_sha256(k_service, "aws4_request")
@@ -140,7 +138,7 @@ class AWSContainerProvider(BaseContainerDeploymentProvider):
         extra_headers: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Build SigV4-signed headers for an AWS API call."""
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         base_headers = extra_headers or {}
         signed = _sign_v4(
             method=method,

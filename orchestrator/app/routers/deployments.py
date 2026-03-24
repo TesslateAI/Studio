@@ -552,6 +552,7 @@ async def deploy_all_containers(
     Service containers (databases, caches) are skipped.
     """
     import asyncio
+
     from sqlalchemy.orm import selectinload
 
     # 1. Verify project ownership
@@ -594,7 +595,7 @@ async def deploy_all_containers(
         )
 
     # 3. Group containers by provider to validate credentials
-    providers_needed = set(c.deployment_provider for c in containers_with_targets)
+    providers_needed = {c.deployment_provider for c in containers_with_targets}
     encryption_service = get_deployment_encryption_service()
 
     # Validate credentials for each provider
@@ -1330,7 +1331,7 @@ async def deploy_single_container_endpoint(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"No credentials found for {provider_name}. Please connect your {provider_name} account first.",
-        )
+        ) from None
 
     # 6. Create deployment record
     deployment = Deployment(

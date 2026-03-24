@@ -11,7 +11,7 @@ import uuid
 
 import httpx
 
-from ..base import DeploymentConfig, DeploymentFile, DeploymentResult
+from ..base import DeploymentResult
 from ..container_base import BaseContainerDeploymentProvider, ContainerDeployConfig
 
 logger = logging.getLogger(__name__)
@@ -257,7 +257,7 @@ class GHCRExportProvider(BaseContainerDeploymentProvider):
             True if deletion succeeded, False otherwise.
         """
         try:
-            username = self.credentials["username"]
+            _username = self.credentials["username"]
             async with httpx.AsyncClient(timeout=30.0) as client:
                 # List package versions to find the one to delete
                 response = await client.get(

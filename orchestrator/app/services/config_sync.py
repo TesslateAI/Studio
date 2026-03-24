@@ -17,7 +17,6 @@ from ..models import (
     Container,
     ContainerConnection,
     DeploymentTarget,
-    Project,
 )
 from .base_config_parser import (
     AppConfig,

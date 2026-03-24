@@ -1919,7 +1919,7 @@ async def save_setup_config(
     for preview in existing_previews.scalars().all():
         await db.delete(preview)
 
-    for preview_name, preview_config in config.previews.items():
+    for _preview_name, preview_config in config.previews.items():
         target_container = container_by_name.get(preview_config.target)
         db.add(BrowserPreview(
             project_id=project.id,
@@ -1952,11 +1952,11 @@ async def sync_config_to_file(
     await track_project_activity(project.id, db)
     settings = get_settings()
 
-    from ..services.config_sync import build_config_from_db
     from ..services.base_config_parser import (
         serialize_config_to_json,
         write_tesslate_config,
     )
+    from ..services.config_sync import build_config_from_db
 
     config = await build_config_from_db(db, project.id)
 

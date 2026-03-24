@@ -160,7 +160,7 @@ PROVIDER_CREDENTIAL_SCHEMA: dict[str, dict] = {
     "northflank":           {"token_alias": "api_token", "meta_keys": ["org_slug"]},
     "fly":                  {"token_alias": "api_token", "meta_keys": ["org_slug"]},
     "deno-deploy":          {"meta_keys": ["org_id"]},
-    "surge":                {"meta_keys": ["email"]},
+    "surge":                {"meta_keys": ["email"], "meta_remap": {"account_name": "email"}},
     "zeabur":               {"token_alias": "api_key"},
     "firebase":             {"token_alias": "service_account_json", "meta_keys": ["site_id"]},
     "aws-apprunner":        {"token_alias": "aws_access_key_id", "meta_keys": ["aws_secret_access_key", "aws_region"], "meta_defaults": {"aws_secret_access_key": "", "aws_region": "us-east-1"}},
@@ -168,8 +168,8 @@ PROVIDER_CREDENTIAL_SCHEMA: dict[str, dict] = {
     "azure-container-apps": {"token_alias": "client_secret", "meta_keys": ["tenant_id", "client_id", "subscription_id", "resource_group", "registry_name", "azure_region"]},
     "do-container":         {"token_alias": "api_token", "meta_keys": ["registry_name"]},
     "digitalocean":         {"token_alias": "api_token", "meta_keys": ["registry_name"]},
-    "dockerhub":            {"meta_keys": ["username"]},
-    "ghcr":                 {"meta_keys": ["username"]},
+    "dockerhub":            {"meta_keys": ["username"], "meta_remap": {"account_name": "username"}},
+    "ghcr":                 {"meta_keys": ["username"], "meta_remap": {"account_name": "username"}},
     "download":             {},
 }
 

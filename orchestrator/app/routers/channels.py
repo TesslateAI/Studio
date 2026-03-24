@@ -244,9 +244,9 @@ async def webhook_inbound(
     # --- Decrypt credentials & instantiate channel ---
     try:
         credentials = decrypt_credentials(config.credentials)
-    except Exception:
+    except Exception as e:
         logger.exception(f"[WEBHOOK] Failed to decrypt credentials for config {config_id}")
-        raise HTTPException(status_code=500, detail="Internal configuration error")
+        raise HTTPException(status_code=500, detail="Internal configuration error") from e
 
     channel = get_channel(channel_type, credentials)
 
@@ -268,9 +268,9 @@ async def webhook_inbound(
     # --- Verify webhook signature ---
     try:
         is_valid = await channel.verify_webhook(headers, body)
-    except Exception:
+    except Exception as e:
         logger.exception(f"[WEBHOOK] Signature verification error for config {config_id}")
-        raise HTTPException(status_code=401, detail="Webhook verification error")
+        raise HTTPException(status_code=401, detail="Webhook verification error") from e
 
     if not is_valid:
         logger.warning(f"[WEBHOOK] Invalid signature for config {config_id}")
@@ -292,8 +292,8 @@ async def webhook_inbound(
     # --- Parse inbound payload ---
     try:
         payload = json.loads(body) if isinstance(body, bytes) else body
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from e
 
     inbound = channel.parse_inbound(payload)
     if inbound is None:
@@ -650,9 +650,9 @@ async def test_channel_config(
 
     try:
         credentials = decrypt_credentials(config.credentials)
-    except Exception:
+    except Exception as e:
         logger.exception(f"[CHANNELS] Failed to decrypt credentials for config {config_id}")
-        raise HTTPException(status_code=500, detail="Internal configuration error")
+        raise HTTPException(status_code=500, detail="Internal configuration error") from e
 
     channel = get_channel(config.channel_type, credentials)
     test_text = "Hello from Tesslate Studio! Your channel is configured correctly."
@@ -664,7 +664,7 @@ async def test_channel_config(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to send test message: {exc}",
-        )
+        ) from exc
 
     # Record outbound test message
     channel_message = ChannelMessage(
