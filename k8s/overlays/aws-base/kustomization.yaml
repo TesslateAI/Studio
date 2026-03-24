@@ -13,4 +13,3 @@ patches:
   - path: frontend-patch.yaml
   - path: backend-patch.yaml
   - path: worker-patch.yaml
-  - path: cleanup-cronjob-patch.yaml

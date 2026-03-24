@@ -179,9 +179,12 @@ All orchestrators implement these methods:
 - `execute_command(user_id, project_id, container_name, command, timeout, working_dir)` -> str
 - `is_container_ready(user_id, project_id, container_name)` -> Dict
 
-### Activity & Cleanup
+### Activity
 - `track_activity(user_id, project_id, container_name)` -> None
-- `cleanup_idle_environments(idle_timeout_minutes)` -> List[str]
+
+> **Note:** `cleanup_idle_environments()` was removed from the orchestrator interface.
+> Idle cleanup is now handled by the in-process `idle_monitor_loop()` in `services/idle_monitor.py`,
+> which runs inside the backend pod and dispatches `hibernate_project_bg()` for idle projects.
 
 ## Backward Compatibility
 

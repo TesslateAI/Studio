@@ -23,7 +23,6 @@ resources:
   - core/frontend-deployment.yaml
   - core/frontend-service.yaml
   - core/worker-deployment.yaml
-  - core/cleanup-cronjob.yaml
   - core/snapshot-cleanup-cronjob.yaml
 
   # Redis (distributed backplane for horizontal scaling)
