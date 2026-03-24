@@ -8,6 +8,8 @@ import base64
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+pytestmark = pytest.mark.mocked
 from uuid import uuid4
 
 from app.services.secret_manager_env import (

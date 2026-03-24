@@ -7,6 +7,9 @@ Covers:
 - Seed function upsert logic (create + update)
 - MarketplaceAgent item_type is 'deployment_target'
 """
+import pytest
+
+pytestmark = pytest.mark.unit
 
 import sys
 import os

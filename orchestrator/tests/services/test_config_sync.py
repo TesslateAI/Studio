@@ -7,6 +7,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+pytestmark = pytest.mark.mocked
+
 from app.services.config_sync import build_config_from_db
 
 

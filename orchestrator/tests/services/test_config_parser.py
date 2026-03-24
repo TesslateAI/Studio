@@ -1,5 +1,7 @@
 import json
 import pytest
+
+pytestmark = pytest.mark.unit
 from app.services.base_config_parser import (
     parse_tesslate_config,
     write_tesslate_config,

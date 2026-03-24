@@ -8,6 +8,7 @@ Tests cover:
 - deploy() with mocked httpx responses for key providers
 - Shared utility functions (tarball, zip, poll, graphql)
 - DownloadExportProvider deploy (no HTTP needed)
+
 - BaseContainerDeploymentProvider.deploy raises NotImplementedError
 """
 
@@ -17,8 +18,11 @@ import tarfile
 import zipfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
+
+pytestmark = pytest.mark.mocked
+
+import httpx
 
 from app.services.deployment.base import DeploymentConfig, DeploymentFile, DeploymentResult
 from app.services.deployment.container_base import (

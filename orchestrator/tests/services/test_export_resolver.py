@@ -1,4 +1,7 @@
 import pytest
+
+pytestmark = pytest.mark.unit
+
 from app.services.export_resolver import resolve_node_exports, build_env_from_connections
 
 

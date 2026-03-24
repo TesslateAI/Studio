@@ -13,6 +13,8 @@ import pytest
 from unittest.mock import AsyncMock, Mock, patch, MagicMock
 from uuid import uuid4
 
+pytestmark = pytest.mark.mocked
+
 import sys
 import os
 

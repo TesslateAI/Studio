@@ -2,6 +2,8 @@
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from app.services.deployment.guards import (
     PROVIDER_CAPABILITIES,
     get_compatible_providers,

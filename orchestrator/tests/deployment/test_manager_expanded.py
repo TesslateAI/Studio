@@ -8,6 +8,8 @@ import json
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from app.services.deployment.container_base import BaseContainerDeploymentProvider
 from app.services.deployment.manager import DeploymentManager
 from app.services.deployment.providers.heroku import HerokuProvider

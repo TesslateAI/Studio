@@ -9,6 +9,8 @@ import inspect
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+pytestmark = pytest.mark.mocked
+
 import pytest
 
 # =============================================================================
