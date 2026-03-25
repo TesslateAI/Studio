@@ -9,6 +9,28 @@ You are working on Tesslate Studio's Kubernetes configuration. This context prov
 **Terraform (per-env)**: `k8s/terraform/aws/`
 **Terraform (shared)**: `k8s/terraform/shared/`
 
+## kubectl Context Safety
+
+Before running ANY kubectl command, verify and set the correct context for the target environment. Never assume the current context is correct.
+
+| Environment | kubectl context | Domain |
+|-------------|----------------|--------|
+| Production | `tesslate-production-eks` | `your-domain.com` |
+| Beta | `tesslate-beta-eks` | beta domain |
+| Minikube | `tesslate` | `localhost` |
+
+**Use the helper script:**
+```bash
+./scripts/kctx.sh production          # Switch context (instant, no network call)
+./scripts/kctx.sh beta                # Switch to beta
+./scripts/kctx.sh minikube            # Switch to local minikube
+./scripts/kctx.sh production --verify # Switch + verify cluster connectivity (slow, ~15-20s)
+./scripts/kctx.sh                     # Show current context
+```
+Use `--verify` only for health checks or when connectivity matters. For normal kubectl work, the instant switch is sufficient.
+
+Running a production command against beta (or vice versa) can cause incorrect diagnoses or dangerous mutations.
+
 ## Quick Commands
 
 ### Minikube

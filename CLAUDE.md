@@ -14,8 +14,10 @@ Use subagents generously if you are doing bulk task items that have a small / at
 
 don't do conditional logic for k8s and docker implementation differences. try to keep it as similar as possible unless if a platform requires differeces. Prioritize the k8s (keep that logic more intact than docker. )
 
-On windows use MSYS_NO_PATHCONV=1 while running kubectl or docker exec commands. 
+On windows use MSYS_NO_PATHCONV=1 while running kubectl or docker exec commands.
 The ECR IS <AWS_ACCOUNT_ID> not <AWS_ACCOUNT_ID>
+
+**CRITICAL: kubectl Context Safety** — Before ANY kubectl command, run `./scripts/kctx.sh <environment>` to switch to the correct cluster. Never assume the current context is correct. See `docs/infrastructure/kubernetes/CLAUDE.md` for details.
 
 CRITICAL -- ENSURE ALL CHANGES ARE NON-BLOCKING
 
