@@ -217,6 +217,7 @@ export default function TeamMembersPage() {
   const canRemove = can('team.remove_member');
   const pendingInvitations = invitations.filter(
     (inv) => !inv.accepted_at && !inv.revoked_at && new Date(inv.expires_at) > new Date()
+      && (inv.max_uses == null || inv.use_count < inv.max_uses)
   );
 
   return (

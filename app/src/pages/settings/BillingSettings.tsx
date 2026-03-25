@@ -4,6 +4,7 @@ import { Coins, AlertTriangle, Zap, ArrowUpRight, TrendingUp, Clock, CreditCard 
 import { motion, AnimatePresence } from 'framer-motion';
 import { SettingsSection, SettingsGroup } from '../../components/settings';
 import { billingApi } from '../../lib/api';
+import { useTeam } from '../../contexts/TeamContext';
 import toast from 'react-hot-toast';
 import type {
   SubscriptionResponse,
@@ -29,6 +30,8 @@ const creditPackages = [
 export default function BillingSettings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { can } = useTeam();
+  const canManage = can('billing.manage');
 
   const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
   const [credits, setCredits] = useState<CreditBalanceResponse | null>(null);
@@ -162,7 +165,7 @@ export default function BillingSettings() {
 
   if (loading) {
     return (
-      <SettingsSection title="Billing" description="Manage your subscription and credits">
+      <SettingsSection title="Billing" description={canManage ? "Manage your subscription and credits" : "View your subscription and credits"}>
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--primary)]"></div>
         </div>
@@ -178,7 +181,7 @@ export default function BillingSettings() {
   const isEmpty = totalCredits <= 0;
 
   return (
-    <SettingsSection title="Billing" description="Manage your subscription and credits">
+    <SettingsSection title="Billing" description={canManage ? "Manage your subscription and credits" : "View your subscription and credits"}>
       {/* Current Plan Card */}
       <SettingsGroup title="Current Plan">
         <div className="p-5 md:p-6">
@@ -221,29 +224,31 @@ export default function BillingSettings() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => setShowPlanModal(true)}
-                className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
-              >
-                {tier === 'free' ? (
-                  <>
-                    <Zap size={14} />
-                    Upgrade
-                  </>
-                ) : (
-                  'Change Plan'
-                )}
-              </button>
-              {tier !== 'free' && !subscription?.cancel_at_period_end && (
+            {canManage && (
+              <div className="flex items-center gap-2 shrink-0">
                 <button
-                  onClick={handleCancelSubscription}
-                  className="px-4 py-2 text-[var(--text)]/40 hover:text-red-400 text-sm transition-colors"
+                  onClick={() => setShowPlanModal(true)}
+                  className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
                 >
-                  Cancel
+                  {tier === 'free' ? (
+                    <>
+                      <Zap size={14} />
+                      Upgrade
+                    </>
+                  ) : (
+                    'Change Plan'
+                  )}
                 </button>
-              )}
-            </div>
+                {tier !== 'free' && !subscription?.cancel_at_period_end && (
+                  <button
+                    onClick={handleCancelSubscription}
+                    className="px-4 py-2 text-[var(--text)]/40 hover:text-red-400 text-sm transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </SettingsGroup>
@@ -290,33 +295,35 @@ export default function BillingSettings() {
               )}
             </div>
 
-            {/* Top Up packages */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-2 lg:w-auto lg:shrink-0">
-              {creditPackages.map((pkg) => (
-                <button
-                  key={pkg.key}
-                  onClick={() => handlePurchaseCredits(pkg.key)}
-                  disabled={purchasing !== null}
-                  className={`relative flex flex-col items-center gap-1 px-4 py-3 rounded-lg text-sm transition-all disabled:opacity-50 min-w-[100px] ${
-                    pkg.popular
-                      ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white ring-1 ring-[var(--primary)]'
-                      : 'bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] text-[var(--text)]'
-                  }`}
-                >
-                  {pkg.popular && (
-                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-px bg-[var(--primary)] text-[9px] font-semibold uppercase tracking-wider rounded-full text-white border border-white/20">
-                      Popular
+            {/* Top Up packages — admin only */}
+            {canManage && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-2 lg:w-auto lg:shrink-0">
+                {creditPackages.map((pkg) => (
+                  <button
+                    key={pkg.key}
+                    onClick={() => handlePurchaseCredits(pkg.key)}
+                    disabled={purchasing !== null}
+                    className={`relative flex flex-col items-center gap-1 px-4 py-3 rounded-lg text-sm transition-all disabled:opacity-50 min-w-[100px] ${
+                      pkg.popular
+                        ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white ring-1 ring-[var(--primary)]'
+                        : 'bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] text-[var(--text)]'
+                    }`}
+                  >
+                    {pkg.popular && (
+                      <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-px bg-[var(--primary)] text-[9px] font-semibold uppercase tracking-wider rounded-full text-white border border-white/20">
+                        Popular
+                      </span>
+                    )}
+                    <span className="font-semibold text-base tabular-nums">
+                      {purchasing === pkg.key ? '...' : `+${pkg.label}`}
                     </span>
-                  )}
-                  <span className="font-semibold text-base tabular-nums">
-                    {purchasing === pkg.key ? '...' : `+${pkg.label}`}
-                  </span>
-                  <span className={`text-xs ${pkg.popular ? 'text-white/70' : 'text-[var(--text)]/40'}`}>
-                    ${pkg.price}
-                  </span>
-                </button>
-              ))}
-            </div>
+                    <span className={`text-xs ${pkg.popular ? 'text-white/70' : 'text-[var(--text)]/40'}`}>
+                      ${pkg.price}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </SettingsGroup>
@@ -359,44 +366,46 @@ export default function BillingSettings() {
         </div>
       </SettingsGroup>
 
-      {/* Recent Transactions */}
-      <SettingsGroup title="Recent Transactions">
-        {transactions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-[var(--text)]/30">
-            <CreditCard size={24} className="mb-2" />
-            <span className="text-sm">No transactions yet</span>
-          </div>
-        ) : (
-          <div className="divide-y divide-white/[0.04]">
-            {transactions.map((transaction) => (
-              <div
-                key={transaction.id}
-                className="flex items-center justify-between px-5 md:px-6 py-3.5"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-white/[0.04] flex items-center justify-center shrink-0">
-                    {getTransactionIcon(transaction.type)}
+      {/* Recent Transactions — admin only */}
+      {canManage && (
+        <SettingsGroup title="Recent Transactions">
+          {transactions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-[var(--text)]/30">
+              <CreditCard size={24} className="mb-2" />
+              <span className="text-sm">No transactions yet</span>
+            </div>
+          ) : (
+            <div className="divide-y divide-white/[0.04]">
+              {transactions.map((transaction) => (
+                <div
+                  key={transaction.id}
+                  className="flex items-center justify-between px-5 md:px-6 py-3.5"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-white/[0.04] flex items-center justify-center shrink-0">
+                      {getTransactionIcon(transaction.type)}
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-[var(--text)]">
+                        {getTransactionLabel(transaction.type)}
+                      </div>
+                      <div className="text-xs text-[var(--text)]/35">
+                        {formatDate(transaction.created_at)}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-sm font-medium text-[var(--text)]">
-                      {getTransactionLabel(transaction.type)}
-                    </div>
-                    <div className="text-xs text-[var(--text)]/35">
-                      {formatDate(transaction.created_at)}
-                    </div>
+                  <div className={`text-sm font-medium tabular-nums ${
+                    transaction.type === 'credit_purchase' ? 'text-emerald-400' : 'text-[var(--text)]'
+                  }`}>
+                    {transaction.type === 'credit_purchase' ? '+' : ''}
+                    {transaction.amount_cents.toLocaleString()} credits
                   </div>
                 </div>
-                <div className={`text-sm font-medium tabular-nums ${
-                  transaction.type === 'credit_purchase' ? 'text-emerald-400' : 'text-[var(--text)]'
-                }`}>
-                  {transaction.type === 'credit_purchase' ? '+' : ''}
-                  {transaction.amount_cents.toLocaleString()} credits
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </SettingsGroup>
+              ))}
+            </div>
+          )}
+        </SettingsGroup>
+      )}
 
       {/* Plan Selection Modal */}
       {showPlanModal && (

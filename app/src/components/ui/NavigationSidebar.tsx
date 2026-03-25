@@ -21,9 +21,10 @@ import {
   Package,
   MessagesSquare,
 } from 'lucide-react';
-import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Check } from '@phosphor-icons/react';
+import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Check, Plus } from '@phosphor-icons/react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
-import { billingApi } from '../../lib/api';
+import { billingApi, teamsApi } from '../../lib/api';
+import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../contexts/TeamContext';
 import { modKey } from '../../lib/keyboard-registry';
@@ -106,11 +107,14 @@ export function NavigationSidebar({
 
   // Team + user profile state
   const { user, logout } = useAuth();
-  const { activeTeam, teams, switchTeam } = useTeam();
+  const { activeTeam, teams, switchTeam, refreshTeams } = useTeam();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [creditBalance, setCreditBalance] = useState<CreditBalanceResponse | null>(null);
   const [imgError, setImgError] = useState(false);
   const [teamAvatarError, setTeamAvatarError] = useState(false);
+  const [showCreateTeam, setShowCreateTeam] = useState(false);
+  const [newTeamName, setNewTeamName] = useState('');
+  const [creatingTeam, setCreatingTeam] = useState(false);
   const userName = user?.name || 'User';
   const totalCredits = creditBalance?.total_credits ?? 0;
   const avatarSrc = user?.avatar_url
@@ -152,6 +156,24 @@ export function NavigationSidebar({
     window.addEventListener('credits-updated', handleCreditsUpdated);
     return () => window.removeEventListener('credits-updated', handleCreditsUpdated);
   }, [handleCreditsUpdated]);
+
+  const handleCreateTeam = async () => {
+    if (!newTeamName.trim()) return;
+    setCreatingTeam(true);
+    try {
+      const slug = newTeamName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      await teamsApi.create({ name: newTeamName.trim(), slug });
+      await refreshTeams();
+      setNewTeamName('');
+      setShowCreateTeam(false);
+      toast.success('Team created');
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to create team');
+    } finally {
+      setCreatingTeam(false);
+    }
+  };
 
   // Credit bar segments
   const GREY_SEGMENTS = [
@@ -262,15 +284,14 @@ export function NavigationSidebar({
       className={`${forceVisible ? 'flex' : 'hidden md:flex'} flex-col h-screen bg-[var(--sidebar-bg)] overflow-x-hidden`}
     >
       {/* Team Switcher — top-level context selector */}
-      <div ref={userDropdownRef} className="flex-shrink-0" style={{ paddingTop: '6px' }}>
+      <div ref={userDropdownRef} className="flex-shrink-0" style={{ padding: '6px 11px 4px' }}>
         <button
           onClick={() => setShowUserDropdown(!showUserDropdown)}
-          className={`relative flex items-center h-10 rounded-[var(--radius-medium)] transition-colors w-full ${isExpanded ? 'gap-2.5 mx-2' : 'justify-center mx-1'} ${
+          className={`relative flex items-center h-10 rounded-[var(--radius-medium)] transition-colors w-full ${isExpanded ? 'gap-2.5 pl-[7px] pr-[7px]' : 'justify-center'} ${
             showUserDropdown
               ? 'bg-[var(--sidebar-active)]'
               : 'hover:bg-[var(--sidebar-hover)]'
           }`}
-          style={isExpanded ? { paddingLeft: '10px', paddingRight: '8px' } : undefined}
           aria-label="Team menu"
         >
           {/* Team avatar */}
@@ -302,7 +323,7 @@ export function NavigationSidebar({
         {/* Team + User Dropdown — fixed position so it's not clipped by sidebar overflow */}
         {showUserDropdown && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowUserDropdown(false)} />
+            <div className="fixed inset-0 z-40" onClick={() => { setShowUserDropdown(false); setShowCreateTeam(false); setNewTeamName(''); }} />
             <div
               className="fixed w-56 bg-[var(--surface)] border rounded-[var(--radius-medium)] z-50 overflow-hidden"
               style={{
@@ -356,6 +377,46 @@ export function NavigationSidebar({
                         )}
                       </button>
                     ))}
+                    {/* Create Team */}
+                    {!showCreateTeam ? (
+                      <button
+                        onClick={() => setShowCreateTeam(true)}
+                        className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[var(--surface-hover)] transition-colors text-left"
+                      >
+                        <div className="w-5 h-5 rounded-md border border-dashed border-[var(--border-hover)] flex items-center justify-center flex-shrink-0">
+                          <Plus size={10} className="text-[var(--text-subtle)]" />
+                        </div>
+                        <span className="text-[11px] text-[var(--text-muted)]">Create Team</span>
+                      </button>
+                    ) : (
+                      <div className="px-3 py-2 space-y-2">
+                        <input
+                          type="text"
+                          value={newTeamName}
+                          onChange={(e) => setNewTeamName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleCreateTeam(); if (e.key === 'Escape') { setShowCreateTeam(false); setNewTeamName(''); } }}
+                          placeholder="Team name"
+                          autoFocus
+                          className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)] placeholder-[var(--text-subtle)]"
+                        />
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={handleCreateTeam}
+                            disabled={creatingTeam || !newTeamName.trim()}
+                            className="btn btn-filled btn-sm flex-1 disabled:opacity-50"
+                          >
+                            {creatingTeam ? 'Creating...' : 'Create'}
+                          </button>
+                          <button
+                            onClick={() => { setShowCreateTeam(false); setNewTeamName(''); }}
+                            className="btn btn-sm"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="h-px bg-[var(--border)] mx-3 my-1" />
                   </>
                 )}

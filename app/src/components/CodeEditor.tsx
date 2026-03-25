@@ -65,6 +65,7 @@ interface CodeEditorProps {
   onDirectoryCreate?: (dirPath: string) => void;
   isFilesSyncing?: boolean;
   startupOverlay?: React.ReactNode;
+  readOnly?: boolean;
 }
 
 function CodeEditor({
@@ -79,6 +80,7 @@ function CodeEditor({
   onDirectoryCreate,
   isFilesSyncing,
   startupOverlay,
+  readOnly = false,
 }: CodeEditorProps) {
   const { theme } = useTheme();
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
@@ -199,6 +201,7 @@ function CodeEditor({
   // ── Save logic ────────────────────────────────────────────────────
 
   const saveCurrentFile = useCallback(() => {
+    if (readOnly) return;
     if (!selectedFile) return;
     const buffer = dirtyBuffers.get(selectedFile);
     if (buffer !== undefined) {
@@ -211,7 +214,7 @@ function CodeEditor({
         return next;
       });
     }
-  }, [selectedFile, dirtyBuffers, onFileUpdate]);
+  }, [readOnly, selectedFile, dirtyBuffers, onFileUpdate]);
 
   // Keep ref current for Monaco command binding (avoids stale closure)
   useEffect(() => { saveRef.current = saveCurrentFile; }, [saveCurrentFile]);
@@ -743,7 +746,7 @@ function CodeEditor({
             >
               <Search size={13} />
             </button>
-            {onFileCreate && (
+            {!readOnly && onFileCreate && (
               <button
                 onClick={() => startNewFile(targetDir)}
                 className="p-0.5 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
@@ -752,7 +755,7 @@ function CodeEditor({
                 <FilePlus size={13} />
               </button>
             )}
-            {onDirectoryCreate && (
+            {!readOnly && onDirectoryCreate && (
               <button
                 onClick={() => startNewFolder(targetDir)}
                 className="p-0.5 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
@@ -916,6 +919,7 @@ function CodeEditor({
               onMount={handleEditorDidMount}
               theme={theme === 'dark' ? 'vs-dark' : 'vs'}
               options={{
+                readOnly,
                 fontSize: isMobile ? 12 : 13,
                 fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
                 lineNumbers: isMobile ? 'off' : 'on',
@@ -1012,39 +1016,43 @@ function CodeEditor({
           className="fixed z-50 min-w-[180px] py-1 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] overflow-hidden"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          <button
-            className="w-full px-3 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--surface-hover)] flex items-center gap-2 transition-colors"
-            onClick={() => {
-              const parent = contextMenu.node
-                ? contextMenu.node.isDirectory
-                  ? contextMenu.node.path
-                  : contextMenu.node.path.includes('/')
-                    ? contextMenu.node.path.substring(0, contextMenu.node.path.lastIndexOf('/'))
-                    : ''
-                : '';
-              startNewFile(parent);
-            }}
-          >
-            <FilePlus size={13} className="text-[var(--text-subtle)]" />
-            New File
-          </button>
-          <button
-            className="w-full px-3 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--surface-hover)] flex items-center gap-2 transition-colors"
-            onClick={() => {
-              const parent = contextMenu.node
-                ? contextMenu.node.isDirectory
-                  ? contextMenu.node.path
-                  : contextMenu.node.path.includes('/')
-                    ? contextMenu.node.path.substring(0, contextMenu.node.path.lastIndexOf('/'))
-                    : ''
-                : '';
-              startNewFolder(parent);
-            }}
-          >
-            <FolderPlus size={13} className="text-[var(--text-subtle)]" />
-            New Folder
-          </button>
-          {contextMenu.node && (
+          {!readOnly && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--surface-hover)] flex items-center gap-2 transition-colors"
+              onClick={() => {
+                const parent = contextMenu.node
+                  ? contextMenu.node.isDirectory
+                    ? contextMenu.node.path
+                    : contextMenu.node.path.includes('/')
+                      ? contextMenu.node.path.substring(0, contextMenu.node.path.lastIndexOf('/'))
+                      : ''
+                  : '';
+                startNewFile(parent);
+              }}
+            >
+              <FilePlus size={13} className="text-[var(--text-subtle)]" />
+              New File
+            </button>
+          )}
+          {!readOnly && (
+            <button
+              className="w-full px-3 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--surface-hover)] flex items-center gap-2 transition-colors"
+              onClick={() => {
+                const parent = contextMenu.node
+                  ? contextMenu.node.isDirectory
+                    ? contextMenu.node.path
+                    : contextMenu.node.path.includes('/')
+                      ? contextMenu.node.path.substring(0, contextMenu.node.path.lastIndexOf('/'))
+                      : ''
+                  : '';
+                startNewFolder(parent);
+              }}
+            >
+              <FolderPlus size={13} className="text-[var(--text-subtle)]" />
+              New Folder
+            </button>
+          )}
+          {!readOnly && contextMenu.node && (
             <>
               <div className="h-px bg-[var(--border)] my-0.5 mx-1.5" />
               <button

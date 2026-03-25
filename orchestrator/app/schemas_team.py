@@ -37,6 +37,7 @@ class TeamRead(BaseModel):
     slug: str
     avatar_url: str | None = None
     is_personal: bool
+    created_by_id: UUID
     subscription_tier: str
     total_credits: int
     daily_credits: int

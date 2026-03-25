@@ -17,6 +17,7 @@ import toast from 'react-hot-toast';
 
 interface KanbanPanelProps {
   projectId: string;
+  readOnly?: boolean;
 }
 
 interface Column {
@@ -93,7 +94,7 @@ const taskTypeIcons = {
   epic: '🎯',
 };
 
-export function KanbanPanel({ projectId }: KanbanPanelProps) {
+export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
   const [board, setBoard] = useState<{ columns: Column[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -206,6 +207,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
   };
 
   const handleDragEnd = async (result: DropResult) => {
+    if (readOnly) return;
     if (!result.destination || !board) return;
 
     const { source, destination, draggableId } = result;
@@ -380,16 +382,18 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                         {column.tasks.length}
                       </span>
                     </div>
-                    <button
-                      onClick={() => {
-                        setNewTaskColumnId(column.id);
-                        setShowNewTaskModal(true);
-                      }}
-                      className="p-1 hover:bg-white/10 rounded transition-colors text-[var(--text)]/60 hover:text-[var(--primary)]"
-                      title="Add task"
-                    >
-                      <Plus size={18} weight="bold" />
-                    </button>
+                    {!readOnly && (
+                      <button
+                        onClick={() => {
+                          setNewTaskColumnId(column.id);
+                          setShowNewTaskModal(true);
+                        }}
+                        className="p-1 hover:bg-white/10 rounded transition-colors text-[var(--text)]/60 hover:text-[var(--primary)]"
+                        title="Add task"
+                      >
+                        <Plus size={18} weight="bold" />
+                      </button>
+                    )}
                   </div>
                   {column.description && (
                     <p className="text-xs text-[var(--text)]/50">{column.description}</p>
@@ -397,7 +401,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                 </div>
 
                 {/* Tasks */}
-                <Droppable droppableId={`column-${column.id}`}>
+                <Droppable droppableId={`column-${column.id}`} isDropDisabled={readOnly}>
                   {(provided, snapshot) => (
                     <div
                       ref={provided.innerRef}
@@ -407,7 +411,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                       }`}
                     >
                       {column.tasks.map((task, index) => (
-                        <Draggable key={task.id} draggableId={`task-${task.id}`} index={index}>
+                        <Draggable key={task.id} draggableId={`task-${task.id}`} index={index} isDragDisabled={readOnly}>
                           {(provided, snapshot) => (
                             <div
                               ref={provided.innerRef}
@@ -485,7 +489,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       </div>
 
       {/* New Task Modal */}
-      {showNewTaskModal && (
+      {!readOnly && showNewTaskModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[300] p-4">
           <div className="bg-[var(--surface)] border border-white/20 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-[var(--text)]/15 flex items-center justify-between">
@@ -593,13 +597,15 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                 <h3 className="text-xl font-bold text-[var(--text)]">{selectedTask.title}</h3>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => deleteTask(selectedTask.id)}
-                  className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
-                  title="Delete task"
-                >
-                  <Trash size={20} weight="bold" />
-                </button>
+                {!readOnly && (
+                  <button
+                    onClick={() => deleteTask(selectedTask.id)}
+                    className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                    title="Delete task"
+                  >
+                    <Trash size={20} weight="bold" />
+                  </button>
+                )}
                 <button
                   onClick={() => setShowTaskDetails(false)}
                   className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60"
@@ -625,37 +631,49 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">
                     Priority
                   </label>
-                  <select
-                    value={selectedTask.priority || 'medium'}
-                    onChange={(e) =>
-                      updateTask(selectedTask.id, {
-                        priority: e.target.value as 'low' | 'medium' | 'high' | 'critical',
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
-                  </select>
+                  {readOnly ? (
+                    <div className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm capitalize">
+                      {selectedTask.priority || 'medium'}
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedTask.priority || 'medium'}
+                      onChange={(e) =>
+                        updateTask(selectedTask.id, {
+                          priority: e.target.value as 'low' | 'medium' | 'high' | 'critical',
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">Type</label>
-                  <select
-                    value={selectedTask.task_type || 'task'}
-                    onChange={(e) =>
-                      updateTask(selectedTask.id, {
-                        task_type: e.target.value as 'feature' | 'bug' | 'task' | 'epic',
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
-                  >
-                    <option value="task">Task</option>
-                    <option value="feature">Feature</option>
-                    <option value="bug">Bug</option>
-                    <option value="epic">Epic</option>
-                  </select>
+                  {readOnly ? (
+                    <div className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm capitalize">
+                      {selectedTask.task_type || 'task'}
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedTask.task_type || 'task'}
+                      onChange={(e) =>
+                        updateTask(selectedTask.id, {
+                          task_type: e.target.value as 'feature' | 'bug' | 'task' | 'epic',
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                    >
+                      <option value="task">Task</option>
+                      <option value="feature">Feature</option>
+                      <option value="bug">Bug</option>
+                      <option value="epic">Epic</option>
+                    </select>
+                  )}
                 </div>
                 {selectedTask.estimate_hours !== undefined && (
                   <div>
@@ -721,23 +739,25 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && addComment()}
-                    placeholder="Add a comment..."
-                    className="flex-1 px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)]"
-                  />
-                  <button
-                    onClick={addComment}
-                    disabled={!newComment.trim()}
-                    className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
-                  >
-                    <ChatCircle size={18} weight="bold" />
-                  </button>
-                </div>
+                {!readOnly && (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && addComment()}
+                      placeholder="Add a comment..."
+                      className="flex-1 px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)]"
+                    />
+                    <button
+                      onClick={addComment}
+                      disabled={!newComment.trim()}
+                      className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+                    >
+                      <ChatCircle size={18} weight="bold" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

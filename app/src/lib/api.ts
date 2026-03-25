@@ -2880,6 +2880,7 @@ export interface Team {
   slug: string;
   avatar_url: string | null;
   is_personal: boolean;
+  created_by_id: string;
   subscription_tier: string;
   total_credits: number;
   daily_credits: number;

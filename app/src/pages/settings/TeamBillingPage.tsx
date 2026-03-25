@@ -187,44 +187,45 @@ export default function TeamBillingPage() {
             </div>
           }
         />
-        <SettingsItem
-          label="Bundled Credits"
-          description="Included with your subscription plan"
-          control={
-            <span className="text-sm font-medium text-[var(--text)]">
-              {billing.bundled_credits.toLocaleString()}
-            </span>
-          }
-        />
-        <SettingsItem
-          label="Purchased Credits"
-          description="Credits bought separately"
-          control={
-            <span className="text-sm font-medium text-[var(--text)]">
-              {billing.purchased_credits.toLocaleString()}
-            </span>
-          }
-        />
-        <SettingsItem
-          label="Bonus Credits"
-          description="Signup and promotional credits"
-          control={
-            <span className="text-sm font-medium text-[var(--text)]">
-              {billing.signup_bonus_credits.toLocaleString()}
-            </span>
-          }
-        />
-
         {canManageBilling && (
-          <div className="px-4 py-3">
-            <button
-              onClick={() => toast('Credit purchase flow coming soon')}
-              className="btn flex items-center gap-2"
-            >
-              <CreditCard size={16} />
-              Purchase Credits
-            </button>
-          </div>
+          <>
+            <SettingsItem
+              label="Bundled Credits"
+              description="Included with your subscription plan"
+              control={
+                <span className="text-sm font-medium text-[var(--text)]">
+                  {billing.bundled_credits.toLocaleString()}
+                </span>
+              }
+            />
+            <SettingsItem
+              label="Purchased Credits"
+              description="Credits bought separately"
+              control={
+                <span className="text-sm font-medium text-[var(--text)]">
+                  {billing.purchased_credits.toLocaleString()}
+                </span>
+              }
+            />
+            <SettingsItem
+              label="Bonus Credits"
+              description="Signup and promotional credits"
+              control={
+                <span className="text-sm font-medium text-[var(--text)]">
+                  {billing.signup_bonus_credits.toLocaleString()}
+                </span>
+              }
+            />
+            <div className="px-4 py-3">
+              <button
+                onClick={() => toast('Credit purchase flow coming soon')}
+                className="btn flex items-center gap-2"
+              >
+                <CreditCard size={16} />
+                Purchase Credits
+              </button>
+            </div>
+          </>
         )}
       </SettingsGroup>
 

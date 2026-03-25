@@ -12,9 +12,10 @@ import { fileEvents } from '../../utils/fileEvents';
 
 interface AssetsPanelProps {
   projectSlug: string;  // Changed from projectId to projectSlug
+  readOnly?: boolean;
 }
 
-export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
+export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps) {
   const [directories, setDirectories] = useState<string[]>([]);
   const [selectedDirectory, setSelectedDirectory] = useState<string | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -98,6 +99,7 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
   };
 
   const handleCreateDirectory = async (path: string) => {
+    if (readOnly) return;
     if (!path.trim()) {
       toast.error('Directory path cannot be empty');
       return;
@@ -386,19 +388,21 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
         </div>
 
         {/* Upload Button */}
-        <button
-          onClick={() => {
-            if (!selectedDirectory) {
-              toast.error('Please select a directory first');
-              return;
-            }
-            setShowUploadModal(true);
-          }}
-          className="px-3 md:px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm md:text-base"
-        >
-          <UploadSimple size={18} className="md:w-5 md:h-5" weight="bold" />
-          <span className="hidden sm:inline">Upload</span>
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => {
+              if (!selectedDirectory) {
+                toast.error('Please select a directory first');
+                return;
+              }
+              setShowUploadModal(true);
+            }}
+            className="px-3 md:px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2 text-sm md:text-base"
+          >
+            <UploadSimple size={18} className="md:w-5 md:h-5" weight="bold" />
+            <span className="hidden sm:inline">Upload</span>
+          </button>
+        )}
       </div>
 
       {/* Main Content - Three Panel Layout */}
@@ -472,7 +476,7 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
                         ? 'Try a different search term'
                         : 'Upload images, videos, fonts, or other files (max 20MB each)'}
                     </p>
-                    {!searchQuery && (
+                    {!searchQuery && !readOnly && (
                       <button
                         onClick={() => setShowUploadModal(true)}
                         className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors inline-flex items-center gap-2"
@@ -489,16 +493,16 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
                     <AssetCard
                       key={asset.id}
                       asset={asset}
-                      onRename={(_id, name) => {
+                      onRename={readOnly ? undefined : (_id, name) => {
                         setSelectedAsset(asset);
                         setNewFilename(name);
                         setShowRenameModal(true);
                       }}
-                      onDelete={() => {
+                      onDelete={readOnly ? undefined : () => {
                         setSelectedAsset(asset);
                         setShowDeleteConfirm(true);
                       }}
-                      onMove={() => {
+                      onMove={readOnly ? undefined : () => {
                         setSelectedAsset(asset);
                         setShowMoveModal(true);
                       }}
@@ -512,16 +516,16 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
                     <AssetListItem
                       key={asset.id}
                       asset={asset}
-                      onRename={(_id, name) => {
+                      onRename={readOnly ? undefined : (_id, name) => {
                         setSelectedAsset(asset);
                         setNewFilename(name);
                         setShowRenameModal(true);
                       }}
-                      onDelete={() => {
+                      onDelete={readOnly ? undefined : () => {
                         setSelectedAsset(asset);
                         setShowDeleteConfirm(true);
                       }}
-                      onMove={() => {
+                      onMove={readOnly ? undefined : () => {
                         setSelectedAsset(asset);
                         setShowMoveModal(true);
                       }}

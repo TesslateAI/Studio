@@ -229,20 +229,39 @@ async def accept_invitation(
     if invitation.max_uses is not None and invitation.use_count >= invitation.max_uses:
         raise HTTPException(status_code=410, detail="Invitation has reached maximum uses")
 
-    # Check not already a member
+    # Check not already an active member
     existing = await get_team_membership(db, invitation.team_id, user.id)
     if existing is not None:
         raise HTTPException(status_code=409, detail="Already a member of this team")
 
-    # Create membership
-    membership = TeamMembership(
-        team_id=invitation.team_id,
-        user_id=user.id,
-        role=invitation.role,
-        is_active=True,
-        invited_by_id=invitation.invited_by_id,
+    # Check for inactive membership (user previously left) — reactivate instead of inserting
+    inactive_result = await db.execute(
+        select(TeamMembership).where(
+            and_(
+                TeamMembership.team_id == invitation.team_id,
+                TeamMembership.user_id == user.id,
+                TeamMembership.is_active.is_(False),
+            )
+        )
     )
-    db.add(membership)
+    inactive = inactive_result.scalar_one_or_none()
+
+    if inactive:
+        # Reactivate existing membership with the new role
+        inactive.is_active = True
+        inactive.role = invitation.role
+        inactive.invited_by_id = invitation.invited_by_id
+        membership = inactive
+    else:
+        # Create new membership
+        membership = TeamMembership(
+            team_id=invitation.team_id,
+            user_id=user.id,
+            role=invitation.role,
+            is_active=True,
+            invited_by_id=invitation.invited_by_id,
+        )
+        db.add(membership)
 
     # Update invitation tracking
     invitation.use_count += 1
@@ -495,6 +514,7 @@ async def invite_by_email(
     # Send invitation email (non-blocking)
     base_url = get_settings().get_app_base_url
     invite_url = f"{base_url}/invite/{invitation.token}"
+    logger.info(f"Invite created: id={invitation.id} token={invitation.token} url={invite_url}")
     inviter_name = user.name or user.email or "A team member"
     email_svc = get_email_service()
     asyncio.create_task(

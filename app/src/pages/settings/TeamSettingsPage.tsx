@@ -130,8 +130,8 @@ export default function TeamSettingsPage() {
       title="Team Settings"
       description="Manage your team's general information and preferences"
     >
-      {/* Personal Team Badge */}
-      {team.is_personal && (
+      {/* Personal Team Badge — only shown to the owner with edit access */}
+      {team.is_personal && team.created_by_id === user?.id && canEdit && (
         <div className="p-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)]">
           <div className="flex items-start gap-3">
             <div className="w-2 h-2 rounded-full bg-[var(--primary)] mt-1.5 flex-shrink-0" />
@@ -239,8 +239,8 @@ export default function TeamSettingsPage() {
         </div>
       )}
 
-      {/* Leave Team — visible to non-owners on non-personal teams */}
-      {!team.is_personal && (
+      {/* Leave Team — visible unless it's your own personal team */}
+      {!(team.is_personal && team.created_by_id === user?.id) && (
         <SettingsGroup title="Membership">
           <div className="px-4 py-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

@@ -85,6 +85,7 @@ interface ChatContainerProps {
   onEnvironmentStopping?: () => void;
   onEnvironmentStopped?: (reason: string) => void;
   onVolumeReady?: () => void;
+  disabled?: boolean;
 }
 
 export function ChatContainer({
@@ -108,6 +109,7 @@ export function ChatContainer({
   onEnvironmentStopping,
   onEnvironmentStopped,
   onVolumeReady,
+  disabled: disabledProp,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const { hasRole } = useAuth();
@@ -2007,7 +2009,7 @@ export function ChatContainer({
             onSendMessage={handleSendMessage}
             slug={projectSlug}
             projectName={projectName}
-            disabled={isStreaming || agentExecuting}
+            disabled={isStreaming || agentExecuting || disabledProp}
             isExecuting={agentExecuting}
             onStop={stopAgentExecution}
             onClearHistory={handleClearHistory}

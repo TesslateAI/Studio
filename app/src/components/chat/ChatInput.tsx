@@ -636,22 +636,28 @@ export function ChatInput({
           className="px-3 flex items-center border-b border-[var(--border)]"
           style={{ minHeight: '44px' }}
         >
-          <textarea
-            ref={textareaRef}
-            value={message}
-            onChange={(e) => {
-              setMessage(e.target.value);
-            }}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder=""
-            rows={1}
-            className="chat-input bg-transparent border-none w-full text-[var(--text)] text-sm !outline-none focus:!outline-none placeholder:text-[var(--text)]/40 resize-none overflow-hidden leading-relaxed my-2"
-            style={{
-              minHeight: '24px',
-              maxHeight: '200px',
-            }}
-          />
+          {disabled ? (
+            <div className="flex items-center gap-2 w-full py-2">
+              <span className="text-xs text-[var(--text-subtle)]">Viewer mode — chat is read-only</span>
+            </div>
+          ) : (
+            <textarea
+              ref={textareaRef}
+              value={message}
+              onChange={(e) => {
+                setMessage(e.target.value);
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder=""
+              rows={1}
+              className="chat-input bg-transparent border-none w-full text-[var(--text)] text-sm !outline-none focus:!outline-none placeholder:text-[var(--text)]/40 resize-none overflow-hidden leading-relaxed my-2"
+              style={{
+                minHeight: '24px',
+                maxHeight: '200px',
+              }}
+            />
+          )}
         </div>
 
         {/* Attachment chips */}

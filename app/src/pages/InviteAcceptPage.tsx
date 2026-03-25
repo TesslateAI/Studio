@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { Users, Check, AlertTriangle, Clock } from 'lucide-react';
 import { teamsApi } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useTeam } from '../contexts/TeamContext';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 
 interface InviteDetails {
@@ -20,6 +21,7 @@ export default function InviteAcceptPage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
+  const { switchTeam, refreshTeams } = useTeam();
   const [loading, setLoading] = useState(true);
   const [invite, setInvite] = useState<InviteDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +68,9 @@ export default function InviteAcceptPage() {
       const result = await teamsApi.acceptInvite(token);
       setAccepted(true);
       toast.success(`Joined ${result.team_name} as ${result.role}`);
-      // Give a moment for the success state to show
+      // Refresh team list and switch to the invited team
+      await refreshTeams();
+      await switchTeam(result.team_slug);
       setTimeout(() => {
         navigate('/dashboard', { replace: true });
       }, 1500);
