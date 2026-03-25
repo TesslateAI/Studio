@@ -1,14 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Check, Trash2, AlertTriangle } from 'lucide-react';
+import { Check, Trash2, AlertTriangle, LogOut } from 'lucide-react';
 import { teamsApi } from '../../lib/api';
 import type { Team } from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../contexts/TeamContext';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { ImageUpload } from '../../components/ImageUpload';
 import { SettingsSection, SettingsGroup, SettingsItem } from '../../components/settings';
 
 export default function TeamSettingsPage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const { activeTeam, can, loading: teamLoading, refreshTeams } = useTeam();
   const [loading, setLoading] = useState(true);
   const [team, setTeam] = useState<Team | null>(null);
@@ -19,6 +23,8 @@ export default function TeamSettingsPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   const loadTeam = useCallback(async () => {
     if (!activeTeam) return;
@@ -78,6 +84,24 @@ export default function TeamSettingsPage() {
       toast.error(err.response?.data?.detail || 'Failed to delete team');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleLeave = async () => {
+    if (!team) return;
+    setLeaving(true);
+    try {
+      await teamsApi.leave(team.slug);
+      toast.success('Left team successfully');
+      await refreshTeams();
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Failed to leave team:', error);
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to leave team');
+    } finally {
+      setLeaving(false);
+      setShowLeaveConfirm(false);
     }
   };
 
@@ -213,6 +237,47 @@ export default function TeamSettingsPage() {
             )}
           </button>
         </div>
+      )}
+
+      {/* Leave Team — visible to non-owners on non-personal teams */}
+      {!team.is_personal && (
+        <SettingsGroup title="Membership">
+          <div className="px-4 py-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium text-[var(--text)]">Leave Team</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                  Remove yourself from this team. You will lose access to all team projects.
+                </p>
+              </div>
+              {!showLeaveConfirm ? (
+                <button
+                  onClick={() => setShowLeaveConfirm(true)}
+                  className="btn btn-danger flex items-center gap-2 flex-shrink-0"
+                >
+                  <LogOut size={14} />
+                  Leave Team
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={handleLeave}
+                    disabled={leaving}
+                    className="btn btn-danger flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {leaving ? 'Leaving...' : 'Confirm Leave'}
+                  </button>
+                  <button
+                    onClick={() => setShowLeaveConfirm(false)}
+                    className="btn"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </SettingsGroup>
       )}
 
       {/* Danger Zone */}

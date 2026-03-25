@@ -160,8 +160,115 @@ async def list_teams(
     for team, role in rows:
         item = TeamList.model_validate(team)
         item.role = role
+        # Only show "Personal" badge to the team's owner
+        if item.is_personal and team.created_by_id != user.id:
+            item.is_personal = False
         out.append(item)
     return out
+
+
+# ── Invitation public routes (must be before /{team_slug} to avoid collision) ──
+
+
+@router.get("/invitations/{token}", response_model=InviteDetailRead)
+async def get_invite_details(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public endpoint — get invite details for the accept page. No auth required."""
+    result = await db.execute(
+        select(TeamInvitation)
+        .options(selectinload(TeamInvitation.team))
+        .where(TeamInvitation.token == token)
+    )
+    invitation = result.scalar_one_or_none()
+    if invitation is None:
+        raise HTTPException(status_code=404, detail="Invitation not found")
+
+    team = invitation.team
+    now = datetime.now(UTC)
+    is_valid = (
+        invitation.revoked_at is None
+        and invitation.expires_at > now
+        and (invitation.max_uses is None or invitation.use_count < invitation.max_uses)
+    )
+
+    return InviteDetailRead(
+        team_name=team.name,
+        team_slug=team.slug,
+        team_avatar_url=team.avatar_url,
+        role=invitation.role,
+        invite_type=invitation.invite_type,
+        expires_at=invitation.expires_at,
+        is_valid=is_valid,
+    )
+
+
+@router.post("/invitations/{token}/accept", response_model=InviteAcceptResponse)
+async def accept_invitation(
+    token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
+    """Accept an invitation. Any authenticated user."""
+    result = await db.execute(
+        select(TeamInvitation)
+        .options(selectinload(TeamInvitation.team))
+        .where(TeamInvitation.token == token)
+    )
+    invitation = result.scalar_one_or_none()
+    if invitation is None:
+        raise HTTPException(status_code=404, detail="Invitation not found")
+
+    # Validate
+    if invitation.revoked_at is not None:
+        raise HTTPException(status_code=410, detail="Invitation has been revoked")
+    if invitation.expires_at < datetime.now(UTC):
+        raise HTTPException(status_code=410, detail="Invitation has expired")
+    if invitation.max_uses is not None and invitation.use_count >= invitation.max_uses:
+        raise HTTPException(status_code=410, detail="Invitation has reached maximum uses")
+
+    # Check not already a member
+    existing = await get_team_membership(db, invitation.team_id, user.id)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Already a member of this team")
+
+    # Create membership
+    membership = TeamMembership(
+        team_id=invitation.team_id,
+        user_id=user.id,
+        role=invitation.role,
+        is_active=True,
+        invited_by_id=invitation.invited_by_id,
+    )
+    db.add(membership)
+
+    # Update invitation tracking
+    invitation.use_count += 1
+    if invitation.invite_type == "email":
+        invitation.accepted_at = datetime.now(UTC)
+        invitation.accepted_by_id = user.id
+
+    await log_event(
+        db,
+        team_id=invitation.team_id,
+        user_id=user.id,
+        action="member.joined",
+        resource_type="membership",
+        resource_id=membership.id,
+        details={"role": invitation.role, "invite_type": invitation.invite_type},
+        request=request,
+    )
+    await db.commit()
+
+    team = invitation.team
+    return InviteAcceptResponse(
+        team_id=team.id,
+        team_name=team.name,
+        team_slug=team.slug,
+        role=invitation.role,
+    )
 
 
 @router.get("/{team_slug}", response_model=TeamRead)
@@ -571,8 +678,12 @@ async def leave_team(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_active_user),
 ):
-    """Leave team. Blocks if sole admin."""
+    """Leave team. Blocks if sole admin or personal team."""
     team = await _resolve_team(db, team_slug)
+
+    if team.is_personal and team.created_by_id == user.id:
+        raise HTTPException(status_code=400, detail="Cannot leave your personal team")
+
     membership = await get_team_membership(db, team.id, user.id)
     if membership is None:
         raise HTTPException(status_code=403, detail="Not a member of this team")
@@ -677,105 +788,8 @@ async def revoke_invitation(
     await db.commit()
 
 
-@router.post("/invitations/{token}/accept", response_model=InviteAcceptResponse)
-async def accept_invitation(
-    token: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(current_active_user),
-):
-    """Accept an invitation. Any authenticated user."""
-    result = await db.execute(
-        select(TeamInvitation)
-        .options(selectinload(TeamInvitation.team))
-        .where(TeamInvitation.token == token)
-    )
-    invitation = result.scalar_one_or_none()
-    if invitation is None:
-        raise HTTPException(status_code=404, detail="Invitation not found")
 
-    # Validate
-    if invitation.revoked_at is not None:
-        raise HTTPException(status_code=410, detail="Invitation has been revoked")
-    if invitation.expires_at < datetime.now(UTC):
-        raise HTTPException(status_code=410, detail="Invitation has expired")
-    if invitation.max_uses is not None and invitation.use_count >= invitation.max_uses:
-        raise HTTPException(status_code=410, detail="Invitation has reached maximum uses")
-
-    # Check not already a member
-    existing = await get_team_membership(db, invitation.team_id, user.id)
-    if existing is not None:
-        raise HTTPException(status_code=409, detail="Already a member of this team")
-
-    # Create membership
-    membership = TeamMembership(
-        team_id=invitation.team_id,
-        user_id=user.id,
-        role=invitation.role,
-        is_active=True,
-        invited_by_id=invitation.invited_by_id,
-    )
-    db.add(membership)
-
-    # Update invitation tracking
-    invitation.use_count += 1
-    if invitation.invite_type == "email":
-        invitation.accepted_at = datetime.now(UTC)
-        invitation.accepted_by_id = user.id
-
-    await log_event(
-        db,
-        team_id=invitation.team_id,
-        user_id=user.id,
-        action="member.joined",
-        resource_type="membership",
-        resource_id=membership.id,
-        details={"role": invitation.role, "invite_type": invitation.invite_type},
-        request=request,
-    )
-    await db.commit()
-
-    team = invitation.team
-    return InviteAcceptResponse(
-        team_id=team.id,
-        team_name=team.name,
-        team_slug=team.slug,
-        role=invitation.role,
-    )
-
-
-@router.get("/invitations/{token}", response_model=InviteDetailRead)
-async def get_invite_details(
-    token: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Public endpoint — get invite details for the accept page. No auth required."""
-    result = await db.execute(
-        select(TeamInvitation)
-        .options(selectinload(TeamInvitation.team))
-        .where(TeamInvitation.token == token)
-    )
-    invitation = result.scalar_one_or_none()
-    if invitation is None:
-        raise HTTPException(status_code=404, detail="Invitation not found")
-
-    team = invitation.team
-    now = datetime.now(UTC)
-    is_valid = (
-        invitation.revoked_at is None
-        and invitation.expires_at > now
-        and (invitation.max_uses is None or invitation.use_count < invitation.max_uses)
-    )
-
-    return InviteDetailRead(
-        team_name=team.name,
-        team_slug=team.slug,
-        team_avatar_url=team.avatar_url,
-        role=invitation.role,
-        invite_type=invitation.invite_type,
-        expires_at=invitation.expires_at,
-        is_valid=is_valid,
-    )
+# (invite accept/details routes moved before /{team_slug} to avoid route collision)
 
 
 # ============================================================================

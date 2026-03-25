@@ -195,18 +195,13 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Add ProxyHeadersMiddleware first to handle X-Forwarded-* headers from Traefik
-# This ensures FastAPI generates correct URLs for OAuth redirects
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
-
-# Use custom dynamic CORS middleware
-app.add_middleware(DynamicCORSMiddleware)
-
-# Add CSRF protection middleware (must be after CORS)
-app.add_middleware(CSRFProtectionMiddleware)
-
-# Activity tracking — update Project.last_activity for project-scoped requests
+# Middleware order: Starlette add_middleware is LIFO — last added = outermost.
+# Execution order (outermost → innermost): CORS → Proxy → CSRF → Activity
+# CORS must be outermost so all responses (including CSRF 403) get CORS headers.
 app.add_middleware(ActivityTrackingMiddleware)
+app.add_middleware(CSRFProtectionMiddleware)
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+app.add_middleware(DynamicCORSMiddleware)
 
 
 async def shell_session_cleanup_loop():
