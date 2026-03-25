@@ -1,0 +1,19 @@
+# Namespace Reaper CronJob Patch for Minikube
+# Use locally loaded image; add security context
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: namespace-reaper
+  namespace: tesslate
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          containers:
+          - name: reaper
+            imagePullPolicy: Never

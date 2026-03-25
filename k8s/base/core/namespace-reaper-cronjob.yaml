@@ -1,0 +1,46 @@
+# Namespace Reaper CronJob
+# Runs every 15 minutes to clean up proj-* namespaces stuck in Terminating state.
+# Root cause: PVC-backed volume unmounts can hang, creating a deadlock between
+# pvc-protection finalizers and pod termination. This reaper force-deletes stuck
+# pods, strips PVC finalizers, and clears namespace finalizers to unblock cleanup.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: namespace-reaper
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: namespace-reaper
+spec:
+  schedule: "*/15 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Replace
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: tesslate-namespace-reaper
+        spec:
+          serviceAccountName: tesslate-backend-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: reaper
+            image: tesslate-backend:latest
+            imagePullPolicy: Always
+            command: ["python", "namespace_reaper.py"]
+            env:
+              - name: DEPLOYMENT_MODE
+                value: "kubernetes"
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "50m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"

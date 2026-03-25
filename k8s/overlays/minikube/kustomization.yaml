@@ -27,6 +27,7 @@ patches:
   - path: ingress-patch.yaml
   # CronJob patches for Minikube (imagePullPolicy: Never for local images)
   - path: snapshot-cleanup-cronjob-patch.yaml
+  - path: namespace-reaper-cronjob-patch.yaml
 
 images:
   # Use latest tag everywhere (same as production)

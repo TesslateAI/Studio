@@ -27,6 +27,11 @@ rules:
   resources: ["namespaces"]
   verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
+# Namespace finalize subresource (for namespace-reaper to strip stuck finalizers)
+- apiGroups: [""]
+  resources: ["namespaces/finalize"]
+  verbs: ["update"]
+
 # Core resources (pods, services, PVCs, PVs, secrets, configmaps, quotas)
 - apiGroups: [""]
   resources:
