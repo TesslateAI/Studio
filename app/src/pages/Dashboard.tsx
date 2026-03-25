@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { projectsApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
+import { useTeam } from '../contexts/TeamContext';
 import { MobileMenu, ProjectCard } from '../components/ui';
 import type { Status } from '../components/ui';
 import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
@@ -48,6 +49,7 @@ interface Project {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { activeTeam } = useTeam();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -75,7 +77,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadProjects();
-  }, []);
+  }, [activeTeam?.slug]);
 
   // Open create modal with pre-selected base from search params (e.g., from marketplace "Use This Version")
   useEffect(() => {
@@ -108,11 +110,11 @@ export default function Dashboard() {
     }, 60000);
 
     return () => clearInterval(pollInterval);
-  }, []);
+  }, [activeTeam?.slug]);
 
   const loadProjects = async () => {
     try {
-      const data = await projectsApi.getAll();
+      const data = await projectsApi.getAll(activeTeam?.slug);
       // Add mock status and agents to existing projects
       const projectsWithMeta = data.map((p: Project) => ({
         ...p,

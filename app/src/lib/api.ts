@@ -380,8 +380,9 @@ export const tasksApi = {
 };
 
 export const projectsApi = {
-  getAll: async () => {
-    const response = await api.get('/api/projects/');
+  getAll: async (teamSlug?: string) => {
+    const params = teamSlug ? { team: teamSlug } : {};
+    const response = await api.get('/api/projects/', { params });
     return response.data;
   },
   create: async (
@@ -2961,7 +2962,7 @@ export const teamsApi = {
     const response = await api.post('/api/teams', data);
     return response.data;
   },
-  async update(slug: string, data: Partial<{ name: string; slug: string; avatar_url: string }>): Promise<Team> {
+  async update(slug: string, data: Partial<{ name: string; slug: string; avatar_url: string | null }>): Promise<Team> {
     const response = await api.patch(`/api/teams/${slug}`, data);
     return response.data;
   },

@@ -29,11 +29,11 @@ const TIER_LABELS: Record<string, string> = {
 };
 
 const TIER_COLORS: Record<string, string> = {
-  free: 'text-gray-400 bg-gray-400/10',
-  basic: 'text-blue-400 bg-blue-400/10',
-  pro: 'text-purple-400 bg-purple-400/10',
-  ultra: 'text-amber-400 bg-amber-400/10',
-  enterprise: 'text-emerald-400 bg-emerald-400/10',
+  free: 'text-[var(--text-muted)] bg-[var(--surface)]',
+  basic: 'text-[var(--text)] bg-[var(--surface)]',
+  pro: 'text-[var(--primary)] bg-[var(--primary)]/10',
+  ultra: 'text-[var(--primary)] bg-[var(--primary)]/10',
+  enterprise: 'text-[var(--status-success)] bg-[var(--status-success)]/10',
 };
 
 export default function TeamBillingPage() {
@@ -104,7 +104,7 @@ export default function TeamBillingPage() {
   }
 
   const tierLabel = TIER_LABELS[billing.subscription_tier] || billing.subscription_tier;
-  const tierColor = TIER_COLORS[billing.subscription_tier] || 'text-[var(--text)] bg-white/5';
+  const tierColor = TIER_COLORS[billing.subscription_tier] || 'text-[var(--text)] bg-[var(--surface)]';
 
   return (
     <SettingsSection
@@ -117,7 +117,7 @@ export default function TeamBillingPage() {
           label="Current Plan"
           description="Your team's active subscription tier"
           control={
-            <span className={`px-4 py-1.5 rounded-lg text-sm font-semibold ${tierColor}`}>
+            <span className={`px-4 py-1.5 rounded-[var(--radius-small)] text-xs font-medium ${tierColor}`}>
               {tierLabel}
             </span>
           }
@@ -144,7 +144,7 @@ export default function TeamBillingPage() {
           <div className="px-4 py-3">
             <button
               onClick={() => toast('Upgrade flow coming soon')}
-              className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+              className="btn btn-filled flex items-center gap-2"
             >
               <Zap size={16} />
               Upgrade Plan
@@ -157,12 +157,12 @@ export default function TeamBillingPage() {
       <SettingsGroup title="Credit Balance">
         {/* Total credits card */}
         <div className="px-4 py-4">
-          <div className="flex items-center gap-3 p-4 bg-[var(--primary)]/5 border border-[var(--primary)]/20 rounded-xl">
-            <div className="w-12 h-12 rounded-full bg-[var(--primary)]/20 flex items-center justify-center flex-shrink-0">
-              <Coins size={24} className="text-[var(--primary)]" />
+          <div className="flex items-center gap-3 p-4 bg-[var(--primary)]/5 border border-[var(--primary)]/20 rounded-[var(--radius)]">
+            <div className="w-10 h-10 rounded-[var(--radius-medium)] bg-[var(--primary)]/10 flex items-center justify-center flex-shrink-0">
+              <Coins size={20} className="text-[var(--primary)]" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-[var(--text)]">
+              <p className="text-lg font-semibold text-[var(--text)]">
                 {billing.total_credits.toLocaleString()}
               </p>
               <p className="text-xs text-[var(--text-muted)]">Total credits available</p>
@@ -180,7 +180,7 @@ export default function TeamBillingPage() {
           }
           control={
             <div className="flex items-center gap-2">
-              <TrendingUp size={14} className="text-green-400" />
+              <TrendingUp size={14} className="text-[var(--status-success)]" />
               <span className="text-sm font-medium text-[var(--text)]">
                 {billing.daily_credits.toLocaleString()}
               </span>
@@ -219,7 +219,7 @@ export default function TeamBillingPage() {
           <div className="px-4 py-3">
             <button
               onClick={() => toast('Credit purchase flow coming soon')}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 text-[var(--text)] border border-white/10 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+              className="btn flex items-center gap-2"
             >
               <CreditCard size={16} />
               Purchase Credits
@@ -231,13 +231,13 @@ export default function TeamBillingPage() {
       {/* Usage Chart Placeholder */}
       <SettingsGroup title="Usage Overview">
         <div className="px-4 py-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-3">
+          <div className="w-12 h-12 rounded-[var(--radius)] bg-[var(--surface)] flex items-center justify-center mx-auto mb-3">
             <TrendingUp size={28} className="text-[var(--text-muted)]" />
           </div>
           <p className="text-sm text-[var(--text-muted)]">
             Usage charts coming soon
           </p>
-          <p className="text-xs text-[var(--text)]/40 mt-1">
+          <p className="text-xs text-[var(--text-subtle)] mt-1">
             Track credit consumption, agent usage, and deployment hours
           </p>
         </div>

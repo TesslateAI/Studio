@@ -190,9 +190,9 @@ export default function TeamMembersPage() {
   };
 
   const roleColors: Record<string, string> = {
-    admin: 'text-amber-400 bg-amber-400/10',
-    editor: 'text-blue-400 bg-blue-400/10',
-    viewer: 'text-gray-400 bg-gray-400/10',
+    admin: 'text-[var(--primary)] bg-[var(--primary)]/10',
+    editor: 'text-[var(--text)] bg-[var(--surface)]',
+    viewer: 'text-[var(--text-muted)] bg-[var(--surface)]',
   };
 
   if (loading || teamLoading) {
@@ -232,7 +232,7 @@ export default function TeamMembersPage() {
               setInviteMode(inviteMode === 'email' ? null : 'email');
               setGeneratedLink(null);
             }}
-            className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+            className="btn btn-filled flex items-center gap-2"
           >
             <UserPlus size={16} />
             Invite Member
@@ -242,7 +242,7 @@ export default function TeamMembersPage() {
               setInviteMode(inviteMode === 'link' ? null : 'link');
               setGeneratedLink(null);
             }}
-            className="px-4 py-2 bg-white/5 hover:bg-white/10 text-[var(--text)] border border-white/10 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+            className="btn flex items-center gap-2"
           >
             <Link2 size={16} />
             Create Invite Link
@@ -256,19 +256,19 @@ export default function TeamMembersPage() {
           <div className="px-4 py-4 space-y-3">
             <div className="flex gap-2">
               <div className="relative flex-1">
-                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text)]/40" />
+                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
                 <input
                   type="email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder="email@example.com"
-                  className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  className="w-full pl-9 pr-3 py-2 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)] placeholder-[var(--text-subtle)]"
                 />
               </div>
               <select
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value)}
-                className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="px-3 py-2 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
               >
                 <option value="admin">Admin</option>
                 <option value="editor">Editor</option>
@@ -279,13 +279,13 @@ export default function TeamMembersPage() {
               <button
                 onClick={handleInviteEmail}
                 disabled={inviting || !inviteEmail}
-                className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-all"
+                className="btn btn-filled"
               >
                 {inviting ? 'Sending...' : 'Send Invitation'}
               </button>
               <button
                 onClick={() => setInviteMode(null)}
-                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-[var(--text)] rounded-lg text-sm transition-all"
+                className="btn"
               >
                 Cancel
               </button>
@@ -302,7 +302,7 @@ export default function TeamMembersPage() {
               <select
                 value={linkRole}
                 onChange={(e) => setLinkRole(e.target.value)}
-                className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="px-3 py-2 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
               >
                 <option value="admin">Admin</option>
                 <option value="editor">Editor</option>
@@ -314,12 +314,12 @@ export default function TeamMembersPage() {
                 onChange={(e) => setLinkMaxUses(e.target.value)}
                 placeholder="Max uses (optional)"
                 min={1}
-                className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="flex-1 px-3 py-2 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)] placeholder-[var(--text-subtle)]"
               />
               <select
                 value={linkExpDays}
                 onChange={(e) => setLinkExpDays(e.target.value)}
-                className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="px-3 py-2 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
               >
                 <option value="1">1 day</option>
                 <option value="7">7 days</option>
@@ -332,7 +332,7 @@ export default function TeamMembersPage() {
               <button
                 onClick={handleCreateLink}
                 disabled={creatingLink}
-                className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-all"
+                className="btn btn-filled"
               >
                 {creatingLink ? 'Creating...' : 'Generate Link'}
               </button>
@@ -341,24 +341,24 @@ export default function TeamMembersPage() {
                   setInviteMode(null);
                   setGeneratedLink(null);
                 }}
-                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-[var(--text)] rounded-lg text-sm transition-all"
+                className="btn"
               >
                 Cancel
               </button>
             </div>
             {generatedLink && (
-              <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+              <div className="flex items-center gap-2 p-3 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 rounded-[var(--radius-small)]">
                 <input
                   type="text"
                   value={generatedLink}
                   readOnly
-                  className="flex-1 bg-transparent text-sm text-green-400 outline-none"
+                  className="flex-1 bg-transparent text-xs text-[var(--status-success)] outline-none"
                 />
                 <button
                   onClick={handleCopyLink}
-                  className="p-1.5 hover:bg-white/10 rounded transition-all"
+                  className="p-1.5 hover:bg-[var(--surface-hover)] rounded transition-all"
                 >
-                  <Copy size={16} className="text-green-400" />
+                  <Copy size={16} className="text-[var(--status-success)]" />
                 </button>
               </div>
             )}
@@ -417,7 +417,7 @@ export default function TeamMembersPage() {
                       value={member.role}
                       onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
                       disabled={changingRole === member.user_id}
-                      className={`appearance-none pl-3 pr-7 py-1 rounded-lg text-xs font-medium capitalize cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50 ${roleColors[member.role] || 'text-[var(--text)] bg-white/5'}`}
+                      className={`appearance-none pl-2 pr-6 py-0.5 rounded-[var(--radius-small)] text-xs font-medium capitalize cursor-pointer focus:outline-none focus:border-[var(--border-hover)] disabled:opacity-50 ${roleColors[member.role] || 'text-[var(--text)] bg-[var(--surface)]'}`}
                     >
                       <option value="admin">Admin</option>
                       <option value="editor">Editor</option>
@@ -430,7 +430,7 @@ export default function TeamMembersPage() {
                   </div>
                 ) : (
                   <span
-                    className={`px-3 py-1 rounded-lg text-xs font-medium capitalize ${roleColors[member.role] || 'text-[var(--text)] bg-white/5'}`}
+                    className={`px-3 py-1 rounded-[var(--radius-small)] text-xs font-medium capitalize ${roleColors[member.role] || 'text-[var(--text)] bg-[var(--surface)]'}`}
                   >
                     {member.role}
                   </span>
@@ -441,7 +441,7 @@ export default function TeamMembersPage() {
                   <button
                     onClick={() => handleRemoveMember(member.user_id)}
                     disabled={removingMember === member.user_id}
-                    className="p-1.5 hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400 rounded-lg transition-all disabled:opacity-50"
+                    className="p-1.5 hover:bg-[var(--status-error)]/10 text-[var(--text-muted)] hover:text-[var(--status-error)] rounded-[var(--radius-small)] transition-all disabled:opacity-50"
                     title="Remove member"
                   >
                     {removingMember === member.user_id ? (
@@ -471,7 +471,7 @@ export default function TeamMembersPage() {
               >
                 {/* Icon */}
                 <div className="flex-shrink-0">
-                  <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-full bg-[var(--surface)] flex items-center justify-center">
                     {inv.invite_type === 'email' ? (
                       <Mail size={14} className="text-[var(--text-muted)]" />
                     ) : (
@@ -498,7 +498,7 @@ export default function TeamMembersPage() {
 
                 {/* Role badge */}
                 <span
-                  className={`px-3 py-1 rounded-lg text-xs font-medium capitalize ${roleColors[inv.role] || 'text-[var(--text)] bg-white/5'}`}
+                  className={`px-3 py-1 rounded-[var(--radius-small)] text-xs font-medium capitalize ${roleColors[inv.role] || 'text-[var(--text)] bg-[var(--surface)]'}`}
                 >
                   {inv.role}
                 </span>
@@ -506,7 +506,7 @@ export default function TeamMembersPage() {
                 {/* Revoke button */}
                 <button
                   onClick={() => handleRevokeInvitation(inv.id)}
-                  className="p-1.5 hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-400 rounded-lg transition-all"
+                  className="p-1.5 hover:bg-[var(--status-error)]/10 text-[var(--text-muted)] hover:text-[var(--status-error)] rounded-[var(--radius-small)] transition-all"
                   title="Revoke invitation"
                 >
                   <X size={14} />

@@ -52,10 +52,10 @@ const ACTION_CATEGORIES: Record<string, string> = {
 };
 
 const ACTION_COLORS: Record<string, string> = {
-  Team: 'text-purple-400 bg-purple-400/10',
-  Members: 'text-blue-400 bg-blue-400/10',
-  Projects: 'text-green-400 bg-green-400/10',
-  Billing: 'text-amber-400 bg-amber-400/10',
+  Team: 'text-[var(--primary)] bg-[var(--primary)]/10',
+  Members: 'text-[var(--text)] bg-[var(--surface)]',
+  Projects: 'text-[var(--status-success)] bg-[var(--status-success)]/10',
+  Billing: 'text-[var(--status-warning)] bg-[var(--status-warning)]/10',
 };
 
 export default function AuditLogPage() {
@@ -134,7 +134,7 @@ export default function AuditLogPage() {
 
   const getActionColor = (action: string): string => {
     const category = getActionCategory(action);
-    return ACTION_COLORS[category] || 'text-[var(--text-muted)] bg-white/5';
+    return ACTION_COLORS[category] || 'text-[var(--text-muted)] bg-[var(--surface)]';
   };
 
   if (!teamLoading && !isAdmin) {
@@ -174,22 +174,18 @@ export default function AuditLogPage() {
       <div className="flex items-center gap-2">
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-            showFilters || hasActiveFilters
-              ? 'bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20'
-              : 'bg-white/5 text-[var(--text)] border border-white/10 hover:bg-white/10'
-          }`}
+          className={`btn btn-sm flex items-center gap-1.5 ${showFilters || hasActiveFilters ? 'btn-active' : ''}`}
         >
           <Filter size={14} />
           Filters
           {hasActiveFilters && (
-            <span className="w-2 h-2 rounded-full bg-[var(--primary)]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />
           )}
         </button>
         {hasActiveFilters && (
           <button
             onClick={clearFilters}
-            className="px-3 py-2 bg-white/5 hover:bg-white/10 text-[var(--text-muted)] rounded-lg text-sm transition-all flex items-center gap-1"
+            className="btn btn-sm flex items-center gap-1"
           >
             <X size={14} />
             Clear
@@ -210,7 +206,7 @@ export default function AuditLogPage() {
               <select
                 value={filters.action}
                 onChange={(e) => handleFilterChange('action', e.target.value)}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
               >
                 <option value="">All actions</option>
                 <option value="team.created">Team created</option>
@@ -235,30 +231,30 @@ export default function AuditLogPage() {
                 value={filters.user_id}
                 onChange={(e) => handleFilterChange('user_id', e.target.value)}
                 placeholder="Filter by user ID"
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)]"
               />
             </div>
             <div>
               <label className="text-xs text-[var(--text-muted)] mb-1 block">From Date</label>
               <div className="relative">
-                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text)]/40" />
+                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
                 <input
                   type="date"
                   value={filters.from_date}
                   onChange={(e) => handleFilterChange('from_date', e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  className="w-full pl-8 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
                 />
               </div>
             </div>
             <div>
               <label className="text-xs text-[var(--text-muted)] mb-1 block">To Date</label>
               <div className="relative">
-                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text)]/40" />
+                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
                 <input
                   type="date"
                   value={filters.to_date}
                   onChange={(e) => handleFilterChange('to_date', e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  className="w-full pl-8 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
                 />
               </div>
             </div>
@@ -317,7 +313,7 @@ export default function AuditLogPage() {
                       {formatDate(entry.created_at)}
                     </p>
                     {entry.ip_address && (
-                      <p className="text-[10px] text-[var(--text)]/30 mt-0.5">
+                      <p className="text-[10px] text-[var(--text-subtle)] mt-0.5">
                         {entry.ip_address}
                       </p>
                     )}
@@ -335,7 +331,7 @@ export default function AuditLogPage() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
-            className="px-3 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-[var(--text)] rounded-lg text-sm transition-all flex items-center gap-1"
+            className="btn btn-sm flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
           >
             <ChevronLeft size={14} />
             Previous
@@ -346,7 +342,7 @@ export default function AuditLogPage() {
           <button
             onClick={() => setPage((p) => p + 1)}
             disabled={!hasMore}
-            className="px-3 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-[var(--text)] rounded-lg text-sm transition-all flex items-center gap-1"
+            className="btn btn-sm flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Next
             <ChevronRight size={14} />

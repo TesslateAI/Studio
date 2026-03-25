@@ -188,20 +188,21 @@ async def update_team(
     team = await _resolve_team(db, team_slug)
     await check_team_permission(db, team.id, user.id, Permission.TEAM_EDIT)
 
+    provided = body.model_dump(exclude_unset=True)
     changes: dict = {}
-    if body.name is not None:
-        changes["name"] = body.name
-        team.name = body.name
-    if body.slug is not None:
-        if body.slug != team.slug:
-            dup = await db.execute(select(Team).where(Team.slug == body.slug))
+    if "name" in provided and provided["name"] is not None:
+        changes["name"] = provided["name"]
+        team.name = provided["name"]
+    if "slug" in provided and provided["slug"] is not None:
+        if provided["slug"] != team.slug:
+            dup = await db.execute(select(Team).where(Team.slug == provided["slug"]))
             if dup.scalar_one_or_none() is not None:
                 raise HTTPException(status_code=409, detail="Team slug already taken")
-            changes["slug"] = body.slug
-            team.slug = body.slug
-    if body.avatar_url is not None:
-        changes["avatar_url"] = body.avatar_url
-        team.avatar_url = body.avatar_url
+            changes["slug"] = provided["slug"]
+            team.slug = provided["slug"]
+    if "avatar_url" in provided:
+        changes["avatar_url"] = provided["avatar_url"]
+        team.avatar_url = provided["avatar_url"]
 
     if changes:
         await log_event(

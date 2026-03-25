@@ -21,10 +21,11 @@ import {
   Package,
   MessagesSquare,
 } from 'lucide-react';
-import { User, CaretDown, Coins, CreditCard, Gear, SignOut } from '@phosphor-icons/react';
+import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Check } from '@phosphor-icons/react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
 import { billingApi } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTeam } from '../../contexts/TeamContext';
 import { modKey } from '../../lib/keyboard-registry';
 import type { CreditBalanceResponse } from '../../types/billing';
 
@@ -103,11 +104,13 @@ export function NavigationSidebar({
   const isPaidPlan = subscriptionTier !== 'free';
   const tierLabel = subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1);
 
-  // User profile state
+  // Team + user profile state
   const { user, logout } = useAuth();
+  const { activeTeam, teams, switchTeam } = useTeam();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [creditBalance, setCreditBalance] = useState<CreditBalanceResponse | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [teamAvatarError, setTeamAvatarError] = useState(false);
   const userName = user?.name || 'User';
   const totalCredits = creditBalance?.total_credits ?? 0;
   const avatarSrc = user?.avatar_url
@@ -119,6 +122,7 @@ export function NavigationSidebar({
   useEffect(() => {
     setImgError(false);
   }, [avatarSrc]);
+  useEffect(() => { setTeamAvatarError(false); }, [activeTeam?.avatar_url]);
 
   // Fetch credits
   useEffect(() => {
@@ -257,31 +261,35 @@ export function NavigationSidebar({
       }}
       className={`${forceVisible ? 'flex' : 'hidden md:flex'} flex-col h-screen bg-[var(--sidebar-bg)] overflow-x-hidden`}
     >
-      {/* User Profile Area — replaces logo */}
+      {/* Team Switcher — top-level context selector */}
       <div ref={userDropdownRef} className="flex-shrink-0" style={{ paddingTop: '6px' }}>
         <button
           onClick={() => setShowUserDropdown(!showUserDropdown)}
-          className={`relative flex items-center h-10 rounded-[var(--radius-medium)] transition-colors ${isExpanded ? 'gap-2.5 mx-2' : 'justify-center mx-1'} ${
-            showUserDropdown ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+          className={`relative flex items-center h-10 rounded-[var(--radius-medium)] transition-colors w-full ${isExpanded ? 'gap-2.5 mx-2' : 'justify-center mx-1'} ${
+            showUserDropdown
+              ? 'bg-[var(--sidebar-active)]'
+              : 'hover:bg-[var(--sidebar-hover)]'
           }`}
           style={isExpanded ? { paddingLeft: '10px', paddingRight: '8px' } : undefined}
-          aria-label="User menu"
+          aria-label="Team menu"
         >
-          {avatarSrc && !imgError ? (
+          {/* Team avatar */}
+          {activeTeam?.avatar_url && !teamAvatarError ? (
             <img
-              src={avatarSrc}
+              src={activeTeam.avatar_url}
               alt=""
-              className="w-6 h-6 rounded-full object-cover flex-shrink-0"
-              referrerPolicy="no-referrer"
-              onError={() => setImgError(true)}
+              className="w-6 h-6 rounded-md object-cover flex-shrink-0"
+              onError={() => setTeamAvatarError(true)}
             />
           ) : (
-            <User size={18} className="text-[var(--text-muted)] flex-shrink-0" weight="fill" />
+            <div className="w-6 h-6 rounded-md bg-[var(--primary)]/20 flex items-center justify-center text-[10px] font-bold text-[var(--primary)] flex-shrink-0">
+              {activeTeam?.name?.charAt(0).toUpperCase() || 'T'}
+            </div>
           )}
           {isExpanded && (
             <>
-              <span className="text-[14px] font-medium text-[var(--sidebar-text)] truncate flex-1 text-left">
-                {userName}
+              <span className="text-xs font-medium text-[var(--sidebar-text)] truncate flex-1 text-left">
+                {activeTeam?.name || 'Select Team'}
               </span>
               <CaretDown
                 size={10}
@@ -291,12 +299,12 @@ export function NavigationSidebar({
           )}
         </button>
 
-        {/* User Dropdown Menu — fixed position so it's not clipped by sidebar overflow */}
+        {/* Team + User Dropdown — fixed position so it's not clipped by sidebar overflow */}
         {showUserDropdown && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setShowUserDropdown(false)} />
             <div
-              className="fixed w-52 bg-[var(--surface)] border rounded-[var(--radius-medium)] z-50 overflow-hidden"
+              className="fixed w-56 bg-[var(--surface)] border rounded-[var(--radius-medium)] z-50 overflow-hidden"
               style={{
                 borderWidth: 'var(--border-width)',
                 borderColor: 'var(--border-hover)',
@@ -309,11 +317,54 @@ export function NavigationSidebar({
               }}
             >
               <div className="py-1">
+                {/* Team list */}
+                {teams.length > 0 && (
+                  <>
+                    <div className="px-3 py-1">
+                      <span className="text-[10px] font-medium text-[var(--text-subtle)] uppercase tracking-wider">Teams</span>
+                    </div>
+                    {teams.map((team) => (
+                      <button
+                        key={team.slug}
+                        onClick={() => {
+                          switchTeam(team.slug);
+                          setShowUserDropdown(false);
+                        }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-1.5 transition-colors text-left ${
+                          activeTeam?.slug === team.slug
+                            ? 'bg-[var(--surface-hover)]'
+                            : 'hover:bg-[var(--surface-hover)]'
+                        }`}
+                      >
+                        {team.avatar_url ? (
+                          <img src={team.avatar_url} alt="" className="w-5 h-5 rounded-md object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-5 h-5 rounded-md bg-[var(--primary)]/20 flex items-center justify-center text-[9px] font-bold text-[var(--primary)] flex-shrink-0">
+                            {team.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <span className={`text-[11px] truncate flex-1 ${
+                          activeTeam?.slug === team.slug ? 'font-medium text-[var(--text)]' : 'text-[var(--text-muted)]'
+                        }`}>
+                          {team.name}
+                        </span>
+                        {team.is_personal && (
+                          <span className="text-[9px] text-[var(--text-subtle)] flex-shrink-0">Personal</span>
+                        )}
+                        {activeTeam?.slug === team.slug && (
+                          <Check size={12} className="text-[var(--primary)] flex-shrink-0" weight="bold" />
+                        )}
+                      </button>
+                    ))}
+                    <div className="h-px bg-[var(--border)] mx-3 my-1" />
+                  </>
+                )}
+
                 {/* Credits */}
                 <button
                   onClick={() => {
                     setShowUserDropdown(false);
-                    navigate('/settings/billing');
+                    navigate('/settings/team/billing');
                   }}
                   className="w-full px-3 py-2 hover:bg-[var(--surface-hover)] transition-colors text-left"
                 >
@@ -348,10 +399,20 @@ export function NavigationSidebar({
 
                 <div className="h-px bg-[var(--border)] mx-3 my-0.5" />
 
+                {/* User section */}
+                <div className="px-3 py-1.5 flex items-center gap-2">
+                  {avatarSrc && !imgError ? (
+                    <img src={avatarSrc} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" referrerPolicy="no-referrer" onError={() => setImgError(true)} />
+                  ) : (
+                    <User size={14} className="text-[var(--text-subtle)] flex-shrink-0" weight="fill" />
+                  )}
+                  <span className="text-[10px] text-[var(--text-subtle)] truncate">{userName}</span>
+                </div>
+
                 <button
                   onClick={() => {
                     setShowUserDropdown(false);
-                    navigate('/settings/billing');
+                    navigate('/settings/team/billing');
                   }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--surface-hover)] transition-colors text-left"
                 >

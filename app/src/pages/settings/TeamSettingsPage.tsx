@@ -9,7 +9,7 @@ import { ImageUpload } from '../../components/ImageUpload';
 import { SettingsSection, SettingsGroup, SettingsItem } from '../../components/settings';
 
 export default function TeamSettingsPage() {
-  const { activeTeam, can, loading: teamLoading } = useTeam();
+  const { activeTeam, can, loading: teamLoading, refreshTeams } = useTeam();
   const [loading, setLoading] = useState(true);
   const [team, setTeam] = useState<Team | null>(null);
   const [name, setName] = useState('');
@@ -54,6 +54,7 @@ export default function TeamSettingsPage() {
         avatar_url: avatarUrl !== team.avatar_url ? avatarUrl : undefined,
       });
       setTeam(updated);
+      await refreshTeams();
       toast.success('Team settings updated');
     } catch (error) {
       console.error('Failed to update team:', error);
@@ -159,7 +160,7 @@ export default function TeamSettingsPage() {
               onChange={(e) => setName(e.target.value)}
               disabled={!canEdit}
               placeholder="My Team"
-              className="w-full sm:w-64 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-64 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
           }
         />
@@ -173,7 +174,7 @@ export default function TeamSettingsPage() {
               onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
               disabled={!canEdit}
               placeholder="my-team"
-              className="w-full sm:w-64 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-64 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
           }
         />
@@ -181,7 +182,7 @@ export default function TeamSettingsPage() {
           label="Subscription Tier"
           description="Current plan for this team"
           control={
-            <span className="px-3 py-1.5 bg-[var(--primary)]/10 text-[var(--primary)] rounded-lg text-sm font-medium capitalize">
+            <span className="px-2 py-0.5 bg-[var(--primary)]/10 text-[var(--primary)] rounded-[var(--radius-small)] text-xs font-medium capitalize">
               {team.subscription_tier}
             </span>
           }
@@ -194,7 +195,7 @@ export default function TeamSettingsPage() {
           <button
             onClick={handleSave}
             disabled={saving || (name === team.name && slug === team.slug && avatarUrl === team.avatar_url)}
-            className="px-6 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all flex items-center gap-2 min-h-[48px]"
+            className="btn btn-filled flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? (
               <>
@@ -220,14 +221,14 @@ export default function TeamSettingsPage() {
           <div className="px-4 py-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-medium text-red-400">Delete Team</p>
+                <p className="text-sm font-medium text-[var(--status-error)]">Delete Team</p>
                 <p className="text-xs text-[var(--text-muted)] mt-0.5">
                   Permanently delete this team and all associated data. This action cannot be undone.
                 </p>
               </div>
               <button
                 onClick={() => setShowDeleteConfirm(true)}
-                className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-sm font-medium transition-all flex items-center gap-2 flex-shrink-0"
+                className="btn btn-danger flex items-center gap-2 flex-shrink-0"
               >
                 <Trash2 size={16} />
                 Delete Team
@@ -235,28 +236,28 @@ export default function TeamSettingsPage() {
             </div>
 
             {showDeleteConfirm && (
-              <div className="mt-4 p-4 bg-red-500/5 border border-red-500/20 rounded-xl">
+              <div className="mt-4 p-4 bg-[var(--status-error)]/5 border border-[var(--status-error)]/20 rounded-[var(--radius)]">
                 <div className="flex items-start gap-3">
-                  <AlertTriangle size={20} className="text-red-400 mt-0.5 flex-shrink-0" />
+                  <AlertTriangle size={20} className="text-[var(--status-error)] mt-0.5 flex-shrink-0" />
                   <div className="flex-1">
-                    <p className="text-sm text-red-400 font-medium">
+                    <p className="text-sm text-[var(--status-error)] font-medium">
                       Are you sure? This will permanently delete the team, all projects, and all data.
                     </p>
                     <p className="text-xs text-[var(--text-muted)] mt-2">
-                      Type <span className="font-mono text-red-400">{team.slug}</span> to confirm:
+                      Type <span className="font-mono text-[var(--status-error)]">{team.slug}</span> to confirm:
                     </p>
                     <input
                       type="text"
                       value={deleteConfirmText}
                       onChange={(e) => setDeleteConfirmText(e.target.value)}
                       placeholder={team.slug}
-                      className="mt-2 w-full px-3 py-2 bg-white/5 border border-red-500/30 rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-red-500"
+                      className="mt-2 w-full px-2 py-1 bg-[var(--bg)] border border-[var(--status-error)]/30 rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--status-error)]"
                     />
                     <div className="flex gap-2 mt-3">
                       <button
                         onClick={handleDelete}
                         disabled={deleting || deleteConfirmText !== team.slug}
-                        className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-all"
+                        className="btn btn-danger flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {deleting ? 'Deleting...' : 'Permanently Delete'}
                       </button>
@@ -265,7 +266,7 @@ export default function TeamSettingsPage() {
                           setShowDeleteConfirm(false);
                           setDeleteConfirmText('');
                         }}
-                        className="px-4 py-2 bg-white/5 hover:bg-white/10 text-[var(--text)] rounded-lg text-sm transition-all"
+                        className="btn flex items-center gap-2"
                       >
                         Cancel
                       </button>
