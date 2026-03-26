@@ -7,12 +7,12 @@ default_team_id to users, team_id to usage_logs + credit_purchases.
 Data migration: creates a personal team for every existing user, copies
 billing fields, creates admin membership, links all projects.
 
-Revision ID: 0032_rbac_teams
-Revises: 0031_volume_hub
+Revision ID: 0034_rbac_teams
+Revises: 0033_container_build
 """
 
-revision = "0032_rbac_teams"
-down_revision = "0031_volume_hub"
+revision = "0034_rbac_teams"
+down_revision = "0033_container_build"
 branch_labels = None
 depends_on = None
 
