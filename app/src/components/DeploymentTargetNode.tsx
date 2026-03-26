@@ -13,9 +13,9 @@ import {
   CircleNotch,
   Clock,
   Plus,
-  Info,
 } from '@phosphor-icons/react';
 import { PROVIDER_CREDENTIAL_HELP } from '../lib/deployment-providers';
+import { InfoTooltip } from './ui/InfoTooltip';
 
 // Provider info interface
 interface ProviderInfo {
@@ -170,6 +170,7 @@ const arePropsEqual = (
     prevData.isConnected === nextData.isConnected &&
     prevData.connectedContainers?.length === nextData.connectedContainers?.length &&
     prevData.deploymentHistory?.length === nextData.deploymentHistory?.length &&
+    prevData.deploymentHistory?.[0]?.id === nextData.deploymentHistory?.[0]?.id &&
     prevData.deploymentHistory?.[0]?.status === nextData.deploymentHistory?.[0]?.status
   );
 };
@@ -295,24 +296,17 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
                   <LinkSimple size={14} className="text-yellow-500" />
                   <span className="text-xs text-yellow-500">Not Connected</span>
                   {helpFields.length > 0 && (
-                    <div className="group/tip relative">
-                      <Info
-                        size={13}
-                        className="text-yellow-500/60 hover:text-yellow-500 transition-colors cursor-help"
-                        weight="fill"
-                      />
-                      <div className="absolute left-0 top-full mt-2 w-64 p-3 bg-[#1a1a2e] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all duration-200 z-50 pointer-events-none">
-                        <p className="text-[10px] font-semibold text-[var(--text)] mb-1.5">How to connect {providerName}</p>
-                        <div className="space-y-1.5">
-                          {helpFields.map(([field, help]) => (
-                            <div key={field}>
-                              <span className="text-[10px] font-medium text-[var(--text)]/70">{field.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}:</span>
-                              <p className="text-[10px] text-[var(--text)]/60 leading-snug">{help}</p>
-                            </div>
-                          ))}
-                        </div>
+                    <InfoTooltip size={13}>
+                      <p className="font-semibold text-[var(--text)] mb-1.5">How to connect {providerName}</p>
+                      <div className="space-y-1.5">
+                        {helpFields.map(([field, help]) => (
+                          <div key={field}>
+                            <span className="font-medium text-[var(--text)]/70">{field.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}:</span>
+                            <p className="text-[var(--text)]/60 leading-snug">{help}</p>
+                          </div>
+                        ))}
                       </div>
-                    </div>
+                    </InfoTooltip>
                   )}
                 </div>
                 <button

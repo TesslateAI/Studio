@@ -6,6 +6,7 @@ as the deployment source - Railway builds directly from the repo.
 """
 
 import logging
+import re
 
 import httpx
 
@@ -26,6 +27,39 @@ logger = logging.getLogger(__name__)
 GRAPHQL_URL = "https://backboard.railway.app/graphql/v2"
 
 TERMINAL_STATES = {"SUCCESS", "FAILED", "CRASHED", "REMOVED"}
+
+# Pattern to extract owner/repo from various GitHub URL formats
+_GITHUB_REPO_RE = re.compile(
+    r"(?:https?://)?(?:[^@]+@)?github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?/?$"
+)
+
+
+def _parse_repo_slug(url: str) -> str:
+    """Convert a full GitHub URL to the ``owner/repo`` slug Railway expects.
+
+    Accepts:
+      - https://github.com/owner/repo
+      - https://github.com/owner/repo.git
+      - https://token@github.com/owner/repo.git
+      - git@github.com:owner/repo.git
+      - owner/repo  (already a slug — returned as-is)
+
+    Raises ValueError with a user-friendly message if the URL can't be parsed.
+    """
+    url = url.strip()
+
+    # Already a slug like "owner/repo"
+    if "/" in url and ":" not in url and "." not in url.split("/")[0]:
+        return url
+
+    m = _GITHUB_REPO_RE.match(url)
+    if m:
+        return f"{m.group('owner')}/{m.group('repo')}"
+
+    raise ValueError(
+        f"Railway requires a GitHub repository in 'owner/repo' format, "
+        f"but got: {url!r}. Make sure the Git panel is connected to a GitHub repository."
+    )
 
 
 class RailwayProvider(BaseDeploymentProvider):
@@ -109,49 +143,101 @@ class RailwayProvider(BaseDeploymentProvider):
             if not repo_url:
                 raise ValueError(NO_GIT_REPO_ERROR)
 
+            # Railway expects "owner/repo" format, not a full URL
+            repo_slug = _parse_repo_slug(repo_url)
+
             project_name = self._sanitize_name(config.project_name)
-            logs.append(f"Deploying '{project_name}' to Railway from {repo_url}@{branch}")
+            logs.append(f"Deploying '{project_name}' to Railway from {repo_slug}@{branch}")
 
             async with httpx.AsyncClient(timeout=120.0) as client:
                 # Step 1 - Create project
                 logs.append("Creating Railway project...")
-                project_data = await self._gql(
-                    client,
-                    """
-                    mutation($name: String!) {
-                        projectCreate(input: { name: $name }) {
-                            id
-                            name
+                try:
+                    project_data = await self._gql(
+                        client,
+                        """
+                        mutation($name: String!) {
+                            projectCreate(input: { name: $name }) {
+                                id
+                                name
+                                environments {
+                                    edges { node { id name } }
+                                }
+                            }
                         }
-                    }
-                    """,
-                    {"name": project_name},
-                )
+                        """,
+                        {"name": project_name},
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Failed to create Railway project '{project_name}'. "
+                        f"Check that your Railway token has project-create permissions. Detail: {exc}"
+                    ) from exc
                 project_id = project_data["projectCreate"]["id"]
                 logs.append(f"Project created: {project_id}")
 
-                # Step 2 - Create service linked to repo
-                logs.append("Creating service linked to repository...")
-                service_data = await self._gql(
-                    client,
-                    """
-                    mutation($projectId: String!, $repo: String!, $branch: String!) {
-                        serviceCreate(input: {
-                            projectId: $projectId,
-                            name: "web",
-                            source: { repo: $repo, branch: $branch }
-                        }) {
-                            id
-                            name
-                        }
-                    }
-                    """,
-                    {"projectId": project_id, "repo": repo_url, "branch": branch},
+                # Step 2 - Resolve the default environment ID
+                env_edges = (
+                    project_data["projectCreate"]
+                    .get("environments", {})
+                    .get("edges", [])
                 )
+                if env_edges:
+                    environment_id = env_edges[0]["node"]["id"]
+                else:
+                    # Fallback: query environments separately
+                    logs.append("Fetching project environments...")
+                    env_data = await self._gql(
+                        client,
+                        """
+                        query($projectId: String!) {
+                            environments(projectId: $projectId, isEphemeral: false) {
+                                edges { node { id name } }
+                            }
+                        }
+                        """,
+                        {"projectId": project_id},
+                    )
+                    env_list = env_data.get("environments", {}).get("edges", [])
+                    if not env_list:
+                        raise ValueError(
+                            "Railway created the project but it has no environments. "
+                            "This is unexpected — try creating the project manually in the Railway dashboard."
+                        )
+                    environment_id = env_list[0]["node"]["id"]
+                logs.append(f"Using environment: {environment_id}")
+
+                # Step 3 - Create service linked to repo
+                # Railway API: `source.repo` takes "owner/repo", `branch` is top-level
+                logs.append(f"Creating service linked to {repo_slug} (branch: {branch})...")
+                try:
+                    service_data = await self._gql(
+                        client,
+                        """
+                        mutation($projectId: String!, $repo: String!, $branch: String!) {
+                            serviceCreate(input: {
+                                projectId: $projectId,
+                                name: "web",
+                                source: { repo: $repo },
+                                branch: $branch
+                            }) {
+                                id
+                                name
+                            }
+                        }
+                        """,
+                        {"projectId": project_id, "repo": repo_slug, "branch": branch},
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Failed to link repository '{repo_slug}' to Railway service. "
+                        f"Make sure Railway has access to this GitHub repo "
+                        f"(check Railway dashboard → GitHub integration). Detail: {exc}"
+                    ) from exc
                 service_id = service_data["serviceCreate"]["id"]
                 logs.append(f"Service created: {service_id}")
 
-                # Step 3 - Set environment variables (filter out internal keys)
+                # Step 4 - Set environment variables (filter out internal keys)
                 public_vars = {
                     k: v
                     for k, v in config.env_vars.items()
@@ -170,46 +256,65 @@ class RailwayProvider(BaseDeploymentProvider):
                             "input": {
                                 "projectId": project_id,
                                 "serviceId": service_id,
+                                "environmentId": environment_id,
                                 "variables": public_vars,
                             }
                         },
                     )
 
-                # Step 4 - Trigger deploy
+                # Step 5 - Trigger deploy via environmentTriggersDeploy
                 logs.append("Triggering deployment...")
-                trigger_data = await self._gql(
-                    client,
-                    """
-                    mutation($serviceId: String!) {
-                        deploymentTriggerCreate(input: { serviceId: $serviceId }) {
-                            id
+                try:
+                    await self._gql(
+                        client,
+                        """
+                        mutation($input: EnvironmentTriggersDeployInput!) {
+                            environmentTriggersDeploy(input: $input)
                         }
-                    }
-                    """,
-                    {"serviceId": service_id},
-                )
-                trigger_id = trigger_data["deploymentTriggerCreate"]["id"]
-                logs.append(f"Deploy trigger created: {trigger_id}")
+                        """,
+                        {
+                            "input": {
+                                "projectId": project_id,
+                                "serviceId": service_id,
+                                "environmentId": environment_id,
+                            }
+                        },
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Failed to trigger Railway deployment. "
+                        f"The project and service were created but the build could not start. Detail: {exc}"
+                    ) from exc
+                logs.append("Deploy triggered")
 
-                # Step 5 - Fetch first deployment and poll
+                # Step 6 - Fetch first deployment and poll
                 logs.append("Waiting for deployment to start...")
-                deploy_list = await self._gql(
-                    client,
-                    """
-                    query($serviceId: String!) {
-                        deployments(input: { serviceId: $serviceId }, first: 1) {
-                            edges { node { id status } }
+                import asyncio as _asyncio
+
+                deployment_id = None
+                for _attempt in range(12):
+                    deploy_list = await self._gql(
+                        client,
+                        """
+                        query($projectId: String!) {
+                            deployments(input: { projectId: $projectId }, first: 1) {
+                                edges { node { id status } }
+                            }
                         }
-                    }
-                    """,
-                    {"serviceId": service_id},
-                )
+                        """,
+                        {"projectId": project_id},
+                    )
+                    edges = deploy_list.get("deployments", {}).get("edges", [])
+                    if edges:
+                        deployment_id = edges[0]["node"]["id"]
+                        break
+                    await _asyncio.sleep(5)
 
-                edges = deploy_list.get("deployments", {}).get("edges", [])
-                if not edges:
-                    raise ValueError("No deployment created after trigger")
-
-                deployment_id = edges[0]["node"]["id"]
+                if not deployment_id:
+                    raise ValueError(
+                        "Railway accepted the deploy trigger but no deployment appeared after 60s. "
+                        "This usually means the repository is empty or has no buildable content."
+                    )
                 logs.append(f"Deployment started: {deployment_id}")
 
                 # Poll until terminal
@@ -246,14 +351,28 @@ class RailwayProvider(BaseDeploymentProvider):
                 )
 
         except httpx.HTTPStatusError as exc:
-            error_msg = f"Railway API error: {exc.response.status_code} - {exc.response.text}"
+            status = exc.response.status_code
+            body = exc.response.text[:500]
+            if status == 401:
+                error_msg = (
+                    "Railway rejected your API token (401 Unauthorized). "
+                    "Go to Settings → Deployments and reconnect your Railway account."
+                )
+            elif status == 403:
+                error_msg = (
+                    "Railway denied access (403 Forbidden). "
+                    "Your token may lack the required scopes — regenerate it in Railway dashboard."
+                )
+            else:
+                error_msg = f"Railway API returned HTTP {status}: {body}"
             logs.append(error_msg)
             return DeploymentResult(success=False, error=error_msg, logs=logs)
         except (ValueError, TimeoutError) as exc:
             logs.append(str(exc))
             return DeploymentResult(success=False, error=str(exc), logs=logs)
         except Exception as exc:
-            error_msg = f"Railway deployment failed: {exc}"
+            error_msg = f"Railway deployment failed unexpectedly: {exc}"
+            logger.error(error_msg, exc_info=True)
             logs.append(error_msg)
             return DeploymentResult(success=False, error=error_msg, logs=logs)
 

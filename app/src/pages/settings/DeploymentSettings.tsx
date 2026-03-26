@@ -5,6 +5,7 @@ import { deploymentCredentialsApi } from '../../lib/api';
 import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
 import { getProviderConfig, PROVIDER_CREDENTIAL_HELP } from '../../lib/deployment-providers';
+import { InfoTooltip } from '../../components/ui/InfoTooltip';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { SettingsSection } from '../../components/settings';
 import { useCancellableParallelRequests } from '../../hooks/useCancellableRequest';
@@ -484,17 +485,7 @@ export default function DeploymentSettings() {
                         <span className="text-red-400 ml-1">*</span>
                       </label>
                       {helpText && (
-                        <div className="group/tip relative">
-                          <Info
-                            size={15}
-                            className="text-[var(--text)]/40 hover:text-[var(--text)]/70 transition-colors cursor-help"
-                            weight="fill"
-                          />
-                          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-72 p-3 bg-[#1a1a2e] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all duration-200 z-50 pointer-events-none">
-                            <p className="text-xs text-[var(--text)]/80 leading-relaxed">{helpText}</p>
-                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-6 border-r-6 border-b-6 border-l-transparent border-r-transparent border-b-white/20" />
-                          </div>
-                        </div>
+                        <InfoTooltip>{helpText}</InfoTooltip>
                       )}
                     </div>
                     <input

@@ -45,6 +45,7 @@ import { ChatContainer } from '../components/chat/ChatContainer';
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
 import { ProviderConnectModal } from '../components/modals/ProviderConnectModal';
+import { ConfirmDialog } from '../components/modals/ConfirmDialog';
 import api, {
   projectsApi,
   deploymentTargetsApi,
@@ -185,6 +186,16 @@ const ProjectGraphCanvasInner = () => {
     provider: string | null;
   }>({ isOpen: false, targetId: null, provider: null });
   const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
+
+  // Confirm dialog state (replaces native confirm() popups)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText: string;
+    variant: 'danger' | 'warning' | 'info';
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'info', onConfirm: () => {} });
 
   // Keep refs in sync with state - this allows callbacks to access latest values without re-creating
   useEffect(() => {
@@ -651,27 +662,65 @@ const ProjectGraphCanvasInner = () => {
 
   // Stable callback for deleting deployment target nodes
   const handleDeleteDeploymentTarget = useCallback(
-    async (targetId: string) => {
-      if (!confirm('Delete this deployment target? Connected containers will be disconnected.'))
-        return;
-
-      try {
-        await deploymentTargetsApi.delete(slugRef.current!, targetId);
-
-        // Remove the deployment target node
-        setNodes((nds) => nds.filter((node) => node.id !== targetId));
-        // Remove any edges connected to this target
-        setEdges((eds) =>
-          eds.filter((edge) => edge.source !== targetId && edge.target !== targetId)
-        );
-        toast.success('Deployment target removed');
-        setConfigDirty(true);
-      } catch (error) {
-        console.error('Failed to delete deployment target:', error);
-        toast.error('Failed to delete deployment target');
-      }
+    (targetId: string) => {
+      setConfirmDialog({
+        isOpen: true,
+        title: 'Delete Deployment Target',
+        message: 'This will remove the deployment target and disconnect all linked containers. This action cannot be undone.',
+        confirmText: 'Delete',
+        variant: 'danger',
+        onConfirm: async () => {
+          setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+          try {
+            await deploymentTargetsApi.delete(slugRef.current!, targetId);
+            setNodes((nds) => nds.filter((node) => node.id !== targetId));
+            setEdges((eds) =>
+              eds.filter((edge) => edge.source !== targetId && edge.target !== targetId)
+            );
+            toast.success('Deployment target removed');
+            setConfigDirty(true);
+          } catch (error) {
+            console.error('Failed to delete deployment target:', error);
+            toast.error('Failed to delete deployment target');
+          }
+        },
+      });
     },
     [setNodes, setEdges]
+  );
+
+  // Refresh deployment history for a target node after deploy/rollback
+  const refreshDeploymentHistory = useCallback(
+    async (targetId: string) => {
+      try {
+        const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
+        setNodes((nds) =>
+          nds.map((node) =>
+            node.id === targetId
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    deploymentHistory: (history || []).map(
+                      (d: { id: string; version?: string; status: string; deployment_url?: string; created_at: string; completed_at?: string }) => ({
+                        id: d.id,
+                        version: d.version,
+                        status: d.status,
+                        deployment_url: d.deployment_url,
+                        created_at: d.created_at,
+                        completed_at: d.completed_at,
+                      })
+                    ),
+                  },
+                }
+              : node
+          )
+        );
+      } catch (error) {
+        console.error('Failed to refresh deployment history:', error);
+      }
+    },
+    [setNodes]
   );
 
   // Stable callback for deploying from a deployment target
@@ -694,22 +743,10 @@ const ProjectGraphCanvasInner = () => {
         console.error('Failed to deploy:', error);
         toast.error('Deployment failed', { id: `deploy-${targetId}` });
       } finally {
-        // Always refresh deployment history — backend creates records for both success and failure
-        try {
-          const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
-          setNodes((nds) =>
-            nds.map((node) =>
-              node.id === targetId
-                ? { ...node, data: { ...node.data, deploymentHistory: history } }
-                : node
-            )
-          );
-        } catch {
-          // History refresh is best-effort
-        }
+        await refreshDeploymentHistory(targetId);
       }
     },
-    [setNodes]
+    [refreshDeploymentHistory]
   );
 
   // Stable callback for connecting a deployment target — OAuth for oauth providers, modal for API token providers
@@ -787,44 +824,40 @@ const ProjectGraphCanvasInner = () => {
 
   // Stable callback for rolling back a deployment
   const handleRollbackDeployment = useCallback(
-    async (targetId: string, deploymentId: string) => {
-      if (!confirm('Rollback to this deployment? This will redeploy the previous version.')) return;
+    (targetId: string, deploymentId: string) => {
+      setConfirmDialog({
+        isOpen: true,
+        title: 'Rollback Deployment',
+        message: 'This will redeploy the selected previous version. Your current deployment will be replaced.',
+        confirmText: 'Rollback',
+        variant: 'warning',
+        onConfirm: async () => {
+          setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+          try {
+            toast.loading('Rolling back...', { id: `rollback-${deploymentId}` });
+            const result = await deploymentTargetsApi.rollback(
+              slugRef.current!,
+              targetId,
+              deploymentId
+            );
 
-      try {
-        toast.loading('Rolling back...', { id: `rollback-${deploymentId}` });
-        const result = await deploymentTargetsApi.rollback(
-          slugRef.current!,
-          targetId,
-          deploymentId
-        );
-
-        if (result.status === 'success') {
-          toast.success('Rollback successful!', { id: `rollback-${deploymentId}` });
-        } else {
-          toast.error(`Rollback failed: ${result.error || 'Unknown error'}`, {
-            id: `rollback-${deploymentId}`,
-          });
-        }
-      } catch (error) {
-        console.error('Failed to rollback:', error);
-        toast.error('Rollback failed', { id: `rollback-${deploymentId}` });
-      } finally {
-        // Always refresh deployment history — backend creates records for both success and failure
-        try {
-          const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
-          setNodes((nds) =>
-            nds.map((node) =>
-              node.id === targetId
-                ? { ...node, data: { ...node.data, deploymentHistory: history } }
-                : node
-            )
-          );
-        } catch {
-          // History refresh is best-effort
-        }
-      }
+            if (result.status === 'success') {
+              toast.success('Rollback successful!', { id: `rollback-${deploymentId}` });
+            } else {
+              toast.error(`Rollback failed: ${result.error || 'Unknown error'}`, {
+                id: `rollback-${deploymentId}`,
+              });
+            }
+          } catch (error) {
+            console.error('Failed to rollback:', error);
+            toast.error('Rollback failed', { id: `rollback-${deploymentId}` });
+          } finally {
+            await refreshDeploymentHistory(targetId);
+          }
+        },
+      });
     },
-    [setNodes]
+    [refreshDeploymentHistory]
   );
 
   // Debounced position update for deployment targets
@@ -2327,6 +2360,17 @@ const ProjectGraphCanvasInner = () => {
         onConnected={handleProviderConnected}
         defaultProvider={providerConnectModal.provider || undefined}
         connectedProviders={connectedProviders}
+      />
+
+      {/* Confirm dialog for destructive actions (delete target, rollback) */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmDialog.onConfirm}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmText={confirmDialog.confirmText}
+        variant={confirmDialog.variant}
       />
     </div>
   );
