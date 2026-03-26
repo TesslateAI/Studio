@@ -176,7 +176,10 @@ build_and_load() {
 
   docker build $cache_flag -t "$img" -f "$dockerfile" "$context"
 
+  # Always remove the old image inside minikube before loading to prevent
+  # stale cached layers from being served instead of the new build.
   info "Loading $img into minikube..."
+  minikube -p "$PROFILE" ssh -- docker rmi -f "$img" 2>/dev/null || true
   minikube -p "$PROFILE" image load "$img"
   success "$img built and loaded"
 }
