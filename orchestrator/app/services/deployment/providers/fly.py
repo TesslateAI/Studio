@@ -22,17 +22,20 @@ class FlyProvider(BaseContainerDeploymentProvider):
 
     async def test_credentials(self) -> dict:
         headers = {"Authorization": f"Bearer {self.credentials['api_token']}"}
+        org_slug = self.credentials.get("org_slug", "personal")
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(f"{MACHINES_API}/v1/apps", headers=headers)
+            resp = await client.get(
+                f"{MACHINES_API}/v1/apps",
+                headers=headers,
+                params={"org_slug": org_slug},
+            )
             resp.raise_for_status()
-            apps = resp.json()
-            org_name = "personal"
-            if apps and isinstance(apps, list) and len(apps) > 0:
-                org_name = apps[0].get("organization", {}).get("name", "personal")
+            body = resp.json()
+            apps = body.get("apps", []) if isinstance(body, dict) else []
             return {
                 "valid": True,
-                "account_name": org_name,
-                "app_count": len(apps) if isinstance(apps, list) else 0,
+                "account_name": org_slug,
+                "app_count": len(apps),
             }
 
     async def push_image(self, image_ref: str) -> str:
@@ -115,7 +118,7 @@ class FlyProvider(BaseContainerDeploymentProvider):
                     state = status_resp.json().get("state", "")
                     if state == "started":
                         break
-                    if state in ("destroyed", "failed"):
+                    if state in ("destroyed", "stopped"):
                         return DeploymentResult(
                             success=False,
                             deployment_id=machine_id,
@@ -167,17 +170,11 @@ class FlyProvider(BaseContainerDeploymentProvider):
     async def get_deployment_logs(self, deployment_id: str) -> list[str]:
         parts = deployment_id.split("/")
         if len(parts) != 2:
-            return []
+            return ["Invalid deployment ID format. Expected 'app_name/machine_id'."]
 
-        app_name, machine_id = parts
-        headers = {"Authorization": f"Bearer {self.credentials['api_token']}"}
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(
-                f"{MACHINES_API}/v1/apps/{app_name}/machines/{machine_id}/logs",
-                headers=headers,
-            )
-            if resp.status_code != 200:
-                return []
-            lines = resp.text.strip().split("\n")
-            return [line for line in lines if line.strip()]
+        app_name, _machine_id = parts
+        return [
+            "Fly.io machine logs are not available via the Machines REST API. "
+            f"Use 'fly logs -a {app_name}' CLI or the Fly.io dashboard "
+            f"(https://fly.io/apps/{app_name}/monitoring) to view logs."
+        ]

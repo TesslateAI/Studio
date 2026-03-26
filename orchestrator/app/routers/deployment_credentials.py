@@ -161,7 +161,7 @@ PROVIDER_CREDENTIAL_SCHEMA: dict[str, dict] = {
     "fly":                  {"token_alias": "api_token", "meta_keys": ["org_slug"]},
     "deno-deploy":          {"meta_keys": ["org_id"]},
     "surge":                {"meta_keys": ["email"], "meta_remap": {"account_name": "email"}},
-    "zeabur":               {"token_alias": "api_key"},
+    "zeabur":               {"token_alias": "api_key", "meta_keys": ["region"], "meta_defaults": {"region": "aws-us-east-1"}},
     "firebase":             {"token_alias": "service_account_json", "meta_keys": ["site_id"]},
     "aws-apprunner":        {"token_alias": "aws_access_key_id", "meta_keys": ["aws_secret_access_key", "aws_region"], "meta_defaults": {"aws_secret_access_key": "", "aws_region": "us-east-1"}},
     "gcp-cloudrun":         {"token_alias": "service_account_json", "meta_keys": ["gcp_region"], "meta_defaults": {"gcp_region": "us-central1"}},

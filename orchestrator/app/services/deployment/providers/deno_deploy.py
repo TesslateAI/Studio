@@ -124,7 +124,7 @@ class DenoDeployProvider(BaseDeploymentProvider):
                 env_vars = dict(config.env_vars) if config.env_vars else {}
 
                 deploy_payload = {
-                    "entryPointUrl": f"file:///{entry_point}",
+                    "entryPointUrl": entry_point,
                     "assets": assets,
                     "envVars": env_vars,
                 }
@@ -242,12 +242,12 @@ class DenoDeployProvider(BaseDeploymentProvider):
         assets: dict[str, dict] = {}
         for f in files:
             normalized = f.path.replace("\\", "/")
-            key = normalized if normalized.startswith("/") else f"/{normalized}"
+            key = normalized.lstrip("/")
 
             if self._is_text_file(normalized):
                 try:
                     text = f.content.decode("utf-8")
-                    assets[key] = {"kind": "file", "content": text}
+                    assets[key] = {"kind": "file", "content": text, "encoding": "utf-8"}
                 except UnicodeDecodeError:
                     encoded = base64.b64encode(f.content).decode("ascii")
                     assets[key] = {

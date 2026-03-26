@@ -12,6 +12,7 @@ interface Provider {
   display_name: string;
   auth_type: 'oauth' | 'api_token';
   required_fields: string[];
+  optional_fields?: string[];
   icon_color: string;
   description: string;
 }
@@ -116,6 +117,9 @@ export function ProviderConnectModal({
   const initializeCredentialsForm = (provider: Provider) => {
     const form: Record<string, string> = {};
     (provider.required_fields || []).forEach((field) => {
+      form[field] = '';
+    });
+    (provider.optional_fields || []).forEach((field) => {
       form[field] = '';
     });
     setManualCredentials(form);
@@ -440,6 +444,41 @@ export function ProviderConnectModal({
                 );
               })}
 
+              {/* Optional fields */}
+              {(selectedProvider.optional_fields || []).length > 0 && (
+                <>
+                  {selectedProvider.optional_fields!.map((field) => {
+                    const helpText = PROVIDER_CREDENTIAL_HELP[selectedProvider.name]?.[field];
+                    return (
+                      <div key={field}>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <label className="block text-xs font-medium text-[var(--text)]">
+                            {formatFieldName(field)}
+                            <span className="text-[var(--text)]/40 ml-1 text-[10px] font-normal">optional</span>
+                          </label>
+                          {helpText && (
+                            <InfoTooltip size={14}>{helpText}</InfoTooltip>
+                          )}
+                        </div>
+                        <input
+                          type={field.includes('token') || field.includes('key') || field.includes('secret') ? 'password' : 'text'}
+                          value={manualCredentials[field] || ''}
+                          onChange={(e) =>
+                            setManualCredentials({
+                              ...manualCredentials,
+                              [field]: e.target.value,
+                            })
+                          }
+                          placeholder={`Enter your ${formatFieldName(field).toLowerCase()}`}
+                          className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                          disabled={isSaving}
+                        />
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
               <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
                 <div className="flex items-start gap-2">
                   <ShieldCheck size={16} className="text-green-400 mt-0.5 flex-shrink-0" />
@@ -454,10 +493,16 @@ export function ProviderConnectModal({
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => setSelectedProvider(null)}
+                  onClick={() => {
+                    if (defaultProvider) {
+                      onClose();
+                    } else {
+                      setSelectedProvider(null);
+                    }
+                  }}
                   className="flex-1 px-4 py-2 bg-white/5 border border-white/10 text-[var(--text)] rounded-lg text-sm font-medium hover:bg-white/10 transition-colors"
                 >
-                  Back
+                  {defaultProvider ? 'Cancel' : 'Back'}
                 </button>
                 <button
                   onClick={handleSaveManualCredentials}

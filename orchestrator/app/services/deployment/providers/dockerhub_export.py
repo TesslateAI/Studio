@@ -37,9 +37,58 @@ class DockerHubExportProvider(BaseContainerDeploymentProvider):
             if key not in self.credentials:
                 raise ValueError(f"Missing required Docker Hub credential: {key}")
 
+    async def _get_hub_jwt(self, client: httpx.AsyncClient) -> str:
+        """
+        Exchange Docker Hub credentials for a JWT token.
+
+        The Docker Hub API requires JWT authentication for Hub API calls
+        (user profile, repository management, tag deletion). This exchanges
+        the username/PAT for a short-lived JWT via the login endpoint.
+
+        Args:
+            client: An active httpx.AsyncClient.
+
+        Returns:
+            JWT token string for Hub API calls.
+
+        Raises:
+            ValueError: If login fails due to invalid credentials or API error.
+        """
+        username = self.credentials["username"]
+        token = self.credentials["token"]
+        try:
+            response = await client.post(
+                f"{HUB_API_BASE}/users/login/",
+                json={"username": username, "password": token},
+            )
+            if response.status_code == 401:
+                raise ValueError(
+                    "Invalid Docker Hub credentials. Ensure your username and "
+                    "personal access token (PAT) are correct."
+                )
+            response.raise_for_status()
+            data = response.json()
+            jwt = data.get("token")
+            if not jwt:
+                raise ValueError(
+                    "Docker Hub login succeeded but returned no token. "
+                    "Please try again or regenerate your access token."
+                )
+            return jwt
+        except httpx.HTTPStatusError as e:
+            raise ValueError(
+                f"Docker Hub login failed (HTTP {e.response.status_code}). "
+                "Check that your username and personal access token are valid."
+            ) from e
+        except httpx.TimeoutException as e:
+            raise ValueError(
+                "Connection to Docker Hub timed out during login. "
+                "Please check your network and try again."
+            ) from e
+
     async def test_credentials(self) -> dict:
         """
-        Test credentials by fetching the Docker Hub user profile.
+        Test credentials by logging in and fetching the Docker Hub user profile.
 
         Returns:
             Dictionary with validation result and username.
@@ -50,11 +99,10 @@ class DockerHubExportProvider(BaseContainerDeploymentProvider):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 username = self.credentials["username"]
+                jwt = await self._get_hub_jwt(client)
                 response = await client.get(
                     f"{HUB_API_BASE}/users/{username}",
-                    headers={
-                        "Authorization": f"Bearer {self.credentials['token']}",
-                    },
+                    headers={"Authorization": f"JWT {jwt}"},
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -65,14 +113,25 @@ class DockerHubExportProvider(BaseContainerDeploymentProvider):
                 }
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
-                raise ValueError("Invalid Docker Hub credentials") from e
+                raise ValueError(
+                    "Docker Hub rejected your credentials. Please verify your "
+                    "username and personal access token are correct."
+                ) from e
             raise ValueError(
-                f"Docker Hub API error: {e.response.status_code}"
+                f"Docker Hub API error (HTTP {e.response.status_code}). "
+                "Please try again later."
             ) from e
         except httpx.TimeoutException as e:
-            raise ValueError("Connection to Docker Hub API timed out") from e
+            raise ValueError(
+                "Connection to Docker Hub timed out. "
+                "Please check your network and try again."
+            ) from e
+        except ValueError:
+            raise
         except Exception as e:
-            raise ValueError(f"Failed to validate Docker Hub credentials: {e}") from e
+            raise ValueError(
+                f"Failed to validate Docker Hub credentials: {e}"
+            ) from e
 
     async def _get_registry_token(self, namespace: str, repo: str) -> str:
         """
@@ -201,6 +260,9 @@ class DockerHubExportProvider(BaseContainerDeploymentProvider):
             DeploymentResult indicating the image was pushed successfully.
         """
         image_ref = config.image_ref
+        # Extract the repo name from the image reference so deletion can
+        # target the correct Docker Hub repository later.
+        repo_name = self._extract_repo_name(image_ref)
         return DeploymentResult(
             success=True,
             deployment_id=f"dockerhub-{uuid.uuid4().hex[:12]}",
@@ -212,10 +274,30 @@ class DockerHubExportProvider(BaseContainerDeploymentProvider):
             metadata={
                 "provider": "dockerhub",
                 "image_ref": image_ref,
+                "repo_name": repo_name,
                 "pull_command": f"docker pull {image_ref}",
                 "registry": "registry-1.docker.io",
             },
         )
+
+    @staticmethod
+    def _extract_repo_name(image_ref: str) -> str:
+        """
+        Extract the bare repository name from a full image reference.
+
+        Examples:
+            "docker.io/myuser/myapp:latest" -> "myapp"
+            "myuser/myapp:v2" -> "myapp"
+            "myapp:latest" -> "myapp"
+            "myapp" -> "myapp"
+        """
+        # Strip registry prefix (e.g. "docker.io/")
+        parts = image_ref.split("/")
+        repo_and_tag = parts[-1]
+        # Strip tag
+        if ":" in repo_and_tag:
+            repo_and_tag = repo_and_tag.rsplit(":", 1)[0]
+        return repo_and_tag
 
     async def get_deployment_status(self, deployment_id: str) -> dict:
         """
@@ -236,44 +318,74 @@ class DockerHubExportProvider(BaseContainerDeploymentProvider):
             "message": "Image available in Docker Hub registry",
         }
 
-    async def delete_deployment(self, deployment_id: str) -> bool:
+    async def delete_deployment(
+        self, deployment_id: str, *, metadata: dict | None = None
+    ) -> bool:
         """
         Attempt to delete a tag from Docker Hub.
 
         Docker Hub's tag deletion via API is limited. This attempts to
-        delete the tag but returns False if unsupported.
+        delete the ``latest`` tag but returns False if unsupported.
+
+        The ``deployment_id`` is a synthetic identifier (``dockerhub-{uuid}``)
+        and cannot be used as a repository name. The actual repo name must be
+        provided via the ``metadata`` dict (key ``repo_name``), which is
+        populated automatically by ``deploy_image``.
 
         Args:
-            deployment_id: The deployment identifier.
+            deployment_id: The deployment identifier (synthetic).
+            metadata: Optional deployment metadata containing ``repo_name``.
 
         Returns:
             True if deletion succeeded, False otherwise.
         """
+        repo_name = (metadata or {}).get("repo_name") if metadata else None
+        if not repo_name:
+            logger.warning(
+                "Cannot delete Docker Hub tag for deployment '%s': no repo_name "
+                "in metadata. The deployment_id is a synthetic identifier and "
+                "does not correspond to a Docker Hub repository. To delete, "
+                "provide the deployment metadata that was returned by deploy_image.",
+                deployment_id,
+            )
+            return False
+
         try:
             username = self.credentials["username"]
             async with httpx.AsyncClient(timeout=30.0) as client:
-                # Docker Hub tag deletion requires the Hub API (not registry API)
-                # and the tag name. Since deployment_id may not contain the tag,
-                # this is a best-effort operation.
+                jwt = await self._get_hub_jwt(client)
                 response = await client.delete(
                     f"{HUB_API_BASE}/repositories/{username}/"
-                    f"{deployment_id}/tags/latest/",
-                    headers={
-                        "Authorization": f"Bearer {self.credentials['token']}",
-                    },
+                    f"{repo_name}/tags/latest/",
+                    headers={"Authorization": f"JWT {jwt}"},
                 )
                 if response.status_code in (200, 204):
-                    logger.info("Deleted tag for deployment %s", deployment_id)
+                    logger.info(
+                        "Deleted latest tag for repo '%s' (deployment %s)",
+                        repo_name,
+                        deployment_id,
+                    )
                     return True
+                if response.status_code == 404:
+                    logger.warning(
+                        "Repository '%s/%s' or tag 'latest' not found on Docker Hub.",
+                        username,
+                        repo_name,
+                    )
+                    return False
                 logger.warning(
-                    "Tag deletion returned status %d for %s",
+                    "Docker Hub tag deletion returned HTTP %d for repo '%s'",
                     response.status_code,
-                    deployment_id,
+                    repo_name,
                 )
                 return False
+        except ValueError:
+            # Re-raise auth errors from _get_hub_jwt with clear messages
+            raise
         except Exception:
             logger.warning(
-                "Failed to delete Docker Hub tag for %s",
+                "Failed to delete Docker Hub tag for repo '%s' (deployment %s)",
+                repo_name,
                 deployment_id,
                 exc_info=True,
             )

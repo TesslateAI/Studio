@@ -6,7 +6,9 @@ platform. Deployments are synchronous -- the PUT request completes when the site
 is live.
 """
 
+import base64
 import logging
+from datetime import datetime, timezone
 
 import httpx
 
@@ -37,14 +39,18 @@ class SurgeProvider(BaseDeploymentProvider):
             )
 
     def _get_headers(self) -> dict[str, str]:
-        """Get headers for Surge API requests."""
+        """Get headers for Surge API requests using HTTP Basic auth."""
+        credentials_b64 = base64.b64encode(
+            f"{self.credentials['email']}:{self.credentials['token']}".encode()
+        ).decode()
         return {
-            "Authorization": f"token {self.credentials['token']}",
+            "Authorization": f"Basic {credentials_b64}",
+            "Content-Type": "application/octet-stream",
         }
 
     async def test_credentials(self) -> dict:
         """
-        Test if credentials are valid by querying the Surge whoami endpoint.
+        Test if credentials are valid by querying the Surge account endpoint.
 
         Returns:
             Dictionary with validation result and user email.
@@ -55,23 +61,35 @@ class SurgeProvider(BaseDeploymentProvider):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
-                    f"{SURGE_BASE}/whoami",
+                    f"{SURGE_BASE}/account",
                     headers=self._get_headers(),
                 )
                 resp.raise_for_status()
-                data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                data = (
+                    resp.json()
+                    if resp.headers.get("content-type", "").startswith(
+                        "application/json"
+                    )
+                    else {}
+                )
                 return {
                     "valid": True,
                     "email": data.get("email", self.credentials.get("email")),
                 }
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):
-                raise ValueError("Invalid Surge.sh token") from e
-            raise ValueError(f"Surge API error: {e.response.status_code}") from e
+                raise ValueError(
+                    "Invalid Surge.sh credentials -- check your email and token"
+                ) from e
+            raise ValueError(
+                f"Surge API returned an unexpected error (HTTP {e.response.status_code})"
+            ) from e
         except httpx.TimeoutException as e:
-            raise ValueError("Connection to Surge API timed out") from e
+            raise ValueError(
+                "Connection to Surge.sh timed out -- please try again later"
+            ) from e
         except Exception as e:
-            raise ValueError(f"Failed to validate credentials: {e}") from e
+            raise ValueError(f"Failed to validate Surge.sh credentials: {e}") from e
 
     async def deploy(
         self, files: list[DeploymentFile], config: DeploymentConfig
@@ -106,6 +124,9 @@ class SurgeProvider(BaseDeploymentProvider):
                     headers={
                         **self._get_headers(),
                         "Content-Type": "application/x-tar",
+                        "file-count": str(len(files)),
+                        "project-size": str(len(tarball)),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                 )
 

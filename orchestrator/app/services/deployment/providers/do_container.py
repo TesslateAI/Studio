@@ -212,7 +212,17 @@ class DigitalOceanContainerProvider(BaseContainerDeploymentProvider):
     async def _get_latest_deployment_phase(
         self, client: httpx.AsyncClient, app_id: str
     ) -> dict:
-        """Fetch the latest deployment phase for an app."""
+        """Fetch the latest deployment phase and app-level live_url."""
+        # Fetch the app object to get the authoritative live_url
+        app_resp = await client.get(
+            f"{DO_API_BASE}/apps/{app_id}",
+            headers=self._bearer_headers(),
+        )
+        app_resp.raise_for_status()
+        app = app_resp.json().get("app", {})
+        app_live_url = app.get("live_url", "")
+
+        # Fetch deployments for the current phase
         resp = await client.get(
             f"{DO_API_BASE}/apps/{app_id}/deployments",
             headers=self._bearer_headers(),
@@ -221,13 +231,13 @@ class DigitalOceanContainerProvider(BaseContainerDeploymentProvider):
         deployments = resp.json().get("deployments", [])
 
         if not deployments:
-            return {"phase": "PENDING"}
+            return {"phase": "PENDING", "live_url": app_live_url}
 
         latest = deployments[0]
         return {
             "phase": latest.get("phase", "UNKNOWN"),
             "deployment_id": latest.get("id"),
-            "live_url": latest.get("live_url", ""),
+            "live_url": app_live_url,
         }
 
     async def get_deployment_status(self, deployment_id: str) -> dict:
@@ -240,13 +250,27 @@ class DigitalOceanContainerProvider(BaseContainerDeploymentProvider):
                 )
                 resp.raise_for_status()
                 app = resp.json().get("app", {})
+
+                # phase lives on the deployment sub-objects, not the app;
+                # prefer in_progress_deployment, fall back to active_deployment
+                in_prog = app.get("in_progress_deployment") or {}
+                active = app.get("active_deployment") or {}
+                deployment = in_prog if in_prog else active
+                phase = deployment.get("phase", "UNKNOWN")
+
                 return {
-                    "status": app.get("phase", "UNKNOWN"),
+                    "status": phase,
                     "url": app.get("live_url"),
                     "updated_at": app.get("updated_at"),
                 }
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return {"status": "unknown", "error": f"App '{deployment_id}' not found on DigitalOcean"}
+            return {"status": "unknown", "error": f"DigitalOcean API error (HTTP {e.response.status_code})"}
+        except httpx.TimeoutException:
+            return {"status": "unknown", "error": "Request to DigitalOcean API timed out"}
         except Exception as e:
-            return {"status": "unknown", "error": str(e)}
+            return {"status": "unknown", "error": f"Failed to fetch deployment status: {e}"}
 
     async def delete_deployment(self, deployment_id: str) -> bool:
         """Delete an App Platform app by app ID."""

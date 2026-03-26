@@ -136,18 +136,45 @@ class GCPContainerProvider(BaseContainerDeploymentProvider):
         Prepares authentication for Artifact Registry and returns the target URI.
         Full layer-level push requires a Docker client.
 
+        The Artifact Registry URI format is:
+            LOCATION-docker.pkg.dev/PROJECT-ID/REPOSITORY/IMAGE:TAG
+
+        The REPOSITORY is resolved from (in order):
+            1. ``credentials["repository"]`` if provided
+            2. Falls back to ``"tesslate"``
+
         Args:
             image_ref: Source image reference (e.g. myapp:latest)
 
         Returns:
             Artifact Registry image URI.
         """
-        repo, tag = _parse_image_ref(image_ref)
+        image_name, tag = _parse_image_ref(image_ref)
+        # Strip any path prefixes so we only keep the bare image name
+        image_name = image_name.split("/")[-1]
+
+        repository = self.credentials.get("repository", "tesslate")
+        if not repository or not repository.strip():
+            raise ValueError(
+                "Artifact Registry repository name is empty. "
+                "Set 'repository' in your GCP credentials or ensure a default is configured. "
+                "Expected URI format: LOCATION-docker.pkg.dev/PROJECT-ID/REPOSITORY/IMAGE:TAG"
+            )
 
         try:
             await self._get_access_token()
             registry_host = f"{self._region}-docker.pkg.dev"
-            pushed_uri = f"{registry_host}/{self._project_id}/{repo}:{tag}"
+            pushed_uri = f"{registry_host}/{self._project_id}/{repository}/{image_name}:{tag}"
+
+            # Validate the URI has the correct number of path segments:
+            # PROJECT-ID / REPOSITORY / IMAGE:TAG  (3 segments after the host)
+            path_segments = pushed_uri.split("/", 1)[1].split("/")
+            if len(path_segments) < 3:
+                raise ValueError(
+                    f"Artifact Registry URI '{pushed_uri}' is malformed — expected at least "
+                    f"3 path segments (PROJECT/REPOSITORY/IMAGE:TAG) but got {len(path_segments)}. "
+                    "Check that the 'repository' credential is set correctly."
+                )
 
             logger.info(
                 "Artifact Registry push target: %s (auth: oauth2accesstoken, full push requires Docker client)",
@@ -155,6 +182,8 @@ class GCPContainerProvider(BaseContainerDeploymentProvider):
             )
             return pushed_uri
 
+        except ValueError:
+            raise
         except Exception as e:
             raise ValueError(f"Failed to prepare Artifact Registry push: {e}") from e
 
@@ -190,8 +219,8 @@ class GCPContainerProvider(BaseContainerDeploymentProvider):
                             "env": env_list,
                             "resources": {
                                 "limits": {
-                                    "cpu": config.cpu,
-                                    "memory": config.memory,
+                                    "cpu": str(config.cpu),
+                                    "memory": str(config.memory),
                                 }
                             },
                         }

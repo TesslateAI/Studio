@@ -16,7 +16,7 @@ from .utils import create_source_zip, graphql_request, poll_until_terminal
 
 logger = logging.getLogger(__name__)
 
-GRAPHQL_URL = "https://gateway.zeabur.com/graphql"
+GRAPHQL_URL = "https://api.zeabur.com/graphql"
 REST_BASE = "https://api.zeabur.com/v2"
 
 
@@ -161,16 +161,17 @@ class ZeaburProvider(BaseDeploymentProvider):
     ) -> str:
         """Create a Zeabur project and return its ID."""
         mutation = """
-        mutation CreateProject($name: String!) {
-            createProject(name: $name) {
+        mutation CreateProject($name: String!, $region: String!) {
+            createProject(name: $name, region: $region) {
                 _id
                 name
             }
         }
         """
-        logs.append(f"Creating Zeabur project '{name}'...")
+        region = self.credentials.get("region", "aws-us-east-1")
+        logs.append(f"Creating Zeabur project '{name}' in region {region}...")
         data = await graphql_request(
-            client, GRAPHQL_URL, mutation, {"name": name}, headers
+            client, GRAPHQL_URL, mutation, {"name": name, "region": region}, headers
         )
         project_id = data["createProject"]["_id"]
         logs.append(f"Project created: {project_id}")

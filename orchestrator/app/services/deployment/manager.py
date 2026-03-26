@@ -257,10 +257,10 @@ class DeploymentManager:
                 "description": "Deploy to Zeabur with ZIP upload",
                 "auth_type": "token",
                 "required_fields": ["api_key"],
-                "optional_fields": [],
+                "optional_fields": ["region"],
                 "deploy_type": "source",
-                "field_labels": {"api_key": "Zeabur API Key"},
-                "field_help": {"api_key": "Dashboard → Settings → API Keys → Create"},
+                "field_labels": {"api_key": "Zeabur API Key", "region": "Region"},
+                "field_help": {"api_key": "Dashboard → Settings → API Keys → Create", "region": "e.g. aws-us-east-1 (default), aws-eu-west-1, aws-ap-northeast-1"},
             },
             {
                 "name": "surge",

@@ -121,7 +121,7 @@ class NorthflankProvider(BaseDeploymentProvider):
             async with httpx.AsyncClient(timeout=120.0) as client:
                 # Step 1 - Create project
                 logs.append("Creating Northflank project...")
-                proj_resp = await client.post(
+                proj_resp = await client.put(
                     f"{API_BASE}/projects",
                     headers=self._get_headers(),
                     json={
@@ -148,8 +148,8 @@ class NorthflankProvider(BaseDeploymentProvider):
                         "projectType": "github",
                         "projectBranch": branch,
                     },
-                    "buildConfiguration": {
-                        "buildCmd": build_cmd,
+                    "buildSettings": {
+                        "buildpack": {"buildCommand": build_cmd},
                     },
                     "ports": [
                         {

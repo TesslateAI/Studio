@@ -1847,7 +1847,10 @@ async def delete_deployment(
                 )
 
                 provider = DeploymentManager.get_provider(deployment.provider, provider_credentials)
-                await provider.delete_deployment(deployment.deployment_id)
+                await provider.delete_deployment(
+                    deployment.deployment_id,
+                    **({"metadata": deployment.deployment_metadata} if deployment.deployment_metadata else {}),
+                )
 
                 logger.info(
                     f"Deleted deployment {deployment_id} from provider {deployment.provider}"

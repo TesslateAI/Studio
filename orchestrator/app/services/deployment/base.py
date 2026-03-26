@@ -141,12 +141,15 @@ class BaseDeploymentProvider(ABC):
         pass
 
     @abstractmethod
-    async def delete_deployment(self, deployment_id: str) -> bool:
+    async def delete_deployment(self, deployment_id: str, **kwargs) -> bool:
         """
         Delete a deployment.
 
         Args:
             deployment_id: Provider's deployment identifier
+            **kwargs: Provider-specific options (e.g. ``metadata`` for
+                      providers that need deployment metadata to locate the
+                      resource).
 
         Returns:
             True if deletion was successful, False otherwise

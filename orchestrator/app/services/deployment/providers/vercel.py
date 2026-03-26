@@ -7,8 +7,11 @@ It handles file uploads, build triggering, and deployment status polling.
 
 import asyncio
 import base64
+import logging
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
 
@@ -93,12 +96,6 @@ class VercelProvider(BaseDeploymentProvider):
                 logs.append("Deployment mode: pre-built (uploading static files)")
                 # Don't set projectSettings - Vercel will serve files as-is
 
-            # Add environment variables if provided
-            if config.env_vars:
-                deployment_data["env"] = [
-                    {"key": k, "value": v} for k, v in config.env_vars.items()
-                ]
-
             # Add team if specified
             team_id = self.credentials.get("team_id")
             url = f"{self.API_BASE}/v13/deployments"
@@ -112,6 +109,12 @@ class VercelProvider(BaseDeploymentProvider):
                 )
                 response.raise_for_status()
                 result = response.json()
+
+            # Set environment variables via the Project Environment Variables API
+            # (the `env` field in the deployment payload is not accepted by Vercel)
+            if config.env_vars:
+                project_id = result.get("projectId") or project_name
+                await self._set_project_env_vars(project_id, config.env_vars, team_id, logs)
 
             deployment_id = result["id"]
             deployment_url = f"https://{result['url']}"
@@ -207,6 +210,75 @@ class VercelProvider(BaseDeploymentProvider):
             except Exception as e:
                 logs.append(f"Error polling status: {str(e)}")
                 return "ERROR"
+
+    async def _set_project_env_vars(
+        self,
+        project_id: str,
+        env_vars: dict[str, str],
+        team_id: str | None,
+        logs: list[str],
+    ) -> None:
+        """
+        Set environment variables on a Vercel project via the Project Environment Variables API.
+
+        Uses POST /v10/projects/{projectId}/env to set each variable for all targets.
+        Failures are logged as warnings but do not block the deployment.
+
+        Args:
+            project_id: Vercel project ID or name
+            env_vars: Mapping of env var names to values
+            team_id: Optional Vercel team ID
+            logs: List to append progress logs to
+        """
+        logs.append(f"Setting {len(env_vars)} environment variable(s) on project...")
+        url = f"{self.API_BASE}/v10/projects/{project_id}/env"
+        params = {}
+        if team_id:
+            params["teamId"] = team_id
+
+        env_payloads = [
+            {
+                "key": k,
+                "value": v,
+                "target": ["production", "preview", "development"],
+                "type": "plain",
+            }
+            for k, v in env_vars.items()
+        ]
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                for env_payload in env_payloads:
+                    resp = await client.post(
+                        url,
+                        headers=self._get_headers(),
+                        params=params,
+                        json=env_payload,
+                    )
+                    if resp.status_code >= 400:
+                        # Log the failure but continue with the rest
+                        logger.warning(
+                            "Failed to set env var '%s' on Vercel project %s: %s %s",
+                            env_payload["key"],
+                            project_id,
+                            resp.status_code,
+                            resp.text,
+                        )
+                        logs.append(
+                            f"Warning: could not set env var '{env_payload['key']}' "
+                            f"(HTTP {resp.status_code}). The deployment will continue without it."
+                        )
+            logs.append("Environment variables configured.")
+        except Exception as e:
+            logger.warning(
+                "Failed to set environment variables on Vercel project %s: %s",
+                project_id,
+                str(e),
+            )
+            logs.append(
+                f"Warning: could not set environment variables ({e}). "
+                "The deployment will continue without them."
+            )
 
     def _map_framework(self, framework: str) -> str | None:
         """
@@ -355,7 +427,7 @@ class VercelProvider(BaseDeploymentProvider):
             List of log messages
         """
         team_id = self.credentials.get("team_id")
-        url = f"{self.API_BASE}/v2/deployments/{deployment_id}/events"
+        url = f"{self.API_BASE}/v3/deployments/{deployment_id}/events"
         params = {}
         if team_id:
             params["teamId"] = team_id
@@ -371,19 +443,12 @@ class VercelProvider(BaseDeploymentProvider):
                         payload = event.get("payload", {})
 
                         # Get text from payload
-                        if payload.get("text"):
-                            log_lines.append(f"[{event_type}] {payload['text']}")
+                        text = payload.get("text")
+                        if text:
+                            log_lines.append(f"[{event_type}] {text}")
 
-                        # Also check for error details
-                        if payload.get("message"):
-                            log_lines.append(f"[{event_type}] {payload['message']}")
-
-                        # Include the full event for debugging if it's an error
-                        if (
-                            event_type == "error"
-                            and not payload.get("text")
-                            and not payload.get("message")
-                        ):
+                        # Include the full payload for debugging if it's a fatal or stderr event with no text
+                        if event_type in ("fatal", "stderr") and not text:
                             log_lines.append(f"[ERROR] {payload}")
 
                     return log_lines if log_lines else ["No logs available"]

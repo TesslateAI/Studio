@@ -201,8 +201,8 @@ class AWSContainerProvider(BaseContainerDeploymentProvider):
         """
         repo, tag = _parse_image_ref(image_ref)
 
-        url = f"https://ecr.{self._region}.amazonaws.com/"
-        body = json.dumps({"registryIds": []})
+        url = f"https://api.ecr.{self._region}.amazonaws.com/"
+        body = json.dumps({})
         content_headers = {
             "Content-Type": "application/x-amz-json-1.1",
             "X-Amz-Target": "AmazonEC2ContainerRegistry_V20150921.GetAuthorizationToken",
@@ -286,7 +286,7 @@ class AWSContainerProvider(BaseContainerDeploymentProvider):
                 logs.append("Waiting for service to become active...")
                 final = await poll_until_terminal(
                     check_fn=lambda: self._describe_service(service_arn),
-                    terminal_states={"RUNNING", "CREATE_FAILED", "DELETED"},
+                    terminal_states={"RUNNING", "CREATE_FAILED", "DELETED", "DELETE_FAILED", "PAUSED"},
                     status_key="Status",
                     interval=10,
                     timeout=600,

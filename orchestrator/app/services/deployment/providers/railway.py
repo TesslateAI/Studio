@@ -207,26 +207,46 @@ class RailwayProvider(BaseDeploymentProvider):
                     environment_id = env_list[0]["node"]["id"]
                 logs.append(f"Using environment: {environment_id}")
 
-                # Step 3 - Create service linked to repo
-                # Railway API: `source.repo` takes "owner/repo", `branch` is top-level
-                logs.append(f"Creating service linked to {repo_slug} (branch: {branch})...")
+                # Step 3 - Create service, then connect repo
+                logs.append("Creating Railway service...")
                 try:
                     service_data = await self._gql(
                         client,
                         """
-                        mutation($projectId: String!, $repo: String!, $branch: String!) {
+                        mutation($projectId: String!) {
                             serviceCreate(input: {
                                 projectId: $projectId,
-                                name: "web",
-                                source: { repo: $repo },
-                                branch: $branch
+                                name: "web"
                             }) {
                                 id
                                 name
                             }
                         }
                         """,
-                        {"projectId": project_id, "repo": repo_slug, "branch": branch},
+                        {"projectId": project_id},
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Failed to create Railway service in project '{project_name}'. "
+                        f"Check that your Railway token has the required permissions. Detail: {exc}"
+                    ) from exc
+                service_id = service_data["serviceCreate"]["id"]
+                logs.append(f"Service created: {service_id}")
+
+                # Step 3b - Connect the repo to the service (triggers deploy automatically)
+                logs.append(f"Connecting repository {repo_slug} (branch: {branch})...")
+                try:
+                    await self._gql(
+                        client,
+                        """
+                        mutation($id: String!, $input: ServiceConnectInput!) {
+                            serviceConnect(id: $id, input: $input) { id }
+                        }
+                        """,
+                        {
+                            "id": service_id,
+                            "input": {"repo": repo_slug, "branch": branch},
+                        },
                     )
                 except ValueError as exc:
                     raise ValueError(
@@ -234,8 +254,7 @@ class RailwayProvider(BaseDeploymentProvider):
                         f"Make sure Railway has access to this GitHub repo "
                         f"(check Railway dashboard → GitHub integration). Detail: {exc}"
                     ) from exc
-                service_id = service_data["serviceCreate"]["id"]
-                logs.append(f"Service created: {service_id}")
+                logs.append("Repository connected — deployment triggered automatically")
 
                 # Step 4 - Set environment variables (filter out internal keys)
                 public_vars = {
@@ -262,30 +281,9 @@ class RailwayProvider(BaseDeploymentProvider):
                         },
                     )
 
-                # Step 5 - Trigger deploy via environmentTriggersDeploy
-                logs.append("Triggering deployment...")
-                try:
-                    await self._gql(
-                        client,
-                        """
-                        mutation($input: EnvironmentTriggersDeployInput!) {
-                            environmentTriggersDeploy(input: $input)
-                        }
-                        """,
-                        {
-                            "input": {
-                                "projectId": project_id,
-                                "serviceId": service_id,
-                                "environmentId": environment_id,
-                            }
-                        },
-                    )
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Failed to trigger Railway deployment. "
-                        f"The project and service were created but the build could not start. Detail: {exc}"
-                    ) from exc
-                logs.append("Deploy triggered")
+                # Step 5 - serviceConnect already triggers a deploy, but if
+                # no deployment appears after polling we use serviceInstanceDeployV2
+                # as a fallback trigger.
 
                 # Step 6 - Fetch first deployment and poll
                 logs.append("Waiting for deployment to start...")
@@ -311,9 +309,58 @@ class RailwayProvider(BaseDeploymentProvider):
                     await _asyncio.sleep(5)
 
                 if not deployment_id:
+                    # Fallback: explicitly trigger a deploy via serviceInstanceDeployV2
+                    logs.append(
+                        "No deployment detected from serviceConnect — "
+                        "triggering deploy explicitly..."
+                    )
+                    try:
+                        await self._gql(
+                            client,
+                            """
+                            mutation($serviceId: String!, $environmentId: String!) {
+                                serviceInstanceDeployV2(
+                                    serviceId: $serviceId,
+                                    environmentId: $environmentId
+                                )
+                            }
+                            """,
+                            {
+                                "serviceId": service_id,
+                                "environmentId": environment_id,
+                            },
+                        )
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Failed to trigger Railway deployment. "
+                            f"The project and service were created but the build could not start. "
+                            f"Try deploying manually from the Railway dashboard. Detail: {exc}"
+                        ) from exc
+
+                    # Poll again for the deployment to appear
+                    for _retry in range(12):
+                        deploy_list = await self._gql(
+                            client,
+                            """
+                            query($projectId: String!) {
+                                deployments(input: { projectId: $projectId }, first: 1) {
+                                    edges { node { id status } }
+                                }
+                            }
+                            """,
+                            {"projectId": project_id},
+                        )
+                        edges = deploy_list.get("deployments", {}).get("edges", [])
+                        if edges:
+                            deployment_id = edges[0]["node"]["id"]
+                            break
+                        await _asyncio.sleep(5)
+
+                if not deployment_id:
                     raise ValueError(
-                        "Railway accepted the deploy trigger but no deployment appeared after 60s. "
-                        "This usually means the repository is empty or has no buildable content."
+                        "Railway accepted the deploy request but no deployment appeared after 120s. "
+                        "This usually means the repository is empty or has no buildable content. "
+                        "Check the Railway dashboard for more details."
                     )
                 logs.append(f"Deployment started: {deployment_id}")
 
@@ -337,10 +384,57 @@ class RailwayProvider(BaseDeploymentProvider):
                 logs.append(f"Deployment finished with status: {final_status}")
 
                 success = final_status == "SUCCESS"
+
+                # Query the actual deployment URL from Railway
+                deployment_url = None
+                if success:
+                    try:
+                        domain_data = await self._gql(
+                            client,
+                            """
+                            query($projectId: String!, $serviceId: String!, $environmentId: String!) {
+                                domains(
+                                    projectId: $projectId,
+                                    serviceId: $serviceId,
+                                    environmentId: $environmentId
+                                ) {
+                                    serviceDomains { domain }
+                                    customDomains { domain }
+                                }
+                            }
+                            """,
+                            {
+                                "projectId": project_id,
+                                "serviceId": service_id,
+                                "environmentId": environment_id,
+                            },
+                        )
+                        domains_info = domain_data.get("domains", {})
+                        # Prefer custom domains, fall back to service domains
+                        custom = domains_info.get("customDomains", [])
+                        service_domains = domains_info.get("serviceDomains", [])
+                        if custom:
+                            deployment_url = f"https://{custom[0]['domain']}"
+                        elif service_domains:
+                            deployment_url = f"https://{service_domains[0]['domain']}"
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not fetch Railway domain for service %s: %s",
+                            service_id, exc,
+                        )
+
+                if not deployment_url:
+                    deployment_url = f"https://railway.app/project/{project_id}"
+                    if success:
+                        logs.append(
+                            "Could not determine the live URL automatically. "
+                            "Check the Railway dashboard for your deployment's public domain."
+                        )
+
                 return DeploymentResult(
                     success=success,
                     deployment_id=deployment_id,
-                    deployment_url=f"https://{project_name}.up.railway.app",
+                    deployment_url=deployment_url,
                     logs=logs,
                     error=None if success else f"Deployment ended with status: {final_status}",
                     metadata={

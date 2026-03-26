@@ -216,7 +216,7 @@ class KoyebProvider(BaseDeploymentProvider):
         """Create a Koyeb service with archive source and return its ID."""
         port = 8000
         env_list = [
-            {"key": k, "value": v, "scope": "region:was"}
+            {"key": k, "value": v, "scopes": ["region:was"]}
             for k, v in config.env_vars.items()
         ]
 
@@ -227,8 +227,10 @@ class KoyebProvider(BaseDeploymentProvider):
                 "type": "WEB",
                 "archive": {
                     "id": archive_id,
-                    "build_command": config.build_command or "npm run build",
-                    "run_command": config.start_command or "npm start",
+                    "buildpack": {
+                        "build_command": config.build_command or "npm run build",
+                        "run_command": config.start_command or "npm start",
+                    },
                 },
                 "env": env_list,
                 "ports": [
@@ -336,7 +338,7 @@ class KoyebProvider(BaseDeploymentProvider):
 
                 service_id = services[0]["id"]
                 log_resp = await client.get(
-                    f"{API_BASE}/v1/streams/logs",
+                    f"{API_BASE}/v1/streams/logs/tail",
                     headers=self._get_headers(),
                     params={
                         "service_id": service_id,

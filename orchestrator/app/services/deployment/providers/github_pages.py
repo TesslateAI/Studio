@@ -231,15 +231,26 @@ class GitHubPagesProvider(BaseDeploymentProvider):
         return resp.json()["sha"]
 
     async def _get_branch_head(self, client: httpx.AsyncClient, repo_path: str, branch: str) -> str | None:
-        """Get the HEAD commit SHA for a branch, or None if it doesn't exist."""
+        """Get the HEAD commit SHA for a branch, or None if it doesn't exist.
+
+        Uses the singular /git/ref/ endpoint which returns a single ref object
+        (not an array), avoiding TypeError when parsing the response.
+        """
         resp = await client.get(
-            f"{API_BASE}/repos/{repo_path}/git/refs/heads/{branch}",
+            f"{API_BASE}/repos/{repo_path}/git/ref/heads/{branch}",
             headers=self._get_headers(),
         )
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
-        return resp.json()["object"]["sha"]
+        data = resp.json()
+        ref_obj = data.get("object")
+        if not ref_obj or "sha" not in ref_obj:
+            raise ValueError(
+                f"Unexpected GitHub API response for branch '{branch}' in {repo_path}: "
+                f"missing 'object.sha' in ref data"
+            )
+        return ref_obj["sha"]
 
     async def _create_commit(
         self,

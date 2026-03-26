@@ -218,7 +218,7 @@ class AzureContainerProvider(BaseContainerDeploymentProvider):
             body = {
                 "location": self._region,
                 "properties": {
-                    "managedEnvironmentId": self.credentials.get(
+                    "environmentId": self.credentials.get(
                         "container_app_environment_id", ""
                     ),
                     "configuration": {
@@ -245,7 +245,7 @@ class AzureContainerProvider(BaseContainerDeploymentProvider):
                                 "env": env_list,
                                 "resources": {
                                     "cpu": float(config.cpu),
-                                    "memory": config.memory,
+                                    "memory": _normalize_memory_to_gi(config.memory),
                                 },
                             }
                         ],
@@ -362,6 +362,61 @@ class AzureContainerProvider(BaseContainerDeploymentProvider):
             Empty list (Azure Monitor / Log Analytics integration not implemented).
         """
         return ["Azure Monitor integration required for Container Apps logs"]
+
+
+def _normalize_memory_to_gi(memory: str) -> str:
+    """
+    Normalize a memory string to the ``Gi`` format required by Azure Container Apps.
+
+    Accepted inputs:
+        - Already in Gi (e.g. ``"0.5Gi"``, ``"1Gi"``) -- returned as-is.
+        - Mi suffix (e.g. ``"512Mi"``) -- converted to Gi (``"0.5Gi"``).
+        - Plain number (e.g. ``"1"``, ``"2.5"``) -- treated as Gi (``"1Gi"``).
+        - Anything else -- logged as a warning and passed through unchanged.
+    """
+    value = memory.strip()
+
+    if value.endswith("Gi"):
+        return value
+
+    if value.endswith("Mi"):
+        mi_part = value[:-2]
+        try:
+            gi_value = float(mi_part) / 1024
+            # Use a clean representation: drop trailing zeros
+            normalized = f"{gi_value:g}Gi"
+            logger.info(
+                "Converted memory '%s' to '%s' for Azure Container Apps",
+                memory,
+                normalized,
+            )
+            return normalized
+        except ValueError:
+            logger.warning(
+                "Unrecognizable Mi memory value '%s'; passing through to Azure as-is",
+                memory,
+            )
+            return value
+
+    # Plain number (no suffix) -- assume Gi
+    try:
+        float(value)
+        normalized = f"{value}Gi"
+        logger.info(
+            "Memory '%s' has no unit suffix; assuming Gi ('%s') for Azure Container Apps",
+            memory,
+            normalized,
+        )
+        return normalized
+    except ValueError:
+        pass
+
+    logger.warning(
+        "Unrecognizable memory format '%s'; passing through to Azure as-is. "
+        "Azure Container Apps expects values like '0.5Gi' or '1Gi'.",
+        memory,
+    )
+    return value
 
 
 def _parse_image_ref(image_ref: str) -> tuple[str, str]:

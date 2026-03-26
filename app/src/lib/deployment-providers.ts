@@ -107,6 +107,7 @@ export const PROVIDER_CREDENTIAL_HELP: Record<string, Record<string, string>> = 
   },
   zeabur: {
     api_key: 'Go to zeabur.com → Settings → Developer → Generate API Key.',
+    region: 'Optional. Zeabur region (e.g., aws-us-east-1, aws-eu-west-1, aws-ap-northeast-1). Defaults to aws-us-east-1.',
   },
   surge: {
     email: 'The email address you used to register with Surge.sh.',

@@ -103,7 +103,7 @@ class HerokuProvider(BaseDeploymentProvider):
                     await self._set_config_vars(client, app_name, config.env_vars, logs)
 
                 # Step 3: Create source upload and upload tarball
-                source_urls = await self._create_source(client, logs)
+                source_urls = await self._create_source(client, app_name, logs)
                 put_url = source_urls["source_blob"]["put_url"]
                 get_url = source_urls["source_blob"]["get_url"]
 
@@ -187,7 +187,7 @@ class HerokuProvider(BaseDeploymentProvider):
             json={"name": app_name},
         )
 
-        if resp.status_code == 409:
+        if resp.status_code == 422:
             logs.append(f"App '{app_name}' already exists, reusing")
             get_resp = await client.get(
                 f"{API_BASE}/apps/{app_name}",
@@ -219,12 +219,12 @@ class HerokuProvider(BaseDeploymentProvider):
         logs.append("Config vars updated")
 
     async def _create_source(
-        self, client: httpx.AsyncClient, logs: list[str]
+        self, client: httpx.AsyncClient, app_name: str, logs: list[str]
     ) -> dict:
-        """Create a source upload endpoint and return URLs."""
-        logs.append("Creating source upload...")
+        """Create a source upload endpoint for the given app and return URLs."""
+        logs.append(f"Creating source upload for app '{app_name}'...")
         resp = await client.post(
-            f"{API_BASE}/sources",
+            f"{API_BASE}/apps/{app_name}/sources",
             headers=self._get_headers(),
         )
         resp.raise_for_status()
