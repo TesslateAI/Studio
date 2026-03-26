@@ -233,44 +233,51 @@ def test_get_invite_details_public(authenticated_client):
 
 
 @pytest.mark.integration
-def test_accept_invite_link(authenticated_client, api_client):
+def test_accept_invite_link(authenticated_client, api_client_session):
     """A second user can accept an invite link and join the team."""
     client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
     slug = f"accept-{uuid4().hex[:8]}"
 
     client_a.post("/api/teams", json={"name": "Accept Team", "slug": slug})
 
-    # Create invite link
+    # Create invite link (client_a has Bearer auth)
     link_resp = client_a.post(
         f"/api/teams/{slug}/members/link", json={"role": "editor"}
     )
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     link_data = link_resp.json()
-    token = link_data.get("token")
-    if not token:
+    invite_token = link_data.get("token")
+    if not invite_token:
         pytest.skip(f"No token in link response: {link_data}")
 
-    # Register user B
+    # Register user B (temporarily clear auth)
     email_b = f"userb-{uuid4().hex[:8]}@example.com"
-    api_client.post(
+    client_a.headers.pop("Authorization", None)
+    api_client_session.headers.pop("Authorization", None)
+    api_client_session.post(
         "/api/auth/register",
         json={"email": email_b, "password": "TestPass123!", "name": "User B"},
     )
-    login_resp = api_client.post(
+    login_resp = api_client_session.post(
         "/api/auth/jwt/login",
         data={"username": email_b, "password": "TestPass123!"},
     )
     token_b = login_resp.json()["access_token"]
-    api_client.headers["Authorization"] = f"Bearer {token_b}"
+    api_client_session.headers["Authorization"] = f"Bearer {token_b}"
 
     # User B accepts the invite
-    response = api_client.post(f"/api/teams/invitations/{token}/accept")
+    response = api_client_session.post(f"/api/teams/invitations/{invite_token}/accept")
     assert response.status_code == 200, f"Accept failed: {response.text}"
 
     # User B should now see the team
-    teams_resp = api_client.get("/api/teams")
+    teams_resp = api_client_session.get("/api/teams")
     team_slugs = [t["slug"] for t in teams_resp.json()]
     assert slug in team_slugs
+
+    # Restore user A auth
+    if token_a:
+        client_a.headers["Authorization"] = token_a
 
 
 @pytest.mark.integration

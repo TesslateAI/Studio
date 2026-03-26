@@ -375,6 +375,13 @@ async def delete_team(
         details={"name": team.name, "slug": team.slug},
         request=request,
     )
+    # Delete memberships, invitations, and audit logs explicitly to avoid
+    # SQLAlchemy trying to SET NULL on non-nullable FK columns before DB cascade
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(TeamMembership).where(TeamMembership.team_id == team.id))
+    await db.execute(sa_delete(TeamInvitation).where(TeamInvitation.team_id == team.id))
+    await db.execute(sa_delete(AuditLog).where(AuditLog.team_id == team.id))
     await db.delete(team)
     await db.commit()
 
