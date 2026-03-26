@@ -107,7 +107,11 @@ async def create_team(
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Team slug already taken")
 
+    import uuid as _uuid
+
+    team_id = _uuid.uuid4()
     team = Team(
+        id=team_id,
         name=body.name,
         slug=body.slug,
         is_personal=False,
@@ -117,7 +121,7 @@ async def create_team(
     await db.flush()
 
     membership = TeamMembership(
-        team_id=team.id,
+        team_id=team_id,
         user_id=user.id,
         role="admin",
         is_active=True,
