@@ -45,8 +45,8 @@ def _extract_refresh_cookie(response) -> str | None:
     return None
 
 
-def _login(client) -> tuple[dict, str]:
-    """Register + login, return (user_data, access_token). Sets refresh cookie on client."""
+def _login(client) -> tuple[dict, str, str]:
+    """Register + login, return (user_data, access_token, refresh_token). Sets refresh cookie on client."""
     # Ensure clean state
     client.headers.pop("Authorization", None)
     client.cookies.clear()
@@ -76,15 +76,17 @@ def _login(client) -> tuple[dict, str]:
     data = login_resp.json()
     assert "access_token" in data
 
-    # Manually set the refresh cookie (TestClient doesn't auto-collect domain-scoped cookies)
     refresh_value = _extract_refresh_cookie(login_resp)
     assert refresh_value, "Login did not set tesslate_refresh cookie"
+    # Clear auto-collected path-scoped cookie to prevent CookieConflict on Python 3.11,
+    # then set a single unscoped cookie that httpx sends on all paths.
+    client.cookies.clear()
     client.cookies.set("tesslate_refresh", refresh_value)
 
     # Set Bearer header for authenticated calls
     client.headers["Authorization"] = f"Bearer {data['access_token']}"
 
-    return user_data, data["access_token"]
+    return user_data, data["access_token"], refresh_value
 
 
 # ---------------------------------------------------------------------------
@@ -99,15 +101,15 @@ def test_login_returns_access_token_and_sets_refresh_cookie(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    _user_data, access_token = _login(client)
+    _user_data, access_token, refresh_value = _login(client)
 
     # Access token should be a valid JWT
     payload = _decode_token(access_token)
     assert "sub" in payload
     assert "exp" in payload
 
-    # Refresh cookie was already verified by _login helper
-    assert client.cookies.get("tesslate_refresh") is not None
+    # Refresh cookie was set by _login helper
+    assert refresh_value is not None
 
     client.headers.pop("Authorization", None)
     client.cookies.clear()
@@ -120,7 +122,7 @@ def test_access_token_expires_in_15_minutes(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    _user_data, access_token = _login(client)
+    _user_data, access_token, _refresh = _login(client)
 
     payload = _decode_token(access_token)
     exp_dt = datetime.fromtimestamp(payload["exp"], tz=UTC)
@@ -146,7 +148,7 @@ def test_refresh_returns_new_access_token(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    _user_data, old_token = _login(client)
+    _user_data, old_token, _refresh = _login(client)
 
     resp = client.post("/api/auth/refresh")
     assert resp.status_code == 200
@@ -159,6 +161,7 @@ def test_refresh_returns_new_access_token(api_client_session):
     # Update cookie for subsequent calls
     new_refresh = _extract_refresh_cookie(resp)
     if new_refresh:
+        client.cookies.clear()
         client.cookies.set("tesslate_refresh", new_refresh)
 
     client.headers.pop("Authorization", None)
@@ -172,7 +175,7 @@ def test_refresh_rotates_cookie(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    _login(client)
+    _user_data, _token, _refresh = _login(client)
 
     resp = client.post("/api/auth/refresh")
     assert resp.status_code == 200
@@ -219,7 +222,7 @@ def test_refreshed_token_works_for_api_calls(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    user_data, _old_token = _login(client)
+    user_data, _old_token, _refresh = _login(client)
 
     resp = client.post("/api/auth/refresh")
     assert resp.status_code == 200
@@ -228,6 +231,7 @@ def test_refreshed_token_works_for_api_calls(api_client_session):
     # Update refresh cookie for future calls
     new_refresh = _extract_refresh_cookie(resp)
     if new_refresh:
+        client.cookies.clear()
         client.cookies.set("tesslate_refresh", new_refresh)
 
     client.headers["Authorization"] = f"Bearer {new_token}"
@@ -251,7 +255,7 @@ def test_logout_revokes_refresh_token(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    _login(client)
+    _user_data, _token, _refresh = _login(client)
 
     resp = client.post("/api/auth/logout")
     assert resp.status_code == 200
@@ -268,8 +272,7 @@ def test_refresh_after_logout_fails(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    _login(client)
-    refresh_cookie = client.cookies.get("tesslate_refresh")
+    _user_data, _token, refresh_cookie = _login(client)
 
     # Logout
     client.post("/api/auth/logout")
@@ -297,7 +300,7 @@ def test_refresh_chain_three_consecutive(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    user_data, _token = _login(client)
+    user_data, _token, _refresh = _login(client)
 
     for i in range(3):
         resp = client.post("/api/auth/refresh")
@@ -306,9 +309,10 @@ def test_refresh_chain_three_consecutive(api_client_session):
         new_token = resp.json()["access_token"]
         client.headers["Authorization"] = f"Bearer {new_token}"
 
-        # Update refresh cookie (rotation)
+        # Update refresh cookie (rotation) — clear first to prevent CookieConflict
         new_refresh = _extract_refresh_cookie(resp)
         assert new_refresh, f"Refresh #{i + 1} did not set new cookie"
+        client.cookies.clear()
         client.cookies.set("tesslate_refresh", new_refresh)
 
         me_resp = client.get("/api/users/me")
@@ -326,8 +330,7 @@ def test_rotated_token_accepted_within_grace_window(api_client_session):
     client.headers.pop("Authorization", None)
     client.cookies.clear()
 
-    _login(client)
-    first_refresh = client.cookies.get("tesslate_refresh")
+    _user_data, _token, first_refresh = _login(client)
 
     # Refresh once (rotates the token)
     resp = client.post("/api/auth/refresh")
