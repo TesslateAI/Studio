@@ -145,35 +145,11 @@ wait_for_backend_ready() {
     --timeout=120s
 }
 
-# Build image and load into minikube (with full cache busting)
-rebuild_image() {
-  local svc="$1"
-  local img
-  img="$(image_name "$svc"):latest"
-  local dockerfile
-  dockerfile=$(image_dockerfile "$svc")
-  local context
-  context=$(image_context "$svc")
-
-  info "Rebuilding $img..."
-
-  # 1. Delete from minikube's Docker daemon
-  minikube -p "$PROFILE" ssh -- docker rmi -f "$img" 2>/dev/null || true
-
-  # 2. Delete local image + rebuild with --no-cache
-  docker rmi -f "$img" 2>/dev/null || true
-  docker build --no-cache -t "$img" -f "$dockerfile" "$context"
-
-  # 3. Load into minikube
-  info "Loading $img into minikube..."
-  minikube -p "$PROFILE" image load "$img"
-
-  success "$img rebuilt and loaded"
-}
-
-# Build image and load without cache busting (for first-time setup)
+# Build image and load into minikube.
+# Uses Docker layer cache by default. Pass --no-cache as $2 to bust cache.
 build_and_load() {
   local svc="$1"
+  local cache_flag="${2:-}"
   local img
   img="$(image_name "$svc"):latest"
   local dockerfile
@@ -181,11 +157,19 @@ build_and_load() {
   local context
   context=$(image_context "$svc")
 
-  info "Building $img..."
-  docker build -t "$img" -f "$dockerfile" "$context"
+  if [[ "$cache_flag" == "--no-cache" ]]; then
+    info "Rebuilding $img (no cache)..."
+    minikube -p "$PROFILE" ssh -- docker rmi -f "$img" 2>/dev/null || true
+    docker rmi -f "$img" 2>/dev/null || true
+  else
+    info "Building $img (cached)..."
+  fi
+
+  docker build $cache_flag -t "$img" -f "$dockerfile" "$context"
+
   info "Loading $img into minikube..."
   minikube -p "$PROFILE" image load "$img"
-  success "$img loaded"
+  success "$img built and loaded"
 }
 
 # ── Init (secret generation) ──────────────────────────────────────────
@@ -409,11 +393,18 @@ cmd_rebuild() {
   ensure_docker
   ensure_minikube
 
-  local target="${1:-}"
+  local target=""
+  local cache_flag=""
+  for arg in "$@"; do
+    case "$arg" in
+      --no-cache) cache_flag="--no-cache" ;;
+      *)          target="$arg" ;;
+    esac
+  done
 
   if [[ "$target" == "--all" ]]; then
     for svc in backend frontend devserver btrfs-csi; do
-      rebuild_image "$svc"
+      build_and_load "$svc" "$cache_flag"
     done
     info "Restarting all pods..."
     kubectl delete pod -n "$NAMESPACE" --all
@@ -428,7 +419,7 @@ cmd_rebuild() {
   fi
 
   if [[ -z "$target" ]]; then
-    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|--all>"
+    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|--all> [--no-cache]"
     exit 1
   fi
 
@@ -439,7 +430,7 @@ cmd_rebuild() {
     exit 1
   fi
 
-  rebuild_image "$target"
+  build_and_load "$target" "$cache_flag"
 
   # Restart relevant pods
   if [[ "$target" == "devserver" ]]; then
