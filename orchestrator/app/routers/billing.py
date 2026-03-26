@@ -1,5 +1,8 @@
 """
 Billing and subscription management endpoints.
+
+All billing data (subscription tier, credits, Stripe customer) lives on the Team,
+not the User.  Every billing endpoint resolves the caller's active team first.
 """
 
 import logging
@@ -22,6 +25,48 @@ from ..users import current_active_user
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing", tags=["billing"])
 settings = get_settings()
+
+
+# ============================================================================
+# Helpers
+# ============================================================================
+
+
+async def _get_active_team(user: AuthUser, db: AsyncSession):
+    """Resolve the user's active team for billing."""
+    from ..models_team import Team
+
+    if not user.default_team_id:
+        raise HTTPException(status_code=400, detail="No active team")
+    result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+    team = result.scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=400, detail="No active team")
+    return team
+
+
+async def _get_or_create_team_customer(team, user: AuthUser, db: AsyncSession) -> str:
+    """
+    Get existing Stripe customer ID from the team, or create a new one.
+    Uses the team's stripe_customer_id; falls back to creating via user email.
+    """
+    if team.stripe_customer_id:
+        return team.stripe_customer_id
+
+    # Create a new Stripe customer for this team
+    customer = await stripe_service.create_customer(
+        email=user.email,
+        name=team.name,
+        metadata={"team_id": str(team.id), "user_id": str(user.id)},
+    )
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create Stripe customer for team",
+        )
+    team.stripe_customer_id = customer["id"]
+    await db.commit()
+    return customer["id"]
 
 
 # ============================================================================
@@ -130,7 +175,7 @@ async def get_subscription(
     user: AuthUser = Depends(current_active_user), db: AsyncSession = Depends(get_db)
 ):
     """
-    Get current subscription status for the user.
+    Get current subscription status for the user's active team.
     """
     import logging
     from datetime import datetime
@@ -139,33 +184,35 @@ async def get_subscription(
 
     logger = logging.getLogger(__name__)
 
+    team = await _get_active_team(user, db)
+
     # Use tier-specific limits
-    tier = user.subscription_tier or "free"
+    tier = team.subscription_tier or "free"
     max_projects = settings.get_tier_max_projects(tier)
     max_deploys = settings.get_tier_max_deploys(tier)
     monthly_allowance = settings.get_tier_bundled_credits(tier)
 
     # Calculate total credits
-    bundled = user.bundled_credits or 0
-    purchased = user.purchased_credits or 0
-    daily = user.daily_credits or 0
-    bonus = user.signup_bonus_credits or 0
-    if user.signup_bonus_expires_at and datetime.now(UTC) > user.signup_bonus_expires_at:
+    bundled = team.bundled_credits or 0
+    purchased = team.purchased_credits or 0
+    daily = team.daily_credits or 0
+    bonus = team.signup_bonus_credits or 0
+    if team.signup_bonus_expires_at and datetime.now(UTC) > team.signup_bonus_expires_at:
         bonus = 0
     total_credits = daily + bundled + bonus + purchased
 
     # Check if BYOK is enabled for this tier
     byok_enabled = tier in settings.byok_tiers_list
 
-    # Fetch subscription details from Stripe if user has an active subscription
+    # Fetch subscription details from Stripe if team has an active subscription
     current_period_start = None
     current_period_end = None
     cancel_at_period_end = None
     cancel_at = None
 
-    if tier != "free" and user.stripe_subscription_id and stripe_service.stripe:
+    if tier != "free" and team.stripe_subscription_id and stripe_service.stripe:
         try:
-            subscription = stripe_lib.Subscription.retrieve(user.stripe_subscription_id)
+            subscription = stripe_lib.Subscription.retrieve(team.stripe_subscription_id)
 
             # Use start_date as subscription start
             current_period_start = datetime.fromtimestamp(subscription.start_date).isoformat()
@@ -181,18 +228,18 @@ async def get_subscription(
             if subscription.cancel_at:
                 cancel_at = datetime.fromtimestamp(subscription.cancel_at).isoformat()
         except Exception as e:
-            logger.error(f"Error fetching subscription details for user {user.id}: {e}")
+            logger.error(f"Error fetching subscription details for team {team.id}: {e}")
 
     # Format credits reset date
     credits_reset_date = None
-    if user.credits_reset_date:
-        credits_reset_date = user.credits_reset_date.isoformat()
+    if team.credits_reset_date:
+        credits_reset_date = team.credits_reset_date.isoformat()
 
     return SubscriptionResponse(
         tier=tier,
         is_active=tier != "free",
-        subscription_id=user.stripe_subscription_id,
-        stripe_customer_id=user.stripe_customer_id,
+        subscription_id=team.stripe_subscription_id,
+        stripe_customer_id=team.stripe_customer_id,
         max_projects=max_projects,
         max_deploys=max_deploys,
         current_period_start=current_period_start,
@@ -230,6 +277,8 @@ async def create_subscription(
     Supports: basic ($20/mo), pro ($49/mo), ultra ($149/mo)
     Also supports annual billing interval.
     """
+    team = await _get_active_team(user, db)
+
     # Get requested tier from body or default to pro
     requested_tier = subscription_request.tier if subscription_request else "pro"
     billing_interval = subscription_request.billing_interval if subscription_request else "monthly"
@@ -265,8 +314,8 @@ async def create_subscription(
                 detail=f"Stripe price ID not configured for tier: {requested_tier}",
             )
 
-    # Block if user already has an active Stripe subscription
-    if user.stripe_subscription_id:
+    # Block if team already has an active Stripe subscription
+    if team.stripe_subscription_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You already have an active subscription. Use 'Manage Subscription' to change plans.",
@@ -274,14 +323,17 @@ async def create_subscription(
 
     # Block same or downgrade attempts
     tier_order = {"free": 0, "basic": 1, "pro": 2, "ultra": 3}
-    current_tier_level = tier_order.get(user.subscription_tier, 0)
+    current_tier_level = tier_order.get(team.subscription_tier, 0)
     requested_tier_level = tier_order.get(requested_tier, 0)
 
-    if current_tier_level >= requested_tier_level and user.subscription_tier != "free":
+    if current_tier_level >= requested_tier_level and team.subscription_tier != "free":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Already subscribed to {user.subscription_tier} tier",
+            detail=f"Already subscribed to {team.subscription_tier} tier",
         )
+
+    # Get or create Stripe customer for the team
+    customer_id = await _get_or_create_team_customer(team, user, db)
 
     # Create checkout session with origin-based URLs to preserve user's domain
     origin = (
@@ -292,20 +344,39 @@ async def create_subscription(
     success_url = f"{origin}/settings/billing?success=true&session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin}/settings/billing?cancelled=true"
 
-    session = await stripe_service.create_subscription_checkout(
-        user=user,
-        success_url=success_url,
-        cancel_url=cancel_url,
-        db=db,
-        tier=requested_tier,
-        billing_interval=billing_interval,
-    )
+    if not stripe_service.stripe:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stripe not configured",
+        )
 
-    if not session:
+    try:
+        session = stripe_service.stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "user_id": str(user.id),
+                "team_id": str(team.id),
+                "type": "subscription",
+                "tier": requested_tier,
+                "billing_interval": billing_interval,
+                "price_id": price_id,
+            },
+        )
+        logger.info(
+            f"Created {requested_tier} ({billing_interval}) subscription checkout "
+            f"for team {team.id} (user {user.id})"
+        )
+    except Exception as e:
+        logger.error(f"Failed to create subscription checkout: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create checkout session",
-        )
+        ) from e
 
     return CheckoutSessionResponse(session_id=session["id"], url=session["url"])
 
@@ -404,20 +475,22 @@ async def cancel_subscription(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Cancel the user's subscription.
+    Cancel the team's subscription.
     """
-    if user.subscription_tier == "free":
+    team = await _get_active_team(user, db)
+
+    if team.subscription_tier == "free":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No active subscription"
         )
 
-    if not user.stripe_subscription_id:
+    if not team.stripe_subscription_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No subscription ID found"
         )
 
     success = await stripe_service.cancel_subscription(
-        subscription_id=user.stripe_subscription_id, at_period_end=at_period_end
+        subscription_id=team.stripe_subscription_id, at_period_end=at_period_end
     )
 
     if not success:
@@ -428,8 +501,8 @@ async def cancel_subscription(
 
     # If immediate cancellation, update tier now
     if not at_period_end:
-        user.subscription_tier = "free"
-        user.stripe_subscription_id = None
+        team.subscription_tier = "free"
+        team.stripe_subscription_id = None
         await db.commit()
 
     return {
@@ -447,17 +520,19 @@ async def renew_subscription(
     """
     Renew a cancelled subscription (reactivate before it ends).
     """
-    if user.subscription_tier == "free":
+    team = await _get_active_team(user, db)
+
+    if team.subscription_tier == "free":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No active subscription"
         )
 
-    if not user.stripe_subscription_id:
+    if not team.stripe_subscription_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No subscription ID found"
         )
 
-    success = await stripe_service.renew_subscription(subscription_id=user.stripe_subscription_id)
+    success = await stripe_service.renew_subscription(subscription_id=team.stripe_subscription_id)
 
     if not success:
         raise HTTPException(
@@ -471,11 +546,17 @@ async def renew_subscription(
 
 
 @router.get("/portal")
-async def get_customer_portal(request: Request, user: AuthUser = Depends(current_active_user)):
+async def get_customer_portal(
+    request: Request,
+    user: AuthUser = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Get Stripe customer portal link for managing subscription.
+    Get Stripe customer portal link for managing the team's subscription.
     """
-    if not user.stripe_customer_id:
+    team = await _get_active_team(user, db)
+
+    if not team.stripe_customer_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No Stripe customer found"
         )
@@ -494,7 +575,7 @@ async def get_customer_portal(request: Request, user: AuthUser = Depends(current
 
     try:
         portal_session = stripe_service.stripe.billing_portal.Session.create(
-            customer=user.stripe_customer_id, return_url=f"{origin}/billing"
+            customer=team.stripe_customer_id, return_url=f"{origin}/billing"
         )
 
         return {"url": portal_session.url}
@@ -521,19 +602,23 @@ async def get_customer_portal(request: Request, user: AuthUser = Depends(current
 
 
 @router.get("/credits", response_model=CreditBalanceResponse)
-async def get_credits_balance(user: AuthUser = Depends(current_active_user)):
+async def get_credits_balance(
+    user: AuthUser = Depends(current_active_user), db: AsyncSession = Depends(get_db)
+):
     """
-    Get user's current credit balance.
+    Get the active team's current credit balance.
     Returns bundled (monthly), purchased (permanent), signup bonus, and daily credits.
     """
-    tier = user.subscription_tier or "free"
-    bundled = user.bundled_credits or 0
-    purchased = user.purchased_credits or 0
-    daily = user.daily_credits or 0
+    team = await _get_active_team(user, db)
+
+    tier = team.subscription_tier or "free"
+    bundled = team.bundled_credits or 0
+    purchased = team.purchased_credits or 0
+    daily = team.daily_credits or 0
 
     # Calculate effective signup bonus (zero if expired)
-    bonus = user.signup_bonus_credits or 0
-    if user.signup_bonus_expires_at and datetime.now(UTC) > user.signup_bonus_expires_at:
+    bonus = team.signup_bonus_credits or 0
+    if team.signup_bonus_expires_at and datetime.now(UTC) > team.signup_bonus_expires_at:
         bonus = 0
 
     total = daily + bundled + bonus + purchased
@@ -541,12 +626,12 @@ async def get_credits_balance(user: AuthUser = Depends(current_active_user)):
 
     # Format dates
     credits_reset_date = None
-    if user.credits_reset_date:
-        credits_reset_date = user.credits_reset_date.isoformat()
+    if team.credits_reset_date:
+        credits_reset_date = team.credits_reset_date.isoformat()
 
     signup_bonus_expires_at = None
-    if user.signup_bonus_expires_at:
-        signup_bonus_expires_at = user.signup_bonus_expires_at.isoformat()
+    if team.signup_bonus_expires_at:
+        signup_bonus_expires_at = team.signup_bonus_expires_at.isoformat()
 
     return CreditBalanceResponse(
         bundled_credits=bundled,
@@ -562,17 +647,21 @@ async def get_credits_balance(user: AuthUser = Depends(current_active_user)):
 
 
 @router.get("/credits/status", response_model=CreditStatusResponse)
-async def get_credit_status(user: AuthUser = Depends(current_active_user)):
+async def get_credit_status(
+    user: AuthUser = Depends(current_active_user), db: AsyncSession = Depends(get_db)
+):
     """
     Get credit status for low balance warning.
     Returns is_low=True when at 20% or below, is_empty=True when credits = 0.
     """
-    tier = user.subscription_tier or "free"
-    bundled = user.bundled_credits or 0
-    purchased = user.purchased_credits or 0
-    daily = user.daily_credits or 0
-    bonus = user.signup_bonus_credits or 0
-    if user.signup_bonus_expires_at and datetime.now(UTC) > user.signup_bonus_expires_at:
+    team = await _get_active_team(user, db)
+
+    tier = team.subscription_tier or "free"
+    bundled = team.bundled_credits or 0
+    purchased = team.purchased_credits or 0
+    daily = team.daily_credits or 0
+    bonus = team.signup_bonus_credits or 0
+    if team.signup_bonus_expires_at and datetime.now(UTC) > team.signup_bonus_expires_at:
         bonus = 0
     total = daily + bundled + bonus + purchased
     monthly_allowance = settings.get_tier_bundled_credits(tier)
@@ -598,8 +687,10 @@ async def purchase_credits(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Create a checkout session for purchasing credits.
+    Create a checkout session for purchasing credits for the active team.
     """
+    team = await _get_active_team(user, db)
+
     # Determine amount and credits based on package
     package_amounts = settings.get_credit_package_amounts()
 
@@ -611,6 +702,9 @@ async def purchase_credits(
 
     amount_cents = package_amounts[request.package]
 
+    # Get or create Stripe customer for the team
+    customer_id = await _get_or_create_team_customer(team, user, db)
+
     # Create checkout session with origin-based URLs to preserve user's domain
     origin = (
         http_request.headers.get("origin")
@@ -620,19 +714,49 @@ async def purchase_credits(
     success_url = f"{origin}/settings/billing?success=true&session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin}/settings/billing?cancelled=true"
 
-    session = await stripe_service.create_credit_purchase_checkout(
-        user=user,
-        amount_cents=amount_cents,
-        success_url=success_url,
-        cancel_url=cancel_url,
-        db=db,
-    )
+    if not stripe_service.stripe:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stripe not configured",
+        )
 
-    if not session:
+    try:
+        session = stripe_service.stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {
+                            "name": f"{amount_cents:,} Credits",
+                            "description": f"Purchase {amount_cents:,} credits for AI usage",
+                        },
+                        "unit_amount": amount_cents,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            mode="payment",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "user_id": str(user.id),
+                "team_id": str(team.id),
+                "type": "credit_purchase",
+                "amount_cents": str(amount_cents),
+            },
+        )
+        logger.info(
+            f"Created credit purchase checkout for team {team.id} (user {user.id}): "
+            f"{amount_cents} credits for ${amount_cents / 100:.2f}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to create credit purchase checkout: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create checkout session",
-        )
+        ) from e
 
     return CheckoutSessionResponse(session_id=session["id"], url=session["url"])
 
@@ -645,11 +769,13 @@ async def get_credit_purchase_history(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get user's credit purchase history.
+    Get the active team's credit purchase history.
     """
+    team = await _get_active_team(user, db)
+
     result = await db.execute(
         select(CreditPurchase)
-        .where(CreditPurchase.user_id == user.id)
+        .where(CreditPurchase.team_id == team.id)
         .order_by(CreditPurchase.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -685,9 +811,11 @@ async def get_usage_summary(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get usage summary for a date range.
+    Get usage summary for the active team within a date range.
     Defaults to current month if no dates provided.
     """
+    team = await _get_active_team(user, db)
+
     # Parse dates
     if start_date:
         start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
@@ -698,12 +826,68 @@ async def get_usage_summary(
 
     end = datetime.fromisoformat(end_date.replace("Z", "+00:00")) if end_date else datetime.now(UTC)
 
-    # Get usage summary
-    summary = await usage_service.get_user_usage_summary(
-        user_id=user.id, start_date=start, end_date=end, db=db
-    )
+    # Query usage logs directly by team_id
+    from sqlalchemy import and_
 
-    return UsageSummaryResponse(**summary)
+    result = await db.execute(
+        select(UsageLog).where(
+            and_(
+                UsageLog.team_id == team.id,
+                UsageLog.created_at >= start,
+                UsageLog.created_at <= end,
+            )
+        )
+    )
+    usage_logs = result.scalars().all()
+
+    # Calculate totals (mirrors usage_service.get_user_usage_summary logic)
+    total_cost = sum(log.cost_total for log in usage_logs)
+    total_tokens_input = sum(log.tokens_input for log in usage_logs)
+    total_tokens_output = sum(log.tokens_output for log in usage_logs)
+
+    # Group by model
+    by_model: dict[str, Any] = {}
+    for log in usage_logs:
+        model_name = log.model or "unknown"
+        if model_name not in by_model:
+            by_model[model_name] = {
+                "cost_cents": 0,
+                "tokens_input": 0,
+                "tokens_output": 0,
+                "requests": 0,
+            }
+        by_model[model_name]["cost_cents"] += log.cost_total
+        by_model[model_name]["tokens_input"] += log.tokens_input
+        by_model[model_name]["tokens_output"] += log.tokens_output
+        by_model[model_name]["requests"] += 1
+
+    # Group by agent
+    by_agent: dict[str, Any] = {}
+    for log in usage_logs:
+        agent_key = str(log.agent_id) if log.agent_id else "default"
+        if agent_key not in by_agent:
+            by_agent[agent_key] = {
+                "cost_cents": 0,
+                "tokens_input": 0,
+                "tokens_output": 0,
+                "requests": 0,
+            }
+        by_agent[agent_key]["cost_cents"] += log.cost_total
+        by_agent[agent_key]["tokens_input"] += log.tokens_input
+        by_agent[agent_key]["tokens_output"] += log.tokens_output
+        by_agent[agent_key]["requests"] += 1
+
+    return UsageSummaryResponse(
+        total_cost_cents=total_cost,
+        total_cost_usd=total_cost / 100,
+        total_tokens_input=total_tokens_input,
+        total_tokens_output=total_tokens_output,
+        total_requests=len(usage_logs),
+        by_model=by_model,
+        by_agent=by_agent,
+        period_start=start.isoformat(),
+        period_end=end.isoformat(),
+    )
 
 
 @router.post("/usage/sync")
@@ -742,10 +926,12 @@ async def get_usage_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get detailed usage logs.
+    Get detailed usage logs for the active team.
     """
-    # Build query
-    query = select(UsageLog).where(UsageLog.user_id == user.id)
+    team = await _get_active_team(user, db)
+
+    # Build query scoped to team
+    query = select(UsageLog).where(UsageLog.team_id == team.id)
 
     if start_date:
         start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
@@ -792,22 +978,24 @@ async def get_transactions(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get all transactions (credits, subscriptions, agent purchases).
+    Get all transactions (credits, subscriptions, agent purchases) for the active team.
     """
-    # Get credit purchases
+    team = await _get_active_team(user, db)
+
+    # Get credit purchases scoped to team
     credit_result = await db.execute(
         select(CreditPurchase)
-        .where(CreditPurchase.user_id == user.id)
+        .where(CreditPurchase.team_id == team.id)
         .order_by(CreditPurchase.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
     credits = credit_result.scalars().all()
 
-    # Get marketplace transactions
+    # Get marketplace transactions scoped to team
     transaction_result = await db.execute(
         select(MarketplaceTransaction)
-        .where(MarketplaceTransaction.user_id == user.id)
+        .where(MarketplaceTransaction.team_id == team.id)
         .order_by(MarketplaceTransaction.created_at.desc())
         .limit(limit)
         .offset(offset)

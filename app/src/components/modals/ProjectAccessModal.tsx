@@ -185,6 +185,9 @@ export function ProjectAccessModal({
               )}
             </div>
 
+            {/* Member management — only for private projects */}
+            {visibility === 'private' && (
+            <>
             {/* Search */}
             <div className="relative">
               <MagnifyingGlass size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
@@ -284,6 +287,8 @@ export function ProjectAccessModal({
                 </div>
               )}
             </div>
+            </>
+            )}
           </div>
 
           {/* Footer */}

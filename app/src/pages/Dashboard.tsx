@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { projectsApi, tasksApi } from '../lib/api';
+import { projectsApi, tasksApi, teamsApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { useTeam } from '../contexts/TeamContext';
 import { MobileMenu, ProjectCard } from '../components/ui';
@@ -46,6 +46,8 @@ interface Project {
   environment_status?: string;
   compute_tier?: string;
   visibility?: 'team' | 'private';
+  members?: Array<{ name: string | null; email: string | null }>;
+  memberCount?: number;
 }
 
 export default function Dashboard() {
@@ -119,13 +121,43 @@ export default function Dashboard() {
   const loadProjects = async () => {
     try {
       const data = await projectsApi.getAll(activeTeam?.slug);
-      // Add mock status and agents to existing projects
       const projectsWithMeta = data.map((p: Project) => ({
         ...p,
         status: (p.status || 'build') as Status,
         agents: p.agents || [],
       }));
       setProjects(projectsWithMeta);
+
+      // Non-blocking: fetch project members for avatar stacks
+      if (activeTeam && isAdmin) {
+        Promise.all(
+          projectsWithMeta.map(async (p: Project) => {
+            try {
+              const members = await teamsApi.listProjectMembers(activeTeam.slug, p.slug);
+              return { slug: p.slug, members };
+            } catch {
+              return { slug: p.slug, members: [] };
+            }
+          })
+        ).then((results) => {
+          setProjects((prev) =>
+            prev.map((p) => {
+              const match = results.find((r) => r.slug === p.slug);
+              if (match && match.members.length > 0) {
+                return {
+                  ...p,
+                  members: match.members.map((m: { user_name: string | null; user_email: string | null }) => ({
+                    name: m.user_name,
+                    email: m.user_email,
+                  })),
+                  memberCount: match.members.length,
+                };
+              }
+              return p;
+            })
+          );
+        });
+      }
     } catch {
       toast.error('Failed to load projects');
     } finally {
@@ -963,6 +995,8 @@ export default function Dashboard() {
                     slug: project.slug,
                     compute_tier: project.compute_tier,
                     environment_status: project.environment_status,
+                    members: project.members,
+                    memberCount: project.memberCount,
                   }}
                   onOpen={() => {
                     if (project.environment_status === 'setup_failed') {

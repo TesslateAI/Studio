@@ -1410,6 +1410,9 @@ class MarketplaceTransaction(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    team_id = Column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+    )
     agent_id = Column(
         UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
@@ -1441,6 +1444,7 @@ class MarketplaceTransaction(Base):
 
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
+    team = relationship("Team", foreign_keys=[team_id])
     creator = relationship("User", foreign_keys=[creator_id])
     agent = relationship("MarketplaceAgent")
 

@@ -20,6 +20,7 @@ from ..models import (
     User,
     UserPurchasedAgent,
 )
+from ..models_team import Team
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -485,6 +486,7 @@ class StripeService:
         """
         metadata = session.get("metadata", {})
         user_id = UUID(metadata["user_id"])
+        team_id_str = metadata.get("team_id")
         amount_cents = int(metadata["amount_cents"])
         credits_amount = int(metadata.get("credits_amount", amount_cents))
         payment_intent = session.get("payment_intent")
@@ -506,9 +508,27 @@ class StripeService:
             logger.info(f"Credit purchase already fulfilled: {payment_intent}")
             return {"credits_added": credits_amount, "already_fulfilled": True}
 
-        # Create record + update user
+        # Resolve team (billing target)
+        user = None
+        team = None
+        resolve_team_id = UUID(team_id_str) if team_id_str else None
+        if not resolve_team_id:
+            user_result = await db.execute(select(User).where(User.id == user_id))
+            user = user_result.scalar_one()
+            resolve_team_id = user.default_team_id
+
+        if resolve_team_id:
+            team_result = await db.execute(select(Team).where(Team.id == resolve_team_id))
+            team = team_result.scalar_one_or_none()
+
+        if not team:
+            logger.error(f"No team found for credit purchase: user_id={user_id}")
+            raise ValueError("No team found for credit purchase")
+
+        # Create record + update team credits
         purchase = CreditPurchase(
             user_id=user_id,
+            team_id=team.id,
             amount_cents=amount_cents,
             credits_amount=credits_amount,
             stripe_payment_intent=payment_intent,
@@ -518,10 +538,8 @@ class StripeService:
         )
         db.add(purchase)
 
-        user_result = await db.execute(select(User).where(User.id == user_id))
-        user = user_result.scalar_one()
-        user.purchased_credits = (user.purchased_credits or 0) + credits_amount
-        user.total_spend = (user.total_spend or 0) + amount_cents
+        team.purchased_credits = (team.purchased_credits or 0) + credits_amount
+        team.total_spend = (team.total_spend or 0) + amount_cents
 
         try:
             await db.commit()
@@ -537,13 +555,16 @@ class StripeService:
         try:
             from .litellm_service import litellm_service
 
+            if not user:
+                user_result = await db.execute(select(User).where(User.id == user_id))
+                user = user_result.scalar_one()
             if user.litellm_api_key:
                 await litellm_service.ensure_budget_headroom(user.litellm_api_key)
         except Exception as e:
             logger.warning(f"LiteLLM budget sync after credit purchase failed (non-blocking): {e}")
 
         logger.info(
-            f"Credit purchase fulfilled: user {user_id}, "
+            f"Credit purchase fulfilled: team {team.id}, user {user_id}, "
             f"{credits_amount} credits for ${amount_cents / 100:.2f}"
         )
         return {"credits_added": credits_amount, "already_fulfilled": False}
@@ -562,6 +583,7 @@ class StripeService:
 
         metadata = session.get("metadata", {})
         user_id = UUID(metadata["user_id"])
+        team_id_str = metadata.get("team_id")
         subscription_id = session.get("subscription")
         tier = metadata.get("tier", "basic")
 
@@ -570,21 +592,35 @@ class StripeService:
             logger.warning(f"Invalid tier in session: {tier}, defaulting to basic")
             tier = "basic"
 
-        user_result = await db.execute(select(User).where(User.id == user_id))
-        user = user_result.scalar_one()
+        # Resolve team (billing target)
+        user = None
+        team = None
+        resolve_team_id = UUID(team_id_str) if team_id_str else None
+        if not resolve_team_id:
+            user_result = await db.execute(select(User).where(User.id == user_id))
+            user = user_result.scalar_one()
+            resolve_team_id = user.default_team_id
+
+        if resolve_team_id:
+            team_result = await db.execute(select(Team).where(Team.id == resolve_team_id))
+            team = team_result.scalar_one_or_none()
+
+        if not team:
+            logger.error(f"No team found for subscription: user_id={user_id}")
+            raise ValueError("No team found for subscription fulfillment")
 
         # Idempotency: if already set to this subscription, skip
-        if user.stripe_subscription_id == subscription_id:
-            logger.info(f"Subscription already fulfilled: user {user_id}, tier {tier}")
+        if team.stripe_subscription_id == subscription_id:
+            logger.info(f"Subscription already fulfilled: team {team.id}, tier {tier}")
             return {"tier": tier, "already_fulfilled": True}
 
-        user.subscription_tier = tier
-        user.stripe_subscription_id = subscription_id
-        user.support_tier = settings.get_support_tier(tier)
+        team.subscription_tier = tier
+        team.stripe_subscription_id = subscription_id
+        team.support_tier = settings.get_support_tier(tier)
 
         bundled_credits = settings.get_tier_bundled_credits(tier)
-        user.bundled_credits = bundled_credits
-        user.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
+        team.bundled_credits = bundled_credits
+        team.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
 
         await db.commit()
 
@@ -592,6 +628,9 @@ class StripeService:
         try:
             from .litellm_service import litellm_service
 
+            if not user:
+                user_result = await db.execute(select(User).where(User.id == user_id))
+                user = user_result.scalar_one()
             if user.litellm_api_key:
                 await litellm_service.ensure_budget_headroom(user.litellm_api_key)
         except Exception as e:
@@ -600,7 +639,7 @@ class StripeService:
             )
 
         logger.info(
-            f"Subscription fulfilled: user {user_id} upgraded to {tier} "
+            f"Subscription fulfilled: team {team.id}, user {user_id} upgraded to {tier} "
             f"with {bundled_credits} bundled credits"
         )
         return {"tier": tier, "already_fulfilled": False}
@@ -975,6 +1014,10 @@ class StripeService:
         agent = agent_result.scalar_one()
         agent.downloads += 1
 
+        # Fetch user for total_spend update and team_id
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one()
+
         # Create transaction for revenue sharing
         amount_total = session["amount_total"]
         amount_creator = int(amount_total * settings.creator_revenue_share)
@@ -982,6 +1025,7 @@ class StripeService:
 
         transaction = MarketplaceTransaction(
             user_id=user_id,
+            team_id=getattr(user, "default_team_id", None),
             agent_id=agent_id,
             creator_id=agent.created_by_user_id,
             transaction_type="subscription" if pricing_type == "monthly" else "one_time",
@@ -994,8 +1038,6 @@ class StripeService:
         db.add(transaction)
 
         # Update user total spend
-        user_result = await db.execute(select(User).where(User.id == user_id))
-        user = user_result.scalar_one()
         user.total_spend += amount_total
 
         await db.commit()
