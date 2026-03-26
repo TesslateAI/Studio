@@ -39,6 +39,8 @@ Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 - `mcp.py` (~510 lines) - MCP server install/uninstall, credential management, discovery, agent assignments
 - `mcp_server.py` (~120 lines) - Tesslate-as-MCP-server (FastMCP Streamable HTTP transport)
 
+- `teams.py` (~900 lines) - Team CRUD, member management, invitations, project access control, audit log
+
 ### Supporting Files
 - `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/main.py` - FastAPI app setup, middleware, router registration
 - `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/schemas.py` - Pydantic request/response models
@@ -495,3 +497,47 @@ See individual router documentation files for detailed examples:
 - `billing.md` - Subscription and payment flows
 - `channels.md` - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
 - `mcp.md` - MCP server install/manage, agent assignments, Tesslate MCP server
+
+## teams.py — Team & RBAC Management
+
+**Prefix**: `/api/teams`
+
+### Team CRUD
+- POST / — Create team (auto-admin)
+- GET / — List user's teams with roles
+- GET /{slug} — Get team details
+- PATCH /{slug} — Update team (admin)
+- DELETE /{slug} — Delete non-personal team (admin)
+- POST /{slug}/switch — Set default team
+
+### Members
+- GET /{slug}/members — List with user info
+- POST /{slug}/members/invite — Email invite (admin, 50/day limit)
+- POST /{slug}/members/link — Link invite (admin, max 10 active)
+- DELETE /{slug}/members/{user_id} — Remove member
+- PATCH /{slug}/members/{user_id} — Change role
+- POST /{slug}/leave — Leave team
+
+### Invitations
+- GET /invitations/{token} — Public invite details (no auth)
+- POST /invitations/{token}/accept — Accept invite
+- GET /{slug}/invitations — List pending (admin)
+- DELETE /{slug}/invitations/{id} — Revoke
+
+### Project Access
+- GET /{slug}/projects/{slug}/members — List project members
+- POST /{slug}/projects/{slug}/members — Add project member
+- PATCH /{slug}/projects/{slug}/members/{user_id} — Change project role
+- DELETE /{slug}/projects/{slug}/members/{user_id} — Remove
+- PATCH /{slug}/projects/{slug}/visibility — Toggle team/private
+
+### Audit Log
+- GET /{slug}/audit-log — Filterable team log (admin)
+- GET /{slug}/projects/{slug}/audit-log — Project log
+- POST /{slug}/audit-log/export — CSV export (admin)
+
+### Key Patterns
+- `check_team_permission()` for team-level operations
+- `get_project_with_access()` for project-level with dual-scope resolution
+- All state-changing actions create audit log entries
+- Soft-delete via is_active flag on memberships

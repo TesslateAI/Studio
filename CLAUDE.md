@@ -191,6 +191,9 @@ tesslate-studio/
 │       ├── models.py         # SQLAlchemy models (User, Project, Container, Chat, etc.)
 │       ├── schemas.py        # Pydantic request/response schemas
 │       ├── config.py         # Settings (env vars, deployment mode)
+│       ├── models_team.py    # Team, TeamMembership, ProjectMembership, TeamInvitation, AuditLog
+│       ├── schemas_team.py   # Team/membership Pydantic schemas
+│       ├── permissions.py    # RBAC permission system, dual-scope role resolution
 │       ├── routers/          # API endpoints
 │       │   ├── projects.py   # Project CRUD, start/stop containers, setup-config
 │       │   ├── chat.py       # Agent chat, streaming responses
@@ -201,6 +204,7 @@ tesslate-studio/
 │       │   ├── channels.py   # Messaging channel configuration (Telegram, Slack, Discord, WhatsApp)
 │       │   ├── mcp.py        # User MCP server management
 │       │   ├── mcp_server.py # MCP server marketplace catalog
+│       │   ├── teams.py      # Team CRUD, members, invitations, project access, audit log
 │       │   └── ...
 │       ├── services/
 │       │   ├── docker_compose_orchestrator.py  # Docker container mgmt
@@ -253,12 +257,21 @@ tesslate-studio/
 ├── app/                      # React frontend
 │   └── src/
 │       ├── pages/            # Dashboard, Project, Marketplace, Library, etc.
+│       │   └── settings/
+│       │       ├── TeamSettingsPage   # Team general settings, leave, delete
+│       │       ├── TeamMembersPage    # Member list, invite, role management
+│       │       ├── TeamBillingPage    # Team billing (admin-scoped)
+│       │       └── AuditLogPage       # Filterable audit trail
 │       ├── components/
 │       │   ├── chat/         # ChatContainer, AgentMessage
 │       │   ├── panels/       # Architecture, Git, Assets, Kanban
 │       │   ├── billing/      # Subscription UI
 │       │   ├── marketplace/  # AgentCard, skill/MCP browsing
 │       │   └── modals/       # CreateProject, Deployment, etc.
+│       ├── contexts/
+│       │   └── TeamContext.tsx    # Team switching, role permissions (can()), refreshTeams
+│       ├── layouts/
+│       │   └── SettingsLayout.tsx # Settings with team sub-tabs
 │       └── lib/              # API client, utilities
 │
 ├── k8s/                      # Kubernetes manifests (Kustomize)
@@ -326,7 +339,7 @@ tesslate-studio/
 ## Key Database Models (models.py)
 
 - **User**: Auth, profile, subscription tier, theme_preset
-- **Project**: Name, slug, owner, files, containers, `volume_id`, `cache_node`, `compute_tier` (none/ephemeral/environment), `active_compute_pod`, `last_sync_at`, `template_storage_class`
+- **Project**: Name, slug, owner, files, containers, `volume_id`, `cache_node`, `compute_tier` (none/ephemeral/environment), `active_compute_pod`, `last_sync_at`, `template_storage_class`, `team_id`, `visibility` (team/private)
 - **ProjectSnapshot**: VolumeSnapshot records for project versioning/timeline
 - **Container**: Individual service in a project (frontend, backend, db); includes `startup_command`
 - **ContainerConnection**: Dependencies between containers
@@ -342,6 +355,11 @@ tesslate-studio/
 - **ChannelMessage**: Message log for channel interactions
 - **UserMcpConfig**: Per-user MCP server installation with encrypted env vars
 - **AgentMcpAssignment**: Many-to-many linking MCP servers to agents
+- **Team**: Name, slug, avatar, is_personal, billing (subscription_tier, credits, stripe), created_by_id
+- **TeamMembership**: User ↔ Team with role (admin/editor/viewer), is_active
+- **ProjectMembership**: User ↔ Project role override (editor/viewer), granted_by_id
+- **TeamInvitation**: Email + link invites, token, expiry, max_uses, use_count
+- **AuditLog**: Team + project scoped event trail, action, resource_type, details JSON
 
 ## Agent Tools (orchestrator/app/agent/tools/)
 
@@ -451,6 +469,7 @@ Each `CLAUDE.md` file contains:
 | Volume Hub client | `orchestrator/app/services/hub_client.py` (gRPC client for Hub RPCs) |
 | Config.json schema & lifecycle | `docs/orchestrator/services/config-json.md` |
 | Container lifecycle tool | `docs/orchestrator/agent/tools/project-control.md` |
+| Teams & RBAC | `docs/orchestrator/routers/CLAUDE.md` → teams.py, `orchestrator/app/permissions.py` |
 
 ## Deployment Modes
 

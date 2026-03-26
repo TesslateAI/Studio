@@ -16,6 +16,7 @@
 - `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models.py` - Main models (39 models, 1000+ lines)
 - `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models_auth.py` - FastAPI-Users auth models (User, OAuthAccount, AccessToken)
 - `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models_kanban.py` - Kanban board models (KanbanBoard, KanbanColumn, KanbanTask)
+- `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models_team.py` - Team RBAC models (Team, TeamMembership, ProjectMembership, TeamInvitation, AuditLog)
 
 ### Related Files
 - `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\schemas.py` - Pydantic request/response schemas
@@ -255,6 +256,50 @@
 - Purpose: Tracks which MCP servers are attached to which agents per user
 - Key fields: `agent_id`, `mcp_config_id`, `user_id`, `enabled`, `added_at`
 - Unique constraint: (agent_id, mcp_config_id, user_id)
+
+### Team & RBAC Models (models_team.py)
+
+**Team** (models_team.py)
+- Purpose: Organizational unit for grouping users and projects; every user gets a personal team on signup
+- Key fields: `name`, `slug` (unique, indexed), `avatar_url`, `is_personal` (bool), `created_by_id` (FK users)
+- Billing fields: `subscription_tier`, `bundled_credits`, `purchased_credits`, `stripe_customer_id`, `stripe_subscription_id`
+- Related: TeamMembership (one-to-many), Projects (one-to-many via `team_id`), TeamInvitation (one-to-many), AuditLog (one-to-many)
+
+**TeamMembership** (models_team.py)
+- Purpose: Links users to teams with a role
+- Key fields: `user_id` (FK users), `team_id` (FK teams), `role` (admin/editor/viewer), `is_active` (soft-delete), `invited_by_id`
+- Unique constraint: (user_id, team_id)
+- Related: User, Team
+
+**ProjectMembership** (models_team.py)
+- Purpose: Per-project role override within a team (e.g., grant a viewer edit access to one project)
+- Key fields: `user_id` (FK users), `project_id` (FK projects), `role` (editor/viewer), `granted_by_id` (FK users)
+- Unique constraint: (user_id, project_id)
+- Related: User, Project
+
+**TeamInvitation** (models_team.py)
+- Purpose: Email and link-based invitations to join a team
+- Key fields: `team_id` (FK teams), `email` (nullable, for email invites), `token` (unique, indexed), `role` (admin/editor/viewer), `invite_type` (email/link), `invited_by_id` (FK users), `expires_at`, `max_uses`, `use_count`, `accepted_at`
+- Related: Team, User (inviter)
+
+**AuditLog** (models_team.py)
+- Purpose: Immutable event trail for team and project actions (compliance, debugging)
+- Key fields: `team_id` (FK teams), `project_id` (FK projects, nullable), `user_id` (FK users), `action` (string), `resource_type` (string), `resource_id` (UUID, nullable), `details` (JSON), `ip_address`
+- Index: Composite on (team_id, created_at)
+- Related: Team, User
+
+### RBAC Permission System (permissions.py)
+
+The `permissions.py` module provides dual-scope role resolution:
+1. **Team-level role**: From `TeamMembership.role` (admin/editor/viewer)
+2. **Project-level override**: From `ProjectMembership.role` (editor/viewer), takes precedence over team role for that project
+
+Key functions:
+- `check_team_permission(db, user_id, team_slug, min_role)` — Verifies user has at least `min_role` in the team
+- `get_project_with_access(db, user_id, team_slug, project_slug, min_role)` — Resolves effective role (project override > team role) and checks access
+- Viewer role: read-only access (view project, browse files)
+- Editor role: read-write access (edit files, run agents, manage containers)
+- Admin role: full access (team settings, billing, member management, delete)
 
 ## Common SQLAlchemy Patterns
 
@@ -572,6 +617,15 @@ ChannelMessage: id, channel_config_id, direction, jid, sender_name, content, pla
 UserMcpConfig: id, user_id, marketplace_agent_id, credentials (encrypted), enabled_capabilities (JSON), is_active
 AgentMcpAssignment: id, agent_id, mcp_config_id, user_id, enabled, added_at
 AgentSkillAssignment: id, agent_id, skill_id, user_id, enabled, added_at
+```
+
+### Team & RBAC Fields
+```
+Team: id, name, slug, avatar_url, is_personal, created_by_id, subscription_tier, bundled_credits, purchased_credits, stripe_customer_id, stripe_subscription_id, created_at, updated_at
+TeamMembership: id, user_id, team_id, role (admin/editor/viewer), is_active, invited_by_id, created_at
+ProjectMembership: id, user_id, project_id, role (editor/viewer), granted_by_id, created_at
+TeamInvitation: id, team_id, email, token, role, invite_type (email/link), invited_by_id, expires_at, max_uses, use_count, accepted_at, created_at
+AuditLog: id, team_id, project_id, user_id, action, resource_type, resource_id, details (JSON), ip_address, created_at
 ```
 
 ## Database Connection Info
