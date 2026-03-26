@@ -753,9 +753,9 @@ async def agent_chat(
 
         # 2c. Check vision support if request contains image attachments
         if request.attachments and any(a.type == "image" for a in request.attachments):
-            import litellm as _litellm
+            from ..services.model_vision import model_supports_vision
 
-            if not _litellm.supports_vision(model=model_name):
+            if not await model_supports_vision(model_name):
                 raise HTTPException(
                     status_code=400,
                     detail="The selected model does not support image input. Please switch to a vision-capable model.",
@@ -1362,9 +1362,9 @@ async def agent_chat_stream(
 
             # 2c. Check vision support if request contains image attachments
             if request.attachments and any(a.type == "image" for a in request.attachments):
-                import litellm as _litellm
+                from ..services.model_vision import model_supports_vision
 
-                if not _litellm.supports_vision(model=model_name):
+                if not await model_supports_vision(model_name):
                     error_event = {
                         "type": "error",
                         "data": {

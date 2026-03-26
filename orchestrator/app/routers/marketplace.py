@@ -97,29 +97,10 @@ async def _get_cached_model_pricing() -> dict[str, dict[str, float]]:
 
 
 async def _get_cached_model_vision_support() -> dict[str, bool]:
-    """Build a model-id → supports_vision map using litellm's model metadata."""
-    try:
-        cache_key = "model_vision_support"
-        cached = await cache.get(cache_key)
-        if cached is not None:
-            return cached
+    """Build a model-name → supports_vision map from LiteLLM /model/info."""
+    from ..services.model_vision import get_cached_model_vision_map
 
-        import litellm
-
-        litellm_models = await _get_cached_litellm_models()
-        vision_map: dict[str, bool] = {}
-        for model in litellm_models:
-            model_id = model.get("id", "")
-            if model_id:
-                try:
-                    vision_map[model_id] = litellm.supports_vision(model=model_id)
-                except Exception:
-                    vision_map[model_id] = False
-
-        await cache.set(cache_key, vision_map, ttl=_MODELS_CACHE_TTL)
-        return vision_map
-    except Exception:
-        return {}
+    return await get_cached_model_vision_map()
 
 
 # ============================================================================
@@ -136,13 +117,15 @@ async def get_available_models(
     Includes both system models and models from user's configured providers.
     Returns models that users can select for open source agents.
     """
-    from ..agent.models import BUILTIN_PROVIDERS
+    from ..agent.models import BUILTIN_PROVIDERS, resolve_model_name
     from ..models import UserAPIKey, UserCustomModel, UserProvider
 
     # Get models, pricing, and health from LiteLLM in parallel (all cached independently)
     litellm_models, pricing_map, health_map, vision_map = await asyncio.gather(
-        _get_cached_litellm_models(), _get_cached_model_pricing(), _get_cached_model_health(),
-        _get_cached_model_vision_support()
+        _get_cached_litellm_models(),
+        _get_cached_model_pricing(),
+        _get_cached_model_health(),
+        _get_cached_model_vision_support(),
     )
 
     # Convert LiteLLM models to response format with pricing and health
@@ -204,7 +187,7 @@ async def get_available_models(
             "available": True,
             "custom_id": model.id,
             "health": None,
-            "supports_vision": vision_map.get(_prefixed_model_id(model), False),
+            "supports_vision": vision_map.get(resolve_model_name(_prefixed_model_id(model)), False),
         }
         for model in custom_models
     ]
@@ -236,7 +219,7 @@ async def get_available_models(
                     "pricing": None,
                     "available": cp.slug in user_providers_set,
                     "health": None,
-                    "supports_vision": vision_map.get(full_id, False),
+                    "supports_vision": vision_map.get(resolve_model_name(full_id), False),
                 }
             )
 
@@ -4404,40 +4387,46 @@ async def get_marketplace_skills(
                 creator_username = skill.forked_by_user.username
                 creator_avatar_url = skill.forked_by_user.avatar_url
 
-        response.append({
-            "id": skill.id,
-            "name": skill.name,
-            "slug": skill.slug,
-            "description": skill.description,
-            "long_description": skill.long_description,
-            "category": skill.category,
-            "item_type": skill.item_type,
-            "mode": skill.mode,
-            "agent_type": skill.agent_type,
-            "model": skill.model,
-            "source_type": skill.source_type,
-            "is_forkable": skill.is_forkable,
-            "is_active": skill.is_active,
-            "icon": skill.icon,
-            "avatar_url": skill.avatar_url,
-            "git_repo_url": skill.git_repo_url,
-            "pricing_type": skill.pricing_type,
-            "price": skill.price / 100.0 if skill.price else 0,
-            "usage_count": skill.usage_count or 0,
-            "downloads": skill.downloads,
-            "rating": skill.rating,
-            "reviews_count": skill.reviews_count,
-            "features": skill.features,
-            "tags": skill.tags or [],
-            "is_featured": skill.is_featured,
-            "is_purchased": skill.id in purchased_skill_ids,
-            "creator_type": creator_type,
-            "creator_name": creator_name,
-            "creator_username": creator_username,
-            "created_by_user_id": str(skill.created_by_user_id) if skill.created_by_user_id else None,
-            "forked_by_user_id": str(skill.forked_by_user_id) if skill.forked_by_user_id else None,
-            "creator_avatar_url": creator_avatar_url,
-        })
+        response.append(
+            {
+                "id": skill.id,
+                "name": skill.name,
+                "slug": skill.slug,
+                "description": skill.description,
+                "long_description": skill.long_description,
+                "category": skill.category,
+                "item_type": skill.item_type,
+                "mode": skill.mode,
+                "agent_type": skill.agent_type,
+                "model": skill.model,
+                "source_type": skill.source_type,
+                "is_forkable": skill.is_forkable,
+                "is_active": skill.is_active,
+                "icon": skill.icon,
+                "avatar_url": skill.avatar_url,
+                "git_repo_url": skill.git_repo_url,
+                "pricing_type": skill.pricing_type,
+                "price": skill.price / 100.0 if skill.price else 0,
+                "usage_count": skill.usage_count or 0,
+                "downloads": skill.downloads,
+                "rating": skill.rating,
+                "reviews_count": skill.reviews_count,
+                "features": skill.features,
+                "tags": skill.tags or [],
+                "is_featured": skill.is_featured,
+                "is_purchased": skill.id in purchased_skill_ids,
+                "creator_type": creator_type,
+                "creator_name": creator_name,
+                "creator_username": creator_username,
+                "created_by_user_id": str(skill.created_by_user_id)
+                if skill.created_by_user_id
+                else None,
+                "forked_by_user_id": str(skill.forked_by_user_id)
+                if skill.forked_by_user_id
+                else None,
+                "creator_avatar_url": creator_avatar_url,
+            }
+        )
 
     return {
         "skills": response,
@@ -4749,8 +4738,7 @@ async def get_agent_skills(
     result = await db.execute(
         select(AgentSkillAssignment)
         .options(
-            selectinload(AgentSkillAssignment.skill)
-            .selectinload(MarketplaceAgent.forked_by_user)
+            selectinload(AgentSkillAssignment.skill).selectinload(MarketplaceAgent.forked_by_user)
         )
         .where(
             AgentSkillAssignment.agent_id == agent_id,
@@ -4777,40 +4765,46 @@ async def get_agent_skills(
                 creator_username = skill.forked_by_user.username
                 creator_avatar_url = skill.forked_by_user.avatar_url
 
-        skills.append({
-            "id": skill.id,
-            "name": skill.name,
-            "slug": skill.slug,
-            "description": skill.description,
-            "long_description": skill.long_description,
-            "category": skill.category,
-            "item_type": skill.item_type,
-            "mode": skill.mode,
-            "agent_type": skill.agent_type,
-            "model": skill.model,
-            "source_type": skill.source_type,
-            "is_forkable": skill.is_forkable,
-            "is_active": skill.is_active,
-            "icon": skill.icon,
-            "avatar_url": skill.avatar_url,
-            "git_repo_url": skill.git_repo_url,
-            "pricing_type": skill.pricing_type,
-            "price": skill.price / 100.0 if skill.price else 0,
-            "usage_count": skill.usage_count or 0,
-            "downloads": skill.downloads,
-            "rating": skill.rating,
-            "reviews_count": skill.reviews_count,
-            "features": skill.features,
-            "tags": skill.tags or [],
-            "is_featured": skill.is_featured,
-            "is_purchased": True,
-            "creator_type": creator_type,
-            "creator_name": creator_name,
-            "creator_username": creator_username,
-            "created_by_user_id": str(skill.created_by_user_id) if skill.created_by_user_id else None,
-            "forked_by_user_id": str(skill.forked_by_user_id) if skill.forked_by_user_id else None,
-            "creator_avatar_url": creator_avatar_url,
-        })
+        skills.append(
+            {
+                "id": skill.id,
+                "name": skill.name,
+                "slug": skill.slug,
+                "description": skill.description,
+                "long_description": skill.long_description,
+                "category": skill.category,
+                "item_type": skill.item_type,
+                "mode": skill.mode,
+                "agent_type": skill.agent_type,
+                "model": skill.model,
+                "source_type": skill.source_type,
+                "is_forkable": skill.is_forkable,
+                "is_active": skill.is_active,
+                "icon": skill.icon,
+                "avatar_url": skill.avatar_url,
+                "git_repo_url": skill.git_repo_url,
+                "pricing_type": skill.pricing_type,
+                "price": skill.price / 100.0 if skill.price else 0,
+                "usage_count": skill.usage_count or 0,
+                "downloads": skill.downloads,
+                "rating": skill.rating,
+                "reviews_count": skill.reviews_count,
+                "features": skill.features,
+                "tags": skill.tags or [],
+                "is_featured": skill.is_featured,
+                "is_purchased": True,
+                "creator_type": creator_type,
+                "creator_name": creator_name,
+                "creator_username": creator_username,
+                "created_by_user_id": str(skill.created_by_user_id)
+                if skill.created_by_user_id
+                else None,
+                "forked_by_user_id": str(skill.forked_by_user_id)
+                if skill.forked_by_user_id
+                else None,
+                "creator_avatar_url": creator_avatar_url,
+            }
+        )
 
     return {"skills": skills, "agent_id": str(agent_id)}
 
@@ -4925,40 +4919,46 @@ async def get_marketplace_mcp_servers(
                 creator_username = mcp_server.forked_by_user.username
                 creator_avatar_url = mcp_server.forked_by_user.avatar_url
 
-        response.append({
-            "id": mcp_server.id,
-            "name": mcp_server.name,
-            "slug": mcp_server.slug,
-            "description": mcp_server.description,
-            "long_description": mcp_server.long_description,
-            "category": mcp_server.category,
-            "item_type": mcp_server.item_type,
-            "mode": mcp_server.mode,
-            "agent_type": mcp_server.agent_type,
-            "model": mcp_server.model,
-            "source_type": mcp_server.source_type,
-            "is_forkable": mcp_server.is_forkable,
-            "is_active": mcp_server.is_active,
-            "icon": mcp_server.icon,
-            "avatar_url": mcp_server.avatar_url,
-            "git_repo_url": mcp_server.git_repo_url,
-            "pricing_type": mcp_server.pricing_type,
-            "price": mcp_server.price / 100.0 if mcp_server.price else 0,
-            "usage_count": mcp_server.usage_count or 0,
-            "downloads": mcp_server.downloads,
-            "rating": mcp_server.rating,
-            "reviews_count": mcp_server.reviews_count,
-            "features": mcp_server.features,
-            "tags": mcp_server.tags or [],
-            "is_featured": mcp_server.is_featured,
-            "is_purchased": mcp_server.id in purchased_mcp_server_ids,
-            "creator_type": creator_type,
-            "creator_name": creator_name,
-            "creator_username": creator_username,
-            "created_by_user_id": str(mcp_server.created_by_user_id) if mcp_server.created_by_user_id else None,
-            "forked_by_user_id": str(mcp_server.forked_by_user_id) if mcp_server.forked_by_user_id else None,
-            "creator_avatar_url": creator_avatar_url,
-        })
+        response.append(
+            {
+                "id": mcp_server.id,
+                "name": mcp_server.name,
+                "slug": mcp_server.slug,
+                "description": mcp_server.description,
+                "long_description": mcp_server.long_description,
+                "category": mcp_server.category,
+                "item_type": mcp_server.item_type,
+                "mode": mcp_server.mode,
+                "agent_type": mcp_server.agent_type,
+                "model": mcp_server.model,
+                "source_type": mcp_server.source_type,
+                "is_forkable": mcp_server.is_forkable,
+                "is_active": mcp_server.is_active,
+                "icon": mcp_server.icon,
+                "avatar_url": mcp_server.avatar_url,
+                "git_repo_url": mcp_server.git_repo_url,
+                "pricing_type": mcp_server.pricing_type,
+                "price": mcp_server.price / 100.0 if mcp_server.price else 0,
+                "usage_count": mcp_server.usage_count or 0,
+                "downloads": mcp_server.downloads,
+                "rating": mcp_server.rating,
+                "reviews_count": mcp_server.reviews_count,
+                "features": mcp_server.features,
+                "tags": mcp_server.tags or [],
+                "is_featured": mcp_server.is_featured,
+                "is_purchased": mcp_server.id in purchased_mcp_server_ids,
+                "creator_type": creator_type,
+                "creator_name": creator_name,
+                "creator_username": creator_username,
+                "created_by_user_id": str(mcp_server.created_by_user_id)
+                if mcp_server.created_by_user_id
+                else None,
+                "forked_by_user_id": str(mcp_server.forked_by_user_id)
+                if mcp_server.forked_by_user_id
+                else None,
+                "creator_avatar_url": creator_avatar_url,
+            }
+        )
 
     return {
         "mcp_servers": response,
@@ -5047,7 +5047,11 @@ async def get_mcp_server_details(
         "creator_type": creator_type,
         "creator_name": creator_name,
         "creator_username": creator_username,
-        "created_by_user_id": str(mcp_server.created_by_user_id) if mcp_server.created_by_user_id else None,
-        "forked_by_user_id": str(mcp_server.forked_by_user_id) if mcp_server.forked_by_user_id else None,
+        "created_by_user_id": str(mcp_server.created_by_user_id)
+        if mcp_server.created_by_user_id
+        else None,
+        "forked_by_user_id": str(mcp_server.forked_by_user_id)
+        if mcp_server.forked_by_user_id
+        else None,
         "creator_avatar_url": creator_avatar_url,
     }
