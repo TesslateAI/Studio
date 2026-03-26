@@ -450,6 +450,14 @@ async def create_project(
             f"(source: {project.source_type}, base_id: {project.base_id})"
         )
 
+        # Check team permission — admins and editors can create projects
+        from ..permissions import Permission, check_team_permission
+
+        if current_user.default_team_id:
+            await check_team_permission(
+                db, current_user.default_team_id, current_user.id, Permission.PROJECT_CREATE
+            )
+
         # Check project limits based on subscription tier
         await enforce_project_limit(current_user, db)
 

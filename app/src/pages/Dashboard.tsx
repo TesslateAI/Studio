@@ -55,6 +55,7 @@ export default function Dashboard() {
   const { theme, toggleTheme } = useTheme();
   const { activeTeam, can } = useTeam();
   const isAdmin = can('team.edit');
+  const canCreateProject = can('project.create');
   const [projects, setProjects] = useState<Project[]>([]);
   const [accessProject, setAccessProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -928,57 +929,61 @@ export default function Dashboard() {
                   : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
               }
             >
-              {/* Create New Project Card */}
-              <button
-                onClick={() => setShowCreateDialog(true)}
-                disabled={isCreating}
-                className={`
-                  group bg-white/[0.01] rounded-[var(--radius)] p-6
-                  border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
-                  hover:border-[rgba(var(--primary-rgb),0.6)]
-                  transition-all duration-300
-                  flex flex-col items-center justify-center gap-3
-                  ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
-                  ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
-                `}
-              >
-                <div className="w-14 h-14 bg-[rgba(var(--primary-rgb),0.2)] rounded-[var(--radius)] flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
-                  <FilePlus className="w-7 h-7 text-[var(--primary)]" weight="fill" />
-                </div>
-                <div className="text-center">
-                  <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">
-                    Create New Project
-                  </h3>
-                  <p className="text-xs text-[var(--text-muted)]">
-                    Start building something amazing
-                  </p>
-                </div>
-              </button>
+              {/* Create New Project Card — hidden for viewers */}
+              {canCreateProject && (
+                <button
+                  onClick={() => setShowCreateDialog(true)}
+                  disabled={isCreating}
+                  className={`
+                    group bg-white/[0.01] rounded-[var(--radius)] p-6
+                    border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
+                    hover:border-[rgba(var(--primary-rgb),0.6)]
+                    transition-all duration-300
+                    flex flex-col items-center justify-center gap-3
+                    ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
+                    ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
+                  `}
+                >
+                  <div className="w-14 h-14 bg-[rgba(var(--primary-rgb),0.2)] rounded-[var(--radius)] flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
+                    <FilePlus className="w-7 h-7 text-[var(--primary)]" weight="fill" />
+                  </div>
+                  <div className="text-center">
+                    <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">
+                      Create New Project
+                    </h3>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      Start building something amazing
+                    </p>
+                  </div>
+                </button>
+              )}
 
-              {/* Import from Repository Card */}
-              <button
-                onClick={() => setShowImportDialog(true)}
-                className={`
-                  group bg-white/[0.01] rounded-[var(--radius)] p-6
-                  border-2 border-dashed border-emerald-500/30
-                  hover:border-emerald-500/60
-                  transition-all duration-300
-                  flex flex-col items-center justify-center gap-3
-                  ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
-                `}
-              >
-                <div className="w-14 h-14 bg-emerald-500/20 rounded-[var(--radius)] flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
-                  <GitBranch className="w-7 h-7 text-emerald-500" weight="fill" />
-                </div>
-                <div className="text-center">
-                  <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">
-                    Import from Repository
-                  </h3>
-                  <p className="text-xs text-[var(--text-muted)]">
-                    Connect a GitHub, GitLab, or Bitbucket repo
-                  </p>
-                </div>
-              </button>
+              {/* Import from Repository Card — hidden for viewers */}
+              {canCreateProject && (
+                <button
+                  onClick={() => setShowImportDialog(true)}
+                  className={`
+                    group bg-white/[0.01] rounded-[var(--radius)] p-6
+                    border-2 border-dashed border-emerald-500/30
+                    hover:border-emerald-500/60
+                    transition-all duration-300
+                    flex flex-col items-center justify-center gap-3
+                    ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
+                  `}
+                >
+                  <div className="w-14 h-14 bg-emerald-500/20 rounded-[var(--radius)] flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
+                    <GitBranch className="w-7 h-7 text-emerald-500" weight="fill" />
+                  </div>
+                  <div className="text-center">
+                    <h3 className="text-sm font-semibold text-[var(--text)] mb-1.5">
+                      Import from Repository
+                    </h3>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      Connect a GitHub, GitLab, or Bitbucket repo
+                    </p>
+                  </div>
+                </button>
+              )}
 
               {/* Project Cards */}
               {filteredProjects.map((project) => (

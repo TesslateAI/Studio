@@ -248,7 +248,11 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         try:
             from .models_team import Team, TeamMembership
 
+            import uuid as _uuid
+
+            team_id = _uuid.uuid4()
             team = Team(
+                id=team_id,
                 name=f"{user.name}'s Team",
                 slug=f"{user.slug}-team",
                 is_personal=True,
@@ -262,12 +266,12 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             await self.user_db.session.flush()
 
             membership = TeamMembership(
-                team_id=team.id,
+                team_id=team_id,
                 user_id=user.id,
                 role="admin",
             )
             self.user_db.session.add(membership)
-            user.default_team_id = team.id
+            user.default_team_id = team_id
             await self.user_db.session.commit()
             logger.info(f"Created personal team for user {user.username}: {team.slug}")
         except Exception as e:
