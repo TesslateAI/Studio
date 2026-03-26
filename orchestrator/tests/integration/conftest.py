@@ -24,11 +24,75 @@ TEST_DATABASE_URL = "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_database():
+def test_db_container():
+    """
+    Manage the test PostgreSQL container lifecycle.
+
+    Starts docker-compose.test.yml if postgres-test isn't already running,
+    and tears it down (with volumes) after the test session.
+    """
+    import subprocess
+    import time
+
+    repo_root = Path(__file__).parent.parent.parent.parent
+
+    # Check if test postgres is already running
+    check = subprocess.run(
+        ["docker", "inspect", "-f", "{{.State.Running}}", "tesslate-postgres-test"],
+        capture_output=True,
+        text=True,
+    )
+    already_running = check.returncode == 0 and "true" in check.stdout
+
+    started_by_us = False
+    if not already_running:
+        result = subprocess.run(
+            ["docker", "compose", "-f", "docker-compose.test.yml", "up", "-d", "--wait"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to start test DB: {result.stderr}")
+        started_by_us = True
+
+        # Wait for postgres to accept connections
+        for _ in range(30):
+            health = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    "tesslate-postgres-test",
+                    "pg_isready",
+                    "-U",
+                    "tesslate_test",
+                ],
+                capture_output=True,
+            )
+            if health.returncode == 0:
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError("Test postgres did not become ready in 30s")
+
+    yield
+
+    # Tear down only if we started it
+    if started_by_us:
+        subprocess.run(
+            ["docker", "compose", "-f", "docker-compose.test.yml", "down", "-v"],
+            cwd=repo_root,
+            capture_output=True,
+        )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_database(test_db_container):
     """
     Run database migrations once per test session.
 
     Uses alembic to bring the test database to latest schema.
+    Depends on test_db_container to ensure postgres is running first.
     """
     import subprocess
 
