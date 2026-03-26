@@ -6,7 +6,6 @@ import { motion } from 'framer-motion';
 import {
   FolderOpen,
   Store,
-  Settings,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -30,7 +29,14 @@ import { modKey } from '../../lib/keyboard-registry';
 import type { CreditBalanceResponse } from '../../types/billing';
 
 interface NavigationSidebarProps {
-  activePage: 'chat' | 'dashboard' | 'marketplace' | 'library' | 'feedback' | 'builder' | 'settings';
+  activePage:
+    | 'chat'
+    | 'dashboard'
+    | 'marketplace'
+    | 'library'
+    | 'feedback'
+    | 'builder'
+    | 'settings';
   showContent?: boolean;
   /** Render prop for injecting builder-specific items into the sidebar */
   builderSection?: (ctx: {
@@ -60,13 +66,23 @@ const LIBRARY_ITEMS = [
   { key: 'themes', label: 'Themes', icon: Palette },
 ] as const;
 
-export function NavigationSidebar({ activePage, showContent = true, builderSection, onExpandedChange, forceVisible }: NavigationSidebarProps) {
+export function NavigationSidebar({
+  activePage,
+  showContent = true,
+  builderSection,
+  onExpandedChange,
+  forceVisible,
+}: NavigationSidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [isExpanded, setIsExpanded] = useState(() => {
     const saved = localStorage.getItem('navigationSidebarExpanded');
     if (saved === null) return true;
-    try { return JSON.parse(saved); } catch { return true; }
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return true;
+    }
   });
   const [subscriptionTier, setSubscriptionTier] = useState<string>('free');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
@@ -81,15 +97,14 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
   }, [activePage]);
 
   // Derive active library tab from URL
-  const activeLibraryTab = activePage === 'library'
-    ? (new URLSearchParams(location.search).get('tab') || 'agents')
-    : null;
+  const activeLibraryTab =
+    activePage === 'library' ? new URLSearchParams(location.search).get('tab') || 'agents' : null;
 
   const isPaidPlan = subscriptionTier !== 'free';
   const tierLabel = subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1);
 
   // User profile state
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [creditBalance, setCreditBalance] = useState<CreditBalanceResponse | null>(null);
   const [imgError, setImgError] = useState(false);
@@ -101,23 +116,31 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
       ? `https://api.dicebear.com/9.x/identicon/svg?seed=${user.id}`
       : null;
 
-  useEffect(() => { setImgError(false); }, [avatarSrc]);
+  useEffect(() => {
+    setImgError(false);
+  }, [avatarSrc]);
 
   // Fetch credits
   useEffect(() => {
-    billingApi.getCreditsBalance().then(setCreditBalance).catch(() => {});
+    billingApi
+      .getCreditsBalance()
+      .then(setCreditBalance)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
     if (showUserDropdown) {
-      billingApi.getCreditsBalance().then(setCreditBalance).catch(() => {});
+      billingApi
+        .getCreditsBalance()
+        .then(setCreditBalance)
+        .catch(() => {});
     }
   }, [showUserDropdown]);
 
   const handleCreditsUpdated = useCallback((e: Event) => {
     const detail = (e as CustomEvent).detail;
     if (typeof detail?.newBalance === 'number') {
-      setCreditBalance((prev) => prev ? { ...prev, total_credits: detail.newBalance } : prev);
+      setCreditBalance((prev) => (prev ? { ...prev, total_credits: detail.newBalance } : prev));
     }
   }, []);
 
@@ -132,11 +155,15 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
     { key: 'bundled_credits' as const, grey: 'rgba(255,255,255,0.10)' },
     { key: 'signup_bonus_credits' as const, grey: 'rgba(255,255,255,0.14)' },
   ];
-  const capacity = creditBalance ? Math.max(creditBalance.monthly_allowance || 0, totalCredits, 1) : 1;
+  const capacity = creditBalance
+    ? Math.max(creditBalance.monthly_allowance || 0, totalCredits, 1)
+    : 1;
   const used = capacity - totalCredits;
   const usedPct = Math.min((used / capacity) * 100, 100);
   const greySegments = creditBalance
-    ? GREY_SEGMENTS.map((s) => ({ ...s, value: creditBalance[s.key] || 0 })).filter((s) => s.value > 0)
+    ? GREY_SEGMENTS.map((s) => ({ ...s, value: creditBalance[s.key] || 0 })).filter(
+        (s) => s.value > 0
+      )
     : [];
 
   useEffect(() => {
@@ -157,8 +184,8 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
     checkSubscription();
   }, []);
 
-  const logout = () => {
-    localStorage.removeItem('token');
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 
@@ -235,9 +262,7 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
         <button
           onClick={() => setShowUserDropdown(!showUserDropdown)}
           className={`relative flex items-center h-10 rounded-[var(--radius-medium)] transition-colors ${isExpanded ? 'gap-2.5 mx-2' : 'justify-center mx-1'} ${
-            showUserDropdown
-              ? 'bg-[var(--sidebar-active)]'
-              : 'hover:bg-[var(--sidebar-hover)]'
+            showUserDropdown ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
           }`}
           style={isExpanded ? { paddingLeft: '10px', paddingRight: '8px' } : undefined}
           aria-label="User menu"
@@ -255,7 +280,9 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
           )}
           {isExpanded && (
             <>
-              <span className="text-[14px] font-medium text-[var(--sidebar-text)] truncate flex-1 text-left">{userName}</span>
+              <span className="text-[14px] font-medium text-[var(--sidebar-text)] truncate flex-1 text-left">
+                {userName}
+              </span>
               <CaretDown
                 size={10}
                 className={`text-[var(--text-subtle)] transition-transform flex-shrink-0 ${showUserDropdown ? 'rotate-180' : ''}`}
@@ -273,14 +300,21 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
               style={{
                 borderWidth: 'var(--border-width)',
                 borderColor: 'var(--border-hover)',
-                top: userDropdownRef.current ? userDropdownRef.current.getBoundingClientRect().bottom + 4 : 52,
-                left: userDropdownRef.current ? userDropdownRef.current.getBoundingClientRect().left : 8,
+                top: userDropdownRef.current
+                  ? userDropdownRef.current.getBoundingClientRect().bottom + 4
+                  : 52,
+                left: userDropdownRef.current
+                  ? userDropdownRef.current.getBoundingClientRect().left
+                  : 8,
               }}
             >
               <div className="py-1">
                 {/* Credits */}
                 <button
-                  onClick={() => { setShowUserDropdown(false); navigate('/settings/billing'); }}
+                  onClick={() => {
+                    setShowUserDropdown(false);
+                    navigate('/settings/billing');
+                  }}
                   className="w-full px-3 py-2 hover:bg-[var(--surface-hover)] transition-colors text-left"
                 >
                   <div className="flex items-center gap-2">
@@ -294,9 +328,19 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
                   </div>
                   {creditBalance && (
                     <div className="flex h-1 rounded-full overflow-hidden mt-1.5 bg-[var(--border)]">
-                      <div className="h-full bg-[var(--primary)] transition-all duration-500 shrink-0" style={{ width: `${usedPct}%` }} />
+                      <div
+                        className="h-full bg-[var(--primary)] transition-all duration-500 shrink-0"
+                        style={{ width: `${usedPct}%` }}
+                      />
                       {greySegments.map((seg) => (
-                        <div key={seg.key} className="h-full transition-all duration-500" style={{ width: `${(seg.value / capacity) * 100}%`, backgroundColor: seg.grey }} />
+                        <div
+                          key={seg.key}
+                          className="h-full transition-all duration-500"
+                          style={{
+                            width: `${(seg.value / capacity) * 100}%`,
+                            backgroundColor: seg.grey,
+                          }}
+                        />
                       ))}
                     </div>
                   )}
@@ -305,7 +349,10 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
                 <div className="h-px bg-[var(--border)] mx-3 my-0.5" />
 
                 <button
-                  onClick={() => { setShowUserDropdown(false); navigate('/settings/billing'); }}
+                  onClick={() => {
+                    setShowUserDropdown(false);
+                    navigate('/settings/billing');
+                  }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--surface-hover)] transition-colors text-left"
                 >
                   <CreditCard size={14} className="text-[var(--text-subtle)]" />
@@ -313,7 +360,10 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
                 </button>
 
                 <button
-                  onClick={() => { setShowUserDropdown(false); navigate('/settings'); }}
+                  onClick={() => {
+                    setShowUserDropdown(false);
+                    navigate('/settings');
+                  }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--surface-hover)] transition-colors text-left"
                 >
                   <Gear size={14} className="text-[var(--text-subtle)]" />
@@ -323,7 +373,10 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
                 <div className="h-px bg-[var(--border)] mx-3 my-0.5" />
 
                 <button
-                  onClick={() => { setShowUserDropdown(false); logout(); }}
+                  onClick={() => {
+                    setShowUserDropdown(false);
+                    handleLogout();
+                  }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--surface-hover)] transition-colors text-left"
                 >
                   <SignOut size={14} className="text-[var(--status-error)]" />
@@ -355,9 +408,7 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
                 }
               >
                 <MessagesSquare size={16} className={iconClass(activePage === 'chat')} />
-                {isExpanded && (
-                  <span className={labelClass(activePage === 'chat')}>Chat</span>
-                )}
+                {isExpanded && <span className={labelClass(activePage === 'chat')}>Chat</span>}
               </button>
             </Tooltip>
 
@@ -412,8 +463,13 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
                   onClick={() => setLibraryOpen(!libraryOpen)}
                   className={navButtonClass(activePage === 'library')}
                 >
-                  <BookOpen size={16} className={`flex-shrink-0 ${iconClass(activePage === 'library')}`} />
-                  <span className={`${labelClass(activePage === 'library')} flex items-center gap-1`}>
+                  <BookOpen
+                    size={16}
+                    className={`flex-shrink-0 ${iconClass(activePage === 'library')}`}
+                  />
+                  <span
+                    className={`${labelClass(activePage === 'library')} flex items-center gap-1`}
+                  >
                     Library
                     <ChevronDown
                       size={10}
@@ -466,9 +522,7 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
                 className={isExpanded ? inactiveNavButton : inactiveNavButtonCollapsed}
               >
                 <FileText size={16} className={inactiveIconClass} />
-                {isExpanded && (
-                  <span className={inactiveLabelClass}>Documentation</span>
-                )}
+                {isExpanded && <span className={inactiveLabelClass}>Documentation</span>}
               </a>
             </Tooltip>
 
@@ -550,9 +604,7 @@ export function NavigationSidebar({ activePage, showContent = true, builderSecti
             ) : (
               <ChevronRight size={16} className={inactiveIconClass} />
             )}
-            {isExpanded && (
-              <span className={inactiveLabelClass}>Collapse</span>
-            )}
+            {isExpanded && <span className={inactiveLabelClass}>Collapse</span>}
           </button>
         </Tooltip>
       </motion.div>
