@@ -517,7 +517,7 @@ async def get_user_manager(user_db: SQLAlchemyUserDatabase = Depends(get_user_db
 
 # Cookie Transport (for web frontend with CSRF protection)
 cookie_transport = CookieTransport(
-    cookie_max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+    cookie_max_age=settings.access_token_expire_minutes * 60,
     cookie_name="tesslate_auth",
     cookie_secure=settings.cookie_secure,  # From environment variable
     cookie_httponly=True,  # Prevent XSS attacks

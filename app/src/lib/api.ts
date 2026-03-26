@@ -35,12 +35,24 @@ const api = axios.create({
 });
 
 /**
- * Authentication with fastapi-users:
- * - JWT Bearer tokens for API authentication
+ * Authentication:
+ * - Short-lived JWT access tokens (15 min) for API authentication
+ * - Long-lived refresh tokens (14 days) as httpOnly cookie for session persistence
  * - Cookie-based OAuth authentication with CSRF protection
- * - No refresh tokens (tokens are long-lived)
- * - Redirect to login on 401 errors
+ * - 401 interceptor triggers refresh-then-retry via cookie
  */
+
+/**
+ * Revoke the server-side session (refresh token + auth cookies).
+ * Best-effort — errors are swallowed since we always clear local state regardless.
+ */
+export async function revokeServerSession(): Promise<void> {
+  try {
+    await axios.post(`${API_URL}/api/auth/logout`, {}, { withCredentials: true });
+  } catch {
+    // Best-effort — server may be unreachable or session already expired
+  }
+}
 
 // CSRF token management
 let csrfToken: string | null = null;
@@ -122,27 +134,16 @@ function onRefreshError(error: unknown) {
  * Uses raw axios to avoid triggering the 401 interceptor recursively.
  */
 async function refreshAuthToken(): Promise<string | null> {
-  const token = localStorage.getItem('token');
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await axios.post(
-    `${API_URL}/api/auth/refresh`,
-    {},
-    { headers, withCredentials: true }
-  );
+  const response = await axios.post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true });
 
   const newToken: string | null = response.data?.access_token ?? null;
-  if (newToken && token) {
-    // Bearer auth — update localStorage
+  if (newToken) {
+    // Update localStorage so Bearer header is set on future API calls.
     // NOTE: localStorage.setItem automatically fires 'storage' events in OTHER tabs.
     // We do NOT dispatchEvent here to avoid triggering AuthContext's handleStorageChange
     // on the same tab (which would cause an unnecessary /api/users/me call).
     localStorage.setItem('token', newToken);
   }
-  // Cookie auth — the server already set the cookie on the response
   return newToken;
 }
 
@@ -289,17 +290,7 @@ export const authApi = {
 
   // Logout - clears both JWT token and cookie auth
   logout: async () => {
-    // Call both logout endpoints to clear all auth state
-    // JWT logout clears the Bearer token mechanism
-    // Cookie logout clears the httpOnly auth cookie (for OAuth users)
-    try {
-      await Promise.all([
-        api.post('/api/auth/jwt/logout').catch(() => {}),
-        api.post('/api/auth/cookie/logout').catch(() => {}),
-      ]);
-    } catch {
-      // Ignore errors, we're logging out anyway
-    }
+    await revokeServerSession();
     localStorage.removeItem('token');
   },
 
@@ -2240,12 +2231,18 @@ export const deploymentCredentialsApi = {
     // Must stay in sync with PROVIDER_CREDENTIAL_SCHEMA.token_alias in
     // orchestrator/app/routers/deployment_credentials.py
     const tokenFieldNames = [
-      'api_token', 'access_token', 'token', 'api_key',
-      'client_secret', 'service_account_json', 'aws_access_key_id',
+      'api_token',
+      'access_token',
+      'token',
+      'api_key',
+      'client_secret',
+      'service_account_json',
+      'aws_access_key_id',
     ];
     // Extract the first matching token field
     const tokenField = tokenFieldNames.reduce<string | undefined>(
-      (found, key) => found || credentials[key], undefined
+      (found, key) => found || credentials[key],
+      undefined
     );
 
     // Extract other fields as metadata

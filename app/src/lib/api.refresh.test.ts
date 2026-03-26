@@ -129,7 +129,7 @@ describe('authApi.refreshToken', () => {
     vi.clearAllMocks();
   });
 
-  it('calls POST /api/auth/refresh with current token', async () => {
+  it('calls POST /api/auth/refresh with credentials (no Bearer header)', async () => {
     const mockPost = axios.post as unknown as ReturnType<typeof vi.fn>;
     mockPost.mockResolvedValueOnce({
       data: { access_token: 'new_token_123', token_type: 'bearer' },
@@ -140,16 +140,18 @@ describe('authApi.refreshToken', () => {
     const { authApi } = await import('./api');
     await authApi.refreshToken();
 
+    // Refresh now relies on the tesslate_refresh httpOnly cookie (withCredentials),
+    // NOT the Bearer header — no Authorization header should be sent
     expect(mockPost).toHaveBeenCalledWith(
       'http://test/api/auth/refresh',
       {},
       expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer old_token_abc',
-        }),
         withCredentials: true,
       })
     );
+    // Verify no Authorization header is sent
+    const callArgs = mockPost.mock.calls[0][2];
+    expect(callArgs.headers?.Authorization).toBeUndefined();
   });
 
   it('updates localStorage with new token on success', async () => {
@@ -165,7 +167,7 @@ describe('authApi.refreshToken', () => {
     expect(localStorageMock.setItem).toHaveBeenCalledWith('token', 'fresh_token_xyz');
   });
 
-  it('does not update localStorage when no token in storage (cookie auth)', async () => {
+  it('always updates localStorage with new token (even for cookie-auth users)', async () => {
     const mockPost = axios.post as unknown as ReturnType<typeof vi.fn>;
     mockPost.mockResolvedValueOnce({
       data: { access_token: 'cookie_token', token_type: 'bearer' },
@@ -175,12 +177,8 @@ describe('authApi.refreshToken', () => {
     const { authApi } = await import('./api');
     await authApi.refreshToken();
 
-    // setItem should NOT have been called with the new token
-    // (only the initial clear() calls)
-    const setItemCalls = localStorageMock.setItem.mock.calls.filter(
-      (call: string[]) => call[0] === 'token'
-    );
-    expect(setItemCalls).toHaveLength(0);
+    // Refresh always stores the access token so Bearer header works on subsequent calls
+    expect(localStorageMock.setItem).toHaveBeenCalledWith('token', 'cookie_token');
   });
 });
 

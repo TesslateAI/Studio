@@ -2,23 +2,28 @@
 Custom authentication routes for Tesslate Studio.
 
 Note: Register, login, and token management are handled by fastapi-users in main.py
-This file only contains custom endpoints like pod access verification and token refresh.
+This file contains token refresh (via DB-backed refresh tokens), unified logout,
+and pod access verification.
 """
 
 import logging
+import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Literal, cast
-from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
-from jose import JWTError
-from jose import jwt as jose_jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..database import get_db
 from ..models import PodAccessLog, User
+from ..models_auth import RefreshToken
+from ..services.auth_tokens import (
+    REFRESH_TOKEN_DAYS,
+    _clear_access_cookie,
+    _clear_refresh_cookie,
+    _set_refresh_cookie,
+)
 from ..users import current_active_user, get_jwt_strategy
 
 logger = logging.getLogger(__name__)
@@ -32,87 +37,64 @@ async def refresh_token(
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-    tesslate_auth: str | None = Cookie(default=None),
+    tesslate_refresh: str | None = Cookie(default=None),
 ):
     """
-    Refresh an existing JWT token.
+    Refresh the session using a long-lived refresh token cookie.
 
-    Accepts the current token via:
-    1. Authorization: Bearer <token> header
-    2. tesslate_auth httpOnly cookie
-
-    Issues a fresh token if the current one is valid (with a 30-minute grace
-    window past expiry to handle edge cases like tab backgrounding).
-
-    Returns:
-    - For bearer auth: {"access_token": "...", "token_type": "bearer"}
-    - For cookie auth: sets the tesslate_auth cookie on the response
+    Reads the `tesslate_refresh` httpOnly cookie, validates it against the DB,
+    rotates (revoke old + create new), and returns a fresh access JWT.
     """
-    # Extract token from header or cookie
-    token = None
-    auth_via_cookie = False
-
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-    elif tesslate_auth:
-        token = tesslate_auth
-        auth_via_cookie = True
-
-    if not token:
+    if not tesslate_refresh:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No token provided",
+            detail="No refresh token",
         )
 
-    # Decode the JWT — allow up to 30 minutes past expiry
-    secret = settings.secret_key
-    algorithm = settings.algorithm
-    try:
-        payload = jose_jwt.decode(
-            token,
-            secret,
-            algorithms=[algorithm],
-            options={
-                "verify_exp": False,  # We check expiry manually with grace window
-                "verify_aud": False,  # Token includes fastapi-users audience; skip here
-            },
-        )
-    except JWTError:
+    # Look up refresh token in DB
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token == tesslate_refresh))
+    token_row = result.scalar_one_or_none()
+
+    if not token_row:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-        ) from None
+            detail="Invalid refresh token",
+        )
 
-    # Check expiry with 30-minute grace window
-    exp = payload.get("exp")
-    if exp is not None:
-        exp_dt = datetime.fromtimestamp(exp, tz=UTC)
-        grace_deadline = exp_dt + timedelta(minutes=30)
-        if datetime.now(UTC) > grace_deadline:
+    # Check revoked — allow a 30-second grace period for multi-tab race conditions
+    # (two tabs refresh simultaneously; first revokes, second arrives with stale cookie)
+    if token_row.revoked_at is not None:
+        grace_seconds = 30
+        since_revoked = (datetime.now(UTC) - token_row.revoked_at).total_seconds()
+        if since_revoked > grace_seconds:
+            logger.warning(f"[SECURITY] Revoked refresh token reused for user {token_row.user_id}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token expired beyond grace window",
+                detail="Refresh token revoked",
             )
+        # Within grace period — look up the user and issue a new access token
+        # but do NOT rotate again (the replacement token is already active)
+        user_result = await db.execute(select(User).where(User.id == token_row.user_id))
+        user = user_result.scalar_one_or_none()
+        if not user or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User inactive or not found",
+            )
+        jwt_strategy = get_jwt_strategy()
+        access_token = await jwt_strategy.write_token(user)
+        return {"access_token": access_token, "token_type": "bearer"}
 
-    # Verify user still exists and is active
-    user_id = payload.get("sub")
-    if not user_id:
+    # Check expired
+    if token_row.expires_at < datetime.now(UTC):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
+            detail="Refresh token expired",
         )
 
-    try:
-        user_uuid = UUID(user_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        ) from None
-
-    result = await db.execute(select(User).where(User.id == user_uuid))
-    user = result.scalar_one_or_none()
+    # Verify user still exists and is active
+    user_result = await db.execute(select(User).where(User.id == token_row.user_id))
+    user = user_result.scalar_one_or_none()
 
     if not user or not user.is_active:
         raise HTTPException(
@@ -120,25 +102,58 @@ async def refresh_token(
             detail="User inactive or not found",
         )
 
-    # Issue a fresh token
+    # Rotate: revoke old token, create new one
+    token_row.revoked_at = datetime.now(UTC)
+
+    new_refresh_value = secrets.token_urlsafe(48)
+    new_refresh = RefreshToken(
+        token=new_refresh_value,
+        user_id=user.id,
+        expires_at=datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_DAYS),
+        user_agent=request.headers.get("User-Agent", "")[:512],
+        ip_address=(
+            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or (request.client.host if request.client else None)
+        ),
+    )
+    db.add(new_refresh)
+    await db.commit()
+
+    # Issue fresh access JWT
     jwt_strategy = get_jwt_strategy()
-    new_token = await jwt_strategy.write_token(user)
+    access_token = await jwt_strategy.write_token(user)
 
-    if auth_via_cookie:
-        # Re-set the httpOnly cookie
-        response.set_cookie(
-            key="tesslate_auth",
-            value=new_token,
-            max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
-            httponly=True,
-            secure=settings.cookie_secure,
-            samesite=cast(Literal["lax", "strict", "none"], settings.cookie_samesite),
-            domain=settings.cookie_domain if settings.cookie_domain else None,
-            path="/",
+    # Set new refresh cookie
+    _set_refresh_cookie(response, new_refresh_value)
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/logout")
+async def logout(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    tesslate_refresh: str | None = Cookie(default=None),
+):
+    """
+    Unified logout: revoke refresh token in DB and clear all auth cookies.
+    """
+    if tesslate_refresh:
+        result = await db.execute(
+            select(RefreshToken).where(RefreshToken.token == tesslate_refresh)
         )
-        return {"access_token": new_token, "token_type": "bearer"}
+        token_row = result.scalar_one_or_none()
+        if token_row:
+            # Hard delete — distinguishes logout (token gone) from rotation (token revoked)
+            # so the rotation grace window doesn't accidentally honour a logged-out session
+            await db.delete(token_row)
+            await db.commit()
 
-    return {"access_token": new_token, "token_type": "bearer"}
+    # Clear both cookies regardless
+    _clear_refresh_cookie(response)
+    _clear_access_cookie(response)
+
+    return {"detail": "Logged out"}
 
 
 @router.get("/verify-access")

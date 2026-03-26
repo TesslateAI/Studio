@@ -921,6 +921,15 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
             for cookie_header in set_cookie_headers:
                 redirect_response.headers.append("set-cookie", cookie_header)
 
+            # Issue refresh token (long-lived httpOnly cookie for session persistence)
+            from app.services.auth_tokens import issue_token_pair  # noqa: E402
+
+            from .database import AsyncSessionLocal  # noqa: E402
+
+            async with AsyncSessionLocal() as db:
+                await issue_token_pair(db, user, redirect_response, request)
+                await db.commit()
+
             logger.info(f"OAuth login successful for {provider_name}: {user.email}")
             return redirect_response
 

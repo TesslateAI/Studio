@@ -93,6 +93,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         "/api/auth/cookie/login",
         "/api/auth/jwt/logout",
         "/api/auth/cookie/logout",
+        "/api/auth/logout",
         "/api/auth/refresh",
         "/api/auth/csrf",  # CSRF token endpoint itself
         "/api/auth/google/callback",

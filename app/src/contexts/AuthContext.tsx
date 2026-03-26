@@ -31,12 +31,12 @@ import {
   AuthenticationError,
   shouldLogoutOnError,
 } from './auth/types';
-import { authApi } from '../lib/api';
+import { authApi, revokeServerSession } from '../lib/api';
 import { config } from '../config';
 
 const API_URL = config.API_URL;
 
-const SILENT_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+const SILENT_REFRESH_INTERVAL_MS = 12 * 60 * 1000; // 12 minutes — refresh before 15-min access token expires
 const REFRESH_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes — minimum gap between refreshes
 
 // =============================================================================
@@ -216,14 +216,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           statusCode: authError.statusCode,
         });
 
-        // Clear invalid token and stale httpOnly cookies if session expired
+        // Clear invalid token and revoke server session if expired
         if (shouldLogoutOnError(authError.toAuthError())) {
           localStorage.removeItem('token');
-          // Clear stale httpOnly cookies by calling server logout (non-blocking)
-          Promise.allSettled([
-            axios.post(`${API_URL}/api/auth/jwt/logout`, {}, { withCredentials: true }),
-            axios.post(`${API_URL}/api/auth/cookie/logout`, {}, { withCredentials: true }),
-          ]).catch(() => {});
+          revokeServerSession(); // non-blocking, best-effort
         }
 
         if (mountedRef.current) {
@@ -297,15 +293,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = useCallback(async () => {
     abortControllerRef.current?.abort();
 
-    try {
-      // Call both logout endpoints (non-blocking)
-      await Promise.allSettled([
-        axios.post(`${API_URL}/api/auth/jwt/logout`, {}, { withCredentials: true }),
-        axios.post(`${API_URL}/api/auth/cookie/logout`, {}, { withCredentials: true }),
-      ]);
-    } catch {
-      // Ignore errors - we're logging out anyway
-    }
+    await revokeServerSession();
 
     // Clear local state
     localStorage.removeItem('token');

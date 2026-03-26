@@ -13,7 +13,7 @@ Provides:
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -22,6 +22,7 @@ from ..schemas_auth import (
     LoginResponse,
     TwoFAVerifyRequest,
 )
+from ..services.auth_tokens import issue_token_pair
 from ..services.email_service import get_email_service
 from ..services.two_fa_service import (
     cleanup_expired_codes,
@@ -30,7 +31,7 @@ from ..services.two_fa_service import (
     validate_temp_token,
     verify_code,
 )
-from ..users import get_jwt_strategy, get_user_manager
+from ..users import get_user_manager
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -45,6 +46,8 @@ router = APIRouter()
 
 @router.post("/login", response_model=LoginResponse)
 async def custom_login(
+    request: Request,
+    response: Response,
     username: str = Form(...),
     password: str = Form(...),
     db: AsyncSession = Depends(get_db),
@@ -90,10 +93,10 @@ async def custom_login(
             detail="LOGIN_BAD_CREDENTIALS",
         )
 
-    # If 2FA is disabled globally, issue JWT directly
+    # If 2FA is disabled globally, issue token pair directly
     if not settings.two_fa_enabled:
-        strategy = get_jwt_strategy()
-        token = await strategy.write_token(user)
+        token = await issue_token_pair(db, user, response, request)
+        await db.commit()
         return LoginResponse(access_token=token)
 
     # Generate code and return temp token (mandatory 2FA)
@@ -120,6 +123,8 @@ async def custom_login(
 
 @router.post("/2fa/verify", response_model=LoginResponse)
 async def verify_2fa(
+    request: Request,
+    response: Response,
     body: TwoFAVerifyRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -161,8 +166,8 @@ async def verify_2fa(
             detail="Invalid or expired verification session",
         )
 
-    strategy = get_jwt_strategy()
-    token = await strategy.write_token(user)
+    token = await issue_token_pair(db, user, response, request)
+    await db.commit()
 
     # Opportunistic cleanup
     asyncio.create_task(_cleanup_codes())

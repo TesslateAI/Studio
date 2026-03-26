@@ -1,15 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import axios from 'axios';
-import { authApi } from '../lib/api';
+import { authApi, revokeServerSession } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import { MiniAsteroids } from '../components/MiniAsteroids';
 import { TesslateLogo } from '../components/ui/TesslateLogo';
 import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -108,14 +105,9 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // Clear any stale auth state (cookies, tokens) before attempting login
-      // This prevents stale httpOnly cookies from conflicting with the new login
-      // Fire-and-forget: 401s are expected (no session to clear) and harmless
+      // Clear any stale auth state before attempting login
       localStorage.removeItem('token');
-      Promise.allSettled([
-        axios.post(`${API_URL}/api/auth/jwt/logout`, {}, { withCredentials: true }),
-        axios.post(`${API_URL}/api/auth/cookie/logout`, {}, { withCredentials: true }),
-      ]).catch(() => {});
+      revokeServerSession(); // non-blocking, best-effort
 
       const response = await authApi.login(formData.email, formData.password);
 

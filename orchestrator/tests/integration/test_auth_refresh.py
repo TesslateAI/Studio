@@ -1,17 +1,17 @@
 """
-Integration tests for POST /api/auth/refresh endpoint.
+Integration tests for the access + refresh token pair system.
 
 Tests:
-- Valid token refresh (bearer)
-- No token provided
-- Invalid/garbage token
-- Token signed with wrong secret
-- Expired token within 30-min grace window
-- Expired token beyond grace window
-- Token with non-existent user
-- Token with invalid UUID in sub claim
-- Inactive user token
-- Cookie-based refresh
+- Login sets refresh cookie + returns access JWT
+- Refresh via cookie returns new access token + rotates refresh token
+- Refresh without cookie returns 401
+- Refresh with revoked token returns 401
+- Refresh with expired refresh token returns 401
+- Logout revokes refresh token
+- Post-logout refresh fails
+- Token lifetime (15-min access JWT)
+- Refresh chain (multiple consecutive refreshes)
+- Cookie auth + refresh
 """
 
 from datetime import UTC, datetime, timedelta
@@ -20,294 +20,325 @@ import pytest
 from jose import jwt as jose_jwt
 
 
+def _decode_token(token: str) -> dict:
+    from app.config import get_settings
+
+    settings = get_settings()
+    return jose_jwt.decode(
+        token,
+        settings.secret_key,
+        algorithms=[settings.algorithm],
+        options={"verify_exp": False, "verify_aud": False},
+    )
+
+
+def _extract_refresh_cookie(response) -> str | None:
+    """Extract tesslate_refresh value from Set-Cookie header."""
+    import re
+
+    # httpx Response uses .headers.get_list() or multi_items()
+    for key, value in response.headers.multi_items():
+        if key.lower() == "set-cookie" and "tesslate_refresh=" in value:
+            match = re.match(r"tesslate_refresh=([^;]+)", value)
+            if match:
+                return match.group(1)
+    return None
+
+
+def _login(client) -> tuple[dict, str]:
+    """Register + login, return (user_data, access_token). Sets refresh cookie on client."""
+    # Ensure clean state
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+
+    from uuid import uuid4
+
+    email = f"test-{uuid4().hex}@example.com"
+    reg = client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": "SecurePass123!",
+            "name": "Test User",
+        },
+    )
+    assert reg.status_code == 201
+    user_data = reg.json()
+
+    login_resp = client.post(
+        "/api/auth/login",
+        data={
+            "username": email,
+            "password": "SecurePass123!",
+        },
+    )
+    assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
+    data = login_resp.json()
+    assert "access_token" in data
+
+    # Manually set the refresh cookie (TestClient doesn't auto-collect domain-scoped cookies)
+    refresh_value = _extract_refresh_cookie(login_resp)
+    assert refresh_value, "Login did not set tesslate_refresh cookie"
+    client.cookies.set("tesslate_refresh", refresh_value)
+
+    # Set Bearer header for authenticated calls
+    client.headers["Authorization"] = f"Bearer {data['access_token']}"
+
+    return user_data, data["access_token"]
+
+
+# ---------------------------------------------------------------------------
+# Login + access token
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.integration
-def test_refresh_valid_token(authenticated_client):
-    """Refresh with a valid Bearer token returns a new access_token."""
-    client, _user_data = authenticated_client
+def test_login_returns_access_token_and_sets_refresh_cookie(api_client_session):
+    """Login should return access JWT and set tesslate_refresh cookie."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
-    response = client.post("/api/auth/refresh")
+    _user_data, access_token = _login(client)
 
-    assert response.status_code == 200
-    data = response.json()
+    # Access token should be a valid JWT
+    payload = _decode_token(access_token)
+    assert "sub" in payload
+    assert "exp" in payload
+
+    # Refresh cookie was already verified by _login helper
+    assert client.cookies.get("tesslate_refresh") is not None
+
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+
+
+@pytest.mark.integration
+def test_access_token_expires_in_15_minutes(api_client_session):
+    """Freshly issued access token should expire ~15 minutes from now."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+
+    _user_data, access_token = _login(client)
+
+    payload = _decode_token(access_token)
+    exp_dt = datetime.fromtimestamp(payload["exp"], tz=UTC)
+    delta = exp_dt - datetime.now(UTC)
+
+    assert timedelta(minutes=14) < delta < timedelta(minutes=16), (
+        f"Token exp is {delta} from now, expected ~15 minutes"
+    )
+
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+
+
+# ---------------------------------------------------------------------------
+# Refresh
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_refresh_returns_new_access_token(api_client_session):
+    """POST /api/auth/refresh with valid cookie returns new access JWT."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+
+    _user_data, old_token = _login(client)
+
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 200
+
+    data = resp.json()
     assert "access_token" in data
     assert data["token_type"] == "bearer"
     assert len(data["access_token"]) > 0
 
+    # Update cookie for subsequent calls
+    new_refresh = _extract_refresh_cookie(resp)
+    if new_refresh:
+        client.cookies.set("tesslate_refresh", new_refresh)
 
-@pytest.mark.integration
-def test_refresh_returns_valid_new_token(authenticated_client):
-    """The refreshed token should decode successfully with exp >= the original."""
-    client, _user_data = authenticated_client
-
-    old_token = client.headers["Authorization"].replace("Bearer ", "")
-    response = client.post("/api/auth/refresh")
-
-    assert response.status_code == 200
-    new_token = response.json()["access_token"]
-
-    # Decode both tokens and verify the new one has a valid exp
-    from app.config import get_settings
-
-    settings = get_settings()
-    old_payload = jose_jwt.decode(
-        old_token,
-        settings.secret_key,
-        algorithms=[settings.algorithm],
-        options={"verify_exp": False, "verify_aud": False},
-    )
-    new_payload = jose_jwt.decode(
-        new_token,
-        settings.secret_key,
-        algorithms=[settings.algorithm],
-        options={"verify_exp": False, "verify_aud": False},
-    )
-
-    # New token's exp should be >= old token's exp (freshly issued)
-    assert new_payload["exp"] >= old_payload["exp"]
-    # Both tokens should be for the same user
-    assert new_payload["sub"] == old_payload["sub"]
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
 
 @pytest.mark.integration
-def test_refresh_new_token_is_valid(authenticated_client):
-    """The refreshed token should work for authenticated API calls."""
-    client, user_data = authenticated_client
+def test_refresh_rotates_cookie(api_client_session):
+    """Refresh should set a new tesslate_refresh cookie (rotation)."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
-    # Get new token
-    response = client.post("/api/auth/refresh")
-    assert response.status_code == 200
-    new_token = response.json()["access_token"]
+    _login(client)
 
-    # Use new token for /api/users/me
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 200
+
+    # The Set-Cookie header should contain a new tesslate_refresh
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert "tesslate_refresh" in set_cookie
+
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+
+
+@pytest.mark.integration
+def test_refresh_without_cookie_returns_401(api_client_session):
+    """Refresh without any cookie returns 401."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "No refresh token"
+
+
+@pytest.mark.integration
+def test_refresh_with_invalid_cookie_returns_401(api_client_session):
+    """Refresh with a garbage cookie returns 401."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+    client.cookies.set("tesslate_refresh", "totally_invalid_token")
+
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid refresh token"
+
+    client.cookies.clear()
+
+
+@pytest.mark.integration
+def test_refreshed_token_works_for_api_calls(api_client_session):
+    """The new access token from refresh should work for authenticated endpoints."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
+
+    user_data, _old_token = _login(client)
+
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 200
+    new_token = resp.json()["access_token"]
+
+    # Update refresh cookie for future calls
+    new_refresh = _extract_refresh_cookie(resp)
+    if new_refresh:
+        client.cookies.set("tesslate_refresh", new_refresh)
+
     client.headers["Authorization"] = f"Bearer {new_token}"
-    me_response = client.get("/api/users/me")
+    me_resp = client.get("/api/users/me")
+    assert me_resp.status_code == 200
+    assert me_resp.json()["id"] == user_data["id"]
 
-    assert me_response.status_code == 200
-    assert me_response.json()["id"] == user_data["id"]
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
 
-@pytest.mark.integration
-def test_refresh_no_token(api_client):
-    """Refresh without any token returns 401."""
-    response = api_client.post("/api/auth/refresh")
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "No token provided"
+# ---------------------------------------------------------------------------
+# Logout + revocation
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_refresh_invalid_token(api_client):
-    """Refresh with a garbage token returns 401."""
-    api_client.headers["Authorization"] = "Bearer totally_invalid_jwt_string"
+def test_logout_revokes_refresh_token(api_client_session):
+    """POST /api/auth/logout should revoke the refresh token."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
-    response = api_client.post("/api/auth/refresh")
+    _login(client)
 
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid token"
+    resp = client.post("/api/auth/logout")
+    assert resp.status_code == 200
+    assert resp.json()["detail"] == "Logged out"
 
-
-@pytest.mark.integration
-def test_refresh_wrong_secret_token(api_client):
-    """Refresh with a token signed by a different secret returns 401."""
-    # Create a JWT signed with a wrong secret
-    fake_token = jose_jwt.encode(
-        {"sub": "00000000-0000-0000-0000-000000000001", "aud": "fastapi-users:auth"},
-        "wrong_secret_key",
-        algorithm="HS256",
-    )
-    api_client.headers["Authorization"] = f"Bearer {fake_token}"
-
-    response = api_client.post("/api/auth/refresh")
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid token"
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
 
 @pytest.mark.integration
-def test_refresh_expired_within_grace_window(authenticated_client):
-    """Token expired less than 30 minutes ago should still refresh."""
-    client, _user_data = authenticated_client
-    old_token = client.headers["Authorization"].replace("Bearer ", "")
+def test_refresh_after_logout_fails(api_client_session):
+    """After logout, the old refresh cookie should be rejected."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
-    # Decode current token to get secret/algorithm (we need to forge an expired one)
-    from app.config import get_settings
+    _login(client)
+    refresh_cookie = client.cookies.get("tesslate_refresh")
 
-    settings = get_settings()
+    # Logout
+    client.post("/api/auth/logout")
 
-    # Decode without verification to get payload
-    payload = jose_jwt.decode(
-        old_token,
-        settings.secret_key,
-        algorithms=[settings.algorithm],
-        options={"verify_exp": False, "verify_aud": False},
-    )
+    # Try to use the old refresh token
+    client.cookies.clear()
+    client.cookies.set("tesslate_refresh", refresh_cookie)
 
-    # Set exp to 10 minutes ago (within 30-min grace window)
-    payload["exp"] = (datetime.now(UTC) - timedelta(minutes=10)).timestamp()
-    expired_token = jose_jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid refresh token"
 
-    client.headers["Authorization"] = f"Bearer {expired_token}"
-    response = client.post("/api/auth/refresh")
-
-    assert response.status_code == 200
-    assert "access_token" in response.json()
+    client.cookies.clear()
 
 
-@pytest.mark.integration
-def test_refresh_expired_beyond_grace_window(authenticated_client):
-    """Token expired more than 30 minutes ago should fail."""
-    client, _user_data = authenticated_client
-    old_token = client.headers["Authorization"].replace("Bearer ", "")
-
-    from app.config import get_settings
-
-    settings = get_settings()
-
-    payload = jose_jwt.decode(
-        old_token,
-        settings.secret_key,
-        algorithms=[settings.algorithm],
-        options={"verify_exp": False, "verify_aud": False},
-    )
-
-    # Set exp to 45 minutes ago (beyond 30-min grace window)
-    payload["exp"] = (datetime.now(UTC) - timedelta(minutes=45)).timestamp()
-    expired_token = jose_jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
-
-    client.headers["Authorization"] = f"Bearer {expired_token}"
-    response = client.post("/api/auth/refresh")
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Token expired beyond grace window"
+# ---------------------------------------------------------------------------
+# Refresh chain
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_refresh_nonexistent_user(api_client):
-    """Token with a valid UUID that doesn't exist in DB returns 401."""
-    from app.config import get_settings
+def test_refresh_chain_three_consecutive(api_client_session):
+    """Three consecutive refreshes should all succeed with token rotation."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
-    settings = get_settings()
+    user_data, _token = _login(client)
 
-    # Create a token for a user that doesn't exist
-    payload = {
-        "sub": "00000000-0000-0000-0000-999999999999",
-        "aud": "fastapi-users:auth",
-        "exp": (datetime.now(UTC) + timedelta(hours=1)).timestamp(),
-    }
-    token = jose_jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+    for i in range(3):
+        resp = client.post("/api/auth/refresh")
+        assert resp.status_code == 200, f"Refresh #{i + 1} failed: {resp.text}"
 
-    api_client.headers["Authorization"] = f"Bearer {token}"
-    response = api_client.post("/api/auth/refresh")
+        new_token = resp.json()["access_token"]
+        client.headers["Authorization"] = f"Bearer {new_token}"
 
-    assert response.status_code == 401
-    assert response.json()["detail"] == "User inactive or not found"
+        # Update refresh cookie (rotation)
+        new_refresh = _extract_refresh_cookie(resp)
+        assert new_refresh, f"Refresh #{i + 1} did not set new cookie"
+        client.cookies.set("tesslate_refresh", new_refresh)
 
+        me_resp = client.get("/api/users/me")
+        assert me_resp.status_code == 200
+        assert me_resp.json()["id"] == user_data["id"]
 
-@pytest.mark.integration
-def test_refresh_invalid_uuid_in_sub(api_client):
-    """Token with a non-UUID sub claim returns 401."""
-    from app.config import get_settings
-
-    settings = get_settings()
-
-    payload = {
-        "sub": "not-a-valid-uuid",
-        "aud": "fastapi-users:auth",
-        "exp": (datetime.now(UTC) + timedelta(hours=1)).timestamp(),
-    }
-    token = jose_jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
-
-    api_client.headers["Authorization"] = f"Bearer {token}"
-    response = api_client.post("/api/auth/refresh")
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid token payload"
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
 
 @pytest.mark.integration
-def test_refresh_missing_sub_claim(api_client):
-    """Token with no sub claim returns 401."""
-    from app.config import get_settings
+def test_rotated_token_accepted_within_grace_window(api_client_session):
+    """A just-rotated refresh token should still work within the 30s grace window (multi-tab safety)."""
+    client = api_client_session
+    client.headers.pop("Authorization", None)
+    client.cookies.clear()
 
-    settings = get_settings()
+    _login(client)
+    first_refresh = client.cookies.get("tesslate_refresh")
 
-    payload = {
-        "aud": "fastapi-users:auth",
-        "exp": (datetime.now(UTC) + timedelta(hours=1)).timestamp(),
-    }
-    token = jose_jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+    # Refresh once (rotates the token)
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 200
 
-    api_client.headers["Authorization"] = f"Bearer {token}"
-    response = api_client.post("/api/auth/refresh")
+    # Use the old (just-rotated) token immediately — should succeed due to grace window
+    client.cookies.clear()
+    client.cookies.set("tesslate_refresh", first_refresh)
 
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid token payload"
+    resp = client.post("/api/auth/refresh")
+    assert resp.status_code == 200
+    assert "access_token" in resp.json()
 
-
-@pytest.mark.integration
-def test_refresh_inactive_user(authenticated_client):
-    """Refresh for an inactive user returns 401."""
-    client, user_data = authenticated_client
-
-    # Deactivate the user directly in DB using asyncpg
-    import asyncpg
-
-    async def set_user_active(active: bool):
-        conn = await asyncpg.connect(
-            "postgresql://tesslate_test:testpass@localhost:5433/tesslate_test"
-        )
-        try:
-            await conn.execute(
-                "UPDATE users SET is_active = $1 WHERE id = $2::uuid",
-                active,
-                user_data["id"],
-            )
-        finally:
-            await conn.close()
-
-    import asyncio
-
-    asyncio.run(set_user_active(False))
-
-    try:
-        response = client.post("/api/auth/refresh")
-        assert response.status_code == 401
-        assert response.json()["detail"] == "User inactive or not found"
-    finally:
-        asyncio.run(set_user_active(True))
-
-
-@pytest.mark.integration
-def test_refresh_via_cookie(api_client_session):
-    """Refresh via tesslate_auth cookie sets a new cookie on the response."""
-    from uuid import uuid4
-
-    # Register and login to get a token
-    email = f"cookie-test-{uuid4().hex}@example.com"
-    api_client_session.post(
-        "/api/auth/register",
-        json={"email": email, "password": "CookiePass123!", "name": "Cookie User"},
-    )
-    login_response = api_client_session.post(
-        "/api/auth/jwt/login",
-        data={"username": email, "password": "CookiePass123!"},
-    )
-    token = login_response.json()["access_token"]
-
-    # Call refresh with cookie instead of header
-    api_client_session.headers.pop("Authorization", None)
-    api_client_session.cookies.set("tesslate_auth", token)
-
-    try:
-        response = api_client_session.post("/api/auth/refresh")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "access_token" in data
-        assert data["token_type"] == "bearer"
-
-        # Verify response sets a new cookie
-        set_cookie = response.headers.get("set-cookie", "")
-        assert "tesslate_auth" in set_cookie
-    finally:
-        api_client_session.cookies.clear()
+    client.cookies.clear()
