@@ -205,7 +205,7 @@ class Settings(BaseSettings):
     csrf_token_max_age: int = 86400  # CSRF token expiration in seconds (default: 24 hours)
 
     # Cookie Security Settings
-    cookie_secure: bool = False  # Set to True in production (requires HTTPS)
+    cookie_secure: bool = True  # HTTPS-only cookies; set to False for local dev without TLS
     cookie_samesite: str = "lax"  # lax, strict, or none
     cookie_domain: str = ""  # Leave empty for default, or set to .yourdomain.com for subdomains
 

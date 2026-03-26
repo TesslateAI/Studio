@@ -131,6 +131,7 @@ async def refresh_token(
 
 @router.post("/logout")
 async def logout(
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
     tesslate_refresh: str | None = Cookie(default=None),
@@ -138,16 +139,24 @@ async def logout(
     """
     Unified logout: revoke refresh token in DB and clear all auth cookies.
     """
+    user_id = None
     if tesslate_refresh:
         result = await db.execute(
             select(RefreshToken).where(RefreshToken.token == tesslate_refresh)
         )
         token_row = result.scalar_one_or_none()
         if token_row:
+            user_id = token_row.user_id
             # Hard delete — distinguishes logout (token gone) from rotation (token revoked)
             # so the rotation grace window doesn't accidentally honour a logged-out session
             await db.delete(token_row)
             await db.commit()
+
+    # Audit log
+    ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (
+        request.client.host if request.client else "unknown"
+    )
+    logger.info(f"[AUDIT] Logout: user={user_id}, ip={ip}")
 
     # Clear both cookies regardless
     _clear_refresh_cookie(response)
