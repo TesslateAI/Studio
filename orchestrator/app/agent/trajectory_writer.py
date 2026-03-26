@@ -136,7 +136,9 @@ def _messages_to_trajectory(messages: list[dict[str, Any]]) -> list[dict[str, An
         role = msg.get("role", "")
         entry: dict[str, Any] = {
             "role": role,
-            "content": msg.get("content") or "",
+            "content": msg.get("content")
+            if isinstance(msg.get("content"), str)
+            else str(msg.get("content") or ""),
             "timestamp": now,
         }
         if role == "assistant" and msg.get("tool_calls"):

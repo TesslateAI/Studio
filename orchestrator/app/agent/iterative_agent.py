@@ -176,7 +176,8 @@ class IterativeAgent(AbstractAgent):
 
         # Get user message with full [CONTEXT] section
         user_message = await get_user_message_wrapper(
-            user_request, project_context,
+            user_request,
+            project_context,
             attachments=context.get("attachments"),
         )
 
@@ -227,11 +228,11 @@ class IterativeAgent(AbstractAgent):
                 for idx, msg in enumerate(self.messages):
                     role = msg["role"]
                     content = msg["content"]
-                    logger.debug(
-                        f"  Message {idx} [{role}]: {content[:500]}..."
-                        if len(content) > 500
-                        else f"  Message {idx} [{role}]: {content}"
-                    )
+                    if isinstance(content, str):
+                        display = f"{content[:500]}..." if len(content) > 500 else content
+                    else:
+                        display = f"[multimodal: {len(content)} parts]"
+                    logger.debug(f"  Message {idx} [{role}]: {display}")
 
                 try:
                     # Step 1: Get model response (streaming)
