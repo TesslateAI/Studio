@@ -430,33 +430,42 @@ class TestStripeBudgetSync:
         service.publishable_key = None
 
         user_id = uuid4()
+        team_id = uuid4()
         checkout_session = {
             "id": "cs_test_123",
             "payment_intent": "pi_test_123",
             "amount_total": 2500,
             "metadata": {
                 "user_id": str(user_id),
+                "team_id": str(team_id),
                 "amount_cents": "2500",
                 "credits_amount": "2500",
             },
         }
 
+        team = Mock()
+        team.id = team_id
+        team.purchased_credits = 0
+        team.total_spend = 0
+
         user = Mock()
         user.id = user_id
-        user.purchased_credits = 0
-        user.total_spend = 0
         user.litellm_api_key = "sk-test"
 
         # First execute: check for existing CreditPurchase (idempotency)
         existing_result = Mock()
         existing_result.scalar_one_or_none.return_value = None
 
-        # Second execute: select user
+        # Second execute: select team (team_id in metadata, no user lookup needed)
+        team_result = Mock()
+        team_result.scalar_one_or_none.return_value = team
+
+        # Third execute: select user (for LiteLLM budget sync)
         user_result = Mock()
         user_result.scalar_one.return_value = user
 
         db = AsyncMock()
-        db.execute = AsyncMock(side_effect=[existing_result, user_result])
+        db.execute = AsyncMock(side_effect=[existing_result, team_result, user_result])
         db.add = Mock()
         db.commit = AsyncMock()
 
@@ -488,29 +497,39 @@ class TestStripeBudgetSync:
         service.publishable_key = None
 
         user_id = uuid4()
+        team_id = uuid4()
         checkout_session = {
             "id": "cs_test_sub",
             "subscription": "sub_test_123",
             "metadata": {
                 "user_id": str(user_id),
+                "team_id": str(team_id),
                 "tier": "pro",
             },
         }
 
+        team = Mock()
+        team.id = team_id
+        team.subscription_tier = "free"
+        team.stripe_subscription_id = None
+        team.bundled_credits = 0
+        team.credits_reset_date = None
+        team.support_tier = "community"
+
         user = Mock()
         user.id = user_id
-        user.subscription_tier = "free"
-        user.stripe_subscription_id = None
-        user.bundled_credits = 0
-        user.credits_reset_date = None
-        user.support_tier = "community"
         user.litellm_api_key = "sk-test"
 
+        # First execute: select team
+        team_result = Mock()
+        team_result.scalar_one_or_none.return_value = team
+
+        # Second execute: select user (for LiteLLM sync)
         user_result = Mock()
         user_result.scalar_one.return_value = user
 
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=user_result)
+        db.execute = AsyncMock(side_effect=[team_result, user_result])
         db.commit = AsyncMock()
 
         mock_headroom = AsyncMock(return_value=True)
@@ -535,31 +554,39 @@ class TestStripeBudgetSync:
         service.publishable_key = None
 
         user_id = uuid4()
+        team_id = uuid4()
         checkout_session = {
             "id": "cs_test_fail",
             "payment_intent": "pi_test_fail",
             "amount_total": 500,
             "metadata": {
                 "user_id": str(user_id),
+                "team_id": str(team_id),
                 "amount_cents": "500",
                 "credits_amount": "500",
             },
         }
 
+        team = Mock()
+        team.id = team_id
+        team.purchased_credits = 0
+        team.total_spend = 0
+
         user = Mock()
         user.id = user_id
-        user.purchased_credits = 0
-        user.total_spend = 0
         user.litellm_api_key = "sk-test"
 
         existing_result = Mock()
         existing_result.scalar_one_or_none.return_value = None
 
+        team_result = Mock()
+        team_result.scalar_one_or_none.return_value = team
+
         user_result = Mock()
         user_result.scalar_one.return_value = user
 
         db = AsyncMock()
-        db.execute = AsyncMock(side_effect=[existing_result, user_result])
+        db.execute = AsyncMock(side_effect=[existing_result, team_result, user_result])
         db.add = Mock()
         db.commit = AsyncMock()
 
