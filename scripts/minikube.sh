@@ -128,6 +128,15 @@ ensure_minikube() {
     echo "  Run: scripts/minikube.sh start"
     exit 1
   fi
+  # CRITICAL: Always switch kubectl context to minikube to prevent
+  # accidentally applying minikube overlays to production.
+  local ctx
+  ctx="$(kubectl config current-context 2>/dev/null || true)"
+  local expected="$PROFILE"
+  if [[ "$ctx" != "$expected" ]]; then
+    warn "kubectl context is '$ctx', switching to '$expected'..."
+    kubectl config use-context "$expected" >/dev/null
+  fi
 }
 
 wait_for_rollout() {
