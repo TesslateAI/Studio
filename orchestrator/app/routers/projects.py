@@ -322,6 +322,8 @@ async def get_projects(
 
 async def enforce_project_limit(user: User, db: AsyncSession) -> None:
     """Raise 403 if user has reached their tier's project limit."""
+    from ..models_team import TeamMembership
+
     settings = get_settings()
     team_id = user.default_team_id
     if team_id:
@@ -329,8 +331,12 @@ async def enforce_project_limit(user: User, db: AsyncSession) -> None:
             select(func.count(Project.id)).where(Project.team_id == team_id)
         )
     else:
+        # Fallback: count projects across all teams the user belongs to
+        user_team_ids = select(TeamMembership.team_id).where(
+            and_(TeamMembership.user_id == user.id, TeamMembership.is_active.is_(True))
+        )
         result = await db.execute(
-            select(func.count(Project.id)).where(Project.owner_id == user.id)
+            select(func.count(Project.id)).where(Project.team_id.in_(user_team_ids))
         )
     current_count = result.scalar()
     tier = user.subscription_tier or "free"
@@ -3564,6 +3570,8 @@ async def deploy_project(
     settings = get_settings()
 
     # Count current deployed projects (team-scoped)
+    from ..models_team import TeamMembership
+
     _team_id = current_user.default_team_id
     if _team_id:
         deployed_count_result = await db.execute(
@@ -3572,9 +3580,12 @@ async def deploy_project(
             )
         )
     else:
+        _user_team_ids = select(TeamMembership.team_id).where(
+            and_(TeamMembership.user_id == current_user.id, TeamMembership.is_active.is_(True))
+        )
         deployed_count_result = await db.execute(
             select(func.count(Project.id)).where(
-                and_(Project.owner_id == current_user.id, Project.is_deployed)
+                and_(Project.team_id.in_(_user_team_ids), Project.is_deployed)
             )
         )
     deployed_count = deployed_count_result.scalar()
@@ -3659,6 +3670,8 @@ async def get_deployment_limits(
     settings = get_settings()
 
     # Count deployed projects (team-scoped)
+    from ..models_team import TeamMembership as _TM
+
     _team_id = current_user.default_team_id
     if _team_id:
         deployed_count_result = await db.execute(
@@ -3667,9 +3680,12 @@ async def get_deployment_limits(
             )
         )
     else:
+        _user_team_ids = select(_TM.team_id).where(
+            and_(_TM.user_id == current_user.id, _TM.is_active.is_(True))
+        )
         deployed_count_result = await db.execute(
             select(func.count(Project.id)).where(
-                and_(Project.owner_id == current_user.id, Project.is_deployed)
+                and_(Project.team_id.in_(_user_team_ids), Project.is_deployed)
             )
         )
     deployed_count = deployed_count_result.scalar()
@@ -3690,7 +3706,7 @@ async def get_deployment_limits(
         )
     else:
         total_projects_result = await db.execute(
-            select(func.count(Project.id)).where(Project.owner_id == current_user.id)
+            select(func.count(Project.id)).where(Project.team_id.in_(_user_team_ids))
         )
     total_projects = total_projects_result.scalar()
 

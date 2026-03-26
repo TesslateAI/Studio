@@ -924,15 +924,12 @@ async def deploy_container(
                 "Use POST /deploy for source-push providers or POST /export for export providers.",
             )
 
-        # 2. Verify project ownership
-        result = await db.execute(
-            select(Project).where(
-                and_(Project.slug == project_slug, Project.owner_id == current_user.id)
-            )
+        # 2. Verify project access via RBAC
+        from ..permissions import Permission, get_project_with_access
+
+        project, _role = await get_project_with_access(
+            db, project_slug, current_user.id, Permission.DEPLOYMENT_CREATE
         )
-        project = result.scalar_one_or_none()
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
         # 3. Get the target container
         if request.container_id:
@@ -1121,15 +1118,12 @@ async def export_project(
                 "Use POST /deploy for source-push or POST /deploy-container for container-push.",
             )
 
-        # 2. Verify project ownership
-        result = await db.execute(
-            select(Project).where(
-                and_(Project.slug == project_slug, Project.owner_id == current_user.id)
-            )
+        # 2. Verify project access via RBAC
+        from ..permissions import Permission, get_project_with_access
+
+        project, _role = await get_project_with_access(
+            db, project_slug, current_user.id, Permission.DEPLOYMENT_CREATE
         )
-        project = result.scalar_one_or_none()
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
         # 3. Get the target container
         if request.container_id:

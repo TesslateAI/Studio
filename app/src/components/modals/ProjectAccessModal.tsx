@@ -12,6 +12,7 @@ interface ProjectAccessModalProps {
   projectName: string;
   currentVisibility: 'team' | 'private';
   onVisibilityChange: (visibility: 'team' | 'private') => void;
+  onMembersChange?: () => void;
 }
 
 export function ProjectAccessModal({
@@ -21,6 +22,7 @@ export function ProjectAccessModal({
   projectName,
   currentVisibility,
   onVisibilityChange,
+  onMembersChange,
 }: ProjectAccessModalProps) {
   const { activeTeam } = useTeam();
   const [visibility, setVisibility] = useState(currentVisibility);
@@ -75,6 +77,7 @@ export function ProjectAccessModal({
     try {
       await teamsApi.addProjectMember(activeTeam.slug, projectSlug, userId, role);
       await loadData();
+      onMembersChange?.();
       toast.success('Member added to project');
     } catch (error) {
       const err = error as { response?: { data?: { detail?: string } } };
@@ -90,6 +93,7 @@ export function ProjectAccessModal({
     try {
       await teamsApi.removeProjectMember(activeTeam.slug, projectSlug, userId);
       await loadData();
+      onMembersChange?.();
       toast.success('Member removed from project');
     } catch {
       toast.error('Failed to remove member');
@@ -104,6 +108,7 @@ export function ProjectAccessModal({
     try {
       await teamsApi.updateProjectMemberRole(activeTeam.slug, projectSlug, userId, role);
       await loadData();
+      onMembersChange?.();
     } catch {
       toast.error('Failed to update role');
     } finally {

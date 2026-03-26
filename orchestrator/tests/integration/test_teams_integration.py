@@ -375,3 +375,538 @@ def test_projects_filtered_by_team(
     for p in projects:
         if "team_id" in p:
             assert p["team_id"] is not None
+
+
+# ── Helpers ────────────────────────────────────────────────────────────
+
+
+def _create_team_and_user_b(api_client_session, admin_client, team_prefix, role="viewer"):
+    """
+    Create a non-personal team via admin_client, register User B, invite
+    via link, accept, and return (client_b, user_b_data, team_slug).
+
+    admin_client: authenticated (client, user_data) tuple for the team creator.
+    """
+    from httpx._client import Client  # noqa: only used for type hint clarity
+
+    client_a, _ = admin_client
+    slug = f"{team_prefix}-{uuid4().hex[:8]}"
+
+    resp = client_a.post("/api/teams", json={"name": f"Team {team_prefix}", "slug": slug})
+    assert resp.status_code in (200, 201), f"Team creation failed: {resp.text}"
+
+    # Create invite link for the given role
+    link_resp = client_a.post(
+        f"/api/teams/{slug}/members/link", json={"role": role}
+    )
+    assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
+    invite_token = link_resp.json()["token"]
+
+    # Register User B with a fresh session-scoped client
+    email_b = f"userb-{uuid4().hex[:8]}@example.com"
+    api_client_session.headers.pop("Authorization", None)
+    reg = api_client_session.post(
+        "/api/auth/register",
+        json={"email": email_b, "password": "TestPass123!", "name": "User B"},
+    )
+    assert reg.status_code == 201, f"Register B failed: {reg.text}"
+    user_b_data = reg.json()
+
+    login = api_client_session.post(
+        "/api/auth/jwt/login",
+        data={"username": email_b, "password": "TestPass123!"},
+    )
+    assert login.status_code == 200, f"Login B failed: {login.text}"
+    token_b = login.json()["access_token"]
+
+    # Accept invite as User B
+    api_client_session.headers["Authorization"] = f"Bearer {token_b}"
+    accept = api_client_session.post(f"/api/teams/invitations/{invite_token}/accept")
+    assert accept.status_code == 200, f"Accept failed: {accept.text}"
+
+    # Return a lightweight wrapper: just the session client configured for B
+    # The caller must restore admin auth when it needs admin_client again.
+    return api_client_session, user_b_data, slug, token_b
+
+
+def _create_team_project(client, team_slug, base_id, name_prefix="rbac-proj"):
+    """Create a project inside the caller's active team context and return the slug."""
+    # Switch to the target team first
+    client.post(f"/api/teams/{team_slug}/switch")
+
+    resp = client.post(
+        "/api/projects/",
+        json={"name": f"{name_prefix}-{uuid4().hex[:6]}", "base_id": base_id},
+    )
+    if resp.status_code != 200:
+        return None
+    return resp.json().get("slug")
+
+
+# ── Viewer Role Enforcement ────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_viewer_can_list_projects(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Viewer can list projects for the team."""
+    client_a, user_a = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, user_b, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vlist", role="viewer"
+    )
+
+    # Restore admin context, create a project
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id)
+    if not proj_slug:
+        pytest.skip("Project creation failed (base_id missing or orchestrator error)")
+
+    # User B lists projects
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/projects/?team={slug}")
+    assert resp.status_code == 200
+
+
+@pytest.mark.integration
+def test_viewer_can_view_project_details(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Viewer can GET a specific project."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vdetail", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id)
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/projects/{proj_slug}")
+    assert resp.status_code == 200
+
+
+@pytest.mark.integration
+def test_viewer_can_view_file_tree(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Viewer can browse the file tree."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vtree", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id)
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/projects/{proj_slug}/files/tree")
+    # 200 = success, 404/502 = no container running (acceptable in test env)
+    assert resp.status_code in (200, 404, 502)
+
+
+@pytest.mark.integration
+def test_viewer_cannot_save_files(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Viewer cannot write files (403)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vsave", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id)
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.post(
+        f"/api/projects/{proj_slug}/files/save",
+        json={"file_path": "/app/test.txt", "content": "hello"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+def test_viewer_cannot_delete_project(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Viewer cannot delete a project (403)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vdel", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id)
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.delete(f"/api/projects/{proj_slug}")
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+def test_viewer_cannot_start_containers(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Viewer cannot start containers (403)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vstart", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id)
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.post(f"/api/projects/{proj_slug}/containers/start-all")
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+def test_viewer_cannot_invite_members(authenticated_client, api_client_session):
+    """Viewer cannot create invitations (403)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vinvite", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.post(
+        f"/api/teams/{slug}/members/invite",
+        json={"email": f"no-{uuid4().hex[:8]}@example.com", "role": "viewer"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+def test_viewer_cannot_change_team_settings(authenticated_client, api_client_session):
+    """Viewer cannot PATCH team settings (403)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vsettings", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.patch(f"/api/teams/{slug}", json={"name": "Hacked"})
+    assert resp.status_code == 403
+
+
+# ── Editor Role Enforcement ────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_editor_can_list_and_view_projects(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Editor can list and view projects."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "elist", role="editor"
+    )
+
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id)
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+
+    list_resp = client_a.get(f"/api/projects/?team={slug}")
+    assert list_resp.status_code == 200
+
+    detail_resp = client_a.get(f"/api/projects/{proj_slug}")
+    assert detail_resp.status_code == 200
+
+
+@pytest.mark.integration
+def test_editor_can_save_files(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Editor can save files (200 or 404 for missing container is acceptable)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "esave", role="editor"
+    )
+
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id)
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.post(
+        f"/api/projects/{proj_slug}/files/save",
+        json={"file_path": "/app/test.txt", "content": "hello from editor"},
+    )
+    # 200 = success, 404 = no container running (acceptable — proves permission passed)
+    # 403 would indicate the permission check is wrong
+    assert resp.status_code != 403, f"Editor should not get 403: {resp.text}"
+
+
+@pytest.mark.integration
+def test_editor_cannot_invite_members(authenticated_client, api_client_session):
+    """Editor cannot create invitations (403)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "einvite", role="editor"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.post(
+        f"/api/teams/{slug}/members/invite",
+        json={"email": f"no-{uuid4().hex[:8]}@example.com", "role": "viewer"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+def test_editor_cannot_change_team_settings(authenticated_client, api_client_session):
+    """Editor cannot PATCH team settings (403)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "esettings", role="editor"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.patch(f"/api/teams/{slug}", json={"name": "Hacked"})
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+def test_editor_cannot_export_audit_log(authenticated_client, api_client_session):
+    """Editor cannot export audit log (403 — admin only)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "eaudit", role="editor"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.post(f"/api/teams/{slug}/audit-log/export", json={})
+    assert resp.status_code == 403
+
+
+# ── Project Visibility Filtering ───────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_viewer_sees_team_visible_but_not_private_projects(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Non-admin sees team-visible projects but not private ones."""
+    client_a, user_a = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, user_b, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vvis", role="viewer"
+    )
+
+    # Create two projects under the team
+    client_a.headers["Authorization"] = token_a
+    proj_team = _create_team_project(client_a, slug, default_base_id, "team-vis")
+    proj_priv = _create_team_project(client_a, slug, default_base_id, "priv-vis")
+    if not proj_team or not proj_priv:
+        pytest.skip("Project creation failed")
+
+    # Mark second project as private
+    client_a.patch(
+        f"/api/teams/{slug}/projects/{proj_priv}/visibility",
+        json={"visibility": "private"},
+    )
+
+    # User B lists projects — should see only the team-visible one
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/projects/?team={slug}")
+    assert resp.status_code == 200
+
+    slugs = [p["slug"] for p in resp.json()]
+    assert proj_team in slugs
+    assert proj_priv not in slugs
+
+
+@pytest.mark.integration
+def test_viewer_sees_private_project_after_explicit_membership(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Viewer gains access to a private project once added as a project member."""
+    client_a, user_a = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, user_b, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vpriv", role="viewer"
+    )
+
+    # Create a private project
+    client_a.headers["Authorization"] = token_a
+    proj_priv = _create_team_project(client_a, slug, default_base_id, "priv-mem")
+    if not proj_priv:
+        pytest.skip("Project creation failed")
+
+    client_a.patch(
+        f"/api/teams/{slug}/projects/{proj_priv}/visibility",
+        json={"visibility": "private"},
+    )
+
+    # Confirm User B cannot see it
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/projects/?team={slug}")
+    slugs = [p["slug"] for p in resp.json()]
+    assert proj_priv not in slugs
+
+    # Admin adds User B as project member (viewer)
+    client_a.headers["Authorization"] = token_a
+    client_a.post(
+        f"/api/teams/{slug}/projects/{proj_priv}/members",
+        json={"user_id": str(user_b["id"]), "role": "viewer"},
+    )
+
+    # Now User B should see it
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/projects/?team={slug}")
+    slugs = [p["slug"] for p in resp.json()]
+    assert proj_priv in slugs
+
+
+# ── Project Role Override ──────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_project_role_override(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Project-level membership overrides the team-level role."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, user_b, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "poverride", role="viewer"
+    )
+
+    # Create a project
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id, "override")
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    # Add User B as editor on the project (overrides team viewer)
+    client_a.post(
+        f"/api/teams/{slug}/projects/{proj_slug}/members",
+        json={"user_id": str(user_b["id"]), "role": "editor"},
+    )
+
+    # Check effective role via my-role endpoint
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/projects/{proj_slug}/my-role")
+    assert resp.status_code == 200
+    assert resp.json()["role"] == "editor"
+
+
+@pytest.mark.integration
+def test_project_role_override_grants_write_access(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Team viewer promoted to project editor can save files."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, user_b, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "pwrite", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id, "woverride")
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    # Promote User B to editor on this project
+    client_a.post(
+        f"/api/teams/{slug}/projects/{proj_slug}/members",
+        json={"user_id": str(user_b["id"]), "role": "editor"},
+    )
+
+    # User B saves a file — should not get 403
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.post(
+        f"/api/projects/{proj_slug}/files/save",
+        json={"file_path": "/app/override.txt", "content": "promoted"},
+    )
+    assert resp.status_code != 403, f"Promoted editor should not get 403: {resp.text}"
+
+
+# ── Billing / Audit Scoping ───────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_viewer_can_view_audit_log(authenticated_client, api_client_session):
+    """Viewer can view the team audit log (team.view permission)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vaudit", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/teams/{slug}/audit-log")
+    assert resp.status_code == 200
+
+
+@pytest.mark.integration
+def test_viewer_cannot_export_audit_log(authenticated_client, api_client_session):
+    """Viewer cannot export the audit log (403 — admin only)."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vexport", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.post(f"/api/teams/{slug}/audit-log/export", json={})
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+def test_admin_can_export_audit_log(authenticated_client):
+    """Admin can export the audit log (200)."""
+    client, _ = authenticated_client
+    slug = f"aexport-{uuid4().hex[:8]}"
+
+    client.post("/api/teams", json={"name": "Export Team", "slug": slug})
+    resp = client.post(f"/api/teams/{slug}/audit-log/export", json={})
+    assert resp.status_code == 200

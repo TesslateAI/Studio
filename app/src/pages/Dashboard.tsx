@@ -1321,7 +1321,9 @@ export default function Dashboard() {
                 p.id === accessProject.id ? { ...p, visibility } : p
               )
             );
+            loadProjects();
           }}
+          onMembersChange={() => loadProjects()}
         />
       )}
     </>
