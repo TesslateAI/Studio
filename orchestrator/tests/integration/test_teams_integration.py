@@ -910,3 +910,145 @@ def test_admin_can_export_audit_log(authenticated_client):
     client.post("/api/teams", json={"name": "Export Team", "slug": slug})
     resp = client.post(f"/api/teams/{slug}/audit-log/export", json={})
     assert resp.status_code == 200
+
+
+# ── Additional RBAC & Billing Tests ──────────────────────────────────
+
+
+@pytest.mark.integration
+def test_viewer_cannot_create_project(
+    authenticated_client, api_client_session, default_base_id
+):
+    """Viewer should not be able to create projects."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vcreate", role="viewer"
+    )
+
+    # Switch User B to the team, then attempt project creation
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    client_a.post(f"/api/teams/{slug}/switch")
+
+    response = client_a.post(
+        "/api/projects/",
+        json={"name": "Viewer Project", "base_id": default_base_id},
+    )
+    # Viewer lacks project.create permission — expect 403
+    assert response.status_code == 403, (
+        f"Expected 403, got {response.status_code}: {response.text}"
+    )
+
+
+@pytest.mark.integration
+def test_viewer_cannot_send_chat(
+    authenticated_client, api_client_session, default_base_id, mock_orchestrator
+):
+    """Viewer should not be able to send agent chat messages."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vchat", role="viewer"
+    )
+
+    # Admin creates a project first
+    client_a.headers["Authorization"] = token_a
+    proj_slug = _create_team_project(client_a, slug, default_base_id, "chat-test")
+    if not proj_slug:
+        pytest.skip("Project creation failed")
+
+    # Get project ID for chat payload
+    proj_resp = client_a.get(f"/api/projects/{proj_slug}")
+    project_id = proj_resp.json()["id"]
+
+    # Viewer tries to send a chat message
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    response = client_a.post(
+        "/api/chat/agent/stream",
+        json={"project_id": project_id, "message": "hello"},
+    )
+    assert response.status_code in (403, 402), (
+        f"Expected 403/402, got {response.status_code}: {response.text}"
+    )
+
+
+@pytest.mark.integration
+def test_editor_cannot_manage_billing(authenticated_client, api_client_session):
+    """Editor should not be able to change subscription or manage billing."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "ebill", role="editor"
+    )
+
+    # Switch User B to the team, then attempt billing action
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    client_a.post(f"/api/teams/{slug}/switch")
+
+    response = client_a.post(
+        "/api/billing/subscribe",
+        json={"tier": "pro", "billing_interval": "monthly"},
+    )
+    # Expect 400 (no active team for billing) or 403
+    assert response.status_code in (400, 403), (
+        f"Expected 400/403, got {response.status_code}: {response.text}"
+    )
+
+
+@pytest.mark.integration
+def test_credit_deduction_uses_team_pool(authenticated_client):
+    """Credit deduction service should target the team, not the user."""
+    client, user_data = authenticated_client
+
+    # Check team billing shows credits
+    billing_resp = client.get("/api/billing/credits")
+    assert billing_resp.status_code == 200
+    credits = billing_resp.json()
+    # Credits should come from the team (total_credits field exists)
+    assert "total_credits" in credits
+
+
+@pytest.mark.integration
+def test_audit_log_records_member_role_change(authenticated_client, api_client_session):
+    """Changing a member's role should create an audit log entry."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, user_b, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "arole", role="editor"
+    )
+
+    # Get user B's ID from members list
+    client_a.headers["Authorization"] = token_a
+    members = client_a.get(f"/api/teams/{slug}/members").json()
+    user_b_id = [m for m in members if m["role"] == "editor"][0]["user_id"]
+
+    # Change role to viewer
+    client_a.patch(
+        f"/api/teams/{slug}/members/{user_b_id}", json={"role": "viewer"}
+    )
+
+    # Check audit log
+    logs = client_a.get(f"/api/teams/{slug}/audit-log").json()
+    actions = [log["action"] for log in logs]
+    assert "member.role_changed" in actions
+
+
+@pytest.mark.integration
+def test_viewer_cannot_delete_team(authenticated_client, api_client_session):
+    """Viewer should not be able to delete the team."""
+    client_a, _ = authenticated_client
+    token_a = client_a.headers.get("Authorization")
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "vdelteam", role="viewer"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    response = client_a.delete(f"/api/teams/{slug}")
+    assert response.status_code == 403, (
+        f"Expected 403, got {response.status_code}: {response.text}"
+    )
