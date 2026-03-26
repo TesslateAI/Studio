@@ -9,8 +9,7 @@ import {
   Eye,
   Calendar,
   User,
-  Activity,
-  Shield
+  Shield,
 } from 'lucide-react';
 import { getAuthHeaders } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -102,7 +101,7 @@ export default function AuditLogViewer() {
 
       const response = await fetch(`/api/admin/audit-logs?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load audit logs');
@@ -133,7 +132,7 @@ export default function AuditLogViewer() {
 
       const response = await fetch(`/api/admin/audit-logs/export?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to export audit logs');
@@ -188,28 +187,41 @@ export default function AuditLogViewer() {
             type="text"
             placeholder="Search logs..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-zinc-700"
           />
         </div>
 
         <select
           value={actionTypeFilter}
-          onChange={(e) => { setActionTypeFilter(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setActionTypeFilter(e.target.value);
+            setPage(1);
+          }}
           className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-zinc-700"
         >
-          {ACTION_TYPE_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          {ACTION_TYPE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
           ))}
         </select>
 
         <select
           value={targetTypeFilter}
-          onChange={(e) => { setTargetTypeFilter(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setTargetTypeFilter(e.target.value);
+            setPage(1);
+          }}
           className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-zinc-700"
         >
-          {TARGET_TYPE_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          {TARGET_TYPE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
           ))}
         </select>
 
@@ -218,14 +230,20 @@ export default function AuditLogViewer() {
           <input
             type="date"
             value={dateFrom}
-            onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setPage(1);
+            }}
             className="px-2 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-zinc-700"
           />
           <span className="text-zinc-500">to</span>
           <input
             type="date"
             value={dateTo}
-            onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setPage(1);
+            }}
             className="px-2 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-zinc-700"
           />
         </div>
@@ -237,9 +255,7 @@ export default function AuditLogViewer() {
           <LoadingSpinner size={32} />
         </div>
       ) : logs.length === 0 ? (
-        <div className="text-center py-12 text-zinc-500">
-          No audit logs found
-        </div>
+        <div className="text-center py-12 text-zinc-500">No audit logs found</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -261,7 +277,9 @@ export default function AuditLogViewer() {
                     {formatDate(log.created_at)}
                   </td>
                   <td className="py-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${ACTION_TYPE_COLORS[log.action_type] || 'bg-zinc-700 text-zinc-300'}`}>
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-medium ${ACTION_TYPE_COLORS[log.action_type] || 'bg-zinc-700 text-zinc-300'}`}
+                    >
                       {formatActionType(log.action_type)}
                     </span>
                   </td>
@@ -273,17 +291,18 @@ export default function AuditLogViewer() {
                   </td>
                   <td className="py-3">
                     <span className="text-zinc-400">{log.target_type}:</span>
-                    <span className="text-white ml-1 font-mono text-xs">{log.target_id.slice(0, 8)}...</span>
+                    <span className="text-white ml-1 font-mono text-xs">
+                      {log.target_id.slice(0, 8)}...
+                    </span>
                   </td>
-                  <td className="py-3 text-zinc-400 max-w-[200px] truncate">
-                    {log.reason || '-'}
-                  </td>
-                  <td className="py-3 text-zinc-500 font-mono text-xs">
-                    {log.ip_address || '-'}
-                  </td>
+                  <td className="py-3 text-zinc-400 max-w-[200px] truncate">{log.reason || '-'}</td>
+                  <td className="py-3 text-zinc-500 font-mono text-xs">{log.ip_address || '-'}</td>
                   <td className="py-3">
                     <button
-                      onClick={() => { setSelectedLog(log); setShowDetailModal(true); }}
+                      onClick={() => {
+                        setSelectedLog(log);
+                        setShowDetailModal(true);
+                      }}
                       className="p-1 hover:bg-zinc-700 rounded"
                     >
                       <Eye className="h-4 w-4 text-zinc-400" />
@@ -304,15 +323,17 @@ export default function AuditLogViewer() {
           </span>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
               className="p-2 hover:bg-zinc-800 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ChevronLeft className="h-4 w-4 text-zinc-400" />
             </button>
-            <span className="text-sm text-zinc-400">Page {page} of {pages}</span>
+            <span className="text-sm text-zinc-400">
+              Page {page} of {pages}
+            </span>
             <button
-              onClick={() => setPage(p => Math.min(pages, p + 1))}
+              onClick={() => setPage((p) => Math.min(pages, p + 1))}
               disabled={page === pages}
               className="p-2 hover:bg-zinc-800 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -331,7 +352,10 @@ export default function AuditLogViewer() {
                 <Shield className="h-5 w-5 text-zinc-400" />
                 <h3 className="font-semibold text-white">Audit Log Details</h3>
               </div>
-              <button onClick={() => setShowDetailModal(false)} className="p-1 hover:bg-zinc-800 rounded">
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="p-1 hover:bg-zinc-800 rounded"
+              >
                 <X className="h-5 w-5 text-zinc-400" />
               </button>
             </div>
@@ -339,7 +363,9 @@ export default function AuditLogViewer() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs text-zinc-500">Action Type</label>
-                  <p className={`mt-1 px-2 py-1 rounded text-sm font-medium inline-block ${ACTION_TYPE_COLORS[selectedLog.action_type] || 'bg-zinc-700 text-zinc-300'}`}>
+                  <p
+                    className={`mt-1 px-2 py-1 rounded text-sm font-medium inline-block ${ACTION_TYPE_COLORS[selectedLog.action_type] || 'bg-zinc-700 text-zinc-300'}`}
+                  >
                     {formatActionType(selectedLog.action_type)}
                   </p>
                 </div>

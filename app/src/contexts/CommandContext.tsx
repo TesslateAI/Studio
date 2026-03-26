@@ -50,13 +50,7 @@ import {
 // Types
 // =============================================================================
 
-export type PanelType =
-  | 'github'
-  | 'architecture'
-  | 'notes'
-  | 'settings'
-  | 'marketplace'
-  | null;
+export type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
 
 export type ViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
 
@@ -133,24 +127,21 @@ export function CommandProvider({ children }: CommandProviderProps) {
   /**
    * Register handlers from a component
    */
-  const registerHandlers = useCallback(
-    (handlers: Partial<CommandHandlers>): (() => void) => {
-      // Merge new handlers with existing
-      handlersRef.current = { ...handlersRef.current, ...handlers };
+  const registerHandlers = useCallback((handlers: Partial<CommandHandlers>): (() => void) => {
+    // Merge new handlers with existing
+    handlersRef.current = { ...handlersRef.current, ...handlers };
 
-      // Return cleanup function that removes these specific handlers
-      return () => {
-        const keys = Object.keys(handlers) as (keyof CommandHandlers)[];
-        keys.forEach((key) => {
-          // Only remove if it's the same handler that was registered
-          if (handlersRef.current[key] === handlers[key]) {
-            delete handlersRef.current[key];
-          }
-        });
-      };
-    },
-    []
-  );
+    // Return cleanup function that removes these specific handlers
+    return () => {
+      const keys = Object.keys(handlers) as (keyof CommandHandlers)[];
+      keys.forEach((key) => {
+        // Only remove if it's the same handler that was registered
+        if (handlersRef.current[key] === handlers[key]) {
+          delete handlersRef.current[key];
+        }
+      });
+    };
+  }, []);
 
   /**
    * Execute a command by name
@@ -185,12 +176,9 @@ export function CommandProvider({ children }: CommandProviderProps) {
   /**
    * Check if a command is available
    */
-  const isCommandAvailable = useCallback(
-    (command: keyof CommandHandlers): boolean => {
-      return !!handlersRef.current[command];
-    },
-    []
-  );
+  const isCommandAvailable = useCallback((command: keyof CommandHandlers): boolean => {
+    return !!handlersRef.current[command];
+  }, []);
 
   /**
    * Get list of available commands
@@ -209,9 +197,7 @@ export function CommandProvider({ children }: CommandProviderProps) {
     [registerHandlers, executeCommand, isCommandAvailable, getAvailableCommands]
   );
 
-  return (
-    <CommandContext.Provider value={value}>{children}</CommandContext.Provider>
-  );
+  return <CommandContext.Provider value={value}>{children}</CommandContext.Provider>;
 }
 
 // =============================================================================
@@ -222,6 +208,7 @@ export function CommandProvider({ children }: CommandProviderProps) {
  * Hook to access command context
  * Must be used within CommandProvider
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useCommands(): CommandContextValue {
   const context = useContext(CommandContext);
   if (!context) {
@@ -256,6 +243,7 @@ export function useCommands(): CommandContextValue {
  * }
  * ```
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useCommandHandlers(handlers: Partial<CommandHandlers>): void {
   const { registerHandlers } = useCommands();
 
@@ -288,6 +276,7 @@ export function useCommandHandlers(handlers: Partial<CommandHandlers>): void {
  * }
  * ```
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useCommandAction<K extends keyof CommandHandlers>(
   command: K
 ): (...args: Parameters<CommandHandlers[K]>) => boolean {

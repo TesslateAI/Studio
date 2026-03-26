@@ -3,12 +3,15 @@ import { ChatMessage } from './ChatMessage';
 import AgentMessage from '../AgentMessage';
 import { ApprovalRequestCard } from './ApprovalRequestCard';
 import type { ChatMessage as ChatMessageType } from '../../hooks/useAgentChat';
-import type { SerializedAttachment } from '../../types/agent';
 
 interface ChatMessageListProps {
   messages: ChatMessageType[];
   isExecuting: boolean;
-  onApproval?: (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop', toolName: string) => void;
+  onApproval?: (
+    approvalId: string,
+    response: 'allow_once' | 'allow_all' | 'stop',
+    toolName: string
+  ) => void;
   emptyState?: React.ReactNode;
   toolCallsCollapsed?: boolean;
 }

@@ -3,7 +3,7 @@ import { X, Check, Key, ShieldCheck, LinkSimple, Spinner } from '@phosphor-icons
 import { deploymentCredentialsApi } from '../../lib/api';
 import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
-import { DEPLOYMENT_PROVIDERS, getProviderConfig } from '../../lib/deployment-providers';
+import { DEPLOYMENT_PROVIDERS } from '../../lib/deployment-providers';
 import toast from 'react-hot-toast';
 
 interface Provider {
@@ -25,13 +25,17 @@ interface ProviderConnectModalProps {
   accountCredentials?: string[];
 }
 
-const PROVIDER_INFO: Record<string, { icon: string; color: string; bgColor: string }> = Object.fromEntries(
-  Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [k, {
-    icon: v.icon,
-    color: v.textColor,
-    bgColor: `bg-[${v.color}]`,
-  }])
-);
+const PROVIDER_INFO: Record<string, { icon: string; color: string; bgColor: string }> =
+  Object.fromEntries(
+    Object.entries(DEPLOYMENT_PROVIDERS).map(([k, v]) => [
+      k,
+      {
+        icon: v.icon,
+        color: v.textColor,
+        bgColor: `bg-[${v.color}]`,
+      },
+    ])
+  );
 
 export function ProviderConnectModal({
   isOpen,

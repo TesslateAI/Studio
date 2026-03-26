@@ -87,10 +87,16 @@ export function ModelSelector({
   const searchRef = useRef<HTMLInputElement>(null);
 
   const activeModel = value || currentAgent?.selectedModel || currentAgent?.model || '';
-  const isReadOnly = currentAgent ? (currentAgent.sourceType === 'closed' && !currentAgent.isCustom) : false;
+  const isReadOnly = currentAgent
+    ? currentAgent.sourceType === 'closed' && !currentAgent.isCustom
+    : false;
 
   // Position state for portal-based dropdown
-  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
 
   // Recalculate position when open
   useEffect(() => {
@@ -299,9 +305,6 @@ export function ModelSelector({
     return { id: activeModel, pricing: null, provider: normalizedProvider } as ModelInfo;
   }, [allModels, activeModel]);
 
-  // No model info at all — hide the selector
-  if (!activeModel) return null;
-
   // Count models per provider for tab badges
   const providerCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -311,6 +314,9 @@ export function ModelSelector({
     }
     return counts;
   }, [allModels]);
+
+  // No model info at all — hide the selector
+  if (!activeModel) return null;
 
   // Dropdown rendered via portal to escape overflow:auto ancestors
   const dropdownContent =
@@ -358,7 +364,14 @@ export function ModelSelector({
 
               {/* Provider filter pills — horizontal scrollable */}
               {providers.length > 1 && (
-                <div className="flex items-center gap-1 overflow-x-auto scrollbar-none" style={{ maskImage: 'linear-gradient(to right, black calc(100% - 12px), transparent)', WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 12px), transparent)' }}>
+                <div
+                  className="flex items-center gap-1 overflow-x-auto scrollbar-none"
+                  style={{
+                    maskImage: 'linear-gradient(to right, black calc(100% - 12px), transparent)',
+                    WebkitMaskImage:
+                      'linear-gradient(to right, black calc(100% - 12px), transparent)',
+                  }}
+                >
                   <button
                     type="button"
                     onClick={() => setActiveTab(null)}
@@ -375,7 +388,9 @@ export function ModelSelector({
                       className={`btn btn-sm shrink-0 ${activeTab === p.id ? 'btn-tab-active' : 'btn-tab'}`}
                     >
                       {p.label}
-                      <span className="text-[10px] opacity-50 ml-0.5">{providerCounts.get(p.id) || 0}</span>
+                      <span className="text-[10px] opacity-50 ml-0.5">
+                        {providerCounts.get(p.id) || 0}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -570,7 +585,8 @@ function ModelRow({
               </span>
             ) : (
               <span className="text-[var(--text-subtle)]">
-                {formatCredits(model.pricing.input)} / {formatCredits(model.pricing.output)} credits per 1M
+                {formatCredits(model.pricing.input)} / {formatCredits(model.pricing.output)} credits
+                per 1M
               </span>
             )}
           </div>

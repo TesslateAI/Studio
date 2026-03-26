@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type Node } from '@xyflow/react';
-import { DEPLOYMENT_PROVIDERS, getProviderConfig } from '../lib/deployment-providers';
+import { DEPLOYMENT_PROVIDERS } from '../lib/deployment-providers';
 import {
   Rocket,
   X,
@@ -62,7 +62,10 @@ interface DeploymentTargetNodeData extends Record<string, unknown> {
   onDeployContainer?: (targetId: string) => void;
   onExport?: (targetId: string) => void;
   onConnect?: (targetId: string) => void;
-  onEnvironmentChange?: (targetId: string, environment: 'production' | 'staging' | 'preview') => void;
+  onEnvironmentChange?: (
+    targetId: string,
+    environment: 'production' | 'staging' | 'preview'
+  ) => void;
   onDelete?: (targetId: string) => void;
   onRollback?: (targetId: string, deploymentId: string) => void;
   onDisconnectContainer?: (targetId: string, containerId: string) => void;
@@ -84,12 +87,9 @@ const CONTAINER_PUSH_PROVIDERS = new Set([
   'fly',
 ]);
 
-const EXPORT_PROVIDERS = new Set([
-  'dockerhub',
-  'ghcr',
-  'download',
-]);
+const EXPORT_PROVIDERS = new Set(['dockerhub', 'ghcr', 'download']);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getDeployType(provider: string): DeployType {
   if (EXPORT_PROVIDERS.has(provider)) return 'export';
   if (CONTAINER_PUSH_PROVIDERS.has(provider)) return 'container';
@@ -178,11 +178,12 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
 
   const providerLogo = PROVIDER_LOGOS[data.provider] || '🚀';
   const providerColor = PROVIDER_COLORS[data.provider] || '#888888';
-  const providerName = data.providerInfo?.display_name || PROVIDER_DISPLAY_NAMES[data.provider] || data.provider;
+  const providerName =
+    data.providerInfo?.display_name || PROVIDER_DISPLAY_NAMES[data.provider] || data.provider;
 
   // Get the latest deployment (first in history)
   const latestDeployment = data.deploymentHistory?.[0];
-  const isLive = latestDeployment?.status === 'success';
+  const _isLive = latestDeployment?.status === 'success';
 
   // Route deploy action based on provider type
   const deployType = getDeployType(data.provider);
@@ -191,9 +192,11 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
     if (isDeploying) return;
 
     const handler =
-      deployType === 'container' ? (data.onDeployContainer ?? data.onDeploy) :
-      deployType === 'export'    ? (data.onExport ?? data.onDeploy) :
-      data.onDeploy;
+      deployType === 'container'
+        ? (data.onDeployContainer ?? data.onDeploy)
+        : deployType === 'export'
+          ? (data.onExport ?? data.onDeploy)
+          : data.onDeploy;
 
     if (!handler) return;
 
@@ -207,16 +210,17 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
 
   // Determine if deploy is possible — check that the appropriate handler exists
   const hasHandler =
-    deployType === 'container' ? !!(data.onDeployContainer ?? data.onDeploy) :
-    deployType === 'export'    ? !!(data.onExport ?? data.onDeploy) :
-    !!data.onDeploy;
-  const canDeploy = data.isConnected && data.connectedContainers.length > 0 && !isDeploying && hasHandler;
+    deployType === 'container'
+      ? !!(data.onDeployContainer ?? data.onDeploy)
+      : deployType === 'export'
+        ? !!(data.onExport ?? data.onDeploy)
+        : !!data.onDeploy;
+  const canDeploy =
+    data.isConnected && data.connectedContainers.length > 0 && !isDeploying && hasHandler;
 
   // Button label based on deploy type
   const deployLabel =
-    deployType === 'export' ? 'Export' :
-    deployType === 'container' ? 'Push & Deploy' :
-    'Deploy';
+    deployType === 'export' ? 'Export' : deployType === 'container' ? 'Push & Deploy' : 'Deploy';
 
   return (
     <div className="group" style={{ contain: 'layout style' }}>
@@ -247,7 +251,11 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
                 title="Click to change environment"
                 onClick={(e) => {
                   e.stopPropagation();
-                  const envs: Array<'production' | 'staging' | 'preview'> = ['production', 'staging', 'preview'];
+                  const envs: Array<'production' | 'staging' | 'preview'> = [
+                    'production',
+                    'staging',
+                    'preview',
+                  ];
                   const currentIdx = envs.indexOf(data.environment);
                   const nextEnv = envs[(currentIdx + 1) % envs.length];
                   data.onEnvironmentChange?.(id, nextEnv);
@@ -316,8 +324,8 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
                         container.status === 'running'
                           ? 'bg-green-400'
                           : container.status === 'starting'
-                          ? 'bg-yellow-400 animate-pulse'
-                          : 'bg-gray-400'
+                            ? 'bg-yellow-400 animate-pulse'
+                            : 'bg-gray-400'
                       }`}
                     />
                     <span className="text-xs text-[var(--text)]">{container.name}</span>

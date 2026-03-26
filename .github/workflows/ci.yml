@@ -35,7 +35,7 @@ jobs:
 
       - name: Run ruff linter
         working-directory: orchestrator
-        run: python -m ruff check app/ || true
+        run: python -m ruff check app/
 
       - name: Run unit tests
         working-directory: orchestrator
@@ -68,11 +68,11 @@ jobs:
 
       - name: Run ESLint
         working-directory: app
-        run: npm run lint || true
+        run: npm run lint
 
       - name: Run Vitest unit tests
         working-directory: app
-        run: npm run test -- --run --passWithNoTests || true
+        run: npm run test -- --run
 
   # Job 3: Backend integration tests (depends on backend-unit)
   backend-integration:

@@ -4,7 +4,6 @@ import toast from 'react-hot-toast';
 import { Check } from 'lucide-react';
 import {
   ArrowRight,
-  FunnelSimple,
   SortAscending,
   SortDescending,
   CaretDown,
@@ -91,11 +90,13 @@ function ThemeCard({
         </div>
 
         {/* Mode pill */}
-        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${
-          theme.mode === 'dark'
-            ? 'bg-[var(--surface)] text-[var(--text-muted)]'
-            : 'bg-yellow-500/10 text-yellow-400'
-        }`}>
+        <span
+          className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+            theme.mode === 'dark'
+              ? 'bg-[var(--surface)] text-[var(--text-muted)]'
+              : 'bg-yellow-500/10 text-yellow-400'
+          }`}
+        >
           {theme.mode === 'dark' ? 'Dark' : 'Light'}
         </span>
 
@@ -129,22 +130,34 @@ function ThemeCard({
       <div className="flex gap-1.5 mb-2">
         <div
           className="w-6 h-6 rounded-md"
-          style={{ backgroundColor: (colors as Record<string, string>).primary || '#6366f1', border: '1px solid rgba(0,0,0,0.2)' }}
+          style={{
+            backgroundColor: (colors as Record<string, string>).primary || '#6366f1',
+            border: '1px solid rgba(0,0,0,0.2)',
+          }}
           title="Primary"
         />
         <div
           className="w-6 h-6 rounded-md"
-          style={{ backgroundColor: (colors as Record<string, string>).background || '#0a0a0a', border: '1px solid rgba(0,0,0,0.2)' }}
+          style={{
+            backgroundColor: (colors as Record<string, string>).background || '#0a0a0a',
+            border: '1px solid rgba(0,0,0,0.2)',
+          }}
           title="Background"
         />
         <div
           className="w-6 h-6 rounded-md"
-          style={{ backgroundColor: (colors as Record<string, string>).surface || '#141414', border: '1px solid rgba(0,0,0,0.2)' }}
+          style={{
+            backgroundColor: (colors as Record<string, string>).surface || '#141414',
+            border: '1px solid rgba(0,0,0,0.2)',
+          }}
           title="Surface"
         />
         <div
           className="w-6 h-6 rounded-md"
-          style={{ backgroundColor: (colors as Record<string, string>).accent || '#8b5cf6', border: '1px solid rgba(0,0,0,0.2)' }}
+          style={{
+            backgroundColor: (colors as Record<string, string>).accent || '#8b5cf6',
+            border: '1px solid rgba(0,0,0,0.2)',
+          }}
           title="Accent"
         />
       </div>
@@ -152,7 +165,9 @@ function ThemeCard({
       {/* Theme name and description */}
       <div className="flex-1">
         <div className="text-xs font-medium text-[var(--text)]">{theme.name}</div>
-        <div className="text-[11px] text-[var(--text-muted)] mt-0.5 line-clamp-1">{theme.description || ''}</div>
+        <div className="text-[11px] text-[var(--text-muted)] mt-0.5 line-clamp-1">
+          {theme.description || ''}
+        </div>
       </div>
 
       {/* Border radius preview */}
@@ -236,7 +251,8 @@ export default function PreferencesSettings() {
       if (modeFilter !== 'all' && t.mode !== modeFilter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        if (!t.name.toLowerCase().includes(q) && !(t.description || '').toLowerCase().includes(q)) return false;
+        if (!t.name.toLowerCase().includes(q) && !(t.description || '').toLowerCase().includes(q))
+          return false;
       }
       return true;
     })
@@ -270,7 +286,10 @@ export default function PreferencesSettings() {
       <SettingsGroup title="Theme">
         <div className="p-0">
           {/* Toolbar — mode tabs left, search/sort/display right */}
-          <div className="h-10 flex items-center justify-between border-b" style={{ paddingLeft: '7px', paddingRight: '10px', borderColor: 'var(--border)' }}>
+          <div
+            className="h-10 flex items-center justify-between border-b"
+            style={{ paddingLeft: '7px', paddingRight: '10px', borderColor: 'var(--border)' }}
+          >
             {/* Left: Mode filter tabs */}
             <div className="flex items-center gap-1 flex-1 min-w-0">
               <button
@@ -300,7 +319,10 @@ export default function PreferencesSettings() {
               {/* Search pill — visible when searching */}
               {searchQuery && (
                 <button
-                  onClick={() => { setSearchQuery(''); setShowSearch(false); }}
+                  onClick={() => {
+                    setSearchQuery('');
+                    setShowSearch(false);
+                  }}
                   className="btn btn-tab-active btn-sm"
                 >
                   &ldquo;{searchQuery}&rdquo;
@@ -313,7 +335,10 @@ export default function PreferencesSettings() {
             <div className="flex items-center gap-[2px]">
               {/* Search toggle / inline input */}
               {showSearch ? (
-                <div className="flex items-center gap-1 bg-[var(--surface)] border rounded-full px-2 h-[24px]" style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}>
+                <div
+                  className="flex items-center gap-1 bg-[var(--surface)] border rounded-full px-2 h-[24px]"
+                  style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+                >
                   <MagnifyingGlass className="w-3 h-3 text-[var(--text-subtle)]" />
                   <input
                     ref={searchInputRef}
@@ -321,13 +346,19 @@ export default function PreferencesSettings() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Escape') { setSearchQuery(''); setShowSearch(false); }
+                      if (e.key === 'Escape') {
+                        setSearchQuery('');
+                        setShowSearch(false);
+                      }
                     }}
                     placeholder="Search themes..."
                     className="bg-transparent border-none outline-none text-xs text-[var(--text)] placeholder:text-[var(--text-subtle)] w-24 sm:w-32"
                   />
                   <button
-                    onClick={() => { setSearchQuery(''); setShowSearch(false); }}
+                    onClick={() => {
+                      setSearchQuery('');
+                      setShowSearch(false);
+                    }}
                     className="text-[var(--text-subtle)] hover:text-[var(--text)]"
                   >
                     <X className="w-3 h-3" />
@@ -363,9 +394,14 @@ export default function PreferencesSettings() {
                 {showSortMenu && (
                   <div
                     className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
-                    style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+                    style={{
+                      borderWidth: 'var(--border-width)',
+                      borderColor: 'var(--border-hover)',
+                    }}
                   >
-                    <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Sort by</div>
+                    <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                      Sort by
+                    </div>
                     {(['name', 'mode'] as ThemeSortField[]).map((field) => (
                       <button
                         key={field}
@@ -399,11 +435,16 @@ export default function PreferencesSettings() {
 
                     <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
 
-                    <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Direction</div>
+                    <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                      Direction
+                    </div>
                     {(['asc', 'desc'] as ThemeSortDirection[]).map((dir) => (
                       <button
                         key={dir}
-                        onClick={() => { setSortDirection(dir); setShowSortMenu(false); }}
+                        onClick={() => {
+                          setSortDirection(dir);
+                          setShowSortMenu(false);
+                        }}
                         className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
                           sortDirection === dir
                             ? 'text-[var(--text)] bg-[var(--surface-hover)]'
@@ -411,9 +452,13 @@ export default function PreferencesSettings() {
                         }`}
                       >
                         {dir === 'asc' ? (
-                          <><SortAscending className="w-3.5 h-3.5" /> Ascending</>
+                          <>
+                            <SortAscending className="w-3.5 h-3.5" /> Ascending
+                          </>
                         ) : (
-                          <><SortDescending className="w-3.5 h-3.5" /> Descending</>
+                          <>
+                            <SortDescending className="w-3.5 h-3.5" /> Descending
+                          </>
                         )}
                         {sortDirection === dir && (
                           <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
@@ -430,7 +475,9 @@ export default function PreferencesSettings() {
               <button
                 onClick={() => setDisplayMode((v) => (v === 'grid' ? 'compact' : 'grid'))}
                 className={`btn btn-icon btn-sm ${displayMode === 'compact' ? 'btn-active' : ''}`}
-                aria-label={displayMode === 'grid' ? 'Switch to compact view' : 'Switch to grid view'}
+                aria-label={
+                  displayMode === 'grid' ? 'Switch to compact view' : 'Switch to grid view'
+                }
               >
                 {displayMode === 'grid' ? (
                   /* Grid icon */
@@ -481,7 +528,11 @@ export default function PreferencesSettings() {
                 </p>
                 {hasActiveFilters && (
                   <button
-                    onClick={() => { setModeFilter('all'); setSearchQuery(''); setShowSearch(false); }}
+                    onClick={() => {
+                      setModeFilter('all');
+                      setSearchQuery('');
+                      setShowSearch(false);
+                    }}
                     className="btn btn-sm"
                   >
                     Clear filters

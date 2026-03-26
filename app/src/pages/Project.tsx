@@ -34,7 +34,6 @@ import { MobileWarning } from '../components/MobileWarning';
 import { BrowserPreview } from '../components/BrowserPreview';
 import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
 import { StartupLogViewer } from '../components/StartupLogViewer';
-import { DiscordSupport } from '../components/DiscordSupport';
 import { useContainerStartup } from '../hooks/useContainerStartup';
 import {
   GitHubPanel,
@@ -239,7 +238,7 @@ export default function Project() {
   const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
-  const [chatExpanded, setChatExpanded] = useState(false);
+  const [_chatExpanded, setChatExpanded] = useState(false);
 
   // Preview port picker state
   const [previewableContainers, setPreviewableContainers] = useState<PreviewableContainer[]>([]);
@@ -1394,16 +1393,25 @@ export default function Project() {
       <NavigationSidebar
         activePage="builder"
         onExpandedChange={setIsLeftSidebarExpanded}
-        builderSection={({ isExpanded, navButtonClass, navButtonClassCollapsed, iconClass, labelClass, inactiveNavButton, inactiveNavButtonCollapsed, inactiveIconClass, inactiveLabelClass }) => (
+        builderSection={({
+          isExpanded,
+          navButtonClass,
+          navButtonClassCollapsed,
+          iconClass,
+          labelClass,
+          _inactiveNavButton,
+          _inactiveNavButtonCollapsed,
+          inactiveIconClass,
+          inactiveLabelClass,
+        }) => (
           <>
             {/* Project name / back to projects */}
             {isExpanded ? (
-              <button
-                onClick={() => navigate('/dashboard')}
-                className={navButtonClass(false)}
-              >
+              <button onClick={() => navigate('/dashboard')} className={navButtonClass(false)}>
                 <ArrowLeft size={16} className={inactiveIconClass} />
-                <span className={`${inactiveLabelClass} truncate`}>{project?.name || 'Project'}</span>
+                <span className={`${inactiveLabelClass} truncate`}>
+                  {project?.name || 'Project'}
+                </span>
               </button>
             ) : (
               <Tooltip content={project?.name || 'Back to Projects'} side="right" delay={200}>
@@ -1451,16 +1459,27 @@ export default function Project() {
 
             {/* Panel Toggles — Notes, GitHub, Project Settings */}
             {[
-              { icon: <BookOpen size={16} />, title: 'Notes', onClick: () => togglePanel('notes'), active: activePanel === 'notes' },
-              { icon: <GitBranch size={16} />, title: 'GitHub Sync', onClick: () => togglePanel('github'), active: activePanel === 'github' },
-              { icon: <Gear size={16} />, title: 'Project Settings', onClick: () => togglePanel('settings'), active: activePanel === 'settings' },
+              {
+                icon: <BookOpen size={16} />,
+                title: 'Notes',
+                onClick: () => togglePanel('notes'),
+                active: activePanel === 'notes',
+              },
+              {
+                icon: <GitBranch size={16} />,
+                title: 'GitHub Sync',
+                onClick: () => togglePanel('github'),
+                active: activePanel === 'github',
+              },
+              {
+                icon: <Gear size={16} />,
+                title: 'Project Settings',
+                onClick: () => togglePanel('settings'),
+                active: activePanel === 'settings',
+              },
             ].map((item, index) =>
               isExpanded ? (
-                <button
-                  key={index}
-                  onClick={item.onClick}
-                  className={navButtonClass(item.active)}
-                >
+                <button key={index} onClick={item.onClick} className={navButtonClass(item.active)}>
                   {React.cloneElement(item.icon, {
                     className: iconClass(item.active),
                   })}
@@ -1468,10 +1487,7 @@ export default function Project() {
                 </button>
               ) : (
                 <Tooltip key={index} content={item.title} side="right" delay={200}>
-                  <button
-                    onClick={item.onClick}
-                    className={navButtonClassCollapsed(item.active)}
-                  >
+                  <button onClick={item.onClick} className={navButtonClassCollapsed(item.active)}>
                     {React.cloneElement(item.icon, {
                       className: iconClass(item.active),
                     })}
@@ -1495,7 +1511,10 @@ export default function Project() {
         }}
       >
         {/* Top Bar with Project Title */}
-        <div className="h-10 border-b border-[var(--border)] flex items-center justify-between flex-shrink-0" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
+        <div
+          className="h-10 border-b border-[var(--border)] flex items-center justify-between flex-shrink-0"
+          style={{ paddingLeft: '7px', paddingRight: '10px' }}
+        >
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <Breadcrumbs
               items={[
@@ -1525,10 +1544,7 @@ export default function Project() {
 
           <div className="flex items-center gap-[2px]">
             {/* Architecture Button (Beta) */}
-            <button
-              onClick={() => navigate(`/project/${slug}`)}
-              className="hidden md:flex btn"
-            >
+            <button onClick={() => navigate(`/project/${slug}`)} className="hidden md:flex btn">
               <FlowArrow size={15} />
               <span className="hidden lg:inline">Architecture</span>
               <span className="text-[10px] px-1.5 py-px rounded-full bg-[var(--surface-hover)] text-[var(--text-subtle)] font-medium">
@@ -1676,7 +1692,11 @@ export default function Project() {
                                   </button>
                                 </div>
                                 <div className="hidden md:flex flex-1 items-center gap-1.5 h-7 bg-[var(--bg)] border border-[var(--border)] rounded-full px-3 min-w-0">
-                                  <LockSimple size={11} weight="bold" className="text-[var(--text-subtle)] flex-shrink-0" />
+                                  <LockSimple
+                                    size={11}
+                                    weight="bold"
+                                    className="text-[var(--text-subtle)] flex-shrink-0"
+                                  />
                                   <span className="text-[11px] text-[var(--text-muted)] font-mono truncate">
                                     {currentPreviewUrl || devServerUrl}
                                   </span>
@@ -1695,11 +1715,23 @@ export default function Project() {
                                     <ArrowsClockwise size={14} />
                                   </button>
                                   <button
-                                    onClick={() => setViewportMode(viewportMode === 'desktop' ? 'mobile' : 'desktop')}
+                                    onClick={() =>
+                                      setViewportMode(
+                                        viewportMode === 'desktop' ? 'mobile' : 'desktop'
+                                      )
+                                    }
                                     className={`btn btn-icon btn-sm ${viewportMode === 'mobile' ? 'btn-active text-[var(--primary)]' : ''}`}
-                                    title={viewportMode === 'desktop' ? 'Switch to mobile view' : 'Switch to desktop view'}
+                                    title={
+                                      viewportMode === 'desktop'
+                                        ? 'Switch to mobile view'
+                                        : 'Switch to desktop view'
+                                    }
                                   >
-                                    {viewportMode === 'desktop' ? <DeviceMobile size={14} /> : <Monitor size={14} />}
+                                    {viewportMode === 'desktop' ? (
+                                      <DeviceMobile size={14} />
+                                    ) : (
+                                      <Monitor size={14} />
+                                    )}
                                   </button>
                                 </div>
                               </div>
@@ -1713,7 +1745,13 @@ export default function Project() {
                                   isPointerOverPreviewRef.current = false;
                                 }}
                               >
-                                <div className={viewportMode === 'mobile' ? 'w-[375px] h-[667px] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden flex-shrink-0 bg-white' : 'w-full h-full'}>
+                                <div
+                                  className={
+                                    viewportMode === 'mobile'
+                                      ? 'w-[375px] h-[667px] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden flex-shrink-0 bg-white'
+                                      : 'w-full h-full'
+                                  }
+                                >
                                   <iframe
                                     ref={iframeRef}
                                     id="preview-iframe"
@@ -1855,7 +1893,11 @@ export default function Project() {
                                 </button>
                               </div>
                               <div className="hidden md:flex flex-1 items-center gap-1.5 h-7 bg-[var(--bg)] border border-[var(--border)] rounded-full px-3 min-w-0">
-                                <LockSimple size={11} weight="bold" className="text-[var(--text-subtle)] flex-shrink-0" />
+                                <LockSimple
+                                  size={11}
+                                  weight="bold"
+                                  className="text-[var(--text-subtle)] flex-shrink-0"
+                                />
                                 <span className="text-[11px] text-[var(--text-muted)] font-mono truncate">
                                   {currentPreviewUrl || devServerUrl}
                                 </span>
@@ -1874,11 +1916,23 @@ export default function Project() {
                                   <ArrowsClockwise size={14} />
                                 </button>
                                 <button
-                                  onClick={() => setViewportMode(viewportMode === 'desktop' ? 'mobile' : 'desktop')}
+                                  onClick={() =>
+                                    setViewportMode(
+                                      viewportMode === 'desktop' ? 'mobile' : 'desktop'
+                                    )
+                                  }
                                   className={`btn btn-icon btn-sm ${viewportMode === 'mobile' ? 'btn-active text-[var(--primary)]' : ''}`}
-                                  title={viewportMode === 'desktop' ? 'Switch to mobile view' : 'Switch to desktop view'}
+                                  title={
+                                    viewportMode === 'desktop'
+                                      ? 'Switch to mobile view'
+                                      : 'Switch to desktop view'
+                                  }
                                 >
-                                  {viewportMode === 'desktop' ? <DeviceMobile size={14} /> : <Monitor size={14} />}
+                                  {viewportMode === 'desktop' ? (
+                                    <DeviceMobile size={14} />
+                                  ) : (
+                                    <Monitor size={14} />
+                                  )}
                                 </button>
                               </div>
                             </div>
@@ -1892,14 +1946,20 @@ export default function Project() {
                                 isPointerOverPreviewRef.current = false;
                               }}
                             >
-                              <div className={viewportMode === 'mobile' ? 'w-[375px] h-[667px] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden flex-shrink-0 bg-white' : 'w-full h-full'}>
+                              <div
+                                className={
+                                  viewportMode === 'mobile'
+                                    ? 'w-[375px] h-[667px] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden flex-shrink-0 bg-white'
+                                    : 'w-full h-full'
+                                }
+                              >
                                 <iframe
                                   ref={iframeRef}
                                   id="preview-iframe"
                                   src={devServerUrlWithAuth || devServerUrl}
                                   className="w-full h-full"
                                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                              />
+                                />
                               </div>
                             </div>
                           </>
@@ -2101,7 +2161,6 @@ export default function Project() {
           </div>
         </div>
       )}
-
 
       {/* Deployment Modal */}
       {showDeployModal && (

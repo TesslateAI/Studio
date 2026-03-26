@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Rocket,
-  Search,
   Eye,
   ChevronLeft,
   ChevronRight,
@@ -10,8 +9,7 @@ import {
   XCircle,
   Clock,
   ExternalLink,
-  Calendar,
-  TrendingUp
+  TrendingUp,
 } from 'lucide-react';
 import { getAuthHeaders } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -111,7 +109,7 @@ export default function DeploymentMonitor() {
   const [pages, setPages] = useState(0);
 
   // Filters
-  const [search, setSearch] = useState('');
+  const [_search, _setSearch] = useState('');
   const [providerFilter, setProviderFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
@@ -124,7 +122,7 @@ export default function DeploymentMonitor() {
       setLoading(true);
       const response = await fetch(`/api/admin/deployments/stats?period=${period}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load deployment stats');
@@ -150,7 +148,7 @@ export default function DeploymentMonitor() {
 
       const response = await fetch(`/api/admin/deployments?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load deployments');
@@ -171,7 +169,7 @@ export default function DeploymentMonitor() {
     try {
       const response = await fetch(`/api/admin/deployments/${deploymentId}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load deployment details');
@@ -204,9 +202,7 @@ export default function DeploymentMonitor() {
   };
 
   // Calculate max value for timeline chart
-  const maxTimelineValue = stats?.timeline
-    ? Math.max(...stats.timeline.map(t => t.total), 1)
-    : 1;
+  const maxTimelineValue = stats?.timeline ? Math.max(...stats.timeline.map((t) => t.total), 1) : 1;
 
   return (
     <div className="space-y-4">
@@ -231,14 +227,12 @@ export default function DeploymentMonitor() {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-zinc-900 rounded-lg w-fit">
-        {(['overview', 'list'] as const).map(tab => (
+        {(['overview', 'list'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === tab
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-400 hover:text-white'
+              activeTab === tab ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'
             }`}
           >
             {tab === 'overview' ? 'Overview' : 'All Deployments'}
@@ -291,13 +285,17 @@ export default function DeploymentMonitor() {
               {stats.by_provider.map((provider) => (
                 <div key={provider.provider} className="bg-zinc-900 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <span className={`px-3 py-1 rounded text-sm font-medium capitalize ${PROVIDER_COLORS[provider.provider] || 'bg-zinc-700'}`}>
+                    <span
+                      className={`px-3 py-1 rounded text-sm font-medium capitalize ${PROVIDER_COLORS[provider.provider] || 'bg-zinc-700'}`}
+                    >
                       {provider.provider}
                     </span>
                     <span className="text-zinc-400 text-sm">{provider.success_rate}%</span>
                   </div>
                   <div className="flex items-center gap-4 text-sm">
-                    <span className="text-zinc-400">Total: <span className="text-white">{provider.total}</span></span>
+                    <span className="text-zinc-400">
+                      Total: <span className="text-white">{provider.total}</span>
+                    </span>
                     <span className="text-green-400">{provider.success} success</span>
                     <span className="text-red-400">{provider.failed} failed</span>
                   </div>
@@ -325,18 +323,28 @@ export default function DeploymentMonitor() {
                 >
                   <div
                     className="bg-green-600 rounded-t"
-                    style={{ height: `${(day.success / maxTimelineValue) * 100}%`, minHeight: day.success > 0 ? '4px' : '0' }}
+                    style={{
+                      height: `${(day.success / maxTimelineValue) * 100}%`,
+                      minHeight: day.success > 0 ? '4px' : '0',
+                    }}
                   />
                   <div
                     className="bg-red-600"
-                    style={{ height: `${((day.total - day.success) / maxTimelineValue) * 100}%`, minHeight: (day.total - day.success) > 0 ? '4px' : '0' }}
+                    style={{
+                      height: `${((day.total - day.success) / maxTimelineValue) * 100}%`,
+                      minHeight: day.total - day.success > 0 ? '4px' : '0',
+                    }}
                   />
                 </div>
               ))}
             </div>
             <div className="flex justify-between text-xs text-zinc-500 mt-2">
               <span>{stats.timeline.length > 0 ? formatDate(stats.timeline[0].date) : ''}</span>
-              <span>{stats.timeline.length > 0 ? formatDate(stats.timeline[stats.timeline.length - 1].date) : ''}</span>
+              <span>
+                {stats.timeline.length > 0
+                  ? formatDate(stats.timeline[stats.timeline.length - 1].date)
+                  : ''}
+              </span>
             </div>
             <div className="flex items-center gap-4 mt-2 text-xs">
               <div className="flex items-center gap-1">
@@ -356,7 +364,10 @@ export default function DeploymentMonitor() {
           <div className="flex flex-wrap items-center gap-3">
             <select
               value={providerFilter}
-              onChange={(e) => { setProviderFilter(e.target.value); setPage(1); }}
+              onChange={(e) => {
+                setProviderFilter(e.target.value);
+                setPage(1);
+              }}
               className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none"
             >
               <option value="">All Providers</option>
@@ -367,7 +378,10 @@ export default function DeploymentMonitor() {
 
             <select
               value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
               className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none"
             >
               <option value="">All Status</option>
@@ -398,20 +412,25 @@ export default function DeploymentMonitor() {
                   </thead>
                   <tbody>
                     {deployments.map((deployment) => (
-                      <tr key={deployment.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                      <tr
+                        key={deployment.id}
+                        className="border-b border-zinc-800/50 hover:bg-zinc-800/30"
+                      >
                         <td className="py-3">
                           <p className="text-white">{deployment.project_name || '-'}</p>
                         </td>
-                        <td className="py-3 text-zinc-400">
-                          @{deployment.user_username || '-'}
-                        </td>
+                        <td className="py-3 text-zinc-400">@{deployment.user_username || '-'}</td>
                         <td className="py-3">
-                          <span className={`px-2 py-1 rounded text-xs font-medium capitalize ${PROVIDER_COLORS[deployment.provider] || 'bg-zinc-700'}`}>
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium capitalize ${PROVIDER_COLORS[deployment.provider] || 'bg-zinc-700'}`}
+                          >
                             {deployment.provider}
                           </span>
                         </td>
                         <td className="py-3">
-                          <span className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${STATUS_COLORS[deployment.status] || 'bg-zinc-700'}`}>
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${STATUS_COLORS[deployment.status] || 'bg-zinc-700'}`}
+                          >
                             {STATUS_ICONS[deployment.status]}
                             {deployment.status}
                           </span>
@@ -451,19 +470,22 @@ export default function DeploymentMonitor() {
               {pages > 1 && (
                 <div className="flex items-center justify-between pt-4">
                   <span className="text-sm text-zinc-500">
-                    Showing {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)} of {total}
+                    Showing {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)} of{' '}
+                    {total}
                   </span>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
                       disabled={page === 1}
                       className="p-2 hover:bg-zinc-800 rounded-lg disabled:opacity-50"
                     >
                       <ChevronLeft className="h-4 w-4 text-zinc-400" />
                     </button>
-                    <span className="text-sm text-zinc-400">Page {page} of {pages}</span>
+                    <span className="text-sm text-zinc-400">
+                      Page {page} of {pages}
+                    </span>
                     <button
-                      onClick={() => setPage(p => Math.min(pages, p + 1))}
+                      onClick={() => setPage((p) => Math.min(pages, p + 1))}
                       disabled={page === pages}
                       className="p-2 hover:bg-zinc-800 rounded-lg disabled:opacity-50"
                     >
@@ -486,17 +508,24 @@ export default function DeploymentMonitor() {
                 <Rocket className="h-5 w-5 text-zinc-400" />
                 <h3 className="font-semibold text-white">Deployment Details</h3>
               </div>
-              <button onClick={() => setShowDetailModal(false)} className="p-1 hover:bg-zinc-800 rounded">
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="p-1 hover:bg-zinc-800 rounded"
+              >
                 <X className="h-5 w-5 text-zinc-400" />
               </button>
             </div>
             <div className="p-4 space-y-4 overflow-y-auto max-h-[60vh]">
               {/* Status and Provider */}
               <div className="flex items-center gap-4">
-                <span className={`px-3 py-1.5 rounded text-sm font-medium capitalize ${PROVIDER_COLORS[selectedDeployment.provider] || 'bg-zinc-700'}`}>
+                <span
+                  className={`px-3 py-1.5 rounded text-sm font-medium capitalize ${PROVIDER_COLORS[selectedDeployment.provider] || 'bg-zinc-700'}`}
+                >
                   {selectedDeployment.provider}
                 </span>
-                <span className={`px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1 ${STATUS_COLORS[selectedDeployment.status] || 'bg-zinc-700'}`}>
+                <span
+                  className={`px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1 ${STATUS_COLORS[selectedDeployment.status] || 'bg-zinc-700'}`}
+                >
                   {STATUS_ICONS[selectedDeployment.status]}
                   {selectedDeployment.status}
                 </span>
@@ -507,7 +536,9 @@ export default function DeploymentMonitor() {
                 <div className="bg-zinc-800/50 rounded-lg p-3">
                   <p className="text-xs text-zinc-500">Project</p>
                   <p className="text-white">{selectedDeployment.project?.name || '-'}</p>
-                  <p className="text-xs text-zinc-500 font-mono">{selectedDeployment.project?.slug}</p>
+                  <p className="text-xs text-zinc-500 font-mono">
+                    {selectedDeployment.project?.slug}
+                  </p>
                 </div>
                 <div className="bg-zinc-800/50 rounded-lg p-3">
                   <p className="text-xs text-zinc-500">User</p>
@@ -555,11 +586,15 @@ export default function DeploymentMonitor() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-zinc-500">Created:</span>
-                  <span className="text-white ml-2">{formatDateTime(selectedDeployment.created_at)}</span>
+                  <span className="text-white ml-2">
+                    {formatDateTime(selectedDeployment.created_at)}
+                  </span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Completed:</span>
-                  <span className="text-white ml-2">{formatDateTime(selectedDeployment.completed_at)}</span>
+                  <span className="text-white ml-2">
+                    {formatDateTime(selectedDeployment.completed_at)}
+                  </span>
                 </div>
               </div>
             </div>

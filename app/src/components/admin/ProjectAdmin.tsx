@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search,
   FolderOpen,
-  MoreVertical,
   Eye,
   Pause,
   Trash2,
@@ -14,7 +13,6 @@ import {
   Globe,
   GitBranch,
   Box,
-  Clock
 } from 'lucide-react';
 import { getAuthHeaders } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -120,7 +118,7 @@ export default function ProjectAdmin() {
 
       const response = await fetch(`/api/admin/projects?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load projects');
@@ -145,7 +143,7 @@ export default function ProjectAdmin() {
     try {
       const response = await fetch(`/api/admin/projects/${projectId}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load project details');
@@ -168,7 +166,7 @@ export default function ProjectAdmin() {
         method: 'POST',
         headers: getAuthHeaders(),
         credentials: 'include',
-        body: JSON.stringify({ reason: hibernateReason })
+        body: JSON.stringify({ reason: hibernateReason }),
       });
 
       if (!response.ok) {
@@ -197,7 +195,7 @@ export default function ProjectAdmin() {
         method: 'DELETE',
         headers: getAuthHeaders(),
         credentials: 'include',
-        body: JSON.stringify({ reason: deleteReason })
+        body: JSON.stringify({ reason: deleteReason }),
       });
 
       if (!response.ok) {
@@ -226,7 +224,7 @@ export default function ProjectAdmin() {
         method: 'POST',
         headers: getAuthHeaders(),
         credentials: 'include',
-        body: JSON.stringify({ new_owner_id: newOwnerId, reason: transferReason })
+        body: JSON.stringify({ new_owner_id: newOwnerId, reason: transferReason }),
       });
 
       if (!response.ok) {
@@ -275,14 +273,20 @@ export default function ProjectAdmin() {
             type="text"
             placeholder="Search by name or slug..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-zinc-700"
           />
         </div>
 
         <select
           value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setPage(1);
+          }}
           className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-zinc-700"
         >
           <option value="">All Status</option>
@@ -292,7 +296,10 @@ export default function ProjectAdmin() {
 
         <select
           value={deploymentFilter}
-          onChange={(e) => { setDeploymentFilter(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setDeploymentFilter(e.target.value);
+            setPage(1);
+          }}
           className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-zinc-700"
         >
           <option value="">All Deployment Status</option>
@@ -307,9 +314,7 @@ export default function ProjectAdmin() {
           <LoadingSpinner size={32} />
         </div>
       ) : projects.length === 0 ? (
-        <div className="text-center py-12 text-zinc-500">
-          No projects found
-        </div>
+        <div className="text-center py-12 text-zinc-500">No projects found</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -341,7 +346,9 @@ export default function ProjectAdmin() {
                     </div>
                   </td>
                   <td className="py-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[project.environment_status] || 'bg-zinc-700 text-zinc-300'}`}>
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[project.environment_status] || 'bg-zinc-700 text-zinc-300'}`}
+                    >
                       {project.environment_status}
                     </span>
                   </td>
@@ -362,12 +369,8 @@ export default function ProjectAdmin() {
                       <span className="text-zinc-600">-</span>
                     )}
                   </td>
-                  <td className="py-3 text-zinc-400">
-                    {project.deployment_count}
-                  </td>
-                  <td className="py-3 text-zinc-400">
-                    {formatDate(project.created_at)}
-                  </td>
+                  <td className="py-3 text-zinc-400">{project.deployment_count}</td>
+                  <td className="py-3 text-zinc-400">{formatDate(project.created_at)}</td>
                   <td className="py-3">
                     <div className="flex items-center gap-1">
                       <button
@@ -422,19 +425,22 @@ export default function ProjectAdmin() {
       {pages > 1 && (
         <div className="flex items-center justify-between pt-4">
           <span className="text-sm text-zinc-500">
-            Showing {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)} of {total} projects
+            Showing {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)} of {total}{' '}
+            projects
           </span>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
               className="p-2 hover:bg-zinc-800 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ChevronLeft className="h-4 w-4 text-zinc-400" />
             </button>
-            <span className="text-sm text-zinc-400">Page {page} of {pages}</span>
+            <span className="text-sm text-zinc-400">
+              Page {page} of {pages}
+            </span>
             <button
-              onClick={() => setPage(p => Math.min(pages, p + 1))}
+              onClick={() => setPage((p) => Math.min(pages, p + 1))}
               disabled={page === pages}
               className="p-2 hover:bg-zinc-800 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -453,7 +459,10 @@ export default function ProjectAdmin() {
                 <h3 className="font-semibold text-white">{selectedProject.name}</h3>
                 <p className="text-sm text-zinc-500 font-mono">{selectedProject.slug}</p>
               </div>
-              <button onClick={() => setShowDetailModal(false)} className="p-1 hover:bg-zinc-800 rounded">
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="p-1 hover:bg-zinc-800 rounded"
+              >
                 <X className="h-5 w-5 text-zinc-400" />
               </button>
             </div>
@@ -462,7 +471,9 @@ export default function ProjectAdmin() {
               <div className="grid grid-cols-4 gap-4">
                 <div className="bg-zinc-800/50 rounded-lg p-3">
                   <p className="text-xs text-zinc-500">Status</p>
-                  <p className={`mt-1 px-2 py-1 rounded text-sm font-medium inline-block ${STATUS_COLORS[selectedProject.environment_status] || 'bg-zinc-700'}`}>
+                  <p
+                    className={`mt-1 px-2 py-1 rounded text-sm font-medium inline-block ${STATUS_COLORS[selectedProject.environment_status] || 'bg-zinc-700'}`}
+                  >
                     {selectedProject.environment_status}
                   </p>
                 </div>
@@ -476,7 +487,9 @@ export default function ProjectAdmin() {
                 </div>
                 <div className="bg-zinc-800/50 rounded-lg p-3">
                   <p className="text-xs text-zinc-500">Containers</p>
-                  <p className="text-white font-medium mt-1">{selectedProject.containers?.length || 0}</p>
+                  <p className="text-white font-medium mt-1">
+                    {selectedProject.containers?.length || 0}
+                  </p>
                 </div>
               </div>
 
@@ -494,28 +507,11 @@ export default function ProjectAdmin() {
                     <Box className="h-4 w-4" /> Containers
                   </h4>
                   <div className="space-y-2">
-                    {selectedProject.containers.map(c => (
+                    {selectedProject.containers.map((c) => (
                       <div key={c.id} className="flex items-center justify-between text-sm">
                         <span className="text-white">{c.name}</span>
-                        <span className="text-zinc-500">{c.container_type} - Port {c.port}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Recent Deployments */}
-              {selectedProject.recent_deployments && selectedProject.recent_deployments.length > 0 && (
-                <div className="bg-zinc-800/50 rounded-lg p-4">
-                  <h4 className="text-sm font-medium text-zinc-400 mb-2 flex items-center gap-2">
-                    <Globe className="h-4 w-4" /> Recent Deployments
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedProject.recent_deployments.map(d => (
-                      <div key={d.id} className="flex items-center justify-between text-sm">
-                        <span className="text-white">{d.provider}</span>
-                        <span className={d.status === 'success' ? 'text-green-400' : d.status === 'failed' ? 'text-red-400' : 'text-yellow-400'}>
-                          {d.status}
+                        <span className="text-zinc-500">
+                          {c.container_type} - Port {c.port}
                         </span>
                       </div>
                     ))}
@@ -523,35 +519,76 @@ export default function ProjectAdmin() {
                 </div>
               )}
 
+              {/* Recent Deployments */}
+              {selectedProject.recent_deployments &&
+                selectedProject.recent_deployments.length > 0 && (
+                  <div className="bg-zinc-800/50 rounded-lg p-4">
+                    <h4 className="text-sm font-medium text-zinc-400 mb-2 flex items-center gap-2">
+                      <Globe className="h-4 w-4" /> Recent Deployments
+                    </h4>
+                    <div className="space-y-2">
+                      {selectedProject.recent_deployments.map((d) => (
+                        <div key={d.id} className="flex items-center justify-between text-sm">
+                          <span className="text-white">{d.provider}</span>
+                          <span
+                            className={
+                              d.status === 'success'
+                                ? 'text-green-400'
+                                : d.status === 'failed'
+                                  ? 'text-red-400'
+                                  : 'text-yellow-400'
+                            }
+                          >
+                            {d.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
               {/* Timestamps */}
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-zinc-500">Created:</span>
-                  <span className="text-white ml-2">{formatDateTime(selectedProject.created_at)}</span>
+                  <span className="text-white ml-2">
+                    {formatDateTime(selectedProject.created_at)}
+                  </span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Last Activity:</span>
-                  <span className="text-white ml-2">{formatDateTime(selectedProject.last_activity)}</span>
+                  <span className="text-white ml-2">
+                    {formatDateTime(selectedProject.last_activity)}
+                  </span>
                 </div>
               </div>
             </div>
             <div className="p-4 border-t border-zinc-800 flex gap-2">
               {selectedProject.environment_status === 'active' && (
                 <button
-                  onClick={() => { setShowDetailModal(false); setShowHibernateModal(true); }}
+                  onClick={() => {
+                    setShowDetailModal(false);
+                    setShowHibernateModal(true);
+                  }}
                   className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-white flex items-center justify-center gap-2"
                 >
                   <Pause className="h-4 w-4" /> Hibernate
                 </button>
               )}
               <button
-                onClick={() => { setShowDetailModal(false); setShowTransferModal(true); }}
+                onClick={() => {
+                  setShowDetailModal(false);
+                  setShowTransferModal(true);
+                }}
                 className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-white flex items-center justify-center gap-2"
               >
                 <UserPlus className="h-4 w-4" /> Transfer
               </button>
               <button
-                onClick={() => { setShowDetailModal(false); setShowDeleteModal(true); }}
+                onClick={() => {
+                  setShowDetailModal(false);
+                  setShowDeleteModal(true);
+                }}
                 className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white flex items-center justify-center gap-2"
               >
                 <Trash2 className="h-4 w-4" /> Delete
@@ -573,8 +610,9 @@ export default function ProjectAdmin() {
             </div>
             <div className="p-4 space-y-4">
               <p className="text-zinc-400">
-                Are you sure you want to hibernate <span className="text-white font-medium">{selectedProject.name}</span>?
-                This will stop all containers and save the project state.
+                Are you sure you want to hibernate{' '}
+                <span className="text-white font-medium">{selectedProject.name}</span>? This will
+                stop all containers and save the project state.
               </p>
               <div>
                 <label className="text-sm text-zinc-500">Reason (required)</label>
@@ -589,7 +627,10 @@ export default function ProjectAdmin() {
             </div>
             <div className="p-4 border-t border-zinc-800 flex gap-2">
               <button
-                onClick={() => { setShowHibernateModal(false); setHibernateReason(''); }}
+                onClick={() => {
+                  setShowHibernateModal(false);
+                  setHibernateReason('');
+                }}
                 className="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-white"
               >
                 Cancel
@@ -619,7 +660,8 @@ export default function ProjectAdmin() {
             <div className="p-4 space-y-4">
               <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
                 <p className="text-red-400 text-sm">
-                  This action is permanent. All project files, containers, and deployments will be deleted.
+                  This action is permanent. All project files, containers, and deployments will be
+                  deleted.
                 </p>
               </div>
               <p className="text-zinc-400">
@@ -638,7 +680,10 @@ export default function ProjectAdmin() {
             </div>
             <div className="p-4 border-t border-zinc-800 flex gap-2">
               <button
-                onClick={() => { setShowDeleteModal(false); setDeleteReason(''); }}
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeleteReason('');
+                }}
                 className="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-white"
               >
                 Cancel
@@ -667,7 +712,8 @@ export default function ProjectAdmin() {
             </div>
             <div className="p-4 space-y-4">
               <p className="text-zinc-400">
-                Transfer <span className="text-white font-medium">{selectedProject.name}</span> to another user.
+                Transfer <span className="text-white font-medium">{selectedProject.name}</span> to
+                another user.
               </p>
               <div>
                 <label className="text-sm text-zinc-500">New Owner ID (required)</label>
@@ -692,7 +738,11 @@ export default function ProjectAdmin() {
             </div>
             <div className="p-4 border-t border-zinc-800 flex gap-2">
               <button
-                onClick={() => { setShowTransferModal(false); setNewOwnerId(''); setTransferReason(''); }}
+                onClick={() => {
+                  setShowTransferModal(false);
+                  setNewOwnerId('');
+                  setTransferReason('');
+                }}
                 className="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-white"
               >
                 Cancel

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Warning, GithubLogo, CircleNotch, PlugsConnected } from '@phosphor-icons/react';
+import { Warning, GithubLogo, CircleNotch } from '@phosphor-icons/react';
 import { motion } from 'framer-motion';
 import { gitProvidersApi } from '../../../lib/git-providers-api';
 import type { GitProvider, AllProvidersStatus } from '../../../types/git-providers';
@@ -52,10 +52,13 @@ export function ConnectProviderInline({
         }
       }, 500);
 
-      setTimeout(() => {
-        clearInterval(checkPopup);
-        setIsConnecting(false);
-      }, 5 * 60 * 1000);
+      setTimeout(
+        () => {
+          clearInterval(checkPopup);
+          setIsConnecting(false);
+        },
+        5 * 60 * 1000
+      );
     } catch (error: unknown) {
       setIsConnecting(false);
       const errorMessage =
@@ -69,8 +72,16 @@ export function ConnectProviderInline({
     provider === 'github'
       ? () => <GithubLogo size={16} weight="fill" />
       : provider === 'gitlab'
-        ? () => <span className="font-bold text-[#FC6D26]" style={{ fontSize: 11 }}>GL</span>
-        : () => <span className="font-bold text-[#0052CC]" style={{ fontSize: 11 }}>BB</span>;
+        ? () => (
+            <span className="font-bold text-[#FC6D26]" style={{ fontSize: 11 }}>
+              GL
+            </span>
+          )
+        : () => (
+            <span className="font-bold text-[#0052CC]" style={{ fontSize: 11 }}>
+              BB
+            </span>
+          );
 
   return (
     <motion.div

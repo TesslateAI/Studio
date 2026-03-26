@@ -17,8 +17,8 @@ interface StepData {
   step_index: number;
   iteration: number | null;
   thought: string | null;
-  tool_calls: any[];
-  tool_results: any[];
+  tool_calls: unknown[];
+  tool_results: unknown[];
   response_text: string | null;
   timestamp: string | null;
 }
@@ -106,7 +106,7 @@ function stepHasError(step: StepData): boolean {
   });
 }
 
-function formatResultContent(result: any): string {
+function formatResultContent(result: unknown): string {
   if (typeof result === 'string') return result;
   if (result == null) return '';
   return JSON.stringify(result, null, 2);
@@ -187,10 +187,7 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
             <Brain className="text-purple-400" size={24} />
             <h3 className="text-xl font-bold text-white">Agent Run Details</h3>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
-          >
+          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
             <X size={20} />
           </button>
         </div>
@@ -202,9 +199,7 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
               <LoadingSpinner message="Loading agent run..." size={60} />
             </div>
           ) : !data ? (
-            <div className="text-center py-12 text-gray-400">
-              Failed to load agent run data.
-            </div>
+            <div className="text-center py-12 text-gray-400">Failed to load agent run data.</div>
           ) : (
             <>
               {/* Info Header */}
@@ -212,7 +207,9 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
                 <div className="flex flex-wrap items-center gap-3">
                   {/* Project name */}
                   <div className="text-white font-medium">
-                    {data.project ? data.project.name : (
+                    {data.project ? (
+                      data.project.name
+                    ) : (
                       <span className="text-gray-500 italic">No project</span>
                     )}
                   </div>
@@ -307,12 +304,13 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
                             {step.tool_calls && step.tool_calls.length > 0 && (
                               <span className="text-gray-500 text-xs flex items-center space-x-1">
                                 <Wrench size={12} />
-                                <span>{step.tool_calls.length} tool call{step.tool_calls.length !== 1 ? 's' : ''}</span>
+                                <span>
+                                  {step.tool_calls.length} tool call
+                                  {step.tool_calls.length !== 1 ? 's' : ''}
+                                </span>
                               </span>
                             )}
-                            {hasError && (
-                              <AlertTriangle size={14} className="text-red-400" />
-                            )}
+                            {hasError && <AlertTriangle size={14} className="text-red-400" />}
                           </div>
                           <div className="flex items-center space-x-2 text-gray-500 text-xs">
                             <Clock size={12} />
@@ -341,28 +339,39 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
                               <div className="pt-1">
                                 <div className="flex items-center space-x-2 mb-2">
                                   <Wrench size={14} className="text-gray-400" />
-                                  <span className="text-gray-400 text-sm font-medium">Tool Calls</span>
+                                  <span className="text-gray-400 text-sm font-medium">
+                                    Tool Calls
+                                  </span>
                                 </div>
                                 <div className="space-y-2">
-                                  {step.tool_calls.map((call: any, callIdx: number) => (
-                                    <div
-                                      key={callIdx}
-                                      className="bg-gray-900 rounded p-3 space-y-2"
-                                    >
-                                      <div className="text-blue-400 font-mono text-sm">
-                                        {call.name || call.function?.name || call.tool || 'unknown'}
+                                  {step.tool_calls.map(
+                                    (call: Record<string, unknown>, callIdx: number) => (
+                                      <div
+                                        key={callIdx}
+                                        className="bg-gray-900 rounded p-3 space-y-2"
+                                      >
+                                        <div className="text-blue-400 font-mono text-sm">
+                                          {call.name ||
+                                            call.function?.name ||
+                                            call.tool ||
+                                            'unknown'}
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                          <pre className="text-sm font-mono text-gray-300 whitespace-pre-wrap">
+                                            {JSON.stringify(
+                                              call.arguments ||
+                                                call.parameters ||
+                                                call.input ||
+                                                call.function?.arguments ||
+                                                {},
+                                              null,
+                                              2
+                                            )}
+                                          </pre>
+                                        </div>
                                       </div>
-                                      <div className="overflow-x-auto">
-                                        <pre className="text-sm font-mono text-gray-300 whitespace-pre-wrap">
-                                          {JSON.stringify(
-                                            call.arguments || call.parameters || call.input || call.function?.arguments || {},
-                                            null,
-                                            2
-                                          )}
-                                        </pre>
-                                      </div>
-                                    </div>
-                                  ))}
+                                    )
+                                  )}
                                 </div>
                               </div>
                             )}
@@ -372,16 +381,15 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
                               <div className="pt-1">
                                 <div className="flex items-center space-x-2 mb-2">
                                   <MessageSquare size={14} className="text-gray-400" />
-                                  <span className="text-gray-400 text-sm font-medium">Tool Results</span>
+                                  <span className="text-gray-400 text-sm font-medium">
+                                    Tool Results
+                                  </span>
                                 </div>
                                 <div className="space-y-2">
-                                  {step.tool_results.map((result: any, resIdx: number) => {
+                                  {step.tool_results.map((result: unknown, resIdx: number) => {
                                     const content = formatResultContent(result);
                                     return (
-                                      <div
-                                        key={resIdx}
-                                        className="bg-gray-900 rounded p-3"
-                                      >
+                                      <div key={resIdx} className="bg-gray-900 rounded p-3">
                                         <TruncatedText text={content} limit={500} />
                                       </div>
                                     );
@@ -395,7 +403,9 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
                               <div className="pt-1">
                                 <div className="flex items-center space-x-2 mb-2">
                                   <MessageSquare size={14} className="text-gray-400" />
-                                  <span className="text-gray-400 text-sm font-medium">Response</span>
+                                  <span className="text-gray-400 text-sm font-medium">
+                                    Response
+                                  </span>
                                 </div>
                                 <div className="bg-gray-900 rounded p-3 text-gray-300 text-sm whitespace-pre-wrap">
                                   {step.response_text}

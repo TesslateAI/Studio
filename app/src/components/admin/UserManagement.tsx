@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search,
   Users,
-  MoreVertical,
   Eye,
   Ban,
   Bot,
@@ -15,7 +14,7 @@ import {
   X,
   AlertTriangle,
   Check,
-  RefreshCw
+  RefreshCw,
 } from 'lucide-react';
 import { getAuthHeaders } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -140,7 +139,7 @@ export default function UserManagement() {
 
       const response = await fetch(`/api/admin/users?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load users');
@@ -165,7 +164,7 @@ export default function UserManagement() {
     try {
       const response = await fetch(`/api/admin/users/${userId}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load user details');
@@ -196,7 +195,7 @@ export default function UserManagement() {
 
       const response = await fetch(`/api/admin/users/${userId}/agent-runs?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load agent runs');
@@ -223,7 +222,7 @@ export default function UserManagement() {
         method: 'POST',
         headers: getAuthHeaders(),
         credentials: 'include',
-        body: JSON.stringify({ reason: suspendReason, notify_user: false })
+        body: JSON.stringify({ reason: suspendReason, notify_user: false }),
       });
 
       if (!response.ok) {
@@ -248,7 +247,7 @@ export default function UserManagement() {
       const response = await fetch(`/api/admin/users/${userId}/unsuspend`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to unsuspend user');
@@ -277,8 +276,8 @@ export default function UserManagement() {
         body: JSON.stringify({
           confirmation_email: deleteConfirmEmail,
           reason: deleteReason,
-          notify_user: false
-        })
+          notify_user: false,
+        }),
       });
 
       if (!response.ok) {
@@ -308,7 +307,7 @@ export default function UserManagement() {
         method: 'POST',
         headers: getAuthHeaders(),
         credentials: 'include',
-        body: JSON.stringify({ amount: creditsAmount, reason: creditsReason })
+        body: JSON.stringify({ amount: creditsAmount, reason: creditsReason }),
       });
 
       if (!response.ok) {
@@ -339,7 +338,7 @@ export default function UserManagement() {
 
       const response = await fetch(`/api/admin/users/export?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to export users');
@@ -367,19 +366,25 @@ export default function UserManagement() {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   };
 
   const getStatusBadge = (user: UserListItem) => {
     if (user.is_deleted) {
-      return <span className="px-2 py-1 rounded text-xs bg-gray-500/20 text-gray-400">Deleted</span>;
+      return (
+        <span className="px-2 py-1 rounded text-xs bg-gray-500/20 text-gray-400">Deleted</span>
+      );
     }
     if (user.is_suspended) {
-      return <span className="px-2 py-1 rounded text-xs bg-red-500/20 text-red-400">Suspended</span>;
+      return (
+        <span className="px-2 py-1 rounded text-xs bg-red-500/20 text-red-400">Suspended</span>
+      );
     }
     if (!user.is_active) {
-      return <span className="px-2 py-1 rounded text-xs bg-yellow-500/20 text-yellow-400">Inactive</span>;
+      return (
+        <span className="px-2 py-1 rounded text-xs bg-yellow-500/20 text-yellow-400">Inactive</span>
+      );
     }
     return <span className="px-2 py-1 rounded text-xs bg-green-500/20 text-green-400">Active</span>;
   };
@@ -389,7 +394,7 @@ export default function UserManagement() {
       free: 'bg-gray-500/20 text-gray-300',
       basic: 'bg-blue-500/20 text-blue-400',
       pro: 'bg-purple-500/20 text-purple-400',
-      ultra: 'bg-yellow-500/20 text-yellow-400'
+      ultra: 'bg-yellow-500/20 text-yellow-400',
     };
     return (
       <span className={`px-2 py-1 rounded text-xs capitalize ${colors[tier] || colors.free}`}>
@@ -429,19 +434,28 @@ export default function UserManagement() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="md:col-span-2">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                size={18}
+              />
               <input
                 type="text"
                 placeholder="Search by email, username, or name..."
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
                 className="w-full bg-gray-700 text-white rounded-lg pl-10 pr-4 py-2 border border-[var(--text)]/20"
               />
             </div>
           </div>
           <select
             value={tierFilter}
-            onChange={(e) => { setTierFilter(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setTierFilter(e.target.value);
+              setPage(1);
+            }}
             className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-[var(--text)]/20 [&>option]:bg-gray-700"
           >
             <option value="">All Tiers</option>
@@ -452,7 +466,10 @@ export default function UserManagement() {
           </select>
           <select
             value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
             className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-[var(--text)]/20 [&>option]:bg-gray-700"
           >
             <option value="">All Status</option>
@@ -475,7 +492,9 @@ export default function UserManagement() {
                 <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Status</th>
                 <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Credits</th>
                 <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Projects</th>
-                <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Last Active</th>
+                <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">
+                  Last Active
+                </th>
                 <th className="text-right px-6 py-3 text-gray-400 font-medium text-sm">Actions</th>
               </tr>
             </thead>
@@ -488,7 +507,8 @@ export default function UserManagement() {
                         <img src={user.avatar_url} alt="" className="w-10 h-10 rounded-full" />
                       ) : (
                         <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-white font-medium">
-                          {user.name?.charAt(0).toUpperCase() || user.username?.charAt(0).toUpperCase()}
+                          {user.name?.charAt(0).toUpperCase() ||
+                            user.username?.charAt(0).toUpperCase()}
                         </div>
                       )}
                       <div>
@@ -536,7 +556,9 @@ export default function UserManagement() {
                             </button>
                           ) : (
                             <button
-                              onClick={() => { loadUserDetail(user.id).then(() => setShowSuspendModal(true)); }}
+                              onClick={() => {
+                                loadUserDetail(user.id).then(() => setShowSuspendModal(true));
+                              }}
                               className="p-2 hover:bg-yellow-600/20 rounded text-yellow-400 hover:text-yellow-300"
                               title="Suspend"
                             >
@@ -544,14 +566,18 @@ export default function UserManagement() {
                             </button>
                           )}
                           <button
-                            onClick={() => { loadUserDetail(user.id).then(() => setShowCreditsModal(true)); }}
+                            onClick={() => {
+                              loadUserDetail(user.id).then(() => setShowCreditsModal(true));
+                            }}
                             className="p-2 hover:bg-blue-600/20 rounded text-blue-400 hover:text-blue-300"
                             title="Adjust credits"
                           >
                             <CreditCard size={16} />
                           </button>
                           <button
-                            onClick={() => { loadUserDetail(user.id).then(() => setShowDeleteModal(true)); }}
+                            onClick={() => {
+                              loadUserDetail(user.id).then(() => setShowDeleteModal(true));
+                            }}
                             className="p-2 hover:bg-red-600/20 rounded text-red-400 hover:text-red-300"
                             title="Delete"
                           >
@@ -581,7 +607,7 @@ export default function UserManagement() {
             </span>
             <div className="flex items-center space-x-2">
               <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
                 className="p-2 hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -591,7 +617,7 @@ export default function UserManagement() {
                 Page {page} of {pages}
               </span>
               <button
-                onClick={() => setPage(p => Math.min(pages, p + 1))}
+                onClick={() => setPage((p) => Math.min(pages, p + 1))}
                 disabled={page === pages}
                 className="p-2 hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -608,7 +634,10 @@ export default function UserManagement() {
           <div className="bg-gray-800 rounded-lg border border-[var(--text)]/15 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
             <div className="p-6 border-b border-[var(--text)]/15 flex items-center justify-between">
               <h3 className="text-xl font-bold text-white">User Details</h3>
-              <button onClick={() => setShowDetailModal(false)} className="text-gray-400 hover:text-white">
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="text-gray-400 hover:text-white"
+              >
                 <X size={20} />
               </button>
             </div>
@@ -643,90 +672,106 @@ export default function UserManagement() {
                 </button>
               </div>
             </div>
-            {detailTab === 'details' && <div className="p-6 space-y-6">
-              {/* Profile Header */}
-              <div className="flex items-center space-x-4">
-                {selectedUser.avatar_url ? (
-                  <img src={selectedUser.avatar_url} alt="" className="w-16 h-16 rounded-full" />
-                ) : (
-                  <div className="w-16 h-16 rounded-full bg-gray-600 flex items-center justify-center text-white text-2xl font-medium">
-                    {selectedUser.name?.charAt(0).toUpperCase()}
+            {detailTab === 'details' && (
+              <div className="p-6 space-y-6">
+                {/* Profile Header */}
+                <div className="flex items-center space-x-4">
+                  {selectedUser.avatar_url ? (
+                    <img src={selectedUser.avatar_url} alt="" className="w-16 h-16 rounded-full" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full bg-gray-600 flex items-center justify-center text-white text-2xl font-medium">
+                      {selectedUser.name?.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <h4 className="text-white font-medium text-lg">{selectedUser.name}</h4>
+                    <p className="text-gray-400">@{selectedUser.username}</p>
+                    <p className="text-gray-500 text-sm">{selectedUser.email}</p>
                   </div>
-                )}
-                <div>
-                  <h4 className="text-white font-medium text-lg">{selectedUser.name}</h4>
-                  <p className="text-gray-400">@{selectedUser.username}</p>
-                  <p className="text-gray-500 text-sm">{selectedUser.email}</p>
                 </div>
-              </div>
 
-              {/* Status Cards */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-gray-700/50 rounded-lg p-4">
-                  <div className="text-gray-400 text-sm">Tier</div>
-                  <div className="text-white font-medium capitalize">{selectedUser.subscription_tier}</div>
+                {/* Status Cards */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-gray-700/50 rounded-lg p-4">
+                    <div className="text-gray-400 text-sm">Tier</div>
+                    <div className="text-white font-medium capitalize">
+                      {selectedUser.subscription_tier}
+                    </div>
+                  </div>
+                  <div className="bg-gray-700/50 rounded-lg p-4">
+                    <div className="text-gray-400 text-sm">Total Credits</div>
+                    <div className="text-white font-medium">
+                      {selectedUser.total_credits.toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="bg-gray-700/50 rounded-lg p-4">
+                    <div className="text-gray-400 text-sm">Total Spend</div>
+                    <div className="text-white font-medium">
+                      ${(selectedUser.total_spend / 100).toFixed(2)}
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-gray-700/50 rounded-lg p-4">
-                  <div className="text-gray-400 text-sm">Total Credits</div>
-                  <div className="text-white font-medium">{selectedUser.total_credits.toLocaleString()}</div>
-                </div>
-                <div className="bg-gray-700/50 rounded-lg p-4">
-                  <div className="text-gray-400 text-sm">Total Spend</div>
-                  <div className="text-white font-medium">${(selectedUser.total_spend / 100).toFixed(2)}</div>
-                </div>
-              </div>
 
-              {/* Details */}
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Status</span>
-                  {getStatusBadge(selectedUser)}
-                </div>
-                {selectedUser.suspended_reason && (
+                {/* Details */}
+                <div className="space-y-3">
                   <div className="flex justify-between">
-                    <span className="text-gray-400">Suspension Reason</span>
-                    <span className="text-red-400 text-sm">{selectedUser.suspended_reason}</span>
+                    <span className="text-gray-400">Status</span>
+                    {getStatusBadge(selectedUser)}
+                  </div>
+                  {selectedUser.suspended_reason && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Suspension Reason</span>
+                      <span className="text-red-400 text-sm">{selectedUser.suspended_reason}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Projects</span>
+                    <span className="text-white">
+                      {selectedUser.project_count} ({selectedUser.deployed_projects_count} deployed)
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Token Usage</span>
+                    <span className="text-white">
+                      {(
+                        selectedUser.usage_stats.total_tokens_input +
+                        selectedUser.usage_stats.total_tokens_output
+                      ).toLocaleString()}{' '}
+                      tokens
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Credits Reset</span>
+                    <span className="text-white">
+                      {formatDate(selectedUser.credits_reset_date)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Last Active</span>
+                    <span className="text-white">{formatDate(selectedUser.last_active_at)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Created</span>
+                    <span className="text-white">{formatDate(selectedUser.created_at)}</span>
+                  </div>
+                </div>
+
+                {/* Recent Projects */}
+                {selectedUser.recent_projects.length > 0 && (
+                  <div>
+                    <h5 className="text-white font-medium mb-2">Recent Projects</h5>
+                    <div className="space-y-2">
+                      {selectedUser.recent_projects.map((p, i) => (
+                        <div key={i} className="flex justify-between text-sm">
+                          <span className="text-gray-300">{p.name}</span>
+                          <span className="text-gray-500">{formatDate(p.created_at)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Projects</span>
-                  <span className="text-white">{selectedUser.project_count} ({selectedUser.deployed_projects_count} deployed)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Token Usage</span>
-                  <span className="text-white">
-                    {(selectedUser.usage_stats.total_tokens_input + selectedUser.usage_stats.total_tokens_output).toLocaleString()} tokens
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Credits Reset</span>
-                  <span className="text-white">{formatDate(selectedUser.credits_reset_date)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Last Active</span>
-                  <span className="text-white">{formatDate(selectedUser.last_active_at)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Created</span>
-                  <span className="text-white">{formatDate(selectedUser.created_at)}</span>
-                </div>
               </div>
-
-              {/* Recent Projects */}
-              {selectedUser.recent_projects.length > 0 && (
-                <div>
-                  <h5 className="text-white font-medium mb-2">Recent Projects</h5>
-                  <div className="space-y-2">
-                    {selectedUser.recent_projects.map((p, i) => (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span className="text-gray-300">{p.name}</span>
-                        <span className="text-gray-500">{formatDate(p.created_at)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>}
+            )}
             {detailTab === 'agent-runs' && (
               <div className="p-6 space-y-4">
                 {/* Filter */}
@@ -767,19 +812,27 @@ export default function UserManagement() {
                     <LoadingSpinner />
                   </div>
                 ) : agentRuns.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    No agent runs found
-                  </div>
+                  <div className="text-center py-8 text-gray-500">No agent runs found</div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead className="bg-gray-750 border-b border-[var(--text)]/15">
                         <tr>
-                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Project</th>
-                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Date</th>
-                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">Status</th>
-                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Iterations</th>
-                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">Tool Calls</th>
+                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">
+                            Project
+                          </th>
+                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">
+                            Date
+                          </th>
+                          <th className="text-left text-gray-400 text-xs font-medium px-4 py-3">
+                            Status
+                          </th>
+                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">
+                            Iterations
+                          </th>
+                          <th className="text-right text-gray-400 text-xs font-medium px-4 py-3">
+                            Tool Calls
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-700">
@@ -790,7 +843,9 @@ export default function UserManagement() {
                             className="hover:bg-gray-700/50 transition-colors cursor-pointer"
                           >
                             <td className="px-4 py-3 text-gray-300 text-sm">
-                              {run.project_name || <span className="text-gray-500 italic">No project</span>}
+                              {run.project_name || (
+                                <span className="text-gray-500 italic">No project</span>
+                              )}
                             </td>
                             <td className="px-4 py-3 text-gray-400 text-sm">
                               <div className="flex items-center space-x-1">
@@ -801,16 +856,49 @@ export default function UserManagement() {
                             <td className="px-4 py-3">
                               {(() => {
                                 const reason = run.completion_reason;
-                                if (reason === 'task_complete_signal') return <span className="px-2 py-0.5 rounded-full text-xs bg-green-500/20 text-green-400">Completed</span>;
-                                if (reason === 'error') return <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/20 text-red-400">Error</span>;
-                                if (reason === 'cancelled') return <span className="px-2 py-0.5 rounded-full text-xs bg-yellow-500/20 text-yellow-400">Cancelled</span>;
-                                if (reason === 'resource_limit_exceeded') return <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">Resource Limit</span>;
-                                if (reason === 'credit_deduction_failed') return <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">Credit Failed</span>;
-                                return <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/20 text-gray-400">{reason || 'Unknown'}</span>;
+                                if (reason === 'task_complete_signal')
+                                  return (
+                                    <span className="px-2 py-0.5 rounded-full text-xs bg-green-500/20 text-green-400">
+                                      Completed
+                                    </span>
+                                  );
+                                if (reason === 'error')
+                                  return (
+                                    <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/20 text-red-400">
+                                      Error
+                                    </span>
+                                  );
+                                if (reason === 'cancelled')
+                                  return (
+                                    <span className="px-2 py-0.5 rounded-full text-xs bg-yellow-500/20 text-yellow-400">
+                                      Cancelled
+                                    </span>
+                                  );
+                                if (reason === 'resource_limit_exceeded')
+                                  return (
+                                    <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">
+                                      Resource Limit
+                                    </span>
+                                  );
+                                if (reason === 'credit_deduction_failed')
+                                  return (
+                                    <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">
+                                      Credit Failed
+                                    </span>
+                                  );
+                                return (
+                                  <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/20 text-gray-400">
+                                    {reason || 'Unknown'}
+                                  </span>
+                                );
                               })()}
                             </td>
-                            <td className="px-4 py-3 text-gray-300 text-sm text-right">{run.iterations}</td>
-                            <td className="px-4 py-3 text-gray-300 text-sm text-right">{run.tool_calls_made}</td>
+                            <td className="px-4 py-3 text-gray-300 text-sm text-right">
+                              {run.iterations}
+                            </td>
+                            <td className="px-4 py-3 text-gray-300 text-sm text-right">
+                              {run.tool_calls_made}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -826,14 +914,18 @@ export default function UserManagement() {
                     </span>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => selectedUser && loadAgentRuns(selectedUser.id, agentRunsPage - 1)}
+                        onClick={() =>
+                          selectedUser && loadAgentRuns(selectedUser.id, agentRunsPage - 1)
+                        }
                         disabled={agentRunsPage <= 1}
                         className="p-1 text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <ChevronLeft size={16} />
                       </button>
                       <button
-                        onClick={() => selectedUser && loadAgentRuns(selectedUser.id, agentRunsPage + 1)}
+                        onClick={() =>
+                          selectedUser && loadAgentRuns(selectedUser.id, agentRunsPage + 1)
+                        }
                         disabled={agentRunsPage >= agentRunsPages}
                         className="p-1 text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -844,7 +936,7 @@ export default function UserManagement() {
                 )}
 
                 {/* Error preview */}
-                {agentRuns.some(r => r.error) && (
+                {agentRuns.some((r) => r.error) && (
                   <div className="text-xs text-gray-500 italic">
                     Click a row to view the full step-by-step execution trace
                   </div>
@@ -875,7 +967,8 @@ export default function UserManagement() {
             </div>
             <div className="p-6 space-y-4">
               <p className="text-gray-300">
-                You are about to suspend <strong>{selectedUser.username}</strong>. They will not be able to log in until unsuspended.
+                You are about to suspend <strong>{selectedUser.username}</strong>. They will not be
+                able to log in until unsuspended.
               </p>
               <div>
                 <label className="block text-gray-400 text-sm mb-2">Reason (required)</label>
@@ -890,7 +983,10 @@ export default function UserManagement() {
             </div>
             <div className="p-6 border-t border-[var(--text)]/15 flex justify-end space-x-3">
               <button
-                onClick={() => { setShowSuspendModal(false); setSuspendReason(''); }}
+                onClick={() => {
+                  setShowSuspendModal(false);
+                  setSuspendReason('');
+                }}
                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg"
               >
                 Cancel
@@ -920,7 +1016,8 @@ export default function UserManagement() {
             </div>
             <div className="p-6 space-y-4">
               <p className="text-gray-300">
-                This will soft-delete <strong>{selectedUser.username}</strong>'s account. Data will be permanently removed after 30 days.
+                This will soft-delete <strong>{selectedUser.username}</strong>'s account. Data will
+                be permanently removed after 30 days.
               </p>
               <div>
                 <label className="block text-gray-400 text-sm mb-2">
@@ -947,14 +1044,22 @@ export default function UserManagement() {
             </div>
             <div className="p-6 border-t border-[var(--text)]/15 flex justify-end space-x-3">
               <button
-                onClick={() => { setShowDeleteModal(false); setDeleteConfirmEmail(''); setDeleteReason(''); }}
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeleteConfirmEmail('');
+                  setDeleteReason('');
+                }}
                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDelete}
-                disabled={actionLoading || deleteConfirmEmail.toLowerCase() !== selectedUser.email.toLowerCase() || !deleteReason.trim()}
+                disabled={
+                  actionLoading ||
+                  deleteConfirmEmail.toLowerCase() !== selectedUser.email.toLowerCase() ||
+                  !deleteReason.trim()
+                }
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50 flex items-center space-x-2"
               >
                 {actionLoading && <RefreshCw size={16} className="animate-spin" />}
@@ -978,9 +1083,12 @@ export default function UserManagement() {
             <div className="p-6 space-y-4">
               <div className="bg-gray-700/50 rounded-lg p-4">
                 <div className="text-gray-400 text-sm">Current Balance</div>
-                <div className="text-white text-2xl font-bold">{selectedUser.total_credits.toLocaleString()}</div>
+                <div className="text-white text-2xl font-bold">
+                  {selectedUser.total_credits.toLocaleString()}
+                </div>
                 <div className="text-gray-500 text-sm">
-                  Bundled: {selectedUser.bundled_credits} | Purchased: {selectedUser.purchased_credits}
+                  Bundled: {selectedUser.bundled_credits} | Purchased:{' '}
+                  {selectedUser.purchased_credits}
                 </div>
               </div>
               <div>
@@ -1015,7 +1123,11 @@ export default function UserManagement() {
             </div>
             <div className="p-6 border-t border-[var(--text)]/15 flex justify-end space-x-3">
               <button
-                onClick={() => { setShowCreditsModal(false); setCreditsAmount(0); setCreditsReason(''); }}
+                onClick={() => {
+                  setShowCreditsModal(false);
+                  setCreditsAmount(0);
+                  setCreditsReason('');
+                }}
                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg"
               >
                 Cancel
@@ -1035,10 +1147,7 @@ export default function UserManagement() {
 
       {/* Agent Run Viewer Modal */}
       {viewingRunId && (
-        <AgentRunViewer
-          messageId={viewingRunId}
-          onClose={() => setViewingRunId(null)}
-        />
+        <AgentRunViewer messageId={viewingRunId} onClose={() => setViewingRunId(null)} />
       )}
     </div>
   );

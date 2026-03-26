@@ -1,7 +1,6 @@
 import { type ReactNode } from 'react';
 import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
-import { Dropdown } from './Dropdown';
 import { type ComputeTier } from '../../types/project';
 import { getEnvironmentStatus } from './environmentStatus';
 import { EnvironmentStatusBadge } from './EnvironmentStatusBadge';
@@ -40,7 +39,7 @@ export function ProjectCard({
   onOpen,
   onDelete,
   onFork,
-  onHibernate,
+  onHibernate: _onHibernate,
   onStatusChange: _onStatusChange,
   onAddAgent,
   isDeleting = false,
@@ -59,8 +58,12 @@ export function ProjectCard({
         overflow: isDeleting ? 'hidden' : 'visible',
         border: `var(--border-width) solid ${isSelected ? 'var(--primary)' : 'var(--border)'}`,
       }}
-      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
-      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--border)'; }}
+      onMouseEnter={(e) => {
+        if (!isSelected) e.currentTarget.style.borderColor = 'var(--border-hover)';
+      }}
+      onMouseLeave={(e) => {
+        if (!isSelected) e.currentTarget.style.borderColor = 'var(--border)';
+      }}
     >
       {/* Selection Checkbox */}
       {onSelectionToggle && (
@@ -222,7 +225,13 @@ export function ProjectCard({
           </button>
 
           {onFork && (
-            <button onClick={(e) => { e.stopPropagation(); onFork(); }} className="btn">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onFork();
+              }}
+              className="btn"
+            >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64ZM144,192a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z" />
               </svg>
@@ -230,7 +239,14 @@ export function ProjectCard({
             </button>
           )}
 
-          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="btn btn-danger" title="Delete project">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="btn btn-danger"
+            title="Delete project"
+          >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
               <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
             </svg>

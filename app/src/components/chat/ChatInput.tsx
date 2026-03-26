@@ -72,7 +72,7 @@ export function ChatInput({
   isExecuting = false,
   onStop,
   onClearHistory,
-  isExpanded = true,
+  _isExpanded = true,
   editMode = 'allow',
   onModeChange,
   onPlanMode,
@@ -319,7 +319,9 @@ export function ChatInput({
     }
     // Down arrow - navigate forwards through history
     else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-      const atEnd = !textareaRef.current || textareaRef.current.selectionStart === textareaRef.current.value.length;
+      const atEnd =
+        !textareaRef.current ||
+        textareaRef.current.selectionStart === textareaRef.current.value.length;
       if (atEnd && historyIndex > -1) {
         e.preventDefault();
         const newIndex = historyIndex + 1;
@@ -390,15 +392,17 @@ export function ChatInput({
 
   const handlePaste = (e: React.ClipboardEvent) => {
     // Check clipboardData.files first (works for most drag/paste)
-    const imageFiles = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'));
+    const imageFiles = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'));
     if (imageFiles.length > 0) {
       if (currentModelSupportsVision === false) {
         e.preventDefault();
-        toast.error('The current model does not support images. Switch to a vision-capable model to attach images.');
+        toast.error(
+          'The current model does not support images. Switch to a vision-capable model to attach images.'
+        );
         return;
       }
       e.preventDefault();
-      imageFiles.forEach(f => addImage(f));
+      imageFiles.forEach((f) => addImage(f));
       return;
     }
 
@@ -414,11 +418,13 @@ export function ChatInput({
       if (imageItems.length > 0) {
         if (currentModelSupportsVision === false) {
           e.preventDefault();
-          toast.error('The current model does not support images. Switch to a vision-capable model to attach images.');
+          toast.error(
+            'The current model does not support images. Switch to a vision-capable model to attach images.'
+          );
           return;
         }
         e.preventDefault();
-        imageItems.forEach(f => addImage(f));
+        imageItems.forEach((f) => addImage(f));
         return;
       }
     }
@@ -448,19 +454,21 @@ export function ChatInput({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const imageFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    const imageFiles = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
     if (imageFiles.length > 0) {
       if (currentModelSupportsVision === false) {
-        toast.error('The current model does not support images. Switch to a vision-capable model to attach images.');
+        toast.error(
+          'The current model does not support images. Switch to a vision-capable model to attach images.'
+        );
         return;
       }
-      imageFiles.forEach(f => addImage(f));
+      imageFiles.forEach((f) => addImage(f));
     }
   };
 
   const handleFileSelect = (filePath: string, fileName: string) => {
     addFileReference(filePath, fileName);
-    setMessage(prev => prev.replace(/@\S*$/, ''));
+    setMessage((prev) => prev.replace(/@\S*$/, ''));
     setShowFilePicker(false);
   };
 

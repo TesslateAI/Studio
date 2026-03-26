@@ -71,9 +71,7 @@ async def get_environment_context(
         )
     else:
         context_parts.append("Container Directory: . (project root)")
-        context_parts.append(
-            "File Scope: File tools resolve paths relative to /app/."
-        )
+        context_parts.append("File Scope: File tools resolve paths relative to /app/.")
 
     # Project path context
     context_parts.append(f"Project Path: users/{user_id}/{project_id}/")
@@ -155,7 +153,7 @@ async def _read_project_file(user_id, project_id, file_path: str) -> str | None:
     if not real_file.startswith(real_project):
         return None
     try:
-        async with aiofiles.open(real_file, "r", errors="replace") as f:
+        async with aiofiles.open(real_file, errors="replace") as f:
             content = await f.read(100_000)  # Cap at 100KB
         return content
     except (FileNotFoundError, IsADirectoryError, PermissionError):
@@ -274,10 +272,12 @@ async def get_user_message_wrapper(
     if image_attachments:
         content_parts: list[dict] = [{"type": "text", "text": text_content}]
         for img in image_attachments:
-            content_parts.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{img['mime_type']};base64,{img['content']}"}
-            })
+            content_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img['mime_type']};base64,{img['content']}"},
+                }
+            )
         return content_parts
 
     return text_content

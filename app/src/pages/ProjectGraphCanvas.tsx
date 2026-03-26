@@ -45,7 +45,14 @@ import { ChatContainer } from '../components/chat/ChatContainer';
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
 import { ProviderConnectModal } from '../components/modals/ProviderConnectModal';
-import api, { projectsApi, deploymentTargetsApi, deploymentCredentialsApi, marketplaceApi, configSyncApi, setupApi } from '../lib/api';
+import api, {
+  projectsApi,
+  deploymentTargetsApi,
+  deploymentCredentialsApi,
+  marketplaceApi,
+  configSyncApi,
+  setupApi,
+} from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { type ChatAgent } from '../types/chat';
 import { fileEvents } from '../utils/fileEvents';
@@ -211,7 +218,12 @@ const ProjectGraphCanvasInner = () => {
       fetchProjectData();
       loadFiles();
       loadAgents();
-      setupApi.getConfig(slug).then(r => { if (!r.exists) setConfigDirty(true); }).catch(() => {});
+      setupApi
+        .getConfig(slug)
+        .then((r) => {
+          if (!r.exists) setConfigDirty(true);
+        })
+        .catch(() => {});
     }
   }, [slug]);
 
@@ -729,27 +741,28 @@ const ProjectGraphCanvasInner = () => {
   }, []);
 
   // Callback when provider credential is saved via the modal
-  const handleProviderConnected = useCallback(async (provider: string) => {
-    const { targetId } = providerConnectModal;
-    if (!targetId || !slugRef.current) return;
+  const handleProviderConnected = useCallback(
+    async (provider: string) => {
+      const { targetId } = providerConnectModal;
+      if (!targetId || !slugRef.current) return;
 
-    // Refresh the target to get updated is_connected status
-    try {
-      const updatedTarget = await deploymentTargetsApi.get(slugRef.current, targetId);
-      setNodes((nds) =>
-        nds.map((node) =>
-          node.id === targetId
-            ? { ...node, data: { ...node.data, isConnected: updatedTarget.is_connected } }
-            : node
-        )
-      );
-      setConnectedProviders((prev) =>
-        prev.includes(provider) ? prev : [...prev, provider]
-      );
-    } catch {
-      // Target might have been refreshed already
-    }
-  }, [providerConnectModal, setNodes]);
+      // Refresh the target to get updated is_connected status
+      try {
+        const updatedTarget = await deploymentTargetsApi.get(slugRef.current, targetId);
+        setNodes((nds) =>
+          nds.map((node) =>
+            node.id === targetId
+              ? { ...node, data: { ...node.data, isConnected: updatedTarget.is_connected } }
+              : node
+          )
+        );
+        setConnectedProviders((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
+      } catch {
+        // Target might have been refreshed already
+      }
+    },
+    [providerConnectModal, setNodes]
+  );
 
   // Stable callback for changing environment on a deployment target
   const handleEnvironmentChange = useCallback(
@@ -757,9 +770,7 @@ const ProjectGraphCanvasInner = () => {
       // Optimistically update the node
       setNodes((nds) =>
         nds.map((node) =>
-          node.id === targetId
-            ? { ...node, data: { ...node.data, environment } }
-            : node
+          node.id === targetId ? { ...node, data: { ...node.data, environment } } : node
         )
       );
 
@@ -1037,7 +1048,8 @@ const ProjectGraphCanvasInner = () => {
 
         // Extract provider key from item config or slug
         // Seed items have config.provider_key; legacy service items have slug like 'vercel-deploy'
-        const provider = item.provider_key || item.slug.replace('deploy-', '').replace('-deploy', '');
+        const provider =
+          item.provider_key || item.slug.replace('deploy-', '').replace('-deploy', '');
 
         // Generate temporary ID for optimistic update
         const tempId = `temp-target-${Date.now()}`;
@@ -1715,7 +1727,7 @@ const ProjectGraphCanvasInner = () => {
       setConfigDirty(false);
       loadFiles();
       fileEvents.emit('file-updated', '.tesslate/config.json');
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to save configuration', { id: 'save-config' });
     }
   };
@@ -1729,12 +1741,15 @@ const ProjectGraphCanvasInner = () => {
         toast.error('No .tesslate/config.json found', { id: 'load-config' });
         return;
       }
-      const { exists, ...config } = configResponse;
+      const { exists: _exists, ...config } = configResponse;
       const result = await configSyncApi.load(slug, config);
-      toast.success(`Config loaded (${result.container_ids.length} containers)`, { id: 'load-config', duration: 2000 });
+      toast.success(`Config loaded (${result.container_ids.length} containers)`, {
+        id: 'load-config',
+        duration: 2000,
+      });
       await fetchProjectData();
       setConfigDirty(false);
-    } catch (error) {
+    } catch (_error) {
       toast.error('Failed to load configuration', { id: 'load-config' });
     }
   };
@@ -2076,10 +2091,7 @@ const ProjectGraphCanvasInner = () => {
           <div className="flex items-center gap-[2px]">
             {/* Config Sync Buttons */}
             <Tooltip content="Save canvas state to .tesslate/config.json" side="bottom">
-              <button
-                onClick={handleSaveConfig}
-                className="hidden md:flex btn"
-              >
+              <button onClick={handleSaveConfig} className="hidden md:flex btn">
                 <span className="relative">
                   <FloppyDisk size={16} />
                   {configDirty && (
@@ -2090,10 +2102,7 @@ const ProjectGraphCanvasInner = () => {
               </button>
             </Tooltip>
             <Tooltip content="Load .tesslate/config.json into canvas" side="bottom">
-              <button
-                onClick={handleLoadConfig}
-                className="hidden md:flex btn"
-              >
+              <button onClick={handleLoadConfig} className="hidden md:flex btn">
                 <span className="relative">
                   <ArrowsClockwise size={16} />
                   {configDirty && (

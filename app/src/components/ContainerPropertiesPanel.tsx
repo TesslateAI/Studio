@@ -11,7 +11,6 @@ import {
   Lock,
   Key,
   CaretDown,
-  CaretRight,
   Pause,
   ArrowLineDown,
 } from '@phosphor-icons/react';
@@ -541,7 +540,6 @@ export const ContainerPropertiesPanel = ({
 
         {/* Scrollable card stack */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-1 space-y-2">
-
           {/* Identity card — name + status + close */}
           <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
             <div className="flex items-center justify-between h-10 px-4 border-b border-[var(--border)]">
@@ -586,7 +584,9 @@ export const ContainerPropertiesPanel = ({
                               : 'bg-[var(--text-subtle)]'
                     }`}
                   />
-                  <span className="text-xs font-semibold text-[var(--text)] truncate">{containerName}</span>
+                  <span className="text-xs font-semibold text-[var(--text)] truncate">
+                    {containerName}
+                  </span>
                   <button
                     onClick={() => setIsEditingName(true)}
                     className="btn btn-icon btn-sm"
@@ -600,10 +600,7 @@ export const ContainerPropertiesPanel = ({
                 {port && (
                   <span className="text-[10px] text-[var(--text-subtle)] font-mono">:{port}</span>
                 )}
-                <button
-                  onClick={onClose}
-                  className="btn btn-icon btn-sm"
-                >
+                <button onClick={onClose} className="btn btn-icon btn-sm">
                   <X size={14} />
                 </button>
               </div>
@@ -618,7 +615,15 @@ export const ContainerPropertiesPanel = ({
                     isLoading || containerStatus === 'running' || containerStatus === 'starting'
                   }
                   className="btn flex-1"
-                  style={containerStatus !== 'running' && containerStatus !== 'starting' && !isLoading ? { background: 'rgba(var(--status-green-rgb), 0.1)', borderColor: 'rgba(var(--status-green-rgb), 0.3)', color: 'var(--status-success)' } : undefined}
+                  style={
+                    containerStatus !== 'running' && containerStatus !== 'starting' && !isLoading
+                      ? {
+                          background: 'rgba(var(--status-green-rgb), 0.1)',
+                          borderColor: 'rgba(var(--status-green-rgb), 0.3)',
+                          color: 'var(--status-success)',
+                        }
+                      : undefined
+                  }
                 >
                   <Play size={12} weight="fill" />
                   {containerStatus === 'starting' ? 'Starting...' : 'Start'}
@@ -651,10 +656,7 @@ export const ContainerPropertiesPanel = ({
           {isExternalService && (
             <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
               <div className="px-4 py-3">
-                <button
-                  onClick={handleEditCredentials}
-                  className="btn w-full"
-                >
+                <button onClick={handleEditCredentials} className="btn w-full">
                   <Key size={14} />
                   Edit Credentials
                 </button>
@@ -670,11 +672,17 @@ export const ContainerPropertiesPanel = ({
                 onClick={() => setIsEnvExpanded((v) => !v)}
                 className="flex-1 flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface-hover)] transition-colors group"
               >
-                <span className="text-[11px] font-medium text-[var(--text-muted)] group-hover:text-[var(--text)]">Environment Variables</span>
+                <span className="text-[11px] font-medium text-[var(--text-muted)] group-hover:text-[var(--text)]">
+                  Environment Variables
+                </span>
                 {savedEnvVars.length > 0 && (
-                  <span className="text-[10px] text-[var(--text-subtle)]">{savedEnvVars.length}</span>
+                  <span className="text-[10px] text-[var(--text-subtle)]">
+                    {savedEnvVars.length}
+                  </span>
                 )}
-                <span className={`transition-transform duration-200 text-[var(--text-subtle)] ${isEnvExpanded ? 'rotate-0' : '-rotate-90'}`}>
+                <span
+                  className={`transition-transform duration-200 text-[var(--text-subtle)] ${isEnvExpanded ? 'rotate-0' : '-rotate-90'}`}
+                >
                   <CaretDown size={10} />
                 </span>
               </button>
@@ -693,170 +701,173 @@ export const ContainerPropertiesPanel = ({
               </div>
             </div>
             {isEnvExpanded && (
-            <div className="px-4 pb-4 space-y-2">
+              <div className="px-4 pb-4 space-y-2">
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-6">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--primary)]"></div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {/* Service-provided env vars (what this service gives to connected containers) */}
+                    {serviceOutputs && Object.keys(serviceOutputs).length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium text-blue-400/80">
+                          Provides to connected containers
+                        </p>
+                        {Object.entries(serviceOutputs).map(([key, description]) => (
+                          <div
+                            key={`output-${key}`}
+                            className="flex gap-1.5 items-center min-w-0 px-2 py-1.5 bg-blue-500/5 border border-blue-500/15 rounded"
+                            title={description}
+                          >
+                            <Lock size={12} className="text-blue-400/60 flex-shrink-0" />
+                            <span className="text-xs font-mono text-blue-300/90 truncate flex-1 min-w-0">
+                              {key}
+                            </span>
+                            <span className="text-[10px] text-blue-400/50 truncate max-w-[80px]">
+                              {description}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="border-b border-[var(--border)] mt-2" />
+                      </div>
+                    )}
 
-          {isLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--primary)]"></div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {/* Service-provided env vars (what this service gives to connected containers) */}
-              {serviceOutputs && Object.keys(serviceOutputs).length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-blue-400/80">
-                    Provides to connected containers
-                  </p>
-                  {Object.entries(serviceOutputs).map(([key, description]) => (
-                    <div
-                      key={`output-${key}`}
-                      className="flex gap-1.5 items-center min-w-0 px-2 py-1.5 bg-blue-500/5 border border-blue-500/15 rounded"
-                      title={description}
-                    >
-                      <Lock size={12} className="text-blue-400/60 flex-shrink-0" />
-                      <span className="text-xs font-mono text-blue-300/90 truncate flex-1 min-w-0">
-                        {key}
-                      </span>
-                      <span className="text-[10px] text-blue-400/50 truncate max-w-[80px]">
-                        {description}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-b border-[var(--border)] mt-2" />
-                </div>
-              )}
+                    {/* Saved environment variables */}
+                    {savedEnvVars.map((envVar) => {
+                      const isBusy = busyKeys.has(envVar.key);
+                      return (
+                        <div key={envVar.key} className="flex gap-1.5 items-center min-w-0">
+                          <span className="text-xs font-mono text-[var(--text)] truncate flex-1 min-w-0">
+                            {envVar.key}
+                          </span>
+                          {envVar.isEditing ? (
+                            <>
+                              <input
+                                type="text"
+                                value={envVar.pendingValue}
+                                onChange={(e) =>
+                                  setSavedEnvVars((prev) =>
+                                    prev.map((ev) =>
+                                      ev.key === envVar.key
+                                        ? { ...ev, pendingValue: e.target.value }
+                                        : ev
+                                    )
+                                  )
+                                }
+                                placeholder="new value"
+                                className="w-24 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveEdit(envVar.key);
+                                  if (e.key === 'Escape') handleCancelEdit(envVar.key);
+                                }}
+                              />
+                              <button
+                                onClick={() => handleSaveEdit(envVar.key)}
+                                disabled={isBusy}
+                                className="p-1 hover:bg-green-500/20 rounded transition-colors flex-shrink-0"
+                              >
+                                <Check size={12} className="text-green-400" />
+                              </button>
+                              <button
+                                onClick={() => handleCancelEdit(envVar.key)}
+                                className="p-1 hover:bg-[var(--sidebar-hover)] rounded transition-colors flex-shrink-0"
+                              >
+                                <X size={12} className="text-[var(--text)]/60" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-xs text-[var(--text)]/40 font-mono">
+                                ••••••••
+                              </span>
+                              <button
+                                onClick={() => handleStartEdit(envVar.key)}
+                                disabled={isBusy}
+                                className="p-1 hover:bg-[var(--sidebar-hover)] rounded transition-colors flex-shrink-0"
+                                title="Edit value"
+                              >
+                                <PencilSimple size={12} className="text-[var(--text)]/60" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteEnvVar(envVar.key)}
+                                disabled={isBusy}
+                                className="p-1 hover:bg-red-500/20 rounded transition-colors flex-shrink-0"
+                                title="Delete"
+                              >
+                                <Trash size={12} className="text-red-400" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
 
-              {/* Saved environment variables */}
-              {savedEnvVars.map((envVar) => {
-                const isBusy = busyKeys.has(envVar.key);
-                return (
-                  <div key={envVar.key} className="flex gap-1.5 items-center min-w-0">
-                    <span className="text-xs font-mono text-[var(--text)] truncate flex-1 min-w-0">
-                      {envVar.key}
-                    </span>
-                    {envVar.isEditing ? (
-                      <>
-                        <input
-                          type="text"
-                          value={envVar.pendingValue}
-                          onChange={(e) =>
-                            setSavedEnvVars((prev) =>
-                              prev.map((ev) =>
-                                ev.key === envVar.key ? { ...ev, pendingValue: e.target.value } : ev
-                              )
-                            )
-                          }
-                          placeholder="new value"
-                          className="w-24 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveEdit(envVar.key);
-                            if (e.key === 'Escape') handleCancelEdit(envVar.key);
-                          }}
-                        />
-                        <button
-                          onClick={() => handleSaveEdit(envVar.key)}
-                          disabled={isBusy}
-                          className="p-1 hover:bg-green-500/20 rounded transition-colors flex-shrink-0"
-                        >
-                          <Check size={12} className="text-green-400" />
-                        </button>
-                        <button
-                          onClick={() => handleCancelEdit(envVar.key)}
-                          className="p-1 hover:bg-[var(--sidebar-hover)] rounded transition-colors flex-shrink-0"
-                        >
-                          <X size={12} className="text-[var(--text)]/60" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-xs text-[var(--text)]/40 font-mono">••••••••</span>
-                        <button
-                          onClick={() => handleStartEdit(envVar.key)}
-                          disabled={isBusy}
-                          className="p-1 hover:bg-[var(--sidebar-hover)] rounded transition-colors flex-shrink-0"
-                          title="Edit value"
-                        >
-                          <PencilSimple size={12} className="text-[var(--text)]/60" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteEnvVar(envVar.key)}
-                          disabled={isBusy}
-                          className="p-1 hover:bg-red-500/20 rounded transition-colors flex-shrink-0"
-                          title="Delete"
-                        >
-                          <Trash size={12} className="text-red-400" />
-                        </button>
-                      </>
+                    {/* Add new environment variable — toggled by + button */}
+                    {isAddingInline && (
+                      <div className="pt-2 border-t border-[var(--border)]">
+                        <div className="space-y-1.5">
+                          <input
+                            type="text"
+                            value={newEnvKey}
+                            onChange={(e) =>
+                              setNewEnvKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))
+                            }
+                            placeholder="KEY_NAME"
+                            className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') {
+                                setIsAddingInline(false);
+                                setNewEnvKey('');
+                                setNewEnvValue('');
+                              }
+                            }}
+                          />
+                          <input
+                            type="text"
+                            value={newEnvValue}
+                            onChange={(e) => setNewEnvValue(e.target.value)}
+                            placeholder="value"
+                            className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleAddEnvVar();
+                              if (e.key === 'Escape') {
+                                setIsAddingInline(false);
+                                setNewEnvKey('');
+                                setNewEnvValue('');
+                              }
+                            }}
+                          />
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={handleAddEnvVar}
+                              disabled={isAdding}
+                              className="btn btn-sm flex-1"
+                            >
+                              <Plus size={12} />
+                              {isAdding ? 'Adding...' : 'Add'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setIsAddingInline(false);
+                                setNewEnvKey('');
+                                setNewEnvValue('');
+                              }}
+                              className="btn btn-sm"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
-                );
-              })}
-
-              {/* Add new environment variable — toggled by + button */}
-              {isAddingInline && (
-                <div className="pt-2 border-t border-[var(--border)]">
-                  <div className="space-y-1.5">
-                    <input
-                      type="text"
-                      value={newEnvKey}
-                      onChange={(e) =>
-                        setNewEnvKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))
-                      }
-                      placeholder="KEY_NAME"
-                      className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          setIsAddingInline(false);
-                          setNewEnvKey('');
-                          setNewEnvValue('');
-                        }
-                      }}
-                    />
-                    <input
-                      type="text"
-                      value={newEnvValue}
-                      onChange={(e) => setNewEnvValue(e.target.value)}
-                      placeholder="value"
-                      className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleAddEnvVar();
-                        if (e.key === 'Escape') {
-                          setIsAddingInline(false);
-                          setNewEnvKey('');
-                          setNewEnvValue('');
-                        }
-                      }}
-                    />
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={handleAddEnvVar}
-                        disabled={isAdding}
-                        className="btn btn-sm flex-1"
-                      >
-                        <Plus size={12} />
-                        {isAdding ? 'Adding...' : 'Add'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsAddingInline(false);
-                          setNewEnvKey('');
-                          setNewEnvValue('');
-                        }}
-                        className="btn btn-sm"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-            </div>
+                )}
+              </div>
             )}
-            </div>
+          </div>
 
           {/* Container Logs card */}
           <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
@@ -865,7 +876,9 @@ export const ContainerPropertiesPanel = ({
               onClick={() => setIsLogsOpen((prev) => !prev)}
               className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface-hover)] transition-colors group w-full"
             >
-              <span className="text-[11px] font-medium text-[var(--text-muted)] group-hover:text-[var(--text)]">Container Logs</span>
+              <span className="text-[11px] font-medium text-[var(--text-muted)] group-hover:text-[var(--text)]">
+                Container Logs
+              </span>
               {isLogsOpen && (containerStatus === 'running' || containerStatus === 'starting') && (
                 <span className="flex items-center gap-1">
                   <span
@@ -876,7 +889,9 @@ export const ContainerPropertiesPanel = ({
                   </span>
                 </span>
               )}
-              <span className={`transition-transform duration-200 text-[var(--text-subtle)] ${isLogsOpen ? 'rotate-0' : '-rotate-90'}`}>
+              <span
+                className={`transition-transform duration-200 text-[var(--text-subtle)] ${isLogsOpen ? 'rotate-0' : '-rotate-90'}`}
+              >
                 <CaretDown size={10} />
               </span>
             </button>
@@ -918,7 +933,9 @@ export const ContainerPropertiesPanel = ({
                         <ArrowLineDown size={12} />
                       </button>
                       {isLogsPaused && (
-                        <span className="text-[10px] text-[var(--status-warning)] ml-auto">paused</span>
+                        <span className="text-[10px] text-[var(--status-warning)] ml-auto">
+                          paused
+                        </span>
                       )}
                     </div>
 
@@ -942,7 +959,6 @@ export const ContainerPropertiesPanel = ({
               </div>
             )}
           </div>
-
         </div>
       </div>
 

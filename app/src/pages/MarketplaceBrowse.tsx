@@ -2,7 +2,12 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { debounce } from 'lodash';
 import { ArrowLeft, MagnifyingGlass, X, Package, Plus, CaretDown } from '@phosphor-icons/react';
-import { AgentCard, SkeletonCard, Pagination, type MarketplaceItem } from '../components/marketplace';
+import {
+  AgentCard,
+  SkeletonCard,
+  Pagination,
+  type MarketplaceItem,
+} from '../components/marketplace';
 import { SubmitBaseModal } from '../components/modals';
 import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
@@ -58,9 +63,15 @@ export default function MarketplaceBrowse() {
   const { isAuthenticated } = useMarketplaceAuth();
 
   // Validate item type
-  const itemType: ItemType = ['agent', 'base', 'theme', 'tool', 'integration', 'skill', 'mcp_server'].includes(
-    itemTypeParam || ''
-  )
+  const itemType: ItemType = [
+    'agent',
+    'base',
+    'theme',
+    'tool',
+    'integration',
+    'skill',
+    'mcp_server',
+  ].includes(itemTypeParam || '')
     ? (itemTypeParam as ItemType)
     : 'agent';
 
@@ -94,7 +105,7 @@ export default function MarketplaceBrowse() {
   const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
 
   // State - Mobile filter dropdowns
-  const [showMobileCategoryDropdown, setShowMobileCategoryDropdown] = useState(false);
+  const [_showMobileCategoryDropdown, setShowMobileCategoryDropdown] = useState(false);
   const [showMobilePriceDropdown, setShowMobilePriceDropdown] = useState(false);
   const [showMobileSortDropdown, setShowMobileSortDropdown] = useState(false);
 
@@ -436,12 +447,21 @@ export default function MarketplaceBrowse() {
         {/* Header — compact toolbar rows */}
         <div className="flex-shrink-0 sticky top-0 z-40 bg-[var(--bg)]">
           {/* Title Row */}
-          <div className="h-10 flex items-center gap-3" style={{ paddingLeft: '7px', paddingRight: '10px', borderBottom: 'var(--border-width) solid var(--border)' }}>
+          <div
+            className="h-10 flex items-center gap-3"
+            style={{
+              paddingLeft: '7px',
+              paddingRight: '10px',
+              borderBottom: 'var(--border-width) solid var(--border)',
+            }}
+          >
             <button onClick={() => navigate('/marketplace')} className="btn btn-sm">
               <ArrowLeft size={14} />
               Marketplace
             </button>
-            <span className="text-xs font-semibold text-[var(--text)]">Browse {itemTypeLabels[itemType]}</span>
+            <span className="text-xs font-semibold text-[var(--text)]">
+              Browse {itemTypeLabels[itemType]}
+            </span>
             {totalCount !== null && (
               <span className="text-[10px] text-[var(--text-subtle)]">{totalCount}</span>
             )}
@@ -464,18 +484,33 @@ export default function MarketplaceBrowse() {
                   className="w-48 h-[29px] pl-8 pr-8 bg-[var(--surface)] border border-[var(--border)] rounded-full text-xs text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)] transition-colors"
                 />
                 {searchQuery ? (
-                  <button onClick={() => setSearchQuery('')} className="absolute right-2.5 text-[var(--text-subtle)] hover:text-[var(--text)]" aria-label="Clear search">
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 text-[var(--text-subtle)] hover:text-[var(--text)]"
+                    aria-label="Clear search"
+                  >
                     <X size={12} />
                   </button>
                 ) : (
-                  <kbd className="absolute right-3 text-[10px] font-mono text-[var(--text-subtle)]">/</kbd>
+                  <kbd className="absolute right-3 text-[10px] font-mono text-[var(--text-subtle)]">
+                    /
+                  </kbd>
                 )}
               </div>
             </div>
           </div>
 
           {/* Tab Row — scrollable category pills (visible on all sizes) */}
-          <div className="h-10 flex items-center overflow-x-auto scrollbar-none" style={{ paddingLeft: '7px', paddingRight: '10px', borderBottom: 'var(--border-width) solid var(--border)', maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)', WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)' }}>
+          <div
+            className="h-10 flex items-center overflow-x-auto scrollbar-none"
+            style={{
+              paddingLeft: '7px',
+              paddingRight: '10px',
+              borderBottom: 'var(--border-width) solid var(--border)',
+              maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)',
+              WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)',
+            }}
+          >
             {categories.map((cat) => (
               <button
                 key={cat.id}
@@ -510,7 +545,10 @@ export default function MarketplaceBrowse() {
                   </button>
                   {showMobilePriceDropdown && (
                     <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowMobilePriceDropdown(false)} />
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowMobilePriceDropdown(false)}
+                      />
                       <div className="absolute left-0 top-full mt-1 py-1 rounded-[var(--radius-medium)] border border-[var(--border-hover)] shadow-xl z-50 min-w-[140px] bg-[var(--surface)]">
                         {pricingOptions.map((opt) => (
                           <button
@@ -521,9 +559,10 @@ export default function MarketplaceBrowse() {
                             }}
                             className={`
                               w-full px-3 py-1.5 text-left text-xs transition-colors
-                              ${pricingFilter === opt.id
-                                ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
-                                : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                              ${
+                                pricingFilter === opt.id
+                                  ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
+                                  : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                               }
                             `}
                           >
@@ -550,7 +589,10 @@ export default function MarketplaceBrowse() {
                   </button>
                   {showMobileSortDropdown && (
                     <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowMobileSortDropdown(false)} />
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowMobileSortDropdown(false)}
+                      />
                       <div className="absolute left-0 top-full mt-1 py-1 rounded-[var(--radius-medium)] border border-[var(--border-hover)] shadow-xl z-50 min-w-[180px] bg-[var(--surface)]">
                         {sortOptions.map((opt) => (
                           <button
@@ -561,9 +603,10 @@ export default function MarketplaceBrowse() {
                             }}
                             className={`
                               w-full px-3 py-1.5 text-left text-xs transition-colors
-                              ${sortBy === opt.id
-                                ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
-                                : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                              ${
+                                sortBy === opt.id
+                                  ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
+                                  : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                               }
                             `}
                           >
@@ -654,7 +697,9 @@ export default function MarketplaceBrowse() {
                 </div>
               ) : items.length > 0 ? (
                 <>
-                  <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
+                  <div
+                    className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 ${filtering ? 'opacity-60' : ''} transition-opacity`}
+                  >
                     {items.map((item) => (
                       <AgentCard
                         key={item.id}
@@ -673,10 +718,7 @@ export default function MarketplaceBrowse() {
                 </>
               ) : (
                 <div className="text-center py-16 rounded-[var(--radius)] bg-[var(--surface)]">
-                  <Package
-                    size={48}
-                    className="mx-auto mb-4 text-[var(--text-subtle)]"
-                  />
+                  <Package size={48} className="mx-auto mb-4 text-[var(--text-subtle)]" />
                   <p className="text-[var(--text-subtle)]">
                     {searchQuery
                       ? `No ${itemType}s found matching "${searchQuery}"`

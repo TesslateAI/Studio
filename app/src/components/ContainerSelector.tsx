@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { CaretDown, Check, Plus, Circle } from '@phosphor-icons/react';
+import { CaretDown, Check, Plus } from '@phosphor-icons/react';
 
 interface Container {
   id: string;
@@ -21,16 +21,16 @@ interface ContainerSelectorProps {
 // Map base slugs to icons
 const getContainerIcon = (slug?: string) => {
   const icons: Record<string, string> = {
-    'nextjs': '▲',
-    'vite': '⚡',
-    'react': '⚛',
-    'fastapi': '🚀',
-    'express': 'E',
-    'django': '🐍',
-    'flask': '🧪',
-    'postgres': '🐘',
-    'mongodb': '🍃',
-    'redis': '◉',
+    nextjs: '▲',
+    vite: '⚡',
+    react: '⚛',
+    fastapi: '🚀',
+    express: 'E',
+    django: '🐍',
+    flask: '🧪',
+    postgres: '🐘',
+    mongodb: '🍃',
+    redis: '◉',
   };
   return icons[slug?.toLowerCase() || ''] || '📦';
 };
@@ -53,13 +53,13 @@ export function ContainerSelector({
   containers,
   currentContainerId,
   onChange,
-  onOpenArchitecture
+  onOpenArchitecture,
 }: ContainerSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Find current container
-  const currentContainer = containers.find(c => c.id === currentContainerId) || containers[0];
+  const currentContainer = containers.find((c) => c.id === currentContainerId) || containers[0];
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -118,7 +118,7 @@ export function ContainerSelector({
 
           {/* Container list */}
           <div className="max-h-64 overflow-y-auto">
-            {containers.map(container => (
+            {containers.map((container) => (
               <button
                 key={container.id}
                 onClick={() => {
@@ -131,16 +131,22 @@ export function ContainerSelector({
                 `}
               >
                 {/* Icon */}
-                <span className="text-lg w-6 text-center">{getContainerIcon(container.base?.slug)}</span>
+                <span className="text-lg w-6 text-center">
+                  {getContainerIcon(container.base?.slug)}
+                </span>
 
                 {/* Name and type */}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-white truncate">{container.name}</div>
-                  <div className="text-xs text-white/50 truncate">{container.base?.name || 'Custom'}</div>
+                  <div className="text-xs text-white/50 truncate">
+                    {container.base?.name || 'Custom'}
+                  </div>
                 </div>
 
                 {/* Status dot */}
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${getStatusColor(container.status)}`} />
+                <span
+                  className={`w-2 h-2 rounded-full flex-shrink-0 ${getStatusColor(container.status)}`}
+                />
 
                 {/* Selected checkmark */}
                 {container.id === currentContainerId && (

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { ChatAttachment, SerializedAttachment, AttachmentType } from '../types/agent';
+import type { ChatAttachment, SerializedAttachment } from '../types/agent';
 
 export function useAttachments() {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -15,7 +15,7 @@ export function useAttachments() {
       previewUrl,
       mimeType: file.type,
     };
-    setAttachments((prev) => prev.length >= 10 ? prev : [...prev, attachment]);
+    setAttachments((prev) => (prev.length >= 10 ? prev : [...prev, attachment]));
   }, []);
 
   const addPastedText = useCallback((text: string) => {
@@ -26,7 +26,7 @@ export function useAttachments() {
       text,
       lineCount,
     };
-    setAttachments((prev) => prev.length >= 10 ? prev : [...prev, attachment]);
+    setAttachments((prev) => (prev.length >= 10 ? prev : [...prev, attachment]));
   }, []);
 
   const addFileReference = useCallback((filePath: string, fileName: string) => {

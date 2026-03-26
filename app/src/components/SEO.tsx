@@ -120,7 +120,18 @@ export function SEO({
       manager.removeStructuredData('structured-data');
       manager.restoreTitle();
     };
-  }, [title, description, keywords, image, url, type, author, publishedTime, modifiedTime, structuredData]);
+  }, [
+    title,
+    description,
+    keywords,
+    image,
+    url,
+    type,
+    author,
+    publishedTime,
+    modifiedTime,
+    structuredData,
+  ]);
 
   return null;
 }
@@ -128,6 +139,7 @@ export function SEO({
 /**
  * Generate structured data for a marketplace item (agent/base)
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function generateProductStructuredData(item: {
   name: string;
   description: string;
@@ -156,15 +168,16 @@ export function generateProductStructuredData(item: {
       priceCurrency: 'USD',
       availability: 'https://schema.org/InStock',
     },
-    ...(item.rating && item.review_count && {
-      aggregateRating: {
-        '@type': 'AggregateRating',
-        ratingValue: item.rating,
-        reviewCount: item.review_count,
-        bestRating: 5,
-        worstRating: 1,
-      },
-    }),
+    ...(item.rating &&
+      item.review_count && {
+        aggregateRating: {
+          '@type': 'AggregateRating',
+          ratingValue: item.rating,
+          reviewCount: item.review_count,
+          bestRating: 5,
+          worstRating: 1,
+        },
+      }),
     ...(item.creator_name && {
       author: {
         '@type': 'Person',
@@ -180,6 +193,7 @@ export function generateProductStructuredData(item: {
 /**
  * Generate structured data for marketplace category/browse pages
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function generateBreadcrumbStructuredData(items: { name: string; url: string }[]) {
   return {
     '@context': 'https://schema.org',
@@ -196,6 +210,7 @@ export function generateBreadcrumbStructuredData(items: { name: string; url: str
 /**
  * Generate structured data for the marketplace homepage
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function generateMarketplaceStructuredData() {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://tesslate.com';
 
@@ -203,7 +218,8 @@ export function generateMarketplaceStructuredData() {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: 'Tesslate Marketplace',
-    description: 'Discover AI-powered coding agents, project templates, and developer tools. Build faster with pre-built solutions.',
+    description:
+      'Discover AI-powered coding agents, project templates, and developer tools. Build faster with pre-built solutions.',
     url: `${baseUrl}/marketplace`,
     potentialAction: {
       '@type': 'SearchAction',

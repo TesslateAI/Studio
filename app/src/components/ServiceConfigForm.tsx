@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, Trash, CaretDown, CaretUp } from '@phosphor-icons/react';
-import type { TesslateConfig, AppConfig, InfraConfig } from '../types/tesslateConfig';
+import type { TesslateConfig, AppConfig } from '../types/tesslateConfig';
 
 interface ServiceConfigFormProps {
   config: TesslateConfig;
@@ -22,7 +22,7 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
   const [showAddInfra, setShowAddInfra] = useState(false);
 
   const toggleExpand = (name: string) => {
-    setExpandedApps(prev => {
+    setExpandedApps((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -57,7 +57,11 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
   };
 
   const addApp = () => {
-    const name = newAppName.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'new-app';
+    const name =
+      newAppName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-') || 'new-app';
     if (config.apps[name]) return;
     const updated = { ...config };
     updated.apps = {
@@ -67,7 +71,7 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
     if (!updated.primaryApp) updated.primaryApp = name;
     onChange(updated);
     setNewAppName('');
-    setExpandedApps(prev => new Set(prev).add(name));
+    setExpandedApps((prev) => new Set(prev).add(name));
   };
 
   const removeApp = (name: string) => {
@@ -112,7 +116,7 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
           Apps
         </h3>
         <div className="space-y-3">
-          {appNames.map(name => {
+          {appNames.map((name) => {
             const app = config.apps[name];
             const isExpanded = expandedApps.has(name);
             const isPrimary = config.primaryApp === name;
@@ -128,7 +132,9 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
                   onClick={() => toggleExpand(name)}
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${isPrimary ? 'bg-[var(--primary)]' : 'bg-white/20'}`} />
+                    <div
+                      className={`w-2 h-2 rounded-full ${isPrimary ? 'bg-[var(--primary)]' : 'bg-white/20'}`}
+                    />
                     <span className="font-medium text-[var(--text)]">{name}</span>
                     {app.port && (
                       <span className="text-xs text-[var(--text)]/40 bg-white/5 px-2 py-0.5 rounded">
@@ -144,13 +150,20 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
                   <div className="flex items-center gap-2">
                     {!readOnly && !isPrimary && appNames.length > 1 && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); removeApp(name); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeApp(name);
+                        }}
                         className="p-1 text-red-400/60 hover:text-red-400 transition-colors"
                       >
                         <Trash size={14} />
                       </button>
                     )}
-                    {isExpanded ? <CaretUp size={14} className="text-[var(--text)]/40" /> : <CaretDown size={14} className="text-[var(--text)]/40" />}
+                    {isExpanded ? (
+                      <CaretUp size={14} className="text-[var(--text)]/40" />
+                    ) : (
+                      <CaretDown size={14} className="text-[var(--text)]/40" />
+                    )}
                   </div>
                 </div>
 
@@ -186,7 +199,9 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
                       <input
                         type="number"
                         value={app.port ?? ''}
-                        onChange={(e) => updateApp(name, 'port', e.target.value ? parseInt(e.target.value) : null)}
+                        onChange={(e) =>
+                          updateApp(name, 'port', e.target.value ? parseInt(e.target.value) : null)
+                        }
                         disabled={readOnly}
                         className="w-full bg-[var(--background)] border border-white/10 rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:border-[var(--primary)]/50 focus:outline-none disabled:opacity-50"
                         placeholder="3000"
@@ -195,7 +210,9 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
 
                     {/* Start Command */}
                     <div>
-                      <label className="text-xs text-[var(--text)]/50 block mb-1">Start Command</label>
+                      <label className="text-xs text-[var(--text)]/50 block mb-1">
+                        Start Command
+                      </label>
                       <textarea
                         value={app.start}
                         onChange={(e) => updateApp(name, 'start', e.target.value)}
@@ -208,7 +225,9 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
 
                     {/* Build Command */}
                     <div>
-                      <label className="text-xs text-[var(--text)]/50 block mb-1">Build Command</label>
+                      <label className="text-xs text-[var(--text)]/50 block mb-1">
+                        Build Command
+                      </label>
                       <input
                         type="text"
                         value={app.build ?? ''}
@@ -221,7 +240,9 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
 
                     {/* Output Directory */}
                     <div>
-                      <label className="text-xs text-[var(--text)]/50 block mb-1">Output Directory</label>
+                      <label className="text-xs text-[var(--text)]/50 block mb-1">
+                        Output Directory
+                      </label>
                       <input
                         type="text"
                         value={app.output ?? ''}
@@ -247,7 +268,9 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
 
                     {/* Env Vars */}
                     <div>
-                      <label className="text-xs text-[var(--text)]/50 block mb-1">Environment Variables</label>
+                      <label className="text-xs text-[var(--text)]/50 block mb-1">
+                        Environment Variables
+                      </label>
                       <div className="space-y-2">
                         {Object.entries(app.env || {}).map(([key, value]) => (
                           <div key={key} className="flex gap-2">
@@ -274,9 +297,7 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
                             )}
                           </div>
                         ))}
-                        {!readOnly && (
-                          <EnvVarAdder onAdd={(k, v) => updateEnvVar(name, k, v)} />
-                        )}
+                        {!readOnly && <EnvVarAdder onAdd={(k, v) => updateEnvVar(name, k, v)} />}
                       </div>
                     </div>
                   </div>
@@ -356,8 +377,12 @@ export function ServiceConfigForm({ config, onChange, readOnly = false }: Servic
                           onClick={() => addInfra(slug)}
                           className="text-left px-3 py-2 bg-[var(--background)] border border-white/5 rounded-lg hover:border-[var(--primary)]/30 transition-colors"
                         >
-                          <span className="text-sm font-medium text-[var(--text)] capitalize">{slug}</span>
-                          <span className="text-[10px] text-[var(--text)]/40 block">{info.image}</span>
+                          <span className="text-sm font-medium text-[var(--text)] capitalize">
+                            {slug}
+                          </span>
+                          <span className="text-[10px] text-[var(--text)]/40 block">
+                            {info.image}
+                          </span>
                         </button>
                       ))}
                   </div>

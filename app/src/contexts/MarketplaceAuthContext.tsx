@@ -12,6 +12,7 @@ interface MarketplaceAuthContextValue {
  * This avoids duplicate auth checks - the layout determines auth state once,
  * and all children can access it without additional API calls
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export const MarketplaceAuthContext = createContext<MarketplaceAuthContextValue>({
   isAuthenticated: false,
   isLoading: true,
@@ -23,6 +24,7 @@ export const MarketplaceAuthContext = createContext<MarketplaceAuthContextValue>
  * - Whether to show "Install" vs "Sign Up" buttons
  * - Whether to show authenticated-only features
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useMarketplaceAuth(): MarketplaceAuthContextValue {
   return useContext(MarketplaceAuthContext);
 }

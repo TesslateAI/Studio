@@ -87,7 +87,7 @@ export default function Marketplace() {
 
   // State - Data
   const [items, setItems] = useState<MarketplaceItem[]>([]);
-  const [page, setPage] = useState(1);
+  const [_page, setPage] = useState(1);
 
   // State - Loading (isolated for non-blocking UI)
   const [initialLoading, setInitialLoading] = useState(true);
@@ -468,23 +468,44 @@ export default function Marketplace() {
         {/* Header — sticky above scroll */}
         <div className="flex-shrink-0">
           {/* Title Row */}
-          <div className="h-10 flex items-center justify-between gap-[6px]" style={{ paddingLeft: '18px', paddingRight: '4px', borderBottom: 'var(--border-width) solid var(--border)' }}>
+          <div
+            className="h-10 flex items-center justify-between gap-[6px]"
+            style={{
+              paddingLeft: '18px',
+              paddingRight: '4px',
+              borderBottom: 'var(--border-width) solid var(--border)',
+            }}
+          >
             {/* Mobile hamburger */}
             <button
               onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
               className="mobile-only btn btn-icon mr-1"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
               </svg>
             </button>
             <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Marketplace</h2>
           </div>
 
           {/* Tab Bar — type tabs left, filter/sort right */}
-          <div className="h-10 flex items-center justify-between" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
+          <div
+            className="h-10 flex items-center justify-between"
+            style={{ paddingLeft: '7px', paddingRight: '10px' }}
+          >
             {/* Item Type Tabs — scrollable with fade */}
-            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none flex-1 min-w-0" style={{ maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)', WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)' }}>
+            <div
+              className="flex items-center gap-1 overflow-x-auto scrollbar-none flex-1 min-w-0"
+              style={{
+                maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)',
+                WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)',
+              }}
+            >
               {itemTypes.map((type) => (
                 <button
                   key={type.id}
@@ -511,12 +532,20 @@ export default function Marketplace() {
 
                 {showFilterDropdown && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowFilterDropdown(false)} />
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowFilterDropdown(false)}
+                    />
                     <div
                       className="absolute right-0 top-full mt-1 z-50 min-w-[200px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
-                      style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+                      style={{
+                        borderWidth: 'var(--border-width)',
+                        borderColor: 'var(--border-hover)',
+                      }}
                     >
-                      <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Price</div>
+                      <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                        Price
+                      </div>
                       {pricingOptions.map((option) => (
                         <button
                           key={option.id}
@@ -529,7 +558,11 @@ export default function Marketplace() {
                         >
                           {option.label}
                           {pricingFilter === option.id && (
-                            <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
+                            <svg
+                              className="w-3 h-3 ml-auto"
+                              fill="currentColor"
+                              viewBox="0 0 16 16"
+                            >
                               <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
                             </svg>
                           )}
@@ -540,7 +573,11 @@ export default function Marketplace() {
                         <>
                           <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
                           <button
-                            onClick={() => { setPricingFilter('all'); setSearchQuery(''); setShowFilterDropdown(false); }}
+                            onClick={() => {
+                              setPricingFilter('all');
+                              setSearchQuery('');
+                              setShowFilterDropdown(false);
+                            }}
                             className="w-full text-left px-3 py-1.5 text-xs text-[var(--status-error)] hover:bg-[var(--surface-hover)] transition-colors"
                           >
                             Clear all filters
@@ -559,22 +596,35 @@ export default function Marketplace() {
                   className={`btn ${sortBy !== 'featured' ? 'btn-active' : ''}`}
                   style={{ gap: '4px' }}
                 >
-                  <span className="hidden sm:inline text-xs">{sortOptions.find((o) => o.id === sortBy)?.label}</span>
+                  <span className="hidden sm:inline text-xs">
+                    {sortOptions.find((o) => o.id === sortBy)?.label}
+                  </span>
                   <CaretDown className="w-3 h-3 opacity-50" />
                 </button>
 
                 {showSortDropdown && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowSortDropdown(false)} />
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowSortDropdown(false)}
+                    />
                     <div
                       className="absolute right-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
-                      style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+                      style={{
+                        borderWidth: 'var(--border-width)',
+                        borderColor: 'var(--border-hover)',
+                      }}
                     >
-                      <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Sort by</div>
+                      <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                        Sort by
+                      </div>
                       {sortOptions.map((option) => (
                         <button
                           key={option.id}
-                          onClick={() => { setSortBy(option.id); setShowSortDropdown(false); }}
+                          onClick={() => {
+                            setSortBy(option.id);
+                            setShowSortDropdown(false);
+                          }}
                           className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
                             sortBy === option.id
                               ? 'text-[var(--text)] bg-[var(--surface-hover)]'
@@ -583,7 +633,11 @@ export default function Marketplace() {
                         >
                           {option.label}
                           {sortBy === option.id && (
-                            <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
+                            <svg
+                              className="w-3 h-3 ml-auto"
+                              fill="currentColor"
+                              viewBox="0 0 16 16"
+                            >
                               <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
                             </svg>
                           )}
@@ -618,138 +672,142 @@ export default function Marketplace() {
                 <X size={16} />
               </button>
             ) : (
-              <kbd className="absolute right-4 text-[11px] font-mono text-[var(--text-subtle)] bg-[var(--surface-hover)] px-1.5 py-0.5 rounded">/</kbd>
+              <kbd className="absolute right-4 text-[11px] font-mono text-[var(--text-subtle)] bg-[var(--surface-hover)] px-1.5 py-0.5 rounded">
+                /
+              </kbd>
             )}
           </div>
         </div>
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        <div
-          className={`px-5 py-5 ${filtering ? 'opacity-60' : ''} transition-opacity`}
-        >
-          {/* Initial Loading - Skeleton */}
-          {initialLoading ? (
-            <>
-              <section className="mb-10">
-                <div className="h-4 w-32 rounded bg-[var(--surface-hover)] mb-5 animate-pulse" />
-                <div className="space-y-3">
-                  <SkeletonCard variant="featured" />
-                  <SkeletonCard variant="featured" />
-                </div>
-              </section>
-              <section>
-                <div className="h-4 w-40 rounded bg-[var(--surface-hover)] mb-5 animate-pulse" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <SkeletonCard key={i} />
-                  ))}
-                </div>
-              </section>
-            </>
-          ) : (
-            <>
-              {/* Featured Section */}
-              {featuredItems.length > 0 && (
+          <div className={`px-5 py-5 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
+            {/* Initial Loading - Skeleton */}
+            {initialLoading ? (
+              <>
                 <section className="mb-10">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xs font-semibold text-[var(--text)]">Featured</h3>
-                    <button
-                      onClick={() => navigate(`/marketplace/browse/${selectedItemType}?sort=rating`)}
-                      className="btn"
-                    >
-                      See All →
-                    </button>
-                  </div>
+                  <div className="h-4 w-32 rounded bg-[var(--surface-hover)] mb-5 animate-pulse" />
                   <div className="space-y-3">
-                    {featuredItems.slice(0, 3).map((item) => (
-                      <FeaturedCard
-                        key={item.id}
-                        item={item}
-                        onInstall={handleInstall}
-                        isAuthenticated={isAuthenticated}
-                      />
+                    <SkeletonCard variant="featured" />
+                    <SkeletonCard variant="featured" />
+                  </div>
+                </section>
+                <section>
+                  <div className="h-4 w-40 rounded bg-[var(--surface-hover)] mb-5 animate-pulse" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <SkeletonCard key={i} />
                     ))}
                   </div>
                 </section>
-              )}
+              </>
+            ) : (
+              <>
+                {/* Featured Section */}
+                {featuredItems.length > 0 && (
+                  <section className="mb-10">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xs font-semibold text-[var(--text)]">Featured</h3>
+                      <button
+                        onClick={() =>
+                          navigate(`/marketplace/browse/${selectedItemType}?sort=rating`)
+                        }
+                        className="btn"
+                      >
+                        See All →
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {featuredItems.slice(0, 3).map((item) => (
+                        <FeaturedCard
+                          key={item.id}
+                          item={item}
+                          onInstall={handleInstall}
+                          isAuthenticated={isAuthenticated}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
 
-              {/* Browse by Category Section */}
-              <section className="mb-10">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xs font-semibold text-[var(--text)]">Browse by Category</h3>
-                  <button
-                    onClick={() => navigate('/marketplace/browse/agent')}
-                    className="btn"
-                  >
-                    See All →
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-2">
-                  {categories.map((cat) => (
-                    <button
-                      key={cat.id}
-                      onClick={() => navigate(`/marketplace/browse/agent?category=${cat.id}`)}
-                      className="p-3 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] text-left transition-colors hover:bg-[var(--surface-hover)] hover:border-[var(--border-hover)] group"
-                    >
-                      <div className="font-medium text-xs text-[var(--text)]">{cat.label}</div>
-                      <div className="text-[11px] mt-0.5 line-clamp-2 text-[var(--text-muted)]">{cat.description}</div>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              {/* All Items Section */}
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xs font-semibold text-[var(--text)]">
-                    {searchQuery
-                      ? `Results for "${searchQuery}"`
-                      : `All ${itemTypes.find((t) => t.id === selectedItemType)?.label}`}
-                  </h3>
-                  {!searchQuery && (
-                    <button
-                      onClick={() => navigate(`/marketplace/browse/${selectedItemType}`)}
-                      className="btn"
-                    >
+                {/* Browse by Category Section */}
+                <section className="mb-10">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xs font-semibold text-[var(--text)]">Browse by Category</h3>
+                    <button onClick={() => navigate('/marketplace/browse/agent')} className="btn">
                       See All →
                     </button>
-                  )}
-                </div>
-
-                {regularItems.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {regularItems.map((item) => (
-                      <AgentCard
-                        key={item.id}
-                        item={item}
-                        onInstall={handleInstall}
-                        isAuthenticated={isAuthenticated}
-                      />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-2">
+                    {categories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => navigate(`/marketplace/browse/agent?category=${cat.id}`)}
+                        className="p-3 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] text-left transition-colors hover:bg-[var(--surface-hover)] hover:border-[var(--border-hover)] group"
+                      >
+                        <div className="font-medium text-xs text-[var(--text)]">{cat.label}</div>
+                        <div className="text-[11px] mt-0.5 line-clamp-2 text-[var(--text-muted)]">
+                          {cat.description}
+                        </div>
+                      </button>
                     ))}
                   </div>
-                ) : (
-                  <div className="text-center py-12 rounded-[var(--radius)] bg-[var(--surface)]">
-                    <Package size={36} className="mx-auto mb-3 text-[var(--text-subtle)]" />
-                    <p className="text-xs text-[var(--text-muted)]">
+                </section>
+
+                {/* All Items Section */}
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xs font-semibold text-[var(--text)]">
                       {searchQuery
-                        ? `No ${selectedItemType}s found matching "${searchQuery}"`
-                        : `No ${selectedItemType}s available yet`}
-                    </p>
-                    {hasActiveFilters && (
+                        ? `Results for "${searchQuery}"`
+                        : `All ${itemTypes.find((t) => t.id === selectedItemType)?.label}`}
+                    </h3>
+                    {!searchQuery && (
                       <button
-                        onClick={() => { setPricingFilter('all'); setSearchQuery(''); }}
-                        className="btn btn-sm mt-3"
+                        onClick={() => navigate(`/marketplace/browse/${selectedItemType}`)}
+                        className="btn"
                       >
-                        Clear Filters
+                        See All →
                       </button>
                     )}
                   </div>
-                )}
-              </section>
-            </>
-          )}
-        </div>
+
+                  {regularItems.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {regularItems.map((item) => (
+                        <AgentCard
+                          key={item.id}
+                          item={item}
+                          onInstall={handleInstall}
+                          isAuthenticated={isAuthenticated}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 rounded-[var(--radius)] bg-[var(--surface)]">
+                      <Package size={36} className="mx-auto mb-3 text-[var(--text-subtle)]" />
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {searchQuery
+                          ? `No ${selectedItemType}s found matching "${searchQuery}"`
+                          : `No ${selectedItemType}s available yet`}
+                      </p>
+                      {hasActiveFilters && (
+                        <button
+                          onClick={() => {
+                            setPricingFilter('all');
+                            setSearchQuery('');
+                          }}
+                          className="btn btn-sm mt-3"
+                        >
+                          Clear Filters
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </>
