@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ChatSessionSidebar } from '../components/chat/ChatSessionSidebar';
@@ -8,7 +8,7 @@ import { ChatInput } from '../components/chat/ChatInput';
 import { type EditMode } from '../components/chat/EditModeStatus';
 import { useChatSessions } from '../hooks/useChatSessions';
 import { useAgentChat } from '../hooks/useAgentChat';
-import { chatApi, marketplaceApi } from '../lib/api';
+import { marketplaceApi } from '../lib/api';
 import type { ChatAgent } from '../types/chat';
 import type { SerializedAttachment } from '../types/agent';
 
@@ -31,7 +31,7 @@ export default function Chat() {
   // Landing prompt from router state (replaces localStorage)
   const location = useLocation();
   const [landingPrompt] = useState<string | null>(
-    () => (location.state as Record<string, unknown>)?.landingPrompt as string || null
+    () => ((location.state as Record<string, unknown>)?.landingPrompt as string) || null
   );
 
   // Vision support map (fetched once from models endpoint)
@@ -39,15 +39,20 @@ export default function Chat() {
 
   useEffect(() => {
     let cancelled = false;
-    marketplaceApi.getAvailableModels().then((data) => {
-      if (cancelled) return;
-      const map: Record<string, boolean> = {};
-      for (const m of data.models || []) {
-        map[m.id] = m.supports_vision ?? false;
-      }
-      setModelVisionMap(map);
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    marketplaceApi
+      .getAvailableModels()
+      .then((data) => {
+        if (cancelled) return;
+        const map: Record<string, boolean> = {};
+        for (const m of data.models || []) {
+          map[m.id] = m.supports_vision ?? false;
+        }
+        setModelVisionMap(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const currentModelId = currentAgent.selectedModel || currentAgent.model;
@@ -81,7 +86,6 @@ export default function Chat() {
     deleteSession,
     switchSession,
     updateSessionProject,
-    refreshSessions,
   } = useChatSessions({ standalone: true });
 
   // Derive connected project from the current session (persisted server-side)
@@ -103,16 +107,20 @@ export default function Chat() {
     projectId: connectedProjectId,
     agent: currentAgent,
     editMode,
-    onTitleGenerated: useCallback((chatId: string, title: string) => {
-      // Update sidebar immediately when worker generates a title
-      updateSessionTitle(chatId, title);
-    }, [updateSessionTitle]),
+    onTitleGenerated: useCallback(
+      (chatId: string, title: string) => {
+        updateSessionTitle(chatId, title);
+      },
+      [updateSessionTitle]
+    ),
+    onSessionNeeded: createSession,
   });
 
   // Load user's agents (same pattern as Project.tsx)
   useEffect(() => {
     let cancelled = false;
-    marketplaceApi.getMyAgents()
+    marketplaceApi
+      .getMyAgents()
       .then((libraryData) => {
         if (cancelled) return;
         const enabledAgents = (libraryData.agents || []).filter(
@@ -137,11 +145,15 @@ export default function Chat() {
         }
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Fetch installed skills for the current agent (slash command autocomplete)
-  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>(
+    []
+  );
 
   useEffect(() => {
     if (!currentAgent.backendId) {
@@ -164,7 +176,9 @@ export default function Chat() {
       .catch(() => {
         if (!cancelled) setAvailableSkills([]);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [currentAgent.backendId]);
 
   const handleSelectAgent = useCallback((agent: ChatAgent) => {
@@ -180,49 +194,48 @@ export default function Chat() {
     }
   }, [createSession, clearMessages]);
 
-  // Handle send message — auto-create session if none exists
-  const handleSendMessage = useCallback(async (message: string, attachments?: SerializedAttachment[]) => {
-    if (!currentSessionId) {
-      clearMessages();
-      const newId = await createSession();
-      if (!newId) {
-        toast.error('Failed to create session');
-        return;
-      }
-      sendMessage(message, newId, attachments);
-      return;
-    }
-    sendMessage(message, undefined, attachments);
-  }, [currentSessionId, sendMessage, createSession, clearMessages]);
+  // Handle send message — sendMessage handles session creation via onSessionNeeded
+  const handleSendMessage = useCallback(
+    async (message: string, attachments?: SerializedAttachment[]) => {
+      sendMessage(message, undefined, attachments);
+    },
+    [sendMessage]
+  );
 
   // Handle model change
-  const handleModelChange = useCallback(async (model: string) => {
-    const agentBackendId = currentAgent.backendId;
-    const previousModel = currentAgent.selectedModel;
-    setCurrentAgent((prev) => ({ ...prev, selectedModel: model }));
-    try {
-      if (agentBackendId) {
-        await marketplaceApi.selectAgentModel(String(agentBackendId), model);
+  const handleModelChange = useCallback(
+    async (model: string) => {
+      const agentBackendId = currentAgent.backendId;
+      const previousModel = currentAgent.selectedModel;
+      setCurrentAgent((prev) => ({ ...prev, selectedModel: model }));
+      try {
+        if (agentBackendId) {
+          await marketplaceApi.selectAgentModel(String(agentBackendId), model);
+        }
+        toast.success(`Model changed to ${model}`, { duration: 2000 });
+      } catch {
+        setCurrentAgent((prev) =>
+          prev.backendId === agentBackendId ? { ...prev, selectedModel: previousModel } : prev
+        );
+        toast.error('Failed to change model');
       }
-      toast.success(`Model changed to ${model}`, { duration: 2000 });
-    } catch {
-      setCurrentAgent((prev) =>
-        prev.backendId === agentBackendId ? { ...prev, selectedModel: previousModel } : prev
-      );
-      toast.error('Failed to change model');
-    }
-  }, [currentAgent]);
+    },
+    [currentAgent]
+  );
 
   // Handle project connection — persisted via session, survives reloads
-  const handleConnectProject = useCallback(async (projectId: string, projectName: string) => {
-    if (!currentSessionId) return;
-    try {
-      await updateSessionProject(currentSessionId, projectId, projectName);
-      toast.success(`Connected to ${projectName}`);
-    } catch {
-      toast.error('Failed to connect project');
-    }
-  }, [currentSessionId, updateSessionProject]);
+  const handleConnectProject = useCallback(
+    async (projectId: string, projectName: string) => {
+      if (!currentSessionId) return;
+      try {
+        await updateSessionProject(currentSessionId, projectId, projectName);
+        toast.success(`Connected to ${projectName}`);
+      } catch {
+        toast.error('Failed to connect project');
+      }
+    },
+    [currentSessionId, updateSessionProject]
+  );
 
   const handleDisconnectProject = useCallback(async () => {
     if (!currentSessionId) return;
@@ -234,18 +247,17 @@ export default function Chat() {
   }, [currentSessionId, updateSessionProject]);
 
   // Handle approval with mode switching
-  const handleApprovalResponse = useCallback(async (
-    approvalId: string,
-    response: 'allow_once' | 'allow_all' | 'stop',
-    toolName: string
-  ) => {
-    await handleApproval(approvalId, response);
-    const WRITE_TOOLS = new Set(['write_file', 'patch_file', 'multi_edit']);
-    if (response === 'allow_all' && WRITE_TOOLS.has(toolName)) {
-      setEditMode('allow');
-      toast.success('Switched to "Allow All Edits" mode');
-    }
-  }, [handleApproval]);
+  const handleApprovalResponse = useCallback(
+    async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop', toolName: string) => {
+      await handleApproval(approvalId, response);
+      const WRITE_TOOLS = new Set(['write_file', 'patch_file', 'multi_edit']);
+      if (response === 'allow_all' && WRITE_TOOLS.has(toolName)) {
+        setEditMode('allow');
+        toast.success('Switched to "Allow All Edits" mode');
+      }
+    },
+    [handleApproval]
+  );
 
   // ESC double-press to stop
   useEffect(() => {
@@ -255,7 +267,9 @@ export default function Chat() {
       if (e.key === 'Escape' && isExecuting) {
         count++;
         clearTimeout(timeout);
-        timeout = setTimeout(() => { count = 0; }, 500);
+        timeout = setTimeout(() => {
+          count = 0;
+        }, 500);
         if (count >= 2) {
           stopExecution();
           count = 0;
@@ -266,7 +280,10 @@ export default function Chat() {
       }
     };
     window.addEventListener('keydown', handleKey);
-    return () => { window.removeEventListener('keydown', handleKey); clearTimeout(timeout); };
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      clearTimeout(timeout);
+    };
   }, [isExecuting, stopExecution]);
 
   const sessionTitle = currentSession?.title || 'Chat';
@@ -281,13 +298,19 @@ export default function Chat() {
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
-      <div className={`${isSidebarOpen ? 'fixed inset-y-0 left-0 z-30 md:relative md:inset-auto' : ''}`}>
+      <div
+        className={`${isSidebarOpen ? 'fixed inset-y-0 left-0 z-30 md:relative md:inset-auto' : ''}`}
+      >
         <ChatSessionSidebar
           sessions={sessions}
           currentSessionId={currentSessionId}
           isOpen={isSidebarOpen}
           onToggle={() => setIsSidebarOpen((v: boolean) => !v)}
-          onSelectSession={(id) => { clearMessages(); switchSession(id); if (window.innerWidth < 768) setIsSidebarOpen(false); }}
+          onSelectSession={(id) => {
+            clearMessages();
+            switchSession(id);
+            if (window.innerWidth < 768) setIsSidebarOpen(false);
+          }}
           onNewSession={handleNewSession}
           onRenameSession={renameSession}
           onDeleteSession={deleteSession}
@@ -309,9 +332,7 @@ export default function Chat() {
         {isLanding ? (
           <div className="flex-1 flex flex-col items-center justify-center px-4">
             <img src="/favicon.svg" alt="" className="w-10 h-10 mb-4 opacity-60" />
-            <h2 className="text-lg font-semibold text-[var(--text)] mb-1">
-              What can I help with?
-            </h2>
+            <h2 className="text-lg font-semibold text-[var(--text)] mb-1">What can I help with?</h2>
             <p className="text-xs text-[var(--text-muted)] mb-6 text-center max-w-sm">
               Ask anything — connect a project for file access
             </p>

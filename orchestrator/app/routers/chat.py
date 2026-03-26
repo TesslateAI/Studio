@@ -12,6 +12,8 @@ import aiofiles
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,9 +44,6 @@ from ..services.agent_context import (
     _get_chat_history,
     _resolve_container_name,
 )
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
 from ..users import current_active_user, current_superuser
 from ..utils.resource_naming import get_project_path
 
@@ -262,9 +261,7 @@ async def get_session_messages(
 
     # Fetch messages
     messages_result = await db.execute(
-        select(Message)
-        .where(Message.chat_id == chat_id)
-        .order_by(Message.created_at.asc())
+        select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at.asc())
     )
     messages = messages_result.scalars().all()
 
@@ -411,15 +408,16 @@ async def delete_chat_session(
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    # Prevent deleting the last chat in a project
-    count_result = await db.execute(
-        select(sa_func.count(Chat.id)).where(
-            Chat.user_id == current_user.id,
-            Chat.project_id == chat.project_id,
+    # Prevent deleting the last chat in a project (standalone chats can always be deleted)
+    if chat.project_id is not None:
+        count_result = await db.execute(
+            select(sa_func.count(Chat.id)).where(
+                Chat.user_id == current_user.id,
+                Chat.project_id == chat.project_id,
+            )
         )
-    )
-    if count_result.scalar() <= 1:
-        raise HTTPException(status_code=400, detail="Cannot delete the last chat session")
+        if count_result.scalar() <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last chat session")
 
     await db.delete(chat)
     await db.commit()
@@ -756,6 +754,7 @@ async def agent_chat(
         # 2c. Check vision support if request contains image attachments
         if request.attachments and any(a.type == "image" for a in request.attachments):
             import litellm as _litellm
+
             if not _litellm.supports_vision(model=model_name):
                 raise HTTPException(
                     status_code=400,
@@ -1011,7 +1010,9 @@ async def agent_chat(
                 chat_id=chat.id,
                 role="user",
                 content=request.message,
-                message_metadata={"attachments": [a.model_dump() for a in request.attachments]} if request.attachments else None,
+                message_metadata={"attachments": [a.model_dump() for a in request.attachments]}
+                if request.attachments
+                else None,
             )
             db.add(user_message)
 
@@ -1258,9 +1259,9 @@ async def agent_chat_stream(
                 else:
                     chat_query = chat_query.where(Chat.project_id.is_(None))
                 chat_result = await db.execute(
-                    chat_query
-                    .order_by(Chat.updated_at.desc().nullslast(), Chat.created_at.desc())
-                    .limit(1)
+                    chat_query.order_by(
+                        Chat.updated_at.desc().nullslast(), Chat.created_at.desc()
+                    ).limit(1)
                 )
                 chat = chat_result.scalar_one_or_none()
 
@@ -1278,7 +1279,9 @@ async def agent_chat_stream(
                 chat_id=chat.id,
                 role="user",
                 content=request.message,
-                message_metadata={"attachments": [a.model_dump() for a in request.attachments]} if request.attachments else None,
+                message_metadata={"attachments": [a.model_dump() for a in request.attachments]}
+                if request.attachments
+                else None,
             )
             db.add(user_message)
             await db.commit()
@@ -1360,6 +1363,7 @@ async def agent_chat_stream(
             # 2c. Check vision support if request contains image attachments
             if request.attachments and any(a.type == "image" for a in request.attachments):
                 import litellm as _litellm
+
                 if not _litellm.supports_vision(model=model_name):
                     error_event = {
                         "type": "error",
@@ -1441,7 +1445,9 @@ async def agent_chat_stream(
                 "volume_id": project.volume_id if project else None,
                 "cache_node": project.cache_node if project else None,
                 "compute_tier": project.compute_tier if project else None,
-                "attachments": [a.model_dump() for a in request.attachments] if request.attachments else [],
+                "attachments": [a.model_dump() for a in request.attachments]
+                if request.attachments
+                else [],
             }
 
             # ================================================================
@@ -1474,7 +1480,9 @@ async def agent_chat_stream(
                     container_id=str(container_id) if container_id else None,
                     container_name=container_name,
                     container_directory=container_directory,
-                    attachments=[a.model_dump() for a in request.attachments] if request.attachments else [],
+                    attachments=[a.model_dump() for a in request.attachments]
+                    if request.attachments
+                    else [],
                 )
 
                 # Enqueue the job

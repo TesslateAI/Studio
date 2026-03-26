@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { chatApi } from '../lib/api';
-import type { AgentMessageData, DBMessage, SerializedAttachment } from '../types/agent';
+import type { AgentMessageData, SerializedAttachment } from '../types/agent';
 import type { ChatAgent } from '../types/chat';
 import type { EditMode } from '../components/chat/EditModeStatus';
 
@@ -40,6 +40,8 @@ interface UseAgentChatOptions {
   agent: ChatAgent;
   editMode: EditMode;
   onTitleGenerated?: (chatId: string, title: string) => void;
+  /** Called when sendMessage needs a session but chatId is null. Must return the new chat ID or null on failure. */
+  onSessionNeeded?: () => Promise<string | null>;
 }
 
 export function useAgentChat({
@@ -48,6 +50,7 @@ export function useAgentChat({
   agent,
   editMode,
   onTitleGenerated,
+  onSessionNeeded,
 }: UseAgentChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -58,6 +61,7 @@ export function useAgentChat({
   const agentTaskIdRef = useRef<string | null>(null);
   const editModeRef = useRef<EditMode>(editMode);
   const onTitleGeneratedRef = useRef(onTitleGenerated);
+  const onSessionNeededRef = useRef(onSessionNeeded);
 
   useEffect(() => {
     editModeRef.current = editMode;
@@ -68,8 +72,14 @@ export function useAgentChat({
   }, [onTitleGenerated]);
 
   useEffect(() => {
+    onSessionNeededRef.current = onSessionNeeded;
+  }, [onSessionNeeded]);
+
+  useEffect(() => {
     isMountedRef.current = true;
-    return () => { isMountedRef.current = false; };
+    return () => {
+      isMountedRef.current = false;
+    };
   }, []);
 
   // Active task reconnection EventSource ref
@@ -82,10 +92,11 @@ export function useAgentChat({
     const prevChatId = prevChatIdRef.current;
     prevChatIdRef.current = chatId;
 
-    // Only abort/reset when switching BETWEEN sessions (oldId → newId),
-    // NOT on initial session creation (null → newId) which may coincide
-    // with an in-flight sendMessage that already set the controller.
-    if (prevChatId !== null && prevChatId !== chatId) {
+    // Only abort/reset when switching BETWEEN real sessions (oldId → newId),
+    // NOT on initial session creation (null → newId) or temp→real ID swap
+    // which coincide with an in-flight sendMessage.
+    const isTempSwap = prevChatId?.startsWith('temp-') && chatId && !chatId.startsWith('temp-');
+    if (prevChatId !== null && prevChatId !== chatId && !isTempSwap) {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
@@ -129,7 +140,9 @@ export function useAgentChat({
                 id: `msg-${idx}`,
                 type: messageType,
                 content: msg.content,
-                attachments: msg.message_metadata?.attachments as SerializedAttachment[] | undefined,
+                attachments: msg.message_metadata?.attachments as
+                  | SerializedAttachment[]
+                  | undefined,
               });
             }
             return;
@@ -215,20 +228,23 @@ export function useAgentChat({
           (m) => m.agentData?.completion_reason === 'in_progress'
         );
         if (!alreadyHasPlaceholder) {
-          setMessages((prev) => [...prev, {
-            id: thinkingId,
-            type: 'ai',
-            content: '',
-            agentData: {
-              steps: [],
-              iterations: 0,
-              tool_calls_made: 0,
-              completion_reason: 'in_progress',
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: thinkingId,
+              type: 'ai',
+              content: '',
+              agentData: {
+                steps: [],
+                iterations: 0,
+                tool_calls_made: 0,
+                completion_reason: 'in_progress',
+              },
+              agentIcon: agent.icon,
+              agentAvatarUrl: agent.avatar_url,
+              agentType: agent.name,
             },
-            agentIcon: agent.icon,
-            agentAvatarUrl: agent.avatar_url,
-            agentType: agent.name,
-          }]);
+          ]);
         }
 
         // Subscribe to live events via EventSource (SSE)
@@ -300,31 +316,44 @@ export function useAgentChat({
               };
               setMessages((prev) => {
                 const withoutThinking = prev.filter((m) => m.id !== thinkingId);
-                return [...withoutThinking, stepMessage, {
-                  id: thinkingId,
-                  type: 'ai',
-                  content: '',
-                  agentData: { steps: [], iterations: 0, tool_calls_made: 0, completion_reason: 'in_progress' },
-                  agentIcon: agent.icon,
-                  agentAvatarUrl: agent.avatar_url,
-                  agentType: agent.name,
-                }];
+                return [
+                  ...withoutThinking,
+                  stepMessage,
+                  {
+                    id: thinkingId,
+                    type: 'ai',
+                    content: '',
+                    agentData: {
+                      steps: [],
+                      iterations: 0,
+                      tool_calls_made: 0,
+                      completion_reason: 'in_progress',
+                    },
+                    agentIcon: agent.icon,
+                    agentAvatarUrl: agent.avatar_url,
+                    agentType: agent.name,
+                  },
+                ];
               });
             } else if (data.type === 'approval_required') {
               const approvalData = data.data || data;
               if (editModeRef.current === 'allow') {
-                chatApi.sendApprovalResponse(approvalData.approval_id, 'allow_all')
+                chatApi
+                  .sendApprovalResponse(approvalData.approval_id, 'allow_all')
                   .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
               } else {
-                setMessages((prev) => [...prev, {
-                  id: `approval-${crypto.randomUUID()}`,
-                  type: 'approval_request',
-                  content: '',
-                  approvalId: approvalData.approval_id,
-                  toolName: approvalData.tool_name,
-                  toolParameters: approvalData.tool_parameters,
-                  toolDescription: approvalData.tool_description,
-                }]);
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `approval-${crypto.randomUUID()}`,
+                    type: 'approval_request',
+                    content: '',
+                    approvalId: approvalData.approval_id,
+                    toolName: approvalData.tool_name,
+                    toolParameters: approvalData.tool_parameters,
+                    toolDescription: approvalData.tool_description,
+                  },
+                ]);
               }
             } else if (data.type === 'chat_title') {
               const title = data.data.title as string;
@@ -335,7 +364,10 @@ export function useAgentChat({
             } else if (data.type === 'credits_used') {
               window.dispatchEvent(
                 new CustomEvent('credits-updated', {
-                  detail: { newBalance: data.data.new_balance, creditsUsed: data.data.credits_deducted },
+                  detail: {
+                    newBalance: data.data.new_balance,
+                    creditsUsed: data.data.credits_deducted,
+                  },
                 })
               );
             } else if (data.type === 'complete') {
@@ -348,15 +380,23 @@ export function useAgentChat({
                   if (lastMsg && lastMsg.agentData) {
                     return [...prev.slice(0, -1), { ...lastMsg, content: finalContent }];
                   }
-                  return [...prev, {
-                    id: `msg-${crypto.randomUUID()}-result`,
-                    type: 'ai',
-                    content: finalContent,
-                    agentData: { steps: [], iterations: 0, tool_calls_made: 0, completion_reason: 'complete' },
-                    agentIcon: agent.icon,
-                    agentAvatarUrl: agent.avatar_url,
-                    agentType: agent.name,
-                  }];
+                  return [
+                    ...prev,
+                    {
+                      id: `msg-${crypto.randomUUID()}-result`,
+                      type: 'ai',
+                      content: finalContent,
+                      agentData: {
+                        steps: [],
+                        iterations: 0,
+                        tool_calls_made: 0,
+                        completion_reason: 'complete',
+                      },
+                      agentIcon: agent.icon,
+                      agentAvatarUrl: agent.avatar_url,
+                      agentType: agent.name,
+                    },
+                  ];
                 });
               }
               cleanupReconnect();
@@ -364,15 +404,23 @@ export function useAgentChat({
               const errorMsg = data.data?.message || 'Agent execution failed';
               setMessages((prev) => {
                 const withoutThinking = prev.filter((m) => m.id !== thinkingId);
-                return [...withoutThinking, {
-                  id: `msg-${crypto.randomUUID()}-error`,
-                  type: 'ai',
-                  content: `I encountered an error: ${errorMsg}`,
-                  agentData: { steps: [], iterations: 0, tool_calls_made: 0, completion_reason: 'error' },
-                  agentIcon: agent.icon,
-                  agentAvatarUrl: agent.avatar_url,
-                  agentType: agent.name,
-                }];
+                return [
+                  ...withoutThinking,
+                  {
+                    id: `msg-${crypto.randomUUID()}-error`,
+                    type: 'ai',
+                    content: `I encountered an error: ${errorMsg}`,
+                    agentData: {
+                      steps: [],
+                      iterations: 0,
+                      tool_calls_made: 0,
+                      completion_reason: 'error',
+                    },
+                    agentIcon: agent.icon,
+                    agentAvatarUrl: agent.avatar_url,
+                    agentType: agent.name,
+                  },
+                ];
               });
               cleanupReconnect();
             } else if (data.type === 'done') {
@@ -409,153 +457,140 @@ export function useAgentChat({
     };
   }, [chatId, agent]);
 
-  const sendMessage = useCallback(async (message: string, overrideChatId?: string, attachments?: SerializedAttachment[]) => {
-    const effectiveChatId = overrideChatId || chatId;
-    if ((!message.trim() && (!attachments || attachments.length === 0)) || isExecuting || !effectiveChatId) return;
+  const sendMessage = useCallback(
+    async (message: string, overrideChatId?: string, attachments?: SerializedAttachment[]) => {
+      if ((!message.trim() && (!attachments || attachments.length === 0)) || isExecuting) return;
 
-    const userMessage: ChatMessage = {
-      id: `msg-${crypto.randomUUID()}`,
-      type: 'user',
-      content: message,
-      attachments,
-    };
-    setMessages((prev) => [...prev, userMessage]);
-    isExecutingRef.current = true;
-    setIsExecuting(true);
+      // Resolve the chat ID — create a session on the fly if needed
+      let effectiveChatId = overrideChatId || chatId;
+      if (!effectiveChatId) {
+        if (!onSessionNeededRef.current) return;
+        isExecutingRef.current = true; // prevent history-load race during session creation
+        const newId = await onSessionNeededRef.current();
+        if (!newId) {
+          isExecutingRef.current = false;
+          return;
+        }
+        effectiveChatId = newId;
+      }
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+      const userMessage: ChatMessage = {
+        id: `msg-${crypto.randomUUID()}`,
+        type: 'user',
+        content: message,
+        attachments,
+      };
+      setMessages((prev) => [...prev, userMessage]);
+      isExecutingRef.current = true;
+      setIsExecuting(true);
 
-    const thinkingMessageId = `msg-${crypto.randomUUID()}-thinking`;
-    const thinkingMessage: ChatMessage = {
-      id: thinkingMessageId,
-      type: 'ai',
-      content: '',
-      agentData: {
-        steps: [],
-        iterations: 0,
-        tool_calls_made: 0,
-        completion_reason: 'in_progress',
-      },
-      agentIcon: agent.icon,
-      agentAvatarUrl: agent.avatar_url,
-      agentType: agent.name,
-    };
-    setMessages((prev) => [...prev, thinkingMessage]);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-    try {
-      await chatApi.sendAgentMessageStreaming(
-        {
-          project_id: projectId || undefined,
-          chat_id: effectiveChatId,
-          message,
-          agent_id: agent.backendId?.toString(),
-          max_iterations: undefined,
-          edit_mode: editModeRef.current,
-          attachments,
+      const thinkingMessageId = `msg-${crypto.randomUUID()}-thinking`;
+      const thinkingMessage: ChatMessage = {
+        id: thinkingMessageId,
+        type: 'ai',
+        content: '',
+        agentData: {
+          steps: [],
+          iterations: 0,
+          tool_calls_made: 0,
+          completion_reason: 'in_progress',
         },
-        (event) => {
-          if (!isMountedRef.current) return;
+        agentIcon: agent.icon,
+        agentAvatarUrl: agent.avatar_url,
+        agentType: agent.name,
+      };
+      setMessages((prev) => [...prev, thinkingMessage]);
 
-          if (event.data?.task_id) {
-            agentTaskIdRef.current = event.data.task_id as string;
-          }
+      try {
+        await chatApi.sendAgentMessageStreaming(
+          {
+            project_id: projectId || undefined,
+            chat_id: effectiveChatId,
+            message,
+            agent_id: agent.backendId?.toString(),
+            max_iterations: undefined,
+            edit_mode: editModeRef.current,
+            attachments,
+          },
+          (event) => {
+            if (!isMountedRef.current) return;
 
-          if (event.type === 'agent_step') {
-            const transformedStep = {
-              ...event.data,
-              tool_calls:
-                (event.data.tool_calls as Array<{ name: string; parameters: unknown }>)?.map(
-                  (tc: { name: string; parameters: unknown }, index: number) => ({
-                    name: tc.name,
-                    parameters: tc.parameters,
-                    result: (event.data.tool_results as unknown[])?.[index] || {},
-                  })
-                ) || [],
-            };
-            delete transformedStep.tool_results;
+            if (event.data?.task_id) {
+              agentTaskIdRef.current = event.data.task_id as string;
+            }
 
-            const stepMessage: ChatMessage = {
-              id: `msg-${crypto.randomUUID()}-step-${event.data.iteration}`,
-              type: 'ai',
-              content: '',
-              agentData: {
-                steps: [transformedStep],
-                iterations: (event.data.iteration as number) || 0,
-                tool_calls_made: (event.data.tool_calls as unknown[])?.length || 0,
-                completion_reason: 'step_complete',
-              },
-              agentIcon: agent.icon,
-              agentAvatarUrl: agent.avatar_url,
-              agentType: agent.name,
-            };
+            if (event.type === 'agent_step') {
+              const transformedStep = {
+                ...event.data,
+                tool_calls:
+                  (event.data.tool_calls as Array<{ name: string; parameters: unknown }>)?.map(
+                    (tc: { name: string; parameters: unknown }, index: number) => ({
+                      name: tc.name,
+                      parameters: tc.parameters,
+                      result: (event.data.tool_results as unknown[])?.[index] || {},
+                    })
+                  ) || [],
+              };
+              delete transformedStep.tool_results;
 
-            setMessages((prev) => {
-              const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
-              return [
-                ...withoutThinking,
-                stepMessage,
-                { ...thinkingMessage, id: thinkingMessageId },
-              ];
-            });
-          } else if (event.type === 'complete') {
-            setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
-
-            if (event.data.success === false) {
-              const errorDetail = event.data.error
-                ? formatAgentError(event.data.error as string)
-                : 'Agent could not complete the task';
+              const stepMessage: ChatMessage = {
+                id: `msg-${crypto.randomUUID()}-step-${event.data.iteration}`,
+                type: 'ai',
+                content: '',
+                agentData: {
+                  steps: [transformedStep],
+                  iterations: (event.data.iteration as number) || 0,
+                  tool_calls_made: (event.data.tool_calls as unknown[])?.length || 0,
+                  completion_reason: 'step_complete',
+                },
+                agentIcon: agent.icon,
+                agentAvatarUrl: agent.avatar_url,
+                agentType: agent.name,
+              };
 
               setMessages((prev) => {
-                const lastMsg = prev[prev.length - 1];
-                const errorContent = `I encountered an error: ${errorDetail}`;
-                if (lastMsg && lastMsg.agentData) {
-                  return [
-                    ...prev.slice(0, -1),
-                    {
-                      ...lastMsg,
-                      content: errorContent,
-                      agentData: { ...lastMsg.agentData, completion_reason: 'error' },
-                    },
-                  ];
-                }
+                const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
                 return [
-                  ...prev,
-                  {
-                    id: `msg-${crypto.randomUUID()}-error`,
-                    type: 'ai',
-                    content: errorContent,
-                    agentData: {
-                      steps: [],
-                      iterations: (event.data.iterations as number) || 0,
-                      tool_calls_made: (event.data.tool_calls_made as number) || 0,
-                      completion_reason: 'error',
-                    },
-                    agentIcon: agent.icon,
-                    agentAvatarUrl: agent.avatar_url,
-                    agentType: agent.name,
-                  },
+                  ...withoutThinking,
+                  stepMessage,
+                  { ...thinkingMessage, id: thinkingMessageId },
                 ];
               });
-            } else {
-              const finalContent = event.data.final_response as string;
-              if (finalContent && finalContent.trim()) {
+            } else if (event.type === 'complete') {
+              setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
+
+              if (event.data.success === false) {
+                const errorDetail = event.data.error
+                  ? formatAgentError(event.data.error as string)
+                  : 'Agent could not complete the task';
+
                 setMessages((prev) => {
                   const lastMsg = prev[prev.length - 1];
+                  const errorContent = `I encountered an error: ${errorDetail}`;
                   if (lastMsg && lastMsg.agentData) {
-                    return [...prev.slice(0, -1), { ...lastMsg, content: finalContent }];
+                    return [
+                      ...prev.slice(0, -1),
+                      {
+                        ...lastMsg,
+                        content: errorContent,
+                        agentData: { ...lastMsg.agentData, completion_reason: 'error' },
+                      },
+                    ];
                   }
                   return [
                     ...prev,
                     {
-                      id: `msg-${crypto.randomUUID()}-result`,
+                      id: `msg-${crypto.randomUUID()}-error`,
                       type: 'ai',
-                      content: finalContent,
+                      content: errorContent,
                       agentData: {
                         steps: [],
-                        iterations: 0,
-                        tool_calls_made: 0,
-                        completion_reason: 'complete',
+                        iterations: (event.data.iterations as number) || 0,
+                        tool_calls_made: (event.data.tool_calls_made as number) || 0,
+                        completion_reason: 'error',
                       },
                       agentIcon: agent.icon,
                       agentAvatarUrl: agent.avatar_url,
@@ -563,93 +598,121 @@ export function useAgentChat({
                     },
                   ];
                 });
+              } else {
+                const finalContent = event.data.final_response as string;
+                if (finalContent && finalContent.trim()) {
+                  setMessages((prev) => {
+                    const lastMsg = prev[prev.length - 1];
+                    if (lastMsg && lastMsg.agentData) {
+                      return [...prev.slice(0, -1), { ...lastMsg, content: finalContent }];
+                    }
+                    return [
+                      ...prev,
+                      {
+                        id: `msg-${crypto.randomUUID()}-result`,
+                        type: 'ai',
+                        content: finalContent,
+                        agentData: {
+                          steps: [],
+                          iterations: 0,
+                          tool_calls_made: 0,
+                          completion_reason: 'complete',
+                        },
+                        agentIcon: agent.icon,
+                        agentAvatarUrl: agent.avatar_url,
+                        agentType: agent.name,
+                      },
+                    ];
+                  });
+                }
+              }
+            } else if (event.type === 'chat_title') {
+              const title = event.data.title as string;
+              const titleChatId = event.data.chat_id as string;
+              if (title && titleChatId && onTitleGeneratedRef.current) {
+                onTitleGeneratedRef.current(titleChatId, title);
+              }
+            } else if (event.type === 'credits_used') {
+              window.dispatchEvent(
+                new CustomEvent('credits-updated', {
+                  detail: {
+                    newBalance: event.data.new_balance,
+                    creditsUsed: event.data.credits_deducted,
+                    costTotal: event.data.cost_total,
+                  },
+                })
+              );
+            } else if (event.type === 'error') {
+              const errorData = event.data || {};
+              if ((errorData as { code?: string }).code === 'insufficient_credits') {
+                setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
+                return;
+              }
+              const errorMsg =
+                (event.data as { message?: string })?.message || 'Agent execution failed';
+              throw new Error(errorMsg);
+            } else if (event.type === 'approval_required') {
+              if (editModeRef.current === 'allow') {
+                chatApi
+                  .sendApprovalResponse(event.data.approval_id as string, 'allow_all')
+                  .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
+              } else {
+                const approvalMessage: ChatMessage = {
+                  id: `approval-${crypto.randomUUID()}`,
+                  type: 'approval_request',
+                  content: '',
+                  approvalId: event.data.approval_id as string,
+                  toolName: event.data.tool_name as string,
+                  toolParameters: event.data.tool_parameters as Record<string, unknown>,
+                  toolDescription: event.data.tool_description as string,
+                };
+                setMessages((prev) => [...prev, approvalMessage]);
               }
             }
-          } else if (event.type === 'chat_title') {
-            const title = event.data.title as string;
-            const titleChatId = event.data.chat_id as string;
-            if (title && titleChatId && onTitleGeneratedRef.current) {
-              onTitleGeneratedRef.current(titleChatId, title);
-            }
-          } else if (event.type === 'credits_used') {
-            window.dispatchEvent(
-              new CustomEvent('credits-updated', {
-                detail: {
-                  newBalance: event.data.new_balance,
-                  creditsUsed: event.data.credits_deducted,
-                  costTotal: event.data.cost_total,
+          },
+          controller.signal
+        );
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          setMessages((prev) => {
+            const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
+            const lastIdx = withoutThinking.length - 1;
+            if (lastIdx >= 0 && withoutThinking[lastIdx].agentData) {
+              withoutThinking[lastIdx] = {
+                ...withoutThinking[lastIdx],
+                content: withoutThinking[lastIdx].content || '_Execution stopped by user_',
+                agentData: {
+                  ...withoutThinking[lastIdx].agentData!,
+                  completion_reason: 'cancelled',
                 },
-              })
-            );
-          } else if (event.type === 'error') {
-            const errorData = event.data || {};
-            if ((errorData as { code?: string }).code === 'insufficient_credits') {
-              setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
-              return;
-            }
-            const errorMsg =
-              (event.data as { message?: string })?.message || 'Agent execution failed';
-            throw new Error(errorMsg);
-          } else if (event.type === 'approval_required') {
-            if (editModeRef.current === 'allow') {
-              chatApi
-                .sendApprovalResponse(event.data.approval_id as string, 'allow_all')
-                .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
-            } else {
-              const approvalMessage: ChatMessage = {
-                id: `approval-${crypto.randomUUID()}`,
-                type: 'approval_request',
-                content: '',
-                approvalId: event.data.approval_id as string,
-                toolName: event.data.tool_name as string,
-                toolParameters: event.data.tool_parameters as Record<string, unknown>,
-                toolDescription: event.data.tool_description as string,
               };
-              setMessages((prev) => [...prev, approvalMessage]);
+              return withoutThinking;
             }
-          }
-        },
-        controller.signal
-      );
-    } catch (error: unknown) {
-      if (error instanceof Error && error.name === 'AbortError') {
+            return withoutThinking;
+          });
+          return;
+        }
+
         setMessages((prev) => {
           const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
-          const lastIdx = withoutThinking.length - 1;
-          if (lastIdx >= 0 && withoutThinking[lastIdx].agentData) {
-            withoutThinking[lastIdx] = {
-              ...withoutThinking[lastIdx],
-              content: withoutThinking[lastIdx].content || '_Execution stopped by user_',
-              agentData: {
-                ...withoutThinking[lastIdx].agentData!,
-                completion_reason: 'cancelled',
-              },
-            };
-            return withoutThinking;
-          }
-          return withoutThinking;
+          return [
+            ...withoutThinking,
+            {
+              id: `msg-${crypto.randomUUID()}-error`,
+              type: 'ai',
+              content: 'I encountered an error while working on your request. Please try again.',
+            },
+          ];
         });
-        return;
+      } finally {
+        isExecutingRef.current = false;
+        setIsExecuting(false);
+        abortControllerRef.current = null;
+        setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
       }
-
-      setMessages((prev) => {
-        const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
-        return [
-          ...withoutThinking,
-          {
-            id: `msg-${crypto.randomUUID()}-error`,
-            type: 'ai',
-            content: 'I encountered an error while working on your request. Please try again.',
-          },
-        ];
-      });
-    } finally {
-      isExecutingRef.current = false;
-      setIsExecuting(false);
-      abortControllerRef.current = null;
-      setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
-    }
-  }, [chatId, projectId, agent, isExecuting]);
+    },
+    [chatId, projectId, agent, isExecuting]
+  );
 
   const stopExecution = useCallback(async () => {
     const controller = abortControllerRef.current;
@@ -659,26 +722,30 @@ export function useAgentChat({
     }
     const taskId = agentTaskIdRef.current;
     if (taskId) {
-      try { await chatApi.cancelAgentTask(taskId); } catch { /* best effort */ }
+      try {
+        await chatApi.cancelAgentTask(taskId);
+      } catch {
+        /* best effort */
+      }
       agentTaskIdRef.current = null;
     }
     isExecutingRef.current = false;
     setIsExecuting(false);
   }, []);
 
-  const handleApproval = useCallback(async (
-    approvalId: string,
-    response: 'allow_once' | 'allow_all' | 'stop',
-  ) => {
-    try {
-      await chatApi.sendApprovalResponse(approvalId, response);
-    } catch (err) {
-      console.error('[APPROVAL] Failed to send response:', err);
-    }
-    setMessages((prev) =>
-      prev.filter((msg) => !(msg.type === 'approval_request' && msg.approvalId === approvalId))
-    );
-  }, []);
+  const handleApproval = useCallback(
+    async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop') => {
+      try {
+        await chatApi.sendApprovalResponse(approvalId, response);
+      } catch (err) {
+        console.error('[APPROVAL] Failed to send response:', err);
+      }
+      setMessages((prev) =>
+        prev.filter((msg) => !(msg.type === 'approval_request' && msg.approvalId === approvalId))
+      );
+    },
+    []
+  );
 
   const clearMessages = useCallback(() => {
     setMessages([]);
