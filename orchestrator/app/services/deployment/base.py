@@ -11,6 +11,24 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
 
+# Internal env-var keys used to pass deployment metadata between the router
+# and provider implementations.  Prefixed with ``_TESSLATE_`` so they are
+# automatically stripped before being sent to the remote provider.
+INTERNAL_ENV_PREFIX = "_TESSLATE_"
+ENV_REPO_URL = f"{INTERNAL_ENV_PREFIX}REPO_URL"
+ENV_BRANCH = f"{INTERNAL_ENV_PREFIX}BRANCH"
+ENV_IMAGE_REF = f"{INTERNAL_ENV_PREFIX}IMAGE_REF"
+ENV_PORT = f"{INTERNAL_ENV_PREFIX}PORT"
+ENV_CPU = f"{INTERNAL_ENV_PREFIX}CPU"
+ENV_MEMORY = f"{INTERNAL_ENV_PREFIX}MEMORY"
+ENV_REGION = f"{INTERNAL_ENV_PREFIX}REGION"
+
+NO_GIT_REPO_ERROR = (
+    "This provider deploys from a git repository, but your project doesn't have one connected. "
+    "Open the Git panel and link a repository, then try deploying again."
+)
+
+
 class DeploymentFile(BaseModel):
     """Represents a file to be deployed."""
 

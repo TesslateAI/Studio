@@ -26,6 +26,7 @@ from ..models import (
     Project,
     User,
 )
+from ..services.deployment.base import ENV_REPO_URL
 from ..services.deployment.guards import (
     PROVIDER_CAPABILITIES,
     get_provider_info,
@@ -37,6 +38,41 @@ from ..users import current_active_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/projects", tags=["deployment-targets"])
+
+
+def _build_source_env_vars(
+    project: Project,
+    target: DeploymentTarget,
+    conn_settings: dict | None,
+    request_env: dict[str, str] | None,
+) -> dict[str, str]:
+    """Build env_vars for source-mode providers with auto-derived git URL.
+
+    Merge order (later wins):
+      1. Auto-derived from project.git_remote_url
+      2. target.deployment_env  (persisted overrides on the target node)
+      3. conn.deployment_settings["env_vars"]  (per-connection overrides)
+      4. request.env_vars  (one-off overrides from the deploy call)
+    """
+    env: dict[str, str] = {}
+
+    # 1. Auto-derive git repo URL from project if available
+    if project.git_remote_url:
+        env[ENV_REPO_URL] = project.git_remote_url
+
+    # 2. Target-level overrides
+    if target.deployment_env and isinstance(target.deployment_env, dict):
+        env.update(target.deployment_env)
+
+    # 3. Connection-level overrides
+    if conn_settings and isinstance(conn_settings, dict):
+        env.update(conn_settings.get("env_vars", {}))
+
+    # 4. Request-level overrides
+    if request_env:
+        env.update(request_env)
+
+    return env
 
 
 async def _get_live_deployment_credential(
@@ -78,6 +114,10 @@ class DeploymentTargetUpdate(BaseModel):
     name: str | None = Field(None, description="Optional custom display name")
     position_x: float | None = Field(None, description="X position on canvas")
     position_y: float | None = Field(None, description="Y position on canvas")
+    deployment_env: dict[str, str] | None = Field(
+        None,
+        description="Environment variable overrides for this deployment target",
+    )
 
 
 class ContainerSummary(BaseModel):
@@ -130,6 +170,7 @@ class DeploymentTargetResponse(BaseModel):
     position_y: float
     is_connected: bool
     credential_id: UUID | None = None
+    deployment_env: dict[str, str] | None = None
     provider_info: ProviderInfo
     connected_containers: list[ContainerSummary]
     deployment_history: list[DeploymentSummary]
@@ -229,6 +270,7 @@ def build_target_response(
         position_y=target.position_y,
         is_connected=is_connected,
         credential_id=target.credential_id,
+        deployment_env=target.deployment_env,
         provider_info=ProviderInfo(
             display_name=provider_info["display_name"] if provider_info else target.provider,
             icon=provider_info["icon"] if provider_info else "🚀",
@@ -554,6 +596,8 @@ async def update_deployment_target(
         target.position_x = request.position_x
     if request.position_y is not None:
         target.position_y = request.position_y
+    if request.deployment_env is not None:
+        target.deployment_env = request.deployment_env
 
     await db.commit()
     await db.refresh(target)
@@ -903,12 +947,12 @@ async def deploy_target(
             # Deploy to provider
             from ..services.deployment.base import DeploymentConfig
 
-            env_vars = {
-                **(request.env_vars or {}),
-                **(
-                    conn.deployment_settings.get("env_vars", {}) if conn.deployment_settings else {}
-                ),
-            }
+            env_vars = _build_source_env_vars(
+                project=project,
+                target=target,
+                conn_settings=conn.deployment_settings,
+                request_env=request.env_vars,
+            )
 
             config = DeploymentConfig(
                 project_id=str(project.id),

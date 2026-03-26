@@ -5,7 +5,17 @@ This module provides a unified interface for deploying to different providers
 (Cloudflare Workers, Vercel, Netlify, etc.) using a factory pattern.
 """
 
-from .base import BaseDeploymentProvider, DeploymentConfig, DeploymentResult
+from .base import (
+    ENV_CPU,
+    ENV_IMAGE_REF,
+    ENV_MEMORY,
+    ENV_PORT,
+    ENV_REGION,
+    INTERNAL_ENV_PREFIX,
+    BaseDeploymentProvider,
+    DeploymentConfig,
+    DeploymentResult,
+)
 from .container_base import BaseContainerDeploymentProvider
 from .providers.aws_container import AWSContainerProvider
 from .providers.azure_container import AzureContainerProvider
@@ -152,12 +162,12 @@ class DeploymentManager:
             from .container_base import ContainerDeployConfig
 
             container_config = ContainerDeployConfig(
-                image_ref=config.env_vars.get("_TESSLATE_IMAGE_REF", ""),
-                port=int(config.env_vars.get("_TESSLATE_PORT", "8080")),
-                cpu=config.env_vars.get("_TESSLATE_CPU", "0.25"),
-                memory=config.env_vars.get("_TESSLATE_MEMORY", "512Mi"),
-                env_vars={k: v for k, v in config.env_vars.items() if not k.startswith("_TESSLATE_")},
-                region=config.env_vars.get("_TESSLATE_REGION", "us-east-1"),
+                image_ref=config.env_vars.get(ENV_IMAGE_REF, ""),
+                port=int(config.env_vars.get(ENV_PORT, "8080")),
+                cpu=config.env_vars.get(ENV_CPU, "0.25"),
+                memory=config.env_vars.get(ENV_MEMORY, "512Mi"),
+                env_vars={k: v for k, v in config.env_vars.items() if not k.startswith(INTERNAL_ENV_PREFIX)},
+                region=config.env_vars.get(ENV_REGION, "us-east-1"),
             )
             pushed_uri = await provider.push_image(container_config.image_ref)
             container_config = ContainerDeployConfig(**{**container_config.model_dump(), "image_ref": pushed_uri})

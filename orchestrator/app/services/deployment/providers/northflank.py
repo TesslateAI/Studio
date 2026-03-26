@@ -9,7 +9,16 @@ import logging
 
 import httpx
 
-from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
+from ..base import (
+    ENV_BRANCH,
+    ENV_REPO_URL,
+    INTERNAL_ENV_PREFIX,
+    NO_GIT_REPO_ERROR,
+    BaseDeploymentProvider,
+    DeploymentConfig,
+    DeploymentFile,
+    DeploymentResult,
+)
 from .utils import poll_until_terminal
 
 logger = logging.getLogger(__name__)
@@ -92,14 +101,11 @@ class NorthflankProvider(BaseDeploymentProvider):
         logs: list[str] = []
 
         try:
-            repo_url = config.env_vars.get("_TESSLATE_REPO_URL", "")
-            branch = config.env_vars.get("_TESSLATE_BRANCH", "main")
+            repo_url = config.env_vars.get(ENV_REPO_URL, "")
+            branch = config.env_vars.get(ENV_BRANCH, "main")
 
             if not repo_url:
-                raise ValueError(
-                    "Northflank requires a git repository. "
-                    "Set _TESSLATE_REPO_URL in config.env_vars."
-                )
+                raise ValueError(NO_GIT_REPO_ERROR)
 
             project_name = self._sanitize_name(config.project_name)
             framework_config = self.get_framework_config(config.framework)
@@ -109,7 +115,7 @@ class NorthflankProvider(BaseDeploymentProvider):
             runtime_vars = {
                 k: v
                 for k, v in config.env_vars.items()
-                if not k.startswith("_TESSLATE_")
+                if not k.startswith(INTERNAL_ENV_PREFIX)
             }
 
             async with httpx.AsyncClient(timeout=120.0) as client:

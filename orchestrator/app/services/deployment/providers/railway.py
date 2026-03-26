@@ -9,7 +9,16 @@ import logging
 
 import httpx
 
-from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
+from ..base import (
+    ENV_BRANCH,
+    ENV_REPO_URL,
+    INTERNAL_ENV_PREFIX,
+    NO_GIT_REPO_ERROR,
+    BaseDeploymentProvider,
+    DeploymentConfig,
+    DeploymentFile,
+    DeploymentResult,
+)
 from .utils import graphql_request, poll_until_terminal
 
 logger = logging.getLogger(__name__)
@@ -94,14 +103,11 @@ class RailwayProvider(BaseDeploymentProvider):
         logs: list[str] = []
 
         try:
-            repo_url = config.env_vars.get("_TESSLATE_REPO_URL", "")
-            branch = config.env_vars.get("_TESSLATE_BRANCH", "main")
+            repo_url = config.env_vars.get(ENV_REPO_URL, "")
+            branch = config.env_vars.get(ENV_BRANCH, "main")
 
             if not repo_url:
-                raise ValueError(
-                    "Railway requires a git repository. "
-                    "Set _TESSLATE_REPO_URL in config.env_vars."
-                )
+                raise ValueError(NO_GIT_REPO_ERROR)
 
             project_name = self._sanitize_name(config.project_name)
             logs.append(f"Deploying '{project_name}' to Railway from {repo_url}@{branch}")
@@ -149,7 +155,7 @@ class RailwayProvider(BaseDeploymentProvider):
                 public_vars = {
                     k: v
                     for k, v in config.env_vars.items()
-                    if not k.startswith("_TESSLATE_")
+                    if not k.startswith(INTERNAL_ENV_PREFIX)
                 }
                 if public_vars:
                     logs.append(f"Setting {len(public_vars)} environment variable(s)...")

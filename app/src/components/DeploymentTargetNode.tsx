@@ -13,7 +13,9 @@ import {
   CircleNotch,
   Clock,
   Plus,
+  Info,
 } from '@phosphor-icons/react';
+import { PROVIDER_CREDENTIAL_HELP } from '../lib/deployment-providers';
 
 // Provider info interface
 interface ProviderInfo {
@@ -283,25 +285,49 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
         </div>
 
         {/* Not Connected Warning */}
-        {!data.isConnected && (
-          <div className="px-3 py-2 bg-yellow-500/10 border-b border-yellow-500/20">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <LinkSimple size={14} className="text-yellow-500" />
-                <span className="text-xs text-yellow-500">Not Connected</span>
+        {!data.isConnected && (() => {
+          const providerHelp = PROVIDER_CREDENTIAL_HELP[data.provider];
+          const helpFields = providerHelp ? Object.entries(providerHelp) : [];
+          return (
+            <div className="px-3 py-2 bg-yellow-500/10 border-b border-yellow-500/20">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <LinkSimple size={14} className="text-yellow-500" />
+                  <span className="text-xs text-yellow-500">Not Connected</span>
+                  {helpFields.length > 0 && (
+                    <div className="group/tip relative">
+                      <Info
+                        size={13}
+                        className="text-yellow-500/60 hover:text-yellow-500 transition-colors cursor-help"
+                        weight="fill"
+                      />
+                      <div className="absolute left-0 top-full mt-2 w-64 p-3 bg-[#1a1a2e] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all duration-200 z-50 pointer-events-none">
+                        <p className="text-[10px] font-semibold text-[var(--text)] mb-1.5">How to connect {providerName}</p>
+                        <div className="space-y-1.5">
+                          {helpFields.map(([field, help]) => (
+                            <div key={field}>
+                              <span className="text-[10px] font-medium text-[var(--text)]/70">{field.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}:</span>
+                              <p className="text-[10px] text-[var(--text)]/60 leading-snug">{help}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    data.onConnect?.(id);
+                  }}
+                  className="px-2 py-0.5 text-xs bg-yellow-500 text-black rounded hover:bg-yellow-400 transition-colors font-medium"
+                >
+                  Connect
+                </button>
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  data.onConnect?.(id);
-                }}
-                className="px-2 py-0.5 text-xs bg-yellow-500 text-black rounded hover:bg-yellow-400 transition-colors font-medium"
-              >
-                Connect
-              </button>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Connected Containers Section */}
         <div className="px-3 py-2 border-b border-[var(--border)]">

@@ -4,7 +4,7 @@ import { X, Trash, Plus, Key, ShieldCheck, Check, LinkSimple, Info } from '@phos
 import { deploymentCredentialsApi } from '../../lib/api';
 import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
-import { getProviderConfig } from '../../lib/deployment-providers';
+import { getProviderConfig, PROVIDER_CREDENTIAL_HELP } from '../../lib/deployment-providers';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { SettingsSection } from '../../components/settings';
 import { useCancellableParallelRequests } from '../../hooks/useCancellableRequest';
@@ -471,36 +471,49 @@ export default function DeploymentSettings() {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
-              {selectedProvider.required_fields.map((field) => (
-                <div key={field}>
-                  <label
-                    htmlFor={field}
-                    className="block text-sm font-semibold text-[var(--text)] mb-2"
-                  >
-                    {formatFieldName(field)}
-                    <span className="text-red-400 ml-1">*</span>
-                  </label>
-                  <input
-                    id={field}
-                    type={field.includes('token') || field.includes('key') ? 'password' : 'text'}
-                    value={manualCredentials[field] || ''}
-                    onChange={(e) =>
-                      setManualCredentials({
-                        ...manualCredentials,
-                        [field]: e.target.value,
-                      })
-                    }
-                    placeholder={`Enter your ${formatFieldName(field).toLowerCase()}`}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-                    disabled={isSaving}
-                  />
-                  {field === 'api_token' && (
-                    <p className="text-xs text-[var(--text)]/60 mt-2">
-                      Find this in your {selectedProvider.display_name} dashboard
-                    </p>
-                  )}
-                </div>
-              ))}
+              {selectedProvider.required_fields.map((field) => {
+                const helpText = PROVIDER_CREDENTIAL_HELP[selectedProvider.name]?.[field];
+                return (
+                  <div key={field}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <label
+                        htmlFor={field}
+                        className="block text-sm font-semibold text-[var(--text)]"
+                      >
+                        {formatFieldName(field)}
+                        <span className="text-red-400 ml-1">*</span>
+                      </label>
+                      {helpText && (
+                        <div className="group/tip relative">
+                          <Info
+                            size={15}
+                            className="text-[var(--text)]/40 hover:text-[var(--text)]/70 transition-colors cursor-help"
+                            weight="fill"
+                          />
+                          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-72 p-3 bg-[#1a1a2e] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all duration-200 z-50 pointer-events-none">
+                            <p className="text-xs text-[var(--text)]/80 leading-relaxed">{helpText}</p>
+                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-6 border-r-6 border-b-6 border-l-transparent border-r-transparent border-b-white/20" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <input
+                      id={field}
+                      type={field.includes('token') || field.includes('key') || field.includes('secret') ? 'password' : 'text'}
+                      value={manualCredentials[field] || ''}
+                      onChange={(e) =>
+                        setManualCredentials({
+                          ...manualCredentials,
+                          [field]: e.target.value,
+                        })
+                      }
+                      placeholder={`Enter your ${formatFieldName(field).toLowerCase()}`}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                      disabled={isSaving}
+                    />
+                  </div>
+                );
+              })}
 
               {/* Security Notice */}
               <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">

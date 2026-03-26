@@ -75,6 +75,99 @@ export function getProviderDisplayName(provider: string): string {
   return getProviderConfig(provider).displayName;
 }
 
+/**
+ * Per-field credential help: tells users where to find each value.
+ * Keys are provider names, values map field names → help strings.
+ */
+export const PROVIDER_CREDENTIAL_HELP: Record<string, Record<string, string>> = {
+  vercel: {
+    token: 'Go to vercel.com → Settings → Tokens → Create Token.',
+    team_id: 'Found in your Vercel team Settings → General → "Team ID" field. Leave blank for personal account.',
+  },
+  netlify: {
+    token: 'Go to app.netlify.com → User Settings → Applications → Personal access tokens → New access token.',
+  },
+  cloudflare: {
+    api_token: 'Go to dash.cloudflare.com → My Profile → API Tokens → Create Token. Use the "Edit Cloudflare Workers" template or create a custom token with Workers permissions.',
+    account_id: 'Found on the right side of your Cloudflare dashboard Overview page, under "Account ID".',
+    dispatch_namespace: 'Optional. Only needed for Workers for Platforms. Found in Workers & Pages → Dispatch Namespaces.',
+  },
+  heroku: {
+    api_key: 'Go to dashboard.heroku.com → Account Settings → scroll to "API Key" → Reveal and copy.',
+  },
+  railway: {
+    token: 'Go to railway.app → Account Settings → Tokens → Create Token.',
+  },
+  render: {
+    api_key: 'Go to dashboard.render.com → Account Settings → API Keys → Create API Key.',
+  },
+  koyeb: {
+    api_token: 'Go to app.koyeb.com → Account → API → Create API Access Token.',
+    org_slug: 'Optional. Your Koyeb organization slug, visible in your organization URL (app.koyeb.com/org/<slug>).',
+  },
+  zeabur: {
+    api_key: 'Go to zeabur.com → Settings → Developer → Generate API Key.',
+  },
+  surge: {
+    email: 'The email address you used to register with Surge.sh.',
+    token: 'Run "surge token" in your terminal to retrieve your token, or check your ~/.netrc file.',
+  },
+  'deno-deploy': {
+    token: 'Go to dash.deno.com → Account Settings → Access Tokens → New Access Token.',
+    org_id: 'Found in your Deno Deploy dashboard URL: dash.deno.com/orgs/<org_id>.',
+  },
+  firebase: {
+    service_account_json: 'Go to Firebase Console → Project Settings → Service accounts → "Generate new private key". Paste the entire JSON contents.',
+    site_id: 'Go to Firebase Console → Hosting → your site ID is shown at the top (e.g., "my-app-12345"). This is the subdomain of your .web.app URL.',
+  },
+  northflank: {
+    api_token: 'Go to app.northflank.com → Account → API → Create new API token.',
+    org_slug: 'Optional. Your Northflank team slug, found in the URL: app.northflank.com/t/<slug>.',
+  },
+  'github-pages': {
+    token: 'Go to github.com → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token. Enable "repo" scope.',
+  },
+  digitalocean: {
+    api_token: 'Go to cloud.digitalocean.com → API → Tokens → Generate New Token. Enable both read and write scopes.',
+    registry_name: 'Optional. Your DigitalOcean Container Registry name, found at cloud.digitalocean.com → Container Registry.',
+  },
+  'aws-apprunner': {
+    aws_access_key_id: 'Go to AWS Console → IAM → Users → your user → Security credentials → Create access key. Select "Application running outside AWS" use case.',
+    aws_secret_access_key: 'Shown once when you create the access key in IAM. Copy it immediately — it cannot be retrieved later.',
+    aws_region: 'The AWS region for deployment (e.g., us-east-1). See the region selector in the top-right of the AWS Console.',
+  },
+  'gcp-cloudrun': {
+    service_account_json: 'Go to GCP Console → IAM & Admin → Service Accounts → select or create an account → Keys → Add Key → Create new key → JSON. Paste the full JSON contents.',
+    gcp_region: 'The GCP region for deployment (e.g., us-central1). See cloud.google.com/run/docs/locations for available regions.',
+  },
+  'azure-container-apps': {
+    client_secret: 'Go to Azure Portal → Microsoft Entra ID → App registrations → your app → Certificates & secrets → New client secret.',
+    tenant_id: 'Found in Azure Portal → Microsoft Entra ID → Overview → "Tenant ID".',
+    client_id: 'Found in Azure Portal → Microsoft Entra ID → App registrations → your app → Overview → "Application (client) ID".',
+    subscription_id: 'Go to Azure Portal → Subscriptions → copy the Subscription ID.',
+    resource_group: 'The name of the resource group for deployment. Found at Azure Portal → Resource groups.',
+    registry_name: 'Your Azure Container Registry name (e.g., "myregistry"). Found at Azure Portal → Container registries.',
+    azure_region: 'The Azure region for deployment (e.g., eastus). See the location column in Azure Portal → Resource groups.',
+  },
+  'do-container': {
+    api_token: 'Go to cloud.digitalocean.com → API → Tokens → Generate New Token with read and write scopes.',
+    registry_name: 'Your DigitalOcean Container Registry name, found at cloud.digitalocean.com → Container Registry.',
+  },
+  fly: {
+    api_token: 'Run "fly tokens create deploy" in your terminal, or go to fly.io → Account → Access Tokens → Create Token.',
+    org_slug: 'Optional. Your Fly.io organization slug, visible at fly.io/dashboard → select your org from the dropdown.',
+  },
+  dockerhub: {
+    username: 'Your Docker Hub username. Found at hub.docker.com when logged in (top-right profile menu).',
+    token: 'Go to hub.docker.com → Account Settings → Security → New Access Token. Use "Read & Write" permissions.',
+  },
+  ghcr: {
+    username: 'Your GitHub username (the one you log in with at github.com).',
+    token: 'Go to github.com → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token. Enable "write:packages" and "read:packages" scopes.',
+  },
+  download: {},
+};
+
 /** Get Tailwind bg color class from hex. */
 export function getProviderBgClass(provider: string): string {
   const config = getProviderConfig(provider);

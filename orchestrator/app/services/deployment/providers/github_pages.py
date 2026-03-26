@@ -11,7 +11,15 @@ import re
 
 import httpx
 
-from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
+from ..base import (
+    ENV_BRANCH,
+    ENV_REPO_URL,
+    NO_GIT_REPO_ERROR,
+    BaseDeploymentProvider,
+    DeploymentConfig,
+    DeploymentFile,
+    DeploymentResult,
+)
 from .utils import poll_until_terminal
 
 logger = logging.getLogger(__name__)
@@ -77,8 +85,8 @@ class GitHubPagesProvider(BaseDeploymentProvider):
         logs: list[str] = []
 
         try:
-            repo_url = config.env_vars.get("_TESSLATE_REPO_URL", "")
-            branch = config.env_vars.get("_TESSLATE_BRANCH", "gh-pages")
+            repo_url = config.env_vars.get(ENV_REPO_URL, "")
+            branch = config.env_vars.get(ENV_BRANCH, "gh-pages")
 
             async with httpx.AsyncClient(timeout=120.0) as client:
                 # Step 1 - Determine repo

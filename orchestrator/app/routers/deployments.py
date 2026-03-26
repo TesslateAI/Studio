@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import Container, Deployment, DeploymentCredential, Project, User
-from ..services.deployment.base import DeploymentConfig
+from ..services.deployment.base import ENV_REPO_URL, INTERNAL_ENV_PREFIX, DeploymentConfig
 from ..services.deployment.builder import BuildError, get_deployment_builder
 from ..services.deployment.manager import DeploymentManager
 from ..services.deployment_encryption import (
@@ -714,11 +714,17 @@ async def deploy_all_containers(
                 provider, creds["token"], creds["metadata"]
             )
 
+            # Auto-derive git repo URL for source-mode providers
+            deploy_env_vars: dict[str, str] = {}
+            if deployment_mode == "source" and project.git_remote_url:
+                deploy_env_vars[ENV_REPO_URL] = project.git_remote_url
+
             config = DeploymentConfig(
                 project_id=str(project.id),
                 project_name=f"{project.slug}-{container.name}",
                 framework=framework,
-                deployment_mode=deployment_mode
+                deployment_mode=deployment_mode,
+                env_vars=deploy_env_vars,
             )
 
             provider_instance = DeploymentManager.get_provider(provider, prepared_creds)
@@ -959,7 +965,7 @@ async def deploy_container(
         await db.commit()
 
         # Filter out internal env vars
-        env_vars = {k: v for k, v in request.env_vars.items() if not k.startswith("_TESSLATE_")}
+        env_vars = {k: v for k, v in request.env_vars.items() if not k.startswith(INTERNAL_ENV_PREFIX)}
 
         container_config = ContainerDeployConfig(
             image_ref=pushed_uri,
@@ -1418,11 +1424,17 @@ async def deploy_single_container_endpoint(
             provider_name, decrypted_token, credential.provider_metadata
         )
 
+        # Auto-derive git repo URL for source-mode providers
+        deploy_env_vars: dict[str, str] = {}
+        if deployment_mode == "source" and project.git_remote_url:
+            deploy_env_vars[ENV_REPO_URL] = project.git_remote_url
+
         config = DeploymentConfig(
             project_id=str(project.id),
             project_name=f"{project.slug}-{container.name}",
             framework=framework,
             deployment_mode=deployment_mode,
+            env_vars=deploy_env_vars,
         )
 
         # Collect files for deployment
