@@ -40,6 +40,7 @@ interface ChatInputProps {
   projectName?: string;
   placeholder?: string;
   disabled?: boolean;
+  viewerMode?: boolean;
   isExecuting?: boolean;
   onStop?: () => void;
   onClearHistory?: () => void;
@@ -69,6 +70,7 @@ export function ChatInput({
   placeholder:
     _placeholder = 'Ask AI to build something... (Enter or ⌃↵ to send, Shift+Enter for new line)',
   disabled = false,
+  viewerMode = false,
   isExecuting = false,
   onStop,
   onClearHistory,
@@ -636,7 +638,7 @@ export function ChatInput({
           className="px-3 flex items-center border-b border-[var(--border)]"
           style={{ minHeight: '44px' }}
         >
-          {disabled ? (
+          {viewerMode ? (
             <div className="flex items-center gap-2 w-full py-2">
               <span className="text-xs text-[var(--text-subtle)]">Viewer mode — chat is read-only</span>
             </div>

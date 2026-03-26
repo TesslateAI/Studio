@@ -30,7 +30,7 @@ const creditPackages = [
 export default function BillingSettings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { can } = useTeam();
+  const { can, refreshTeams } = useTeam();
   const canManage = can('billing.manage');
 
   const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
@@ -60,12 +60,14 @@ export default function BillingSettings() {
             toast.success('Payment successful! Your account has been updated.');
           }
           loadData();
+          refreshTeams();
         })
         .catch(() => {
           toast.success('Payment received! Changes may take a moment to apply.');
+          refreshTeams();
         })
         .finally(() => {
-          navigate('/settings/billing', { replace: true });
+          navigate('/settings/team/billing', { replace: true });
         });
     } else if (searchParams.get('success') === 'true') {
       toast.success('Payment successful! Your plan has been updated.');

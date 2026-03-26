@@ -2010,6 +2010,7 @@ export function ChatContainer({
             slug={projectSlug}
             projectName={projectName}
             disabled={isStreaming || agentExecuting || disabledProp}
+            viewerMode={!!disabledProp}
             isExecuting={agentExecuting}
             onStop={stopAgentExecution}
             onClearHistory={handleClearHistory}

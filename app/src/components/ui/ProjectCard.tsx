@@ -65,11 +65,12 @@ export function ProjectCard({
   return (
     <div
       className={`
-        project-card relative group
+        project-card relative group cursor-pointer
         bg-[var(--surface-hover)] rounded-[var(--radius)]
         transition-all duration-300 ease-[var(--ease)]
         hover:transform hover:-translate-y-0.5
       `}
+      onClick={onOpen}
       style={{
         overflow: isDeleting ? 'hidden' : 'visible',
         border: `var(--border-width) solid ${isSelected ? 'var(--primary)' : 'var(--border)'}`,

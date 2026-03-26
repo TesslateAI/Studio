@@ -86,7 +86,6 @@ export function NavigationSidebar({
       return true;
     }
   });
-  const [subscriptionTier, setSubscriptionTier] = useState<string>('free');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(() => activePage === 'library');
@@ -102,12 +101,12 @@ export function NavigationSidebar({
   const activeLibraryTab =
     activePage === 'library' ? new URLSearchParams(location.search).get('tab') || 'agents' : null;
 
-  const isPaidPlan = subscriptionTier !== 'free';
-  const tierLabel = subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1);
-
   // Team + user profile state
   const { user, logout } = useAuth();
   const { activeTeam, teams, switchTeam, refreshTeams } = useTeam();
+  const subscriptionTier = activeTeam?.subscription_tier || 'free';
+  const isPaidPlan = subscriptionTier !== 'free';
+  const tierLabel = subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [creditBalance, setCreditBalance] = useState<CreditBalanceResponse | null>(null);
   const [imgError, setImgError] = useState(false);
@@ -197,18 +196,6 @@ export function NavigationSidebar({
     onExpandedChange?.(isExpanded);
   }, [isExpanded, onExpandedChange]);
 
-  useEffect(() => {
-    // Check subscription status
-    const checkSubscription = async () => {
-      try {
-        const subscription = await billingApi.getSubscription();
-        setSubscriptionTier(subscription.tier || 'free');
-      } catch (error) {
-        console.error('Failed to check subscription:', error);
-      }
-    };
-    checkSubscription();
-  }, []);
 
   const handleLogout = async () => {
     await logout();
@@ -365,12 +352,15 @@ export function NavigationSidebar({
                         }`}>
                           {team.name}
                         </span>
-                        {team.is_personal && (
-                          <span className="text-[9px] text-[var(--text-subtle)] flex-shrink-0">Personal</span>
-                        )}
-                        {activeTeam?.slug === team.slug && (
-                          <Check size={12} className="text-[var(--primary)] flex-shrink-0" weight="bold" />
-                        )}
+                        {team.is_personal ? (
+                          <span className="text-[9px] text-[#f89521] flex-shrink-0">Personal</span>
+                        ) : team.role === 'admin' ? (
+                          <span className="text-[9px] text-[var(--primary)] flex-shrink-0">Admin</span>
+                        ) : team.role === 'editor' ? (
+                          <span className="text-[9px] text-[var(--text)] flex-shrink-0">Editor</span>
+                        ) : team.role === 'viewer' ? (
+                          <span className="text-[9px] text-[var(--text-subtle)] flex-shrink-0">Viewer</span>
+                        ) : null}
                       </button>
                     ))}
                     {/* Create Team */}

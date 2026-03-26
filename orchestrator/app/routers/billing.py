@@ -341,8 +341,8 @@ async def create_subscription(
         or request.headers.get("referer", "").rstrip("/").split("?")[0].rsplit("/", 1)[0]
         or settings.get_app_base_url
     )
-    success_url = f"{origin}/settings/billing?success=true&session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{origin}/settings/billing?cancelled=true"
+    success_url = f"{origin}/settings/team/billing?success=true&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/settings/team/billing?cancelled=true"
 
     if not stripe_service.stripe:
         raise HTTPException(
@@ -404,7 +404,9 @@ async def verify_checkout(
         import stripe
 
         stripe.api_key = settings.stripe_secret_key
-        session = stripe.checkout.Session.retrieve(session_id)
+        session_obj = stripe.checkout.Session.retrieve(session_id)
+        # Convert Stripe object to plain dict for safe .get() access
+        session = session_obj.to_dict() if hasattr(session_obj, "to_dict") else dict(session_obj)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid session: {e}"
@@ -711,8 +713,8 @@ async def purchase_credits(
         or http_request.headers.get("referer", "").rstrip("/").split("?")[0].rsplit("/", 1)[0]
         or settings.get_app_base_url
     )
-    success_url = f"{origin}/settings/billing?success=true&session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{origin}/settings/billing?cancelled=true"
+    success_url = f"{origin}/settings/team/billing?success=true&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/settings/team/billing?cancelled=true"
 
     if not stripe_service.stripe:
         raise HTTPException(
