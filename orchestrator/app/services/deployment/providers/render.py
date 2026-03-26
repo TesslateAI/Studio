@@ -122,6 +122,35 @@ class RenderProvider(BaseDeploymentProvider):
                 if not k.startswith(INTERNAL_ENV_PREFIX)
             ]
 
+            # Map frameworks to Render runtime identifiers
+            runtime_map = {
+                "nextjs": "node",
+                "vite": "node",
+                "react": "node",
+                "vue": "node",
+                "nuxt": "node",
+                "svelte": "node",
+                "python": "python",
+                "flask": "python",
+                "django": "python",
+                "fastapi": "python",
+                "go": "go",
+                "rust": "rust",
+                "ruby": "ruby",
+                "elixir": "elixir",
+            }
+            runtime = runtime_map.get(config.framework, "node")
+            if config.framework not in runtime_map:
+                logger.warning(
+                    "Unrecognized framework '%s' for Render deploy — defaulting to runtime='node' "
+                    "with npm build/start commands. Set build_command/start_command in config to override.",
+                    config.framework,
+                )
+
+            # Build/start commands for native runtime
+            build_cmd = config.build_command or framework_config.get("build_command", "npm run build")
+            start_cmd = config.start_command or framework_config.get("start_command", "npm start")
+
             service_payload = {
                 "type": "web_service",
                 "name": project_name,
@@ -129,18 +158,33 @@ class RenderProvider(BaseDeploymentProvider):
                 "branch": branch,
                 "autoDeploy": "yes",
                 "envVars": env_vars_payload,
+                "serviceDetails": {
+                    "runtime": runtime,
+                    "envSpecificDetails": {
+                        "buildCommand": build_cmd,
+                        "startCommand": start_cmd,
+                    },
+                },
             }
 
-            # Add build/start commands from config or framework defaults
-            build_cmd = config.build_command or framework_config.get("build_command")
-            if build_cmd:
-                service_payload["buildCommand"] = build_cmd
-
-            start_cmd = config.start_command
-            if start_cmd:
-                service_payload["startCommand"] = start_cmd
-
             async with httpx.AsyncClient(timeout=120.0) as client:
+                # Step 0 - Resolve owner ID (required by Render API)
+                owners_resp = await client.get(
+                    f"{API_BASE}/owners",
+                    headers=self._get_headers(),
+                )
+                owners_resp.raise_for_status()
+                owners = owners_resp.json()
+                if not owners:
+                    raise ValueError("No Render account owner found — verify your API key permissions")
+                first_owner = owners[0]
+                owner_data = first_owner.get("owner", first_owner)
+                owner_id = owner_data.get("id")
+                if not owner_id:
+                    raise ValueError("Could not resolve Render owner ID from API response")
+                service_payload["ownerId"] = owner_id
+                logs.append(f"Resolved Render owner: {owner_data.get('name', owner_id)}")
+
                 # Step 1 - Create service
                 logs.append("Creating Render web service...")
                 resp = await client.post(

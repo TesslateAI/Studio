@@ -439,6 +439,7 @@ async def deploy_project(
             container_directory=build_directory,
             volume_name=project.slug,
             container_name=build_container_name,
+            volume_id=project.volume_id,
         )
 
         deployment.logs.append(f"Collected {len(files)} files")
@@ -739,6 +740,7 @@ async def deploy_all_containers(
                 container_directory=resolved_directory,
                 volume_name=project.slug,
                 container_name=container.container_name,
+                volume_id=project.volume_id,
             )
 
             deploy_result = await provider_instance.deploy(files, config)
@@ -1140,6 +1142,7 @@ async def export_project(
                 container_directory=resolved_directory,
                 volume_name=project.slug,
                 container_name=container.container_name,
+                volume_id=project.volume_id,
             )
 
             config = DeploymentConfig(
@@ -1447,6 +1450,7 @@ async def deploy_single_container_endpoint(
             container_directory=resolved_directory,
             volume_name=project.slug,
             container_name=container.container_name,
+            volume_id=project.volume_id,
         )
 
         provider_instance = DeploymentManager.get_provider(provider_name, provider_credentials)

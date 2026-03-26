@@ -184,6 +184,7 @@ class DeploymentBuilder:
         container_directory: str | None = None,
         volume_name: str | None = None,
         container_name: str | None = None,
+        volume_id: str | None = None,
         # Deprecated params kept for backwards compat — ignored
         framework: str | None = None,
         project_settings: dict | None = None,
@@ -199,6 +200,7 @@ class DeploymentBuilder:
             container_directory: Subdirectory within project
             volume_name: Project slug (used for Docker shared volume path)
             container_name: Container name for orchestrator commands
+            volume_id: Project volume ID (K8s — enables FileOps direct read)
 
         Returns:
             List of DeploymentFile objects
@@ -212,6 +214,28 @@ class DeploymentBuilder:
                 base_dir = f"/app/{container_directory}"
             else:
                 base_dir = "/app"
+
+            # K8s fast path: use FileOps gRPC to read directly from the btrfs
+            # volume.  This avoids the slow tar|base64 over kubectl-exec path
+            # which chokes on large build outputs (e.g. .next at 150 MB+).
+            from ..orchestration import is_kubernetes_mode
+
+            if volume_id and is_kubernetes_mode():
+                # Resolve project root via FileOps (no exec needed)
+                rel_base = base_dir.removeprefix("/app").lstrip("/") or "."
+                rel_base = await self._find_project_root_via_fileops(volume_id, rel_base)
+
+                if collect_source:
+                    target_rel = rel_base
+                    logger.info(f"Collecting source files via FileOps at {target_rel}")
+                else:
+                    output_dir = custom_output_dir or "dist"
+                    target_rel = f"{rel_base}/{output_dir}" if rel_base != "." else output_dir
+                    logger.info(f"Collecting built files via FileOps at {target_rel}")
+
+                files = await self._collect_files_via_fileops(volume_id, target_rel)
+                logger.info(f"Collected {len(files)} files via FileOps")
+                return files
 
             # Resolve actual project root on disk (same as trigger_build)
             if container_name:
@@ -410,6 +434,172 @@ class DeploymentBuilder:
                     files.append(DeploymentFile(path=name, content=content))
 
         return files
+
+    async def _find_project_root_via_fileops(
+        self, volume_id: str, expected_rel: str
+    ) -> str:
+        """
+        Find the actual project root directory using FileOps (no exec needed).
+
+        Mirrors _find_project_root but reads from the btrfs volume directly.
+
+        Args:
+            volume_id: Volume ID for FileOps
+            expected_rel: Expected relative path (e.g. "." or "frontend")
+
+        Returns:
+            Relative path to the project root (e.g. "." or "next-js-16")
+        """
+        from ..volume_manager import get_volume_manager
+
+        vm = get_volume_manager()
+        client = await vm.get_fileops_client(volume_id)
+
+        indicators = ("package.json", "requirements.txt", "go.mod")
+
+        # Check expected directory first
+        for indicator in indicators:
+            check_path = f"{expected_rel}/{indicator}" if expected_rel != "." else indicator
+            try:
+                info = await client.stat_path(volume_id, check_path, timeout=5)
+                if not info.is_dir:
+                    return expected_rel
+            except Exception:
+                continue
+
+        # Scan one level deep under root
+        try:
+            entries = await client.list_dir(volume_id, ".", recursive=False, timeout=5)
+            for entry in entries:
+                if not entry.is_dir:
+                    continue
+                for indicator in indicators:
+                    try:
+                        info = await client.stat_path(
+                            volume_id, f"{entry.name}/{indicator}", timeout=5
+                        )
+                        if not info.is_dir:
+                            logger.info(
+                                f"Project root resolved via FileOps: {expected_rel} → {entry.name}"
+                            )
+                            return entry.name
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.warning(f"Failed to scan project root via FileOps: {e}")
+
+        return expected_rel
+
+    async def _collect_files_via_fileops(
+        self, volume_id: str, target_rel: str
+    ) -> list[DeploymentFile]:
+        """
+        Collect deployment files directly from a btrfs volume via FileOps gRPC.
+
+        Uses ListTree to enumerate files (with server-side exclusions) and
+        concurrent ReadFile calls to fetch contents. This bypasses the slow
+        tar|base64-over-exec path that chokes on large build outputs.
+
+        Args:
+            volume_id: Volume ID for FileOps
+            target_rel: Relative path inside the volume (e.g. "." or ".next")
+
+        Returns:
+            List of DeploymentFile objects
+        """
+        from ..volume_manager import get_volume_manager
+
+        vm = get_volume_manager()
+        client = await vm.get_fileops_client(volume_id)
+
+        # Verify the directory exists
+        try:
+            info = await client.stat_path(volume_id, target_rel, timeout=10)
+            if not info.is_dir:
+                raise FileNotFoundError(f"Not a directory: {target_rel}")
+        except FileNotFoundError:
+            raise
+        except Exception as exc:
+            raise FileNotFoundError(
+                f"Directory not found on volume {volume_id}: {target_rel} ({exc})"
+            ) from exc
+
+        # List all files with server-side exclusions
+        exclude_dirs = [
+            "node_modules", ".git", "__pycache__", ".venv", "venv",
+            ".cache", ".turbo", "coverage", ".nyc_output", "lost+found",
+        ]
+        exclude_files = [".DS_Store", "Thumbs.db", ".env", ".env.local",
+                         ".env.production", ".env.development"]
+        exclude_exts = ["map", "lock"]
+
+        entries = await client.list_tree(
+            volume_id,
+            target_rel,
+            exclude_dirs=exclude_dirs,
+            exclude_files=exclude_files,
+            exclude_extensions=exclude_exts,
+            timeout=30,
+        )
+
+        # Filter to files only, skip hidden files
+        file_entries = []
+        for entry in entries:
+            if entry.is_dir:
+                continue
+            # Skip hidden files/directories in path
+            rel = entry.path
+            if any(part.startswith(".") for part in rel.split("/")):
+                continue
+            file_entries.append(entry)
+
+        if not file_entries:
+            raise FileNotFoundError(f"No files found in {target_rel}")
+
+        logger.info(f"FileOps listed {len(file_entries)} files in {target_rel}")
+
+        # Read files concurrently in batches to avoid overwhelming the gRPC server
+        max_file_size = 10 * 1024 * 1024  # 10 MB per file
+        batch_size = 50
+        files: list[DeploymentFile] = []
+
+        for i in range(0, len(file_entries), batch_size):
+            batch = file_entries[i : i + batch_size]
+            tasks = []
+            for entry in batch:
+                if entry.size > max_file_size:
+                    logger.warning(
+                        f"Skipping oversized file {entry.path} ({entry.size} bytes)"
+                    )
+                    continue
+                tasks.append(self._read_single_file_via_fileops(client, volume_id, entry, target_rel))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.warning(f"Failed to read file: {result}")
+                    continue
+                if result is not None:
+                    files.append(result)
+
+        return files
+
+    async def _read_single_file_via_fileops(
+        self, client, volume_id: str, entry, target_rel: str
+    ) -> DeploymentFile | None:
+        """Read a single file via FileOps and return a DeploymentFile."""
+        try:
+            content = await client.read_file(volume_id, entry.path, timeout=30)
+            # Make path relative to the target directory
+            rel_path = entry.path
+            if target_rel != ".":
+                prefix = target_rel.rstrip("/") + "/"
+                if rel_path.startswith(prefix):
+                    rel_path = rel_path[len(prefix):]
+            return DeploymentFile(path=rel_path, content=content)
+        except Exception as e:
+            logger.warning(f"Failed to read {entry.path}: {e}")
+            return None
 
     async def _read_file_async(self, file_path: str) -> bytes:
         """Read a file asynchronously."""

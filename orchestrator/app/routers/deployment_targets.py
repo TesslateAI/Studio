@@ -942,6 +942,7 @@ async def deploy_target(
                 volume_name=project.slug,
                 container_name=container.container_name,
                 custom_output_dir=container.output_directory,
+                volume_id=project.volume_id,
             )
 
             # Deploy to provider

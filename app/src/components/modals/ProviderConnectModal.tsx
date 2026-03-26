@@ -3,7 +3,8 @@ import { X, Check, Key, ShieldCheck, LinkSimple, Spinner } from '@phosphor-icons
 import { deploymentCredentialsApi } from '../../lib/api';
 import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
-import { DEPLOYMENT_PROVIDERS } from '../../lib/deployment-providers';
+import { DEPLOYMENT_PROVIDERS, getProviderConfig, PROVIDER_CREDENTIAL_HELP } from '../../lib/deployment-providers';
+import { InfoTooltip } from '../ui/InfoTooltip';
 import toast from 'react-hot-toast';
 
 interface Provider {
@@ -75,6 +76,13 @@ export function ProviderConnectModal({
 
   useEffect(() => {
     if (isOpen) {
+      // Reset internal state each time the modal opens
+      setSelectedProvider(null);
+      setManualCredentials({});
+      setIsSaving(false);
+      setIsOAuthPending(false);
+      setShowCredentialChoice(false);
+      setPendingChoiceProvider(null);
       loadProviders();
     }
   }, [isOpen]);
@@ -85,12 +93,16 @@ export function ProviderConnectModal({
       const data = await deploymentCredentialsApi.getProviders();
       setProviders(data.providers || []);
 
-      // If defaultProvider is set, pre-select it
+      // If defaultProvider is set, go straight to the appropriate flow
       if (defaultProvider) {
         const provider = (data.providers || []).find((p: Provider) => p.name === defaultProvider);
         if (provider) {
-          setSelectedProvider(provider);
-          initializeCredentialsForm(provider);
+          if (provider.auth_type === 'oauth') {
+            handleOAuthConnect(provider);
+          } else {
+            setSelectedProvider(provider);
+            initializeCredentialsForm(provider);
+          }
         }
       }
     } catch (error) {
@@ -398,27 +410,35 @@ export function ProviderConnectModal({
           ) : selectedProvider ? (
             // Manual credential form (any non-OAuth provider that was selected)
             <div className="space-y-4">
-              {selectedProvider.required_fields.map((field) => (
-                <div key={field}>
-                  <label className="block text-xs font-medium text-[var(--text)] mb-1.5">
-                    {formatFieldName(field)}
-                    <span className="text-red-400 ml-0.5">*</span>
-                  </label>
-                  <input
-                    type={field.includes('token') || field.includes('key') ? 'password' : 'text'}
-                    value={manualCredentials[field] || ''}
-                    onChange={(e) =>
-                      setManualCredentials({
-                        ...manualCredentials,
-                        [field]: e.target.value,
-                      })
-                    }
-                    placeholder={`Enter your ${formatFieldName(field).toLowerCase()}`}
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-                    disabled={isSaving}
-                  />
-                </div>
-              ))}
+              {selectedProvider.required_fields.map((field) => {
+                const helpText = PROVIDER_CREDENTIAL_HELP[selectedProvider.name]?.[field];
+                return (
+                  <div key={field}>
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <label className="block text-xs font-medium text-[var(--text)]">
+                        {formatFieldName(field)}
+                        <span className="text-red-400 ml-0.5">*</span>
+                      </label>
+                      {helpText && (
+                        <InfoTooltip size={14}>{helpText}</InfoTooltip>
+                      )}
+                    </div>
+                    <input
+                      type={field.includes('token') || field.includes('key') || field.includes('secret') ? 'password' : 'text'}
+                      value={manualCredentials[field] || ''}
+                      onChange={(e) =>
+                        setManualCredentials({
+                          ...manualCredentials,
+                          [field]: e.target.value,
+                        })
+                      }
+                      placeholder={`Enter your ${formatFieldName(field).toLowerCase()}`}
+                      className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                      disabled={isSaving}
+                    />
+                  </div>
+                );
+              })}
 
               <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
                 <div className="flex items-start gap-2">
