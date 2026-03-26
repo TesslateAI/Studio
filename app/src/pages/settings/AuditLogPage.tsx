@@ -17,7 +17,9 @@ interface AuditLogEntry {
   id: string;
   team_id: string;
   project_id: string | null;
+  project_name: string | null;
   user_id: string;
+  user_name: string | null;
   action: string;
   resource_type: string;
   resource_id: string | null;
@@ -292,17 +294,21 @@ export default function AuditLogPage() {
 
                   {/* Content */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[var(--text)]">
-                      <span className="font-medium">{entry.action}</span>
-                      {entry.resource_type && (
+                    <p className="text-xs text-[var(--text)]">
+                      <span className="font-medium">{entry.user_name || 'Unknown user'}</span>
+                      <span className="text-[var(--text-muted)]"> {entry.action.replace('.', ' → ')}</span>
+                      {entry.project_name && (
                         <span className="text-[var(--text-muted)]">
-                          {' '}on {entry.resource_type}
+                          {' '}in <span className="font-medium text-[var(--text)]">{entry.project_name}</span>
                         </span>
                       )}
                     </p>
                     {entry.details && Object.keys(entry.details).length > 0 && (
-                      <p className="text-xs text-[var(--text-muted)] mt-0.5 truncate">
-                        {JSON.stringify(entry.details)}
+                      <p className="text-[10px] text-[var(--text-subtle)] mt-0.5 truncate">
+                        {Object.entries(entry.details)
+                          .filter(([, v]) => v != null && v !== '')
+                          .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
+                          .join(' · ')}
                       </p>
                     )}
                   </div>

@@ -164,7 +164,9 @@ class AuditLogRead(BaseModel):
     id: UUID
     team_id: UUID
     project_id: UUID | None = None
+    project_name: str | None = None
     user_id: UUID
+    user_name: str | None = None
     action: str
     resource_type: str
     resource_id: UUID | None = None
@@ -203,3 +205,7 @@ class TeamBillingRead(BaseModel):
     total_spend: int
     deployed_projects_count: int
     support_tier: str
+
+
+class ProjectVisibilityUpdate(BaseModel):
+    visibility: str = Field(..., pattern=r"^(team|private)$")

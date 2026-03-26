@@ -203,6 +203,10 @@ class AuditLog(Base):
     user_agent = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+    # Relationships (for eager loading in audit queries)
+    project = relationship("Project", foreign_keys=[project_id], lazy="noload")
+    user = relationship("User", foreign_keys=[user_id], lazy="noload")
+
     __table_args__ = (
         Index("ix_audit_logs_team_created", "team_id", "created_at"),
         Index("ix_audit_logs_project_created", "project_id", "created_at"),

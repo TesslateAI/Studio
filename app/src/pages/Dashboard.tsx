@@ -6,6 +6,7 @@ import { useTeam } from '../contexts/TeamContext';
 import { MobileMenu, ProjectCard } from '../components/ui';
 import type { Status } from '../components/ui';
 import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
+import { ProjectAccessModal } from '../components/modals/ProjectAccessModal';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 import {
@@ -44,13 +45,16 @@ interface Project {
   agents?: Array<{ icon: string; name: string }>;
   environment_status?: string;
   compute_tier?: string;
+  visibility?: 'team' | 'private';
 }
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { activeTeam } = useTeam();
+  const { activeTeam, can } = useTeam();
+  const isAdmin = can('team.edit');
   const [projects, setProjects] = useState<Project[]>([]);
+  const [accessProject, setAccessProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
@@ -979,6 +983,9 @@ export default function Dashboard() {
                   isDeleting={deletingProjectIds.has(project.id)}
                   isSelected={selectedProjectIds.has(project.id)}
                   onSelectionToggle={() => toggleProjectSelection(project.id)}
+                  isAdmin={isAdmin}
+                  visibility={project.visibility}
+                  onManageAccess={() => setAccessProject(project)}
                 />
               ))}
             </div>
@@ -1299,6 +1306,24 @@ export default function Dashboard() {
           }
         }}
       />
+
+      {/* Project Access Modal */}
+      {accessProject && (
+        <ProjectAccessModal
+          isOpen={!!accessProject}
+          onClose={() => setAccessProject(null)}
+          projectSlug={accessProject.slug}
+          projectName={accessProject.name}
+          currentVisibility={accessProject.visibility || 'team'}
+          onVisibilityChange={(visibility) => {
+            setProjects((prev) =>
+              prev.map((p) =>
+                p.id === accessProject.id ? { ...p, visibility } : p
+              )
+            );
+          }}
+        />
+      )}
     </>
   );
 }

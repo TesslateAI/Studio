@@ -385,6 +385,10 @@ export const projectsApi = {
     const response = await api.get('/api/projects/', { params });
     return response.data;
   },
+  getMyRole: async (projectSlug: string): Promise<{ role: string | null }> => {
+    const response = await api.get(`/api/projects/${projectSlug}/my-role`);
+    return response.data;
+  },
   create: async (
     name: string,
     description?: string,
@@ -2937,6 +2941,16 @@ export interface InviteDetail {
   is_valid: boolean;
 }
 
+export interface ProjectMember {
+  id: string;
+  user_id: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  user_name: string | null;
+  user_email: string | null;
+}
+
 export interface AuditLogEntry {
   id: string;
   team_id: string;
@@ -3027,6 +3041,27 @@ export const teamsApi = {
   },
   async getProjectAuditLog(teamSlug: string, projectSlug: string, params?: Record<string, string | number>): Promise<AuditLogEntry[]> {
     const response = await api.get(`/api/teams/${teamSlug}/projects/${projectSlug}/audit-log`, { params });
+    return response.data;
+  },
+
+  // Project Members
+  async listProjectMembers(teamSlug: string, projectSlug: string) {
+    const response = await api.get(`/api/teams/${teamSlug}/projects/${projectSlug}/members`);
+    return response.data;
+  },
+  async addProjectMember(teamSlug: string, projectSlug: string, userId: string, role: string) {
+    const response = await api.post(`/api/teams/${teamSlug}/projects/${projectSlug}/members`, { user_id: userId, role });
+    return response.data;
+  },
+  async updateProjectMemberRole(teamSlug: string, projectSlug: string, userId: string, role: string) {
+    const response = await api.patch(`/api/teams/${teamSlug}/projects/${projectSlug}/members/${userId}`, { role });
+    return response.data;
+  },
+  async removeProjectMember(teamSlug: string, projectSlug: string, userId: string) {
+    await api.delete(`/api/teams/${teamSlug}/projects/${projectSlug}/members/${userId}`);
+  },
+  async updateProjectVisibility(teamSlug: string, projectSlug: string, visibility: 'team' | 'private') {
+    const response = await api.patch(`/api/teams/${teamSlug}/projects/${projectSlug}/visibility`, { visibility });
     return response.data;
   },
 };

@@ -329,12 +329,8 @@ export function NavigationSidebar({
               style={{
                 borderWidth: 'var(--border-width)',
                 borderColor: 'var(--border-hover)',
-                top: userDropdownRef.current
-                  ? userDropdownRef.current.getBoundingClientRect().bottom + 4
-                  : 52,
-                left: userDropdownRef.current
-                  ? userDropdownRef.current.getBoundingClientRect().left
-                  : 8,
+                top: userDropdownRef.current ? userDropdownRef.current.getBoundingClientRect().bottom + 2 : 52,
+                left: userDropdownRef.current ? userDropdownRef.current.getBoundingClientRect().left + 11 : 11,
               }}
             >
               <div className="py-1">

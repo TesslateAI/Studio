@@ -549,6 +549,20 @@ async def create_project(
         raise HTTPException(status_code=500, detail=f"Failed to create project: {str(e)}") from e
 
 
+@router.get("/{project_slug}/my-role")
+async def get_my_project_role(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the current user's effective role on a project (team role + project override)."""
+    from ..permissions import get_effective_project_role
+
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    role = await get_effective_project_role(db, project, current_user.id)
+    return {"role": role}
+
+
 @router.get("/{project_slug}", response_model=ProjectSchema)
 async def get_project(
     project_slug: str,

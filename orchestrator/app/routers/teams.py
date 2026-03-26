@@ -43,6 +43,7 @@ from ..schemas_team import (
     ProjectMemberAdd,
     ProjectMemberRead,
     ProjectMemberUpdate,
+    ProjectVisibilityUpdate,
     TeamCreate,
     TeamList,
     TeamMemberRead,
@@ -1049,6 +1050,38 @@ async def remove_project_member(
     await db.commit()
 
 
+@router.patch("/{team_slug}/projects/{project_slug}/visibility")
+async def update_project_visibility(
+    team_slug: str,
+    project_slug: str,
+    body: ProjectVisibilityUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
+    """Update project visibility. Admin only."""
+    team = await _resolve_team(db, team_slug)
+    project = await _resolve_project_in_team(db, team, project_slug)
+    await check_team_permission(db, team.id, user.id, Permission.PROJECT_SETTINGS)
+
+    old_visibility = project.visibility
+    project.visibility = body.visibility
+
+    await log_event(
+        db,
+        team_id=team.id,
+        user_id=user.id,
+        action="project.visibility_changed",
+        resource_type="project",
+        resource_id=project.id,
+        project_id=project.id,
+        details={"old_visibility": old_visibility, "new_visibility": body.visibility},
+        request=request,
+    )
+    await db.commit()
+    return {"visibility": project.visibility}
+
+
 # ============================================================================
 # Audit Log
 # ============================================================================
@@ -1109,8 +1142,30 @@ async def get_audit_log(
         to_date=to_date,
     )
     query = query.offset((page - 1) * per_page).limit(per_page)
-    result = await db.execute(query)
-    return result.scalars().all()
+    result = await db.execute(
+        query.options(
+            selectinload(AuditLog.project),
+            selectinload(AuditLog.user),
+        )
+    )
+    entries = result.scalars().all()
+    return [
+        AuditLogRead(
+            id=e.id,
+            team_id=e.team_id,
+            project_id=e.project_id,
+            project_name=e.project.name if e.project else None,
+            user_id=e.user_id,
+            user_name=e.user.name if e.user else None,
+            action=e.action,
+            resource_type=e.resource_type,
+            resource_id=e.resource_id,
+            details=e.details,
+            ip_address=e.ip_address,
+            created_at=e.created_at,
+        )
+        for e in entries
+    ]
 
 
 @router.get(
