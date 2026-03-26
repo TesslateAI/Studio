@@ -485,9 +485,15 @@ class TestBashExecToolOracle:
                 "details": {"command": test_case["input"]["command"], "tier": "environment"},
             }
 
-        with patch(
-            "app.agent.tools.shell_ops.bash._run_environment",
-            return_value=mock_return,
+        with (
+            patch(
+                "app.agent.tools.shell_ops.bash._run_environment",
+                return_value=mock_return,
+            ),
+            patch(
+                "app.config.get_settings",
+                return_value=MagicMock(is_docker_mode=False),
+            ),
         ):
             # Execute tool
             result = await bash_exec_tool(test_case["input"], test_context)

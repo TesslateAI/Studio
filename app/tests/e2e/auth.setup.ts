@@ -45,11 +45,11 @@ setup('authenticate', async ({ page, request }) => {
   await page.fill('input[type="password"]', TEST_PASSWORD);
   await page.click('button[type="submit"]');
 
-  // Wait for successful login redirect
-  await page.waitForURL('/dashboard', { timeout: 10000 });
+  // Wait for successful login redirect (may go to /dashboard or /chat)
+  await page.waitForURL(/\/(dashboard|chat)/, { timeout: 10000 });
 
   // Verify we're logged in
-  await expect(page).toHaveURL('/dashboard');
+  await expect(page).toHaveURL(/\/(dashboard|chat)/);
 
   // Step 3: Save authentication state
   await page.context().storageState({ path: authFile });

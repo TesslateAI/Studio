@@ -43,7 +43,7 @@ RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
 ENV PATH="/usr/local/bin:$PATH"
 
 # Install common global npm packages for development
-RUN npm install -g npm@latest pnpm typescript vite create-vite eslint prettier
+RUN npm install -g pnpm typescript vite create-vite eslint prettier
 
 # Create project directory (will be mounted/populated at runtime)
 WORKDIR /project

@@ -337,6 +337,10 @@ class TestShellToolSessionIntegration:
                     "details": {"exit_code": 0},
                 },
             ) as mock_run_env,
+            patch(
+                "app.config.get_settings",
+                return_value=MagicMock(is_docker_mode=False),
+            ),
         ):
             result = await bash_exec_tool({"command": "echo hello"}, test_context)
 
@@ -355,10 +359,16 @@ class TestShellToolSessionIntegration:
         test_context["compute_tier"] = "environment"
         test_context["container_name"] = "frontend"
 
-        with patch(
-            "app.agent.tools.shell_ops.bash._run_environment",
-            return_value={"success": True, "output": "reused", "details": {"exit_code": 0}},
-        ) as mock_run_env:
+        with (
+            patch(
+                "app.agent.tools.shell_ops.bash._run_environment",
+                return_value={"success": True, "output": "reused", "details": {"exit_code": 0}},
+            ) as mock_run_env,
+            patch(
+                "app.config.get_settings",
+                return_value=MagicMock(is_docker_mode=False),
+            ),
+        ):
             result = await bash_exec_tool({"command": "echo reused"}, test_context)
 
             assert result["success"] is True
@@ -423,9 +433,15 @@ class TestSessionErrorHandling:
             "details": {"command": "echo test", "tier": "environment"},
         }
 
-        with patch(
-            "app.agent.tools.shell_ops.bash._run_environment",
-            return_value=error_result,
+        with (
+            patch(
+                "app.agent.tools.shell_ops.bash._run_environment",
+                return_value=error_result,
+            ),
+            patch(
+                "app.config.get_settings",
+                return_value=MagicMock(is_docker_mode=False),
+            ),
         ):
             result = await bash_exec_tool({"command": "echo test"}, test_context)
 

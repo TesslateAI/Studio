@@ -110,22 +110,26 @@ test.describe('Project Creation', () => {
       return;
     }
 
-    // Wait for page to fully load
+    // New projects land on setup page — skip it to reach the builder
+    const skipSetup = page.locator('text=Skip setup').first();
+    await skipSetup.waitFor({ state: 'visible', timeout: 5000 });
+    await skipSetup.click();
+    await page.waitForURL(/\/builder/, { timeout: 15000 });
     await page.waitForLoadState('networkidle');
 
     // Verify core UI elements are present
     const hasEditor = await page
-      .locator('[class*="monaco"], [class*="editor"]')
+      .locator('[class*="monaco"], [class*="editor"], [data-testid*="editor"]')
       .first()
-      .isVisible()
+      .isVisible({ timeout: 10000 })
       .catch(() => false);
     const hasChat = await page
-      .locator('[class*="chat"], [aria-label*="chat" i]')
+      .locator('[class*="chat"], [aria-label*="chat" i], [data-testid*="chat"]')
       .first()
       .isVisible()
       .catch(() => false);
     const hasFileTree = await page
-      .locator('[class*="file"], [class*="tree"]')
+      .locator('[class*="file"], [class*="tree"], [class*="sidebar"]')
       .first()
       .isVisible()
       .catch(() => false);

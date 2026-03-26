@@ -122,6 +122,7 @@ function renderGuardedRoute(path: string, guard: RouteGuard) {
         {/* Redirect targets */}
         <Route path="/login" element={<div data-testid="login-page">Login</div>} />
         <Route path="/dashboard" element={<div data-testid="dashboard">Dashboard</div>} />
+        <Route path="/chat" element={<div data-testid="chat">Chat</div>} />
       </Routes>
     </MemoryRouter>
   );
@@ -164,7 +165,7 @@ describe('Route protection – private routes', () => {
 describe('Route protection – public-only routes', () => {
   const publicOnlyRoutes = ROUTE_CONFIG.filter((r) => r.guard === 'publicOnly');
 
-  describe('redirect to /dashboard when authenticated', () => {
+  describe('redirect to /chat when authenticated', () => {
     beforeEach(() => {
       mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
     });
@@ -172,7 +173,7 @@ describe('Route protection – public-only routes', () => {
     it.each(publicOnlyRoutes.map((r) => [r.label, r.path]))('%s (%s)', (_label, path) => {
       renderGuardedRoute(path, 'publicOnly');
       expect(screen.queryByTestId('page-content')).not.toBeInTheDocument();
-      expect(screen.getByTestId('dashboard')).toBeInTheDocument();
+      expect(screen.getByTestId('chat')).toBeInTheDocument();
     });
   });
 

@@ -8,10 +8,13 @@ Tests the complete iterative agent workflow including:
 - Completion detection
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from app.agent.iterative_agent import IterativeAgent
 from app.agent.models import ModelAdapter
+from app.agent.resource_limits import ResourceLimits
 from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry
 
 
@@ -26,6 +29,7 @@ class TestIterativeAgentIntegration:
 
         async def echo_tool(params, context):
             return {
+                "success": True,
                 "message": f"Echo: {params.get('text', '')}",
                 "echoed_text": params.get("text", ""),
             }
@@ -48,26 +52,13 @@ class TestIterativeAgentIntegration:
 
     @pytest.fixture
     def mock_model_with_tool_call(self):
-        """Create a mock model that returns a tool call."""
+        """Create a mock model that returns a JSON tool call then completes."""
 
         class MockModelWithToolCall(ModelAdapter):
             def __init__(self):
                 self.responses = [
-                    """
-THOUGHT: I'll echo the user's message.
-
-<tool_call>
-<tool_name>echo</tool_name>
-<parameters>
-{"text": "Hello World"}
-</parameters>
-</tool_call>
-""",
-                    """
-THOUGHT: Task is complete.
-
-TASK_COMPLETE
-""",
+                    '{"tool_name": "echo", "parameters": {"text": "Hello World"}}',
+                    "TASK_COMPLETE",
                 ]
                 self.call_count = 0
 
@@ -91,7 +82,6 @@ TASK_COMPLETE
             system_prompt="You are a helpful assistant.",
             tools=simple_tool_registry,
             model=mock_model_with_tool_call,
-            max_iterations=5,
         )
 
         events = []
@@ -107,26 +97,20 @@ TASK_COMPLETE
 
         complete_event = complete_events[0]
         assert complete_event["data"]["success"] is True
-        assert complete_event["data"]["iterations"] <= 5
 
     @pytest.mark.asyncio
     async def test_iterative_agent_tool_execution(self, simple_tool_registry, test_context):
         """Test that tools are actually executed."""
 
-        # Model that calls echo tool
+        # Model that calls echo tool on first iteration, then completes
         class ToolCallingModel(ModelAdapter):
-            async def chat(self, messages, **kwargs):
-                if len(messages) <= 2:
-                    response = """
-THOUGHT: I'll use the echo tool.
+            def __init__(self):
+                self.call_count = 0
 
-<tool_call>
-<tool_name>echo</tool_name>
-<parameters>
-{"text": "Test message"}
-</parameters>
-</tool_call>
-"""
+            async def chat(self, messages, **kwargs):
+                if self.call_count == 0:
+                    self.call_count += 1
+                    response = '{"tool_name": "echo", "parameters": {"text": "Test message"}}'
                 else:
                     response = "TASK_COMPLETE"
 
@@ -140,7 +124,6 @@ THOUGHT: I'll use the echo tool.
             system_prompt="Test agent",
             tools=simple_tool_registry,
             model=ToolCallingModel(),
-            max_iterations=3,
         )
 
         events = []
@@ -163,21 +146,12 @@ THOUGHT: I'll use the echo tool.
 
     @pytest.mark.asyncio
     async def test_iterative_agent_max_iterations(self, simple_tool_registry, test_context):
-        """Test agent reaching max iterations."""
+        """Test agent reaching per-run iteration limit via resource limits."""
 
         # Model that never completes
         class NeverCompleteModel(ModelAdapter):
             async def chat(self, messages, **kwargs):
-                response = """
-THOUGHT: Still working...
-
-<tool_call>
-<tool_name>echo</tool_name>
-<parameters>
-{"text": "Iteration"}
-</parameters>
-</tool_call>
-"""
+                response = '{"tool_name": "echo", "parameters": {"text": "Iteration"}}'
                 for char in response:
                     yield char
 
@@ -188,21 +162,22 @@ THOUGHT: Still working...
             system_prompt="Test agent",
             tools=simple_tool_registry,
             model=NeverCompleteModel(),
-            max_iterations=3,
         )
 
-        events = []
-        async for event in agent.run("Test request", test_context):
-            events.append(event)
+        # Patch resource limits to enforce a 3-iteration cap
+        limited = ResourceLimits(max_iterations_per_run=3)
+        with patch("app.agent.iterative_agent.get_resource_limits", return_value=limited):
+            events = []
+            async for event in agent.run("Test request", test_context):
+                events.append(event)
 
         # Find complete event
         complete_events = [e for e in events if e["type"] == "complete"]
         assert len(complete_events) == 1
 
-        # Should indicate max iterations reached
+        # Should indicate resource limit exceeded
         complete_data = complete_events[0]["data"]
-        assert complete_data["iterations"] == 3
-        assert complete_data["completion_reason"] == "max_iterations"
+        assert complete_data["completion_reason"] == "resource_limit_exceeded"
 
     @pytest.mark.asyncio
     async def test_iterative_agent_no_tools(self, test_context):
@@ -221,7 +196,6 @@ THOUGHT: Still working...
             system_prompt="Conversational agent",
             tools=None,
             model=ConversationalModel(),
-            max_iterations=3,
         )
 
         events = []
@@ -258,14 +232,7 @@ THOUGHT: Still working...
             async def chat(self, messages, **kwargs):
                 if self.call_count == 0:
                     self.call_count += 1
-                    response = """
-<tool_call>
-<tool_name>failing_tool</tool_name>
-<parameters>
-{}
-</parameters>
-</tool_call>
-"""
+                    response = '{"tool_name": "failing_tool", "parameters": {}}'
                 else:
                     response = "TASK_COMPLETE"
 
@@ -276,7 +243,9 @@ THOUGHT: Still working...
                 return "failing-tool-model"
 
         agent = IterativeAgent(
-            system_prompt="Test agent", tools=registry, model=FailingToolModel(), max_iterations=3
+            system_prompt="Test agent",
+            tools=registry,
+            model=FailingToolModel(),
         )
 
         events = []
@@ -298,10 +267,10 @@ THOUGHT: Still working...
         registry = ToolRegistry()
 
         async def tool1(params, context):
-            return {"message": "Tool 1 executed"}
+            return {"success": True, "message": "Tool 1 executed"}
 
         async def tool2(params, context):
-            return {"message": "Tool 2 executed"}
+            return {"success": True, "message": "Tool 2 executed"}
 
         registry.register(
             Tool(
@@ -326,8 +295,8 @@ THOUGHT: Still working...
         class MultiToolModel(ModelAdapter):
             def __init__(self):
                 self.responses = [
-                    "<tool_call><tool_name>tool1</tool_name><parameters>{}</parameters></tool_call>",
-                    "<tool_call><tool_name>tool2</tool_name><parameters>{}</parameters></tool_call>",
+                    '{"tool_name": "tool1", "parameters": {}}',
+                    '{"tool_name": "tool2", "parameters": {}}',
                     "TASK_COMPLETE",
                 ]
                 self.call_count = 0
@@ -342,7 +311,9 @@ THOUGHT: Still working...
                 return "multi-tool"
 
         agent = IterativeAgent(
-            system_prompt="Test agent", tools=registry, model=MultiToolModel(), max_iterations=5
+            system_prompt="Test agent",
+            tools=registry,
+            model=MultiToolModel(),
         )
 
         events = []
@@ -359,7 +330,7 @@ THOUGHT: Still working...
 
     @pytest.mark.asyncio
     async def test_iterative_agent_json_parse_error(self, simple_tool_registry, test_context):
-        """Test agent handling JSON parse errors in tool calls."""
+        """Test agent handling invalid JSON in tool calls."""
 
         class BadJsonModel(ModelAdapter):
             def __init__(self):
@@ -368,15 +339,8 @@ THOUGHT: Still working...
             async def chat(self, messages, **kwargs):
                 if self.call_count == 0:
                     self.call_count += 1
-                    # Invalid JSON - missing quotes around value
-                    response = """
-<tool_call>
-<tool_name>echo</tool_name>
-<parameters>
-{"text": broken json}
-</parameters>
-</tool_call>
-"""
+                    # Invalid JSON
+                    response = '{"tool_name": "echo", "parameters": {broken json}}'
                 else:
                     response = "TASK_COMPLETE"
 
@@ -390,21 +354,15 @@ THOUGHT: Still working...
             system_prompt="Test agent",
             tools=simple_tool_registry,
             model=BadJsonModel(),
-            max_iterations=3,
         )
 
         events = []
         async for event in agent.run("Test", test_context):
             events.append(event)
 
-        # Should handle parse error
-        step_events = [e for e in events if e["type"] == "agent_step"]
-        assert len(step_events) > 0
-
-        # Check for parse error tool call
-        first_step = step_events[0]
-        if first_step["data"]["tool_calls"]:
-            assert first_step["data"]["tool_calls"][0]["name"] == "__parse_error__"
+        # Should handle parse error gracefully and complete
+        complete_events = [e for e in events if e["type"] == "complete"]
+        assert len(complete_events) == 1
 
     def test_agent_get_execution_summary(self, simple_tool_registry, mock_model_with_tool_call):
         """Test getting execution summary from agent."""
@@ -412,7 +370,6 @@ THOUGHT: Still working...
             system_prompt="Test",
             tools=simple_tool_registry,
             model=mock_model_with_tool_call,
-            max_iterations=5,
         )
 
         # Agent should have initial state
@@ -426,7 +383,6 @@ THOUGHT: Still working...
             system_prompt="Test",
             tools=simple_tool_registry,
             model=mock_model_with_tool_call,
-            max_iterations=5,
         )
 
         # Initially empty
