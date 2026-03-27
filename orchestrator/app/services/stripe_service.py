@@ -996,9 +996,14 @@ class StripeService:
             logger.info(f"Agent purchase already processed: user {user_id}, agent {agent_id}")
             return
 
-        # Create purchase record
+        # Fetch user for total_spend update and team_id
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one()
+
+        # Create purchase record (scoped to user's active team)
         purchase = UserPurchasedAgent(
             user_id=user_id,
+            team_id=getattr(user, "default_team_id", None),
             agent_id=agent_id,
             purchase_type="subscription" if pricing_type == "monthly" else "purchased",
             stripe_payment_intent=payment_intent,
@@ -1013,10 +1018,6 @@ class StripeService:
         )
         agent = agent_result.scalar_one()
         agent.downloads += 1
-
-        # Fetch user for total_spend update and team_id
-        user_result = await db.execute(select(User).where(User.id == user_id))
-        user = user_result.scalar_one()
 
         # Create transaction for revenue sharing
         amount_total = session["amount_total"]

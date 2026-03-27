@@ -60,12 +60,19 @@ async def _get_owned_config(
     config_id: UUID,
     user_id: UUID,
     db: AsyncSession,
+    *,
+    team_id: UUID | None = None,
 ) -> UserMcpConfig:
     """Fetch a UserMcpConfig and verify ownership. Raises 404 if missing."""
+    ownership_filter = (
+        UserMcpConfig.team_id == team_id
+        if team_id
+        else UserMcpConfig.user_id == user_id
+    )
     result = await db.execute(
         select(UserMcpConfig).where(
             UserMcpConfig.id == config_id,
-            UserMcpConfig.user_id == user_id,
+            ownership_filter,
             UserMcpConfig.is_active.is_(True),
         )
     )
@@ -166,10 +173,18 @@ async def install_mcp_server(
             detail="Marketplace item is not an MCP server",
         )
 
-    # Check per-user server limit
+    # Resolve active team for ownership scoping
+    team_id = user.default_team_id
+
+    # Check per-user/team server limit
+    limit_filter = (
+        UserMcpConfig.team_id == team_id
+        if team_id
+        else UserMcpConfig.user_id == user.id
+    )
     count_result = await db.execute(
         select(func.count()).where(
-            UserMcpConfig.user_id == user.id,
+            limit_filter,
             UserMcpConfig.is_active.is_(True),
         )
     )
@@ -191,6 +206,7 @@ async def install_mcp_server(
 
     config = UserMcpConfig(
         user_id=user.id,
+        team_id=team_id,
         marketplace_agent_id=body.marketplace_agent_id,
         credentials=encrypted_creds,
         enabled_capabilities=default_capabilities,
@@ -220,12 +236,20 @@ async def list_installed_mcp_servers(
     user=Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all active MCP server installations for the current user."""
+    """List all active MCP server installations for the current user/team."""
+    # Resolve active team for ownership scoping
+    team_id = user.default_team_id
+    ownership_filter = (
+        UserMcpConfig.team_id == team_id
+        if team_id
+        else UserMcpConfig.user_id == user.id
+    )
+
     result = await db.execute(
         select(UserMcpConfig, MarketplaceAgent)
         .join(MarketplaceAgent, UserMcpConfig.marketplace_agent_id == MarketplaceAgent.id)
         .where(
-            UserMcpConfig.user_id == user.id,
+            ownership_filter,
             UserMcpConfig.is_active.is_(True),
         )
         .order_by(UserMcpConfig.created_at.desc())
@@ -241,7 +265,7 @@ async def get_installed_mcp_server(
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single MCP server installation (credentials masked)."""
-    config = await _get_owned_config(config_id, user.id, db)
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
     agent = await _get_agent_for_config(config.marketplace_agent_id, db)
     return _build_config_response(config, agent)
 
@@ -254,7 +278,7 @@ async def update_installed_mcp_server(
     db: AsyncSession = Depends(get_db),
 ):
     """Update credentials or enabled capabilities for an installed MCP server."""
-    config = await _get_owned_config(config_id, user.id, db)
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
 
     if body.credentials is not None:
         config.credentials = encrypt_credentials(body.credentials)
@@ -279,7 +303,7 @@ async def uninstall_mcp_server(
     db: AsyncSession = Depends(get_db),
 ):
     """Soft-delete an MCP server installation."""
-    config = await _get_owned_config(config_id, user.id, db)
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
     config.is_active = False
     await db.commit()
 
@@ -293,7 +317,7 @@ async def test_mcp_server(
     db: AsyncSession = Depends(get_db),
 ):
     """Test connection to an installed MCP server and return capability counts."""
-    config = await _get_owned_config(config_id, user.id, db)
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
     agent = await _get_agent_for_config(config.marketplace_agent_id, db)
 
     credentials = {}
@@ -329,7 +353,7 @@ async def discover_mcp_server(
     db: AsyncSession = Depends(get_db),
 ):
     """Full re-discovery of an MCP server's capabilities (invalidates cache)."""
-    config = await _get_owned_config(config_id, user.id, db)
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
     agent = await _get_agent_for_config(config.marketplace_agent_id, db)
 
     await _invalidate_mcp_cache(user.id, config.marketplace_agent_id)
@@ -367,8 +391,11 @@ async def assign_mcp_to_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """Assign an installed MCP server to a specific agent."""
+    # Resolve active team for ownership scoping
+    team_id = user.default_team_id
+
     # Verify ownership of the MCP config
-    config = await _get_owned_config(config_id, user.id, db)
+    config = await _get_owned_config(config_id, user.id, db, team_id=team_id)
 
     # Verify the agent exists and is active
     agent_result = await db.execute(
@@ -382,11 +409,16 @@ async def assign_mcp_to_agent(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     # Check for existing assignment
+    assignment_ownership = (
+        AgentMcpAssignment.team_id == team_id
+        if team_id
+        else AgentMcpAssignment.user_id == user.id
+    )
     existing_result = await db.execute(
         select(AgentMcpAssignment).where(
             AgentMcpAssignment.agent_id == agent_id,
             AgentMcpAssignment.mcp_config_id == config_id,
-            AgentMcpAssignment.user_id == user.id,
+            assignment_ownership,
         )
     )
     existing = existing_result.scalar_one_or_none()
@@ -423,6 +455,7 @@ async def assign_mcp_to_agent(
         agent_id=agent_id,
         mcp_config_id=config_id,
         user_id=user.id,
+        team_id=team_id,
         enabled=True,
     )
     db.add(assignment)
@@ -449,11 +482,19 @@ async def unassign_mcp_from_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove an MCP server from a specific agent."""
+    # Resolve active team for ownership scoping
+    team_id = user.default_team_id
+    ownership_filter = (
+        AgentMcpAssignment.team_id == team_id
+        if team_id
+        else AgentMcpAssignment.user_id == user.id
+    )
+
     result = await db.execute(
         select(AgentMcpAssignment).where(
             AgentMcpAssignment.agent_id == agent_id,
             AgentMcpAssignment.mcp_config_id == config_id,
-            AgentMcpAssignment.user_id == user.id,
+            ownership_filter,
         )
     )
     assignment = result.scalar_one_or_none()
@@ -472,6 +513,14 @@ async def get_agent_mcp_servers(
     db: AsyncSession = Depends(get_db),
 ):
     """List MCP servers assigned to a specific agent."""
+    # Resolve active team for ownership scoping
+    team_id = user.default_team_id
+    ownership_filter = (
+        AgentMcpAssignment.team_id == team_id
+        if team_id
+        else AgentMcpAssignment.user_id == user.id
+    )
+
     # Verify agent exists
     agent_result = await db.execute(
         select(MarketplaceAgent).where(
@@ -488,7 +537,7 @@ async def get_agent_mcp_servers(
         .join(MarketplaceAgent, UserMcpConfig.marketplace_agent_id == MarketplaceAgent.id)
         .where(
             AgentMcpAssignment.agent_id == agent_id,
-            AgentMcpAssignment.user_id == user.id,
+            ownership_filter,
             AgentMcpAssignment.enabled.is_(True),
             UserMcpConfig.is_active.is_(True),
         )

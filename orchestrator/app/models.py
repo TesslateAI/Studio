@@ -1021,6 +1021,7 @@ class AgentSkillAssignment(Base):
         UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
     enabled = Column(Boolean, default=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -1041,6 +1042,7 @@ class UserPurchasedAgent(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
     agent_id = Column(
         UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
@@ -1174,6 +1176,7 @@ class UserPurchasedBase(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
     base_id = Column(
         UUID(as_uuid=True), ForeignKey("marketplace_bases.id", ondelete="CASCADE"), nullable=False
     )
@@ -1595,6 +1598,7 @@ class UserLibraryTheme(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
     theme_id = Column(String(100), ForeignKey("themes.id", ondelete="CASCADE"), nullable=False)
     added_date = Column(DateTime(timezone=True), server_default=func.now())
     purchase_type = Column(String(20), nullable=False, default="free")  # free / purchased
@@ -1846,6 +1850,7 @@ class UserMcpConfig(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
     marketplace_agent_id = Column(
         UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
@@ -1873,6 +1878,7 @@ class AgentMcpAssignment(Base):
         UUID(as_uuid=True), ForeignKey("user_mcp_configs.id", ondelete="CASCADE"), nullable=False
     )
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
     enabled = Column(Boolean, default=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 

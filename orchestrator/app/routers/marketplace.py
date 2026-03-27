@@ -709,10 +709,18 @@ async def purchase_agent(
     if not agent or not agent.is_active:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    # Check if already purchased
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+
+    # Check if already purchased (scoped to team when available)
+    ownership_filter = (
+        UserPurchasedAgent.team_id == team_id
+        if team_id
+        else UserPurchasedAgent.user_id == current_user.id
+    )
     existing_result = await db.execute(
         select(UserPurchasedAgent).where(
-            UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.agent_id == agent_id
+            ownership_filter, UserPurchasedAgent.agent_id == agent_id
         )
     )
     existing_purchase = existing_result.scalar_one_or_none()
@@ -729,7 +737,7 @@ async def purchase_agent(
         else:
             # Create new purchase record
             purchase = UserPurchasedAgent(
-                user_id=current_user.id, agent_id=agent_id, purchase_type="free", is_active=True
+                user_id=current_user.id, team_id=team_id, agent_id=agent_id, purchase_type="free", is_active=True
             )
             db.add(purchase)
 
@@ -1468,12 +1476,20 @@ async def get_user_agents(
     """
     Get all agents in the user's library.
     """
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserPurchasedAgent.team_id == team_id
+        if team_id
+        else UserPurchasedAgent.user_id == current_user.id
+    )
+
     # Query user's purchased agents (all agents in library, regardless of enabled/disabled status)
     result = await db.execute(
         select(MarketplaceAgent, UserPurchasedAgent)
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
         .where(
-            UserPurchasedAgent.user_id == current_user.id,
+            ownership_filter,
             MarketplaceAgent.item_type.notin_(["skill", "subagent", "mcp_server"]),
         )
         .options(selectinload(MarketplaceAgent.forked_by_user))
@@ -1851,10 +1867,18 @@ async def remove_agent_from_library(
     """
     Remove an agent from user's library (delete purchase record).
     """
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserPurchasedAgent.team_id == team_id
+        if team_id
+        else UserPurchasedAgent.user_id == current_user.id
+    )
+
     # Find the purchase record
     result = await db.execute(
         select(UserPurchasedAgent).where(
-            UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.agent_id == agent_id
+            ownership_filter, UserPurchasedAgent.agent_id == agent_id
         )
     )
     purchase = result.scalar_one_or_none()
@@ -1911,10 +1935,18 @@ async def select_agent_model(
             status_code=403, detail="Model selection is only available for open source agents"
         )
 
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserPurchasedAgent.team_id == team_id
+        if team_id
+        else UserPurchasedAgent.user_id == current_user.id
+    )
+
     # Find the purchase record
     result = await db.execute(
         select(UserPurchasedAgent).where(
-            UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.agent_id == agent_id
+            ownership_filter, UserPurchasedAgent.agent_id == agent_id
         )
     )
     purchase = result.scalar_one_or_none()
@@ -2788,6 +2820,9 @@ async def purchase_base(
     current_user: User = Depends(current_active_user),
 ):
     """Purchase or add a free base to user's library."""
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+
     # Get base
     result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
     base = result.scalar_one_or_none()
@@ -2795,10 +2830,15 @@ async def purchase_base(
     if not base or not base.is_active:
         raise HTTPException(status_code=404, detail="Base not found")
 
-    # Check if already purchased
+    # Check if already purchased (scoped to team when available)
+    ownership_filter = (
+        UserPurchasedBase.team_id == team_id
+        if team_id
+        else UserPurchasedBase.user_id == current_user.id
+    )
     existing_result = await db.execute(
         select(UserPurchasedBase).where(
-            UserPurchasedBase.user_id == current_user.id, UserPurchasedBase.base_id == base_id
+            ownership_filter, UserPurchasedBase.base_id == base_id
         )
     )
     existing_purchase = existing_result.scalar_one_or_none()
@@ -2813,7 +2853,7 @@ async def purchase_base(
             existing_purchase.purchase_date = datetime.now(UTC)
         else:
             purchase = UserPurchasedBase(
-                user_id=current_user.id, base_id=base_id, purchase_type="free", is_active=True
+                user_id=current_user.id, team_id=team_id, base_id=base_id, purchase_type="free", is_active=True
             )
             db.add(purchase)
 
@@ -2831,10 +2871,18 @@ async def get_user_bases(
     db: AsyncSession = Depends(get_db), current_user: User = Depends(current_active_user)
 ):
     """Get all bases in the user's library."""
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserPurchasedBase.team_id == team_id
+        if team_id
+        else UserPurchasedBase.user_id == current_user.id
+    )
+
     result = await db.execute(
         select(MarketplaceBase, UserPurchasedBase)
         .join(UserPurchasedBase, UserPurchasedBase.base_id == MarketplaceBase.id)
-        .where(UserPurchasedBase.user_id == current_user.id, UserPurchasedBase.is_active)
+        .where(ownership_filter, UserPurchasedBase.is_active)
         .order_by(UserPurchasedBase.purchase_date.desc())
     )
 
@@ -3369,11 +3417,19 @@ async def get_user_marketplace_items(
     """
     from ..services.service_definitions import get_all_services, service_to_dict
 
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserPurchasedBase.team_id == team_id
+        if team_id
+        else UserPurchasedBase.user_id == current_user.id
+    )
+
     # Fetch user's purchased bases
     result = await db.execute(
         select(MarketplaceBase, UserPurchasedBase)
         .join(UserPurchasedBase, UserPurchasedBase.base_id == MarketplaceBase.id)
-        .where(UserPurchasedBase.user_id == current_user.id, UserPurchasedBase.is_active)
+        .where(ownership_filter, UserPurchasedBase.is_active)
         .order_by(UserPurchasedBase.purchase_date.desc())
     )
 
@@ -3851,10 +3907,18 @@ async def get_user_library_themes(
     current_user: User = Depends(current_active_user),
 ):
     """Get themes in the current user's library."""
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserLibraryTheme.team_id == team_id
+        if team_id
+        else UserLibraryTheme.user_id == current_user.id
+    )
+
     result = await db.execute(
         select(Theme, UserLibraryTheme)
         .join(UserLibraryTheme, UserLibraryTheme.theme_id == Theme.id)
-        .where(UserLibraryTheme.user_id == current_user.id)
+        .where(ownership_filter)
         .order_by(Theme.sort_order.asc(), Theme.name.asc())
     )
     rows = result.all()
@@ -3894,10 +3958,18 @@ async def add_theme_to_library(
     if not theme or not theme.is_active:
         raise HTTPException(status_code=404, detail="Theme not found")
 
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserLibraryTheme.team_id == team_id
+        if team_id
+        else UserLibraryTheme.user_id == current_user.id
+    )
+
     # Check if already in library
     existing_result = await db.execute(
         select(UserLibraryTheme).where(
-            UserLibraryTheme.user_id == current_user.id,
+            ownership_filter,
             UserLibraryTheme.theme_id == theme_id,
         )
     )
@@ -3913,6 +3985,7 @@ async def add_theme_to_library(
     else:
         lib_entry = UserLibraryTheme(
             user_id=current_user.id,
+            team_id=team_id,
             theme_id=theme_id,
             purchase_type="free",
             is_active=True,
@@ -3942,9 +4015,17 @@ async def remove_theme_from_library(
             detail="Cannot remove default themes from your library",
         )
 
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserLibraryTheme.team_id == team_id
+        if team_id
+        else UserLibraryTheme.user_id == current_user.id
+    )
+
     result = await db.execute(
         select(UserLibraryTheme).where(
-            UserLibraryTheme.user_id == current_user.id,
+            ownership_filter,
             UserLibraryTheme.theme_id == theme_id,
         )
     )
@@ -3977,9 +4058,17 @@ async def toggle_library_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Toggle a theme enabled/disabled in user's library."""
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserLibraryTheme.team_id == team_id
+        if team_id
+        else UserLibraryTheme.user_id == current_user.id
+    )
+
     result = await db.execute(
         select(UserLibraryTheme).where(
-            UserLibraryTheme.user_id == current_user.id,
+            ownership_filter,
             UserLibraryTheme.theme_id == theme_id,
         )
     )
@@ -4535,10 +4624,18 @@ async def purchase_skill(
     if not skill or not skill.is_active:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    # Check if already purchased
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserPurchasedAgent.team_id == team_id
+        if team_id
+        else UserPurchasedAgent.user_id == current_user.id
+    )
+
+    # Check if already purchased (scoped to team when available)
     existing_result = await db.execute(
         select(UserPurchasedAgent).where(
-            UserPurchasedAgent.user_id == current_user.id,
+            ownership_filter,
             UserPurchasedAgent.agent_id == skill_id,
         )
     )
@@ -4555,6 +4652,7 @@ async def purchase_skill(
         else:
             purchase = UserPurchasedAgent(
                 user_id=current_user.id,
+                team_id=team_id,
                 agent_id=skill_id,
                 purchase_type="free",
                 is_active=True,
@@ -4628,10 +4726,23 @@ async def install_skill_on_agent(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    skill_ownership_filter = (
+        UserPurchasedAgent.team_id == team_id
+        if team_id
+        else UserPurchasedAgent.user_id == current_user.id
+    )
+    assignment_ownership_filter = (
+        AgentSkillAssignment.team_id == team_id
+        if team_id
+        else AgentSkillAssignment.user_id == current_user.id
+    )
+
     # Verify user owns the skill
     owned_result = await db.execute(
         select(UserPurchasedAgent).where(
-            UserPurchasedAgent.user_id == current_user.id,
+            skill_ownership_filter,
             UserPurchasedAgent.agent_id == skill_id,
             UserPurchasedAgent.is_active,
         )
@@ -4654,7 +4765,7 @@ async def install_skill_on_agent(
         select(AgentSkillAssignment).where(
             AgentSkillAssignment.agent_id == body.agent_id,
             AgentSkillAssignment.skill_id == skill_id,
-            AgentSkillAssignment.user_id == current_user.id,
+            assignment_ownership_filter,
         )
     )
     existing = existing_result.scalar_one_or_none()
@@ -4671,6 +4782,7 @@ async def install_skill_on_agent(
         agent_id=body.agent_id,
         skill_id=skill_id,
         user_id=current_user.id,
+        team_id=team_id,
         enabled=True,
     )
     db.add(assignment)
@@ -4689,11 +4801,19 @@ async def uninstall_skill_from_agent(
     """
     Detach a skill from an agent.
     """
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        AgentSkillAssignment.team_id == team_id
+        if team_id
+        else AgentSkillAssignment.user_id == current_user.id
+    )
+
     result = await db.execute(
         select(AgentSkillAssignment).where(
             AgentSkillAssignment.agent_id == agent_id,
             AgentSkillAssignment.skill_id == skill_id,
-            AgentSkillAssignment.user_id == current_user.id,
+            ownership_filter,
         )
     )
     assignment = result.scalar_one_or_none()
@@ -4726,6 +4846,14 @@ async def get_agent_skills(
     if not agent_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    # Resolve active team for ownership scoping
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        AgentSkillAssignment.team_id == team_id
+        if team_id
+        else AgentSkillAssignment.user_id == current_user.id
+    )
+
     result = await db.execute(
         select(AgentSkillAssignment)
         .options(
@@ -4733,7 +4861,7 @@ async def get_agent_skills(
         )
         .where(
             AgentSkillAssignment.agent_id == agent_id,
-            AgentSkillAssignment.user_id == current_user.id,
+            ownership_filter,
             AgentSkillAssignment.enabled.is_(True),
         )
     )
