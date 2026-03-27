@@ -396,7 +396,7 @@ case "$COMMAND" in
         declare -A BUILD_CONTEXTS=(
             [backend]="orchestrator/"
             [frontend]="app/"
-            [devserver]="orchestrator/"
+            [devserver]="."
             [compute]="services/btrfs-csi/"
         )
         declare -A K8S_LABELS=(
