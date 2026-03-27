@@ -122,7 +122,7 @@ func NewProcess(config ProcessConfig, stdout io.Writer, bufferLines int) *Proces
 	}
 }
 
-// Start launches the process in a new PTY with its own session/process group.
+// Start launches the process in a new PTY with its own process group.
 func (p *Process) Start() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -135,10 +135,15 @@ func (p *Process) Start() error {
 
 	cmd := buildCmd(p.config.Cmd, p.config.Dir, p.config.Env)
 
-	// Create a new session so the process gets its own process group.
-	// The session leader PID == PGID, which lets us kill the whole group.
+	// Create a new process group (Setpgid) so we can kill the whole group
+	// on Stop(). We intentionally do NOT use Setsid here: Setsid creates a
+	// new session, making the child the session leader. When a session leader
+	// exits, the kernel sends SIGHUP to all processes in the session — which
+	// kills fork-and-exit children (e.g. bun run dev → next-server) before
+	// tsinit can track them. Setpgid gives us group-kill without the
+	// session-leader-death SIGHUP.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
+		Setpgid: true,
 	}
 
 	master, err := startWithPTY(cmd, uint16(p.config.Cols), uint16(p.config.Rows))
@@ -385,14 +390,23 @@ func (p *Process) teeOutput(name string, data []byte) {
 	}
 }
 
+// pgroupAlive checks whether any process in the process group is still running.
+// Uses kill(2) with signal 0 which checks existence without sending a signal.
+func pgroupAlive(pgid int) bool {
+	return syscall.Kill(-pgid, 0) == nil
+}
+
 // waitLoop waits for the process to exit, records the exit code, and
 // optionally triggers a restart.
+//
+// The tracked child is typically a shell (sh -c "...") that may fork a
+// long-running workload (e.g. bun run dev → next-server). When the shell
+// exits, we check whether the process group still has living members.
+// If it does, the process is still "running" — we poll until the group
+// is empty before declaring it exited. This handles fork-and-exit
+// patterns (bun, npx, npm run) that spawn a child and then exit.
 func (p *Process) waitLoop() {
 	err := p.cmd.Wait()
-
-	p.mu.Lock()
-	now := time.Now()
-	p.exitedAt = now
 
 	exitCode := 0
 	if err != nil {
@@ -406,6 +420,49 @@ func (p *Process) waitLoop() {
 			exitCode = -1
 		}
 	}
+
+	p.mu.RLock()
+	pid := p.pid
+	name := p.config.Name
+	state := p.state
+	p.mu.RUnlock()
+
+	// The direct child exited, but the process group (pgid == pid due to
+	// Setsid) may still have living members (fork-and-exit pattern).
+	// Poll until the group is empty before declaring the process dead.
+	if state != StateStopped && pgroupAlive(pid) {
+		slog.Info("direct child exited but process group still alive, tracking group",
+			"name", name,
+			"pid", pid,
+			"child_exit_code", exitCode,
+		)
+
+		const pollInterval = 2 * time.Second
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			// Check if Stop() was called while we're polling.
+			p.mu.RLock()
+			stopped := p.state == StateStopped
+			p.mu.RUnlock()
+			if stopped {
+				return
+			}
+
+			if !pgroupAlive(pid) {
+				slog.Info("process group empty, declaring exited",
+					"name", name,
+					"pid", pid,
+				)
+				break
+			}
+		}
+	}
+
+	p.mu.Lock()
+	now := time.Now()
+	p.exitedAt = now
 	p.exitCode = exitCode
 
 	// Close the PTY master if still open.
@@ -427,15 +484,13 @@ func (p *Process) waitLoop() {
 	}
 
 	policy := p.config.Restart
-	state := p.state
-	name := p.config.Name
-	restarts := p.restarts
+	state = p.state
 	p.mu.Unlock()
 
 	slog.Info("process exited",
 		"name", name,
 		"exit_code", exitCode,
-		"restarts", restarts,
+		"ephemeral", p.config.Ephemeral,
 	)
 
 	// Decide whether to restart.
@@ -449,7 +504,10 @@ func (p *Process) waitLoop() {
 		// no-op
 	}
 
+	// Before restarting, kill any orphaned process group members
+	// to avoid resource conflicts (e.g. EADDRINUSE).
 	if shouldRestart {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		go p.restartLoop()
 	}
 }

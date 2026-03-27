@@ -888,3 +888,149 @@ func TestStdoutTeePrefix(t *testing.T) {
 	deleteProcess(t, name)
 	t.Log("stdout tee: ring buffer has raw output, prefix goes to container stdout only")
 }
+
+// TestForkAndExit verifies that when the direct child (shell) exits but
+// a forked descendant is still alive, tsinit keeps the process state as
+// "running" instead of "exited".
+//
+// This simulates the real-world pattern where:
+//   bun run dev → forks next-server → bun exits → next-server keeps running
+//
+// With Setpgid (no Setsid), the shell exiting does NOT send SIGHUP to
+// the process group, so even plain sleep survives. This is the key fix
+// for fork-and-exit wrappers like bun/npx/npm run.
+func TestForkAndExit(t *testing.T) {
+	name := "fork-exit-test"
+
+	// Shell forks a background sleep (simulating a dev server), then exits.
+	// With Setpgid, no SIGHUP is sent — sleep survives.
+	code, _ := createProcess(t, map[string]any{
+		"name": name,
+		"cmd":  `sh -c 'sleep 300 & echo FORK_CHILD_READY; exit 0'`,
+	})
+	if code != 201 {
+		t.Fatalf("expected 201, got %d", code)
+	}
+
+	// Wait for the forked child to start.
+	deadline := time.Now().Add(10 * time.Second)
+	ready := false
+	for time.Now().Before(deadline) {
+		_, data := doJSON(t, "GET", "/v1/processes/"+name+"/output?lines=20", nil)
+		lines, _ := data["lines"].([]any)
+		for _, l := range lines {
+			if strings.Contains(fmt.Sprint(l), "FORK_CHILD_READY") {
+				ready = true
+				break
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("forked child did not start within 10s")
+	}
+
+	// Give the shell time to exit.
+	time.Sleep(2 * time.Second)
+
+	// The shell (direct child) has exited, but sleep is still alive in the
+	// process group. tsinit should still report state as "running".
+	_, data := doJSON(t, "GET", "/v1/processes/"+name, nil)
+	state := data["state"].(string)
+	if state != "running" {
+		t.Fatalf("expected state 'running' (process group alive), got %q", state)
+	}
+	t.Logf("process state is %q with shell exited but forked child alive — correct", state)
+
+	// Now stop the process — should kill the entire group.
+	deleteProcess(t, name)
+	t.Log("fork-and-exit: process group tracked correctly, stop kills all members")
+}
+
+// TestForkAndExitWithServer verifies fork-and-exit with a real HTTP server
+// (node), confirming the server is reachable and cleanup kills it.
+func TestForkAndExitWithServer(t *testing.T) {
+	name := "fork-server-test"
+
+	code, _ := createProcess(t, map[string]any{
+		"name": name,
+		"cmd":  `sh -c 'node -e "require(\"http\").createServer((_,r)=>{r.end(\"ok\")}).listen(18999,()=>{console.log(\"SERVER_READY\")})" & sleep 0.5; exit 0'`,
+	})
+	if code != 201 {
+		t.Fatalf("expected 201, got %d", code)
+	}
+
+	// Wait for server to start.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		_, data := doJSON(t, "GET", "/v1/processes/"+name+"/output?lines=20", nil)
+		lines, _ := data["lines"].([]any)
+		for _, l := range lines {
+			if strings.Contains(fmt.Sprint(l), "SERVER_READY") {
+				goto serverUp
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatal("node server did not print SERVER_READY within 10s")
+serverUp:
+
+	time.Sleep(2 * time.Second)
+
+	// Process should be running (group alive).
+	_, data := doJSON(t, "GET", "/v1/processes/"+name, nil)
+	if data["state"].(string) != "running" {
+		t.Fatalf("expected 'running', got %q", data["state"])
+	}
+
+	// Server should be reachable.
+	resp, err := http.Get("http://localhost:18999/")
+	if err != nil {
+		t.Fatalf("node server not reachable: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	t.Log("node server responding on port 18999")
+
+	// Stop should kill the server.
+	deleteProcess(t, name)
+	time.Sleep(1 * time.Second)
+	_, err = http.Get("http://localhost:18999/")
+	if err == nil {
+		t.Fatal("node server should be dead after stop, but it responded")
+	}
+	t.Log("fork-and-exit with server: tracked, reachable, cleanup works")
+}
+
+// TestForkAndExitCleanExit verifies that when both the direct child AND
+// all process group members exit, tsinit correctly transitions to "exited".
+func TestForkAndExitCleanExit(t *testing.T) {
+	name := "fork-clean-exit"
+
+	// Shell forks a short-lived sleep, then exits. Sleep runs for 2s.
+	code, _ := createProcess(t, map[string]any{
+		"name": name,
+		"cmd":  `sh -c 'sleep 2 & echo EPHEMERAL_READY; exit 0'`,
+	})
+	if code != 201 {
+		t.Fatalf("expected 201, got %d", code)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	// Should be "running" while sleep is alive.
+	_, data := doJSON(t, "GET", "/v1/processes/"+name, nil)
+	state := data["state"].(string)
+	if state != "running" {
+		t.Fatalf("expected 'running' while forked child alive, got %q", state)
+	}
+
+	// Wait for sleep to exit (2s + poll margin).
+	waitForState(t, name, "exited", 8*time.Second)
+	t.Log("fork-clean-exit: process group empty → correctly transitioned to exited")
+}
