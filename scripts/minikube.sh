@@ -110,7 +110,7 @@ image_context() {
   case "$1" in
     backend)   echo "orchestrator" ;;
     frontend)  echo "app" ;;
-    devserver) echo "orchestrator" ;;
+    devserver) echo "." ;;
     btrfs-csi) echo "services/btrfs-csi" ;;
   esac
 }

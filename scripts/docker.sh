@@ -110,7 +110,7 @@ cmd_start() {
   if ! docker image inspect tesslate-devserver:latest &>/dev/null; then
     info "Building devserver image (first time)..."
     docker build -t tesslate-devserver:latest \
-      -f orchestrator/Dockerfile.devserver orchestrator/
+      -f orchestrator/Dockerfile.devserver .
     success "Devserver image built"
   fi
 
@@ -250,7 +250,7 @@ cmd_reset() {
 
   info "Building devserver image..."
   docker build -t tesslate-devserver:latest \
-    -f orchestrator/Dockerfile.devserver orchestrator/
+    -f orchestrator/Dockerfile.devserver .
 
   cmd_start
   cmd_migrate

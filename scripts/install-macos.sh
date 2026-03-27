@@ -194,7 +194,7 @@ header "Step 5: Building Docker Images"
 
 info "Building devserver image..."
 docker build -t tesslate-devserver:latest \
-  -f orchestrator/Dockerfile.devserver orchestrator/
+  -f orchestrator/Dockerfile.devserver .
 success "Devserver image built"
 
 if [[ "$DEV_MODE" == "docker" ]]; then
