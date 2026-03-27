@@ -8,11 +8,11 @@ Data migration: creates a personal team for every existing user, copies
 billing fields, creates admin membership, links all projects.
 
 Revision ID: 0034_rbac_teams
-Revises: 0033_container_build
+Revises: 0034_refresh_tokens
 """
 
 revision = "0034_rbac_teams"
-down_revision = "0033_container_build"
+down_revision = "0034_refresh_tokens"
 branch_labels = None
 depends_on = None
 
