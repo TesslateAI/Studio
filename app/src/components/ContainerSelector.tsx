@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { CaretDown, Check, Plus } from '@phosphor-icons/react';
+import { CaretDown, Check, FolderSimple, Plus } from '@phosphor-icons/react';
+
+export const PROJECT_ROOT_ID = 'root';
 
 interface Container {
   id: string;
@@ -59,7 +61,10 @@ export function ContainerSelector({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Find current container
-  const currentContainer = containers.find((c) => c.id === currentContainerId) || containers[0];
+  const isProjectRoot = currentContainerId === PROJECT_ROOT_ID;
+  const currentContainer = isProjectRoot
+    ? null
+    : containers.find((c) => c.id === currentContainerId) || containers[0];
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -73,34 +78,37 @@ export function ContainerSelector({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Don't render if no containers
-  if (!currentContainer) {
+  // Don't render if no containers at all
+  if (!isProjectRoot && !currentContainer) {
     return null;
   }
 
-  const hasMultipleContainers = containers.length > 1;
+  const hasDropdown = containers.length > 0;
 
   return (
     <div className="relative" ref={dropdownRef}>
-      {/* Current container button */}
+      {/* Current selection button */}
       <button
-        onClick={() => hasMultipleContainers && setIsOpen(!isOpen)}
+        onClick={() => hasDropdown && setIsOpen(!isOpen)}
         className={`
           flex items-center gap-2 px-3 py-2 rounded-lg transition-colors
-          ${hasMultipleContainers ? 'hover:bg-white/5 cursor-pointer' : 'cursor-default'}
+          ${hasDropdown ? 'hover:bg-white/5 cursor-pointer' : 'cursor-default'}
         `}
       >
-        {/* Container icon */}
-        <span className="text-lg">{getContainerIcon(currentContainer.base?.slug)}</span>
+        {isProjectRoot ? (
+          <>
+            <FolderSimple size={18} className="text-[var(--text)]/70" />
+            <span className="font-medium text-[var(--text)]">Project Root</span>
+          </>
+        ) : currentContainer ? (
+          <>
+            <span className="text-lg">{getContainerIcon(currentContainer.base?.slug)}</span>
+            <span className="font-medium text-[var(--text)]">{currentContainer.name}</span>
+            <span className={`w-2 h-2 rounded-full ${getStatusColor(currentContainer.status)}`} />
+          </>
+        ) : null}
 
-        {/* Container name */}
-        <span className="font-medium text-[var(--text)]">{currentContainer.name}</span>
-
-        {/* Status dot */}
-        <span className={`w-2 h-2 rounded-full ${getStatusColor(currentContainer.status)}`} />
-
-        {/* Chevron (only if multiple containers) */}
-        {hasMultipleContainers && (
+        {hasDropdown && (
           <CaretDown
             size={14}
             className={`text-[var(--text)]/50 transition-transform ${isOpen ? 'rotate-180' : ''}`}
@@ -109,10 +117,31 @@ export function ContainerSelector({
       </button>
 
       {/* Dropdown panel */}
-      {isOpen && hasMultipleContainers && (
+      {isOpen && hasDropdown && (
         <div className="absolute top-full left-0 mt-1 w-64 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
-          {/* Header */}
-          <div className="px-3 py-2 border-b border-white/10 text-xs text-white/50 uppercase tracking-wide font-medium">
+          {/* Project Root option */}
+          <button
+            onClick={() => {
+              onChange(PROJECT_ROOT_ID);
+              setIsOpen(false);
+            }}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/5 transition-colors text-left
+              ${isProjectRoot ? 'bg-white/5' : ''}
+            `}
+          >
+            <FolderSimple size={18} className="w-6 text-center text-white/70" />
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-white truncate">Project Root</div>
+              <div className="text-xs text-white/50 truncate">All files</div>
+            </div>
+            {isProjectRoot && (
+              <Check size={16} className="text-[var(--primary)] flex-shrink-0" weight="bold" />
+            )}
+          </button>
+
+          {/* Containers header */}
+          <div className="px-3 py-2 border-t border-white/10 text-xs text-white/50 uppercase tracking-wide font-medium">
             Containers
           </div>
 

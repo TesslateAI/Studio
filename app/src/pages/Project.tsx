@@ -46,7 +46,7 @@ import {
 import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
-import { ContainerSelector } from '../components/ContainerSelector';
+import { ContainerSelector, PROJECT_ROOT_ID } from '../components/ContainerSelector';
 import { PreviewPortPicker, type PreviewableContainer } from '../components/PreviewPortPicker';
 import { projectsApi, marketplaceApi } from '../lib/api';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
@@ -863,6 +863,13 @@ export default function Project() {
       // No containers = project needs setup
       if (!allContainers || allContainers.length === 0) {
         navigate(`/project/${slug}/setup`, { replace: true });
+        return;
+      }
+
+      // Project Root mode — show full file tree, skip container startup
+      if (containerId === PROJECT_ROOT_ID) {
+        setContainer({ id: PROJECT_ROOT_ID, name: 'Project Root', status: 'running' });
+        localStorage.setItem(`tesslate-container-${slug}`, PROJECT_ROOT_ID);
         return;
       }
 
