@@ -43,7 +43,7 @@ export function ContainerLoadingOverlay({
             <button
               onClick={() =>
                 onAskAgent(
-                  `Use the running tmux process to get this up and running. The port for the preview url is ${containerPort}.`
+                  `The dev server failed to start. Check its output and restart it on port ${containerPort}.`
                 )
               }
               className="flex items-center gap-2 px-5 py-2.5 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary)]/80 transition-colors font-medium"
@@ -127,7 +127,8 @@ export function ContainerLoadingOverlay({
 
         {/* Helpful tip */}
         <p className="text-xs text-[var(--text)]/30 text-center">
-          This may take a moment for first-time setup. We're installing dependencies and starting your dev server.
+          This may take a moment for first-time setup. We're installing dependencies and starting
+          your dev server.
         </p>
       </div>
     </div>

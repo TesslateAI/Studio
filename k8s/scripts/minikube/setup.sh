@@ -117,7 +117,7 @@ log_info "Kubectl context set to '$MINIKUBE_PROFILE'"
 log_info "Building Docker images..."
 docker build -t tesslate-backend:latest -f "$REPO_ROOT/orchestrator/Dockerfile" "$REPO_ROOT/orchestrator"
 docker build -t tesslate-frontend:latest -f "$REPO_ROOT/app/Dockerfile.prod" "$REPO_ROOT/app"
-docker build -t tesslate-devserver:latest -f "$REPO_ROOT/orchestrator/Dockerfile.devserver" "$REPO_ROOT/orchestrator"
+docker build -t tesslate-devserver:latest -f "$REPO_ROOT/orchestrator/Dockerfile.devserver" "$REPO_ROOT"
 docker build -t tesslate-btrfs-csi:latest -f "$CSI_DIR/Dockerfile" "$CSI_DIR"
 log_success "Images built"
 

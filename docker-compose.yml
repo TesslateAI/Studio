@@ -329,8 +329,8 @@ services:
 
   devserver:
     build:
-      context: ./orchestrator
-      dockerfile: Dockerfile.devserver
+      context: .
+      dockerfile: orchestrator/Dockerfile.devserver
     image: tesslate-devserver:latest
     entrypoint: ["true"]
     restart: "no"

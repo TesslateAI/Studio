@@ -117,7 +117,7 @@ function NoComputePlaceholder({
                 <button
                   onClick={() =>
                     onAskAgent(
-                      `Use the running tmux process to get this up and running. The port for the preview url is ${containerPort}.`
+                      `The dev server failed to start. Check its output and restart it on port ${containerPort}.`
                     )
                   }
                   className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary)]/80 transition-colors text-sm font-medium"

@@ -255,10 +255,10 @@ class TestCreateFileManagerDeployment:
         volumes = dep.spec.template.spec.volumes
         assert any(v.persistent_volume_claim.claim_name == "project-storage" for v in volumes)
 
-    def test_command_is_tail(self):
+    def test_command_is_tesslate_init(self):
         dep = self._make()
         container = dep.spec.template.spec.containers[0]
-        assert container.command == ["tail", "-f", "/dev/null"]
+        assert container.command == ["tsinit", "serve"]
 
     def test_replicas_is_one(self):
         dep = self._make()
@@ -291,11 +291,11 @@ class TestCreateContainerDeployment:
         dep = self._make(container_directory="frontend")
         assert dep.metadata.name == "dev-frontend"
 
-    def test_tmux_command_in_args(self):
+    def test_tesslate_init_command(self):
         dep = self._make(startup_command="npm run dev")
         container = dep.spec.template.spec.containers[0]
-        assert "tmux new-session -d -s main" in container.args[0]
-        assert "npm run dev" in container.args[0]
+        assert container.command == ["tsinit", "serve"]
+        assert any("npm run dev" in a for a in container.args)
 
     def test_ports(self):
         dep = self._make(port=5173)
@@ -308,7 +308,7 @@ class TestCreateContainerDeployment:
         container = dep.spec.template.spec.containers[0]
         probe = container.startup_probe
         assert probe is not None
-        assert "tmux has-session" in probe._exec.command[-1]
+        assert probe._exec.command == ["tsinit", "health", "/tmp/tsinit.sock"]
 
     def test_readiness_probe_http(self):
         dep = self._make(port=3000)
@@ -360,12 +360,15 @@ class TestCreateContainerDeployment:
     def test_working_directory_in_command(self):
         dep = self._make(container_directory="frontend", working_directory="client")
         container = dep.spec.template.spec.containers[0]
-        assert "/app/client" in container.args[0]
+        # tsinit args: ["--process", "main=mkdir -p /app/client && ...", ...]
+        process_arg = container.args[container.args.index("--process") + 1]
+        assert "/app/client" in process_arg
 
     def test_working_directory_dot_maps_to_app(self):
         dep = self._make(container_directory="frontend", working_directory=".")
         container = dep.spec.template.spec.containers[0]
-        assert "mkdir -p /app && cd /app" in container.args[0]
+        process_arg = container.args[container.args.index("--process") + 1]
+        assert "mkdir -p /app && cd /app" in process_arg
 
     def test_selector_uses_container_id(self):
         cid = uuid4()
@@ -1086,12 +1089,11 @@ class TestCreateV2DevDeployment:
         volumes = dep.spec.template.spec.volumes
         assert volumes[0].persistent_volume_claim.claim_name == "custom-pvc"
 
-    def test_tmux_command_pattern(self):
+    def test_tesslate_init_command(self):
         dep = self._make(startup_command="npm run dev")
         container = dep.spec.template.spec.containers[0]
-        assert "tmux new-session -d -s main" in container.args[0]
-        assert "npm run dev" in container.args[0]
-        assert "tail -f /dev/null" in container.args[0]
+        assert container.command == ["tsinit", "serve"]
+        assert any("npm run dev" in a for a in container.args)
 
     def test_volume_mount_path(self):
         dep = self._make()
@@ -1141,7 +1143,7 @@ class TestCreateV2DevDeployment:
         dep = self._make()
         container = dep.spec.template.spec.containers[0]
         assert container.startup_probe is not None
-        assert "tmux has-session" in container.startup_probe._exec.command[-1]
+        assert container.startup_probe._exec.command == ["tsinit", "health", "/tmp/tsinit.sock"]
 
     def test_readiness_probe(self):
         dep = self._make(port=5173)
@@ -1156,12 +1158,14 @@ class TestCreateV2DevDeployment:
     def test_working_directory_fallback_to_container_directory(self):
         dep = self._make(container_directory="frontend", working_directory="")
         container = dep.spec.template.spec.containers[0]
-        assert "/app/frontend" in container.args[0]
+        process_arg = container.args[container.args.index("--process") + 1]
+        assert "/app/frontend" in process_arg
 
     def test_working_directory_dot(self):
         dep = self._make(container_directory="frontend", working_directory=".")
         container = dep.spec.template.spec.containers[0]
-        assert "mkdir -p /app && cd /app" in container.args[0]
+        process_arg = container.args[container.args.index("--process") + 1]
+        assert "mkdir -p /app && cd /app" in process_arg
 
     def test_selector_labels(self):
         cid = uuid4()

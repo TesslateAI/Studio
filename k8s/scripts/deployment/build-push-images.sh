@@ -54,7 +54,7 @@ docker build -t "${FRONTEND_IMAGE}" -f app/Dockerfile.prod app/
 
 # Build dev server image (for user development environments)
 echo "Building dev server image..."
-docker build -t "${DEV_SERVER_IMAGE}" -f orchestrator/Dockerfile.devserver orchestrator/
+docker build -t "${DEV_SERVER_IMAGE}" -f orchestrator/Dockerfile.devserver .
 
 # Push images to registry
 echo "Pushing backend image to DOCR..."

@@ -197,8 +197,10 @@ def create_file_manager_deployment(
         name="file-manager",
         image=image,
         image_pull_policy=image_pull_policy,
-        command=["tail", "-f", "/dev/null"],  # Keep alive
-        working_dir="/app",
+        # tsinit as PID 1 with no managed processes — just a proper init
+        # that handles signals and zombie reaping. No working_dir set to avoid
+        # CWD holding the PVC mount busy during teardown (umount EBUSY fix).
+        command=["tsinit", "serve"],
         volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],
         resources=client.V1ResourceRequirements(
             # File-manager needs enough memory for npm install (Next.js needs ~1GB)
@@ -327,23 +329,24 @@ def create_container_deployment(
         name="dev-server",
         image=image,
         image_pull_policy=image_pull_policy,
-        command=["sh", "-c"],
-        # Run dev server in tmux session so agent can stop/restart without crashing container
-        # PID 1 is immortal tail -f, dev server runs in tmux session "main"
-        # Agent can: tmux send-keys -t main C-c (stop), tmux send-keys -t main 'npm run dev' Enter (start)
-        # Dependencies are installed during file init (generate_git_clone_script)
-        # No need to check/install here - just start the dev server
-        # rm -rf .next/dev/lock is a walkaround to avoid startup failure,
-        # needs better solution
+        # tsinit as PID 1: proper signal forwarding, process group kill,
+        # zombie reaping. Dev server runs as managed process "main".
+        # Agent can restart via tsinit API without killing the container.
         # NOTE: Do NOT set working_dir on the container spec. containerd creates
         # the working directory as root before the container process starts, causing
-        # EACCES errors for uid 1000. Instead, mkdir -p + cd in the command itself
-        # so the directory is created by the running user (node/1000).
+        # EACCES errors for uid 1000. tsinit handles mkdir + cd internally.
+        command=["tsinit", "serve"],
         args=[
-            f"mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && "
-            f"tmux new-session -d -s main '{startup_command}' && "
-            f"tmux pipe-pane -o -t main 'cat > /proc/1/fd/1' 2>/dev/null; "
-            f"exec tail -f /dev/null"
+            "--process",
+            f"main=mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && {startup_command}",
+            "--dir",
+            "/",
+            "--grace-period",
+            "10s",
+            "--restart-policy",
+            "never",
+            "--sock-path",
+            "/tmp/tsinit.sock",
         ],
         ports=[client.V1ContainerPort(container_port=port, name="http")],
         volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],
@@ -351,12 +354,11 @@ def create_container_deployment(
         resources=client.V1ResourceRequirements(
             requests={"memory": "256Mi", "cpu": "50m"}, limits={"memory": "1Gi", "cpu": "1000m"}
         ),
-        # Startup probe - check tmux session exists (passes fast, doesn't require dev server)
-        # Uses exec instead of HTTP so containers stay alive even if dev server never starts
-        # (e.g. community bases with wrong startup command). Agent can fix it later.
+        # Startup probe - tsinit health check (passes fast — checks supervisor, not dev server)
+        # Container stays alive even if dev server never starts. Agent can fix it.
         startup_probe=client.V1Probe(
-            _exec=client.V1ExecAction(command=["sh", "-c", "tmux has-session -t main 2>/dev/null"]),
-            initial_delay_seconds=5,
+            _exec=client.V1ExecAction(command=["tsinit", "health", "/tmp/tsinit.sock"]),
+            initial_delay_seconds=2,
             period_seconds=3,
             timeout_seconds=5,
             failure_threshold=30,
@@ -369,10 +371,10 @@ def create_container_deployment(
             timeout_seconds=3,
             failure_threshold=3,
         ),
-        # Liveness probe - check tmux exists (keeps container alive regardless of dev server state)
+        # Liveness probe - tsinit alive (keeps container alive regardless of dev server state)
         liveness_probe=client.V1Probe(
-            _exec=client.V1ExecAction(command=["sh", "-c", "tmux has-session -t main 2>/dev/null"]),
-            initial_delay_seconds=30,
+            _exec=client.V1ExecAction(command=["tsinit", "health", "/tmp/tsinit.sock"]),
+            initial_delay_seconds=10,
             period_seconds=10,
             timeout_seconds=5,
             failure_threshold=3,
@@ -686,6 +688,7 @@ fi
 
     # Sanitize URL for logging (hide tokens)
     import re as _re
+
     safe_log_url = _re.sub(r"https://[^@]+@", "https://***@", git_url)
 
     return f'''#!/bin/sh
@@ -792,7 +795,7 @@ def create_service_container_deployment(
     - Use their own Docker image (e.g., postgres:16-alpine)
     - Have their own PVC for data persistence
     - Don't need file-manager or git clone
-    - Don't need tmux or dev-server wrappers
+    - Don't need tsinit or dev-server wrappers
     - Don't need ingress (internal services only)
 
     Args:
@@ -1382,13 +1385,20 @@ def create_v2_dev_deployment(
         name="dev-server",
         image=image,
         image_pull_policy=image_pull_policy,
-        command=["sh", "-c"],
-        # Same tmux pattern as v1 — PID 1 is immortal tail -f, dev server in tmux
+        # tsinit as PID 1: proper signal forwarding, process group kill,
+        # zombie reaping. Dev server runs as managed process "main".
+        command=["tsinit", "serve"],
         args=[
-            f"mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && "
-            f"tmux new-session -d -s main '{startup_command}' && "
-            f"tmux pipe-pane -o -t main 'cat > /proc/1/fd/1' 2>/dev/null; "
-            f"exec tail -f /dev/null"
+            "--process",
+            f"main=mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && {startup_command}",
+            "--dir",
+            "/",
+            "--grace-period",
+            "10s",
+            "--restart-policy",
+            "never",
+            "--sock-path",
+            "/tmp/tsinit.sock",
         ],
         ports=[client.V1ContainerPort(container_port=port, name="http")],
         volume_mounts=[client.V1VolumeMount(name="project-source", mount_path="/app")],
@@ -1398,8 +1408,8 @@ def create_v2_dev_deployment(
             limits={"memory": "1Gi", "cpu": "1000m"},
         ),
         startup_probe=client.V1Probe(
-            _exec=client.V1ExecAction(command=["sh", "-c", "tmux has-session -t main 2>/dev/null"]),
-            initial_delay_seconds=5,
+            _exec=client.V1ExecAction(command=["tsinit", "health", "/tmp/tsinit.sock"]),
+            initial_delay_seconds=2,
             period_seconds=3,
             timeout_seconds=5,
             failure_threshold=30,
@@ -1412,8 +1422,8 @@ def create_v2_dev_deployment(
             failure_threshold=3,
         ),
         liveness_probe=client.V1Probe(
-            _exec=client.V1ExecAction(command=["sh", "-c", "tmux has-session -t main 2>/dev/null"]),
-            initial_delay_seconds=30,
+            _exec=client.V1ExecAction(command=["tsinit", "health", "/tmp/tsinit.sock"]),
+            initial_delay_seconds=10,
             period_seconds=10,
             timeout_seconds=5,
             failure_threshold=3,

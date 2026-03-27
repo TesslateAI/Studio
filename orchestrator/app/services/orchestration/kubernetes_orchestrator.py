@@ -1643,10 +1643,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     namespace=namespace,
                     label_selector="app=dev-container",
                 )
-                running = [
-                    p for p in pods.items
-                    if p.status.phase == "Running"
-                ]
+                running = [p for p in pods.items if p.status.phase == "Running"]
                 if not running:
                     raise RuntimeError(
                         "No running container found. Please start the development server first."
@@ -1754,23 +1751,6 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 and pod.spec.containers
             ):
                 k8s_container_name = pod.spec.containers[0].name
-
-            # Ensure tmux pipe-pane routes dev server output to container stdout.
-            # New containers get this in the startup command (helpers.py), but
-            # existing containers started before the fix need it enabled on-demand.
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(
-                    self.k8s_client._exec_in_pod,
-                    pod_name,
-                    namespace,
-                    k8s_container_name,
-                    [
-                        "sh",
-                        "-c",
-                        "tmux pipe-pane -o -t main 'cat > /proc/1/fd/1' 2>/dev/null || true",
-                    ],
-                    10,
-                )
 
             # Stream logs using queue bridge (K8s stream is synchronous)
             stop_event = asyncio.Event()

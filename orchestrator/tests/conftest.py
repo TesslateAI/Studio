@@ -18,7 +18,6 @@ import asyncio
 import os
 import sys
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -646,34 +645,6 @@ def mock_pty_session():
     session.read_new_output = read_new_output
 
     return session
-
-
-# ============================================================================
-# Tmux Session Fixtures
-# ============================================================================
-
-
-@pytest.fixture
-def mock_tmux_session_manager():
-    """Mock TmuxSessionManager for testing tmux operations."""
-    manager = AsyncMock()
-
-    manager.generate_startup_command = Mock(
-        return_value="tmux new-session -d -s main -x 120 -y 30 'npm run dev'"
-    )
-    manager.create_session = AsyncMock(
-        return_value={
-            "session_id": "main",
-            "created_at": datetime.utcnow().isoformat(),
-        }
-    )
-    manager.is_session_active = AsyncMock(return_value=True)
-    manager.attach_to_session = AsyncMock(return_value="main:0.0")
-    manager.send_keys = AsyncMock(return_value=True)
-    manager.capture_pane = AsyncMock(return_value="$ npm run dev\nReady on http://localhost:3000")
-    manager.close_window = AsyncMock(return_value=True)
-
-    return manager
 
 
 # ============================================================================
