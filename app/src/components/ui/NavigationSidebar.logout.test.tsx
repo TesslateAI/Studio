@@ -54,11 +54,26 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
+vi.mock('../../contexts/TeamContext', () => ({
+  useTeam: () => ({
+    activeTeam: { slug: 'personal', name: 'Personal', is_personal: true, subscription_tier: 'free' },
+    teams: [{ slug: 'personal', name: 'Personal', is_personal: true, role: 'admin' }],
+    switchTeam: vi.fn(),
+    refreshTeams: vi.fn(),
+    membership: { role: 'admin' },
+    can: () => true,
+  }),
+}));
+
 vi.mock('../../lib/api', () => ({
   billingApi: {
     getSubscription: vi.fn().mockResolvedValue({ tier: 'free' }),
     getCreditBalance: vi.fn().mockResolvedValue({ total_credits: 0 }),
     getCreditsBalance: vi.fn().mockResolvedValue({ total_credits: 0 }),
+  },
+  teamsApi: {
+    list: vi.fn().mockResolvedValue([]),
+    create: vi.fn().mockResolvedValue({}),
   },
 }));
 
