@@ -2415,6 +2415,7 @@ async def export_project_as_template(
     # Auto-add to user's library
     user_purchase = UserPurchasedBase(
         user_id=current_user.id,
+        team_id=current_user.default_team_id,
         base_id=marketplace_base.id,
         purchase_type="free",
         is_active=True,

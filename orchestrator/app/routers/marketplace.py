@@ -3119,6 +3119,7 @@ async def submit_base(
     # Auto-add to creator's library
     purchase = UserPurchasedBase(
         user_id=current_user.id,
+        team_id=current_user.default_team_id,
         base_id=new_base.id,
         purchase_type="free",
         is_active=True,

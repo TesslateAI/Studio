@@ -189,9 +189,15 @@ async def _ensure_user_has_base(
     from ...models import UserPurchasedBase
 
     user_id = db_project.owner_id
+    team_id = db_project.team_id
+    ownership_filter = (
+        UserPurchasedBase.team_id == team_id
+        if team_id
+        else UserPurchasedBase.user_id == user_id
+    )
     purchase = await db.scalar(
         select(UserPurchasedBase).where(
-            UserPurchasedBase.user_id == user_id,
+            ownership_filter,
             UserPurchasedBase.base_id == project_data.base_id,
         )
     )
@@ -214,6 +220,7 @@ async def _ensure_user_has_base(
             )
         purchase = UserPurchasedBase(
             user_id=user_id,
+            team_id=team_id,
             base_id=project_data.base_id,
             purchase_type="free",
             is_active=True,

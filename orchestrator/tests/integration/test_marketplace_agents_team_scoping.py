@@ -68,7 +68,9 @@ def _my_agent_ids(client):
     """Return set of agent IDs currently in the user's library."""
     resp = client.get("/api/marketplace/my-agents")
     assert resp.status_code == 200
-    return {a["id"] for a in resp.json()}
+    data = resp.json()
+    agents = data.get("agents", []) if isinstance(data, dict) else data
+    return {a["id"] for a in agents}
 
 
 def _register_and_login(api_client_session, prefix="userb"):
@@ -289,19 +291,25 @@ def test_skill_install_on_agent_scoped_to_team(authenticated_client):
     # Verify skill appears on the agent
     skills_resp = client.get(f"/api/marketplace/agents/{agent_id}/skills")
     assert skills_resp.status_code == 200
-    skill_ids = [s["id"] for s in skills_resp.json()]
+    skills_data = skills_resp.json()
+    skills_list = skills_data.get("skills", []) if isinstance(skills_data, dict) else skills_data
+    skill_ids = [s["id"] for s in skills_list]
     assert str(skill_id) in [str(sid) for sid in skill_ids]
 
     # Switch to personal team -- skill should NOT show on agent
     client.post(f"/api/teams/{personal_slug}/switch")
     personal_skills_resp = client.get(f"/api/marketplace/agents/{agent_id}/skills")
     assert personal_skills_resp.status_code == 200
-    personal_skill_ids = [str(s["id"]) for s in personal_skills_resp.json()]
+    personal_data = personal_skills_resp.json()
+    personal_list = personal_data.get("skills", []) if isinstance(personal_data, dict) else personal_data
+    personal_skill_ids = [str(s["id"]) for s in personal_list]
     assert str(skill_id) not in personal_skill_ids
 
     # Switch back to team -- skill should reappear
     client.post(f"/api/teams/{team_slug}/switch")
     team_skills_resp = client.get(f"/api/marketplace/agents/{agent_id}/skills")
     assert team_skills_resp.status_code == 200
-    team_skill_ids = [str(s["id"]) for s in team_skills_resp.json()]
+    team_data = team_skills_resp.json()
+    team_list = team_data.get("skills", []) if isinstance(team_data, dict) else team_data
+    team_skill_ids = [str(s["id"]) for s in team_list]
     assert str(skill_id) in team_skill_ids
