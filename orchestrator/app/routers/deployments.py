@@ -17,8 +17,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import Container, Deployment, DeploymentCredential, Project, User
-from ..services.deployment.base import ENV_REPO_URL, INTERNAL_ENV_PREFIX, DeploymentConfig
+from ..services.deployment.base import (
+    ENV_CPU,
+    ENV_IMAGE_REF,
+    ENV_MEMORY,
+    ENV_PORT,
+    ENV_REGION,
+    ENV_REPO_URL,
+    INTERNAL_ENV_PREFIX,
+    BaseDeploymentProvider,
+    DeploymentConfig,
+    DeploymentResult,
+)
 from ..services.deployment.builder import BuildError, get_deployment_builder
+from ..services.deployment.container_base import BaseContainerDeploymentProvider, ContainerDeployConfig
 from ..services.deployment.manager import DeploymentManager
 from ..services.deployment_encryption import (
     DeploymentEncryptionError,
@@ -209,6 +221,58 @@ def prepare_provider_credentials(
     from .deployment_credentials import _build_provider_credentials
 
     return _build_provider_credentials(provider, decrypted_token, metadata)
+
+
+# ============================================================================
+# Container-provider deploy helper
+# ============================================================================
+
+
+async def _execute_provider_deploy(
+    provider_instance: BaseDeploymentProvider,
+    provider_name: str,
+    files: list,
+    config: DeploymentConfig,
+    container: "Container | None" = None,
+) -> "DeploymentResult":
+    """
+    Execute deployment, routing container providers through push_image + deploy_image.
+
+    Source/file-based providers go through the normal .deploy() path.
+    Container-push providers (aws-apprunner, gcp-cloudrun, azure-container-apps,
+    do-container, fly) are routed through push_image → deploy_image instead.
+    """
+    if DeploymentManager.is_container_provider(provider_name) and isinstance(
+        provider_instance, BaseContainerDeploymentProvider
+    ):
+        # Derive image ref from env_vars or project name
+        image_ref = config.env_vars.get(ENV_IMAGE_REF) or f"{config.project_name}:latest"
+        port = int(
+            config.env_vars.get(ENV_PORT)
+            or (str(container.internal_port) if container and container.internal_port else "8080")
+        )
+
+        container_config = ContainerDeployConfig(
+            image_ref=image_ref,
+            port=port,
+            cpu=config.env_vars.get(ENV_CPU, "0.25"),
+            memory=config.env_vars.get(ENV_MEMORY, "512Mi"),
+            env_vars={
+                k: v
+                for k, v in config.env_vars.items()
+                if not k.startswith(INTERNAL_ENV_PREFIX)
+            },
+            region=config.env_vars.get(ENV_REGION, "us-east-1"),
+        )
+
+        pushed_uri = await provider_instance.push_image(container_config.image_ref)
+        container_config = ContainerDeployConfig(
+            **{**container_config.model_dump(), "image_ref": pushed_uri}
+        )
+        return await provider_instance.deploy_image(container_config)
+
+    # File/source-based providers
+    return await provider_instance.deploy(files, config)
 
 
 # ============================================================================
@@ -460,7 +524,9 @@ async def deploy_project(
         )
 
         provider = DeploymentManager.get_provider(provider_lower, provider_credentials)
-        result = await provider.deploy(files, config)
+        result = await _execute_provider_deploy(
+            provider, provider_lower, files, config, container=primary_container
+        )
 
         # 11. Update deployment record
         if result.success:
@@ -730,7 +796,7 @@ async def deploy_all_containers(
 
             provider_instance = DeploymentManager.get_provider(provider, prepared_creds)
 
-            # Collect files for deployment
+            # Collect files for deployment (skipped internally for container providers)
             files = await builder.collect_deployment_files(
                 user_id=str(current_user.id),
                 project_id=str(project.id),
@@ -743,7 +809,9 @@ async def deploy_all_containers(
                 volume_id=project.volume_id,
             )
 
-            deploy_result = await provider_instance.deploy(files, config)
+            deploy_result = await _execute_provider_deploy(
+                provider_instance, provider, files, config, container=container
+            )
 
             # Update deployment record
             deployment.status = "success" if deploy_result.success else "failed"
@@ -1155,11 +1223,6 @@ async def export_project(
             deploy_result = await provider.deploy(files, config)
         else:
             # Registry export (dockerhub, ghcr): push image
-            from ..services.deployment.container_base import (
-                BaseContainerDeploymentProvider,
-                ContainerDeployConfig,
-            )
-
             if not isinstance(provider, BaseContainerDeploymentProvider):
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1454,7 +1517,9 @@ async def deploy_single_container_endpoint(
         )
 
         provider_instance = DeploymentManager.get_provider(provider_name, provider_credentials)
-        deploy_result = await provider_instance.deploy(files, config)
+        deploy_result = await _execute_provider_deploy(
+            provider_instance, provider_name, files, config, container=container
+        )
 
         # 11. Update deployment record
         deployment.status = "success" if deploy_result.success else "failed"

@@ -27,6 +27,7 @@ from ..models import (
     User,
 )
 from ..services.deployment.base import ENV_REPO_URL
+from .deployments import _execute_provider_deploy
 from ..services.deployment.guards import (
     PROVIDER_CAPABILITIES,
     get_provider_info,
@@ -965,7 +966,9 @@ async def deploy_target(
             )
 
             provider = DeploymentManager.get_provider(target.provider, provider_credentials)
-            result = await provider.deploy(files, config)
+            result = await _execute_provider_deploy(
+                provider, target.provider, files, config, container=container
+            )
 
             # Update deployment record
             deployment.status = "success" if result.success else "failed"
