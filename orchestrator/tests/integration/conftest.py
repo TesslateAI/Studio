@@ -38,15 +38,18 @@ def test_db_container():
 
     repo_root = Path(__file__).parent.parent.parent.parent
 
-    # Check if postgres is already reachable on port 5433 (CI service container
-    # or manually started docker-compose). This is more reliable than checking
-    # for a specific Docker container name, since CI uses a different name.
-    def _port_open():
+    # Check if port 5433 is already reachable (e.g., CI service container)
+    def _port_open(port: int = 5433) -> bool:
         try:
-            with socket.create_connection(("localhost", 5433), timeout=2):
+            with socket.create_connection(("localhost", port), timeout=2):
                 return True
         except OSError:
             return False
+
+    if _port_open():
+        # DB already available (CI service or manually started) — skip docker
+        yield
+        return
 
     started_by_us = False
     if not _port_open():
