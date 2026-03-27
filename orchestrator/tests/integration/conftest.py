@@ -28,24 +28,28 @@ def test_db_container():
     """
     Manage the test PostgreSQL container lifecycle.
 
-    Starts docker-compose.test.yml if postgres-test isn't already running,
-    and tears it down (with volumes) after the test session.
+    Checks if postgres is already accepting connections on port 5433
+    (e.g. CI service container). If not, starts docker-compose.test.yml
+    and tears it down after the session.
     """
+    import socket
     import subprocess
     import time
 
     repo_root = Path(__file__).parent.parent.parent.parent
 
-    # Check if test postgres is already running
-    check = subprocess.run(
-        ["docker", "inspect", "-f", "{{.State.Running}}", "tesslate-postgres-test"],
-        capture_output=True,
-        text=True,
-    )
-    already_running = check.returncode == 0 and "true" in check.stdout
+    # Check if postgres is already reachable on port 5433 (CI service container
+    # or manually started docker-compose). This is more reliable than checking
+    # for a specific Docker container name, since CI uses a different name.
+    def _port_open():
+        try:
+            with socket.create_connection(("localhost", 5433), timeout=2):
+                return True
+        except OSError:
+            return False
 
     started_by_us = False
-    if not already_running:
+    if not _port_open():
         result = subprocess.run(
             ["docker", "compose", "-f", "docker-compose.test.yml", "up", "-d", "--wait"],
             cwd=repo_root,
@@ -58,18 +62,7 @@ def test_db_container():
 
         # Wait for postgres to accept connections
         for _ in range(30):
-            health = subprocess.run(
-                [
-                    "docker",
-                    "exec",
-                    "tesslate-postgres-test",
-                    "pg_isready",
-                    "-U",
-                    "tesslate_test",
-                ],
-                capture_output=True,
-            )
-            if health.returncode == 0:
+            if _port_open():
                 break
             time.sleep(1)
         else:
