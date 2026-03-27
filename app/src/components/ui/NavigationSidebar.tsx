@@ -21,7 +21,7 @@ import {
   Package,
   MessagesSquare,
 } from 'lucide-react';
-import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Check, Plus } from '@phosphor-icons/react';
+import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Plus } from '@phosphor-icons/react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
 import { billingApi, teamsApi } from '../../lib/api';
 import toast from 'react-hot-toast';

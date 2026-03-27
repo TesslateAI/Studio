@@ -106,6 +106,7 @@ export function TeamProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useTeam() {
   const ctx = useContext(TeamContext);
   if (!ctx) throw new Error('useTeam must be used within TeamProvider');
