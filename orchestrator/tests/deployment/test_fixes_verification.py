@@ -7,7 +7,6 @@ won't regress.
 
 import inspect
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -72,14 +71,17 @@ class TestFix2GcpTerminalStates:
 
 
 class TestFix3AwsEcrEndpoint:
-    """AWS ECR must use ecr.{region}.amazonaws.com, not api.ecr."""
+    """AWS ECR must use boto3 ECR client, not hand-rolled endpoint URLs."""
 
-    def test_ecr_endpoint_correct(self):
+    def test_ecr_uses_boto3_client(self):
         from app.services.deployment.providers.aws_container import AWSContainerProvider
 
         src = inspect.getsource(AWSContainerProvider.push_image)
+        # Must use boto3 ECR client, not manual endpoint construction
+        assert 'client("ecr")' in src
+        assert "get_authorization_token" in src
+        # Must not hand-roll the ECR endpoint
         assert "api.ecr" not in src
-        assert "ecr.{self._region}.amazonaws.com" in src
 
 
 # =============================================================================
@@ -88,14 +90,15 @@ class TestFix3AwsEcrEndpoint:
 
 
 class TestFix4GitHubPagesRefs:
-    """GitHub Pages _get_branch_head must use /git/refs/ (plural)."""
+    """GitHub Pages _get_branch_head must use /git/ref/ (singular) for single-ref lookup."""
 
-    def test_branch_head_uses_plural_refs(self):
+    def test_branch_head_uses_singular_ref(self):
         from app.services.deployment.providers.github_pages import GitHubPagesProvider
 
         src = inspect.getsource(GitHubPagesProvider._get_branch_head)
-        assert "/git/refs/heads/" in src
-        assert "/git/ref/heads/" not in src
+        # Uses singular /git/ref/ endpoint which returns a single ref object
+        # (not an array), avoiding TypeError when parsing the response.
+        assert "/git/ref/heads/" in src
 
     def test_update_ref_uses_plural_refs(self):
         from app.services.deployment.providers.github_pages import GitHubPagesProvider
@@ -272,11 +275,13 @@ class TestFix10FlyTimeouts:
         src = inspect.getsource(FlyProvider.delete_deployment)
         assert "timeout=" in src
 
-    def test_get_deployment_logs_has_timeout(self):
+    def test_get_deployment_logs_returns_cli_guidance(self):
         from app.services.deployment.providers.fly import FlyProvider
 
         src = inspect.getsource(FlyProvider.get_deployment_logs)
-        assert "timeout=" in src
+        # Logs are not available via REST API; method returns CLI guidance
+        # instead of making an HTTP call, so no timeout is needed.
+        assert "fly logs" in src or "fly.io" in src.lower()
 
     def test_test_credentials_has_timeout(self):
         from app.services.deployment.providers.fly import FlyProvider
@@ -291,24 +296,21 @@ class TestFix10FlyTimeouts:
 
 
 class TestFix11KoyebScopeField:
-    """Koyeb env vars must use singular 'scope' string, not 'scopes' array."""
+    """Koyeb env vars must include region scopes for proper deployment targeting."""
 
-    def test_uses_singular_scope(self):
+    def test_env_vars_have_scopes(self):
         from app.services.deployment.providers.koyeb import KoyebProvider
 
         src = inspect.getsource(KoyebProvider._create_service)
-        assert '"scope"' in src
+        # Env vars use "scopes" array with region targets (Koyeb API format)
+        assert '"scopes"' in src
 
-    def test_env_vars_use_singular_scope_not_plural(self):
+    def test_env_vars_include_region_scope(self):
         from app.services.deployment.providers.koyeb import KoyebProvider
 
         src = inspect.getsource(KoyebProvider._create_service)
-        # The env_list comprehension must use "scope" (singular string),
-        # not "scopes" (array). The scalings section may still use "scopes" for regions.
-        lines = src.split("\n")
-        for line in lines:
-            if "env_list" in line or ("key" in line and "value" in line and "scope" in line):
-                assert '"scopes"' not in line, f"env_list line still uses plural scopes: {line}"
+        # Env list entries must include a region scope value
+        assert "region:" in src
 
 
 # =============================================================================
