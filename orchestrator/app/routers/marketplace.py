@@ -22,7 +22,6 @@ from ..models import (
     BaseReview,
     MarketplaceAgent,
     MarketplaceBase,
-    Project,
     ProjectAgent,
     Theme,
     User,
