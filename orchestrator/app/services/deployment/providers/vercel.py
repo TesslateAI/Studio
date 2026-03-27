@@ -11,9 +11,9 @@ import logging
 
 import httpx
 
-logger = logging.getLogger(__name__)
-
 from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
+
+logger = logging.getLogger(__name__)
 
 
 class VercelProvider(BaseDeploymentProvider):

@@ -30,7 +30,10 @@ from ..services.deployment.base import (
     DeploymentResult,
 )
 from ..services.deployment.builder import BuildError, get_deployment_builder
-from ..services.deployment.container_base import BaseContainerDeploymentProvider, ContainerDeployConfig
+from ..services.deployment.container_base import (
+    BaseContainerDeploymentProvider,
+    ContainerDeployConfig,
+)
 from ..services.deployment.manager import DeploymentManager
 from ..services.deployment_encryption import (
     DeploymentEncryptionError,

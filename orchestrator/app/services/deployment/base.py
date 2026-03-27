@@ -8,8 +8,7 @@ along with Pydantic models for deployment configuration and results.
 import os
 from abc import ABC, abstractmethod
 
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, Field  # noqa: I001
 
 # Internal env-var keys used to pass deployment metadata between the router
 # and provider implementations.  Prefixed with ``_TESSLATE_`` so they are

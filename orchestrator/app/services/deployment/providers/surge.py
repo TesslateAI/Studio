@@ -8,7 +8,7 @@ is live.
 
 import base64
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -126,7 +126,7 @@ class SurgeProvider(BaseDeploymentProvider):
                         "Content-Type": "application/x-tar",
                         "file-count": str(len(files)),
                         "project-size": str(len(tarball)),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     },
                 )
 

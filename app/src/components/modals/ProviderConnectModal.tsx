@@ -3,7 +3,7 @@ import { X, Check, Key, ShieldCheck, LinkSimple, Spinner } from '@phosphor-icons
 import { deploymentCredentialsApi } from '../../lib/api';
 import { COMING_SOON_PROVIDERS } from '../../lib/utils';
 import { isValidOAuthUrl } from '../../lib/url-validation';
-import { DEPLOYMENT_PROVIDERS, getProviderConfig, PROVIDER_CREDENTIAL_HELP } from '../../lib/deployment-providers';
+import { DEPLOYMENT_PROVIDERS, PROVIDER_CREDENTIAL_HELP } from '../../lib/deployment-providers';
 import { InfoTooltip } from '../ui/InfoTooltip';
 import toast from 'react-hot-toast';
 

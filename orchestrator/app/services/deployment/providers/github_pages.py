@@ -14,7 +14,6 @@ import httpx
 from ..base import (
     ENV_BRANCH,
     ENV_REPO_URL,
-    NO_GIT_REPO_ERROR,
     BaseDeploymentProvider,
     DeploymentConfig,
     DeploymentFile,
