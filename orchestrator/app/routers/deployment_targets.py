@@ -27,7 +27,6 @@ from ..models import (
     User,
 )
 from ..services.deployment.base import ENV_REPO_URL
-from .deployments import _execute_provider_deploy
 from ..services.deployment.guards import (
     PROVIDER_CAPABILITIES,
     get_provider_info,
@@ -35,6 +34,7 @@ from ..services.deployment.guards import (
     validate_deployment_connection,
 )
 from ..users import current_active_user
+from .deployments import _execute_provider_deploy
 
 logger = logging.getLogger(__name__)
 
