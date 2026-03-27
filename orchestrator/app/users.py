@@ -246,9 +246,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         logger = logging.getLogger(__name__)
         try:
-            from .models_team import Team, TeamMembership
-
             import uuid as _uuid
+
+            from .models_team import Team, TeamMembership
 
             team_id = _uuid.uuid4()
             team = Team(

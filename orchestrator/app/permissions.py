@@ -12,12 +12,17 @@ See .claude/research/rbac-prd.md for the full RBAC specification.
 from __future__ import annotations
 
 import logging
-from enum import Enum
+from enum import StrEnum
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from .models import Project
+    from .models_team import TeamMembership
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class Permission(str, Enum):
+class Permission(StrEnum):
     """Every granular permission in the system. Values are dot-delimited for
     readability in logs and audit trails."""
 
@@ -165,7 +170,7 @@ async def get_team_membership(
     db: AsyncSession,
     team_id: UUID,
     user_id: UUID,
-) -> "TeamMembership | None":
+) -> TeamMembership | None:
     """Return the user's *active* membership row in *team_id*, or ``None``."""
     from .models_team import TeamMembership
 
@@ -186,7 +191,7 @@ async def check_team_permission(
     team_id: UUID,
     user_id: UUID,
     permission: Permission,
-) -> "TeamMembership":
+) -> TeamMembership:
     """Verify the user holds *permission* in the given team.
 
     Returns the ``TeamMembership`` row on success.
@@ -231,7 +236,7 @@ async def check_team_permission(
 
 async def get_effective_project_role(
     db: AsyncSession,
-    project: "Project",
+    project: Project,
     user_id: UUID,
 ) -> str | None:
     """Resolve the effective role a user holds on a project.
@@ -245,10 +250,9 @@ async def get_effective_project_role(
           - No project_membership + visibility == "private" → ``None``.
           - No project_membership + visibility == "team" → return team_role.
     """
-    from .models_team import ProjectMembership, TeamMembership
-
     # --- superuser fast-path ---
     from .models_auth import User
+    from .models_team import ProjectMembership
 
     user_result = await db.execute(select(User).where(User.id == user_id))
     user = user_result.scalar_one_or_none()

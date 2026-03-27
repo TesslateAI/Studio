@@ -10,11 +10,10 @@ import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import Project, User
+from ..models import User
 from ..schemas import (
     AgentCommandLogSchema,
     AgentCommandRequest,

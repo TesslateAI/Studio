@@ -14,7 +14,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import DeploymentCredential, Project, User
+from ..models import DeploymentCredential, User
 from ..services.deployment.manager import DeploymentManager
 from ..services.deployment_encryption import (
     DeploymentEncryptionError,

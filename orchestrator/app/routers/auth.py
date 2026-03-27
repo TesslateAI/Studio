@@ -271,7 +271,7 @@ async def verify_dev_environment_access(
                 )
 
             # Verify current user has access to this project via RBAC
-            from ..permissions import Permission, get_effective_project_role
+            from ..permissions import get_effective_project_role
 
             effective_role = await get_effective_project_role(db, project, current_user.id)
             if effective_role is None:

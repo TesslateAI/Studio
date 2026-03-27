@@ -263,7 +263,7 @@ async def get_projects(
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from ..models_team import Team, TeamMembership, ProjectMembership
+    from ..models_team import ProjectMembership, Team, TeamMembership
 
     # Resolve active team
     if team:
@@ -284,7 +284,7 @@ async def get_projects(
             and_(
                 TeamMembership.team_id == team_id,
                 TeamMembership.user_id == current_user.id,
-                TeamMembership.is_active == True,
+                TeamMembership.is_active.is_(True),
             )
         )
     )
@@ -307,7 +307,7 @@ async def get_projects(
                             select(ProjectMembership.project_id).where(
                                 and_(
                                     ProjectMembership.user_id == current_user.id,
-                                    ProjectMembership.is_active == True,
+                                    ProjectMembership.is_active.is_(True),
                                 )
                             )
                         ),

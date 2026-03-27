@@ -12,10 +12,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..config import get_settings
 from ..database import get_db
 from ..models import Project
 from ..models_auth import User
@@ -51,7 +52,6 @@ from ..schemas_team import (
     TeamRead,
     TeamUpdate,
 )
-from ..config import get_settings
 from ..services.audit_service import log_event
 from ..services.email_service import get_email_service
 from ..users import current_active_user
@@ -324,13 +324,12 @@ async def update_team(
     if "name" in provided and provided["name"] is not None:
         changes["name"] = provided["name"]
         team.name = provided["name"]
-    if "slug" in provided and provided["slug"] is not None:
-        if provided["slug"] != team.slug:
-            dup = await db.execute(select(Team).where(Team.slug == provided["slug"]))
-            if dup.scalar_one_or_none() is not None:
-                raise HTTPException(status_code=409, detail="Team slug already taken")
-            changes["slug"] = provided["slug"]
-            team.slug = provided["slug"]
+    if "slug" in provided and provided["slug"] is not None and provided["slug"] != team.slug:
+        dup = await db.execute(select(Team).where(Team.slug == provided["slug"]))
+        if dup.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Team slug already taken")
+        changes["slug"] = provided["slug"]
+        team.slug = provided["slug"]
     if "avatar_url" in provided:
         changes["avatar_url"] = provided["avatar_url"]
         team.avatar_url = provided["avatar_url"]

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth_external import get_external_api_user
 from ..config import get_settings
 from ..database import get_db
-from ..models import Chat, Container, ExternalAPIKey, Message, Project, User
+from ..models import Chat, Container, ExternalAPIKey, Message, User
 from ..schemas import (
     ExternalAgentInvokeRequest,
     ExternalAgentInvokeResponse,
