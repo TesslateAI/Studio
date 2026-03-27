@@ -714,8 +714,12 @@ class TestDockerHubTestCredentials:
         from app.services.deployment.providers.dockerhub_export import DockerHubExportProvider
 
         provider = DockerHubExportProvider(credentials={"username": "user", "token": "tok"})
-        with patch("httpx.AsyncClient") as mock_client:
+        with patch("app.services.deployment.providers.dockerhub_export.httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
+            # First call: _get_hub_jwt (POST login), second call: GET user profile
+            mock_instance.post = AsyncMock(
+                return_value=_mock_response(json_data={"token": "jwt-token"})
+            )
             mock_instance.get = AsyncMock(
                 return_value=_mock_response(json_data={"username": "user"})
             )
@@ -728,13 +732,11 @@ class TestDockerHubTestCredentials:
         from app.services.deployment.providers.dockerhub_export import DockerHubExportProvider
 
         provider = DockerHubExportProvider(credentials={"username": "user", "token": "bad"})
-        with patch("httpx.AsyncClient") as mock_client:
+        with patch("app.services.deployment.providers.dockerhub_export.httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
-            mock_resp = MagicMock()
-            mock_resp.status_code = 401
-            mock_resp.text = "Unauthorized"
-            mock_instance.get = AsyncMock(
-                side_effect=httpx.HTTPStatusError("err", request=MagicMock(), response=mock_resp)
+            # _get_hub_jwt POST returns 401
+            mock_instance.post = AsyncMock(
+                return_value=_mock_response(status_code=401, json_data={})
             )
             with pytest.raises(ValueError, match="Invalid Docker Hub credentials"):
                 await provider.test_credentials()
@@ -834,21 +836,14 @@ class TestAWSContainerTestCredentials:
             "aws_secret_access_key": "secret",
             "aws_region": "us-east-1",
         })
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = mock_client.return_value.__aenter__.return_value
-            xml_body = (
-                "<GetCallerIdentityResponse>"
-                "<GetCallerIdentityResult>"
-                "<Account>123456</Account>"
-                "<Arn>arn:aws:iam::123456:user/test</Arn>"
-                "</GetCallerIdentityResult>"
-                "</GetCallerIdentityResponse>"
-            )
-            resp = MagicMock()
-            resp.status_code = 200
-            resp.text = xml_body
-            resp.raise_for_status = lambda: None
-            mock_instance.post = AsyncMock(return_value=resp)
+        mock_sts = MagicMock()
+        mock_sts.get_caller_identity.return_value = {
+            "Account": "123456",
+            "Arn": "arn:aws:iam::123456:user/test",
+        }
+        mock_session = MagicMock()
+        mock_session.client.return_value = mock_sts
+        with patch.object(provider, "_boto_session", return_value=mock_session):
             result = await provider.test_credentials()
             assert result["valid"] is True
             assert result["account_id"] == "123456"
