@@ -137,7 +137,7 @@ describe('NavigationSidebar logout', () => {
     );
 
     // Open the user dropdown
-    const userArea = screen.getByText('Test User');
+    const userArea = screen.getByLabelText('Team menu');
     fireEvent.click(userArea);
 
     // Click the Logout button
@@ -156,7 +156,7 @@ describe('NavigationSidebar logout', () => {
       </MemoryRouter>
     );
 
-    const userArea = screen.getByText('Test User');
+    const userArea = screen.getByLabelText('Team menu');
     fireEvent.click(userArea);
 
     const logoutButton = screen.getByText('Logout');
@@ -174,7 +174,7 @@ describe('NavigationSidebar logout', () => {
       </MemoryRouter>
     );
 
-    const userArea = screen.getByText('Test User');
+    const userArea = screen.getByLabelText('Team menu');
     fireEvent.click(userArea);
 
     localStorageMock.removeItem.mockClear();
