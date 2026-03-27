@@ -88,6 +88,7 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://console.anthropic.com",
         "requires_key": True,
+        "prompt_caching": "explicit",  # Requires cache_control annotations
     },
     "groq": {
         "name": "Groq",
@@ -151,9 +152,9 @@ def resolve_model_name(model: str) -> str:
     - "gpt-4o" → "gpt-4o" (no prefix, unchanged)
     """
     if model.startswith(BUILTIN_PREFIX):
-        return model[len(BUILTIN_PREFIX):]
+        return model[len(BUILTIN_PREFIX) :]
     if model.startswith(CUSTOM_PREFIX):
-        stripped = model[len(CUSTOM_PREFIX):]
+        stripped = model[len(CUSTOM_PREFIX) :]
         # custom/{provider_slug}/{model_id} → {model_id}
         parts = stripped.split("/", 1)
         return parts[1] if len(parts) > 1 else stripped
@@ -162,6 +163,31 @@ def resolve_model_name(model: str) -> str:
         if provider_slug in BUILTIN_PROVIDERS:
             return model.removeprefix(f"{provider_slug}/")
     return model
+
+
+def extract_provider_slug(model_name: str) -> str | None:
+    """Extract the BYOK provider slug from a model identifier, if present.
+
+    Returns the slug only when it matches a known ``BUILTIN_PROVIDERS`` entry.
+    Returns ``None`` for builtin/LiteLLM models and custom providers.
+
+    Examples::
+
+        "anthropic/claude-3.5-sonnet"           → "anthropic"
+        "openrouter/anthropic/claude-3.5-sonnet" → "openrouter"
+        "builtin/claude-opus-4.6"               → None  (LiteLLM-proxied)
+        "claude-opus-4.6"                       → None  (no prefix)
+        "custom/my-provider/model-x"            → None  (custom provider)
+    """
+    if not model_name:
+        return None
+    if model_name.startswith(BUILTIN_PREFIX) or model_name.startswith(CUSTOM_PREFIX):
+        return None
+    if "/" in model_name:
+        slug = model_name.split("/", 1)[0]
+        if slug in BUILTIN_PROVIDERS:
+            return slug
+    return None
 
 
 def get_byok_provider_prefixes() -> tuple[str, ...]:
@@ -272,8 +298,7 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
 
         if not custom_provider:
             raise ValueError(
-                f"Custom provider '{provider_slug}' not found. "
-                f"Please add it in Library → API Keys."
+                f"Custom provider '{provider_slug}' not found. Please add it in Library → API Keys."
             )
 
         provider_config = {
@@ -321,9 +346,7 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
                 provider_config = BUILTIN_PROVIDERS[provider_slug]
                 # Rewrite model_name with provider prefix so stripping works correctly
                 model_name = f"{provider_slug}/{model_name}"
-                logger.info(
-                    f"Resolved unprefixed model to {provider_slug}: {model_name}"
-                )
+                logger.info(f"Resolved unprefixed model to {provider_slug}: {model_name}")
             else:
                 raise ValueError(
                     f"Unknown provider '{provider_slug}'. "
@@ -350,7 +373,9 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
         if not user.litellm_api_key:
             raise ValueError("User does not have a LiteLLM API key. Please contact support.")
 
-        return AsyncOpenAI(api_key=user.litellm_api_key, base_url=settings.litellm_api_base, max_retries=1)
+        return AsyncOpenAI(
+            api_key=user.litellm_api_key, base_url=settings.litellm_api_base, max_retries=1
+        )
 
 
 class ModelAdapter(ABC):
@@ -466,6 +491,11 @@ class OpenAIAdapter(ModelAdapter):
             request_params["max_tokens"] = max_tokens
 
         try:
+            # Inject prompt caching breakpoints for eligible models (e.g. Claude).
+            from .prompt_caching import inject_cache_breakpoints
+
+            inject_cache_breakpoints(messages, self.model_name)
+
             logger.debug(
                 f"Sending streaming request to {self.model_name} with {len(messages)} messages"
             )
@@ -486,6 +516,15 @@ class OpenAIAdapter(ModelAdapter):
                         "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
                         "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
                     }
+                    # Capture Anthropic/Bedrock cache metrics when present
+                    for field in (
+                        "cache_creation_input_tokens",
+                        "cache_read_input_tokens",
+                        "cached_tokens",
+                    ):
+                        val = getattr(chunk.usage, field, None)
+                        if val:
+                            self._last_usage[field] = val
 
             logger.debug(f"Streaming complete for {self.model_name}")
 
@@ -521,6 +560,11 @@ class OpenAIAdapter(ModelAdapter):
         request_params["parallel_tool_calls"] = True
 
         try:
+            # Inject prompt caching breakpoints for eligible models (e.g. Claude).
+            from .prompt_caching import inject_cache_breakpoints
+
+            inject_cache_breakpoints(messages, self.model_name)
+
             logger.debug(
                 f"chat_with_tools: {self.model_name}, {len(messages)} messages, {len(tools)} tools"
             )
@@ -534,13 +578,23 @@ class OpenAIAdapter(ModelAdapter):
             usage_data = None
 
             async for chunk in stream:
+                # Capture usage from any chunk (some providers send it
+                # with the final choice, others in a separate empty chunk).
+                if hasattr(chunk, "usage") and chunk.usage:
+                    usage_data = {
+                        "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
+                    }
+                    # Capture Anthropic/Bedrock cache metrics when present
+                    for field in (
+                        "cache_creation_input_tokens",
+                        "cache_read_input_tokens",
+                        "cached_tokens",
+                    ):
+                        val = getattr(chunk.usage, field, None)
+                        if val:
+                            usage_data[field] = val
                 if not chunk.choices:
-                    # Check for usage in final chunk
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        usage_data = {
-                            "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
-                            "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
-                        }
                     continue
 
                 choice = chunk.choices[0]

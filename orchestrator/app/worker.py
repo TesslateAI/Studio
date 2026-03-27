@@ -803,6 +803,11 @@ async def startup(ctx: dict):
     )
     logger.info("[WORKER] ARQ worker started")
 
+    # Load prompt-caching eligible models from LiteLLM
+    from .agent.prompt_caching import refresh_eligible_models
+
+    await refresh_eligible_models()
+
 
 async def shutdown(ctx: dict):
     """Worker shutdown hook — cleanup."""

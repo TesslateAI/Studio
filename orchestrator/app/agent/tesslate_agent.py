@@ -379,10 +379,20 @@ class TesslateAgent(AbstractAgent):
 
                         # Estimate tokens if provider didn't return usage
                         if not tokens_in and not tokens_out:
+
+                            def _extract_text(c):
+                                if isinstance(c, str):
+                                    return c
+                                if isinstance(c, list):
+                                    return " ".join(
+                                        b.get("text", "") for b in c if isinstance(b, dict)
+                                    )
+                                return ""
+
                             msg_text = " ".join(
-                                m.get("content", "")
+                                _extract_text(m.get("content"))
                                 for m in messages
-                                if isinstance(m.get("content"), str)
+                                if m.get("content") is not None
                             )
                             tokens_in = max(1, len(msg_text) // 4)
                             tokens_out = max(1, len(content or "") // 4)
@@ -594,7 +604,8 @@ class TesslateAgent(AbstractAgent):
         project_context["project_id"] = context.get("project_id")
         project_context["container_directory"] = context.get("container_directory")
         user_message = await get_user_message_wrapper(
-            user_request, project_context,
+            user_request,
+            project_context,
             attachments=context.get("attachments"),
         )
 

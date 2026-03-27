@@ -118,6 +118,11 @@ class StreamAgent(AbstractAgent):
                 if provider_cfg and provider_cfg.get("default_headers"):
                     stream_params["extra_headers"] = provider_cfg["default_headers"]
 
+            # Inject prompt caching breakpoints for eligible models (e.g. Claude).
+            from .prompt_caching import inject_cache_breakpoints
+
+            inject_cache_breakpoints(messages, model_id)
+
             stream = await client.chat.completions.create(**stream_params)
 
             # Stream chunks to the frontend
@@ -151,10 +156,18 @@ class StreamAgent(AbstractAgent):
 
                     # Estimate tokens if provider didn't return usage
                     if not tokens_in and not tokens_out:
+
+                        def _extract_text(c):
+                            if isinstance(c, str):
+                                return c
+                            if isinstance(c, list):
+                                return " ".join(b.get("text", "") for b in c if isinstance(b, dict))
+                            return ""
+
                         msg_text = " ".join(
-                            m.get("content", "")
+                            _extract_text(m.get("content"))
                             for m in messages
-                            if isinstance(m.get("content"), str)
+                            if m.get("content") is not None
                         )
                         tokens_in = max(1, len(msg_text) // 4)
                         tokens_out = max(1, len(full_response) // 4)

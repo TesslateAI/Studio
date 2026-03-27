@@ -92,6 +92,7 @@ model_list:
       output_cost_per_token: 0.000025
       max_tokens: 128000
       max_input_tokens: 200000
+      supports_prompt_caching: true
       access_groups: ["internal"]
 
   - model_name: "claude-sonnet-4.6"
@@ -104,6 +105,7 @@ model_list:
       output_cost_per_token: 0.000015
       max_tokens: 64000
       max_input_tokens: 200000
+      supports_prompt_caching: true
       access_groups: ["internal"]
 
   - model_name: "claude-opus-4.5"
@@ -116,6 +118,7 @@ model_list:
       output_cost_per_token: 0.000025
       max_tokens: 128000
       max_input_tokens: 200000
+      supports_prompt_caching: true
       access_groups: ["internal"]
 
   - model_name: "claude-sonnet-4.5"
@@ -128,6 +131,7 @@ model_list:
       output_cost_per_token: 0.000015
       max_tokens: 64000
       max_input_tokens: 200000
+      supports_prompt_caching: true
       access_groups: ["internal"]
 
   - model_name: "claude-haiku-4.5"
@@ -140,6 +144,7 @@ model_list:
       output_cost_per_token: 0.000005
       max_tokens: 64000
       max_input_tokens: 200000
+      supports_prompt_caching: true
       access_groups: ["internal"]
 
   # --- DeepSeek ---

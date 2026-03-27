@@ -594,6 +594,11 @@ async def startup():
     else:
         logger.info("Skipping base cache manager initialization (Kubernetes mode)")
 
+    # Load prompt-caching eligible models from LiteLLM (non-blocking)
+    from .agent.prompt_caching import refresh_eligible_models
+
+    asyncio.create_task(refresh_eligible_models())
+
     # Eagerly build btrfs templates for featured bases on startup (K8s only)
     if (
         settings.is_kubernetes_mode
