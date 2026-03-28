@@ -957,7 +957,7 @@ export default function Dashboard() {
                     slug: project.slug,
                     compute_tier: project.compute_tier,
                   }}
-                  onOpen={() => navigate(`/project/${project.slug}/builder`)}
+                  onOpen={() => navigate(`/project/${project.slug}`)}
                   onDelete={() => deleteProject(project.id)}
                   onStatusChange={(status) => updateProjectStatus(project.id, status)}
                   onFork={() => handleForkProject(project.id)}
@@ -997,7 +997,7 @@ export default function Dashboard() {
                         ? 'bg-[var(--surface)]'
                         : 'hover:bg-[var(--surface)]'
                     } ${deletingProjectIds.has(project.id) ? 'opacity-40 pointer-events-none' : ''}`}
-                    onClick={() => navigate(`/project/${project.slug}/builder`)}
+                    onClick={() => navigate(`/project/${project.slug}`)}
                   >
                     {/* Checkbox */}
                     <div className="w-8 flex-shrink-0 flex items-center">

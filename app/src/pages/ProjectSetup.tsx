@@ -106,11 +106,11 @@ export default function ProjectSetup() {
 
       // Navigate to builder with the primary container
       if (result.primary_container_id) {
-        navigate(`/project/${slug}/builder?container=${result.primary_container_id}`);
+        navigate(`/project/${slug}?container=${result.primary_container_id}`);
       } else if (result.container_ids.length > 0) {
-        navigate(`/project/${slug}/builder?container=${result.container_ids[0]}`);
+        navigate(`/project/${slug}?container=${result.container_ids[0]}`);
       } else {
-        navigate(`/project/${slug}/builder`);
+        navigate(`/project/${slug}`);
       }
     } catch (error) {
       console.error('Save failed:', error);
@@ -132,9 +132,9 @@ export default function ProjectSetup() {
         primaryApp: 'workspace',
       };
       await setupApi.saveConfig(slug, defaultConfig);
-      navigate(`/project/${slug}/builder`);
+      navigate(`/project/${slug}`);
     } catch {
-      navigate(`/project/${slug}/builder`);
+      navigate(`/project/${slug}`);
     } finally {
       setIsSaving(false);
     }

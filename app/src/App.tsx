@@ -15,9 +15,8 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
-import Project from './pages/Project';
+import ProjectPage from './pages/ProjectPage';
 import ProjectSetup from './pages/ProjectSetup';
-import { ProjectGraphCanvas } from './pages/ProjectGraphCanvas';
 import Marketplace from './pages/Marketplace';
 import MarketplaceDetail from './pages/MarketplaceDetail';
 import MarketplaceAuthor from './pages/MarketplaceAuthor';
@@ -159,18 +158,44 @@ function AppContent() {
           success: {
             duration: 3000,
             icon: (
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--status-success)', flexShrink: 0 }} />
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'var(--status-success)',
+                  flexShrink: 0,
+                }}
+              />
             ),
           },
           error: {
             duration: 5000,
             icon: (
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--status-error)', flexShrink: 0 }} />
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'var(--status-error)',
+                  flexShrink: 0,
+                }}
+              />
             ),
           },
           loading: {
             icon: (
-              <span style={{ width: 14, height: 14, border: '2px solid var(--border)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+              <span
+                style={{
+                  width: 14,
+                  height: 14,
+                  border: '2px solid var(--border)',
+                  borderTopColor: 'var(--primary)',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite',
+                  flexShrink: 0,
+                }}
+              />
             ),
           },
         }}
@@ -191,7 +216,12 @@ function AppContent() {
                     aria-label="Dismiss notification"
                   >
                     <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-                      <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      <path
+                        d="M3 3L11 11M11 3L3 11"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                      />
                     </svg>
                   </button>
                 )}
@@ -273,7 +303,7 @@ function AppContent() {
           path="/project/:slug"
           element={
             <PrivateRoute>
-              <ProjectGraphCanvas />
+              <ProjectPage />
             </PrivateRoute>
           }
         />
@@ -281,7 +311,7 @@ function AppContent() {
           path="/project/:slug/builder"
           element={
             <PrivateRoute>
-              <Project />
+              <ProjectPage />
             </PrivateRoute>
           }
         />

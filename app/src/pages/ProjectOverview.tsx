@@ -139,7 +139,7 @@ export default function ProjectOverview() {
   ];
 
   const handleOpenBuilder = () => {
-    navigate(`/project/${slug}/builder`);
+    navigate(`/project/${slug}`);
   };
 
   return (
