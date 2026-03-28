@@ -2,12 +2,17 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/sys/unix"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
@@ -46,18 +51,35 @@ func (ns *NodeServer) NodePublishVolume(
 	targetPath := req.GetTargetPath()
 	sourcePath := filepath.Join(ns.driver.poolPath, "volumes", volID)
 
-	// Verify the source subvolume exists. If missing, attempt cross-node
-	// restore from CAS store (handles node failure recovery).
+	// Verify the source subvolume exists. If missing, ask the Hub to
+	// materialize it (peer-transfer or CAS restore). Falls back to
+	// direct CAS restore if Hub is unreachable.
 	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-		klog.Warningf("Volume %q not found locally, attempting restore from CAS", volID)
-		if ns.driver.syncer != nil {
+		klog.Warningf("Volume %q not found locally, requesting Hub materialization", volID)
+		materialized := false
+
+		// Try Hub EnsureCached (preferred — uses fastest path available)
+		if ns.driver.hubAddress != "" {
+			if hubErr := ns.ensureCachedViaHub(ctx, volID); hubErr != nil {
+				klog.Warningf("Hub EnsureCached for volume %q failed: %v, falling back to CAS", volID, hubErr)
+			} else if _, statErr := os.Stat(sourcePath); statErr == nil {
+				klog.Infof("Volume %q materialized via Hub successfully", volID)
+				materialized = true
+			}
+		}
+
+		// Fallback: direct CAS restore
+		if !materialized && ns.driver.syncer != nil {
 			if restoreErr := ns.driver.syncer.RestoreVolume(ctx, volID); restoreErr != nil {
 				klog.Errorf("Failed to restore volume %q from CAS: %v", volID, restoreErr)
-				return nil, status.Errorf(codes.NotFound, "volume %q not found locally and CAS restore failed: %v", volID, restoreErr)
+				return nil, status.Errorf(codes.NotFound, "volume %q not found locally and restore failed: %v", volID, restoreErr)
 			}
 			klog.Infof("Volume %q restored from CAS successfully", volID)
-		} else {
-			return nil, status.Errorf(codes.NotFound, "volume %q not found at %s", volID, sourcePath)
+			materialized = true
+		}
+
+		if !materialized {
+			return nil, status.Errorf(codes.NotFound, "volume %q not found at %s and no restore path available", volID, sourcePath)
 		}
 	} else if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to stat source path: %v", err)
@@ -250,3 +272,46 @@ func (ns *NodeServer) NodeUnstageVolume(
 ) (*csi.NodeUnstageVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "NodeUnstageVolume is not supported")
 }
+
+// ensureCachedViaHub calls the Hub's EnsureCached RPC to materialize a
+// missing volume on this node. Uses the same JSON codec as all Hub RPCs.
+// Connection is plaintext — cluster-internal, protected by NetworkPolicy.
+func (ns *NodeServer) ensureCachedViaHub(ctx context.Context, volumeID string) error {
+	conn, err := grpc.NewClient(
+		ns.driver.hubAddress,
+		grpc.WithTransportCredentials(hubPlaintextCreds()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(hubJSONCodec{})),
+	)
+	if err != nil {
+		return fmt.Errorf("connect to hub %s: %w", ns.driver.hubAddress, err)
+	}
+	defer conn.Close()
+
+	// Build request: this node only — Hub will materialize here
+	reqData := map[string]interface{}{
+		"volume_id":       volumeID,
+		"candidate_nodes": []string{ns.driver.nodeID},
+	}
+
+	var resp map[string]interface{}
+	err = conn.Invoke(ctx, "/volumehub.VolumeHub/EnsureCached", reqData, &resp)
+	if err != nil {
+		return fmt.Errorf("EnsureCached RPC: %w", err)
+	}
+
+	klog.Infof("Hub EnsureCached returned node=%v for volume %s", resp["node_name"], volumeID)
+	return nil
+}
+
+// hubPlaintextCreds returns plaintext transport credentials for
+// cluster-internal Hub communication (NetworkPolicy protected).
+func hubPlaintextCreds() credentials.TransportCredentials {
+	return insecure.NewCredentials()
+}
+
+// hubJSONCodec implements grpc encoding.Codec for Hub JSON communication.
+type hubJSONCodec struct{}
+
+func (hubJSONCodec) Marshal(v interface{}) ([]byte, error)     { return json.Marshal(v) }
+func (hubJSONCodec) Unmarshal(data []byte, v interface{}) error { return json.Unmarshal(data, v) }
+func (hubJSONCodec) Name() string                              { return "json" }

@@ -193,6 +193,8 @@ type (
 		VolumeID       string   `json:"volume_id"`
 		CandidateNodes []string `json:"candidate_nodes,omitempty"`
 		HintNode       string   `json:"hint_node,omitempty"` // deprecated, backward compat
+		BudgetCPU      int64    `json:"budget_cpu,omitempty"`  // millicores needed (0 = skip headroom check)
+		BudgetMem      int64    `json:"budget_mem,omitempty"`  // bytes needed (0 = skip headroom check)
 	}
 	EnsureCachedResponse struct {
 		NodeName string `json:"node_name"`
@@ -245,6 +247,11 @@ type (
 		State          string `json:"state"` // "cached", "restoring", "unavailable"
 	}
 
+	TransferOwnershipRequest struct {
+		VolumeID string `json:"volume_id"`
+		NewNode  string `json:"new_node"`
+	}
+
 	Empty struct{}
 )
 
@@ -273,6 +280,7 @@ func registerVolumeHubServer(srv *grpc.Server, s *Server) {
 			{MethodName: "ListSnapshots", Handler: s.handleListSnapshots},
 			{MethodName: "RestoreToSnapshot", Handler: s.handleRestoreToSnapshot},
 			{MethodName: "ResolveVolume", Handler: s.handleResolveVolume},
+			{MethodName: "TransferOwnership", Handler: s.handleTransferOwnership},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -362,6 +370,27 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		}
 	}
 
+	// 2b. Filter candidates by resource headroom if a budget was provided.
+	if req.BudgetCPU > 0 || req.BudgetMem > 0 {
+		candidateNames := make([]string, 0, len(candidateSet))
+		for n := range candidateSet {
+			candidateNames = append(candidateNames, n)
+		}
+		withRoom := s.registry.NodesWithHeadroom(candidateNames, req.BudgetCPU, req.BudgetMem)
+		if len(withRoom) == 0 {
+			return nil, status.Errorf(codes.ResourceExhausted,
+				"no candidate node has enough resources (need %dm CPU, %d bytes mem)",
+				req.BudgetCPU, req.BudgetMem)
+		}
+		// Rebuild candidateSet to only include nodes with headroom.
+		candidateSet = make(map[string]struct{}, len(withRoom))
+		for _, n := range withRoom {
+			candidateSet[n] = struct{}{}
+		}
+		klog.V(2).Infof("EnsureCached: budget filter reduced candidates to %d nodes (need %dm CPU, %d bytes mem)",
+			len(candidateSet), req.BudgetCPU, req.BudgetMem)
+	}
+
 	// 3. Get cached nodes from registry, filter to live-only.
 	//    Proactively clean stale entries.
 	cachedNodes := s.registry.GetCachedNodes(req.VolumeID)
@@ -381,6 +410,12 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 	volPath := fmt.Sprintf("volumes/%s", req.VolumeID)
 	for _, n := range liveCached {
 		if _, ok := candidateSet[n]; !ok {
+			continue
+		}
+		// Skip nodes where the volume is being evicted — the subvolume
+		// may exist momentarily but will be deleted.
+		if s.registry.IsEvicting(req.VolumeID, n) {
+			klog.V(2).Infof("EnsureCached: skipping %s for volume %s — eviction in progress", n, req.VolumeID)
 			continue
 		}
 		// Quick verification via NodeOps SubvolumeExists (~5ms).
@@ -1058,6 +1093,39 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// TransferOwnership — explicit ownership transfer (orchestrator-triggered)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleTransferOwnership(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req TransferOwnershipRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if req.NewNode == "" {
+		return nil, status.Error(codes.InvalidArgument, "new_node is required")
+	}
+
+	// Validate the volume is cached on the new node
+	if !s.registry.IsCached(req.VolumeID, req.NewNode) {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"volume %s is not cached on node %s — cannot transfer ownership",
+			req.VolumeID, req.NewNode)
+	}
+
+	oldOwner := s.registry.GetOwner(req.VolumeID)
+	s.registry.SetOwner(req.VolumeID, req.NewNode)
+
+	klog.Infof("TransferOwnership: volume %s ownership transferred %s → %s",
+		req.VolumeID, oldOwner, req.NewNode)
+
+	return &Empty{}, nil
+}
+
 // Internal helpers
 // ---------------------------------------------------------------------------
 

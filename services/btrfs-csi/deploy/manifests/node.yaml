@@ -87,6 +87,7 @@ spec:
             - "--pool-path=/mnt/tesslate-pool"
             - "--mode=node"
             - "--nodeops-port=9741"
+            - "--hub-address=tesslate-volume-hub.kube-system.svc:9750"
           lifecycle:
             preStop:
               exec:

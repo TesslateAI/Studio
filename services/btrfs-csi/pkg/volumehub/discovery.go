@@ -148,6 +148,21 @@ func (r *NodeResolver) parseEndpoints(ep *endpointsResponse) map[string]string {
 	return newMap
 }
 
+// APIHost returns the K8s API server URL (for sharing with ResourceWatcher).
+func (r *NodeResolver) APIHost() string { return r.apiHost }
+
+// Token returns the service account token (for sharing with ResourceWatcher).
+func (r *NodeResolver) Token() string { return r.token }
+
+// HTTPClient returns a TLS-configured HTTP client suitable for K8s API calls.
+// Shares the same TLS transport (cluster CA) as the NodeResolver.
+func (r *NodeResolver) HTTPClient() *http.Client {
+	return &http.Client{
+		Timeout:   15 * time.Second,
+		Transport: r.httpClient.Transport,
+	}
+}
+
 // Resolve returns the gRPC address (podIP:port) for the given K8s node name.
 // Returns empty string if unknown.
 func (r *NodeResolver) Resolve(nodeName string) string {

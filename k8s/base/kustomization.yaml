@@ -34,6 +34,9 @@ resources:
   - database/postgres-service.yaml
   - database/postgres-pvc.yaml
 
+  # PriorityClasses (cluster-scoped, apply manually):
+  #   kubectl apply -f k8s/base/core/priority-classes.yaml
+
   # Compute Pool (ephemeral Tier 1 pods)
   # All compute-pool resources (namespace, network-policy, resource-quota) are
   # excluded from kustomize because the top-level `namespace: tesslate` renames

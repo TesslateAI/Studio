@@ -62,11 +62,12 @@ type Driver struct {
 	defaultQuota    int64 // Default per-volume storage quota in bytes (0 = unlimited)
 
 	// Node-mode subsystems (nil in hub mode).
-	btrfs    *btrfs.Manager
-	store    objstore.ObjectStorage
-	casStore *cas.Store
-	syncer   *bsync.Daemon
-	tmplMgr  *template.Manager
+	btrfs          *btrfs.Manager
+	store          objstore.ObjectStorage
+	casStore       *cas.Store
+	syncer         *bsync.Daemon
+	tmplMgr        *template.Manager
+	hubAddress     string // VolumeHub gRPC address for safety-net materialization (node mode)
 
 	// Controller-mode subsystem (nil in node mode).
 	nodeOps nodeops.NodeOps
@@ -123,6 +124,7 @@ func WithHubGRPCPort(grpcPort int) Option {
 	}
 }
 
+func WithHubAddress(addr string) Option        { return func(d *Driver) { d.hubAddress = addr } }
 func WithOrchestratorURL(url string) Option { return func(d *Driver) { d.orchestratorURL = url } }
 func WithDrainPort(port int) Option         { return func(d *Driver) { d.drainPort = port } }
 func WithDefaultQuota(bytes int64) Option   { return func(d *Driver) { d.defaultQuota = bytes } }
@@ -361,6 +363,22 @@ func (d *Driver) runHub(ctx context.Context) error {
 			klog.Warningf("RebuildRegistry after watch event: %v", rebuildErr)
 		}
 	})
+
+	// Start ResourceWatcher — polls K8s node/pod resources every 30s and
+	// updates per-node headroom in the registry. Shares TLS transport.
+	resWatcher := volumehub.NewResourceWatcher(
+		registry,
+		resolver.HTTPClient(),
+		resolver.APIHost(),
+		resolver.Token(),
+		30*time.Second,
+	)
+	go resWatcher.Start(ctx)
+
+	// Start CacheEvictor — periodically evicts stale cached volumes
+	// from non-owner nodes after a grace period.
+	evictor := volumehub.NewCacheEvictor(registry, nodeClientFactory)
+	go evictor.Start(ctx)
 
 	go func() {
 		addr := fmt.Sprintf(":%d", d.hubGRPCPort)

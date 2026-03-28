@@ -1146,11 +1146,14 @@ def create_v2_project_pv(
 
     The btrfs CSI driver's NodePublishVolume resolves volume_handle to
     /mnt/tesslate-pool/volumes/{volume_handle} and bind-mounts it into the pod.
-    Node affinity ensures the scheduler places pods on the correct node.
+    CSI NodePublishVolume materializes the volume on demand if missing
+    (safety net via Hub.EnsureCached). No hard nodeAffinity — pods use
+    soft affinity instead, allowing the scheduler to place elsewhere when
+    the preferred node is full.
 
     Args:
         volume_id: btrfs subvolume ID (used as CSI volume handle)
-        node_name: Node where the subvolume lives
+        node_name: Node where the subvolume lives (unused — kept for API compat)
         project_id: Project UUID
         size: Capacity (informational — btrfs has no per-subvolume quota)
     """
@@ -1171,21 +1174,6 @@ def create_v2_project_pv(
             csi=client.V1CSIPersistentVolumeSource(
                 driver="btrfs.csi.tesslate.io",
                 volume_handle=volume_id,
-            ),
-            node_affinity=client.V1VolumeNodeAffinity(
-                required=client.V1NodeSelector(
-                    node_selector_terms=[
-                        client.V1NodeSelectorTerm(
-                            match_expressions=[
-                                client.V1NodeSelectorRequirement(
-                                    key="kubernetes.io/hostname",
-                                    operator="In",
-                                    values=[node_name],
-                                )
-                            ]
-                        )
-                    ]
-                )
             ),
         ),
     )
@@ -1232,9 +1220,12 @@ def create_v2_service_pv(
 ) -> client.V1PersistentVolume:
     """Create a static PV for a service container's btrfs subvolume.
 
+    No hard nodeAffinity — CSI NodePublishVolume materializes the volume
+    on demand. Pods use soft affinity for the preferred node.
+
     Args:
         service_volume_id: btrfs service subvolume ID
-        node_name: Node where the subvolume lives
+        node_name: Node where the subvolume lives (unused — kept for API compat)
         project_id: Project UUID
         service_dir: Sanitized service directory name (for labeling)
         size: Capacity (informational)
@@ -1257,21 +1248,6 @@ def create_v2_service_pv(
             csi=client.V1CSIPersistentVolumeSource(
                 driver="btrfs.csi.tesslate.io",
                 volume_handle=service_volume_id,
-            ),
-            node_affinity=client.V1VolumeNodeAffinity(
-                required=client.V1NodeSelector(
-                    node_selector_terms=[
-                        client.V1NodeSelectorTerm(
-                            match_expressions=[
-                                client.V1NodeSelectorRequirement(
-                                    key="kubernetes.io/hostname",
-                                    operator="In",
-                                    values=[node_name],
-                                )
-                            ]
-                        )
-                    ]
-                )
             ),
         ),
     )
@@ -1326,13 +1302,14 @@ def create_v2_dev_deployment(
     image_pull_policy: str = "IfNotPresent",
     image_pull_secret: str = None,
     extra_env: dict[str, str] | None = None,
+    preferred_node: str | None = None,
 ) -> client.V1Deployment:
     """
     Create a v2 dev container deployment using CSI-backed PVC volumes.
 
-    Uses a PVC (bound to a static PV with CSI node affinity) instead of
-    hostPath + nodeName. The scheduler places pods on the correct node
-    via the PV's node affinity — no explicit nodeName needed.
+    Pods use soft affinity for the preferred node (where volume is cached).
+    If the preferred node is full, the scheduler can place elsewhere —
+    CSI NodePublishVolume materializes the volume on demand.
 
     Args:
         namespace: Kubernetes namespace
@@ -1432,6 +1409,7 @@ def create_v2_dev_deployment(
 
     # Pod spec — PVC volume, scheduler uses PV node affinity for placement
     pod_spec = client.V1PodSpec(
+        priority_class_name="tesslate-environment",
         containers=[dev_container],
         automount_service_account_token=False,
         volumes=[
@@ -1449,6 +1427,28 @@ def create_v2_dev_deployment(
 
     if image_pull_secret:
         pod_spec.image_pull_secrets = [client.V1LocalObjectReference(name=image_pull_secret)]
+
+    # Soft affinity: prefer the node where the volume is cached, but allow
+    # the scheduler to place elsewhere if the preferred node is full.
+    if preferred_node:
+        pod_spec.affinity = client.V1Affinity(
+            node_affinity=client.V1NodeAffinity(
+                preferred_during_scheduling_ignored_during_execution=[
+                    client.V1PreferredSchedulingTerm(
+                        weight=80,
+                        preference=client.V1NodeSelectorTerm(
+                            match_expressions=[
+                                client.V1NodeSelectorRequirement(
+                                    key="kubernetes.io/hostname",
+                                    operator="In",
+                                    values=[preferred_node],
+                                )
+                            ]
+                        ),
+                    )
+                ]
+            )
+        )
 
     return client.V1Deployment(
         metadata=client.V1ObjectMeta(name=deployment_name, namespace=namespace, labels=labels),
@@ -1476,6 +1476,8 @@ def create_v2_service_deployment(
     service_pvc_name: str | None = None,
     command: list[str] | None = None,
     health_check: dict | None = None,
+    service_slug: str | None = None,
+    preferred_node: str | None = None,
 ) -> client.V1Deployment:
     """
     Create a v2 service container deployment using CSI-backed PVC volumes.
@@ -1536,6 +1538,13 @@ def create_v2_service_deployment(
             )
         )
 
+    # Resolve resource profile from service definition
+    _svc_def = None
+    if service_slug:
+        from app.services.service_definitions import get_service
+
+        _svc_def = get_service(service_slug)
+
     container_spec = client.V1Container(
         name="service",
         image=image,
@@ -1543,8 +1552,14 @@ def create_v2_service_deployment(
         ports=[client.V1ContainerPort(container_port=port, name="service")],
         volume_mounts=volume_mounts if volume_mounts else None,
         resources=client.V1ResourceRequirements(
-            requests={"memory": "256Mi", "cpu": "50m"},
-            limits={"memory": "512Mi", "cpu": "500m"},
+            requests={
+                "cpu": _svc_def.cpu_request if _svc_def else "50m",
+                "memory": _svc_def.mem_request if _svc_def else "256Mi",
+            },
+            limits={
+                "cpu": _svc_def.cpu_limit if _svc_def else "500m",
+                "memory": _svc_def.mem_limit if _svc_def else "512Mi",
+            },
         ),
     )
 
@@ -1579,12 +1594,34 @@ def create_v2_service_deployment(
             failure_threshold=3,
         )
 
-    # Pod spec — scheduler uses PV node affinity for placement
+    # Pod spec — soft affinity for preferred node, CSI materializes volume on demand
     pod_spec = client.V1PodSpec(
+        priority_class_name="tesslate-environment",
         containers=[container_spec],
         automount_service_account_token=False,
         volumes=volume_specs if volume_specs else None,
     )
+
+    # Soft affinity: prefer the node where the volume is cached
+    if preferred_node:
+        pod_spec.affinity = client.V1Affinity(
+            node_affinity=client.V1NodeAffinity(
+                preferred_during_scheduling_ignored_during_execution=[
+                    client.V1PreferredSchedulingTerm(
+                        weight=80,
+                        preference=client.V1NodeSelectorTerm(
+                            match_expressions=[
+                                client.V1NodeSelectorRequirement(
+                                    key="kubernetes.io/hostname",
+                                    operator="In",
+                                    values=[preferred_node],
+                                )
+                            ]
+                        ),
+                    )
+                ]
+            )
+        )
 
     return client.V1Deployment(
         metadata=client.V1ObjectMeta(name=deployment_name, namespace=namespace, labels=labels),

@@ -874,14 +874,10 @@ class TestCreateV2ProjectPV:
         pv = self._make()
         assert pv.spec.storage_class_name == ""
 
-    def test_node_affinity(self):
+    def test_no_hard_node_affinity(self):
+        """PV has no hard nodeAffinity — CSI materializes volumes on demand."""
         pv = self._make(node_name="worker-1")
-        terms = pv.spec.node_affinity.required.node_selector_terms
-        assert len(terms) == 1
-        expr = terms[0].match_expressions[0]
-        assert expr.key == "kubernetes.io/hostname"
-        assert expr.operator == "In"
-        assert expr.values == ["worker-1"]
+        assert pv.spec.node_affinity is None
 
     def test_labels(self):
         pid = uuid4()
@@ -991,11 +987,10 @@ class TestCreateV2ServicePV:
         pv = self._make(project_id=pid)
         assert pv.metadata.labels["tesslate.io/project-id"] == str(pid)
 
-    def test_node_affinity(self):
+    def test_no_hard_node_affinity(self):
+        """Service PV has no hard nodeAffinity — CSI materializes on demand."""
         pv = self._make(node_name="worker-2")
-        terms = pv.spec.node_affinity.required.node_selector_terms
-        expr = terms[0].match_expressions[0]
-        assert expr.values == ["worker-2"]
+        assert pv.spec.node_affinity is None
 
     def test_reclaim_policy(self):
         pv = self._make()

@@ -20,6 +20,11 @@ import grpc.aio
 
 logger = logging.getLogger(__name__)
 
+
+class NodeResourcesExhausted(Exception):
+    """Raised when no node has enough resources for a placement unit."""
+
+
 _MAX_MESSAGE_SIZE = 64 * 1024 * 1024  # 64 MiB
 
 
@@ -138,14 +143,17 @@ class HubClient:
         volume_id: str,
         candidate_nodes: list[str] | None = None,
         *,
+        budget_cpu: int = 0,
+        budget_mem: int = 0,
         timeout: float = 120.0,
     ) -> str:
         """Ensure volume is cached on a live, schedulable compute node.
 
-        The Hub validates candidates against its live node set and never
-        returns a dead node. If the volume is already cached on a live
-        candidate, it returns immediately (fast path). Otherwise it
-        peer-transfers or restores from CAS onto the best candidate.
+        The Hub validates candidates against its live node set, optionally
+        filters by resource headroom, and never returns a dead node. If the
+        volume is already cached on a qualifying candidate, it returns
+        immediately (fast path). Otherwise it peer-transfers or restores
+        from CAS onto the best candidate.
 
         Args:
             volume_id: Volume to cache.
@@ -153,6 +161,8 @@ class HubClient:
                 The Hub intersects this with its own live set and picks
                 the best one. Pass ``None`` to let the Hub choose from
                 all live nodes.
+            budget_cpu: CPU millicores needed for the placement unit (0 = skip check).
+            budget_mem: Memory bytes needed for the placement unit (0 = skip check).
             timeout: gRPC deadline in seconds (default 120 s to cover
                      network transfers).
 
@@ -162,7 +172,18 @@ class HubClient:
         request: dict = {"volume_id": volume_id}
         if candidate_nodes is not None:
             request["candidate_nodes"] = candidate_nodes
-        resp = await self._call("EnsureCached", request, timeout=timeout)
+        if budget_cpu > 0:
+            request["budget_cpu"] = budget_cpu
+        if budget_mem > 0:
+            request["budget_mem"] = budget_mem
+        try:
+            resp = await self._call("EnsureCached", request, timeout=timeout)
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
+                raise NodeResourcesExhausted(
+                    f"No node has enough resources for volume {volume_id}: {e.details()}"
+                ) from e
+            raise
         node_name = resp["node_name"]
         logger.info(
             "EnsureCached succeeded: volume_id=%s node=%s (candidates=%s)",
@@ -171,6 +192,35 @@ class HubClient:
             candidate_nodes,
         )
         return node_name
+
+    async def transfer_ownership(
+        self,
+        volume_id: str,
+        new_node: str,
+        *,
+        timeout: float = 30.0,
+    ) -> None:
+        """Transfer volume ownership to a new node.
+
+        The Hub validates the volume is cached on the new node before
+        transferring. Orchestrator should call this after pods are
+        healthy on the new node.
+
+        Args:
+            volume_id: Volume to transfer.
+            new_node: Node to become the new owner.
+            timeout: gRPC deadline in seconds.
+        """
+        await self._call(
+            "TransferOwnership",
+            {"volume_id": volume_id, "new_node": new_node},
+            timeout=timeout,
+        )
+        logger.info(
+            "TransferOwnership succeeded: volume_id=%s new_node=%s",
+            volume_id,
+            new_node,
+        )
 
     async def trigger_sync(
         self,

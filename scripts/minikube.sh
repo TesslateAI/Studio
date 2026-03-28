@@ -58,6 +58,7 @@ NAMESPACE="tesslate"
 # Configurable via env vars (e.g., MINIKUBE_DRIVER=docker, MINIKUBE_MEMORY=6144)
 MINIKUBE_CPUS="${MINIKUBE_CPUS:-4}"
 MINIKUBE_MEMORY="${MINIKUBE_MEMORY:-8192}"
+MINIKUBE_NODES="${MINIKUBE_NODES:-1}"
 # MINIKUBE_DRIVER — leave unset to auto-detect (OrbStack, Docker Desktop, etc.)
 
 # Service short name -> K8s deployment name
@@ -279,9 +280,15 @@ cmd_start() {
     fi
 
     info "Starting minikube cluster..."
+    local nodes_flag=""
+    if [[ "$MINIKUBE_NODES" -gt 1 ]]; then
+      nodes_flag="--nodes=$MINIKUBE_NODES"
+    fi
+
     minikube start \
       -p "$PROFILE" \
       $driver_flag \
+      $nodes_flag \
       --cpus="$MINIKUBE_CPUS" \
       --memory="$MINIKUBE_MEMORY" \
       --disk-size=40g \
@@ -305,9 +312,10 @@ cmd_start() {
   # Each layer is a standalone kustomization — no inline YAML or patching.
   # Order matters: MinIO must be ready before CSI (CSI syncs to MinIO on startup).
 
-  # 1. Cluster-scoped prereqs (StorageClass + VolumeSnapshot CRDs)
+  # 1. Cluster-scoped prereqs (StorageClass + VolumeSnapshot CRDs + PriorityClasses)
   header "Applying cluster prereqs"
   kubectl apply -f k8s/overlays/minikube/storage-class.yaml
+  kubectl apply -f k8s/base/core/priority-classes.yaml
   kubectl apply -k k8s/overlays/minikube/snapshot-crds --server-side 2>/dev/null \
     || kubectl apply -k k8s/overlays/minikube/snapshot-crds
 

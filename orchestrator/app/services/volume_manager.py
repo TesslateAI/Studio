@@ -81,13 +81,24 @@ class VolumeManager:
         await self._hub.delete_volume(volume_id)
         logger.info("[VOLUME] Deleted volume %s", volume_id)
 
-    async def ensure_cached(self, volume_id: str, candidate_nodes: list[str] | None = None) -> str:
+    async def ensure_cached(
+        self,
+        volume_id: str,
+        candidate_nodes: list[str] | None = None,
+        budget_cpu: int = 0,
+        budget_mem: int = 0,
+    ) -> str:
         """Ensure volume is cached on a live, schedulable compute node.
 
-        The Hub validates candidates against its live node set, picks the
-        best one, and never returns a dead node.
+        The Hub validates candidates against its live node set, filters by
+        resource headroom if budget is provided, and picks the best one.
         """
-        node_name = await self._hub.ensure_cached(volume_id, candidate_nodes=candidate_nodes)
+        node_name = await self._hub.ensure_cached(
+            volume_id,
+            candidate_nodes=candidate_nodes,
+            budget_cpu=budget_cpu,
+            budget_mem=budget_mem,
+        )
         logger.info(
             "[VOLUME] Volume %s cached on node %s (candidates=%s)",
             volume_id,
@@ -95,6 +106,15 @@ class VolumeManager:
             candidate_nodes,
         )
         return node_name
+
+    async def transfer_ownership(self, volume_id: str, new_node: str) -> None:
+        """Transfer volume ownership to a new node.
+
+        Call after pods are healthy on the new node. Hub validates the
+        volume is cached there before transferring.
+        """
+        await self._hub.transfer_ownership(volume_id, new_node)
+        logger.info("[VOLUME] Ownership transferred: volume %s → node %s", volume_id, new_node)
 
     async def trigger_sync(self, volume_id: str) -> None:
         """Trigger S3 sync on the node that owns the volume.

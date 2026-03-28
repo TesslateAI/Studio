@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -52,6 +53,80 @@ def resolve_k8s_container_dir(container) -> str:
         # Root directory (".") → use container UUID prefix as stable identifier
         return _sanitize_k8s_name(str(container.id).replace("-", "")[:12])
     return sanitized
+
+
+def _parse_cpu_millicores(cpu_str: str) -> int:
+    """Parse K8s CPU string (e.g. '1930m', '2', '500m') to millicores."""
+    cpu_str = str(cpu_str).strip()
+    if not cpu_str or cpu_str == "0":
+        return 0
+    if cpu_str.endswith("m"):
+        return int(float(cpu_str[:-1]))
+    return int(float(cpu_str) * 1000)
+
+
+def _parse_mem_mib(mem_str: str) -> int:
+    """Parse K8s memory string (e.g. '512Mi', '2Gi', '1024') to MiB."""
+    mem_str = str(mem_str).strip()
+    if not mem_str or mem_str == "0":
+        return 0
+    if mem_str.endswith("Gi"):
+        return int(float(mem_str[:-2]) * 1024)
+    if mem_str.endswith("Mi"):
+        return int(float(mem_str[:-2]))
+    if mem_str.endswith("Ki"):
+        return max(1, int(float(mem_str[:-2]) / 1024))
+    return max(1, int(float(mem_str) / (1024 * 1024)))
+
+
+# Default resource requests for dev (base) containers.
+_DEV_CONTAINER_CPU_REQUEST = "50m"
+_DEV_CONTAINER_MEM_REQUEST = "256Mi"
+
+# Reserved headroom for ephemeral pods (terminal, one-shot commands).
+_EPHEMERAL_HEADROOM_CPU = "100m"
+_EPHEMERAL_HEADROOM_MEM = "512Mi"
+
+
+@dataclass(frozen=True, slots=True)
+class PlacementBudget:
+    """Total resource budget for a placement unit."""
+
+    cpu_millicores: int
+    memory_mib: int
+
+
+def placement_budget(containers: list) -> PlacementBudget:
+    """Calculate total resource budget for a placement unit.
+
+    Sums CPU/memory requests for all containers in the project:
+    - Service containers use profiles from service_definitions.py.
+    - Base (dev) containers use defaults (_DEV_CONTAINER_*).
+    - Ephemeral headroom is always added.
+    """
+    from .service_definitions import get_service
+
+    total_cpu = 0
+    total_mem = 0
+
+    for c in containers:
+        if c.container_type == "service" and c.service_slug:
+            svc_def = get_service(c.service_slug)
+            if svc_def:
+                total_cpu += _parse_cpu_millicores(svc_def.cpu_request)
+                total_mem += _parse_mem_mib(svc_def.mem_request)
+            else:
+                total_cpu += _parse_cpu_millicores(_DEV_CONTAINER_CPU_REQUEST)
+                total_mem += _parse_mem_mib(_DEV_CONTAINER_MEM_REQUEST)
+        else:
+            total_cpu += _parse_cpu_millicores(_DEV_CONTAINER_CPU_REQUEST)
+            total_mem += _parse_mem_mib(_DEV_CONTAINER_MEM_REQUEST)
+
+    # Always reserve ephemeral headroom
+    total_cpu += _parse_cpu_millicores(_EPHEMERAL_HEADROOM_CPU)
+    total_mem += _parse_mem_mib(_EPHEMERAL_HEADROOM_MEM)
+
+    return PlacementBudget(cpu_millicores=total_cpu, memory_mib=total_mem)
 
 
 class ComputeQuotaExceeded(Exception):
@@ -261,28 +336,11 @@ class ComputeManager:
         try:
             existing_pv = await asyncio.to_thread(v1.read_persistent_volume, pv_name)
             pv_exists = True
-            # If PV exists but references a different node, delete and recreate
-            terms = (
-                existing_pv.spec.node_affinity
-                and existing_pv.spec.node_affinity.required
-                and existing_pv.spec.node_affinity.required.node_selector_terms
-            ) or []
-            current_node = None
-            for term in terms:
-                for expr in term.match_expressions or []:
-                    if expr.key == "kubernetes.io/hostname" and expr.values:
-                        current_node = expr.values[0]
             pv_phase = (existing_pv.status.phase or "") if existing_pv.status else ""
-            if current_node != node_name or pv_phase == "Released":
+            if pv_phase == "Released":
                 await asyncio.to_thread(v1.delete_persistent_volume, pv_name)
                 pv_exists = False
-                logger.info(
-                    "[COMPUTE] Recreating PV %s (node=%s→%s, phase=%s)",
-                    pv_name,
-                    current_node,
-                    node_name,
-                    pv_phase,
-                )
+                logger.info("[COMPUTE] Recreating PV %s (phase=%s)", pv_name, pv_phase)
         except ApiException as exc:
             if exc.status != 404:
                 raise
@@ -308,21 +366,6 @@ class ComputeManager:
                     claim_ref=k8s_client.V1ObjectReference(
                         name=pvc_name,
                         namespace=ns,
-                    ),
-                    node_affinity=k8s_client.V1VolumeNodeAffinity(
-                        required=k8s_client.V1NodeSelector(
-                            node_selector_terms=[
-                                k8s_client.V1NodeSelectorTerm(
-                                    match_expressions=[
-                                        k8s_client.V1NodeSelectorRequirement(
-                                            key="kubernetes.io/hostname",
-                                            operator="In",
-                                            values=[node_name],
-                                        )
-                                    ]
-                                )
-                            ]
-                        )
                     ),
                 ),
             )
@@ -634,6 +677,7 @@ class ComputeManager:
                 },
             ),
             spec=k8s_client.V1PodSpec(
+                priority_class_name="tesslate-ephemeral",
                 restart_policy="Never",
                 active_deadline_seconds=timeout + 30,  # K8s safety net slightly after app timeout
                 termination_grace_period_seconds=5,
@@ -835,20 +879,48 @@ class ComputeManager:
                         {"phase": phase, "message": message, "progress": progress}
                     )
 
-        # 1. Ensure volume is cached on a schedulable compute node.
-        #    The Hub is authoritative for node liveness — we just tell it
-        #    which K8s nodes are schedulable and it picks the best one.
+        # 1. Calculate placement budget for the entire placement unit.
+        budget = placement_budget(containers)
+        logger.info(
+            "[COMPUTE-T2] Placement budget for project %s: %dm CPU, %d MiB mem",
+            project.id,
+            budget.cpu_millicores,
+            budget.memory_mib,
+        )
+
+        # 2. Ensure volume is cached on a schedulable compute node with
+        #    enough headroom for the placement unit.
         vm = get_volume_manager()
         candidate_nodes = await self._get_schedulable_nodes()
         if not candidate_nodes:
             raise RuntimeError("No schedulable compute nodes available")
-        node_name = await vm.ensure_cached(volume_id, candidate_nodes=candidate_nodes)
+        node_name = await vm.ensure_cached(
+            volume_id,
+            candidate_nodes=candidate_nodes,
+            budget_cpu=budget.cpu_millicores,
+            budget_mem=budget.memory_mib * 1024 * 1024,  # MiB → bytes for Hub
+        )
 
+        migrated_from = None  # Track migration for deferred ownership transfer
         if node_name != project.cache_node:
-            project.cache_node = node_name
-            await db.commit()
+            old_node = project.cache_node
+            # If environment is already running on old node, migrate first
+            if old_node and project.compute_tier == "environment":
+                await send_progress("migrating", f"Migrating project to node {node_name}...", 5)
+                await self._migrate_placement_unit(
+                    project,
+                    volume_id,
+                    old_node,
+                    node_name,
+                    user_id,
+                    db,
+                )
+                migrated_from = old_node
+            else:
+                project.cache_node = node_name
+                await db.commit()
 
-        # 2. Separate service and dev containers
+        # 3. Separate service and dev containers
         service_containers = [
             c for c in containers if getattr(c, "container_type", "base") == "service"
         ]
@@ -878,7 +950,7 @@ class ComputeManager:
         if not node_name:
             raise RuntimeError(
                 f"Project {project.id} has no cache_node after ensure_cached. "
-                "Cannot create node-affinity PV."
+                "Cannot create PV without a target node."
             )
         v1 = self._api()
         project_pv = create_v2_project_pv(volume_id, node_name, project.id)
@@ -955,6 +1027,8 @@ class ComputeManager:
                 service_pvc_name=svc_pvc_name,
                 command=service_def.command,
                 health_check=service_def.health_check,
+                service_slug=svc_container.service_slug,
+                preferred_node=node_name,
             )
             await k8s.create_deployment(deployment, namespace)
 
@@ -1033,6 +1107,7 @@ class ComputeManager:
                 image_pull_policy=settings.k8s_image_pull_policy,
                 image_pull_secret=settings.k8s_image_pull_secret or None,
                 extra_env=extra_env,
+                preferred_node=node_name,
             )
             await k8s.create_deployment(deployment, namespace)
 
@@ -1126,6 +1201,24 @@ class ComputeManager:
         project.last_activity = datetime.now(UTC)
         await db.commit()
 
+        # 10. Transfer ownership after pods are healthy (deferred from migration)
+        if migrated_from:
+            try:
+                await vm.transfer_ownership(volume_id, node_name)
+                logger.info(
+                    "[COMPUTE-T2] Ownership transferred: %s → %s (project %s)",
+                    migrated_from,
+                    node_name,
+                    project.id,
+                )
+            except Exception:
+                logger.warning(
+                    "[COMPUTE-T2] Ownership transfer failed for project %s — "
+                    "pods are running, will retry on next start",
+                    project.id,
+                    exc_info=True,
+                )
+
         await send_progress("ready", "Environment is ready!", 100, container_status="ready")
 
         logger.info(
@@ -1134,6 +1227,48 @@ class ComputeManager:
             len(containers),
         )
         return container_urls
+
+    async def _migrate_placement_unit(
+        self,
+        project,
+        volume_id: str,
+        old_node: str,
+        new_node: str,
+        user_id: UUID,
+        db: AsyncSession,
+    ) -> None:
+        """Warm-migrate a placement unit to a new node.
+
+        Called from start_environment() when Hub returns a different node.
+        Volume is already cached on new_node (Hub did peer-transfer in
+        EnsureCached). We stop old pods, then let the normal start flow
+        recreate on the new node with soft affinity.
+
+        Ownership transfer happens AFTER pods are healthy — the caller
+        (start_environment) handles that after the normal start flow
+        completes successfully.
+        """
+        logger.info(
+            "[COMPUTE-T2] Migrating project %s: %s → %s",
+            project.id,
+            old_node,
+            new_node,
+        )
+
+        # 1. Stop old environment (deletes namespace + PVs)
+        if project.compute_tier == "environment":
+            await self.stop_environment(project, db)
+
+        # 2. Update project cache_node — ownership transfer deferred
+        project.cache_node = new_node
+        project.compute_tier = "none"  # Will be set back by start flow
+        await db.commit()
+
+        logger.info(
+            "[COMPUTE-T2] Migration complete for project %s → node %s",
+            project.id,
+            new_node,
+        )
 
     async def stop_environment(self, project, db: AsyncSession) -> None:
         """Delete namespace + PVs for a v2 project. btrfs subvolumes stay on node."""

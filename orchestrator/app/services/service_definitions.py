@@ -81,6 +81,13 @@ class ServiceDefinition:
     oauth_provider: str | None = None  # For OAuth-based services
     docs_url: str | None = None
 
+    # Resource profiles for placement budget calculation (container services only).
+    # Values use K8s resource notation (e.g. "100m" for CPU, "512Mi" for memory).
+    cpu_request: str = "50m"
+    mem_request: str = "256Mi"
+    cpu_limit: str = "500m"
+    mem_limit: str = "512Mi"
+
     # Connection template - how to generate env vars from credentials
     # Keys are target env var names, values are templates like "{api_key}" or "{project_url}/rest/v1"
     connection_template: dict[str, str] = field(default_factory=dict)
@@ -119,6 +126,10 @@ SERVICES: dict[str, ServiceDefinition] = {
             "timeout": "5s",
             "retries": 5,
         },
+        cpu_request="100m",
+        mem_request="512Mi",
+        cpu_limit="1000m",
+        mem_limit="2Gi",
         outputs={
             "DATABASE_URL": "PostgreSQL connection string",
             "POSTGRES_HOST": "Database hostname",
@@ -159,6 +170,10 @@ SERVICES: dict[str, ServiceDefinition] = {
             "timeout": "5s",
             "retries": 5,
         },
+        cpu_request="100m",
+        mem_request="512Mi",
+        cpu_limit="1000m",
+        mem_limit="2Gi",
         outputs={
             "DATABASE_URL": "MySQL connection string",
             "MYSQL_HOST": "Database hostname",
@@ -192,6 +207,10 @@ SERVICES: dict[str, ServiceDefinition] = {
             "timeout": "5s",
             "retries": 5,
         },
+        cpu_request="100m",
+        mem_request="512Mi",
+        cpu_limit="1000m",
+        mem_limit="2Gi",
         outputs={"MONGODB_URL": "MongoDB connection string", "MONGODB_HOST": "Database hostname"},
         connection_template={
             "MONGODB_URL": "mongodb://{MONGO_INITDB_ROOT_USERNAME}:{MONGO_INITDB_ROOT_PASSWORD}@{container_name}:{internal_port}/{MONGO_INITDB_DATABASE}?authSource=admin",
@@ -218,6 +237,10 @@ SERVICES: dict[str, ServiceDefinition] = {
             "timeout": "3s",
             "retries": 5,
         },
+        cpu_request="50m",
+        mem_request="128Mi",
+        cpu_limit="500m",
+        mem_limit="512Mi",
         outputs={
             "REDIS_URL": "Redis connection string",
             "REDIS_HOST": "Redis hostname",
@@ -248,6 +271,10 @@ SERVICES: dict[str, ServiceDefinition] = {
             "timeout": "5s",
             "retries": 5,
         },
+        cpu_request="100m",
+        mem_request="256Mi",
+        cpu_limit="500m",
+        mem_limit="1Gi",
         outputs={"RABBITMQ_URL": "AMQP connection string", "RABBITMQ_HOST": "RabbitMQ hostname"},
         connection_template={
             "RABBITMQ_URL": "amqp://{RABBITMQ_DEFAULT_USER}:{RABBITMQ_DEFAULT_PASS}@{container_name}:{internal_port}",
@@ -277,6 +304,10 @@ SERVICES: dict[str, ServiceDefinition] = {
             "timeout": "5s",
             "retries": 5,
         },
+        cpu_request="500m",
+        mem_request="2Gi",
+        cpu_limit="2000m",
+        mem_limit="4Gi",
         outputs={
             "ELASTICSEARCH_URL": "Elasticsearch URL",
             "ELASTICSEARCH_HOST": "Elasticsearch hostname",
@@ -306,6 +337,10 @@ SERVICES: dict[str, ServiceDefinition] = {
             "timeout": "5s",
             "retries": 5,
         },
+        cpu_request="100m",
+        mem_request="256Mi",
+        cpu_limit="1000m",
+        mem_limit="1Gi",
         outputs={
             "S3_ENDPOINT": "S3-compatible endpoint URL",
             "S3_ACCESS_KEY": "Access key",
@@ -984,11 +1019,9 @@ SERVICES: dict[str, ServiceDefinition] = {
         outputs={"PROMETHEUS_URL": "Prometheus URL"},
         connection_template={"PROMETHEUS_URL": "http://{container_name}:{internal_port}"},
     ),
-
     # ============================================================================
     # DEPLOYMENT TARGETS (external hosting providers)
     # ============================================================================
-
     "vercel-deploy": ServiceDefinition(
         slug="vercel-deploy",
         name="Vercel",
@@ -999,10 +1032,9 @@ SERVICES: dict[str, ServiceDefinition] = {
         docs_url="https://vercel.com/docs",
         outputs={
             "compatible_frameworks": "nextjs,react,vite,remix,astro,svelte,nuxt,vue,solid",
-            "compatible_types": "base"
-        }
+            "compatible_types": "base",
+        },
     ),
-
     "netlify-deploy": ServiceDefinition(
         slug="netlify-deploy",
         name="Netlify",
@@ -1013,10 +1045,9 @@ SERVICES: dict[str, ServiceDefinition] = {
         docs_url="https://docs.netlify.com",
         outputs={
             "compatible_frameworks": "nextjs,react,vite,gatsby,hugo,eleventy,astro,svelte,nuxt",
-            "compatible_types": "base"
-        }
+            "compatible_types": "base",
+        },
     ),
-
     "cloudflare-deploy": ServiceDefinition(
         slug="cloudflare-deploy",
         name="Cloudflare Pages",
@@ -1027,8 +1058,8 @@ SERVICES: dict[str, ServiceDefinition] = {
         docs_url="https://developers.cloudflare.com/pages",
         outputs={
             "compatible_frameworks": "nextjs,react,vite,astro,svelte,remix,solid,qwik",
-            "compatible_types": "base"
-        }
+            "compatible_types": "base",
+        },
     ),
 }
 
@@ -1120,26 +1151,70 @@ def service_to_dict(service: ServiceDefinition) -> dict[str, Any]:
 # Framework compatibility rules for deployment targets
 DEPLOYMENT_COMPATIBILITY: dict[str, dict[str, Any]] = {
     "vercel": {
-        "frameworks": ["nextjs", "react", "vite", "remix", "astro", "svelte", "nuxt", "vue", "solid"],
+        "frameworks": [
+            "nextjs",
+            "react",
+            "vite",
+            "remix",
+            "astro",
+            "svelte",
+            "nuxt",
+            "vue",
+            "solid",
+        ],
         "container_types": ["base"],
-        "exclude_services": ["postgres", "mysql", "mongodb", "redis", "rabbitmq", "elasticsearch", "minio"],
+        "exclude_services": [
+            "postgres",
+            "mysql",
+            "mongodb",
+            "redis",
+            "rabbitmq",
+            "elasticsearch",
+            "minio",
+        ],
         "display_name": "Vercel",
-        "icon": "▲"
+        "icon": "▲",
     },
     "netlify": {
-        "frameworks": ["nextjs", "react", "vite", "gatsby", "hugo", "eleventy", "astro", "svelte", "nuxt"],
+        "frameworks": [
+            "nextjs",
+            "react",
+            "vite",
+            "gatsby",
+            "hugo",
+            "eleventy",
+            "astro",
+            "svelte",
+            "nuxt",
+        ],
         "container_types": ["base"],
-        "exclude_services": ["postgres", "mysql", "mongodb", "redis", "rabbitmq", "elasticsearch", "minio"],
+        "exclude_services": [
+            "postgres",
+            "mysql",
+            "mongodb",
+            "redis",
+            "rabbitmq",
+            "elasticsearch",
+            "minio",
+        ],
         "display_name": "Netlify",
-        "icon": "◆"
+        "icon": "◆",
     },
     "cloudflare": {
         "frameworks": ["nextjs", "react", "vite", "astro", "svelte", "remix", "solid", "qwik"],
         "container_types": ["base"],
-        "exclude_services": ["postgres", "mysql", "mongodb", "redis", "rabbitmq", "elasticsearch", "minio"],
+        "exclude_services": [
+            "postgres",
+            "mysql",
+            "mongodb",
+            "redis",
+            "rabbitmq",
+            "elasticsearch",
+            "minio",
+        ],
         "display_name": "Cloudflare Pages",
-        "icon": "🔥"
-    }
+        "icon": "🔥",
+    },
 }
 
 
@@ -1155,10 +1230,7 @@ def get_deployment_target(provider: str) -> ServiceDefinition | None:
 
 
 def is_deployment_compatible(
-    container_type: str,
-    service_slug: str | None,
-    tech_stack: list[str],
-    provider: str
+    container_type: str, service_slug: str | None, tech_stack: list[str], provider: str
 ) -> tuple[bool, str]:
     """
     Check if a container is compatible with a deployment provider.
@@ -1171,7 +1243,10 @@ def is_deployment_compatible(
 
     # Check container type - only base containers can be deployed
     if container_type not in rules["container_types"]:
-        return False, f"{rules['display_name']} can only deploy base containers, not {container_type}s"
+        return (
+            False,
+            f"{rules['display_name']} can only deploy base containers, not {container_type}s",
+        )
 
     # Check if it's an excluded service (databases, caches, etc.)
     if service_slug and service_slug in rules["exclude_services"]:
@@ -1208,11 +1283,15 @@ def is_deployment_compatible(
     return True, "Compatible"
 
 
-def get_compatible_providers(container_type: str, service_slug: str | None, tech_stack: list[str]) -> list[str]:
+def get_compatible_providers(
+    container_type: str, service_slug: str | None, tech_stack: list[str]
+) -> list[str]:
     """Get list of compatible deployment providers for a container"""
     compatible = []
     for provider in DEPLOYMENT_COMPATIBILITY:
-        is_compatible, _ = is_deployment_compatible(container_type, service_slug, tech_stack, provider)
+        is_compatible, _ = is_deployment_compatible(
+            container_type, service_slug, tech_stack, provider
+        )
         if is_compatible:
             compatible.append(provider)
     return compatible

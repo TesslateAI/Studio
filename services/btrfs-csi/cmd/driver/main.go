@@ -41,6 +41,7 @@ func main() {
 		hubGRPCPort     = flag.Int("hub-grpc-port", 9750, "VolumeHub gRPC listen port (hub mode)")
 		orchestratorURL = flag.String("orchestrator-url", "", "Orchestrator base URL for GC known-volumes (e.g., http://tesslate-backend:8000)")
 		drainPort       = flag.Int("drain-port", 9743, "HTTP port for drain endpoint (preStop hook)")
+		hubAddress     = flag.String("hub-address", "tesslate-volume-hub.kube-system.svc:9750", "VolumeHub gRPC address for CSI safety-net materialization (node mode)")
 		defaultQuota   = flag.String("default-quota", "", "Default per-volume storage quota (e.g., 5Gi, 500Mi)")
 		showVersion    = flag.Bool("version", false, "Print version and exit")
 	)
@@ -121,6 +122,7 @@ func main() {
 		driver.WithStorageConfig(*storageProvider, *storageBucket, storageEnvMap),
 		driver.WithSyncInterval(*syncInterval),
 		driver.WithHubGRPCPort(*hubGRPCPort),
+		driver.WithHubAddress(*hubAddress),
 		driver.WithOrchestratorURL(*orchestratorURL),
 		driver.WithDrainPort(*drainPort),
 		driver.WithDefaultQuota(driver.ParseQuota(*defaultQuota)),

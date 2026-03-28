@@ -1,0 +1,39 @@
+# PriorityClasses for Tesslate workloads.
+#
+# PriorityClasses are cluster-scoped, so they must be applied directly:
+#   kubectl apply -f k8s/base/core/priority-classes.yaml
+#
+# They are NOT included in kustomization.yaml because the top-level
+# `namespace: tesslate` rename breaks cluster-scoped resources.
+#
+# Hierarchy:
+#   tesslate-system (2000)      — CSI DaemonSet, Volume Hub — never evicted
+#   tesslate-ephemeral (1000)   — one-shot commands, terminal sessions
+#   tesslate-environment (100)  — dev containers, service containers
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tesslate-system
+value: 2000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "Tesslate system-level pods (CSI driver, Volume Hub). Never preempted."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tesslate-ephemeral
+value: 1000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "Tesslate ephemeral pods (one-shot commands, terminal). Can preempt environment pods."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tesslate-environment
+value: 100
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "Tesslate environment pods (dev containers, services). Lowest Tesslate priority."
