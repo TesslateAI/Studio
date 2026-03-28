@@ -117,16 +117,14 @@ def _get_k8s_api():
     return _get_k8s_api._v1
 
 
-async def _run_environment(context: dict[str, Any], command: str, timeout: int) -> dict[str, Any]:
-    """Execute a command in a running Tier 2 dev container via kubectl exec.
+async def _find_dev_pod(context: dict[str, Any]) -> tuple[Any | None, dict[str, Any] | None]:
+    """Find the running dev container pod for a project.
 
-    Targets the correct pod using container_name/container_directory from context.
-    Captures exit codes via sentinel pattern (k8s_stream doesn't expose them).
+    Returns (pod, None) on success or (None, error_dict) on failure.
     """
     import asyncio
 
     from kubernetes.client.rest import ApiException as K8sApiException
-    from kubernetes.stream import stream as k8s_stream
 
     project_id = context["project_id"]
     namespace = f"proj-{project_id}"
@@ -134,14 +132,11 @@ async def _run_environment(context: dict[str, Any], command: str, timeout: int) 
 
     v1 = _get_k8s_api()
 
-    # Build label selector — target specific container if context provides one
     labels = "tesslate.io/tier=2,tesslate.io/component=dev-container"
     if container_name:
-        # Sanitize to match the label value set during deployment
         safe_name = container_name.lower().replace(" ", "-").replace("_", "-")
         labels += f",tesslate.io/container-directory={safe_name}"
 
-    # Find running dev container pod
     try:
         pod_list = await asyncio.to_thread(
             v1.list_namespaced_pod,
@@ -151,7 +146,7 @@ async def _run_environment(context: dict[str, Any], command: str, timeout: int) 
         )
     except K8sApiException as exc:
         if exc.status == 404:
-            return error_output(
+            return None, error_output(
                 message="Project namespace not found — environment may not be started",
                 suggestion="Start the project environment first",
                 details={"namespace": namespace, "tier": "environment"},
@@ -159,31 +154,124 @@ async def _run_environment(context: dict[str, Any], command: str, timeout: int) 
         raise
 
     pods = pod_list.items or []
-    if not pods:
-        # If targeting a specific container found nothing, fall back to any dev pod
-        if container_name:
-            try:
-                pod_list = await asyncio.to_thread(
-                    v1.list_namespaced_pod,
-                    namespace,
-                    label_selector="tesslate.io/tier=2,tesslate.io/component=dev-container",
-                    field_selector="status.phase=Running",
-                )
-                pods = pod_list.items or []
-            except K8sApiException:
-                pass
+    if not pods and container_name:
+        try:
+            pod_list = await asyncio.to_thread(
+                v1.list_namespaced_pod,
+                namespace,
+                label_selector="tesslate.io/tier=2,tesslate.io/component=dev-container",
+                field_selector="status.phase=Running",
+            )
+            pods = pod_list.items or []
+        except K8sApiException:
+            pass
 
-        if not pods:
-            return error_output(
-                message="No running dev container found in the environment",
-                suggestion="Start the project environment or wait for pods to be ready",
-                details={"namespace": namespace, "tier": "environment"},
+    if not pods:
+        return None, error_output(
+            message="No running dev container found in the environment",
+            suggestion="Start the project environment or wait for pods to be ready",
+            details={"namespace": namespace, "tier": "environment"},
+        )
+
+    return pods[0], None
+
+
+async def _run_via_tsinit(pod_ip: str, command: str, timeout: int) -> tuple[str, str, int] | None:
+    """Try executing a command via tsinit's /v1/run WebSocket endpoint.
+
+    Returns (stdout, stderr, exit_code) on success, or None if tsinit
+    is not reachable (caller should fall back to kubectl exec).
+    """
+    from ....services.tsinit_client import TsinitClient
+
+    client = TsinitClient(host=pod_ip)
+    if not await client.is_reachable(timeout=2.0):
+        return None
+
+    return await client.run(cmd=command, tty=False, timeout=timeout)
+
+
+async def _run_environment(context: dict[str, Any], command: str, timeout: int) -> dict[str, Any]:
+    """Execute a command in a running Tier 2 dev container.
+
+    Tries tsinit WebSocket first (structured exit codes, clean stdout/stderr
+    separation). Falls back to kubectl exec if tsinit is not reachable.
+    """
+    pod, err = await _find_dev_pod(context)
+    if err is not None:
+        return err
+
+    pod_name = pod.metadata.name
+    pod_ip = pod.status.pod_ip
+
+    # --- Fast path: tsinit WebSocket ---
+    if pod_ip:
+        result = await _run_via_tsinit(pod_ip, command, timeout)
+        if result is not None:
+            stdout, stderr, exit_code = result
+            clean_output = strip_ansi_codes(stdout) if stdout else ""
+            if stderr:
+                clean_output = clean_output + strip_ansi_codes(stderr)
+
+            if exit_code == 124:
+                return error_output(
+                    message=f"Command timed out after {timeout}s: {command}",
+                    suggestion="Try a shorter command or increase the timeout parameter",
+                    details={
+                        "command": command,
+                        "timeout": timeout,
+                        "exit_code": 124,
+                        "tier": "environment",
+                    },
+                )
+
+            if exit_code != 0:
+                return error_output(
+                    message=f"Command failed (exit code {exit_code}): {command}",
+                    suggestion="Check the output for errors",
+                    details={
+                        "command": command,
+                        "exit_code": exit_code,
+                        "output": clean_output,
+                        "pod": pod_name,
+                        "tier": "environment",
+                    },
+                )
+
+            logger.info(
+                "[BASH-ENV] tsinit command completed in %s, output_length=%d",
+                pod_name,
+                len(clean_output),
+            )
+            return success_output(
+                message=f"Executed '{command}'",
+                output=clean_output,
+                details={
+                    "command": command,
+                    "exit_code": 0,
+                    "pod": pod_name,
+                    "tier": "environment",
+                },
             )
 
-    pod_name = pods[0].metadata.name
+    # --- Fallback: kubectl exec with sentinel exit code parsing ---
+    logger.info("[BASH-ENV] tsinit not reachable, falling back to kubectl exec for %s", pod_name)
+    return await _run_environment_kubectl(context, pod_name, command, timeout)
 
-    # Wrap command with exit code capture — k8s_stream returns combined stdout+stderr
-    # but doesn't expose the process exit code. Use a sentinel to extract it.
+
+async def _run_environment_kubectl(
+    context: dict[str, Any], pod_name: str, command: str, timeout: int
+) -> dict[str, Any]:
+    """Execute via kubectl exec (legacy fallback when tsinit is unavailable)."""
+    import asyncio
+
+    from kubernetes.client.rest import ApiException as K8sApiException
+    from kubernetes.stream import stream as k8s_stream
+
+    project_id = context["project_id"]
+    namespace = f"proj-{project_id}"
+    v1 = _get_k8s_api()
+
     wrapped_command = f'{command}\n__EXIT_CODE__=$?\necho "__TESSLATE_EXIT:$__EXIT_CODE__"'
     exec_command = ["/bin/sh", "-c", wrapped_command]
 
@@ -219,7 +307,6 @@ async def _run_environment(context: dict[str, Any], command: str, timeout: int) 
             details={"pod": pod_name, "command": command, "error": str(exc), "tier": "environment"},
         )
 
-    # Parse exit code from sentinel
     raw_output = output or ""
     exit_code = 0
     sentinel = "__TESSLATE_EXIT:"
@@ -246,7 +333,9 @@ async def _run_environment(context: dict[str, Any], command: str, timeout: int) 
             },
         )
 
-    logger.info("[BASH-ENV] Command completed in %s, output_length=%d", pod_name, len(clean_output))
+    logger.info(
+        "[BASH-ENV] kubectl exec completed in %s, output_length=%d", pod_name, len(clean_output)
+    )
     return success_output(
         message=f"Executed '{command}'",
         output=clean_output,

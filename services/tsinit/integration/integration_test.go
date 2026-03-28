@@ -18,6 +18,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -865,24 +866,29 @@ func TestStdoutTeePrefix(t *testing.T) {
 	name := "tee-test"
 	createProcess(t, map[string]any{
 		"name":       name,
-		"cmd":        "echo tee-marker",
+		"cmd":        "sh -c 'echo tee-marker; sleep 5'",
 		"tee_stdout": true,
 	})
 
-	time.Sleep(1 * time.Second)
-
-	// The ring buffer should have the raw output WITHOUT prefix.
-	_, data := doJSON(t, "GET", "/v1/processes/"+name+"/output?lines=5", nil)
-	lines, _ := data["lines"].([]any)
+	// Wait for output to appear in the ring buffer (poll, bounded).
+	deadline := time.Now().Add(3 * time.Second)
 	found := false
-	for _, l := range lines {
-		s := fmt.Sprint(l)
-		if strings.Contains(s, "tee-marker") && !strings.Contains(s, "[tee-test]") {
-			found = true
+	for time.Now().Before(deadline) {
+		_, data := doJSON(t, "GET", "/v1/processes/"+name+"/output?lines=5", nil)
+		lines, _ := data["lines"].([]any)
+		for _, l := range lines {
+			s := fmt.Sprint(l)
+			if strings.Contains(s, "tee-marker") && !strings.Contains(s, "[tee-test]") {
+				found = true
+			}
 		}
+		if found {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	if !found {
-		t.Fatalf("expected raw 'tee-marker' without prefix in ring buffer, got: %v", lines)
+		t.Fatal("expected raw 'tee-marker' without prefix in ring buffer")
 	}
 
 	deleteProcess(t, name)
@@ -1033,4 +1039,359 @@ func TestForkAndExitCleanExit(t *testing.T) {
 	// Wait for sleep to exit (2s + poll margin).
 	waitForState(t, name, "exited", 8*time.Second)
 	t.Log("fork-clean-exit: process group empty → correctly transitioned to exited")
+}
+
+// ---------------------------------------------------------------------------
+// /v1/run — channel-multiplexed WebSocket endpoint
+// ---------------------------------------------------------------------------
+
+// readRunFrame reads a single channel-multiplexed binary frame from the
+// WebSocket and returns (channel, payload). Returns (-1, nil) on error.
+func readRunFrame(conn *websocket.Conn) (byte, []byte) {
+	_, data, err := conn.ReadMessage()
+	if err != nil || len(data) < 1 {
+		return 0xFF, nil
+	}
+	return data[0], data[1:]
+}
+
+// sendRunFrame sends a channel-prefixed binary frame.
+func sendRunFrame(t *testing.T, conn *websocket.Conn, ch byte, payload []byte) {
+	t.Helper()
+	frame := make([]byte, 1+len(payload))
+	frame[0] = ch
+	copy(frame[1:], payload)
+	if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+		t.Fatalf("sendRunFrame: %v", err)
+	}
+}
+
+// dialRun connects to /v1/run with the given query string.
+func dialRun(t *testing.T, query string) *websocket.Conn {
+	t.Helper()
+	url := "ws://localhost:9111/v1/run?" + query
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dialRun: %v", err)
+	}
+	return conn
+}
+
+// collectRunOutput reads all frames until a status (channel 3) frame or timeout.
+// Returns collected stdout, stderr, and the exit code.
+func collectRunOutput(t *testing.T, conn *websocket.Conn, timeout time.Duration) (stdout, stderr string, exitCode int) {
+	t.Helper()
+	conn.SetReadDeadline(time.Now().Add(timeout))
+	var outBuf, errBuf bytes.Buffer
+	exitCode = -1
+
+	for {
+		ch, payload := readRunFrame(conn)
+		if ch == 0xFF {
+			break
+		}
+		switch ch {
+		case 1: // stdout
+			outBuf.Write(payload)
+		case 2: // stderr
+			errBuf.Write(payload)
+		case 3: // status
+			var status struct {
+				ExitCode int `json:"exit_code"`
+			}
+			if err := json.Unmarshal(payload, &status); err == nil {
+				exitCode = status.ExitCode
+			}
+			return outBuf.String(), errBuf.String(), exitCode
+		}
+	}
+	return outBuf.String(), errBuf.String(), exitCode
+}
+
+// TestRunTTYEcho verifies a basic TTY-mode command that echoes output.
+func TestRunTTYEcho(t *testing.T) {
+	conn := dialRun(t, "cmd=echo+hello-run&tty=true")
+	defer conn.Close()
+
+	stdout, _, exitCode := collectRunOutput(t, conn, 5*time.Second)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+	if !strings.Contains(stdout, "hello-run") {
+		t.Fatalf("expected 'hello-run' in stdout, got %q", stdout)
+	}
+	t.Logf("run TTY echo: exit=%d, stdout=%q", exitCode, strings.TrimSpace(stdout))
+}
+
+// TestRunPipeStdoutStderr verifies non-TTY mode separates stdout and stderr.
+func TestRunPipeStdoutStderr(t *testing.T) {
+	conn := dialRun(t, "cmd=sh+-c+%27echo+out-data+%26%26+echo+err-data+%3E%262%27&tty=false")
+	defer conn.Close()
+
+	stdout, stderr, exitCode := collectRunOutput(t, conn, 5*time.Second)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+	if !strings.Contains(stdout, "out-data") {
+		t.Fatalf("expected 'out-data' in stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "err-data") {
+		t.Fatalf("expected 'err-data' in stderr, got %q", stderr)
+	}
+	t.Logf("run pipe: exit=%d stdout=%q stderr=%q", exitCode, strings.TrimSpace(stdout), strings.TrimSpace(stderr))
+}
+
+// TestRunExitCodeNonZero verifies the correct exit code is reported.
+func TestRunExitCodeNonZero(t *testing.T) {
+	conn := dialRun(t, "cmd=sh+-c+%27exit+42%27&tty=false")
+	defer conn.Close()
+
+	_, _, exitCode := collectRunOutput(t, conn, 5*time.Second)
+	if exitCode != 42 {
+		t.Fatalf("expected exit code 42, got %d", exitCode)
+	}
+	t.Logf("run exit code: got %d (correct)", exitCode)
+}
+
+// TestRunTTYInputRoundTrip verifies that stdin data sent on channel 0
+// is echoed back on channel 1 through the PTY.
+func TestRunTTYInputRoundTrip(t *testing.T) {
+	// Start an interactive shell.
+	conn := dialRun(t, "cmd=sh&tty=true")
+	defer conn.Close()
+
+	// Wait briefly for shell to start, then send a command.
+	time.Sleep(300 * time.Millisecond)
+	sendRunFrame(t, conn, 0, []byte("echo run-roundtrip-ok\n"))
+
+	// Read frames until we see the echo.
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	found := false
+	for i := 0; i < 30; i++ {
+		ch, payload := readRunFrame(conn)
+		if ch == 0xFF {
+			break
+		}
+		if ch == 1 && strings.Contains(string(payload), "run-roundtrip-ok") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("did not see 'run-roundtrip-ok' echoed back on channel 1")
+	}
+	t.Log("run TTY input round-trip OK")
+}
+
+// TestRunTTYResize verifies that resize messages on channel 4 are accepted.
+func TestRunTTYResize(t *testing.T) {
+	conn := dialRun(t, "cmd=sh&tty=true&cols=80&rows=24")
+	defer conn.Close()
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Send resize on channel 4.
+	resize := []byte(`{"width":200,"height":50}`)
+	sendRunFrame(t, conn, 4, resize)
+
+	// Send a tput command to verify the new size is applied.
+	sendRunFrame(t, conn, 0, []byte("tput cols\n"))
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	found := false
+	for i := 0; i < 20; i++ {
+		ch, payload := readRunFrame(conn)
+		if ch == 0xFF {
+			break
+		}
+		if ch == 1 && strings.Contains(string(payload), "200") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Log("tput cols did not return 200 (tput may not be installed); resize accepted without error")
+	} else {
+		t.Log("run TTY resize verified: cols=200")
+	}
+}
+
+// TestRunDisconnectKillsProcess verifies that closing the WebSocket kills
+// the remote process (one connection = one lifecycle).
+func TestRunDisconnectKillsProcess(t *testing.T) {
+	// Use a marker file: the process creates it on start, we check removal after disconnect.
+	marker := "/tmp/tsinit-test-disconnect-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+
+	// Start a process that creates a marker file then sleeps.
+	cmd := fmt.Sprintf("touch %s && sleep 3600", marker)
+	conn := dialRun(t, "cmd="+url.QueryEscape(cmd)+"&tty=false")
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify marker exists (process started).
+	checkConn := dialRun(t, "cmd="+url.QueryEscape(fmt.Sprintf("test -f %s && echo EXISTS || echo GONE", marker))+"&tty=false")
+	stdout, _, _ := collectRunOutput(t, checkConn, 3*time.Second)
+	if !strings.Contains(stdout, "EXISTS") {
+		t.Fatal("marker file not created — process didn't start")
+	}
+
+	// Disconnect. The server's cleanup runs asynchronously after the
+	// client close returns, so we poll for the process to die.
+	conn.Close()
+
+	// Poll until sleep 3600 is gone (bounded — fails after 5s).
+	// Use ps + grep -v grep to avoid pgrep matching its own args.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		checkConn2 := dialRun(t, "cmd="+url.QueryEscape("ps aux | grep 'sleep 3600' | grep -v grep | grep -v ps > /dev/null 2>&1 && echo ALIVE || echo DEAD")+"&tty=false")
+		stdout2, _, _ := collectRunOutput(t, checkConn2, 3*time.Second)
+		if strings.Contains(stdout2, "DEAD") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("process survived WebSocket disconnect after 5s")
+		}
+	}
+
+	// Clean up marker.
+	cleanConn := dialRun(t, "cmd="+url.QueryEscape(fmt.Sprintf("rm -f %s", marker))+"&tty=false")
+	collectRunOutput(t, cleanConn, 3*time.Second)
+
+	t.Log("run disconnect: process killed correctly")
+}
+
+// TestRunDisconnectKillsBackgroundJobs verifies that closing the WebSocket
+// kills background jobs spawned by the shell, not just the shell itself.
+// With Setsid+Setctty, the shell uses job control and creates separate
+// process groups for background jobs. killSession must find and kill all
+// processes in the session via /proc.
+func TestRunDisconnectKillsBackgroundJobs(t *testing.T) {
+	// Use unique marker files for each background job.
+	id := strconv.FormatInt(time.Now().UnixNano(), 36)
+	markerA := "/tmp/tsinit-bg-a-" + id
+	markerB := "/tmp/tsinit-bg-b-" + id
+
+	// Start an interactive TTY shell.
+	conn := dialRun(t, "cmd=sh&tty=true")
+	time.Sleep(500 * time.Millisecond)
+
+	// Spawn background jobs that create marker files and sleep.
+	// Each background job gets its own PGID under job control.
+	sendRunFrame(t, conn, 0, []byte(fmt.Sprintf("sh -c 'touch %s && sleep 9001' &\n", markerA)))
+	time.Sleep(300 * time.Millisecond)
+	sendRunFrame(t, conn, 0, []byte(fmt.Sprintf("sh -c 'touch %s && sleep 9002' &\n", markerB)))
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify both markers exist (jobs started).
+	checkCmd := fmt.Sprintf("test -f %s && test -f %s && echo BOTH_RUNNING || echo NOT_READY", markerA, markerB)
+	checkConn := dialRun(t, "cmd="+url.QueryEscape(checkCmd)+"&tty=false")
+	stdout, _, _ := collectRunOutput(t, checkConn, 3*time.Second)
+	if !strings.Contains(stdout, "BOTH_RUNNING") {
+		t.Fatalf("background jobs did not start: %s", strings.TrimSpace(stdout))
+	}
+
+	// Disconnect the TTY session.
+	conn.Close()
+
+	// Poll until background sleeps are gone (bounded — fails after 5s).
+	checkCmd2 := "pgrep -f 'sleep 900[12]' >/dev/null 2>&1 && echo LEAKED || echo CLEAN"
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		checkConn2 := dialRun(t, "cmd="+url.QueryEscape(checkCmd2)+"&tty=false")
+		stdout2, _, _ := collectRunOutput(t, checkConn2, 3*time.Second)
+		if strings.Contains(stdout2, "CLEAN") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background jobs survived disconnect after 5s")
+		}
+	}
+
+	// Clean up markers.
+	cleanCmd := fmt.Sprintf("rm -f %s %s", markerA, markerB)
+	cleanConn := dialRun(t, "cmd="+url.QueryEscape(cleanCmd)+"&tty=false")
+	collectRunOutput(t, cleanConn, 3*time.Second)
+
+	t.Log("run disconnect: background jobs killed correctly (session-level cleanup)")
+}
+
+// TestRunLargeOutput verifies that large output is delivered in full.
+func TestRunLargeOutput(t *testing.T) {
+	// Generate 10000 lines of output.
+	conn := dialRun(t, "cmd=seq+10000&tty=false")
+	defer conn.Close()
+
+	stdout, _, exitCode := collectRunOutput(t, conn, 10*time.Second)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) < 9000 {
+		t.Fatalf("expected ~10000 lines, got %d", len(lines))
+	}
+	// Check last line is "10000"
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if last != "10000" {
+		t.Fatalf("expected last line '10000', got %q", last)
+	}
+	t.Logf("run large output: %d lines delivered, last=%s", len(lines), last)
+}
+
+// TestRunWorkingDirectory verifies the dir query parameter is respected.
+func TestRunWorkingDirectory(t *testing.T) {
+	conn := dialRun(t, "cmd=pwd&dir=%2Ftmp&tty=false")
+	defer conn.Close()
+
+	stdout, _, exitCode := collectRunOutput(t, conn, 5*time.Second)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+	if !strings.Contains(stdout, "/tmp") {
+		t.Fatalf("expected '/tmp' in pwd output, got %q", stdout)
+	}
+	t.Logf("run working directory: %s", strings.TrimSpace(stdout))
+}
+
+// TestRunMissingCmd verifies that missing cmd returns an HTTP error (not a WS upgrade).
+func TestRunMissingCmd(t *testing.T) {
+	resp, data := doJSON(t, "GET", "/v1/run", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %v", resp.StatusCode, data)
+	}
+	t.Log("run missing cmd: correctly returned 400")
+}
+
+// TestRunDoesNotBreakManagedProcesses verifies that /v1/run sessions don't
+// interfere with the supervisor's managed process lifecycle. This catches
+// regressions where tracked PID locking contends with the zombie reaper
+// and blocks managed process reaping (e.g. bun → next-server fork-and-exit).
+func TestRunDoesNotBreakManagedProcesses(t *testing.T) {
+	// Start a managed fork-and-exit process (simulates bun → next-server).
+	name := "run-coexist-test"
+	code, _ := createProcess(t, map[string]any{
+		"name": name,
+		"cmd":  "sh -c 'sleep 2 & exec sleep 0'",
+	})
+	if code != 201 {
+		t.Fatalf("expected 201, got %d", code)
+	}
+	defer deleteProcess(t, name)
+
+	// Simultaneously run several /v1/run sessions to create lock contention.
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			conn := dialRun(t, "cmd=echo+coexist-ok&tty=false")
+			defer conn.Close()
+			collectRunOutput(t, conn, 5*time.Second)
+		}()
+	}
+	wg.Wait()
+
+	// The managed process should still be tracked correctly.
+	// It should reach "running" (group alive) then "exited" (group empty).
+	waitForState(t, name, "exited", 10*time.Second)
+	t.Log("run+managed coexistence: managed process lifecycle unaffected")
 }

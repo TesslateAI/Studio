@@ -26,6 +26,18 @@ type ProcessManager struct {
 	startedAt   time.Time
 	version     string
 	bufferLines int
+
+	// trackedPIDs holds PIDs of short-lived processes (e.g. /v1/run)
+	// that are NOT fully managed but whose exit status must be preserved
+	// when the supervisor's Wait4(-1) zombie reaper collects them.
+	trackedMu   sync.RWMutex
+	trackedPIDs map[int]struct{}
+	// stolenExits stores exit codes for tracked PIDs that were reaped
+	// by Wait4(-1) before cmd.Wait() could collect them.
+	stolenExits map[int]int
+	// stolenReady is closed per-PID when SaveStolenExit writes the code,
+	// allowing awaitExit to block on it instead of polling.
+	stolenReady map[int]chan struct{}
 }
 
 // NewProcessManager creates a new process manager.
@@ -37,6 +49,9 @@ func NewProcessManager(stdout io.Writer, version string, bufferLines int) *Proce
 		startedAt:   time.Now(),
 		version:     version,
 		bufferLines: bufferLines,
+		trackedPIDs: make(map[int]struct{}),
+		stolenExits: make(map[int]int),
+		stolenReady: make(map[int]chan struct{}),
 	}
 }
 
@@ -210,7 +225,79 @@ func (m *ProcessManager) StopAll(gracePeriod time.Duration) {
 	slog.Info("all processes stopped")
 }
 
-// IsManaged returns true if the given PID belongs to a currently managed process.
+// LockTracked acquires the tracked PID write lock. Used to atomically
+// start a process and register its PID before the reaper can run.
+func (m *ProcessManager) LockTracked()   { m.trackedMu.Lock() }
+func (m *ProcessManager) UnlockTracked() { m.trackedMu.Unlock() }
+
+// TrackPIDLocked registers a PID while the caller already holds LockTracked.
+func (m *ProcessManager) TrackPIDLocked(pid int) {
+	m.trackedPIDs[pid] = struct{}{}
+	m.stolenReady[pid] = make(chan struct{})
+}
+
+// TrackPID registers a PID so the zombie reaper won't steal its exit status.
+// Call UntrackPID when the process has been waited on.
+func (m *ProcessManager) TrackPID(pid int) {
+	m.trackedMu.Lock()
+	m.trackedPIDs[pid] = struct{}{}
+	m.trackedMu.Unlock()
+}
+
+// UntrackPID removes a PID from the tracked set and cleans up any stolen exit.
+func (m *ProcessManager) UntrackPID(pid int) {
+	m.trackedMu.Lock()
+	delete(m.trackedPIDs, pid)
+	delete(m.stolenExits, pid)
+	delete(m.stolenReady, pid)
+	m.trackedMu.Unlock()
+}
+
+// SaveStolenExit records an exit code for a tracked PID whose status was
+// consumed by the zombie reaper's Wait4(-1). Closes the per-PID ready
+// channel so WaitStolenExit unblocks immediately.
+func (m *ProcessManager) SaveStolenExit(pid int, exitCode int) {
+	m.trackedMu.Lock()
+	m.stolenExits[pid] = exitCode
+	if ch, ok := m.stolenReady[pid]; ok {
+		close(ch)
+	}
+	m.trackedMu.Unlock()
+}
+
+// StolenExit returns the exit code saved by the zombie reaper for a tracked
+// PID, and whether one was found.
+func (m *ProcessManager) StolenExit(pid int) (int, bool) {
+	m.trackedMu.RLock()
+	code, ok := m.stolenExits[pid]
+	m.trackedMu.RUnlock()
+	return code, ok
+}
+
+// WaitStolenExit blocks until the reaper saves a stolen exit code for pid,
+// then returns it. Returns (-1, false) if the channel doesn't exist (pid
+// was not tracked).
+func (m *ProcessManager) WaitStolenExit(pid int) (int, bool) {
+	m.trackedMu.RLock()
+	ch, ok := m.stolenReady[pid]
+	m.trackedMu.RUnlock()
+	if !ok {
+		return -1, false
+	}
+	<-ch // blocks until SaveStolenExit closes it
+	return m.StolenExit(pid)
+}
+
+// IsTracked returns true if the PID was registered via TrackPID (/v1/run).
+func (m *ProcessManager) IsTracked(pid int) bool {
+	m.trackedMu.RLock()
+	_, tracked := m.trackedPIDs[pid]
+	m.trackedMu.RUnlock()
+	return tracked
+}
+
+// IsManaged returns true if the given PID belongs to a supervisor-managed
+// process (started via ProcessManager.Start). Does NOT check tracked PIDs.
 func (m *ProcessManager) IsManaged(pid int) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

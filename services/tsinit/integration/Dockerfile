@@ -28,7 +28,7 @@ RUN apk add --no-cache bash curl nodejs npm python3
 RUN adduser -D -u 1000 testuser
 COPY --from=builder /tsinit /usr/local/bin/tsinit
 COPY --from=builder /integration-tests /usr/local/bin/integration-tests
-RUN mkdir -p /var/run && chown testuser:testuser /var/run
+RUN mkdir -p /var/run /app && chown testuser:testuser /var/run /app
 
 USER testuser
 

@@ -63,6 +63,9 @@ func (s *Server) registerRoutes() {
 	// WebSocket streaming
 	s.mux.HandleFunc("GET /v1/processes/{name}/stream", s.handleProcessStream)
 
+	// Run: one-shot command execution via channel-multiplexed WebSocket
+	s.mux.HandleFunc("GET /v1/run", s.handleRun)
+
 	// System
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /info", s.handleInfo)

@@ -614,6 +614,183 @@ class KubernetesPTYBroker(BasePTYBroker):
         logger.info(f"Closed K8s PTY session {session_id}")
 
 
+class TsinitPTYBroker(BasePTYBroker):
+    """PTY broker using tsinit's /v1/run WebSocket endpoint.
+
+    Connects directly to tsinit inside the dev container over the pod
+    network. Falls back to KubernetesPTYBroker (kubectl exec) if tsinit
+    is not reachable.
+    """
+
+    def __init__(self):
+        from kubernetes import client, config
+
+        try:
+            config.load_incluster_config()
+        except config.ConfigException:
+            config.load_kube_config()
+
+        self._core_v1 = client.CoreV1Api()
+        self._k8s_fallback = KubernetesPTYBroker()
+
+        # tsinit sessions (keyed by session_id)
+        self.sessions: dict[str, PTYSession] = {}
+        self._streams: dict[str, object] = {}  # session_id -> RunStream
+
+    async def _get_pod_ip(self, pod_name: str, namespace: str) -> str | None:
+        """Look up the pod IP via the K8s API."""
+        try:
+            pod = await asyncio.to_thread(self._core_v1.read_namespaced_pod, pod_name, namespace)
+            return pod.status.pod_ip
+        except Exception:
+            return None
+
+    async def create_session(
+        self,
+        user_id: UUID,
+        project_id: str,
+        container_name: str = None,
+        command: str = "/bin/sh",
+        rows: int = 24,
+        cols: int = 80,
+        namespace: str = None,
+        container: str = "dev-server",
+        pod_name: str | None = None,
+    ) -> PTYSession:
+        if not namespace:
+            namespace = f"proj-{project_id}"
+
+        # Try tsinit path if we have a pod name to resolve
+        if pod_name:
+            pod_ip = await self._get_pod_ip(pod_name, namespace)
+            if pod_ip:
+                try:
+                    return await self._create_tsinit_session(
+                        pod_ip=pod_ip,
+                        user_id=user_id,
+                        project_id=project_id,
+                        pod_name=pod_name,
+                        command=command,
+                        rows=rows,
+                        cols=cols,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[TSINIT-PTY] tsinit stream failed, falling back to kubectl: %s", exc
+                    )
+
+        # Fallback to kubectl exec
+        logger.info("[TSINIT-PTY] falling back to KubernetesPTYBroker")
+        return await self._k8s_fallback.create_session(
+            user_id=user_id,
+            project_id=project_id,
+            container_name=container_name,
+            command=command,
+            rows=rows,
+            cols=cols,
+            namespace=namespace,
+            container=container,
+            pod_name=pod_name,
+        )
+
+    async def _create_tsinit_session(
+        self,
+        pod_ip: str,
+        user_id: UUID,
+        project_id: str,
+        pod_name: str,
+        command: str,
+        rows: int,
+        cols: int,
+    ) -> PTYSession:
+        from .tsinit_client import TsinitClient
+
+        client = TsinitClient(host=pod_ip)
+        if not await client.is_reachable(timeout=2.0):
+            raise ConnectionError("tsinit not reachable")
+
+        stream = await client.run_stream(cmd=command, tty=True, rows=rows, cols=cols)
+
+        session_id = str(uuid.uuid4())
+        session = PTYSession(
+            session_id=session_id,
+            user_id=user_id,
+            project_id=project_id,
+            container_name=pod_name,
+            command=command,
+            cwd="/app",
+            rows=rows,
+            cols=cols,
+        )
+
+        self.sessions[session_id] = session
+        self._streams[session_id] = stream
+
+        # Background reader: tsinit stream -> PTYSession output buffer
+        session.reader_task = asyncio.create_task(self._stream_reader(session_id, stream))
+
+        logger.info("[TSINIT-PTY] session %s created via tsinit at %s", session_id, pod_ip)
+        return session
+
+    async def _stream_reader(self, session_id: str, stream) -> None:
+        """Read from tsinit RunStream and buffer into PTYSession."""
+        from .tsinit_client import CHAN_STATUS, CHAN_STDOUT
+
+        session = self.sessions.get(session_id)
+        if not session:
+            return
+
+        try:
+            while not session.is_closed:
+                channel, data = await stream.read()
+                if channel == CHAN_STDOUT and data:
+                    await session.append_output(data)
+                    session.last_activity = datetime.utcnow()
+                elif channel == CHAN_STATUS:
+                    await session.mark_eof()
+                    break
+        except asyncio.CancelledError:
+            logger.info("[TSINIT-PTY] stream reader cancelled for %s", session_id)
+        except Exception as exc:
+            logger.error("[TSINIT-PTY] stream reader error for %s: %s", session_id, exc)
+            await session.mark_eof()
+
+    async def write_to_pty(self, session_id: str, data: bytes) -> None:
+        # Check if this is a tsinit-managed session
+        if session_id in self._streams:
+            stream = self._streams[session_id]
+            if not stream.closed:
+                await stream.write_stdin(data)
+            return  # tsinit session — don't fall through even if closed
+        await self._k8s_fallback.write_to_pty(session_id, data)
+
+    async def resize(self, session_id: str, cols: int, rows: int) -> None:
+        if session_id in self._streams:
+            stream = self._streams[session_id]
+            if not stream.closed:
+                await stream.resize(cols, rows)
+            return  # tsinit session — don't fall through even if closed
+        await self._k8s_fallback.resize(session_id, cols, rows)
+
+    async def close_session(self, session_id: str) -> None:
+        stream = self._streams.pop(session_id, None)
+        session = self.sessions.pop(session_id, None)
+
+        if stream:
+            await stream.close()
+        if session:
+            session.is_closed = True
+            if session.reader_task:
+                session.reader_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await session.reader_task
+            logger.info("[TSINIT-PTY] session %s closed", session_id)
+            return
+
+        # Not a tsinit session — delegate to kubectl fallback
+        await self._k8s_fallback.close_session(session_id)
+
+
 # Singleton instances
 _docker_pty_broker = None
 _kubernetes_pty_broker = None
@@ -627,8 +804,8 @@ def get_pty_broker() -> BasePTYBroker:
 
     if is_kubernetes_mode():
         if _kubernetes_pty_broker is None:
-            _kubernetes_pty_broker = KubernetesPTYBroker()
-            logger.info("Created singleton KubernetesPTYBroker instance")
+            _kubernetes_pty_broker = TsinitPTYBroker()
+            logger.info("Created singleton TsinitPTYBroker instance")
         return _kubernetes_pty_broker
     else:
         if _docker_pty_broker is None:

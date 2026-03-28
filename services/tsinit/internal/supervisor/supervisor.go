@@ -89,11 +89,16 @@ func (s *Supervisor) reapZombies() {
 		if pid <= 0 || err != nil {
 			break
 		}
+		if s.manager.IsTracked(pid) {
+			// /v1/run process — save the exit code so awaitExit can
+			// recover it after cmd.Wait() gets ECHILD.
+			s.manager.SaveStolenExit(pid, status.ExitStatus())
+			slog.Debug("reaped tracked child, saved exit status", "pid", pid, "exit_status", status.ExitStatus())
+			continue
+		}
 		if s.manager.IsManaged(pid) {
-			// This PID belongs to a managed process. Go's runtime will
-			// reap it via cmd.Wait(). We already consumed the status
-			// though (Wait4 is destructive), so the managed process's
-			// waitLoop will get ECHILD — it handles that gracefully.
+			// Supervisor-managed process. cmd.Wait() will get ECHILD
+			// but waitLoop handles that gracefully (exit code -1).
 			slog.Debug("reaped managed child (exit code may be lost)", "pid", pid)
 			continue
 		}

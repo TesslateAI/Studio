@@ -264,7 +264,7 @@ def test_get_pty_broker_docker():
 
 
 def test_get_pty_broker_kubernetes():
-    """Test factory function returns Kubernetes broker."""
+    """Test factory function returns TsinitPTYBroker (wraps KubernetesPTYBroker)."""
     # Mock kubernetes modules
     mock_k8s_client = MagicMock()
     mock_k8s_config = MagicMock()
@@ -283,9 +283,9 @@ def test_get_pty_broker_kubernetes():
             },
         ),
     ):
-        from app.services.pty_broker import KubernetesPTYBroker
+        from app.services.pty_broker import TsinitPTYBroker
 
         mock_settings.return_value.deployment_mode = "kubernetes"
 
         broker = get_pty_broker()
-        assert isinstance(broker, KubernetesPTYBroker)
+        assert isinstance(broker, TsinitPTYBroker)
