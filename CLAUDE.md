@@ -17,7 +17,7 @@ don't do conditional logic for k8s and docker implementation differences. try to
 On windows use MSYS_NO_PATHCONV=1 while running kubectl or docker exec commands.
 The ECR IS <AWS_ACCOUNT_ID> not <AWS_ACCOUNT_ID>
 
-**CRITICAL: kubectl Context Safety** — Before ANY kubectl command, run `./scripts/kctx.sh <environment>` to switch to the correct cluster. Never assume the current context is correct. See `docs/infrastructure/kubernetes/CLAUDE.md` for details.
+**CRITICAL: kubectl Context Safety** — EVERY `kubectl` command MUST include `--context=<name>`. NEVER use `kubectl config use-context`, `./scripts/kctx.sh`, or any context-switching command. Context switching is BANNED because cronjobs and other processes can change it mid-session, causing accidental production mutations. Use: `kubectl --context=tesslate` (minikube), `kubectl --context=tesslate-production-eks` (prod), `kubectl --context=tesslate-beta-eks` (beta). See `docs/infrastructure/kubernetes/CLAUDE.md` for details.
 
 CRITICAL -- ENSURE ALL CHANGES ARE NON-BLOCKING
 
