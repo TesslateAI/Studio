@@ -357,6 +357,7 @@ tesslate-studio/
 | `skill_ops/load_skill.py` | Load skill instructions at runtime from marketplace |
 | `todos.py` | Task planning and tracking |
 | `metadata.py` | Query project info |
+| `project_control.py` | Container lifecycle control (status, restart, logs, health) |
 
 ## Documentation Knowledge Graph
 
@@ -448,6 +449,8 @@ Each `CLAUDE.md` file contains:
 | Universal project setup | `docs/orchestrator/routers/CLAUDE.md` → projects.py setup-config |
 | Volume/storage architecture | `services/btrfs-csi/` (Go driver) + `orchestrator/app/services/volume_manager.py` |
 | Volume Hub client | `orchestrator/app/services/hub_client.py` (gRPC client for Hub RPCs) |
+| Config.json schema & lifecycle | `docs/orchestrator/services/config-json.md` |
+| Container lifecycle tool | `docs/orchestrator/agent/tools/project-control.md` |
 
 ## Deployment Modes
 

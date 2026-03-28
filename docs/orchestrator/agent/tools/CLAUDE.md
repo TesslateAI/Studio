@@ -30,8 +30,9 @@ This context provides information about Tesslate Studio's agent tool system, inc
   - `shell.py` - Open shell in container
   - `__init__.py` - Registration
 
-- `orchestrator/app/agent/tools/project_ops/` - Project metadata
+- `orchestrator/app/agent/tools/project_ops/` - Project metadata and lifecycle
   - `metadata.py` - get_project_info
+  - `project_control.py` - project_control (container lifecycle management)
 
 - `orchestrator/app/agent/tools/planning_ops/` - Task planning
   - `todos.py` - todo_read, todo_write
@@ -58,7 +59,7 @@ This context provides information about Tesslate Studio's agent tool system, inc
 |----------|-------|-------|
 | **File Operations** | 4 | `file_ops/read_write.py`, `file_ops/edit.py` |
 | **Shell Operations** | 4 | `shell_ops/bash.py`, `shell_ops/session.py`, `shell_ops/execute.py` |
-| **Project Operations** | 1 | `project_ops/metadata.py` |
+| **Project Operations** | 2 | `project_ops/metadata.py`, `project_ops/project_control.py` |
 | **Planning Operations** | 2 | `planning_ops/todos.py` |
 | **Web Operations** | 3 | `web_ops/fetch.py`, `web_ops/search.py`, `web_ops/send_message.py` |
 | **Skill Operations** | 1 | `skill_ops/load_skill.py` |

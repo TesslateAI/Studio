@@ -28,6 +28,7 @@ This context provides information about Tesslate Studio's AI agent system, inclu
   - `send_message.py` - send_message tool (chat, Discord, webhook, or reply channel)
 - `orchestrator/app/agent/tools/skill_ops/` - Skill loading via progressive disclosure
   - `load_skill.py` - Loads full skill instructions on-demand from DB or project files
+- `orchestrator/app/agent/tools/project_ops/project_control.py` - project_control tool for container lifecycle management
 - `orchestrator/app/agent/tools/graph_ops/` - Container management tools for graph view
 
 ### TesslateAgent Supporting Files
@@ -142,6 +143,7 @@ This context relates to:
 - **Skill Discovery** (`orchestrator/app/services/skill_discovery.py`) - Discovers available skills for progressive disclosure
 - **Channel Service** (`orchestrator/app/services/channels/`) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
 - **MCP Service** (`orchestrator/app/services/mcp/`) - MCP server management and tool bridging
+- **Config System** (`orchestrator/app/services/base_config_parser.py`, `config_resolver.py`) - `.tesslate/config.json` parsing and resolution
 
 ## Agent Execution Patterns
 

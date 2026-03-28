@@ -126,6 +126,10 @@ The frontmatter is parsed during discovery; the body (everything after the secon
 
 `load_skill` is included in the `PARALLEL_TOOLS` set, meaning it can be executed concurrently with other parallel-safe tools during agent iterations. This allows the agent to load a skill while simultaneously reading files or executing other non-conflicting tools.
 
+### Example: Project Architecture Skill
+
+The "Project Architecture" skill (`slug: project-architecture`) is a Tesslate-bundled skill that teaches agents the `.tesslate/config.json` schema, modification workflow, and container lifecycle control. It's loaded on-demand when users ask about project structure, containers, services, or configuration.
+
 ## Related Documentation
 
 - [../../services/skill-discovery.md](../../services/skill-discovery.md) - Skill discovery service
