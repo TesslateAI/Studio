@@ -322,7 +322,7 @@ resource "aws_iam_role" "team_deployer" {
 
 resource "aws_iam_policy" "team_deployer" {
   name        = "${local.cluster_name}-team-deployer"
-  description = "Team deployer: EKS describe + ECR push/pull"
+  description = "Team deployer: EKS describe + ECR push/pull/browse + CloudWatch Logs read"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -340,15 +340,20 @@ resource "aws_iam_policy" "team_deployer" {
         Resource = "*"
       },
       {
-        Sid      = "ECRAuth"
-        Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken"]
+        Sid    = "ECRDiscover"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:DescribeRepositories",
+        ]
         Resource = "*"
       },
       {
         Sid    = "ECRPushPull"
         Effect = "Allow"
         Action = [
+          "ecr:ListImages",
+          "ecr:DescribeImages",
           "ecr:BatchCheckLayerAvailability",
           "ecr:PutImage",
           "ecr:InitiateLayerUpload",
@@ -358,6 +363,22 @@ resource "aws_iam_policy" "team_deployer" {
           "ecr:GetDownloadUrlForLayer",
         ]
         Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/tesslate-*"
+      },
+      {
+        Sid      = "CloudWatchLogsDiscover"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+      },
+      {
+        Sid    = "CloudWatchLogsRead"
+        Effect = "Allow"
+        Action = [
+          "logs:GetLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:FilterLogEvents",
+        ]
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/${local.cluster_name}/*"
       }
     ]
   })
@@ -413,7 +434,7 @@ resource "aws_iam_role" "team_observer" {
 
 resource "aws_iam_policy" "team_observer" {
   name        = "${local.cluster_name}-team-observer"
-  description = "Team observer: EKS describe + CloudWatch Logs read"
+  description = "Team observer: EKS describe + ECR browse + CloudWatch Logs read"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -429,6 +450,26 @@ resource "aws_iam_policy" "team_observer" {
         Effect   = "Allow"
         Action   = ["eks:ListClusters"]
         Resource = "*"
+      },
+      {
+        Sid    = "ECRDiscover"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:DescribeRepositories",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRRead"
+        Effect = "Allow"
+        Action = [
+          "ecr:ListImages",
+          "ecr:DescribeImages",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+        Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/tesslate-*"
       },
       {
         Sid      = "CloudWatchLogsDiscover"
@@ -500,7 +541,7 @@ resource "aws_iam_role" "team_debugger" {
 
 resource "aws_iam_policy" "team_debugger" {
   name        = "${local.cluster_name}-team-debugger"
-  description = "Team debugger: EKS describe + ECR push/pull + CloudWatch Logs read"
+  description = "Team debugger: EKS describe + ECR push/pull/browse + CloudWatch Logs read"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -518,15 +559,20 @@ resource "aws_iam_policy" "team_debugger" {
         Resource = "*"
       },
       {
-        Sid      = "ECRAuth"
-        Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken"]
+        Sid    = "ECRDiscover"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:DescribeRepositories",
+        ]
         Resource = "*"
       },
       {
         Sid    = "ECRPushPull"
         Effect = "Allow"
         Action = [
+          "ecr:ListImages",
+          "ecr:DescribeImages",
           "ecr:BatchCheckLayerAvailability",
           "ecr:PutImage",
           "ecr:InitiateLayerUpload",
@@ -613,33 +659,44 @@ resource "aws_iam_role" "team_admin" {
 
 resource "aws_iam_policy" "team_admin" {
   name        = "${local.cluster_name}-team-admin"
-  description = "Team admin: full cluster admin (EKS + ECR + CloudWatch Logs)"
+  description = "Team admin: full platform admin (EKS, ECR, S3, SecretsManager, IAM team mgmt, CloudWatch)"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # EKS — full access to this cluster
       {
-        Sid      = "EKSDescribe"
-        Effect   = "Allow"
-        Action   = ["eks:DescribeCluster"]
-        Resource = local.cluster_arn
-      },
-      {
-        Sid      = "EKSList"
-        Effect   = "Allow"
-        Action   = ["eks:ListClusters"]
-        Resource = "*"
-      },
-      {
-        Sid      = "ECRAuth"
-        Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken"]
-        Resource = "*"
-      },
-      {
-        Sid    = "ECRPushPull"
+        Sid    = "EKSFull"
         Effect = "Allow"
         Action = [
+          "eks:DescribeCluster",
+          "eks:ListClusters",
+          "eks:ListNodegroups",
+          "eks:DescribeNodegroup",
+          "eks:ListAddons",
+          "eks:DescribeAddon",
+          "eks:ListUpdates",
+          "eks:DescribeUpdate",
+          "eks:AccessKubernetesApi",
+        ]
+        Resource = "*"
+      },
+      # ECR — full management of tesslate repos
+      {
+        Sid    = "ECRDiscover"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:DescribeRepositories",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRFull"
+        Effect = "Allow"
+        Action = [
+          "ecr:ListImages",
+          "ecr:DescribeImages",
           "ecr:BatchCheckLayerAvailability",
           "ecr:PutImage",
           "ecr:InitiateLayerUpload",
@@ -647,9 +704,114 @@ resource "aws_iam_policy" "team_admin" {
           "ecr:CompleteLayerUpload",
           "ecr:BatchGetImage",
           "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchDeleteImage",
+          "ecr:PutLifecyclePolicy",
+          "ecr:GetLifecyclePolicy",
+          "ecr:ListTagsForResource",
+          "ecr:TagResource",
         ]
         Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/tesslate-*"
       },
+      # S3 — terraform state access
+      {
+        Sid    = "TerraformState"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket",
+          "s3:DeleteObject",
+        ]
+        Resource = [
+          "arn:aws:s3:::<TERRAFORM_STATE_BUCKET>",
+          "arn:aws:s3:::<TERRAFORM_STATE_BUCKET>/*",
+        ]
+      },
+      {
+        Sid      = "S3List"
+        Effect   = "Allow"
+        Action   = ["s3:ListAllMyBuckets"]
+        Resource = "*"
+      },
+      # DynamoDB — terraform locks
+      {
+        Sid    = "TerraformLocks"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:DescribeTable",
+        ]
+        Resource = "arn:aws:dynamodb:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/<AWS_IAM_USER>-locks"
+      },
+      # SecretsManager — full access for admin (create, read, update, delete)
+      {
+        Sid    = "SecretsFull"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:CreateSecret",
+          "secretsmanager:UpdateSecret",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:DeleteSecret",
+          "secretsmanager:TagResource",
+        ]
+        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:tesslate/*"
+      },
+      {
+        Sid      = "SecretsList"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:ListSecrets"]
+        Resource = "*"
+      },
+      # IAM — team user management (create users, manage group membership)
+      {
+        Sid    = "IAMTeamManage"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateUser",
+          "iam:DeleteUser",
+          "iam:GetUser",
+          "iam:ListUsers",
+          "iam:TagUser",
+          "iam:CreateAccessKey",
+          "iam:DeleteAccessKey",
+          "iam:ListAccessKeys",
+          "iam:AddUserToGroup",
+          "iam:RemoveUserFromGroup",
+          "iam:ListGroupsForUser",
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/team/*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:group/team/*",
+        ]
+      },
+      {
+        Sid    = "IAMListGroups"
+        Effect = "Allow"
+        Action = [
+          "iam:ListGroups",
+          "iam:GetGroup",
+        ]
+        Resource = "*"
+      },
+      # EC2 — read-only for infrastructure visibility
+      {
+        Sid    = "EC2Read"
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeInstances",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeSnapshots",
+          "ec2:DescribeVpcs",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeSecurityGroups",
+        ]
+        Resource = "*"
+      },
+      # CloudWatch Logs — full read
       {
         Sid      = "CloudWatchLogsDiscover"
         Effect   = "Allow"
@@ -663,8 +825,19 @@ resource "aws_iam_policy" "team_admin" {
           "logs:GetLogEvents",
           "logs:DescribeLogStreams",
           "logs:FilterLogEvents",
+          "logs:GetLogRecord",
+          "logs:GetQueryResults",
+          "logs:StartQuery",
+          "logs:StopQuery",
         ]
         Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/eks/${local.cluster_name}/*"
+      },
+      # STS — caller identity (needed for aws sts get-caller-identity)
+      {
+        Sid      = "STSIdentity"
+        Effect   = "Allow"
+        Action   = ["sts:GetCallerIdentity"]
+        Resource = "*"
       }
     ]
   })
