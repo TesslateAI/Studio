@@ -199,8 +199,9 @@ async def _action_restart_container(
         # Continue to start — the container may already be stopped.
 
     # --- Start ---
-    from sqlalchemy.orm import selectinload
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
     from ....models import Container as ContainerModel
 
     # Re-fetch with base loaded (needed by start_container)
@@ -430,7 +431,7 @@ async def _action_container_logs(
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return error_output(
             message=f"Timed out fetching logs for '{container_name}'",
             suggestion="The container may be unresponsive — try restarting it",

@@ -545,7 +545,7 @@ class TestContainerLogsAction:
         with (
             patch(_ORCH_IS_K8S, return_value=False),
             patch("asyncio.create_subprocess_shell", return_value=AsyncMock()),
-            patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+            patch("asyncio.wait_for", side_effect=TimeoutError()),
         ):
             result = await project_control_executor(
                 {"action": "container_logs", "container_name": "frontend"},
