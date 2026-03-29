@@ -378,17 +378,20 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		}
 		withRoom := s.registry.NodesWithHeadroom(candidateNames, req.BudgetCPU, req.BudgetMem)
 		if len(withRoom) == 0 {
-			return nil, status.Errorf(codes.ResourceExhausted,
-				"no candidate node has enough resources (need %dm CPU, %d bytes mem)",
+			// Soft filter: fall back to all candidates instead of hard-failing.
+			// K8s autoscaler needs Pending pods to trigger scale-up — if we
+			// reject here, no pod is created and autoscaler never sees demand.
+			klog.Warningf("EnsureCached: no candidate has enough resources (need %dm CPU, %d bytes mem) — falling back to least-loaded",
 				req.BudgetCPU, req.BudgetMem)
+		} else {
+			// Rebuild candidateSet to only include nodes with headroom.
+			candidateSet = make(map[string]struct{}, len(withRoom))
+			for _, n := range withRoom {
+				candidateSet[n] = struct{}{}
+			}
+			klog.V(2).Infof("EnsureCached: budget filter reduced candidates to %d nodes (need %dm CPU, %d bytes mem)",
+				len(candidateSet), req.BudgetCPU, req.BudgetMem)
 		}
-		// Rebuild candidateSet to only include nodes with headroom.
-		candidateSet = make(map[string]struct{}, len(withRoom))
-		for _, n := range withRoom {
-			candidateSet[n] = struct{}{}
-		}
-		klog.V(2).Infof("EnsureCached: budget filter reduced candidates to %d nodes (need %dm CPU, %d bytes mem)",
-			len(candidateSet), req.BudgetCPU, req.BudgetMem)
 	}
 
 	// 3. Get cached nodes from registry, filter to live-only.
@@ -807,13 +810,24 @@ func (s *Server) handleResolveVolume(_ interface{}, ctx context.Context, dec fun
 
 // CreateVolumeOnNode creates a volume with the given ID on the best available
 // node. If hintNode is non-empty it is preferred, otherwise the least-loaded
-// registered node is chosen. Returns the node the volume was placed on.
+// live node is chosen. Uses live node set from the resolver, not the registry,
+// to avoid picking nodes that were scaled down.
 func (s *Server) CreateVolumeOnNode(ctx context.Context, volumeID, template, hintNode string) (string, error) {
 	targetNode := hintNode
 	if targetNode == "" {
-		targetNode = s.registry.LeastLoadedNode()
-		if targetNode == "" {
-			return "", fmt.Errorf("no compute nodes registered")
+		// Pick from live nodes, not registry — registry can contain stale
+		// nodes during autoscaler transitions.
+		liveNames := s.liveNodes()
+		if len(liveNames) == 0 {
+			return "", fmt.Errorf("no live compute nodes available")
+		}
+		bestCount := -1
+		for _, n := range liveNames {
+			count := s.registry.NodeVolumeCount(n)
+			if bestCount < 0 || count < bestCount || (count == bestCount && n < targetNode) {
+				targetNode = n
+				bestCount = count
+			}
 		}
 	}
 
