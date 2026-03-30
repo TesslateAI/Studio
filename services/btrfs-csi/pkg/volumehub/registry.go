@@ -1,11 +1,24 @@
 package volumehub
 
 import (
+	"fmt"
+	"runtime"
 	"slices"
 	"sort"
 	"sync"
 	"time"
+
+	"k8s.io/klog/v2"
 )
+
+// callerInfo returns a short caller location for deprecation warnings.
+func callerInfo() string {
+	_, file, line, ok := runtime.Caller(2)
+	if !ok {
+		return "unknown"
+	}
+	return fmt.Sprintf("%s:%d", file, line)
+}
 
 // NodeRegistry tracks which compute nodes have which volumes cached,
 // and which node owns each volume.
@@ -282,7 +295,11 @@ func (r *NodeRegistry) GetVolumeStatus(volumeID string) *VolumeStatus {
 
 // RegisteredNodes returns a sorted list of all known node names. Useful for
 // selecting a cache target when no hint is provided.
+// Deprecated: RegisteredNodes returns stale data during autoscaler transitions.
+// Use Server.liveNodes() for node selection. This exists only for volume
+// metadata bookkeeping (ReconcileNodes). Every call is logged as a warning.
 func (r *NodeRegistry) RegisteredNodes() []string {
+	klog.Warningf("DEPRECATED: RegisteredNodes() called — this returns stale registry data, use liveNodes() instead (stack: %s)", callerInfo())
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -294,9 +311,10 @@ func (r *NodeRegistry) RegisteredNodes() []string {
 	return names
 }
 
-// LeastLoadedNode returns the registered node with the fewest cached volumes.
-// Returns "" if no nodes are registered.
+// Deprecated: LeastLoadedNode uses stale registry data. Use
+// Server.rankLiveNodes() instead. Every call is logged as an error.
 func (r *NodeRegistry) LeastLoadedNode() string {
+	klog.Errorf("DEPRECATED: LeastLoadedNode() called — MUST NOT be used for node selection, use liveNodes() (stack: %s)", callerInfo())
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -520,9 +538,14 @@ func (r *NodeRegistry) ReconcileNodes(liveNodes []string) (added, removed []stri
 		live[n] = struct{}{}
 	}
 
-	// Find stale nodes (lock is taken per-call inside Register/Unregister,
-	// so we snapshot the current list first).
-	current := r.RegisteredNodes()
+	// Snapshot current node list directly (avoid deprecated RegisteredNodes
+	// which logs warnings — this is legitimate internal bookkeeping).
+	r.mu.RLock()
+	current := make([]string, 0, len(r.nodes))
+	for name := range r.nodes {
+		current = append(current, name)
+	}
+	r.mu.RUnlock()
 	for _, n := range current {
 		if _, ok := live[n]; !ok {
 			r.UnregisterNode(n)

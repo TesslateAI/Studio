@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -809,28 +810,102 @@ func (s *Server) handleResolveVolume(_ interface{}, ctx context.Context, dec fun
 // ---------------------------------------------------------------------------
 
 // CreateVolumeOnNode creates a volume with the given ID on the best available
-// node. If hintNode is non-empty it is preferred, otherwise the least-loaded
-// live node is chosen. Uses live node set from the resolver, not the registry,
-// to avoid picking nodes that were scaled down.
+// node. Always uses live nodes from the resolver — never the registry. If
+// hintNode is live it is preferred, otherwise (or on transient failure) the
+// least-loaded live node is chosen. Retries once on a different node when a
+// gRPC Unavailable / connection error indicates the target is draining.
 func (s *Server) CreateVolumeOnNode(ctx context.Context, volumeID, template, hintNode string) (string, error) {
-	targetNode := hintNode
-	if targetNode == "" {
-		// Pick from live nodes, not registry — registry can contain stale
-		// nodes during autoscaler transitions.
-		liveNames := s.liveNodes()
-		if len(liveNames) == 0 {
-			return "", fmt.Errorf("no live compute nodes available")
-		}
-		bestCount := -1
-		for _, n := range liveNames {
-			count := s.registry.NodeVolumeCount(n)
-			if bestCount < 0 || count < bestCount || (count == bestCount && n < targetNode) {
-				targetNode = n
-				bestCount = count
-			}
-		}
+	liveNames := s.liveNodes()
+	if len(liveNames) == 0 {
+		return "", fmt.Errorf("no live compute nodes available")
 	}
 
+	// Build live set for O(1) lookups and least-loaded ranking.
+	liveSet := make(map[string]struct{}, len(liveNames))
+	for _, n := range liveNames {
+		liveSet[n] = struct{}{}
+	}
+
+	// Rank all live nodes by volume count (least-loaded first).
+	ranked := s.rankLiveNodes(liveNames)
+
+	// Pick initial target: hintNode if it's live, otherwise least-loaded.
+	targetNode := ""
+	if hintNode != "" {
+		if _, alive := liveSet[hintNode]; alive {
+			targetNode = hintNode
+		} else {
+			klog.Warningf("CreateVolumeOnNode: hintNode %s is not live, ignoring", hintNode)
+		}
+	}
+	if targetNode == "" {
+		targetNode = ranked[0]
+	}
+
+	node, err := s.tryCreateOnNode(ctx, volumeID, template, targetNode)
+	if err != nil && isNodeUnavailable(err) && len(ranked) > 1 {
+		// Retry on the next best live node.
+		klog.Warningf("CreateVolumeOnNode: %s failed on %s (%v), retrying on different node", volumeID, targetNode, err)
+		for _, fallback := range ranked {
+			if fallback == targetNode {
+				continue
+			}
+			node, err = s.tryCreateOnNode(ctx, volumeID, template, fallback)
+			if err == nil || !isNodeUnavailable(err) {
+				break
+			}
+			klog.Warningf("CreateVolumeOnNode: %s also failed on %s (%v)", volumeID, fallback, err)
+		}
+	}
+	return node, err
+}
+
+// rankLiveNodes returns live node names sorted by volume count (ascending),
+// with deterministic tie-break by name.
+func (s *Server) rankLiveNodes(liveNames []string) []string {
+	type nodeRank struct {
+		name  string
+		count int
+	}
+	ranks := make([]nodeRank, len(liveNames))
+	for i, n := range liveNames {
+		ranks[i] = nodeRank{name: n, count: s.registry.NodeVolumeCount(n)}
+	}
+	sort.Slice(ranks, func(i, j int) bool {
+		if ranks[i].count != ranks[j].count {
+			return ranks[i].count < ranks[j].count
+		}
+		return ranks[i].name < ranks[j].name
+	})
+	out := make([]string, len(ranks))
+	for i, r := range ranks {
+		out[i] = r.name
+	}
+	return out
+}
+
+// isNodeUnavailable returns true for gRPC errors that indicate the node is
+// draining, shutting down, or unreachable — i.e. retryable on a different node.
+func isNodeUnavailable(err error) bool {
+	st, ok := status.FromError(err)
+	if ok {
+		switch st.Code() {
+		case codes.Unavailable, codes.DeadlineExceeded:
+			return true
+		}
+	}
+	// Wrapped errors from fmt.Errorf — check the message.
+	msg := err.Error()
+	return strings.Contains(msg, "Unavailable") ||
+		strings.Contains(msg, "connection error") ||
+		strings.Contains(msg, "goaway") ||
+		strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "graceful_stop")
+}
+
+// tryCreateOnNode attempts to create a volume on a specific node. Returns
+// (nodeName, nil) on success or (empty, err) on failure.
+func (s *Server) tryCreateOnNode(ctx context.Context, volumeID, template, targetNode string) (string, error) {
 	client, err := s.nodeClient(targetNode)
 	if err != nil {
 		return "", fmt.Errorf("connect to node %s: %v", targetNode, err)
@@ -969,11 +1044,11 @@ func (s *Server) VolumeRegistered(volumeID string) bool {
 	return s.registry.GetOwner(volumeID) != ""
 }
 
-// AggregateCapacity returns the total available bytes across all registered
+// AggregateCapacity returns the total available bytes across all live
 // compute nodes. Nodes that are unreachable are skipped.
 func (s *Server) AggregateCapacity(ctx context.Context) (int64, error) {
 	var totalAvailable int64
-	for _, nodeName := range s.registry.RegisteredNodes() {
+	for _, nodeName := range s.liveNodes() {
 		client, err := s.nodeClient(nodeName)
 		if err != nil {
 			klog.Warningf("AggregateCapacity: skip node %s: %v", nodeName, err)
@@ -1024,12 +1099,13 @@ func (s *Server) DiscoverNodes(resolver *NodeResolver) error {
 	return nil
 }
 
-// RebuildRegistry queries all known CSI nodes to rebuild the Hub's in-memory
-// state. Called on startup to recover from restarts.
+// RebuildRegistry queries all live CSI nodes to rebuild the Hub's in-memory
+// state. Called on startup to recover from restarts. Uses live nodes from the
+// resolver — never the registry — to avoid querying stale/dead nodes.
 func (s *Server) RebuildRegistry(ctx context.Context) error {
-	nodes := s.registry.RegisteredNodes()
+	nodes := s.liveNodes()
 	if len(nodes) == 0 {
-		klog.Info("RebuildRegistry: no nodes registered, skipping")
+		klog.Info("RebuildRegistry: no live nodes, skipping")
 		return nil
 	}
 
