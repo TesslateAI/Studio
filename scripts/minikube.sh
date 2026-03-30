@@ -54,6 +54,9 @@ header()  { echo -e "\n${BOLD}$*${NC}"; }
 
 PROFILE="tesslate"
 NAMESPACE="tesslate"
+# Pin every kubectl call to the minikube context to prevent accidental
+# production mutations (cronjobs and scripts can change the active context).
+KC="kubectl --context=$PROFILE"
 
 # Configurable via env vars (e.g., MINIKUBE_DRIVER=docker, MINIKUBE_MEMORY=6144)
 MINIKUBE_CPUS="${MINIKUBE_CPUS:-4}"
@@ -129,27 +132,21 @@ ensure_minikube() {
     echo "  Run: scripts/minikube.sh start"
     exit 1
   fi
-  # CRITICAL: Always switch kubectl context to minikube to prevent
-  # accidentally applying minikube overlays to production.
-  local ctx
-  ctx="$(kubectl config current-context 2>/dev/null || true)"
-  local expected="$PROFILE"
-  if [[ "$ctx" != "$expected" ]]; then
-    warn "kubectl context is '$ctx', switching to '$expected'..."
-    kubectl config use-context "$expected" >/dev/null
-  fi
+  # All kubectl calls use $KC (kubectl --context=$PROFILE) so no
+  # context switching is needed — safe even if another process changes
+  # the active context mid-session.
 }
 
 wait_for_rollout() {
   local deployment="$1"
   local timeout="${2:-120}"
   info "Waiting for $deployment to be ready..."
-  kubectl rollout status "deployment/$deployment" -n "$NAMESPACE" --timeout="${timeout}s"
+  $KC rollout status "deployment/$deployment" -n "$NAMESPACE" --timeout="${timeout}s"
 }
 
 wait_for_backend_ready() {
   info "Waiting for backend pod to be ready..."
-  kubectl wait --for=condition=ready pod \
+  $KC wait --for=condition=ready pod \
     -l app=tesslate-backend \
     -n "$NAMESPACE" \
     --timeout=120s
@@ -314,35 +311,35 @@ cmd_start() {
 
   # 1. Cluster-scoped prereqs (StorageClass + VolumeSnapshot CRDs + PriorityClasses)
   header "Applying cluster prereqs"
-  kubectl apply -f k8s/overlays/minikube/storage-class.yaml
-  kubectl apply -f k8s/base/core/priority-classes.yaml
-  kubectl apply -k k8s/overlays/minikube/snapshot-crds --server-side 2>/dev/null \
-    || kubectl apply -k k8s/overlays/minikube/snapshot-crds
+  $KC apply -f k8s/overlays/minikube/storage-class.yaml
+  $KC apply -f k8s/base/core/priority-classes.yaml
+  $KC apply -k k8s/overlays/minikube/snapshot-crds --server-side 2>/dev/null \
+    || $KC apply -k k8s/overlays/minikube/snapshot-crds
 
   # 2. MinIO (minio-system namespace — S3 simulation for local dev)
   #    Must be ready before CSI since btrfs-csi syncs snapshots to MinIO.
   header "Applying MinIO"
-  kubectl apply -k k8s/overlays/minikube/minio
+  $KC apply -k k8s/overlays/minikube/minio
   info "Waiting for MinIO..."
-  kubectl rollout status deployment/minio -n minio-system --timeout=120s
+  $KC rollout status deployment/minio -n minio-system --timeout=120s
   info "Waiting for MinIO init job (bucket creation)..."
-  kubectl wait --for=condition=complete job/minio-init -n minio-system --timeout=120s
+  $KC wait --for=condition=complete job/minio-init -n minio-system --timeout=120s
 
   # 3. btrfs-CSI driver + Volume Hub (kube-system namespace)
   header "Applying btrfs-CSI + Volume Hub"
-  kubectl apply -k services/btrfs-csi/overlays/minikube
+  $KC apply -k services/btrfs-csi/overlays/minikube
   info "Waiting for Volume Hub..."
-  kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+  $KC rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
   info "Waiting for CSI node..."
-  kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=180s
+  $KC rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=180s
 
   # 4. Compute pool namespace + isolation (tesslate-compute-pool)
   header "Applying Compute Pool"
-  kubectl apply -k k8s/base/compute-pool
+  $KC apply -k k8s/base/compute-pool
 
   # 5. Main application (tesslate namespace)
   header "Applying Tesslate application"
-  kubectl apply -k k8s/overlays/minikube
+  $KC apply -k k8s/overlays/minikube
 
   # ── Wait for critical deployments ─────────────────────────────────────
   header "Waiting for services"
@@ -386,14 +383,14 @@ cmd_restart() {
 
   if [[ -z "$name" ]]; then
     info "Restarting all pods..."
-    kubectl delete pod -n "$NAMESPACE" --all
+    $KC delete pod -n "$NAMESPACE" --all
     wait_for_rollout "tesslate-backend" 180
     wait_for_rollout "tesslate-frontend" 120
   else
     local label
     label=$(resolve_label "$name")
     info "Restarting $name pods..."
-    kubectl delete pod -n "$NAMESPACE" -l "app=$label"
+    $KC delete pod -n "$NAMESPACE" -l "app=$label"
 
     local deploy
     deploy=$(resolve_k8s "$name")
@@ -402,7 +399,7 @@ cmd_restart() {
     # If backend, also restart worker (same image)
     if [[ "$name" == "backend" ]]; then
       info "Also restarting worker (shares backend image)..."
-      kubectl delete pod -n "$NAMESPACE" -l app=tesslate-worker
+      $KC delete pod -n "$NAMESPACE" -l app=tesslate-worker
       wait_for_rollout "tesslate-worker" 120
     fi
   fi
@@ -427,13 +424,13 @@ cmd_rebuild() {
       build_and_load "$svc" "$cache_flag"
     done
     info "Restarting all pods..."
-    kubectl delete pod -n "$NAMESPACE" --all
-    kubectl delete pod -n kube-system -l app=tesslate-volume-hub
-    kubectl delete pod -n kube-system -l app=tesslate-btrfs-csi-node
+    $KC delete pod -n "$NAMESPACE" --all
+    $KC delete pod -n kube-system -l app=tesslate-volume-hub
+    $KC delete pod -n kube-system -l app=tesslate-btrfs-csi-node
     wait_for_rollout "tesslate-backend" 180
     wait_for_rollout "tesslate-frontend" 120
-    kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
-    kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
+    $KC rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+    $KC rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
     success "Full rebuild complete"
     return
   fi
@@ -456,15 +453,15 @@ cmd_rebuild() {
   if [[ "$target" == "devserver" ]]; then
     success "Devserver image rebuilt and loaded (no pods to restart)"
   elif [[ "$target" == "btrfs-csi" ]]; then
-    kubectl delete pod -n kube-system -l app=tesslate-volume-hub
-    kubectl delete pod -n kube-system -l app=tesslate-btrfs-csi-node
-    kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
-    kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
+    $KC delete pod -n kube-system -l app=tesslate-volume-hub
+    $KC delete pod -n kube-system -l app=tesslate-btrfs-csi-node
+    $KC rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+    $KC rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
     success "btrfs-csi pods restarted"
   else
     local label
     label=$(resolve_label "$target")
-    kubectl delete pod -n "$NAMESPACE" -l "app=$label"
+    $KC delete pod -n "$NAMESPACE" -l "app=$label"
 
     local deploy
     deploy=$(resolve_k8s "$target")
@@ -472,7 +469,7 @@ cmd_rebuild() {
 
     if [[ "$target" == "backend" ]]; then
       info "Also restarting worker..."
-      kubectl delete pod -n "$NAMESPACE" -l app=tesslate-worker
+      $KC delete pod -n "$NAMESPACE" -l app=tesslate-worker
       wait_for_rollout "tesslate-worker" 120
     fi
   fi
@@ -484,20 +481,20 @@ cmd_logs() {
   local name="${1:-backend}"
   local deploy
   deploy=$(resolve_k8s "$name")
-  kubectl logs -f -n "$NAMESPACE" "deployment/$deploy"
+  $KC logs -f -n "$NAMESPACE" "deployment/$deploy"
 }
 
 cmd_status() {
   ensure_minikube
   header "Application Pods ($NAMESPACE)"
-  kubectl get pods -n "$NAMESPACE" -o wide
+  $KC get pods -n "$NAMESPACE" -o wide
   echo ""
   header "Storage Pods (kube-system)"
-  kubectl get pods -n kube-system -l 'app in (tesslate-btrfs-csi-node,tesslate-volume-hub)' -o wide 2>/dev/null \
+  $KC get pods -n kube-system -l 'app in (tesslate-btrfs-csi-node,tesslate-volume-hub)' -o wide 2>/dev/null \
     || echo "  No storage pods found"
   echo ""
   header "Ingress"
-  kubectl get ingress -n "$NAMESPACE" 2>/dev/null || echo "  No ingress found"
+  $KC get ingress -n "$NAMESPACE" 2>/dev/null || echo "  No ingress found"
   echo ""
   _print_mk_urls
 }
@@ -508,14 +505,14 @@ cmd_shell() {
   local deploy
   deploy=$(resolve_k8s "$name")
   info "Opening shell in $deploy..."
-  kubectl exec -it -n "$NAMESPACE" "deployment/$deploy" -- /bin/bash
+  $KC exec -it -n "$NAMESPACE" "deployment/$deploy" -- /bin/bash
 }
 
 cmd_migrate() {
   ensure_minikube
   wait_for_backend_ready
   info "Running Alembic migrations..."
-  kubectl exec -n "$NAMESPACE" deployment/tesslate-backend -- alembic upgrade head
+  $KC exec -n "$NAMESPACE" deployment/tesslate-backend -- alembic upgrade head
   success "Migrations complete"
 }
 
@@ -526,7 +523,7 @@ cmd_seed() {
 
   header "Seeding database"
   local backend_pod
-  backend_pod=$(kubectl get pods -n "$NAMESPACE" -l app=tesslate-backend -o jsonpath='{.items[0].metadata.name}')
+  backend_pod=$($KC get pods -n "$NAMESPACE" -l app=tesslate-backend -o jsonpath='{.items[0].metadata.name}')
   if [[ -z "$backend_pod" ]]; then
     error "No backend pod found"
     exit 1
@@ -551,8 +548,8 @@ cmd_seed() {
   for script in "${scripts[@]}"; do
     if [[ -f "$seed_dir/$script" ]]; then
       info "Running $script..."
-      kubectl cp "$seed_dir/$script" "$NAMESPACE/${backend_pod}:/tmp/$script"
-      kubectl exec -n "$NAMESPACE" "$backend_pod" -- python "/tmp/$script" 2>&1 || {
+      $KC cp "$seed_dir/$script" "$NAMESPACE/${backend_pod}:/tmp/$script"
+      $KC exec -n "$NAMESPACE" "$backend_pod" -- python "/tmp/$script" 2>&1 || {
         warn "$script failed (non-fatal), continuing..."
       }
     fi
@@ -576,17 +573,17 @@ cmd_deploy_compute() {
 
   # VolumeSnapshot CRDs
   info "Applying VolumeSnapshot CRDs..."
-  kubectl apply -k k8s/overlays/minikube/snapshot-crds --server-side 2>/dev/null \
-    || kubectl apply -k k8s/overlays/minikube/snapshot-crds
+  $KC apply -k k8s/overlays/minikube/snapshot-crds --server-side 2>/dev/null \
+    || $KC apply -k k8s/overlays/minikube/snapshot-crds
 
   # btrfs-CSI + Volume Hub
   info "Applying btrfs-CSI + Volume Hub manifests..."
-  kubectl apply -k services/btrfs-csi/overlays/minikube
+  $KC apply -k services/btrfs-csi/overlays/minikube
 
   info "Waiting for Volume Hub..."
-  kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+  $KC rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
   info "Waiting for CSI node..."
-  kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
+  $KC rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
 
   success "Compute stack deployed"
   echo ""
@@ -597,13 +594,13 @@ cmd_deploy_k8s() {
   ensure_minikube
 
   header "Applying application manifests"
-  kubectl apply -k k8s/overlays/minikube
+  $KC apply -k k8s/overlays/minikube
   success "Manifests applied"
 
   info "Restarting pods..."
-  kubectl rollout restart deployment/tesslate-backend -n "$NAMESPACE"
-  kubectl rollout restart deployment/tesslate-frontend -n "$NAMESPACE"
-  kubectl rollout restart deployment/tesslate-worker -n "$NAMESPACE"
+  $KC rollout restart deployment/tesslate-backend -n "$NAMESPACE"
+  $KC rollout restart deployment/tesslate-frontend -n "$NAMESPACE"
+  $KC rollout restart deployment/tesslate-worker -n "$NAMESPACE"
 
   wait_for_rollout "tesslate-backend" 180
   wait_for_rollout "tesslate-frontend" 120
@@ -741,16 +738,16 @@ cmd_cf_start() {
   fi
 
   # Verify ingress-nginx is running (cloudflared routes through it)
-  if ! kubectl get service ingress-nginx-controller -n ingress-nginx &>/dev/null; then
+  if ! $KC get service ingress-nginx-controller -n ingress-nginx &>/dev/null; then
     error "ingress-nginx is not deployed. Ensure minikube was started with --addons ingress."
     echo "  Run: minikube addons enable ingress -p $PROFILE"
     exit 1
   fi
 
   # Apply manifests
-  kubectl apply -k k8s/overlays/minikube/cloudflare-tunnel
+  $KC apply -k k8s/overlays/minikube/cloudflare-tunnel
   info "Waiting for cloudflared..."
-  kubectl rollout status deployment/cloudflared -n cloudflare-tunnel --timeout=60s
+  $KC rollout status deployment/cloudflared -n cloudflare-tunnel --timeout=60s
 
   success "Cloudflare Tunnel is running"
   echo ""
@@ -764,8 +761,8 @@ cmd_cf_stop() {
 
   header "Stopping Cloudflare Tunnel"
 
-  if kubectl get namespace cloudflare-tunnel &>/dev/null; then
-    kubectl delete -k k8s/overlays/minikube/cloudflare-tunnel
+  if $KC get namespace cloudflare-tunnel &>/dev/null; then
+    $KC delete -k k8s/overlays/minikube/cloudflare-tunnel
     success "Cloudflare Tunnel removed"
   else
     info "Cloudflare Tunnel is not deployed"
@@ -777,18 +774,18 @@ cmd_cf_status() {
 
   header "Cloudflare Tunnel Status"
 
-  if ! kubectl get namespace cloudflare-tunnel &>/dev/null; then
+  if ! $KC get namespace cloudflare-tunnel &>/dev/null; then
     info "Cloudflare Tunnel is not deployed"
     echo "  Run: scripts/minikube.sh cf start"
     return
   fi
 
-  kubectl get pods -n cloudflare-tunnel -o wide
+  $KC get pods -n cloudflare-tunnel -o wide
   echo ""
 
   # Show pod readiness
   local ready
-  ready=$(kubectl get pods -n cloudflare-tunnel -l app=cloudflared -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+  ready=$($KC get pods -n cloudflare-tunnel -l app=cloudflared -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
   if [[ "$ready" == "True" ]]; then
     success "Tunnel connector is healthy"
   else
@@ -799,13 +796,13 @@ cmd_cf_status() {
 cmd_cf_logs() {
   ensure_minikube
 
-  if ! kubectl get namespace cloudflare-tunnel &>/dev/null; then
+  if ! $KC get namespace cloudflare-tunnel &>/dev/null; then
     error "Cloudflare Tunnel is not deployed"
     echo "  Run: scripts/minikube.sh cf start"
     exit 1
   fi
 
-  kubectl logs -f -n cloudflare-tunnel deployment/cloudflared
+  $KC logs -f -n cloudflare-tunnel deployment/cloudflared
 }
 
 _print_mk_urls() {

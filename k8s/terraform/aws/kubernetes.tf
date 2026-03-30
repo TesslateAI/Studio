@@ -6,6 +6,43 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# PriorityClasses (cluster-scoped)
+# Mirrors k8s/base/core/priority-classes.yaml so `terraform apply` is sufficient.
+# -----------------------------------------------------------------------------
+resource "kubernetes_priority_class" "system" {
+  metadata {
+    name = "tesslate-system"
+  }
+
+  value             = 2000
+  global_default    = false
+  preemption_policy = "PreemptLowerPriority"
+  description       = "Tesslate system-level pods (CSI driver, Volume Hub). Never preempted."
+}
+
+resource "kubernetes_priority_class" "ephemeral" {
+  metadata {
+    name = "tesslate-ephemeral"
+  }
+
+  value             = 1000
+  global_default    = false
+  preemption_policy = "PreemptLowerPriority"
+  description       = "Tesslate ephemeral pods (one-shot commands, terminal). Can preempt environment pods."
+}
+
+resource "kubernetes_priority_class" "environment" {
+  metadata {
+    name = "tesslate-environment"
+  }
+
+  value             = 100
+  global_default    = false
+  preemption_policy = "PreemptLowerPriority"
+  description       = "Tesslate environment pods (dev containers, services). Lowest Tesslate priority."
+}
+
+# -----------------------------------------------------------------------------
 # Tesslate Namespace
 # -----------------------------------------------------------------------------
 resource "kubernetes_namespace" "tesslate" {
