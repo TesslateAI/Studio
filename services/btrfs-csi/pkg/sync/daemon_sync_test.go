@@ -127,8 +127,15 @@ func newFakeCAS() *fakeCAS {
 	}
 }
 
-func (f *fakeCAS) PutBlob(_ context.Context, r io.Reader) (string, error) {
-	data, _ := io.ReadAll(r)
+func (f *fakeCAS) PutBlob(ctx context.Context, r io.Reader) (string, error) {
+	data, readErr := io.ReadAll(r)
+	if readErr != nil {
+		return "", readErr
+	}
+	// Also check context — stall detection cancels it.
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	h := f.nextHash
@@ -898,4 +905,51 @@ func TestSyncAll_LocksPerVolume(t *testing.T) {
 	if len(m.Layers) > 2 {
 		t.Errorf("expected ≤2 layers, got %d (possible race)", len(m.Layers))
 	}
+}
+
+// stallingBtrfs is a fakeBtrfs variant where Send returns some bytes then blocks.
+type stallingBtrfs struct {
+	*fakeBtrfs
+}
+
+func (s *stallingBtrfs) Send(_ context.Context, _ string, _ string) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		pw.Write([]byte("initial-bytes"))
+		// Block forever — stall detection should cancel us.
+		select {}
+	}()
+	return pr, nil
+}
+
+func TestSyncOne_StallDetection(t *testing.T) {
+	fb := &stallingBtrfs{fakeBtrfs: newFakeBtrfs()}
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	volID := "vol-stall"
+	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
+
+	tv := &trackedVolume{
+		volumeID:     volID,
+		templateName: "tmpl",
+		templateHash: "sha256:base",
+	}
+
+	start := time.Now()
+	_, _, err := d.syncOne(context.Background(), tv, "sync", "")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error from stalled sync")
+	}
+	if !strings.Contains(err.Error(), "stall") {
+		t.Errorf("expected stall in error message, got: %v", err)
+	}
+	// Should detect stall within ~syncStallTimeout + small overhead, not hang.
+	if elapsed > syncStallTimeout+5*time.Second {
+		t.Errorf("stall detection took %v, expected ~%v", elapsed, syncStallTimeout)
+	}
+	t.Logf("Stall detected in %v (timeout=%v)", elapsed, syncStallTimeout)
 }

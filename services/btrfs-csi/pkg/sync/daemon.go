@@ -776,16 +776,25 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 	}
 	// If no template, full send (blank project or template not locally cached).
 
-	// 3. btrfs send → CAS PutBlob.
+	// 3. btrfs send → CAS PutBlob with stall detection.
 	sendReader, err := d.btrfs.Send(ctx, pendingPath, parentPath)
 	if err != nil {
 		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 		return "", "", fmt.Errorf("btrfs send: %w", err)
 	}
 
-	hash, err := d.cas.PutBlob(ctx, sendReader)
-	_ = sendReader.Close()
+	// Wrap with stall detection: if no bytes flow for 30s, the sync is stuck
+	// (S3 hang, network partition, dead rclone). Cancel to unblock.
+	stallCtx, stallCancel := context.WithCancelCause(ctx)
+	stallR := newStallReader(sendReader, stallCtx, stallCancel, syncStallTimeout)
+
+	hash, err := d.cas.PutBlob(stallCtx, stallR)
+	stallR.Close() // stops timer + closes underlying sendReader
 	if err != nil {
+		// Annotate with stall cause if the stall timer (not parent ctx) caused cancellation.
+		if cause := context.Cause(stallCtx); cause != nil {
+			err = fmt.Errorf("%w (cause: %v)", err, cause)
+		}
 		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 		return "", "", fmt.Errorf("put blob: %w", err)
 	}
