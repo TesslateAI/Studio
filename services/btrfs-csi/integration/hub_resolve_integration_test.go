@@ -160,7 +160,6 @@ func TestHub_ResolveVolume_RestoreFromCAS(t *testing.T) {
 
 	// Hub: volume is registered but NOT cached.
 	registry := volumehub.NewNodeRegistry()
-	registry.RegisterNode(nodeName)
 	registry.RegisterVolume(volID)
 
 	hub := volumehub.NewServer(
@@ -171,6 +170,7 @@ func TestHub_ResolveVolume_RestoreFromCAS(t *testing.T) {
 		},
 		func(n string) string { return nodeOpsAddr },
 		func() []string { return []string{nodeName} },
+		nil, // no ResourceWatcher
 	)
 
 	client := startHubAndConnect(t, hub)
@@ -220,25 +220,38 @@ func TestHub_ResolveVolume_RestoreFromCAS(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHub_ResolveVolume_CachedFastPath(t *testing.T) {
-	_ = getPoolPath(t) // skip if no btrfs pool
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx := context.Background()
 
 	nodeName := "fast-node"
-	nodeOpsAddr := "127.0.0.1:9741"
+	volID := uniqueName("fast-vol")
+
+	// Create a real subvolume so SubvolumeExists returns true on the fast path.
+	volPath := "volumes/" + volID
+	if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("CreateSubvolume: %v", err)
+	}
+	t.Cleanup(func() { mgr.DeleteSubvolume(context.Background(), volPath) })
+	_ = pool
+
+	// Start a real NodeOps server so SubvolumeExists can be called.
+	syncer := bsync.NewDaemon(mgr, nil, nil, 1*time.Hour)
+	nodeOpsAddr := startNodeOpsServer(t, mgr, syncer, nil)
 
 	registry := volumehub.NewNodeRegistry()
-	registry.RegisterNode(nodeName)
-	volID := uniqueName("fast-vol")
 	registry.RegisterVolume(volID)
 	registry.SetCached(volID, nodeName)
 
 	hub := volumehub.NewServer(
 		registry, nil,
 		func(n string) (*nodeops.Client, error) {
-			t.Fatal("nodeClient should not be called on fast path")
-			return nil, nil
+			return nodeops.NewClientWithDialOptions(nodeOpsAddr,
+				grpc.WithTransportCredentials(localhostTestCredentials()))
 		},
 		func(n string) string { return nodeOpsAddr },
 		func() []string { return []string{nodeName} },
+		nil, // no ResourceWatcher
 	)
 
 	client := startHubAndConnect(t, hub)
@@ -323,7 +336,6 @@ func TestHub_EnsureCached_ClientTimeout_RestoreContinues(t *testing.T) {
 	nodeName := "timeout-node"
 
 	registry := volumehub.NewNodeRegistry()
-	registry.RegisterNode(nodeName)
 	registry.RegisterVolume(volID)
 
 	hub := volumehub.NewServer(
@@ -334,6 +346,7 @@ func TestHub_EnsureCached_ClientTimeout_RestoreContinues(t *testing.T) {
 		},
 		func(n string) string { return nodeOpsAddr },
 		func() []string { return []string{nodeName} },
+		nil, // no ResourceWatcher
 	)
 
 	client := startHubAndConnect(t, hub)
@@ -467,7 +480,6 @@ func TestHub_RestoreVolume_CrossNodeWithSyntheticTemplate(t *testing.T) {
 	nodeName := "fresh-node"
 
 	registry := volumehub.NewNodeRegistry()
-	registry.RegisterNode(nodeName)
 	registry.RegisterVolume(volID)
 
 	hub := volumehub.NewServer(
@@ -478,6 +490,7 @@ func TestHub_RestoreVolume_CrossNodeWithSyntheticTemplate(t *testing.T) {
 		},
 		func(n string) string { return nodeOpsAddr },
 		func() []string { return []string{nodeName} },
+		nil, // no ResourceWatcher
 	)
 
 	client := startHubAndConnect(t, hub)
@@ -568,7 +581,6 @@ func TestHub_RebuildRegistry_MissingSubvolume(t *testing.T) {
 	nodeName := "rebuild-node"
 
 	registry := volumehub.NewNodeRegistry()
-	registry.RegisterNode(nodeName)
 
 	hub := volumehub.NewServer(
 		registry, casStore,
@@ -578,6 +590,7 @@ func TestHub_RebuildRegistry_MissingSubvolume(t *testing.T) {
 		},
 		func(n string) string { return nodeOpsAddr },
 		func() []string { return []string{nodeName} },
+		nil, // no ResourceWatcher
 	)
 
 	// Trigger RebuildRegistry explicitly.

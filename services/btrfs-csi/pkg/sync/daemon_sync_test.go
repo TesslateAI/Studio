@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	stdsync "sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeBtrfs struct {
+	mu         stdsync.Mutex
 	subvolumes map[string]bool // path → exists
 	snapshots  []snapshotCall
 	deletes    []string
@@ -42,29 +44,41 @@ func newFakeBtrfs() *fakeBtrfs {
 }
 
 func (f *fakeBtrfs) SubvolumeExists(_ context.Context, name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.subvolumes[name]
 }
 
 func (f *fakeBtrfs) SnapshotSubvolume(_ context.Context, source, dest string, readOnly bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.snapshots = append(f.snapshots, snapshotCall{source, dest, readOnly})
 	f.subvolumes[dest] = true
 	return nil
 }
 
 func (f *fakeBtrfs) DeleteSubvolume(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deletes = append(f.deletes, name)
 	delete(f.subvolumes, name)
 	return nil
 }
 
 func (f *fakeBtrfs) Send(_ context.Context, _ string, _ string) (io.ReadCloser, error) {
-	if f.sendErr != nil {
-		return nil, f.sendErr
+	f.mu.Lock()
+	sendErr := f.sendErr
+	sendData := f.sendData
+	f.mu.Unlock()
+	if sendErr != nil {
+		return nil, sendErr
 	}
-	return io.NopCloser(strings.NewReader(f.sendData)), nil
+	return io.NopCloser(strings.NewReader(sendData)), nil
 }
 
 func (f *fakeBtrfs) RenameSubvolume(_ context.Context, oldName, newName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.renames = append(f.renames, renameCall{oldName, newName})
 	if f.subvolumes[oldName] {
 		delete(f.subvolumes, oldName)
@@ -74,6 +88,8 @@ func (f *fakeBtrfs) RenameSubvolume(_ context.Context, oldName, newName string) 
 }
 
 func (f *fakeBtrfs) ListSubvolumes(_ context.Context, prefix string) ([]btrfs.SubvolumeInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var result []btrfs.SubvolumeInfo
 	for p := range f.subvolumes {
 		if strings.HasPrefix(p, prefix) {
@@ -96,6 +112,7 @@ func (f *fakeBtrfs) GetQgroupUsage(_ context.Context, _ string) (int64, int64, e
 // ---------------------------------------------------------------------------
 
 type fakeCAS struct {
+	mu        stdsync.Mutex
 	blobs     map[string]string // hash → data
 	manifests map[string]*cas.Manifest
 	putCount  int
@@ -112,6 +129,8 @@ func newFakeCAS() *fakeCAS {
 
 func (f *fakeCAS) PutBlob(_ context.Context, r io.Reader) (string, error) {
 	data, _ := io.ReadAll(r)
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	h := f.nextHash
 	f.blobs[h] = string(data)
 	f.putCount++
@@ -119,6 +138,8 @@ func (f *fakeCAS) PutBlob(_ context.Context, r io.Reader) (string, error) {
 }
 
 func (f *fakeCAS) GetBlob(_ context.Context, hash string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	data, ok := f.blobs[hash]
 	if !ok {
 		return nil, fmt.Errorf("blob %s not found", hash)
@@ -127,6 +148,8 @@ func (f *fakeCAS) GetBlob(_ context.Context, hash string) (io.ReadCloser, error)
 }
 
 func (f *fakeCAS) GetManifest(_ context.Context, volumeID string) (*cas.Manifest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	m, ok := f.manifests[volumeID]
 	if !ok {
 		return nil, fmt.Errorf("manifest %s not found", volumeID)
@@ -135,11 +158,15 @@ func (f *fakeCAS) GetManifest(_ context.Context, volumeID string) (*cas.Manifest
 }
 
 func (f *fakeCAS) PutManifest(_ context.Context, m *cas.Manifest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.manifests[m.VolumeID] = m
 	return nil
 }
 
 func (f *fakeCAS) DeleteManifest(_ context.Context, volumeID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	delete(f.manifests, volumeID)
 	return nil
 }
@@ -741,5 +768,134 @@ func TestGetTrackedState_ReportsDirty(t *testing.T) {
 	states = d.GetTrackedState()
 	if states[0].Dirty {
 		t.Error("synced volume should report Dirty=false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Parallel DrainAll tests
+// ---------------------------------------------------------------------------
+
+// slowFakeCAS wraps fakeCAS with a per-PutBlob delay to simulate S3 latency.
+type slowFakeCAS struct {
+	*fakeCAS
+	delay time.Duration
+}
+
+func (f *slowFakeCAS) PutBlob(ctx context.Context, r io.Reader) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(f.delay):
+	}
+	return f.fakeCAS.PutBlob(ctx, r)
+}
+
+func TestDrainAll_Parallel_FasterThanSerial(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := &slowFakeCAS{fakeCAS: newFakeCAS(), delay: 50 * time.Millisecond}
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	numVols := 6
+	for i := 0; i < numVols; i++ {
+		volID := fmt.Sprintf("vol-drain-%d", i)
+		fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
+		d.TrackVolume(volID, "tmpl", "sha256:base")
+	}
+
+	start := time.Now()
+	err := d.DrainAll(context.Background())
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("DrainAll error: %v", err)
+	}
+
+	// Serial would take ≥ 6 × 50ms = 300ms.
+	// Parallel (cap=3) should take ≈ 2 × 50ms = 100ms + overhead.
+	// Allow up to 200ms — proving parallelism.
+	serialTime := time.Duration(numVols) * 50 * time.Millisecond
+	if elapsed >= serialTime {
+		t.Errorf("DrainAll took %v — slower than serial (%v). Parallelism not working.", elapsed, serialTime)
+	}
+	t.Logf("DrainAll: %d volumes in %v (serial would be ≥%v)", numVols, elapsed, serialTime)
+
+	// All volumes should have manifests.
+	for i := 0; i < numVols; i++ {
+		volID := fmt.Sprintf("vol-drain-%d", i)
+		if _, err := fc.GetManifest(context.Background(), volID); err != nil {
+			t.Errorf("manifest missing for %s: %v", volID, err)
+		}
+	}
+}
+
+func TestDrainAll_ParallelOnlyDirty(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	// 3 clean + 2 dirty
+	for i := 0; i < 5; i++ {
+		volID := fmt.Sprintf("vol-mix-%d", i)
+		fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
+		d.TrackVolume(volID, "tmpl", "sha256:base")
+	}
+	// Mark first 3 as clean
+	d.mu.Lock()
+	for i := 0; i < 3; i++ {
+		d.tracked[fmt.Sprintf("vol-mix-%d", i)].dirty = false
+	}
+	d.mu.Unlock()
+
+	err := d.DrainAll(context.Background())
+	if err != nil {
+		t.Fatalf("DrainAll error: %v", err)
+	}
+
+	// Only 2 dirty volumes should have been synced (manifests created).
+	synced := 0
+	for i := 0; i < 5; i++ {
+		volID := fmt.Sprintf("vol-mix-%d", i)
+		if _, err := fc.GetManifest(context.Background(), volID); err == nil {
+			synced++
+		}
+	}
+	if synced != 2 {
+		t.Errorf("expected 2 synced manifests, got %d", synced)
+	}
+}
+
+func TestSyncAll_LocksPerVolume(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	volID := "vol-locktest"
+	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
+	d.TrackVolume(volID, "tmpl", "sha256:base")
+
+	// Run syncAll and a concurrent SyncVolume on the same volume.
+	// Both should complete without error (serialized by per-volume lock).
+	errs := make(chan error, 2)
+	go func() { errs <- d.syncAll(context.Background()) }()
+	go func() { errs <- d.SyncVolume(context.Background(), volID) }()
+
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent sync error: %v", err)
+		}
+	}
+
+	// Manifest should exist and not be corrupted (no duplicate layers from race).
+	m, err := fc.GetManifest(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("manifest missing: %v", err)
+	}
+	// Should have at most 2 layers (one from each sync). Previously without
+	// locking, concurrent syncOne could produce duplicate/corrupt layers.
+	if len(m.Layers) > 2 {
+		t.Errorf("expected ≤2 layers, got %d (possible race)", len(m.Layers))
 	}
 }

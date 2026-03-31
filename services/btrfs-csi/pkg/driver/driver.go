@@ -259,6 +259,9 @@ func (d *Driver) runNode(ctx context.Context) error {
 				// disconnect before drain completes, which would cancel r.Context().
 				// Background context ensures drain runs to completion even if the
 				// process receives SIGTERM during drain (best-effort data safety).
+				// Timeout matches K8s terminationGracePeriodSeconds (600s) as a
+				// hard safety net. Parallel drain + 15s sync interval means this
+				// should never be hit. Future: replace with per-volume stall detection.
 				drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				defer drainCancel()
 				if err := d.syncer.DrainAll(drainCtx); err != nil {

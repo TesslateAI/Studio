@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
@@ -190,30 +191,54 @@ func (d *Daemon) DrainAll(ctx context.Context) error {
 	total := len(d.tracked)
 	d.mu.Unlock()
 
-	klog.Infof("Drain: %d dirty volumes to sync, %d clean (skipped), %d total", len(items), skipped, total)
+	klog.Infof("Drain: %d dirty volumes to sync in parallel (max 3), %d clean (skipped), %d total", len(items), skipped, total)
 
-	for i, item := range items {
-		select {
-		case <-ctx.Done():
-			klog.Warningf("Drain: context cancelled after syncing %d/%d dirty volumes", i, len(items))
-			return ctx.Err()
-		default:
-		}
-
-		if err := d.SyncVolume(ctx, item.volumeID); err != nil {
-			klog.Errorf("Drain: failed to sync volume %d/%d %s: %v", i+1, len(items), item.volumeID, err)
-			// Continue draining remaining volumes — partial drain > no drain.
-			continue
-		}
-		d.UntrackVolume(item.volumeID)
-		klog.Infof("Drain: synced volume %d/%d: %s", i+1, len(items), item.volumeID)
+	// Early exit if already cancelled.
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
-	// Don't call d.Stop() here — the syncer must remain available for RPCs
-	// that arrive between drain completion and SIGTERM. Context cancellation
-	// from main.go will stop the syncer naturally via Start()'s ctx.Done.
-	klog.Info("Drain: complete (syncer remains active for late RPCs)")
-	return nil
+	// Parallel drain: sync up to 3 dirty volumes concurrently.
+	// Per-volume locking inside SyncVolume prevents two goroutines from
+	// syncing the same volume. Different volumes are fully independent.
+	g, gctx := errgroup.WithContext(ctx)
+	sem := make(chan struct{}, 3) // concurrency cap
+	var synced sync.Map
+
+	for _, item := range items {
+		item := item // capture loop var
+		g.Go(func() error {
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-gctx.Done():
+				return gctx.Err()
+			}
+
+			if err := d.SyncVolume(gctx, item.volumeID); err != nil {
+				if gctx.Err() != nil {
+					return gctx.Err() // propagate cancellation
+				}
+				klog.Errorf("Drain: failed to sync %s: %v", item.volumeID, err)
+				return nil // non-cancel error: continue draining others
+			}
+			d.UntrackVolume(item.volumeID)
+			synced.Store(item.volumeID, true)
+			return nil
+		})
+	}
+
+	err := g.Wait()
+
+	syncedCount := 0
+	synced.Range(func(_, _ interface{}) bool { syncedCount++; return true })
+	klog.Infof("Drain: synced %d/%d dirty volumes (syncer remains active for late RPCs)", syncedCount, len(items))
+
+	// If context was cancelled, surface the cancellation error.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 // TrackVolume registers a volume for periodic CAS sync with its template context.
@@ -671,7 +696,12 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 		default:
 		}
 
+		// Per-volume lock serializes with concurrent SyncVolume/CreateSnapshot RPCs.
+		vl := d.volumeLock(item.tv.volumeID)
+		vl.Lock()
 		hash, newSnapPath, err := d.syncOne(ctx, &item.tv, "sync", "")
+		vl.Unlock()
+
 		if err != nil {
 			klog.Errorf("CAS sync failed for volume %s: %v", item.tv.volumeID, err)
 			metrics.SyncFailures.Inc()

@@ -37,7 +37,7 @@ func main() {
 		s3AccessKey = flag.String("s3-access-key", "", "(deprecated) S3 access key")
 		s3SecretKey = flag.String("s3-secret-key", "", "(deprecated) S3 secret key")
 		s3Region    = flag.String("s3-region", "us-east-1", "(deprecated) S3 region")
-		syncInterval   = flag.Duration("sync-interval", 60*time.Second, "Interval between sync daemon runs")
+		syncInterval   = flag.Duration("sync-interval", 15*time.Second, "Interval between sync daemon runs")
 		hubGRPCPort     = flag.Int("hub-grpc-port", 9750, "VolumeHub gRPC listen port (hub mode)")
 		orchestratorURL = flag.String("orchestrator-url", "", "Orchestrator base URL for GC known-volumes (e.g., http://tesslate-backend:8000)")
 		drainPort       = flag.Int("drain-port", 9743, "HTTP port for drain endpoint (preStop hook)")

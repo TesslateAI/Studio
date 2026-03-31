@@ -941,11 +941,11 @@ func (s *Server) tryCreateOnNode(ctx context.Context, volumeID, template, target
 		klog.Warningf("CreateVolumeOnNode: track %s on %s: %v", volumeID, targetNode, err)
 	}
 
-	// Write-through CAS sync: ensure data is persisted to object storage
-	// before returning. If the node dies before this completes, we'd lose
-	// the volume data — so treat sync failure as a creation failure.
+	// Write-through CAS sync for empty volumes (no template). Template-based
+	// volumes are reconstructable from the template already in S3, so the
+	// initial sync is redundant — the sync daemon will pick it up within 15s.
 	// Skip when CAS is not configured (e.g. minikube / local-only mode).
-	if s.cas != nil {
+	if s.cas != nil && template == "" {
 		if err := client.SyncVolume(ctx, volumeID); err != nil {
 			klog.Errorf("CreateVolumeOnNode: initial CAS sync failed for %s on %s: %v — rolling back", volumeID, targetNode, err)
 			_ = client.UntrackVolume(ctx, volumeID)
