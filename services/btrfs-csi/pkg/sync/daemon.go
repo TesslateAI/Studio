@@ -110,6 +110,12 @@ func (d *Daemon) Start(ctx context.Context) {
 // discoverVolumes scans volumes/ subvolumes on disk and tracks any that
 // aren't already tracked. This recovers sync tracking after a pod restart.
 // Template context is recovered from the CAS manifest if available.
+//
+// Smart dirty detection: for each volume, finds the corresponding layer
+// snapshot (layers/{volID}@*) and compares btrfs generations. If the
+// volume's generation matches the snapshot's, the volume hasn't changed
+// since the last sync and starts as clean. This prevents a thundering
+// herd re-sync of all volumes after every rolling restart.
 func (d *Daemon) discoverVolumes(ctx context.Context) {
 	if d.btrfs == nil {
 		return
@@ -121,7 +127,23 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 		return
 	}
 
+	// Build a map of layer snapshots for generation comparison.
+	// Layer snapshots are at layers/{volID}@{shortHash}.
+	layerSnaps := make(map[string]string) // volID → snapshot path
+	layers, _ := d.btrfs.ListSubvolumes(ctx, "layers/")
+	for _, layer := range layers {
+		name := strings.TrimPrefix(layer.Path, "layers/")
+		if atIdx := strings.Index(name, "@"); atIdx > 0 {
+			volID := name[:atIdx]
+			// Keep the latest snapshot (lexicographically last — they're
+			// content-addressed hashes, so any is fine; we just need one).
+			layerSnaps[volID] = layer.Path
+		}
+	}
+
 	discovered := 0
+	clean := 0
+	dirty := 0
 	for _, sub := range subs {
 		volID := strings.TrimPrefix(sub.Path, "volumes/")
 		if volID == "" || volID == sub.Path {
@@ -144,12 +166,48 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 			}
 		}
 
+		// Determine dirty state by comparing btrfs generations.
+		isDirty := true // default: dirty (safe — will sync if unsure)
+		snapPath, hasSnap := layerSnaps[volID]
+		if hasSnap {
+			volGen, volErr := d.btrfs.GetGeneration(ctx, "volumes/"+volID)
+			snapGen, snapErr := d.btrfs.GetGeneration(ctx, snapPath)
+			if volErr == nil && snapErr == nil {
+				if volGen <= snapGen {
+					// Volume generation hasn't advanced past the snapshot —
+					// no modifications since last sync.
+					isDirty = false
+				} else {
+					klog.V(2).Infof("discoverVolumes: %s dirty (vol gen %d > snap gen %d)",
+						volID, volGen, snapGen)
+				}
+			} else {
+				klog.V(2).Infof("discoverVolumes: %s dirty (generation check failed: vol=%v snap=%v)",
+					volID, volErr, snapErr)
+			}
+		}
+
 		d.TrackVolume(volID, templateName, templateHash)
+
+		if !isDirty {
+			// Override the default dirty=true from TrackVolume.
+			d.mu.Lock()
+			if tv, ok := d.tracked[volID]; ok {
+				tv.dirty = false
+				tv.lastSnapPath = snapPath
+			}
+			d.mu.Unlock()
+			clean++
+		} else {
+			dirty++
+		}
+
 		discovered++
 	}
 
 	if discovered > 0 {
-		klog.Infof("discoverVolumes: auto-tracked %d volume(s) from disk", discovered)
+		klog.Infof("discoverVolumes: auto-tracked %d volume(s) from disk (%d clean, %d dirty)",
+			discovered, clean, dirty)
 	}
 }
 
@@ -222,7 +280,13 @@ func (d *Daemon) DrainAll(ctx context.Context) error {
 				klog.Errorf("Drain: failed to sync %s: %v", item.volumeID, err)
 				return nil // non-cancel error: continue draining others
 			}
-			d.UntrackVolume(item.volumeID)
+			// Remove from tracked map but KEEP the layer snapshot on disk.
+			// The next pod's discoverVolumes needs the snapshot to compare
+			// generations and detect clean volumes (avoids thundering herd
+			// re-sync of all volumes after every rolling restart).
+			d.mu.Lock()
+			delete(d.tracked, item.volumeID)
+			d.mu.Unlock()
 			synced.Store(item.volumeID, true)
 			return nil
 		})

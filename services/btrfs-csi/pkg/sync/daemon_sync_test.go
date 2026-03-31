@@ -18,13 +18,14 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeBtrfs struct {
-	mu         stdsync.Mutex
-	subvolumes map[string]bool // path → exists
-	snapshots  []snapshotCall
-	deletes    []string
-	renames    []renameCall
-	sendData   string // returned by Send
-	sendErr    error
+	mu          stdsync.Mutex
+	subvolumes  map[string]bool   // path → exists
+	generations map[string]uint64 // path → btrfs generation
+	snapshots   []snapshotCall
+	deletes     []string
+	renames     []renameCall
+	sendData    string // returned by Send
+	sendErr     error
 }
 
 type snapshotCall struct {
@@ -38,8 +39,9 @@ type renameCall struct {
 
 func newFakeBtrfs() *fakeBtrfs {
 	return &fakeBtrfs{
-		subvolumes: make(map[string]bool),
-		sendData:   "fake-btrfs-stream",
+		subvolumes:  make(map[string]bool),
+		generations: make(map[string]uint64),
+		sendData:    "fake-btrfs-stream",
 	}
 }
 
@@ -105,6 +107,16 @@ func (f *fakeBtrfs) Receive(_ context.Context, _ string, _ io.Reader) error {
 
 func (f *fakeBtrfs) GetQgroupUsage(_ context.Context, _ string) (int64, int64, error) {
 	return 0, 0, nil
+}
+
+func (f *fakeBtrfs) GetGeneration(_ context.Context, name string) (uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	gen, ok := f.generations[name]
+	if !ok {
+		return 0, fmt.Errorf("subvolume %q not found", name)
+	}
+	return gen, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -952,4 +964,201 @@ func TestSyncOne_StallDetection(t *testing.T) {
 		t.Errorf("stall detection took %v, expected ~%v", elapsed, syncStallTimeout)
 	}
 	t.Logf("Stall detected in %v (timeout=%v)", elapsed, syncStallTimeout)
+}
+
+// ---------------------------------------------------------------------------
+// Smart dirty detection via btrfs generation
+// ---------------------------------------------------------------------------
+
+func TestDiscoverVolumes_CleanViaGeneration(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	// Simulate a volume and its layer snapshot on disk (left by previous pod's drain).
+	fb.subvolumes["volumes/vol-clean"] = true
+	fb.subvolumes["layers/vol-clean@abc123"] = true
+
+	// Both have the same generation → volume is clean (not modified since snapshot).
+	fb.generations["volumes/vol-clean"] = 42
+	fb.generations["layers/vol-clean@abc123"] = 42
+
+	// Add a manifest so template context is recovered.
+	fc.manifests["vol-clean"] = &cas.Manifest{
+		VolumeID:     "vol-clean",
+		TemplateName: "nextjs",
+		Base:         "sha256:tmplhash",
+	}
+
+	d.discoverVolumes(context.Background())
+
+	d.mu.Lock()
+	tv, ok := d.tracked["vol-clean"]
+	d.mu.Unlock()
+
+	if !ok {
+		t.Fatal("vol-clean should be tracked")
+	}
+	if tv.dirty {
+		t.Error("vol-clean should be clean (same generation as snapshot)")
+	}
+	if tv.lastSnapPath != "layers/vol-clean@abc123" {
+		t.Errorf("lastSnapPath = %q, want layers/vol-clean@abc123", tv.lastSnapPath)
+	}
+	if tv.templateName != "nextjs" {
+		t.Errorf("templateName = %q, want nextjs", tv.templateName)
+	}
+}
+
+func TestDiscoverVolumes_DirtyViaGeneration(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	// Volume modified after snapshot — generation is higher.
+	fb.subvolumes["volumes/vol-dirty"] = true
+	fb.subvolumes["layers/vol-dirty@abc123"] = true
+	fb.generations["volumes/vol-dirty"] = 50
+	fb.generations["layers/vol-dirty@abc123"] = 42
+
+	d.discoverVolumes(context.Background())
+
+	d.mu.Lock()
+	tv, ok := d.tracked["vol-dirty"]
+	d.mu.Unlock()
+
+	if !ok {
+		t.Fatal("vol-dirty should be tracked")
+	}
+	if !tv.dirty {
+		t.Error("vol-dirty should be dirty (volume generation > snapshot generation)")
+	}
+}
+
+func TestDiscoverVolumes_DirtyNoSnapshot(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	// Volume exists but no layer snapshot — must be dirty.
+	fb.subvolumes["volumes/vol-new"] = true
+	fb.generations["volumes/vol-new"] = 10
+
+	d.discoverVolumes(context.Background())
+
+	d.mu.Lock()
+	tv, ok := d.tracked["vol-new"]
+	d.mu.Unlock()
+
+	if !ok {
+		t.Fatal("vol-new should be tracked")
+	}
+	if !tv.dirty {
+		t.Error("vol-new should be dirty (no layer snapshot exists)")
+	}
+}
+
+func TestDrainAll_PreservesLayerSnapshots(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	volID := "vol-drain-keep"
+	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
+	d.TrackVolume(volID, "tmpl", "sha256:base")
+
+	// Sync the volume first — this creates a layer snapshot.
+	err := d.SyncVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("SyncVolume: %v", err)
+	}
+
+	// Verify a layer snapshot was created.
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	snapPath := tv.lastSnapPath
+	d.mu.Unlock()
+	if snapPath == "" {
+		t.Fatal("expected lastSnapPath after sync")
+	}
+	if !fb.SubvolumeExists(context.Background(), snapPath) {
+		t.Fatalf("layer snapshot %s should exist after sync", snapPath)
+	}
+
+	// Mark dirty again to force drain to sync.
+	d.MarkDirty(volID)
+
+	// Drain.
+	if err := d.DrainAll(context.Background()); err != nil {
+		t.Fatalf("DrainAll: %v", err)
+	}
+
+	// The layer snapshot should STILL exist (drain preserves it).
+	if !fb.SubvolumeExists(context.Background(), snapPath) {
+		// Check if a new snapshot was created (drain creates new layers).
+		found := false
+		for path := range fb.subvolumes {
+			if strings.HasPrefix(path, "layers/"+volID+"@") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("layer snapshot should be preserved after drain (needed for generation comparison)")
+		}
+	}
+}
+
+func TestDiscoverVolumes_MixedCleanAndDirty(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	// 3 clean volumes, 2 dirty, 1 new (no snapshot).
+	for i := 0; i < 3; i++ {
+		volID := fmt.Sprintf("vol-clean-%d", i)
+		fb.subvolumes["volumes/"+volID] = true
+		fb.subvolumes[fmt.Sprintf("layers/%s@hash%d", volID, i)] = true
+		fb.generations["volumes/"+volID] = 100
+		fb.generations[fmt.Sprintf("layers/%s@hash%d", volID, i)] = 100
+	}
+	for i := 0; i < 2; i++ {
+		volID := fmt.Sprintf("vol-dirty-%d", i)
+		fb.subvolumes["volumes/"+volID] = true
+		fb.subvolumes[fmt.Sprintf("layers/%s@hash%d", volID, i)] = true
+		fb.generations["volumes/"+volID] = 200 // higher than snapshot
+		fb.generations[fmt.Sprintf("layers/%s@hash%d", volID, i)] = 100
+	}
+	fb.subvolumes["volumes/vol-new"] = true
+	fb.generations["volumes/vol-new"] = 10
+
+	d.discoverVolumes(context.Background())
+
+	d.mu.Lock()
+	cleanCount := 0
+	dirtyCount := 0
+	for _, tv := range d.tracked {
+		if tv.dirty {
+			dirtyCount++
+		} else {
+			cleanCount++
+		}
+	}
+	total := len(d.tracked)
+	d.mu.Unlock()
+
+	if total != 6 {
+		t.Errorf("tracked %d volumes, want 6", total)
+	}
+	if cleanCount != 3 {
+		t.Errorf("clean = %d, want 3", cleanCount)
+	}
+	if dirtyCount != 3 {
+		t.Errorf("dirty = %d, want 3 (2 modified + 1 new)", dirtyCount)
+	}
 }

@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -434,4 +435,63 @@ func TestPathTraversalBlocked(t *testing.T) {
 			t.Logf("Correctly blocked: %v", err)
 		})
 	}
+}
+
+// --------------------------------------------------------------------------
+// Generation tracking
+// --------------------------------------------------------------------------
+
+func TestGetGeneration(t *testing.T) {
+	mgr := newBtrfsManager(t)
+	ctx := context.Background()
+
+	volName := uniqueName("gen-test")
+	volPath := "volumes/" + volName
+	if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("CreateSubvolume: %v", err)
+	}
+	t.Cleanup(func() { mgr.DeleteSubvolume(context.Background(), volPath) })
+
+	pool := getPoolPath(t)
+
+	// Write initial data and force commit.
+	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", "hello")
+	exec.CommandContext(ctx, "sync").Run()
+
+	// Snapshot — forces a new btrfs transaction.
+	snapPath := "layers/" + volName + "@snap1"
+	if err := mgr.SnapshotSubvolume(ctx, volPath, snapPath, true); err != nil {
+		t.Fatalf("SnapshotSubvolume: %v", err)
+	}
+	t.Cleanup(func() { mgr.DeleteSubvolume(context.Background(), snapPath) })
+
+	snapGen, err := mgr.GetGeneration(ctx, snapPath)
+	if err != nil {
+		t.Fatalf("GetGeneration(snapshot): %v", err)
+	}
+	volGen, err := mgr.GetGeneration(ctx, volPath)
+	if err != nil {
+		t.Fatalf("GetGeneration(volume after snap): %v", err)
+	}
+	if volGen == 0 || snapGen == 0 {
+		t.Fatal("generation should be > 0")
+	}
+
+	// After snapshot with no modifications, volume gen should equal snapshot gen.
+	if volGen != snapGen {
+		t.Errorf("volume gen (%d) should equal snapshot gen (%d) when no modifications", volGen, snapGen)
+	}
+
+	// Modify volume — generation should increase past snapshot.
+	writeTestFile(t, filepath.Join(pool, volPath), "data2.txt", "world")
+	exec.CommandContext(ctx, "sync").Run()
+	volGen2, err := mgr.GetGeneration(ctx, volPath)
+	if err != nil {
+		t.Fatalf("GetGeneration after post-snap write: %v", err)
+	}
+	if volGen2 <= snapGen {
+		t.Errorf("volume gen (%d) should be > snapshot gen (%d) after modification", volGen2, snapGen)
+	}
+
+	t.Logf("Generation tracking: snap=%d, unmodified_vol=%d, modified_vol=%d", snapGen, volGen, volGen2)
 }

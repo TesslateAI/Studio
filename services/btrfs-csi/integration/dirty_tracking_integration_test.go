@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -559,3 +560,124 @@ func TestDirty_FullCycle_EndToEnd(t *testing.T) {
 
 // verify fileops.DirtySyncer is satisfied by sync.Daemon at compile time.
 var _ fileops.DirtySyncer = (*bsync.Daemon)(nil)
+
+// --------------------------------------------------------------------------
+// Generation-based smart dirty detection
+// --------------------------------------------------------------------------
+
+// TestDirty_GenerationBasedDetection verifies that discoverVolumes uses btrfs
+// generation comparison to correctly detect clean vs dirty volumes after a
+// pod restart. This is the real btrfs integration test.
+func TestDirty_GenerationBasedDetection(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx := context.Background()
+
+	store := newObjectStorage(t, uniqueName("gen-detect"))
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create 3 volumes.
+	volIDs := make([]string, 3)
+	for i := range volIDs {
+		volID := uniqueName("gen-vol")
+		volIDs[i] = volID
+		volPath := "volumes/" + volID
+		if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+			t.Fatalf("CreateSubvolume(%s): %v", volID, err)
+		}
+		writeTestFile(t, filepath.Join(pool, volPath), "data.txt", "initial")
+		t.Cleanup(func() {
+			mgr.DeleteSubvolume(context.Background(), volPath)
+			subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
+			for _, sub := range subs {
+				mgr.DeleteSubvolume(context.Background(), sub.Path)
+			}
+		})
+	}
+
+	// First daemon: track and sync all 3 volumes.
+	daemon1 := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+	for _, volID := range volIDs {
+		daemon1.TrackVolume(volID, "", "")
+	}
+	for _, volID := range volIDs {
+		if err := daemon1.SyncVolume(ctx, volID); err != nil {
+			t.Fatalf("SyncVolume(%s): %v", volID, err)
+		}
+	}
+
+	// Simulate drain: sync dirty volumes but preserve layer snapshots.
+	// (Mark dirty first to force drain to actually sync.)
+	for _, volID := range volIDs {
+		daemon1.MarkDirty(volID)
+	}
+	if err := daemon1.DrainAll(ctx); err != nil {
+		t.Fatalf("DrainAll: %v", err)
+	}
+
+	// Modify volume 0 AFTER drain (simulates user writing between drain and pod death).
+	writeTestFile(t, filepath.Join(pool, "volumes/"+volIDs[0]), "post-drain.txt", "modified")
+	// Force btrfs transaction commit so generation is updated.
+	exec.CommandContext(ctx, "sync").Run()
+
+	// Verify layer snapshots still exist (drain preserves them).
+	for _, volID := range volIDs {
+		subs, err := mgr.ListSubvolumes(ctx, "layers/"+volID)
+		if err != nil {
+			t.Fatalf("ListSubvolumes(layers/%s): %v", volID, err)
+		}
+		if len(subs) == 0 {
+			t.Fatalf("layer snapshot for %s should exist after drain", volID)
+		}
+	}
+
+	// Second daemon: simulates new pod starting. discoverVolumes should detect:
+	// - volIDs[0]: DIRTY (modified after drain → generation > snapshot generation)
+	// - volIDs[1]: CLEAN (not modified → generation == snapshot generation)
+	// - volIDs[2]: CLEAN (not modified → generation == snapshot generation)
+	daemon2 := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+
+	// Start triggers discoverVolumes internally. We can check tracked state after.
+	// But Start blocks on the ticker. Instead, call discoverVolumes indirectly
+	// by checking GetTrackedState (it's populated by the first sync tick or
+	// we can just create a daemon and not start it — discoverVolumes is called
+	// from Start).
+
+	// Use a context that we cancel immediately after discovery.
+	discoverCtx, discoverCancel := context.WithCancel(ctx)
+	go daemon2.Start(discoverCtx)
+	// Give it time to run discoverVolumes.
+	time.Sleep(500 * time.Millisecond)
+	discoverCancel()
+	time.Sleep(100 * time.Millisecond)
+
+	states := daemon2.GetTrackedState()
+	if len(states) < 3 {
+		t.Fatalf("expected at least 3 tracked volumes, got %d", len(states))
+	}
+
+	stateMap := make(map[string]bool) // volID → dirty
+	for _, s := range states {
+		stateMap[s.VolumeID] = s.Dirty
+	}
+
+	// volIDs[0] should be dirty (modified after drain).
+	if dirty, ok := stateMap[volIDs[0]]; !ok {
+		t.Errorf("%s not tracked", volIDs[0])
+	} else if !dirty {
+		t.Errorf("%s should be DIRTY (modified after drain)", volIDs[0])
+	}
+
+	// volIDs[1] and [2] should be clean (not modified after drain).
+	for _, volID := range volIDs[1:] {
+		if dirty, ok := stateMap[volID]; !ok {
+			t.Errorf("%s not tracked", volID)
+		} else if dirty {
+			t.Errorf("%s should be CLEAN (not modified after drain)", volID)
+		}
+	}
+
+	t.Logf("Generation-based detection: %s=dirty, %s=clean, %s=clean ✓",
+		volIDs[0], volIDs[1], volIDs[2])
+}

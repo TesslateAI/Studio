@@ -18,6 +18,7 @@ type btrfsOps interface {
 	ListSubvolumes(ctx context.Context, prefix string) ([]btrfs.SubvolumeInfo, error)
 	Receive(ctx context.Context, destDir string, reader io.Reader) error
 	GetQgroupUsage(ctx context.Context, name string) (exclusive int64, limit int64, err error)
+	GetGeneration(ctx context.Context, name string) (uint64, error)
 }
 
 // casOps abstracts the CAS store operations used by the sync Daemon.

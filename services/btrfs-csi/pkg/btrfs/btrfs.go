@@ -315,6 +315,41 @@ func (m *Manager) GetSubvolumeSize(ctx context.Context, name string) (usedBytes 
 	return used, nil
 }
 
+// GetGeneration returns the btrfs generation (ctransid) of a subvolume.
+// The generation is incremented on every transaction that modifies the
+// subvolume. Comparing generations between a volume and its snapshot tells
+// you if the volume was modified since the snapshot was taken.
+func (m *Manager) GetGeneration(ctx context.Context, name string) (uint64, error) {
+	target, err := m.safePath(name)
+	if err != nil {
+		return 0, err
+	}
+
+	output, err := m.run(ctx, "subvolume", "show", target)
+	if err != nil {
+		return 0, fmt.Errorf("subvolume show %q: %w", name, err)
+	}
+
+	// Parse "Generation:" field from `btrfs subvolume show` output.
+	// Example line: "	Generation: 		42"
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "Generation:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				gen, parseErr := strconv.ParseUint(parts[len(parts)-1], 10, 64)
+				if parseErr != nil {
+					return 0, fmt.Errorf("parse generation from %q: %w", line, parseErr)
+				}
+				return gen, nil
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("generation field not found in subvolume show output for %q", name)
+}
+
 // ---------------------------------------------------------------------------
 // Send / Receive (for S3 persistence)
 // ---------------------------------------------------------------------------
