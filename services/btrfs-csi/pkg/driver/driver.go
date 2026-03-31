@@ -348,8 +348,18 @@ func (d *Driver) runHub(ctx context.Context) error {
 		return nodeops.NewClient(addr, nil)
 	}
 
+	// Start ResourceWatcher — standalone resource headroom tracker. Polls
+	// K8s node/pod resources every 30s into its own map. No registry dependency.
+	resWatcher := volumehub.NewResourceWatcher(
+		resolver.HTTPClient(),
+		resolver.APIHost(),
+		resolver.Token(),
+		30*time.Second,
+	)
+	go resWatcher.Start(ctx)
+
 	// Start VolumeHub gRPC server with CAS store for manifest reads.
-	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory, resolver.Resolve, resolver.NodeNames)
+	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory, resolver.Resolve, resolver.NodeNames, resWatcher)
 	d.hubServer = hubSrv // store for CSI controller access
 
 	// Watch K8s Endpoints for CSI node pod changes (~1s latency vs 30s polling).
@@ -363,17 +373,6 @@ func (d *Driver) runHub(ctx context.Context) error {
 			klog.Warningf("RebuildRegistry after watch event: %v", rebuildErr)
 		}
 	})
-
-	// Start ResourceWatcher — polls K8s node/pod resources every 30s and
-	// updates per-node headroom in the registry. Shares TLS transport.
-	resWatcher := volumehub.NewResourceWatcher(
-		registry,
-		resolver.HTTPClient(),
-		resolver.APIHost(),
-		resolver.Token(),
-		30*time.Second,
-	)
-	go resWatcher.Start(ctx)
 
 	// Start CacheEvictor — periodically evicts stale cached volumes
 	// from non-owner nodes after a grace period.

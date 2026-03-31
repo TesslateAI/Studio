@@ -61,6 +61,7 @@ type Server struct {
 	nodeClient  NodeClientFactory
 	resolveAddr NodeAddrResolver
 	liveNodes   LiveNodesFn
+	resWatcher  *ResourceWatcher // standalone resource headroom (no registry dependency)
 	srv         *grpc.Server
 
 	mu       sync.Mutex
@@ -68,13 +69,14 @@ type Server struct {
 }
 
 // NewServer creates a VolumeHub Server.
-func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClientFactory, resolveAddr NodeAddrResolver, liveNodes LiveNodesFn) *Server {
+func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClientFactory, resolveAddr NodeAddrResolver, liveNodes LiveNodesFn, resWatcher *ResourceWatcher) *Server {
 	return &Server{
 		registry:    registry,
 		cas:         casStore,
 		nodeClient:  nodeClient,
 		resolveAddr: resolveAddr,
 		liveNodes:   liveNodes,
+		resWatcher:  resWatcher,
 		inflight:    make(map[string]*inflightRestore),
 	}
 }
@@ -372,12 +374,12 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 	}
 
 	// 2b. Filter candidates by resource headroom if a budget was provided.
-	if req.BudgetCPU > 0 || req.BudgetMem > 0 {
+	if (req.BudgetCPU > 0 || req.BudgetMem > 0) && s.resWatcher != nil {
 		candidateNames := make([]string, 0, len(candidateSet))
 		for n := range candidateSet {
 			candidateNames = append(candidateNames, n)
 		}
-		withRoom := s.registry.NodesWithHeadroom(candidateNames, req.BudgetCPU, req.BudgetMem)
+		withRoom := s.resWatcher.NodesWithHeadroom(candidateNames, req.BudgetCPU, req.BudgetMem)
 		if len(withRoom) == 0 {
 			// Soft filter: fall back to all candidates instead of hard-failing.
 			// K8s autoscaler needs Pending pods to trigger scale-up — if we
@@ -547,19 +549,31 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 	}
 }
 
-// pickBestCandidate returns the candidate with the fewest cached volumes
-// (least-loaded). Deterministic tie-break by lexicographic order.
+// pickBestCandidate returns the candidate with the most resource headroom.
+// Deterministic tie-break by lexicographic order.
 func (s *Server) pickBestCandidate(candidateSet map[string]struct{}) string {
-	var best string
-	bestCount := -1
+	candidates := make([]string, 0, len(candidateSet))
 	for n := range candidateSet {
-		count := s.registry.NodeVolumeCount(n)
-		if bestCount < 0 || count < bestCount || (count == bestCount && n < best) {
-			best = n
-			bestCount = count
-		}
+		candidates = append(candidates, n)
 	}
-	return best
+	ranked := s.rankNodes(candidates)
+	if len(ranked) == 0 {
+		return ""
+	}
+	return ranked[0]
+}
+
+// rankNodes ranks nodes by headroom if ResourceWatcher is available,
+// otherwise falls back to lexicographic order.
+func (s *Server) rankNodes(nodes []string) []string {
+	if s.resWatcher != nil {
+		return s.resWatcher.RankByHeadroom(nodes)
+	}
+	// Fallback: lexicographic (deterministic, no headroom data).
+	out := make([]string, len(nodes))
+	copy(out, nodes)
+	sort.Strings(out)
+	return out
 }
 
 func (s *Server) handleTriggerSync(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -826,8 +840,8 @@ func (s *Server) CreateVolumeOnNode(ctx context.Context, volumeID, template, hin
 		liveSet[n] = struct{}{}
 	}
 
-	// Rank all live nodes by volume count (least-loaded first).
-	ranked := s.rankLiveNodes(liveNames)
+	// Rank all live nodes by resource headroom (most headroom first).
+	ranked := s.rankNodes(liveNames)
 
 	// Pick initial target: hintNode if it's live, otherwise least-loaded.
 	targetNode := ""
@@ -858,30 +872,6 @@ func (s *Server) CreateVolumeOnNode(ctx context.Context, volumeID, template, hin
 		}
 	}
 	return node, err
-}
-
-// rankLiveNodes returns live node names sorted by volume count (ascending),
-// with deterministic tie-break by name.
-func (s *Server) rankLiveNodes(liveNames []string) []string {
-	type nodeRank struct {
-		name  string
-		count int
-	}
-	ranks := make([]nodeRank, len(liveNames))
-	for i, n := range liveNames {
-		ranks[i] = nodeRank{name: n, count: s.registry.NodeVolumeCount(n)}
-	}
-	sort.Slice(ranks, func(i, j int) bool {
-		if ranks[i].count != ranks[j].count {
-			return ranks[i].count < ranks[j].count
-		}
-		return ranks[i].name < ranks[j].name
-	})
-	out := make([]string, len(ranks))
-	for i, r := range ranks {
-		out[i] = r.name
-	}
-	return out
 }
 
 // isNodeUnavailable returns true for gRPC errors that indicate the node is
@@ -1076,24 +1066,24 @@ func (s *Server) Registry() *NodeRegistry {
 	return s.registry
 }
 
+// LiveNodes returns the current set of live CSI node names from the resolver.
+func (s *Server) LiveNodes() []string {
+	return s.liveNodes()
+}
+
 // ---------------------------------------------------------------------------
 // Discovery and registry rebuild
 // ---------------------------------------------------------------------------
 
 // DiscoverNodes uses the NodeResolver to find CSI nodes via K8s Endpoints API
-// and reconciles the registry: new nodes are registered, stale nodes (e.g.
-// scaled-down instances) are removed along with their volume/template refs.
+// and cleans stale volume/template references pointing at dead nodes.
 func (s *Server) DiscoverNodes(resolver *NodeResolver) error {
 	names := resolver.NodeNames()
 	if len(names) == 0 {
 		return fmt.Errorf("no CSI nodes found in endpoints")
 	}
-	added, removed := s.registry.ReconcileNodes(names)
-	if len(removed) > 0 {
-		klog.Infof("DiscoverNodes: removed %d stale nodes: %v", len(removed), removed)
-	}
-	if len(added) > 0 {
-		klog.Infof("DiscoverNodes: added %d new nodes: %v", len(added), added)
+	if cleaned := s.registry.CleanStaleReferences(names); cleaned > 0 {
+		klog.Infof("DiscoverNodes: cleaned %d stale references", cleaned)
 	}
 	klog.Infof("DiscoverNodes: %d live CSI nodes", len(names))
 	return nil

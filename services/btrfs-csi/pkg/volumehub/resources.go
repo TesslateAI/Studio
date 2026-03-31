@@ -7,18 +7,48 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/klog/v2"
 )
 
+// NodeResources holds the resource headroom for a K8s node.
+type NodeResources struct {
+	AllocatableCPU int64 // millicores
+	AllocatableMem int64 // bytes
+	RequestedCPU   int64 // sum of pod CPU requests on this node (millicores)
+	RequestedMem   int64 // sum of pod memory requests on this node (bytes)
+	UpdatedAt      time.Time
+}
+
+// HeadroomCPU returns available CPU headroom in millicores.
+func (nr *NodeResources) HeadroomCPU() int64 {
+	h := nr.AllocatableCPU - nr.RequestedCPU
+	if h < 0 {
+		return 0
+	}
+	return h
+}
+
+// HeadroomMem returns available memory headroom in bytes.
+func (nr *NodeResources) HeadroomMem() int64 {
+	h := nr.AllocatableMem - nr.RequestedMem
+	if h < 0 {
+		return 0
+	}
+	return h
+}
+
 // ResourceWatcher periodically queries the K8s API for node allocatable
-// resources and pod resource requests, then updates the NodeRegistry with
-// per-node headroom. Uses the same raw-HTTP K8s API pattern as NodeResolver.
+// resources and pod resource requests, maintaining a standalone per-node
+// headroom map. No dependency on NodeRegistry — purely live K8s data.
 type ResourceWatcher struct {
-	registry   *NodeRegistry
+	mu         sync.RWMutex
+	resources  map[string]NodeResources // nodeName -> headroom
 	httpClient *http.Client
 	apiHost    string
 	token      string
@@ -28,9 +58,9 @@ type ResourceWatcher struct {
 // NewResourceWatcher creates a ResourceWatcher that polls every interval.
 // Accepts a pre-configured HTTP client (should share the TLS transport from
 // NodeResolver so cluster CA verification works).
-func NewResourceWatcher(registry *NodeRegistry, httpClient *http.Client, apiHost, token string, interval time.Duration) *ResourceWatcher {
+func NewResourceWatcher(httpClient *http.Client, apiHost, token string, interval time.Duration) *ResourceWatcher {
 	return &ResourceWatcher{
-		registry:   registry,
+		resources:  make(map[string]NodeResources),
 		httpClient: httpClient,
 		apiHost:    apiHost,
 		token:      token,
@@ -63,8 +93,80 @@ func (w *ResourceWatcher) Start(ctx context.Context) {
 	}
 }
 
+// GetNodeResources returns the resource headroom for a node.
+func (w *ResourceWatcher) GetNodeResources(nodeName string) NodeResources {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.resources[nodeName]
+}
+
+// NodesWithHeadroom returns node names from the candidate set that have
+// at least the requested CPU (millicores) and memory (bytes) headroom.
+// Nodes with no resource data (not yet populated) are included to avoid
+// false rejections during startup.
+func (w *ResourceWatcher) NodesWithHeadroom(candidates []string, cpuMillis, memBytes int64) []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	var result []string
+	for _, name := range candidates {
+		res, ok := w.resources[name]
+		if !ok || res.UpdatedAt.IsZero() {
+			// Unknown or no data yet — include (conservative)
+			result = append(result, name)
+			continue
+		}
+		if res.HeadroomCPU() >= cpuMillis && res.HeadroomMem() >= memBytes {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+// RankByHeadroom returns the given node names sorted by available headroom
+// (most headroom first). Nodes with no resource data sort last.
+// This is the replacement for ranking by volume count.
+func (w *ResourceWatcher) RankByHeadroom(nodes []string) []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	type nodeRank struct {
+		name       string
+		cpuMillis  int64
+		hasData    bool
+	}
+	ranks := make([]nodeRank, len(nodes))
+	for i, n := range nodes {
+		res, ok := w.resources[n]
+		ranks[i] = nodeRank{
+			name:      n,
+			cpuMillis: res.HeadroomCPU(),
+			hasData:   ok && !res.UpdatedAt.IsZero(),
+		}
+	}
+
+	sort.Slice(ranks, func(i, j int) bool {
+		// Nodes with data sort before nodes without
+		if ranks[i].hasData != ranks[j].hasData {
+			return ranks[i].hasData
+		}
+		// More headroom first
+		if ranks[i].cpuMillis != ranks[j].cpuMillis {
+			return ranks[i].cpuMillis > ranks[j].cpuMillis
+		}
+		// Deterministic tie-break
+		return ranks[i].name < ranks[j].name
+	})
+
+	out := make([]string, len(ranks))
+	for i, r := range ranks {
+		out[i] = r.name
+	}
+	return out
+}
+
 // refresh queries K8s for all nodes and non-terminated pods, computes
-// per-node headroom, and updates the registry.
+// per-node headroom, and stores it.
 func (w *ResourceWatcher) refresh(ctx context.Context) error {
 	nodes, err := w.listNodes(ctx)
 	if err != nil {
@@ -124,7 +226,8 @@ func (w *ResourceWatcher) refresh(ctx context.Context) error {
 		pr.RequestedMem += effMem
 	}
 
-	// Update registry per node
+	// Build new resources map atomically
+	newResources := make(map[string]NodeResources, len(nodes))
 	for _, node := range nodes {
 		name := node.Metadata.Name
 		allocCPU := parseCPUMillis(node.Status.Allocatable.CPU)
@@ -137,13 +240,19 @@ func (w *ResourceWatcher) refresh(ctx context.Context) error {
 			reqMem = pr.RequestedMem
 		}
 
-		w.registry.UpdateNodeResources(name, NodeResources{
+		newResources[name] = NodeResources{
 			AllocatableCPU: allocCPU,
 			AllocatableMem: allocMem,
 			RequestedCPU:   reqCPU,
 			RequestedMem:   reqMem,
-		})
+			UpdatedAt:      time.Now(),
+		}
 	}
+
+	// Atomic swap
+	w.mu.Lock()
+	w.resources = newResources
+	w.mu.Unlock()
 
 	klog.V(2).Infof("ResourceWatcher: updated %d nodes", len(nodes))
 	return nil

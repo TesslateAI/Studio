@@ -4,11 +4,8 @@ import (
 	"testing"
 )
 
-func TestUnregisterNode_CleansUpVolumeCacheAndOwnership(t *testing.T) {
+func TestCleanStaleReferences_CleansOwnerAndCache(t *testing.T) {
 	r := NewNodeRegistry()
-
-	r.RegisterNode("node-a")
-	r.RegisterNode("node-b")
 
 	r.RegisterVolume("vol-1")
 	r.SetOwner("vol-1", "node-a")
@@ -18,18 +15,16 @@ func TestUnregisterNode_CleansUpVolumeCacheAndOwnership(t *testing.T) {
 	r.RegisterTemplate("tmpl-nextjs", "node-a")
 	r.RegisterTemplate("tmpl-nextjs", "node-b")
 
-	// Unregister node-a
-	r.UnregisterNode("node-a")
+	// node-a dies — only node-b is live
+	cleaned := r.CleanStaleReferences([]string{"node-b"})
 
-	// node-a should be gone from registered nodes
-	nodes := r.RegisteredNodes()
-	if len(nodes) != 1 || nodes[0] != "node-b" {
-		t.Errorf("RegisteredNodes = %v, want [node-b]", nodes)
+	if cleaned != 3 { // owner cleared + cache entry removed + template entry removed
+		t.Errorf("cleaned = %d, want 2", cleaned)
 	}
 
-	// Volume ownership should be cleared
+	// Volume ownership should be cleared (was node-a)
 	if owner := r.GetOwner("vol-1"); owner != "" {
-		t.Errorf("GetOwner(vol-1) = %q, want empty (was node-a)", owner)
+		t.Errorf("GetOwner(vol-1) = %q, want empty", owner)
 	}
 
 	// Volume should still be cached on node-b but not node-a
@@ -45,85 +40,76 @@ func TestUnregisterNode_CleansUpVolumeCacheAndOwnership(t *testing.T) {
 	}
 }
 
-func TestUnregisterNode_RemovesEmptyTemplateSets(t *testing.T) {
+func TestCleanStaleReferences_RemovesEmptyTemplateSets(t *testing.T) {
 	r := NewNodeRegistry()
 
-	r.RegisterNode("node-a")
 	r.RegisterTemplate("tmpl-only-a", "node-a")
 
-	r.UnregisterNode("node-a")
+	r.CleanStaleReferences([]string{"node-b"})
 
-	// Template set should be fully cleaned up
 	if nodes := r.GetTemplateNodes("tmpl-only-a"); len(nodes) != 0 {
 		t.Errorf("GetTemplateNodes(tmpl-only-a) = %v, want empty", nodes)
 	}
 }
 
-func TestUnregisterNode_Idempotent(t *testing.T) {
+func TestCleanStaleReferences_NoopWhenAllLive(t *testing.T) {
 	r := NewNodeRegistry()
-	r.RegisterNode("node-a")
-	r.UnregisterNode("node-a")
-	r.UnregisterNode("node-a") // should not panic
-}
 
-func TestReconcileNodes_AddsAndRemoves(t *testing.T) {
-	r := NewNodeRegistry()
-	r.RegisterNode("node-old")
-	r.RegisterNode("node-keep")
+	r.RegisterVolume("vol-1")
+	r.SetOwner("vol-1", "node-a")
+	r.SetCached("vol-1", "node-a")
+	r.SetCached("vol-1", "node-b")
 
-	r.RegisterVolume("vol-on-old")
-	r.SetOwner("vol-on-old", "node-old")
-	r.SetCached("vol-on-old", "node-old")
+	cleaned := r.CleanStaleReferences([]string{"node-a", "node-b"})
 
-	r.RegisterTemplate("tmpl", "node-old")
-	r.RegisterTemplate("tmpl", "node-keep")
-
-	added, removed := r.ReconcileNodes([]string{"node-keep", "node-new"})
-
-	if len(removed) != 1 || removed[0] != "node-old" {
-		t.Errorf("removed = %v, want [node-old]", removed)
-	}
-	if len(added) != 1 || added[0] != "node-new" {
-		t.Errorf("added = %v, want [node-new]", added)
+	if cleaned != 0 {
+		t.Errorf("cleaned = %d, want 0", cleaned)
 	}
 
-	nodes := r.RegisteredNodes()
-	if len(nodes) != 2 {
-		t.Errorf("RegisteredNodes = %v, want [node-keep, node-new]", nodes)
-	}
-
-	// Volume owned by removed node should have cleared ownership
-	if owner := r.GetOwner("vol-on-old"); owner != "" {
-		t.Errorf("GetOwner(vol-on-old) = %q, want empty", owner)
-	}
-
-	// Template should only have node-keep
-	tmplNodes := r.GetTemplateNodes("tmpl")
-	if len(tmplNodes) != 1 || tmplNodes[0] != "node-keep" {
-		t.Errorf("GetTemplateNodes = %v, want [node-keep]", tmplNodes)
+	if owner := r.GetOwner("vol-1"); owner != "node-a" {
+		t.Errorf("GetOwner = %q, want node-a", owner)
 	}
 }
 
-func TestLeastLoadedNode_SkipsRemovedNodes(t *testing.T) {
+func TestVolumeLifecycle(t *testing.T) {
 	r := NewNodeRegistry()
-	r.RegisterNode("node-a")
-	r.RegisterNode("node-b")
 
-	// Put 5 volumes on node-b so node-a would be "least loaded"
-	for i := 0; i < 5; i++ {
-		r.SetCached("vol-"+string(rune('0'+i)), "node-b")
+	r.RegisterVolume("vol-1")
+	r.SetOwner("vol-1", "node-a")
+	r.SetCached("vol-1", "node-a")
+
+	if owner := r.GetOwner("vol-1"); owner != "node-a" {
+		t.Errorf("GetOwner = %q, want node-a", owner)
+	}
+	if !r.IsCached("vol-1", "node-a") {
+		t.Error("IsCached(vol-1, node-a) = false, want true")
 	}
 
-	// node-a has 0 volumes — it would win LeastLoaded
-	if best := r.LeastLoadedNode(); best != "node-a" {
-		t.Fatalf("before removal: LeastLoadedNode = %q, want node-a", best)
+	r.UnregisterVolume("vol-1")
+
+	if owner := r.GetOwner("vol-1"); owner != "" {
+		t.Errorf("after unregister: GetOwner = %q, want empty", owner)
+	}
+}
+
+func TestEvictionHelpers(t *testing.T) {
+	r := NewNodeRegistry()
+
+	r.RegisterVolume("vol-1")
+	r.SetCached("vol-1", "node-a")
+
+	if !r.MarkEvicting("vol-1", "node-a") {
+		t.Error("MarkEvicting should return true")
+	}
+	if r.MarkEvicting("vol-1", "node-a") {
+		t.Error("second MarkEvicting should return false (already evicting)")
+	}
+	if !r.IsEvicting("vol-1", "node-a") {
+		t.Error("IsEvicting should return true")
 	}
 
-	// Remove node-a (simulates scale-down)
-	r.UnregisterNode("node-a")
-
-	// Now node-b should be the only candidate
-	if best := r.LeastLoadedNode(); best != "node-b" {
-		t.Errorf("after removal: LeastLoadedNode = %q, want node-b", best)
+	r.ClearEvicting("vol-1", "node-a")
+	if r.IsEvicting("vol-1", "node-a") {
+		t.Error("IsEvicting should return false after clear")
 	}
 }

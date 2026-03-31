@@ -1026,7 +1026,7 @@ func newTestHubControllerServer() (*ControllerServer, *volumehub.NodeRegistry) {
 	registry := volumehub.NewNodeRegistry()
 	hub := volumehub.NewServer(registry, nil, func(nodeName string) (*nodeops.Client, error) {
 		return nil, fmt.Errorf("no test node %q", nodeName)
-	}, func(nodeName string) string { return "" }, func() []string { return registry.RegisteredNodes() })
+	}, func(nodeName string) string { return "" }, func() []string { return nil }, nil)
 
 	d := &Driver{
 		name:   "btrfs.csi.tesslate.io",
@@ -1043,7 +1043,6 @@ func TestHubCreateVolume_Idempotent(t *testing.T) {
 	cs, reg := newTestHubControllerServer()
 
 	// Pre-register volume in the Hub registry.
-	reg.RegisterNode("node-A")
 	reg.RegisterVolume("vol-exists")
 	reg.SetOwner("vol-exists", "node-A")
 
@@ -1073,8 +1072,6 @@ func TestHubCreateVolume_Idempotent(t *testing.T) {
 
 func TestHubCreateVolume_TopologyPreferred(t *testing.T) {
 	cs, reg := newTestHubControllerServer()
-	reg.RegisterNode("node-A")
-	reg.RegisterNode("node-B")
 	reg.RegisterVolume("vol-pre")
 	reg.SetOwner("vol-pre", "node-B")
 
@@ -1099,7 +1096,6 @@ func TestHubCreateVolume_TopologyPreferred(t *testing.T) {
 
 func TestHubCreateVolume_TopologyRequisiteFallback(t *testing.T) {
 	cs, reg := newTestHubControllerServer()
-	reg.RegisterNode("node-C")
 	reg.RegisterVolume("vol-req")
 	reg.SetOwner("vol-req", "node-C")
 
@@ -1123,8 +1119,7 @@ func TestHubCreateVolume_TopologyRequisiteFallback(t *testing.T) {
 }
 
 func TestHubCreateVolume_SnapshotNotTracked(t *testing.T) {
-	cs, reg := newTestHubControllerServer()
-	reg.RegisterNode("node-A")
+	cs, _ := newTestHubControllerServer()
 
 	_, err := cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "vol-from-snap",
@@ -1170,7 +1165,6 @@ func TestHubDeleteVolume_UnknownVolume(t *testing.T) {
 
 func TestHubValidateVolumeCapabilities_Registered(t *testing.T) {
 	cs, reg := newTestHubControllerServer()
-	reg.RegisterNode("node-A")
 	reg.RegisterVolume("vol-valid")
 	reg.SetOwner("vol-valid", "node-A")
 
@@ -1240,7 +1234,6 @@ func TestHubGetCapacity_NoNodes(t *testing.T) {
 
 func TestHubListVolumes(t *testing.T) {
 	cs, reg := newTestHubControllerServer()
-	reg.RegisterNode("node-A")
 	for _, id := range []string{"vol-1", "vol-2", "vol-3"} {
 		reg.RegisterVolume(id)
 		reg.SetOwner(id, "node-A")

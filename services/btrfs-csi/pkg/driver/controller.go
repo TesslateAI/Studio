@@ -580,11 +580,11 @@ func (cs *ControllerServer) deleteSnapshotDirect(
 	return &csi.DeleteSnapshotResponse{}, nil
 }
 
-// findSnapshotNode scans all registered nodes for a snapshot subvolume.
+// findSnapshotNode scans all live nodes for a snapshot subvolume.
 // Used as a fallback when snapNodeMap is empty (e.g., after Hub pod restart).
 func (cs *ControllerServer) findSnapshotNode(ctx context.Context, snapID string) string {
 	snapRelPath := filepath.Join("snapshots", snapID)
-	for _, nodeName := range cs.hub.Registry().RegisteredNodes() {
+	for _, nodeName := range cs.hub.LiveNodes() {
 		client, err := cs.hub.NodeClientFor(nodeName)
 		if err != nil {
 			continue

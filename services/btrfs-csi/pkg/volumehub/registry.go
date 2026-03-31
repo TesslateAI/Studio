@@ -1,32 +1,22 @@
 package volumehub
 
 import (
-	"fmt"
-	"runtime"
-	"slices"
 	"sort"
 	"sync"
 	"time"
-
-	"k8s.io/klog/v2"
 )
 
-// callerInfo returns a short caller location for deprecation warnings.
-func callerInfo() string {
-	_, file, line, ok := runtime.Caller(2)
-	if !ok {
-		return "unknown"
-	}
-	return fmt.Sprintf("%s:%d", file, line)
-}
+// ---------------------------------------------------------------------------
+// VolumeStore — pure volume metadata, zero node roster
+// ---------------------------------------------------------------------------
 
-// NodeRegistry tracks which compute nodes have which volumes cached,
-// and which node owns each volume.
-// This is the Hub's view of the cluster topology.
+// NodeRegistry tracks volume metadata: ownership, cache locations, templates,
+// sync state. It has NO concept of "which nodes exist" — node liveness is
+// always sourced from the live resolver. Node names appear only as strings
+// referenced by volume entries.
 type NodeRegistry struct {
 	mu      sync.RWMutex
 	volumes map[string]*volumeEntry // volumeID -> entry
-	nodes   map[string]*nodeEntry   // nodeName -> entry
 	// templateNodes tracks which nodes have each template cached.
 	templateNodes map[string]map[string]struct{} // templateName -> set of nodeNames
 }
@@ -43,49 +33,19 @@ type volumeEntry struct {
 	latestHash     string // latest layer hash (from manifest)
 }
 
-// NodeResources holds the resource headroom for a K8s node.
-type NodeResources struct {
-	AllocatableCPU int64 // millicores
-	AllocatableMem int64 // bytes
-	RequestedCPU   int64 // sum of pod CPU requests on this node (millicores)
-	RequestedMem   int64 // sum of pod memory requests on this node (bytes)
-	UpdatedAt      time.Time
-}
-
-// HeadroomCPU returns available CPU headroom in millicores.
-func (nr *NodeResources) HeadroomCPU() int64 {
-	h := nr.AllocatableCPU - nr.RequestedCPU
-	if h < 0 {
-		return 0
-	}
-	return h
-}
-
-// HeadroomMem returns available memory headroom in bytes.
-func (nr *NodeResources) HeadroomMem() int64 {
-	h := nr.AllocatableMem - nr.RequestedMem
-	if h < 0 {
-		return 0
-	}
-	return h
-}
-
-type nodeEntry struct {
-	name      string
-	volumes   map[string]struct{} // set of volumeIDs cached on this node
-	resources NodeResources       // resource headroom (updated by ResourceWatcher)
-}
-
 // NewNodeRegistry creates a new in-memory NodeRegistry.
 func NewNodeRegistry() *NodeRegistry {
 	return &NodeRegistry{
 		volumes:       make(map[string]*volumeEntry),
-		nodes:         make(map[string]*nodeEntry),
 		templateNodes: make(map[string]map[string]struct{}),
 	}
 }
 
-// RegisterVolume registers a volume in the registry. If it already exists this
+// ---------------------------------------------------------------------------
+// Volume lifecycle
+// ---------------------------------------------------------------------------
+
+// RegisterVolume registers a volume in the store. If it already exists this
 // is a no-op.
 func (r *NodeRegistry) RegisterVolume(volumeID string) {
 	r.mu.Lock()
@@ -100,22 +60,12 @@ func (r *NodeRegistry) RegisterVolume(volumeID string) {
 	}
 }
 
-// UnregisterVolume removes a volume and all its cache associations from the
-// registry. Idempotent.
+// UnregisterVolume removes a volume and all its cache associations.
+// Idempotent.
 func (r *NodeRegistry) UnregisterVolume(volumeID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	ve, ok := r.volumes[volumeID]
-	if !ok {
-		return
-	}
-
-	for nodeName := range ve.cachedNodes {
-		if ne, exists := r.nodes[nodeName]; exists {
-			delete(ne.volumes, volumeID)
-		}
-	}
 	delete(r.volumes, volumeID)
 }
 
@@ -136,13 +86,6 @@ func (r *NodeRegistry) SetOwner(volumeID, nodeName string) {
 		ve.ownerChangedAt = time.Now()
 	}
 	ve.ownerNode = nodeName
-
-	if _, ok := r.nodes[nodeName]; !ok {
-		r.nodes[nodeName] = &nodeEntry{
-			name:    nodeName,
-			volumes: make(map[string]struct{}),
-		}
-	}
 }
 
 // GetOwner returns the owner node for a volume, or "" if unset.
@@ -156,8 +99,7 @@ func (r *NodeRegistry) GetOwner(volumeID string) string {
 	return ""
 }
 
-// SetCached marks a volume as cached on the given node. Both the volume and
-// node entries are created lazily if they don't already exist.
+// SetCached marks a volume as cached on the given node.
 func (r *NodeRegistry) SetCached(volumeID, nodeName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -171,16 +113,6 @@ func (r *NodeRegistry) SetCached(volumeID, nodeName string) {
 		r.volumes[volumeID] = ve
 	}
 	ve.cachedNodes[nodeName] = time.Now()
-
-	ne, ok := r.nodes[nodeName]
-	if !ok {
-		ne = &nodeEntry{
-			name:    nodeName,
-			volumes: make(map[string]struct{}),
-		}
-		r.nodes[nodeName] = ne
-	}
-	ne.volumes[volumeID] = struct{}{}
 }
 
 // RemoveCached removes the cache association between a volume and a node.
@@ -191,9 +123,6 @@ func (r *NodeRegistry) RemoveCached(volumeID, nodeName string) {
 
 	if ve, ok := r.volumes[volumeID]; ok {
 		delete(ve.cachedNodes, nodeName)
-	}
-	if ne, ok := r.nodes[nodeName]; ok {
-		delete(ne.volumes, volumeID)
 	}
 }
 
@@ -293,110 +222,22 @@ func (r *NodeRegistry) GetVolumeStatus(volumeID string) *VolumeStatus {
 	return vs
 }
 
-// RegisteredNodes returns a sorted list of all known node names. Useful for
-// selecting a cache target when no hint is provided.
-// Deprecated: RegisteredNodes returns stale data during autoscaler transitions.
-// Use Server.liveNodes() for node selection. This exists only for volume
-// metadata bookkeeping (ReconcileNodes). Every call is logged as a warning.
-func (r *NodeRegistry) RegisteredNodes() []string {
-	klog.Warningf("DEPRECATED: RegisteredNodes() called — this returns stale registry data, use liveNodes() instead (stack: %s)", callerInfo())
+// AllVolumeIDs returns a sorted list of all registered volume IDs.
+func (r *NodeRegistry) AllVolumeIDs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	names := make([]string, 0, len(r.nodes))
-	for name := range r.nodes {
-		names = append(names, name)
+	ids := make([]string, 0, len(r.volumes))
+	for id := range r.volumes {
+		ids = append(ids, id)
 	}
-	sort.Strings(names)
-	return names
+	sort.Strings(ids)
+	return ids
 }
 
-// Deprecated: LeastLoadedNode uses stale registry data. Use
-// Server.rankLiveNodes() instead. Every call is logged as an error.
-func (r *NodeRegistry) LeastLoadedNode() string {
-	klog.Errorf("DEPRECATED: LeastLoadedNode() called — MUST NOT be used for node selection, use liveNodes() (stack: %s)", callerInfo())
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var best string
-	bestCount := -1
-	for name, ne := range r.nodes {
-		count := len(ne.volumes)
-		if bestCount < 0 || count < bestCount {
-			best = name
-			bestCount = count
-		}
-	}
-	return best
-}
-
-// NodeVolumeCount returns the number of volumes cached on the given node.
-// Returns 0 for unknown nodes.
-func (r *NodeRegistry) NodeVolumeCount(nodeName string) int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	if ne, ok := r.nodes[nodeName]; ok {
-		return len(ne.volumes)
-	}
-	return 0
-}
-
-// UpdateNodeResources stores the latest resource headroom data for a node.
-func (r *NodeRegistry) UpdateNodeResources(nodeName string, res NodeResources) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	ne, ok := r.nodes[nodeName]
-	if !ok {
-		ne = &nodeEntry{
-			name:    nodeName,
-			volumes: make(map[string]struct{}),
-		}
-		r.nodes[nodeName] = ne
-	}
-	res.UpdatedAt = time.Now()
-	ne.resources = res
-}
-
-// GetNodeResources returns the resource headroom for a node.
-func (r *NodeRegistry) GetNodeResources(nodeName string) NodeResources {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	if ne, ok := r.nodes[nodeName]; ok {
-		return ne.resources
-	}
-	return NodeResources{}
-}
-
-// NodesWithHeadroom returns node names from the candidate set that have
-// at least the requested CPU (millicores) and memory (bytes) headroom.
-// Nodes with no resource data (not yet populated) are included to avoid
-// false rejections during startup.
-func (r *NodeRegistry) NodesWithHeadroom(candidates []string, cpuMillis, memBytes int64) []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var result []string
-	for _, name := range candidates {
-		ne, ok := r.nodes[name]
-		if !ok {
-			// Unknown node — include it (conservative; don't reject what we haven't measured)
-			result = append(result, name)
-			continue
-		}
-		if ne.resources.UpdatedAt.IsZero() {
-			// No resource data yet — include it
-			result = append(result, name)
-			continue
-		}
-		if ne.resources.HeadroomCPU() >= cpuMillis && ne.resources.HeadroomMem() >= memBytes {
-			result = append(result, name)
-		}
-	}
-	return result
-}
+// ---------------------------------------------------------------------------
+// Eviction helpers
+// ---------------------------------------------------------------------------
 
 // MarkEvicting marks a volume as being evicted from a node.
 // Returns false if the volume is not cached on the node or already evicting.
@@ -464,14 +305,12 @@ func (r *NodeRegistry) FindEvictableCaches(gracePeriod time.Duration) []Evictabl
 		if owner == "" {
 			continue
 		}
-		// Skip if ownership hasn't changed (ownerChangedAt is zero) or
-		// grace period hasn't elapsed since ownership transfer.
 		if ve.ownerChangedAt.IsZero() || now.Sub(ve.ownerChangedAt) < gracePeriod {
 			continue
 		}
 		for nodeName := range ve.cachedNodes {
 			if nodeName == owner {
-				continue // Don't evict from owner node
+				continue
 			}
 			if ve.evicting != nil {
 				if _, evicting := ve.evicting[nodeName]; evicting {
@@ -484,84 +323,58 @@ func (r *NodeRegistry) FindEvictableCaches(gracePeriod time.Duration) []Evictabl
 	return result
 }
 
-// RegisterNode adds a node to the registry. Idempotent.
-func (r *NodeRegistry) RegisterNode(nodeName string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// ---------------------------------------------------------------------------
+// Stale reference cleanup
+// ---------------------------------------------------------------------------
 
-	if _, ok := r.nodes[nodeName]; !ok {
-		r.nodes[nodeName] = &nodeEntry{
-			name:    nodeName,
-			volumes: make(map[string]struct{}),
-		}
-	}
-}
-
-// UnregisterNode removes a node and cleans up all references to it:
-// volume cache associations, volume ownership, and template cache entries.
-func (r *NodeRegistry) UnregisterNode(nodeName string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	ne, ok := r.nodes[nodeName]
-	if !ok {
-		return
-	}
-
-	// Remove this node from all volume cache associations.
-	for volID := range ne.volumes {
-		if ve, exists := r.volumes[volID]; exists {
-			delete(ve.cachedNodes, nodeName)
-			// If this node was the owner, clear ownership.
-			if ve.ownerNode == nodeName {
-				ve.ownerNode = ""
-			}
-		}
-	}
-
-	// Remove this node from all template cache sets.
-	for tmpl, nodes := range r.templateNodes {
-		delete(nodes, nodeName)
-		if len(nodes) == 0 {
-			delete(r.templateNodes, tmpl)
-		}
-	}
-
-	delete(r.nodes, nodeName)
-}
-
-// ReconcileNodes keeps only the given set of node names in the registry.
-// Nodes not in liveNodes are unregistered; new nodes are registered.
-func (r *NodeRegistry) ReconcileNodes(liveNodes []string) (added, removed []string) {
+// CleanStaleReferences removes cache and owner references to nodes not in
+// the provided live set. Also cleans up template entries for dead nodes.
+// This replaces the old ReconcileNodes + UnregisterNode approach — there is
+// no node roster to reconcile, just volume/template references to clean.
+func (r *NodeRegistry) CleanStaleReferences(liveNodes []string) (cleaned int) {
 	live := make(map[string]struct{}, len(liveNodes))
 	for _, n := range liveNodes {
 		live[n] = struct{}{}
 	}
 
-	// Snapshot current node list directly (avoid deprecated RegisteredNodes
-	// which logs warnings — this is legitimate internal bookkeeping).
-	r.mu.RLock()
-	current := make([]string, 0, len(r.nodes))
-	for name := range r.nodes {
-		current = append(current, name)
-	}
-	r.mu.RUnlock()
-	for _, n := range current {
-		if _, ok := live[n]; !ok {
-			r.UnregisterNode(n)
-			removed = append(removed, n)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Clean volume owner and cache references.
+	for _, ve := range r.volumes {
+		if ve.ownerNode != "" {
+			if _, alive := live[ve.ownerNode]; !alive {
+				ve.ownerNode = ""
+				cleaned++
+			}
+		}
+		for nodeName := range ve.cachedNodes {
+			if _, alive := live[nodeName]; !alive {
+				delete(ve.cachedNodes, nodeName)
+				cleaned++
+			}
 		}
 	}
 
-	// Register any new nodes.
-	for _, n := range liveNodes {
-		if !slices.Contains(current, n) {
-			r.RegisterNode(n)
-			added = append(added, n)
+	// Clean template node references.
+	for tmpl, nodes := range r.templateNodes {
+		for nodeName := range nodes {
+			if _, alive := live[nodeName]; !alive {
+				delete(nodes, nodeName)
+				cleaned++
+			}
+		}
+		if len(nodes) == 0 {
+			delete(r.templateNodes, tmpl)
 		}
 	}
-	return added, removed
+
+	return cleaned
 }
+
+// ---------------------------------------------------------------------------
+// Template tracking
+// ---------------------------------------------------------------------------
 
 // RegisterTemplate records that a template is cached on a given node.
 func (r *NodeRegistry) RegisterTemplate(templateName, nodeName string) {
@@ -574,19 +387,6 @@ func (r *NodeRegistry) RegisterTemplate(templateName, nodeName string) {
 		r.templateNodes[templateName] = nodes
 	}
 	nodes[nodeName] = struct{}{}
-}
-
-// AllVolumeIDs returns a sorted list of all registered volume IDs.
-func (r *NodeRegistry) AllVolumeIDs() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	ids := make([]string, 0, len(r.volumes))
-	for id := range r.volumes {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
 }
 
 // GetTemplateNodes returns a sorted list of nodes that have the template cached.
