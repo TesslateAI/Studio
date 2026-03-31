@@ -919,6 +919,50 @@ func TestSyncAll_LocksPerVolume(t *testing.T) {
 	}
 }
 
+func TestSyncAll_PromotesDirtyViaGeneration(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+
+	volID := "vol-direct-write"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "tmpl", "sha256:base")
+
+	// Sync it first so it becomes clean with a layer snapshot.
+	if err := d.SyncVolume(context.Background(), volID); err != nil {
+		t.Fatalf("SyncVolume: %v", err)
+	}
+
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	if tv.dirty {
+		t.Fatal("volume should be clean after sync")
+	}
+	snapPath := tv.lastSnapPath
+	d.mu.Unlock()
+
+	// Simulate a direct write (compute pod) by advancing the volume generation
+	// past the snapshot generation. No MarkDirty is called.
+	fb.generations["volumes/"+volID] = 100
+	fb.generations[snapPath] = 50
+
+	// syncAll should detect the generation mismatch and promote to dirty.
+	if err := d.syncAll(context.Background()); err != nil {
+		t.Fatalf("syncAll: %v", err)
+	}
+
+	// The volume should have been synced (manifest should have a new layer).
+	m, err := fc.GetManifest(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	// Should have 2+ layers: one from SyncVolume, one from syncAll after promotion.
+	if len(m.Layers) < 2 {
+		t.Errorf("expected ≥2 layers after generation-promoted sync, got %d", len(m.Layers))
+	}
+}
+
 // stallingBtrfs is a fakeBtrfs variant where Send returns some bytes then blocks.
 type stallingBtrfs struct {
 	*fakeBtrfs

@@ -141,32 +141,66 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 		}
 	}
 
-	discovered := 0
-	clean := 0
-	dirty := 0
+	// --- Pass 1: Collect volume IDs to discover (local, fast). ---
+	var volIDs []string
 	for _, sub := range subs {
 		volID := strings.TrimPrefix(sub.Path, "volumes/")
 		if volID == "" || volID == sub.Path {
 			continue
 		}
-
 		d.mu.Lock()
 		_, alreadyTracked := d.tracked[volID]
 		d.mu.Unlock()
 		if alreadyTracked {
 			continue
 		}
+		volIDs = append(volIDs, volID)
+	}
+	if len(volIDs) == 0 {
+		return
+	}
 
-		// Try to recover template context from CAS manifest.
-		var templateName, templateHash string
-		if d.cas != nil {
-			if m, mErr := d.cas.GetManifest(ctx, volID); mErr == nil {
-				templateName = m.TemplateName
-				templateHash = m.Base
-			}
+	// --- Pass 2: Fetch manifests from S3 in parallel (the slow part). ---
+	// GetManifest is a pure read — safe to call concurrently. Results are
+	// collected into a map and consumed serially in pass 3. Cap at 10
+	// concurrent S3 reads to avoid overwhelming the connection.
+	type manifestInfo struct {
+		templateName string
+		templateHash string
+	}
+	manifestMap := make(map[string]manifestInfo, len(volIDs))
+	if d.cas != nil {
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 10)
+
+		for _, volID := range volIDs {
+			wg.Add(1)
+			go func(vid string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				if m, err := d.cas.GetManifest(ctx, vid); err == nil {
+					mu.Lock()
+					manifestMap[vid] = manifestInfo{
+						templateName: m.TemplateName,
+						templateHash: m.Base,
+					}
+					mu.Unlock()
+				}
+			}(volID)
 		}
+		wg.Wait()
+	}
 
-		// Determine dirty state by comparing btrfs generations.
+	// --- Pass 3: Track volumes with generation-based dirty detection. ---
+	discovered := 0
+	clean := 0
+	dirty := 0
+	for _, volID := range volIDs {
+		mi := manifestMap[volID] // zero-value if manifest not found
+
 		isDirty := true // default: dirty (safe — will sync if unsure)
 		snapPath, hasSnap := layerSnaps[volID]
 		if hasSnap {
@@ -174,8 +208,6 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 			snapGen, snapErr := d.btrfs.GetGeneration(ctx, snapPath)
 			if volErr == nil && snapErr == nil {
 				if volGen <= snapGen {
-					// Volume generation hasn't advanced past the snapshot —
-					// no modifications since last sync.
 					isDirty = false
 				} else {
 					klog.V(2).Infof("discoverVolumes: %s dirty (vol gen %d > snap gen %d)",
@@ -187,10 +219,9 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 			}
 		}
 
-		d.TrackVolume(volID, templateName, templateHash)
+		d.TrackVolume(volID, mi.templateName, mi.templateHash)
 
 		if !isDirty {
-			// Override the default dirty=true from TrackVolume.
 			d.mu.Lock()
 			if tv, ok := d.tracked[volID]; ok {
 				tv.dirty = false
@@ -201,7 +232,6 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 		} else {
 			dirty++
 		}
-
 		discovered++
 	}
 
@@ -726,21 +756,63 @@ func (d *Daemon) GetManifest(ctx context.Context, volumeID string) (*cas.Manifes
 }
 
 // syncAll iterates over all tracked volumes and syncs dirty ones.
+// Volumes marked clean are verified via btrfs generation comparison —
+// if the volume's generation advanced past its layer snapshot, it was
+// modified by a process outside FileOps (e.g. compute pod) and needs
+// syncing despite the dirty flag being false.
 func (d *Daemon) syncAll(ctx context.Context) error {
-	d.mu.Lock()
-	type syncItem struct {
-		tv trackedVolume // copy
+	// Snapshot tracked state under lock (fast).
+	type candidate struct {
+		tv           trackedVolume
+		needGenCheck bool // clean volume with a layer snapshot — verify via generation
 	}
-	items := make([]syncItem, 0, len(d.tracked))
-	skipped := 0
+	d.mu.Lock()
+	candidates := make([]candidate, 0, len(d.tracked))
 	for _, tv := range d.tracked {
-		if !tv.dirty {
+		c := candidate{tv: *tv}
+		if !tv.dirty && tv.lastSnapPath != "" {
+			c.needGenCheck = true
+		}
+		candidates = append(candidates, c)
+	}
+	d.mu.Unlock()
+
+	// Generation check for clean volumes — outside the lock since
+	// GetGeneration runs a btrfs subprocess (~1ms each).
+	for i := range candidates {
+		c := &candidates[i]
+		if !c.needGenCheck {
+			continue
+		}
+		volGen, volErr := d.btrfs.GetGeneration(ctx, "volumes/"+c.tv.volumeID)
+		snapGen, snapErr := d.btrfs.GetGeneration(ctx, c.tv.lastSnapPath)
+		if volErr == nil && snapErr == nil && volGen > snapGen {
+			klog.V(2).Infof("syncAll: %s promoted to dirty (vol gen %d > snap gen %d, direct write detected)",
+				c.tv.volumeID, volGen, snapGen)
+			c.tv.dirty = true
+			// Also update the tracked map so DrainAll sees it.
+			d.mu.Lock()
+			if tv, ok := d.tracked[c.tv.volumeID]; ok {
+				tv.dirty = true
+			}
+			d.mu.Unlock()
+		}
+	}
+
+	// Build final sync list.
+	type syncItem struct {
+		tv trackedVolume
+	}
+	items := make([]syncItem, 0, len(candidates))
+	skipped := 0
+	for _, c := range candidates {
+		if !c.tv.dirty {
 			skipped++
 			continue
 		}
-		items = append(items, syncItem{tv: *tv})
+		items = append(items, syncItem{tv: c.tv})
 	}
-	d.mu.Unlock()
+
 
 	if len(items) == 0 {
 		if skipped > 0 {

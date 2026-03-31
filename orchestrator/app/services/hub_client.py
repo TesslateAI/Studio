@@ -73,7 +73,7 @@ class HubClient:
             )
         return self._channel
 
-    async def _call(self, method: str, request: dict, *, timeout: float = 30.0) -> dict:
+    async def _call(self, method: str, request: dict, *, timeout: float = 300.0) -> dict:
         """Invoke a VolumeHub RPC with JSON codec content-type."""
         channel = await self._ensure_channel()
         call = channel.unary_unary(
@@ -94,7 +94,7 @@ class HubClient:
         template: str | None = None,
         hint_node: str | None = None,
         *,
-        timeout: float = 30.0,
+        timeout: float = 300.0,
     ) -> tuple[str, str]:
         """Create a volume on a node from template (or empty).
 
@@ -124,7 +124,7 @@ class HubClient:
         )
         return volume_id, node_name
 
-    async def delete_volume(self, volume_id: str, *, timeout: float = 30.0) -> None:
+    async def delete_volume(self, volume_id: str, *, timeout: float = 300.0) -> None:
         """Delete from Hub + S3 + all node caches.  Idempotent.
 
         Args:
@@ -145,7 +145,7 @@ class HubClient:
         *,
         budget_cpu: int = 0,
         budget_mem: int = 0,
-        timeout: float = 120.0,
+        timeout: float = 300.0,
     ) -> str:
         """Ensure volume is cached on a live, schedulable compute node.
 
@@ -163,8 +163,8 @@ class HubClient:
                 all live nodes.
             budget_cpu: CPU millicores needed for the placement unit (0 = skip check).
             budget_mem: Memory bytes needed for the placement unit (0 = skip check).
-            timeout: gRPC deadline in seconds (default 120 s to cover
-                     network transfers).
+            timeout: gRPC deadline in seconds. Go-side stall detection
+                     handles real hangs; this is a safety net for Hub death.
 
         Returns:
             The node name where the volume is now cached.
@@ -198,7 +198,7 @@ class HubClient:
         volume_id: str,
         new_node: str,
         *,
-        timeout: float = 30.0,
+        timeout: float = 300.0,
     ) -> None:
         """Transfer volume ownership to a new node.
 
@@ -226,7 +226,7 @@ class HubClient:
         self,
         volume_id: str,
         *,
-        timeout: float = 120.0,
+        timeout: float = 300.0,
     ) -> None:
         """Trigger S3 sync on the node that owns the volume.
 
@@ -235,8 +235,8 @@ class HubClient:
 
         Args:
             volume_id: Volume whose data to sync.
-            timeout: gRPC deadline in seconds (default 120 s for large
-                     syncs).
+            timeout: gRPC deadline in seconds. Go-side stall detection
+                     handles real hangs; this is a safety net for Hub death.
         """
         await self._call(
             "TriggerSync",
@@ -252,7 +252,7 @@ class HubClient:
     # Status / introspection
     # ------------------------------------------------------------------
 
-    async def volume_status(self, volume_id: str, *, timeout: float = 30.0) -> dict:
+    async def volume_status(self, volume_id: str, *, timeout: float = 300.0) -> dict:
         """Get volume status from Hub registry.
 
         Args:
@@ -271,7 +271,7 @@ class HubClient:
     # Volume routing
     # ------------------------------------------------------------------
 
-    async def resolve_volume(self, volume_id: str, *, timeout: float = 20.0) -> dict:
+    async def resolve_volume(self, volume_id: str, *, timeout: float = 300.0) -> dict:
         """Non-blocking volume resolution via Hub.
 
         Returns the volume's current state and routing addresses.
@@ -302,7 +302,7 @@ class HubClient:
         base_volume_id: str,
         service_name: str,
         *,
-        timeout: float = 30.0,
+        timeout: float = 300.0,
     ) -> str:
         """Create a service-specific subvolume on the Hub.
 
