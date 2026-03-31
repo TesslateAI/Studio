@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -68,6 +69,7 @@ type Driver struct {
 	syncer         *bsync.Daemon
 	tmplMgr        *template.Manager
 	hubAddress     string // VolumeHub gRPC address for safety-net materialization (node mode)
+	unpublishWg    stdsync.WaitGroup // tracks async SyncVolume goroutines fired from NodeUnpublishVolume
 
 	// Controller-mode subsystem (nil in node mode).
 	nodeOps nodeops.NodeOps
@@ -264,6 +266,10 @@ func (d *Driver) runNode(ctx context.Context) error {
 				// should never be hit. Future: replace with per-volume stall detection.
 				drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				defer drainCancel()
+				// Wait for any in-flight async syncs from NodeUnpublishVolume
+				// to complete before draining, so their SyncVolume calls don't
+				// race with DrainAll on the same volumes.
+				d.unpublishWg.Wait()
 				if err := d.syncer.DrainAll(drainCtx); err != nil {
 					klog.Errorf("Drain failed: %v", err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)

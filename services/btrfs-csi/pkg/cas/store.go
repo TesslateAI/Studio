@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"k8s.io/klog/v2"
@@ -149,6 +150,41 @@ func (s *Store) HasBlob(ctx context.Context, hash string) (bool, error) {
 // DeleteBlob removes a blob from object storage.
 func (s *Store) DeleteBlob(ctx context.Context, hash string) error {
 	return s.obj.Delete(ctx, blobKey(hash))
+}
+
+// StagingMaxAge is the maximum age of a staging key before it is considered
+// orphaned. PutBlob normally cleans up staging keys immediately, but a crash
+// between upload and delete leaves orphans. 1 hour is far longer than any
+// normal upload takes.
+const StagingMaxAge = 1 * time.Hour
+
+// CleanupStaging deletes orphaned staging keys older than StagingMaxAge.
+// Returns the number of keys deleted. Safe to call concurrently — each
+// staging key is unique (random), so deleting a key that another goroutine
+// is still uploading to is not possible in practice (would require the same
+// random 8-byte suffix).
+func (s *Store) CleanupStaging(ctx context.Context) (int, error) {
+	objects, err := s.obj.List(ctx, "blobs/_staging/")
+	if err != nil {
+		return 0, fmt.Errorf("list staging objects: %w", err)
+	}
+
+	cutoff := time.Now().Add(-StagingMaxAge)
+	deleted := 0
+	for _, obj := range objects {
+		if obj.LastModified.Before(cutoff) {
+			if err := s.obj.Delete(ctx, obj.Key); err != nil {
+				klog.Warningf("CleanupStaging: failed to delete %s: %v", obj.Key, err)
+				continue
+			}
+			deleted++
+		}
+	}
+
+	if deleted > 0 {
+		klog.Infof("CleanupStaging: deleted %d orphaned staging key(s)", deleted)
+	}
+	return deleted, nil
 }
 
 // blobReader wraps a zstd decoder and the underlying download reader so that

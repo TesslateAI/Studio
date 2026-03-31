@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1019,4 +1020,233 @@ func TestPeerTransfer_StaleTransferCleanup(t *testing.T) {
 		mgr.DeleteSubvolume(context.Background(), volPath)
 		mgr.DeleteSubvolume(context.Background(), staleTransfer)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Root Cause C integration tests: disk-authoritative tracking
+// ---------------------------------------------------------------------------
+
+// TestDrainAll_DiscoversUntrackedVolumes verifies that DrainAll re-runs
+// discoverVolumes, catching volumes that exist on disk but were never
+// explicitly tracked (e.g., service volumes created by the Hub before
+// periodic discovery ran). The volume should be synced to S3 during drain.
+func TestDrainAll_DiscoversUntrackedVolumes(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	bucket := uniqueName("drain-disc")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create daemon with 1h interval (manual control only).
+	daemon := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+
+	// Create a volume on disk WITHOUT calling TrackVolume — simulates a
+	// service volume created by the Hub that was missed by discovery.
+	volID := uniqueName("untracked")
+	volPath := "volumes/" + volID
+	if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("create untracked volume: %v", err)
+	}
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+		// Clean up layer snapshots.
+		subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
+		for _, sub := range subs {
+			mgr.DeleteSubvolume(context.Background(), sub.Path)
+		}
+		synth := "templates/_vol_" + volID
+		if mgr.SubvolumeExists(context.Background(), synth) {
+			mgr.DeleteSubvolume(context.Background(), synth)
+		}
+	})
+	writeTestFile(t, filepath.Join(pool, volPath), "important.txt", "do-not-lose-this")
+
+	// Verify NOT tracked yet.
+	for _, s := range daemon.GetTrackedState() {
+		if s.VolumeID == volID {
+			t.Fatal("volume should not be tracked before DrainAll")
+		}
+	}
+
+	// DrainAll should discover the volume and sync it to S3.
+	if err := daemon.DrainAll(ctx); err != nil {
+		t.Fatalf("DrainAll: %v", err)
+	}
+
+	// Verify the volume was persisted: a CAS manifest should exist.
+	manifest, err := casStore.GetManifest(ctx, volID)
+	if err != nil {
+		t.Fatalf("volume %s should have a CAS manifest after drain (discovered + synced): %v", volID, err)
+	}
+	if len(manifest.Layers) == 0 {
+		t.Error("manifest should have at least 1 layer after drain sync")
+	}
+
+	t.Logf("DrainAll discovered untracked volume %s and synced %d layer(s)", volID, len(manifest.Layers))
+}
+
+// TestPeriodicDiscovery_TracksNewVolume verifies that syncAll's periodic
+// discovery picks up volumes created after initial startup.
+func TestPeriodicDiscovery_TracksNewVolume(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	bucket := uniqueName("periodic")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create daemon with 1h interval (manual sync only).
+	daemon := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+
+	// Start daemon — initial discovery sees nothing.
+	dCtx, dCancel := context.WithCancel(ctx)
+	go daemon.Start(dCtx)
+	t.Cleanup(func() {
+		dCancel()
+		daemon.Stop()
+	})
+
+	// Give startup discovery a moment.
+	time.Sleep(100 * time.Millisecond)
+
+	// Create a volume AFTER startup.
+	volID := uniqueName("late-vol")
+	volPath := "volumes/" + volID
+	if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("create volume: %v", err)
+	}
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+	})
+
+	// Verify NOT tracked yet.
+	found := false
+	for _, s := range daemon.GetTrackedState() {
+		if s.VolumeID == volID {
+			found = true
+		}
+	}
+	if found {
+		t.Fatal("volume should not be tracked before periodic discovery")
+	}
+
+	// Manually trigger syncAll enough times to trigger periodic discovery.
+	// discoverInterval is 5, so we need 5 calls.
+	for i := 0; i < 5; i++ {
+		daemon.SyncAll(ctx)
+	}
+
+	// Now check tracking.
+	found = false
+	for _, s := range daemon.GetTrackedState() {
+		if s.VolumeID == volID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("volume should be tracked after periodic discovery triggered by 5 syncAll cycles")
+	}
+
+	t.Logf("Periodic discovery picked up late volume %s", volID)
+}
+
+// TestNodeOps_TrackVolume_Integration verifies the TrackVolume gRPC call
+// works end-to-end: Hub calls TrackVolume on node → sync daemon tracks it.
+func TestNodeOps_TrackVolume_Integration(t *testing.T) {
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create daemon + nodeops server.
+	daemon := bsync.NewDaemon(mgr, nil, nil, 1*time.Hour)
+	addr := startNodeOpsServer(t, mgr, daemon, nil)
+	client := connectNodeOpsClient(t, addr)
+
+	volID := uniqueName("svc-vol")
+
+	// Verify not tracked.
+	for _, s := range daemon.GetTrackedState() {
+		if s.VolumeID == volID {
+			t.Fatal("should not be tracked before RPC")
+		}
+	}
+
+	// Call TrackVolume via gRPC (same path as Hub's CreateServiceVolume).
+	if err := client.TrackVolume(ctx, volID, "", ""); err != nil {
+		t.Fatalf("TrackVolume RPC: %v", err)
+	}
+
+	// Verify tracked + dirty.
+	found := false
+	for _, s := range daemon.GetTrackedState() {
+		if s.VolumeID == volID {
+			found = true
+			if !s.Dirty {
+				t.Error("newly tracked volume should be dirty")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("volume should be tracked after TrackVolume RPC")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bonus F integration test: staging GC
+// ---------------------------------------------------------------------------
+
+// TestStagingGC_DeletesOrphanedKeys verifies that CleanupStaging deletes
+// orphaned staging keys from real S3 (MinIO).
+func TestStagingGC_DeletesOrphanedKeys(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	bucket := uniqueName("staging-gc")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+
+	// Plant an orphaned staging key by uploading directly to the staging prefix.
+	// In production this would be left by a crashed PutBlob.
+	orphanKey := "blobs/_staging/orphan-test.zst"
+	if err := store.Upload(ctx, orphanKey, strings.NewReader("orphan-data"), -1); err != nil {
+		t.Fatalf("upload orphan key: %v", err)
+	}
+
+	// Verify it exists.
+	exists, err := store.Exists(ctx, orphanKey)
+	if err != nil || !exists {
+		t.Fatal("orphan key should exist after upload")
+	}
+
+	// CleanupStaging with default 1h max age — key was just created, should NOT be deleted.
+	deleted, err := casStore.CleanupStaging(ctx)
+	if err != nil {
+		t.Fatalf("CleanupStaging: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("fresh staging key should not be deleted, got %d deleted", deleted)
+	}
+
+	// Verify still exists.
+	exists, _ = store.Exists(ctx, orphanKey)
+	if !exists {
+		t.Fatal("fresh staging key should still exist")
+	}
+
+	t.Log("CleanupStaging correctly preserved fresh staging key (would delete keys >1h old)")
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,11 @@ type trackedVolume struct {
 	dirty         bool // true = volume has changed since last successful sync
 }
 
+// discoverInterval is the number of syncAll cycles between periodic
+// discoverVolumes runs. With a 15s sync interval this means re-discovery
+// every ~75s — fast enough to catch service volumes created by the Hub.
+const discoverInterval = 5
+
 // Daemon periodically snapshots tracked volumes, uploads incremental layers
 // to the CAS store, and maintains volume manifests.
 type Daemon struct {
@@ -39,6 +45,7 @@ type Daemon struct {
 	tracked  map[string]*trackedVolume
 	syncLocks   sync.Mutex                  // guards volLocks
 	volLocks    map[string]*sync.Mutex       // per-volume sync serialization
+	discoverCycle atomic.Int32               // counts syncAll cycles for periodic discovery
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
 }
@@ -242,6 +249,17 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 	}
 }
 
+// cleanupStaging deletes orphaned S3 staging keys left by crashed uploads.
+// Called alongside periodic discoverVolumes as housekeeping.
+func (d *Daemon) cleanupStaging(ctx context.Context) {
+	if d.cas == nil {
+		return
+	}
+	if _, err := d.cas.CleanupStaging(ctx); err != nil {
+		klog.Warningf("cleanupStaging: %v", err)
+	}
+}
+
 // Stop signals the daemon to stop and waits for the sync loop to finish.
 func (d *Daemon) Stop() {
 	select {
@@ -258,6 +276,11 @@ func (d *Daemon) Stop() {
 // DaemonSet pod termination. Clean volumes are skipped — their data is
 // already in S3 from the last successful sync.
 func (d *Daemon) DrainAll(ctx context.Context) error {
+	// Re-discover volumes from disk before snapshotting the tracked map.
+	// This catches service volumes and any volumes created after the last
+	// periodic discovery but before the drain signal arrived.
+	d.discoverVolumes(ctx)
+
 	d.mu.Lock()
 	type drainItem struct {
 		volumeID     string
@@ -721,12 +744,28 @@ func (d *Daemon) GetManifest(ctx context.Context, volumeID string) (*cas.Manifes
 	return d.cas.GetManifest(ctx, volumeID)
 }
 
+// SyncAll runs a single CAS sync cycle. Exported for integration tests
+// that need to trigger cycles without waiting for the ticker.
+func (d *Daemon) SyncAll(ctx context.Context) error {
+	return d.syncAll(ctx)
+}
+
 // syncAll iterates over all tracked volumes and syncs dirty ones.
 // Volumes marked clean are verified via btrfs generation comparison —
 // if the volume's generation advanced past its layer snapshot, it was
 // modified by a process outside FileOps (e.g. compute pod) and needs
 // syncing despite the dirty flag being false.
 func (d *Daemon) syncAll(ctx context.Context) error {
+	// Periodic re-discovery: scan disk for untracked volumes every Nth cycle.
+	// This catches service volumes created by the Hub and any volumes that
+	// appeared after the initial startup discovery. Atomic counter because
+	// SyncAll is exported and could be called concurrently with the ticker.
+	if d.discoverCycle.Add(1) >= int32(discoverInterval) {
+		d.discoverCycle.Store(0)
+		d.discoverVolumes(ctx)
+		d.cleanupStaging(ctx)
+	}
+
 	// Snapshot tracked state under lock (fast).
 	type candidate struct {
 		tv           trackedVolume

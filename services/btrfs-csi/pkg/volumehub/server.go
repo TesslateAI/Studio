@@ -682,6 +682,14 @@ func (s *Server) handleCreateServiceVolume(_ interface{}, ctx context.Context, d
 		klog.Warningf("SetOwnership for service volume %s: %v", serviceVolumeID, err)
 	}
 
+	// Register the service volume for CAS sync on the target node.
+	// Without this, DrainAll would skip the volume and data would be lost
+	// if the node is drained before the next periodic discovery cycle.
+	if err := client.TrackVolume(ctx, serviceVolumeID, "", ""); err != nil {
+		klog.Warningf("TrackVolume for service volume %s on %s: %v", serviceVolumeID, ownerNode, err)
+		// Non-fatal: periodic discoverVolumes will pick it up eventually.
+	}
+
 	klog.Infof("Created service volume %s on %s (base=%s, service=%s)", serviceVolumeID, ownerNode, req.BaseVolumeID, req.ServiceName)
 	return &CreateServiceVolumeResponse{VolumeID: serviceVolumeID}, nil
 }

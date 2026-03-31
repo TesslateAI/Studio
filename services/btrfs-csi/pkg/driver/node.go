@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/sys/unix"
@@ -145,7 +146,8 @@ func (ns *NodeServer) NodeUnpublishVolume(
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
-	klog.Infof("Unmounting volume %q from %s", req.GetVolumeId(), targetPath)
+	volID := req.GetVolumeId()
+	klog.Infof("Unmounting volume %q from %s", volID, targetPath)
 	if err := ns.mounter.Unmount(targetPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmount %s: %v", targetPath, err)
 	}
@@ -154,6 +156,27 @@ func (ns *NodeServer) NodeUnpublishVolume(
 	if err := os.RemoveAll(targetPath); err != nil {
 		klog.Warningf("Failed to remove target path %s: %v", targetPath, err)
 		// Non-fatal: the unmount succeeded.
+	}
+
+	// Sync barrier: the compute pod is leaving, so any writes it made
+	// should be persisted to S3 as soon as possible. MarkDirty ensures
+	// the next syncAll cycle picks it up; the async SyncVolume fires
+	// immediately so data is persisted without waiting up to 15s.
+	// The WaitGroup ensures DrainAll can wait for inflight syncs before
+	// the process exits.
+	if ns.driver.syncer != nil {
+		ns.driver.syncer.MarkDirty(volID)
+		ns.driver.unpublishWg.Add(1)
+		go func() {
+			defer ns.driver.unpublishWg.Done()
+			syncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if err := ns.driver.syncer.SyncVolume(syncCtx, volID); err != nil {
+				klog.Warningf("Async sync after unpublish for %s: %v", volID, err)
+			} else {
+				klog.V(2).Infof("Async sync after unpublish for %s completed", volID)
+			}
+		}()
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil

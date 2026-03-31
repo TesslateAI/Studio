@@ -207,6 +207,10 @@ func (f *fakeCAS) DeleteManifest(_ context.Context, volumeID string) error {
 	return nil
 }
 
+func (f *fakeCAS) CleanupStaging(_ context.Context) (int, error) {
+	return 0, nil
+}
+
 // ---------------------------------------------------------------------------
 // Fake templateOps
 // ---------------------------------------------------------------------------
@@ -1390,4 +1394,94 @@ func TestRestoreVolume_WithStalePending(t *testing.T) {
 	if !hasTarget {
 		t.Error("layer target path should exist after restore")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Root Cause C tests
+// ---------------------------------------------------------------------------
+
+// TestSyncAll_PeriodicDiscovery verifies that discoverVolumes runs every
+// discoverInterval cycles via syncAll.
+func TestSyncAll_PeriodicDiscovery(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+
+	ctx := context.Background()
+
+	// Run discoverInterval-1 cycles — no discovery should happen.
+	for i := 0; i < discoverInterval-1; i++ {
+		_ = d.syncAll(ctx)
+	}
+
+	// Add an untracked volume on "disk" with a matching layer snapshot
+	// so it's discovered as clean (won't trigger syncOne).
+	fb.mu.Lock()
+	fb.subvolumes["volumes/vol-untracked"] = true
+	fb.generations["volumes/vol-untracked"] = 100
+	fb.subvolumes["layers/vol-untracked@abc123"] = true
+	fb.generations["layers/vol-untracked@abc123"] = 100 // same gen = clean
+	fb.mu.Unlock()
+
+	d.mu.Lock()
+	_, tracked := d.tracked["vol-untracked"]
+	d.mu.Unlock()
+	if tracked {
+		t.Fatal("volume should NOT be tracked before discovery interval")
+	}
+
+	// The Nth cycle triggers discovery.
+	_ = d.syncAll(ctx)
+
+	d.mu.Lock()
+	_, tracked = d.tracked["vol-untracked"]
+	d.mu.Unlock()
+	if !tracked {
+		t.Fatal("volume should be tracked after periodic discovery")
+	}
+}
+
+// TestDrainAll_DiscoverBeforeSnapshot verifies that DrainAll re-discovers
+// volumes from disk before building the drain list, catching late arrivals.
+func TestDrainAll_DiscoverBeforeSnapshot(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+
+	// Put a volume on "disk" that isn't tracked.
+	fb.mu.Lock()
+	fb.subvolumes["volumes/vol-late"] = true
+	fb.generations["volumes/vol-late"] = 50
+	fb.mu.Unlock()
+
+	ctx := context.Background()
+	// DrainAll should discover vol-late and attempt to sync it.
+	// The sync itself may fail (no real btrfs), but we verify discovery
+	// happened by checking a snapshot was attempted.
+	_ = d.DrainAll(ctx)
+
+	// The key assertion: DrainAll should have attempted to sync vol-late,
+	// which means it was discovered. Check that a snapshot was attempted.
+	fb.mu.Lock()
+	hasSnapshot := false
+	for _, snap := range fb.snapshots {
+		if strings.HasPrefix(snap.Source, "volumes/vol-late") {
+			hasSnapshot = true
+			break
+		}
+	}
+	fb.mu.Unlock()
+
+	if !hasSnapshot {
+		t.Fatal("DrainAll should have discovered vol-late and attempted to sync it")
+	}
+}
+
+// TestCleanupStaging_NilCAS verifies cleanupStaging is a no-op with nil CAS.
+func TestCleanupStaging_NilCAS(t *testing.T) {
+	d := newDaemonWithInterfaces(newFakeBtrfs(), nil, nil, 15*time.Second)
+	// Should not panic.
+	d.cleanupStaging(context.Background())
 }
