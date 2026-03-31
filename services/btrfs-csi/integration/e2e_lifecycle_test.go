@@ -744,3 +744,279 @@ func TestAutoPromote_TemplatelessVolume(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Test: RestoreVolume recovers when a stale @pending subvolume exists
+// from a previous failed restore attempt. Without idempotent cleanup,
+// btrfs receive would fail because the destination already exists.
+// ---------------------------------------------------------------------------
+
+func TestRestoreVolume_StalePendingCleanup(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	// CAS infrastructure.
+	bucket := uniqueName("stale-pending")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create template (staging → read-only snapshot → upload).
+	tmplName := uniqueName("sp-tmpl")
+	tmplPath := "templates/" + tmplName
+	stagingPath := "volumes/" + uniqueName("staging")
+	if err := mgr.CreateSubvolume(ctx, stagingPath); err != nil {
+		t.Fatalf("create staging: %v", err)
+	}
+	writeTestFile(t, filepath.Join(pool, stagingPath), "base.txt", "template-base")
+	if err := mgr.SnapshotSubvolume(ctx, stagingPath, tmplPath, true); err != nil {
+		t.Fatalf("snapshot staging to template: %v", err)
+	}
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), tmplPath)
+		mgr.DeleteSubvolume(context.Background(), stagingPath)
+	})
+
+	tmplHash, err := tmplMgr.UploadTemplate(ctx, tmplName)
+	if err != nil {
+		t.Fatalf("UploadTemplate: %v", err)
+	}
+
+	// Create volume, write data, sync to S3.
+	volID := uniqueName("sp-vol")
+	volPath := "volumes/" + volID
+	if err := mgr.SnapshotSubvolume(ctx, tmplPath, volPath, false); err != nil {
+		t.Fatalf("snapshot template to volume: %v", err)
+	}
+
+	uniqueData := "unique-" + uniqueName("payload")
+	writeTestFile(t, filepath.Join(pool, volPath), "user-data.txt", uniqueData)
+
+	daemon := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+	daemon.TrackVolume(volID, tmplName, tmplHash)
+
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("SyncVolume: %v", err)
+	}
+
+	// Delete local volume + layer snapshots to force CAS restore.
+	if err := mgr.DeleteSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("delete volume: %v", err)
+	}
+	layerSubs, _ := mgr.ListSubvolumes(ctx, "layers/"+volID)
+	for _, sub := range layerSubs {
+		mgr.DeleteSubvolume(ctx, sub.Path)
+	}
+
+	// Simulate a failed previous restore: create a stale @pending subvolume.
+	// In production this happens when btrfs receive is interrupted mid-stream.
+	stalePending := fmt.Sprintf("layers/%s@pending", volID)
+	if err := mgr.CreateSubvolume(ctx, stalePending); err != nil {
+		t.Fatalf("create stale @pending: %v", err)
+	}
+
+	// RestoreVolume should clean up the stale @pending and succeed.
+	if err := daemon.RestoreVolume(ctx, volID); err != nil {
+		t.Fatalf("RestoreVolume with stale @pending: %v", err)
+	}
+
+	// Verify restored content.
+	if !mgr.SubvolumeExists(ctx, volPath) {
+		t.Fatal("volume should exist after restore")
+	}
+	verifyFileContent(t, filepath.Join(pool, volPath, "user-data.txt"), uniqueData)
+	verifyFileContent(t, filepath.Join(pool, volPath, "base.txt"), "template-base")
+
+	// Verify stale @pending is gone.
+	if mgr.SubvolumeExists(ctx, stalePending) {
+		t.Error("stale @pending subvolume should have been cleaned up")
+	}
+
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+		mgr.DeleteSubvolume(context.Background(), stalePending)
+		subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
+		for _, sub := range subs {
+			mgr.DeleteSubvolume(context.Background(), sub.Path)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Test: RestoreToSnapshot recovers when a stale @pending exists.
+// Same scenario as above but for the layer-specific restore path.
+// ---------------------------------------------------------------------------
+
+func TestRestoreToSnapshot_StalePendingCleanup(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	bucket := uniqueName("snap-stale")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create template.
+	tmplName := uniqueName("ss-tmpl")
+	tmplPath := "templates/" + tmplName
+	stagingPath := "volumes/" + uniqueName("staging")
+	if err := mgr.CreateSubvolume(ctx, stagingPath); err != nil {
+		t.Fatalf("create staging: %v", err)
+	}
+	writeTestFile(t, filepath.Join(pool, stagingPath), "base.txt", "template-base")
+	if err := mgr.SnapshotSubvolume(ctx, stagingPath, tmplPath, true); err != nil {
+		t.Fatalf("snapshot staging to template: %v", err)
+	}
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), tmplPath)
+		mgr.DeleteSubvolume(context.Background(), stagingPath)
+	})
+
+	tmplHash, err := tmplMgr.UploadTemplate(ctx, tmplName)
+	if err != nil {
+		t.Fatalf("UploadTemplate: %v", err)
+	}
+
+	// Create volume, sync v1, modify, sync v2.
+	volID := uniqueName("ss-vol")
+	volPath := "volumes/" + volID
+	if err := mgr.SnapshotSubvolume(ctx, tmplPath, volPath, false); err != nil {
+		t.Fatalf("snapshot template to volume: %v", err)
+	}
+
+	v1Data := "version-1-" + uniqueName("v1")
+	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", v1Data)
+
+	daemon := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+	daemon.TrackVolume(volID, tmplName, tmplHash)
+
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("SyncVolume v1: %v", err)
+	}
+
+	manifest, err := casStore.GetManifest(ctx, volID)
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	v1Hash := manifest.Layers[0].Hash
+
+	v2Data := "version-2-" + uniqueName("v2")
+	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", v2Data)
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("SyncVolume v2: %v", err)
+	}
+
+	// Delete all layer snapshots to force CAS download.
+	layerSubs, _ := mgr.ListSubvolumes(ctx, "layers/"+volID)
+	for _, sub := range layerSubs {
+		mgr.DeleteSubvolume(ctx, sub.Path)
+	}
+
+	// Simulate stale @pending from a previous failed restore.
+	stalePending := fmt.Sprintf("layers/%s@pending", volID)
+	if err := mgr.CreateSubvolume(ctx, stalePending); err != nil {
+		t.Fatalf("create stale @pending: %v", err)
+	}
+
+	// RestoreToSnapshot should clean up stale @pending and restore v1.
+	if err := daemon.RestoreToSnapshot(ctx, volID, v1Hash); err != nil {
+		t.Fatalf("RestoreToSnapshot with stale @pending: %v", err)
+	}
+
+	verifyFileContent(t, filepath.Join(pool, volPath, "data.txt"), v1Data)
+
+	if mgr.SubvolumeExists(ctx, stalePending) {
+		t.Error("stale @pending should have been cleaned up")
+	}
+
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+		mgr.DeleteSubvolume(context.Background(), stalePending)
+		subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
+		for _, sub := range subs {
+			mgr.DeleteSubvolume(context.Background(), sub.Path)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Test: Peer transfer receive cleans up stale @transfer subvolume
+// from a previous failed ReceiveVolumeStream.
+// ---------------------------------------------------------------------------
+
+func TestPeerTransfer_StaleTransferCleanup(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	casStore := cas.NewStore(nil) // no S3 needed for peer transfer
+	tmplMgr := template.NewManager(mgr, nil, pool)
+	daemon := bsync.NewDaemon(mgr, nil, tmplMgr, 1*time.Hour)
+
+	// Start sender and receiver nodeops servers.
+	senderAddr := startNodeOpsServer(t, mgr, daemon, tmplMgr)
+	receiverAddr := startNodeOpsServer(t, mgr, daemon, tmplMgr)
+	_ = casStore
+
+	// Create a source volume with data on the "sender" (same node in test).
+	volID := uniqueName("transfer-vol")
+	volPath := "volumes/" + volID
+	if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("create volume: %v", err)
+	}
+
+	transferData := "transfer-payload-" + uniqueName("data")
+	writeTestFile(t, filepath.Join(pool, volPath), "transfer.txt", transferData)
+
+	// Simulate stale @transfer on the receiver from a previous failed transfer.
+	staleTransfer := fmt.Sprintf("volumes/%s@transfer", volID)
+	if err := mgr.CreateSubvolume(ctx, staleTransfer); err != nil {
+		t.Fatalf("create stale @transfer: %v", err)
+	}
+
+	// Perform peer transfer: sender → receiver (same node, but exercises the gRPC path).
+	senderClient := connectNodeOpsClient(t, senderAddr)
+
+	// Need read-only snapshot for send.
+	snapPath := "volumes/" + volID + "@snap"
+	if err := mgr.SnapshotSubvolume(ctx, volPath, snapPath, true); err != nil {
+		t.Fatalf("create ro snapshot: %v", err)
+	}
+	t.Cleanup(func() { mgr.DeleteSubvolume(context.Background(), snapPath) })
+
+	if err := senderClient.SendVolumeTo(ctx, volID, receiverAddr); err != nil {
+		t.Fatalf("SendVolumeTo: %v", err)
+	}
+
+	// Verify the transfer succeeded — volume should exist at canonical path.
+	if !mgr.SubvolumeExists(ctx, volPath) {
+		t.Fatal("volume should exist at canonical path after transfer")
+	}
+
+	// Verify stale @transfer was cleaned up.
+	if mgr.SubvolumeExists(ctx, staleTransfer) {
+		t.Error("stale @transfer subvolume should have been cleaned up by receiver")
+	}
+
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+		mgr.DeleteSubvolume(context.Background(), staleTransfer)
+	})
+}

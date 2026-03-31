@@ -1,4 +1,4 @@
-package sync
+package ioutil
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ func TestStallReader_NormalRead(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	sr := newStallReader(strings.NewReader(data), ctx, cancel, 1*time.Second)
+	sr := NewStallReader(strings.NewReader(data), ctx, cancel, 1*time.Second)
 	defer sr.Close()
 
 	got, err := io.ReadAll(sr)
@@ -39,7 +39,7 @@ func TestStallReader_StallDetected(t *testing.T) {
 	}()
 
 	ctx, cancel := context.WithCancelCause(context.Background())
-	sr := newStallReader(pr, ctx, cancel, 100*time.Millisecond)
+	sr := NewStallReader(pr, ctx, cancel, 100*time.Millisecond)
 	defer sr.Close()
 
 	buf := make([]byte, 64)
@@ -74,7 +74,7 @@ func TestStallReader_SlowButProgressing(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	sr := newStallReader(pr, ctx, cancel, 200*time.Millisecond)
+	sr := NewStallReader(pr, ctx, cancel, 200*time.Millisecond)
 	defer sr.Close()
 
 	got, err := io.ReadAll(sr)
@@ -93,7 +93,7 @@ func TestStallReader_CloseStopsTimer(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	sr := newStallReader(strings.NewReader("data"), ctx, cancel, 100*time.Millisecond)
+	sr := NewStallReader(strings.NewReader("data"), ctx, cancel, 100*time.Millisecond)
 	io.ReadAll(sr)
 	sr.Close()
 
@@ -115,7 +115,7 @@ func TestStallReader_ZeroBytesRead(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancelCause(context.Background())
-	sr := newStallReader(zeroReader, ctx, cancel, 100*time.Millisecond)
+	sr := NewStallReader(zeroReader, ctx, cancel, 100*time.Millisecond)
 	defer sr.Close()
 
 	io.ReadAll(sr)
@@ -131,7 +131,7 @@ func TestStallReader_LargeData(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	sr := newStallReader(bytes.NewReader(data), ctx, cancel, 1*time.Second)
+	sr := NewStallReader(bytes.NewReader(data), ctx, cancel, 1*time.Second)
 	defer sr.Close()
 
 	got, err := io.ReadAll(sr)

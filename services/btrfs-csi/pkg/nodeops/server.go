@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/grpc"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/ioutil"
 	bsync "github.com/TesslateAI/tesslate-btrfs-csi/pkg/sync"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/template"
 )
@@ -753,7 +755,10 @@ func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, ta
 	if err != nil {
 		return fmt.Errorf("btrfs send %q: %w", subvolPath, err)
 	}
-	defer sendReader.Close()
+
+	stallCtx, stallCancel := context.WithCancelCause(ctx)
+	stallR := ioutil.NewStallReader(sendReader, stallCtx, stallCancel, ioutil.StallTimeout)
+	defer stallR.Close()
 
 	target, err := NewClient(targetAddr, nil)
 	if err != nil {
@@ -779,13 +784,16 @@ func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, ta
 	const chunkSize = 2 * 1024 * 1024 // 2 MiB
 	pr, pw := io.Pipe()
 
+	var compressWg sync.WaitGroup
+	compressWg.Add(1)
 	go func() {
+		defer compressWg.Done()
 		encoder, encErr := zstd.NewWriter(pw)
 		if encErr != nil {
 			pw.CloseWithError(encErr)
 			return
 		}
-		_, copyErr := io.Copy(encoder, sendReader)
+		_, copyErr := io.Copy(encoder, stallR)
 		closeErr := encoder.Close()
 		if copyErr != nil {
 			pw.CloseWithError(copyErr)
@@ -798,21 +806,33 @@ func (s *Server) sendSubvolumeTo(ctx context.Context, subvolPath, identifier, ta
 		pw.Close()
 	}()
 
+	var sendErr error
 	buf := make([]byte, chunkSize)
 	for {
 		n, readErr := io.ReadFull(pr, buf)
 		if n > 0 {
-			if sendErr := stream.SendMsg(&ReceiveStreamChunk{Data: buf[:n]}); sendErr != nil {
-				pr.CloseWithError(sendErr)
-				return fmt.Errorf("stream send: %w", sendErr)
+			if err := stream.SendMsg(&ReceiveStreamChunk{Data: buf[:n]}); err != nil {
+				pr.CloseWithError(err)
+				sendErr = fmt.Errorf("stream send: %w", err)
+				break
 			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
 				break
 			}
-			return fmt.Errorf("read compressed stream: %w", readErr)
+			sendErr = fmt.Errorf("read compressed stream: %w", readErr)
+			break
 		}
+	}
+
+	// Ensure the compress goroutine exits before closing stallR.
+	// stallR.Close() closes the btrfs send process, which unblocks the goroutine.
+	stallR.Close()
+	compressWg.Wait()
+
+	if sendErr != nil {
+		return sendErr
 	}
 
 	if err := stream.SendMsg(&ReceiveStreamChunk{Final: true}); err != nil {
@@ -846,6 +866,14 @@ func (s *Server) handleReceiveVolumeStream(srv interface{}, stream grpc.ServerSt
 	if header.TemplateParent != "" {
 		if err := s.tmplMgr.EnsureTemplate(ctx, header.TemplateParent); err != nil {
 			klog.Warningf("ReceiveVolumeStream: ensure template parent %s: %v", header.TemplateParent, err)
+		}
+	}
+
+	// Idempotent cleanup: remove stale @transfer from a previous failed run.
+	transferPath := fmt.Sprintf("volumes/%s@transfer", volumeID)
+	if s.btrfs.SubvolumeExists(ctx, transferPath) {
+		if err := s.btrfs.DeleteSubvolume(ctx, transferPath); err != nil {
+			klog.Warningf("stale transfer subvolume %q undeletable: %v", transferPath, err)
 		}
 	}
 
@@ -887,9 +915,16 @@ func (s *Server) handleReceiveVolumeStream(srv interface{}, stream grpc.ServerSt
 	}
 	defer decoder.Close()
 
-	if err := s.btrfs.Receive(ctx, "volumes", decoder); err != nil {
+	stallCtx, stallCancel := context.WithCancelCause(ctx)
+	stallR := ioutil.NewStallReader(decoder, stallCtx, stallCancel, ioutil.StallTimeout)
+	defer stallR.Close()
+
+	if err := s.btrfs.Receive(stallCtx, "volumes", stallR); err != nil {
 		compressedPR.Close()
 		<-recvErrCh
+		if cause := context.Cause(stallCtx); cause != nil {
+			err = fmt.Errorf("%w (cause: %v)", err, cause)
+		}
 		return status.Errorf(codes.Internal, "btrfs receive: %v", err)
 	}
 	compressedPR.Close()

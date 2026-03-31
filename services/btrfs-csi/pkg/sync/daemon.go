@@ -12,6 +12,7 @@ import (
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/ioutil"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/metrics"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/template"
 )
@@ -541,26 +542,8 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		targetPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latest.Hash))
 
 		if !d.btrfs.SubvolumeExists(ctx, targetPath) {
-			reader, err := d.cas.GetBlob(ctx, latest.Hash)
-			if err != nil {
-				return fmt.Errorf("download layer %s: %w", latest.Hash, err)
-			}
-
-			if err := d.btrfs.Receive(ctx, "layers", reader); err != nil {
-				reader.Close()
-				return fmt.Errorf("receive layer %s: %w", latest.Hash, err)
-			}
-			reader.Close()
-
-			// Rename received subvolume to content-addressed name.
-			receivedPath := fmt.Sprintf("layers/%s@pending", volumeID)
-			if d.btrfs.SubvolumeExists(ctx, receivedPath) {
-				if d.btrfs.SubvolumeExists(ctx, targetPath) {
-					_ = d.btrfs.DeleteSubvolume(ctx, targetPath)
-				}
-				if err := d.btrfs.RenameSubvolume(ctx, receivedPath, targetPath); err != nil {
-					return fmt.Errorf("rename layer to %s: %w", targetPath, err)
-				}
+			if err := d.downloadLayer(ctx, volumeID, latest.Hash, targetPath); err != nil {
+				return fmt.Errorf("restore layer %s: %w", latest.Hash, err)
 			}
 		}
 		sourcePath = targetPath
@@ -660,25 +643,8 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 
 		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(targetLayer.Hash))
 		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
-			reader, err := d.cas.GetBlob(ctx, targetLayer.Hash)
-			if err != nil {
-				return fmt.Errorf("download layer %s: %w", targetLayer.Hash, err)
-			}
-			if err := d.btrfs.Receive(ctx, "layers", reader); err != nil {
-				reader.Close()
-				return fmt.Errorf("receive layer %s: %w", targetLayer.Hash, err)
-			}
-			reader.Close()
-
-			// Rename received snapshot.
-			receivedPath := fmt.Sprintf("layers/%s@pending", volumeID)
-			if d.btrfs.SubvolumeExists(ctx, receivedPath) {
-				if d.btrfs.SubvolumeExists(ctx, layerPath) {
-					_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
-				}
-				if err := d.btrfs.RenameSubvolume(ctx, receivedPath, layerPath); err != nil {
-					return fmt.Errorf("rename layer to %s: %w", layerPath, err)
-				}
+			if err := d.downloadLayer(ctx, volumeID, targetLayer.Hash, layerPath); err != nil {
+				return fmt.Errorf("restore layer %s: %w", targetLayer.Hash, err)
 			}
 		}
 		targetLayerPath = layerPath
@@ -922,7 +888,7 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 	// Wrap with stall detection: if no bytes flow for 30s, the sync is stuck
 	// (S3 hang, network partition, dead rclone). Cancel to unblock.
 	stallCtx, stallCancel := context.WithCancelCause(ctx)
-	stallR := newStallReader(sendReader, stallCtx, stallCancel, syncStallTimeout)
+	stallR := ioutil.NewStallReader(sendReader, stallCtx, stallCancel, ioutil.StallTimeout)
 
 	hash, err := d.cas.PutBlob(stallCtx, stallR)
 	stallR.Close() // stops timer + closes underlying sendReader
@@ -1024,4 +990,51 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 		tv.volumeID, cas.ShortHash(hash), layerType)
 
 	return hash, newSnapPath, nil
+}
+
+// downloadLayer downloads a CAS blob and receives it as a layer snapshot.
+// Includes idempotent @pending cleanup (prevents permanent bricking after a
+// failed receive) and stall detection (cancels on 30s of zero I/O progress).
+func (d *Daemon) downloadLayer(ctx context.Context, volumeID, blobHash, targetPath string) error {
+	pendingPath := fmt.Sprintf("layers/%s@pending", volumeID)
+
+	// Idempotent cleanup: remove stale @pending from a previous failed run.
+	if d.btrfs.SubvolumeExists(ctx, pendingPath) {
+		if err := d.btrfs.DeleteSubvolume(ctx, pendingPath); err != nil {
+			klog.Warningf("stale pending snapshot %q undeletable, using unique suffix: %v", pendingPath, err)
+			pendingPath = fmt.Sprintf("layers/%s@pending-%d", volumeID, time.Now().UnixNano())
+		}
+	}
+
+	reader, err := d.cas.GetBlob(ctx, blobHash)
+	if err != nil {
+		return fmt.Errorf("download blob %s: %w", blobHash, err)
+	}
+
+	stallCtx, stallCancel := context.WithCancelCause(ctx)
+	stallR := ioutil.NewStallReader(reader, stallCtx, stallCancel, ioutil.StallTimeout)
+
+	if err := d.btrfs.Receive(stallCtx, "layers", stallR); err != nil {
+		stallR.Close()
+		// Clean up partial @pending from the failed receive.
+		if d.btrfs.SubvolumeExists(ctx, pendingPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		}
+		if cause := context.Cause(stallCtx); cause != nil {
+			err = fmt.Errorf("%w (cause: %v)", err, cause)
+		}
+		return fmt.Errorf("btrfs receive blob %s: %w", blobHash, err)
+	}
+	stallR.Close()
+
+	// Rename received subvolume to content-addressed name.
+	if d.btrfs.SubvolumeExists(ctx, pendingPath) {
+		if d.btrfs.SubvolumeExists(ctx, targetPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, targetPath)
+		}
+		if err := d.btrfs.RenameSubvolume(ctx, pendingPath, targetPath); err != nil {
+			return fmt.Errorf("rename layer to %s: %w", targetPath, err)
+		}
+	}
+	return nil
 }

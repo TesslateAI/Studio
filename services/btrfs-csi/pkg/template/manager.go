@@ -10,6 +10,7 @@ import (
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/ioutil"
 )
 
 // Manager downloads golden templates from the CAS store and prepares them as
@@ -138,9 +139,15 @@ func (m *Manager) UploadTemplate(ctx context.Context, name string) (string, erro
 		return "", fmt.Errorf("btrfs send template: %w", err)
 	}
 
-	hash, err := m.cas.PutBlob(ctx, sendReader)
-	_ = sendReader.Close()
+	stallCtx, stallCancel := context.WithCancelCause(ctx)
+	stallR := ioutil.NewStallReader(sendReader, stallCtx, stallCancel, ioutil.StallTimeout)
+
+	hash, err := m.cas.PutBlob(stallCtx, stallR)
+	stallR.Close()
 	if err != nil {
+		if cause := context.Cause(stallCtx); cause != nil {
+			err = fmt.Errorf("%w (cause: %v)", err, cause)
+		}
 		return "", fmt.Errorf("put template blob: %w", err)
 	}
 
@@ -208,13 +215,20 @@ func (m *Manager) downloadTemplateByHash(ctx context.Context, name, hash string)
 	if err != nil {
 		return fmt.Errorf("download template %s blob %s: %w", name, cas.ShortHash(hash), err)
 	}
-	defer reader.Close()
+
+	stallCtx, stallCancel := context.WithCancelCause(ctx)
+	stallR := ioutil.NewStallReader(reader, stallCtx, stallCancel, ioutil.StallTimeout)
 
 	// btrfs receive creates the subvolume with the basename from the send
 	// stream. For templates, the send stream name is the template name.
-	if err := m.btrfs.Receive(ctx, "templates", reader); err != nil {
+	if err := m.btrfs.Receive(stallCtx, "templates", stallR); err != nil {
+		stallR.Close()
+		if cause := context.Cause(stallCtx); cause != nil {
+			err = fmt.Errorf("%w (cause: %v)", err, cause)
+		}
 		return fmt.Errorf("btrfs receive template %q: %w", name, err)
 	}
+	stallR.Close()
 
 	klog.Infof("Downloaded and received template %s (hash=%s) from CAS", name, cas.ShortHash(hash))
 	return nil
