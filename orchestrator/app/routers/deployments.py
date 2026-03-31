@@ -16,7 +16,7 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import Container, Deployment, DeploymentCredential, Project, User
+from ..models import Container, Deployment, DeploymentCredential, User
 from ..services.deployment.base import (
     ENV_CPU,
     ENV_IMAGE_REF,
