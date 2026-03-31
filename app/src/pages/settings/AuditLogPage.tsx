@@ -61,7 +61,7 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 export default function AuditLogPage() {
-  const { activeTeam, membership, loading: teamLoading } = useTeam();
+  const { activeTeam, membership, loading: teamLoading, teamSwitchKey } = useTeam();
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [page, setPage] = useState(1);
@@ -168,6 +168,7 @@ export default function AuditLogPage() {
   }
 
   return (
+    <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
     <SettingsSection
       title="Audit Log"
       description="Track all activity and changes within your team"
@@ -356,5 +357,6 @@ export default function AuditLogPage() {
         </div>
       )}
     </SettingsSection>
+    </div>
   );
 }

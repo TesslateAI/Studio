@@ -103,7 +103,8 @@ export function NavigationSidebar({
 
   // Team + user profile state
   const { user, logout } = useAuth();
-  const { activeTeam, teams, switchTeam, refreshTeams } = useTeam();
+  const { activeTeam, teams, switchTeam, refreshTeams, can } = useTeam();
+  const canChat = can('chat.send');
   const subscriptionTier = activeTeam?.subscription_tier || 'free';
   const isPaidPlan = subscriptionTier !== 'free';
   const tierLabel = subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1);
@@ -318,6 +319,8 @@ export function NavigationSidebar({
                 borderColor: 'var(--border-hover)',
                 top: userDropdownRef.current ? userDropdownRef.current.getBoundingClientRect().bottom + 2 : 52,
                 left: userDropdownRef.current ? userDropdownRef.current.getBoundingClientRect().left + 11 : 11,
+                animation: 'team-dropdown-in 0.15s ease-out',
+                transformOrigin: 'top left',
               }}
             >
               <div className="py-1">
@@ -330,9 +333,10 @@ export function NavigationSidebar({
                     {teams.map((team) => (
                       <button
                         key={team.slug}
-                        onClick={() => {
-                          switchTeam(team.slug);
+                        onClick={async () => {
+                          await switchTeam(team.slug);
                           setShowUserDropdown(false);
+                          if (activePage === 'builder') navigate('/dashboard');
                         }}
                         className={`w-full flex items-center gap-2.5 px-3 py-1.5 transition-colors text-left ${
                           activeTeam?.slug === team.slug
@@ -506,17 +510,23 @@ export function NavigationSidebar({
         {/* Standard Navigation Items — hidden in builder mode */}
         {activePage !== 'builder' && (
           <>
-            <Tooltip content="Chat" shortcut={`${modKey} J`} side="right" delay={200}>
+            <Tooltip content={canChat ? 'Chat' : 'Chat (Restricted)'} shortcut={canChat ? `${modKey} J` : undefined} side="right" delay={200}>
               <button
-                onClick={() => navigate('/chat')}
+                onClick={canChat ? () => navigate('/chat') : undefined}
                 className={
                   isExpanded
                     ? navButtonClass(activePage === 'chat')
                     : navButtonClassCollapsed(activePage === 'chat')
                 }
+                style={!canChat ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
               >
                 <MessagesSquare size={16} className={iconClass(activePage === 'chat')} />
-                {isExpanded && <span className={labelClass(activePage === 'chat')}>Chat</span>}
+                {isExpanded && (
+                  <span className={`${labelClass(activePage === 'chat')} flex items-center gap-1`}>
+                    Chat
+                    {!canChat && <span className="text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-60">locked</span>}
+                  </span>
+                )}
               </button>
             </Tooltip>
 

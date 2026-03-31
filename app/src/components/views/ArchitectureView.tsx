@@ -117,6 +117,7 @@ export interface ArchitectureViewProps {
   onContainersChanged: () => void;
   onNavigateToContainer: (id: string) => void;
   onStateChange?: (state: { configDirty: boolean; isRunning: boolean }) => void;
+  readOnly?: boolean;
 }
 
 export interface ArchitectureViewHandle {
@@ -135,7 +136,7 @@ export interface ArchitectureViewHandle {
 
 const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureViewProps>(
   (
-    { slug, projectId, isActive, onContainersChanged, onNavigateToContainer, onStateChange },
+    { slug, projectId, isActive, onContainersChanged, onNavigateToContainer, onStateChange, readOnly = false },
     ref
   ) => {
     const { theme } = useTheme();
@@ -1875,28 +1876,30 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       <div className="flex-1 flex relative h-full">
         {/* React Flow canvas area */}
         <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform">
-          {/* Floating component drawer */}
-          <MarketplaceSidebar
-            onAutoLayout={handleAutoLayout}
-            autoLayoutDisabled={nodes.length < 2}
-          />
+          {/* Floating component drawer — hidden for viewers */}
+          {!readOnly && (
+            <MarketplaceSidebar
+              onAutoLayout={handleAutoLayout}
+              autoLayoutDisabled={nodes.length < 2}
+            />
+          )}
 
           <GraphCanvas
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
+            onNodesChange={readOnly ? undefined : onNodesChange}
+            onEdgesChange={readOnly ? undefined : onEdgesChange}
+            onConnect={readOnly ? undefined : onConnect}
+            onDrop={readOnly ? undefined : onDrop}
+            onDragOver={readOnly ? undefined : onDragOver}
             onInit={() => {}}
-            onNodeDragStart={handleNodeDragStart}
-            onNodeDragStop={handleNodeDragStop}
+            onNodeDragStart={readOnly ? undefined : handleNodeDragStart}
+            onNodeDragStop={readOnly ? undefined : handleNodeDragStop}
             onNodeClick={handleNodeClick}
-            onNodeDoubleClick={handleNodeDoubleClick}
-            onEdgeClick={handleEdgeClick}
-            onEdgesDelete={handleEdgesDelete}
-            onBeforeDelete={handleBeforeDelete}
+            onNodeDoubleClick={readOnly ? undefined : handleNodeDoubleClick}
+            onEdgeClick={readOnly ? undefined : handleEdgeClick}
+            onEdgesDelete={readOnly ? undefined : handleEdgesDelete}
+            onBeforeDelete={readOnly ? undefined : handleBeforeDelete}
             onPaneClick={handlePaneClick}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
@@ -1904,8 +1907,8 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
           />
         </div>
 
-        {/* Container Properties Panel — inline with graph */}
-        {selectedContainer && (
+        {/* Container Properties Panel — inline with graph, hidden for viewers */}
+        {selectedContainer && !readOnly && (
           <ContainerPropertiesPanel
             containerId={selectedContainer.id}
             containerName={selectedContainer.name}

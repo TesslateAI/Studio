@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useTeam } from '../contexts/TeamContext';
 import {
   ArrowLeft,
   Check,
@@ -79,6 +80,7 @@ export default function MarketplaceDetail() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { isAuthenticated } = useMarketplaceAuth();
+  const { teamSwitchKey } = useTeam();
   const [item, setItem] = useState<MarketplaceItem | null>(null);
   const [relatedItems, setRelatedItems] = useState<MarketplaceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,7 +112,7 @@ export default function MarketplaceDetail() {
       setLoading(true);
       loadItemDetails();
     }
-  }, [slug]);
+  }, [slug, teamSwitchKey]);
 
   // Reload agent details when returning to this page (e.g., after removing from Library)
   useEffect(() => {
@@ -476,7 +478,7 @@ export default function MarketplaceDetail() {
           '@graph': [productStructuredData, breadcrumbData],
         }}
       />
-      <div className="h-screen overflow-y-auto bg-[var(--bg)]">
+      <div key={teamSwitchKey} className="h-screen overflow-y-auto bg-[var(--bg)]" style={{ animation: 'fade-in 0.25s ease-out' }}>
         {/* Header */}
         <div className="border-b border-[var(--border)] flex-shrink-0">
           <div className="max-w-5xl mx-auto px-6 md:px-12">

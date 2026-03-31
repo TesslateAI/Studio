@@ -33,6 +33,8 @@ interface TeamContextValue {
   can: (permission: string) => boolean;
   loading: boolean;
   refreshTeams: () => Promise<void>;
+  /** Increments on every team switch — use in useEffect deps to trigger re-fetches. */
+  teamSwitchKey: number;
 }
 
 const TeamContext = createContext<TeamContextValue | undefined>(undefined);
@@ -42,6 +44,7 @@ export function TeamProvider({ children }: { children: React.ReactNode }) {
   const [teams, setTeams] = useState<TeamList[]>([]);
   const [activeTeam, setActiveTeam] = useState<TeamList | null>(null);
   const [loading, setLoading] = useState(true);
+  const [teamSwitchKey, setTeamSwitchKey] = useState(0);
 
   const loadTeams = useCallback(async () => {
     if (!isAuthenticated) {
@@ -79,6 +82,9 @@ export function TeamProvider({ children }: { children: React.ReactNode }) {
         } catch {
           /* non-blocking */
         }
+        // Increment after backend acknowledges the switch so subsequent
+        // API calls (getMyAgents, etc.) hit the correct team scope.
+        setTeamSwitchKey((k) => k + 1);
       }
     },
     [teams]
@@ -99,7 +105,7 @@ export function TeamProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <TeamContext.Provider
-      value={{ activeTeam, teams, switchTeam, membership, can, loading, refreshTeams: loadTeams }}
+      value={{ activeTeam, teams, switchTeam, membership, can, loading, refreshTeams: loadTeams, teamSwitchKey }}
     >
       {children}
     </TeamContext.Provider>

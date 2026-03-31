@@ -36,7 +36,7 @@ type InviteMode = 'email' | 'link' | null;
 
 export default function TeamMembersPage() {
   const { user } = useAuth();
-  const { activeTeam, can, loading: teamLoading } = useTeam();
+  const { activeTeam, can, loading: teamLoading, teamSwitchKey } = useTeam();
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -221,6 +221,7 @@ export default function TeamMembersPage() {
   );
 
   return (
+    <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
     <SettingsSection
       title="Team Members"
       description="Manage who has access to this team and their roles"
@@ -518,5 +519,6 @@ export default function TeamMembersPage() {
         </SettingsGroup>
       )}
     </SettingsSection>
+    </div>
   );
 }

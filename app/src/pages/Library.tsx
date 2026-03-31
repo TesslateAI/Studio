@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTeam } from '../contexts/TeamContext';
 import {
   Folder,
   Storefront,
@@ -125,6 +126,7 @@ interface InstalledMcpServer {
 export default function Library() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { teamSwitchKey } = useTeam();
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   // Normalize legacy "api-keys" tab to "models"
@@ -212,7 +214,7 @@ export default function Library() {
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, teamSwitchKey]);
 
   const loadData = async () => {
     setLoading(true);
@@ -447,7 +449,7 @@ export default function Library() {
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-hidden flex flex-col">
+      <div key={teamSwitchKey} className="flex-1 overflow-hidden flex flex-col" style={{ animation: 'fade-in 0.25s ease-out' }}>
         {activeTab === 'agents' && (
           <AgentsPage
             agents={agents}

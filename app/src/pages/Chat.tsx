@@ -9,6 +9,7 @@ import { type EditMode } from '../components/chat/EditModeStatus';
 import { useChatSessions } from '../hooks/useChatSessions';
 import { useAgentChat } from '../hooks/useAgentChat';
 import { marketplaceApi } from '../lib/api';
+import { useTeam } from '../contexts/TeamContext';
 import type { ChatAgent } from '../types/chat';
 import type { SerializedAttachment } from '../types/agent';
 
@@ -20,6 +21,7 @@ const LANDING_SUGGESTIONS = [
 ];
 
 export default function Chat() {
+  const { teamSwitchKey } = useTeam();
   // Agent state
   const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>({
@@ -116,7 +118,7 @@ export default function Chat() {
     onSessionNeeded: createSession,
   });
 
-  // Load user's agents (same pattern as Project.tsx)
+  // Load user's agents (same pattern as Project.tsx) — re-fetch on team switch
   useEffect(() => {
     let cancelled = false;
     marketplaceApi
@@ -148,7 +150,7 @@ export default function Chat() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [teamSwitchKey]);
 
   // Fetch installed skills for the current agent (slash command autocomplete)
   const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>(
@@ -318,7 +320,7 @@ export default function Chat() {
       </div>
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div key={teamSwitchKey} className="flex-1 flex flex-col min-w-0" style={{ animation: 'fade-in 0.25s ease-out' }}>
         <ChatTopBar
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen(true)}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { feedbackApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
+import { useTeam } from '../contexts/TeamContext';
 import { MobileMenu } from '../components/ui';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { CreateFeedbackModal } from '../components/modals/CreateFeedbackModal';
@@ -45,6 +46,7 @@ interface FeedbackPost {
 export default function Feedback() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { teamSwitchKey } = useTeam();
   const [feedback, setFeedback] = useState<FeedbackPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FeedbackType>('all');
@@ -232,7 +234,7 @@ export default function Feedback() {
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto">
+      <div key={teamSwitchKey} className="flex-1 overflow-auto" style={{ animation: 'fade-in 0.25s ease-out' }}>
         <div className="p-4 md:p-5">
           {/* Feedback Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

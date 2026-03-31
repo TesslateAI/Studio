@@ -37,7 +37,7 @@ const TIER_COLORS: Record<string, string> = {
 };
 
 export default function TeamBillingPage() {
-  const { activeTeam, can, loading: teamLoading } = useTeam();
+  const { activeTeam, can, loading: teamLoading, teamSwitchKey } = useTeam();
   const [loading, setLoading] = useState(true);
   const [billing, setBilling] = useState<TeamBilling | null>(null);
 
@@ -107,6 +107,7 @@ export default function TeamBillingPage() {
   const tierColor = TIER_COLORS[billing.subscription_tier] || 'text-[var(--text)] bg-[var(--surface)]';
 
   return (
+    <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
     <SettingsSection
       title="Team Billing"
       description="Manage your team's subscription and credit balance"
@@ -244,5 +245,6 @@ export default function TeamBillingPage() {
         </div>
       </SettingsGroup>
     </SettingsSection>
+    </div>
   );
 }

@@ -53,6 +53,7 @@ import {
 import { projectsApi, marketplaceApi } from '../lib/api';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
+import { useTeam } from '../contexts/TeamContext';
 import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
@@ -99,7 +100,18 @@ export default function ProjectPage() {
   const containerId = searchParams.get('container');
 
   const { chatPosition } = useChatPosition();
+  const { can } = useTeam();
   const isBuilderPath = location.pathname.endsWith('/builder');
+
+  // RBAC: viewer-level restriction flags
+  const isViewer = !can('chat.send');
+  const canChat = can('chat.send');
+  const canEditKanban = can('kanban.edit');
+  const canAccessTerminal = can('terminal.access');
+  const canGitWrite = can('git.write');
+  const canEditSettings = can('project.settings');
+  const canDeploy = can('deployment.create');
+  const canEditAssets = can('file.write');
 
   // ---------------------------------------------------------------------------
   // Core state
@@ -1095,36 +1107,48 @@ export default function ProjectPage() {
       title: 'Architecture',
       onClick: () => setActiveView('architecture'),
       active: activeView === 'architecture',
+      disabled: false,
+      restricted: false,
     },
     {
       icon: <Monitor size={18} />,
       title: 'Preview',
       onClick: () => setActiveView('preview'),
       active: activeView === 'preview',
+      disabled: false,
+      restricted: false,
     },
     {
       icon: <Code size={18} />,
       title: 'Code',
       onClick: () => setActiveView('code'),
       active: activeView === 'code',
+      disabled: false,
+      restricted: false,
     },
     {
       icon: <Kanban size={18} />,
       title: 'Kanban Board',
       onClick: () => setActiveView('kanban'),
       active: activeView === 'kanban',
+      disabled: false,
+      restricted: !canEditKanban,
     },
     {
       icon: <Image size={18} />,
       title: 'Assets',
       onClick: () => setActiveView('assets'),
       active: activeView === 'assets',
+      disabled: false,
+      restricted: !canEditAssets,
     },
     {
       icon: <Terminal size={18} />,
       title: 'Terminal',
-      onClick: () => setActiveView('terminal'),
+      onClick: canAccessTerminal ? () => setActiveView('terminal') : undefined,
       active: activeView === 'terminal',
+      disabled: !canAccessTerminal,
+      restricted: !canAccessTerminal,
     },
   ];
 
@@ -1134,18 +1158,24 @@ export default function ProjectPage() {
       title: 'Notes',
       onClick: () => togglePanel('notes'),
       active: activePanel === 'notes',
+      disabled: false,
+      restricted: false,
     },
     {
       icon: <GitBranch size={16} />,
       title: 'GitHub Sync',
-      onClick: () => togglePanel('github'),
+      onClick: canGitWrite ? () => togglePanel('github') : undefined,
       active: activePanel === 'github',
+      disabled: !canGitWrite,
+      restricted: !canGitWrite,
     },
     {
       icon: <Gear size={16} />,
       title: 'Project Settings',
-      onClick: () => togglePanel('settings'),
+      onClick: canEditSettings ? () => togglePanel('settings') : undefined,
       active: activePanel === 'settings',
+      disabled: !canEditSettings,
+      restricted: !canEditSettings,
     },
   ];
 
@@ -1191,6 +1221,7 @@ export default function ProjectPage() {
           .catch(() => {});
       }
     },
+    disabled: !canChat,
   } as const;
 
   // ---------------------------------------------------------------------------
@@ -1217,6 +1248,7 @@ export default function ProjectPage() {
             navigate(`/project/${slug}?container=${id}`);
           }}
           onStateChange={handleArchStateChange}
+          readOnly={isViewer}
         />
       </div>
     );
@@ -1355,6 +1387,7 @@ export default function ProjectPage() {
         onDirectoryCreate={handleDirectoryCreate}
         isFilesSyncing={!filesInitiallyLoaded && fileTree.length === 0}
         startupOverlay={codeEditorOverlay}
+        readOnly={!canEditAssets}
       />
     </div>
   );
@@ -1362,19 +1395,29 @@ export default function ProjectPage() {
   const renderKanbanView = () =>
     kanbanMounted && project?.id ? (
       <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-        <KanbanPanel projectId={project.id as string} />
+        <KanbanPanel projectId={project.id as string} readOnly={!canEditKanban} />
       </div>
     ) : null;
 
   const renderAssetsView = () => (
     <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
-      <AssetsPanel projectSlug={slug!} />
+      <AssetsPanel projectSlug={slug!} readOnly={!canEditAssets} />
     </div>
   );
 
   const renderTerminalView = () => (
     <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-      <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
+      {canAccessTerminal ? (
+        <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <div className="text-center p-6">
+            <LockSimple size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
+            <p className="text-[var(--text-subtle)] text-sm font-medium">Terminal access is restricted</p>
+            <p className="text-[var(--text-subtle)] text-xs mt-1 opacity-60">Viewers cannot access the terminal</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -1396,7 +1439,7 @@ export default function ProjectPage() {
   const renderTopBarActions = () => (
     <div className="flex items-center gap-[2px]">
       {/* Architecture-only: Save/Load Config */}
-      {activeView === 'architecture' && (
+      {activeView === 'architecture' && !isViewer && (
         <>
           <button
             onClick={() => archRef.current?.saveConfig()}
@@ -1412,7 +1455,11 @@ export default function ProjectPage() {
       )}
 
       {/* Always visible: Start/Stop All */}
-      <button onClick={handleStartStopAll} className="hidden md:flex btn">
+      <button
+        onClick={can('container.start_stop') ? handleStartStopAll : undefined}
+        className="hidden md:flex btn"
+        style={!can('container.start_stop') ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+      >
         {isEnvironmentRunning ? 'Stop All' : 'Start All'}
       </button>
 
@@ -1428,9 +1475,12 @@ export default function ProjectPage() {
       {/* Always visible: Deploy Button with Dropdown */}
       <div className="relative">
         <button
-          onClick={() => setShowDeploymentsDropdown(!showDeploymentsDropdown)}
+          onClick={canDeploy ? () => setShowDeploymentsDropdown(!showDeploymentsDropdown) : undefined}
           className="btn btn-filled"
+          style={!canDeploy ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+          title={!canDeploy ? 'Deployment restricted for viewers' : undefined}
         >
+          {!canDeploy && <LockSimple size={13} weight="bold" />}
           <Rocket size={15} weight="bold" />
           <span className="hidden md:inline">Deploy</span>
         </button>
@@ -1511,20 +1561,27 @@ export default function ProjectPage() {
               isExpanded ? (
                 <button
                   key={index}
-                  onClick={item.onClick}
+                  onClick={item.disabled ? undefined : item.onClick}
                   className={navButtonClass(item.active || false)}
+                  style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
                 >
                   {React.cloneElement(item.icon, {
                     size: 16,
                     className: iconClass(item.active || false),
                   })}
                   <span className={labelClass(item.active || false)}>{item.title}</span>
+                  {item.restricted && (
+                    <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
+                      {item.disabled ? 'locked' : 'view'}
+                    </span>
+                  )}
                 </button>
               ) : (
-                <Tooltip key={index} content={item.title} side="right" delay={200}>
+                <Tooltip key={index} content={item.restricted ? `${item.title} ${item.disabled ? '(Locked)' : '(View only)'}` : item.title} side="right" delay={200}>
                   <button
-                    onClick={item.onClick}
+                    onClick={item.disabled ? undefined : item.onClick}
                     className={navButtonClassCollapsed(item.active || false)}
+                    style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
                   >
                     {React.cloneElement(item.icon, {
                       size: 16,
@@ -1540,13 +1597,27 @@ export default function ProjectPage() {
             {/* Panel Toggles */}
             {panelItems.map((item, index) =>
               isExpanded ? (
-                <button key={index} onClick={item.onClick} className={navButtonClass(item.active)}>
+                <button
+                  key={index}
+                  onClick={item.disabled ? undefined : item.onClick}
+                  className={navButtonClass(item.active)}
+                  style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+                >
                   {React.cloneElement(item.icon, { className: iconClass(item.active) })}
                   <span className={labelClass(item.active)}>{item.title}</span>
+                  {item.restricted && (
+                    <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
+                      locked
+                    </span>
+                  )}
                 </button>
               ) : (
-                <Tooltip key={index} content={item.title} side="right" delay={200}>
-                  <button onClick={item.onClick} className={navButtonClassCollapsed(item.active)}>
+                <Tooltip key={index} content={item.restricted ? `${item.title} (Locked)` : item.title} side="right" delay={200}>
+                  <button
+                    onClick={item.disabled ? undefined : item.onClick}
+                    className={navButtonClassCollapsed(item.active)}
+                    style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+                  >
                     {React.cloneElement(item.icon, { className: iconClass(item.active) })}
                   </button>
                 </Tooltip>
@@ -1688,24 +1759,34 @@ export default function ProjectPage() {
                 onDirectoryCreate={handleDirectoryCreate}
                 isFilesSyncing={!filesInitiallyLoaded && fileTree.length === 0}
                 startupOverlay={codeEditorOverlay}
+                readOnly={!canEditAssets}
               />
             </div>
 
             {/* Mobile kanban */}
             {kanbanMounted && project?.id && (
               <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-                <KanbanPanel projectId={project.id as string} />
+                <KanbanPanel projectId={project.id as string} readOnly={!canEditKanban} />
               </div>
             )}
 
             {/* Mobile assets */}
             <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
-              <AssetsPanel projectSlug={slug!} />
+              <AssetsPanel projectSlug={slug!} readOnly={!canEditAssets} />
             </div>
 
             {/* Mobile terminal */}
             <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-              <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
+              {canAccessTerminal ? (
+                <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="text-center p-6">
+                    <LockSimple size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
+                    <p className="text-[var(--text-subtle)] text-sm">Terminal access is restricted</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Mobile architecture (no architecture on mobile — placeholder) */}

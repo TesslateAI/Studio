@@ -10,6 +10,7 @@ import {
 } from '../components/marketplace';
 import { SubmitBaseModal } from '../components/modals';
 import { marketplaceApi } from '../lib/api';
+import { useTeam } from '../contexts/TeamContext';
 import toast from 'react-hot-toast';
 import { isCanceledError } from '../lib/utils';
 import { SEO, generateBreadcrumbStructuredData } from '../components/SEO';
@@ -61,6 +62,7 @@ export default function MarketplaceBrowse() {
   const { itemType: itemTypeParam } = useParams<{ itemType: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { isAuthenticated } = useMarketplaceAuth();
+  const { teamSwitchKey } = useTeam();
 
   // Validate item type
   const itemType: ItemType = [
@@ -329,7 +331,7 @@ export default function MarketplaceBrowse() {
       pageNum: 1,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemType]);
+  }, [itemType, teamSwitchKey]);
 
   // Handle filter changes
   useEffect(() => {
@@ -443,7 +445,7 @@ export default function MarketplaceBrowse() {
         url={`${baseUrl}/marketplace/browse/${itemType}`}
         structuredData={breadcrumbData}
       />
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      <div key={teamSwitchKey} className="flex-1 overflow-y-auto overflow-x-hidden" style={{ animation: 'fade-in 0.25s ease-out' }}>
         {/* Header — compact toolbar rows */}
         <div className="flex-shrink-0 sticky top-0 z-40 bg-[var(--bg)]">
           {/* Title Row */}

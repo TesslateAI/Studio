@@ -459,12 +459,18 @@ async def get_marketplace_agents(
     result = await db.execute(query)
     agents = result.scalars().all()
 
-    # Get user's purchased agents (only if authenticated)
+    # Get user's purchased agents (only if authenticated), scoped to active team
     purchased_agent_ids = []
     if current_user:
+        team_id = current_user.default_team_id
+        purchase_filter = (
+            UserPurchasedAgent.team_id == team_id
+            if team_id
+            else UserPurchasedAgent.user_id == current_user.id
+        )
         purchased_result = await db.execute(
             select(UserPurchasedAgent.agent_id).where(
-                UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.is_active
+                purchase_filter, UserPurchasedAgent.is_active
             )
         )
         purchased_agent_ids = [row[0] for row in purchased_result.fetchall()]
@@ -566,12 +572,18 @@ async def get_agent_details(
         if not is_creator:
             raise HTTPException(status_code=404, detail="Agent not found")
 
-    # Check if user has purchased this agent (only if authenticated)
+    # Check if user has purchased this agent (only if authenticated), scoped to team
     is_purchased = False
     if current_user:
+        team_id = current_user.default_team_id
+        detail_ownership = (
+            UserPurchasedAgent.team_id == team_id
+            if team_id
+            else UserPurchasedAgent.user_id == current_user.id
+        )
         purchased_result = await db.execute(
             select(UserPurchasedAgent).where(
-                UserPurchasedAgent.user_id == current_user.id,
+                detail_ownership,
                 UserPurchasedAgent.agent_id == agent.id,
                 UserPurchasedAgent.is_active,
             )
@@ -2535,12 +2547,18 @@ async def get_marketplace_bases(
     result = await db.execute(query)
     bases = result.scalars().all()
 
-    # Get user's purchased bases (only if authenticated)
+    # Get user's purchased bases (only if authenticated), scoped to active team
     purchased_base_ids = []
     if current_user:
+        team_id = current_user.default_team_id
+        base_ownership = (
+            UserPurchasedBase.team_id == team_id
+            if team_id
+            else UserPurchasedBase.user_id == current_user.id
+        )
         purchased_result = await db.execute(
             select(UserPurchasedBase.base_id).where(
-                UserPurchasedBase.user_id == current_user.id, UserPurchasedBase.is_active
+                base_ownership, UserPurchasedBase.is_active
             )
         )
         purchased_base_ids = [row[0] for row in purchased_result.fetchall()]
@@ -2637,12 +2655,18 @@ async def get_base_details(
     ):
         raise HTTPException(status_code=404, detail="Base not found")
 
-    # Check if user has purchased this base (only if authenticated)
+    # Check if user has purchased this base (only if authenticated), scoped to team
     is_purchased = False
     if current_user:
+        team_id = current_user.default_team_id
+        base_detail_ownership = (
+            UserPurchasedBase.team_id == team_id
+            if team_id
+            else UserPurchasedBase.user_id == current_user.id
+        )
         purchased_result = await db.execute(
             select(UserPurchasedBase).where(
-                UserPurchasedBase.user_id == current_user.id,
+                base_detail_ownership,
                 UserPurchasedBase.base_id == base.id,
                 UserPurchasedBase.is_active,
             )
@@ -4443,12 +4467,18 @@ async def get_marketplace_skills(
     result = await db.execute(query)
     skills = result.scalars().all()
 
-    # Purchased skill ids (only if authenticated)
+    # Purchased skill ids (only if authenticated), scoped to active team
     purchased_skill_ids: list[UUID] = []
     if current_user:
+        team_id = current_user.default_team_id
+        skill_ownership = (
+            UserPurchasedAgent.team_id == team_id
+            if team_id
+            else UserPurchasedAgent.user_id == current_user.id
+        )
         purchased_result = await db.execute(
             select(UserPurchasedAgent.agent_id).where(
-                UserPurchasedAgent.user_id == current_user.id,
+                skill_ownership,
                 UserPurchasedAgent.is_active,
             )
         )
@@ -4542,12 +4572,18 @@ async def get_skill_details(
     if not skill or not skill.is_active:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    # Check purchase status
+    # Check purchase status, scoped to active team
     is_purchased = False
     if current_user:
+        team_id = current_user.default_team_id
+        skill_detail_ownership = (
+            UserPurchasedAgent.team_id == team_id
+            if team_id
+            else UserPurchasedAgent.user_id == current_user.id
+        )
         purchased_result = await db.execute(
             select(UserPurchasedAgent).where(
-                UserPurchasedAgent.user_id == current_user.id,
+                skill_detail_ownership,
                 UserPurchasedAgent.agent_id == skill.id,
                 UserPurchasedAgent.is_active,
             )
@@ -5014,12 +5050,18 @@ async def get_marketplace_mcp_servers(
     result = await db.execute(query)
     mcp_servers = result.scalars().all()
 
-    # Purchased MCP server ids (only if authenticated)
+    # Purchased MCP server ids (only if authenticated), scoped to active team
     purchased_mcp_server_ids: list[UUID] = []
     if current_user:
+        team_id = current_user.default_team_id
+        mcp_ownership = (
+            UserPurchasedAgent.team_id == team_id
+            if team_id
+            else UserPurchasedAgent.user_id == current_user.id
+        )
         purchased_result = await db.execute(
             select(UserPurchasedAgent.agent_id).where(
-                UserPurchasedAgent.user_id == current_user.id,
+                mcp_ownership,
                 UserPurchasedAgent.is_active,
             )
         )
@@ -5113,12 +5155,18 @@ async def get_mcp_server_details(
     if not mcp_server or not mcp_server.is_active:
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    # Check purchase status
+    # Check purchase status, scoped to active team
     is_purchased = False
     if current_user:
+        team_id = current_user.default_team_id
+        mcp_detail_ownership = (
+            UserPurchasedAgent.team_id == team_id
+            if team_id
+            else UserPurchasedAgent.user_id == current_user.id
+        )
         purchased_result = await db.execute(
             select(UserPurchasedAgent).where(
-                UserPurchasedAgent.user_id == current_user.id,
+                mcp_detail_ownership,
                 UserPurchasedAgent.agent_id == mcp_server.id,
                 UserPurchasedAgent.is_active,
             )

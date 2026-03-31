@@ -30,7 +30,7 @@ const creditPackages = [
 export default function BillingSettings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { can, refreshTeams } = useTeam();
+  const { can, refreshTeams, teamSwitchKey } = useTeam();
   const canManage = can('billing.manage');
 
   const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
@@ -80,7 +80,7 @@ export default function BillingSettings() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [teamSwitchKey]);
 
   const loadData = async () => {
     try {
@@ -167,11 +167,13 @@ export default function BillingSettings() {
 
   if (loading) {
     return (
+      <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
       <SettingsSection title="Billing" description={canManage ? "Manage your subscription and credits" : "View your subscription and credits"}>
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--primary)]"></div>
         </div>
       </SettingsSection>
+      </div>
     );
   }
 
@@ -183,6 +185,7 @@ export default function BillingSettings() {
   const isEmpty = totalCredits <= 0;
 
   return (
+    <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
     <SettingsSection title="Billing" description={canManage ? "Manage your subscription and credits" : "View your subscription and credits"}>
       {/* Current Plan Card */}
       <SettingsGroup title="Current Plan">
@@ -418,6 +421,7 @@ export default function BillingSettings() {
         />
       )}
     </SettingsSection>
+    </div>
   );
 }
 

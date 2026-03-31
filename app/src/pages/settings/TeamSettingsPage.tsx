@@ -13,7 +13,7 @@ import { SettingsSection, SettingsGroup, SettingsItem } from '../../components/s
 export default function TeamSettingsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { activeTeam, can, loading: teamLoading, refreshTeams } = useTeam();
+  const { activeTeam, can, loading: teamLoading, refreshTeams, teamSwitchKey } = useTeam();
   const [loading, setLoading] = useState(true);
   const [team, setTeam] = useState<Team | null>(null);
   const [name, setName] = useState('');
@@ -126,6 +126,7 @@ export default function TeamSettingsPage() {
   const canEdit = can('team.edit');
 
   return (
+    <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
     <SettingsSection
       title="Team Settings"
       description="Manage your team's general information and preferences"
@@ -344,5 +345,6 @@ export default function TeamSettingsPage() {
         </SettingsGroup>
       )}
     </SettingsSection>
+    </div>
   );
 }

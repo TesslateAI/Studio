@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTeam } from '../contexts/TeamContext';
 import { debounce } from 'lodash';
 import {
   MagnifyingGlass,
@@ -66,6 +67,7 @@ export default function Marketplace() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { theme, toggleTheme } = useTheme();
   const { isAuthenticated } = useMarketplaceAuth();
+  const { teamSwitchKey } = useTeam();
 
   // Refs
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -343,7 +345,7 @@ export default function Marketplace() {
     };
   }, [debouncedLoadItems]);
 
-  // Initial load
+  // Initial load — re-fetch on team switch to update is_purchased flags
   useEffect(() => {
     loadItems({
       itemType: selectedItemType,
@@ -354,7 +356,7 @@ export default function Marketplace() {
       pageNum: 1,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [teamSwitchKey]);
 
   // Handle filter changes (with debounce for search)
   useEffect(() => {
@@ -680,7 +682,7 @@ export default function Marketplace() {
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div key={teamSwitchKey} className="flex-1 overflow-y-auto overflow-x-hidden" style={{ animation: 'fade-in 0.25s ease-out' }}>
           <div className={`px-5 py-5 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
             {/* Initial Loading - Skeleton */}
             {initialLoading ? (

@@ -53,7 +53,7 @@ interface Project {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { activeTeam, can } = useTeam();
+  const { activeTeam, can, teamSwitchKey } = useTeam();
   const isAdmin = can('team.edit');
   const canCreateProject = can('project.create');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -84,7 +84,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadProjects();
-  }, [activeTeam?.slug]);
+  }, [activeTeam?.slug, teamSwitchKey]);
 
   // Open create modal with pre-selected base from search params (e.g., from marketplace "Use This Version")
   useEffect(() => {
@@ -918,7 +918,7 @@ export default function Dashboard() {
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto">
+      <div key={teamSwitchKey} className="flex-1 overflow-auto" style={{ animation: 'fade-in 0.25s ease-out' }}>
         {viewMode === 'cards' ? (
           /* ===== CARDS VIEW ===== */
           <div className="p-4 md:p-5">
