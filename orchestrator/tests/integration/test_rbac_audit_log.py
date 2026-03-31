@@ -102,6 +102,10 @@ def test_audit_log_records_member_joined(authenticated_client, api_client_sessio
 @pytest.mark.integration
 def test_audit_log_records_member_removed(authenticated_client, api_client_session):
     """Admin removing a member should generate a member.removed audit entry."""
+    # Save admin auth before helper overwrites the shared session headers
+    client_a, _ = authenticated_client
+    admin_token = api_client_session.headers.get("Authorization")
+
     client_b, user_b_data, slug, _ = _create_team_and_user_b(
         api_client_session, authenticated_client, "al-removed"
     )
@@ -110,8 +114,8 @@ def test_audit_log_records_member_removed(authenticated_client, api_client_sessi
     if not user_b_id:
         pytest.skip(f"Cannot determine user B id from registration response: {user_b_data}")
 
-    # Admin removes User B
-    client_a, _ = authenticated_client
+    # Restore admin auth
+    api_client_session.headers["Authorization"] = admin_token
     remove_resp = client_a.delete(f"/api/teams/{slug}/members/{user_b_id}")
     assert remove_resp.status_code in (200, 204), f"Remove failed: {remove_resp.text}"
 
@@ -247,6 +251,10 @@ def test_audit_log_pagination(authenticated_client):
 @pytest.mark.integration
 def test_audit_log_export_admin_only(authenticated_client, api_client_session):
     """Only admins can export audit log as CSV. Editors and viewers get 403."""
+    # Save admin auth before helper overwrites the shared session headers
+    client_a, _ = authenticated_client
+    admin_token = api_client_session.headers.get("Authorization")
+
     # Create team and add User B as editor
     client_b, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "al-export", role="editor"
@@ -254,8 +262,8 @@ def test_audit_log_export_admin_only(authenticated_client, api_client_session):
 
     export_body = {}
 
-    # Admin should succeed
-    client_a, _ = authenticated_client
+    # Restore admin auth
+    api_client_session.headers["Authorization"] = admin_token
     admin_resp = client_a.post(f"/api/teams/{slug}/audit-log/export", json=export_body)
     assert admin_resp.status_code == 200, f"Admin export failed: {admin_resp.text}"
 
@@ -266,7 +274,8 @@ def test_audit_log_export_admin_only(authenticated_client, api_client_session):
         f"Editor export should be 403, got {editor_resp.status_code}: {editor_resp.text}"
     )
 
-    # Create viewer User C
+    # Create viewer User C — restore admin auth first
+    api_client_session.headers["Authorization"] = admin_token
     email_c = f"userc-{uuid4().hex[:8]}@example.com"
     link_resp = client_a.post(f"/api/teams/{slug}/members/link", json={"role": "viewer"})
     assert link_resp.status_code in (200, 201)
@@ -336,6 +345,10 @@ def test_audit_log_has_required_fields(authenticated_client):
 @pytest.mark.integration
 def test_member_leave_creates_audit_entry(authenticated_client, api_client_session):
     """When User B leaves a team, a member.left audit entry should be created."""
+    # Save admin auth before helper overwrites the shared session headers
+    client_a, _ = authenticated_client
+    admin_token = api_client_session.headers.get("Authorization")
+
     client_b, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "al-leave"
     )
@@ -345,8 +358,8 @@ def test_member_leave_creates_audit_entry(authenticated_client, api_client_sessi
     leave_resp = client_b.post(f"/api/teams/{slug}/leave")
     assert leave_resp.status_code == 200, f"Leave failed: {leave_resp.text}"
 
-    # Admin reads the audit log
-    client_a, _ = authenticated_client
+    # Restore admin auth and read the audit log
+    api_client_session.headers["Authorization"] = admin_token
     log_resp = client_a.get(f"/api/teams/{slug}/audit-log")
     assert log_resp.status_code == 200, f"Audit log fetch failed: {log_resp.text}"
 

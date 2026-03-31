@@ -279,6 +279,11 @@ async def create_subscription(
     """
     team = await _get_active_team(user, db)
 
+    # RBAC: only admins can manage subscriptions
+    from ..permissions import Permission, check_team_permission
+
+    await check_team_permission(db, team.id, user.id, Permission.BILLING_MANAGE)
+
     # Get requested tier from body or default to pro
     requested_tier = subscription_request.tier if subscription_request else "pro"
     billing_interval = subscription_request.billing_interval if subscription_request else "monthly"
