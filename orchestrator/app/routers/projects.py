@@ -349,6 +349,13 @@ async def _perform_project_setup(
 
         except Exception as e:
             logger.error(f"[CREATE] Background task error: {e}", exc_info=True)
+            # Mark the project as setup_failed so the UI shows an error
+            # with retry/delete options instead of a broken project.
+            try:
+                db_project.environment_status = "setup_failed"
+                await db.commit()
+            except Exception:
+                logger.warning("[CREATE] Failed to mark project %s as setup_failed", db_project_id)
             raise
 
 
