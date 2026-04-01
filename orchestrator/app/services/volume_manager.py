@@ -75,6 +75,15 @@ class VolumeManager:
         """
         return await self.create_volume(template=None, hint_node=hint_node)
 
+    async def fork_volume(self, source_volume_id: str) -> tuple[str, str]:
+        """Fork a volume by snapshotting it on the same node (btrfs CoW clone).
+
+        Returns: (new_volume_id, node_name)
+        """
+        volume_id, node_name = await self._hub.fork_volume(source_volume_id)
+        logger.info("[VOLUME] Forked %s → %s on %s", source_volume_id, volume_id, node_name)
+        return volume_id, node_name
+
     async def delete_volume(self, volume_id: str) -> None:
         """Delete from Hub + S3 + all node caches. Idempotent."""
         await self._hub.delete_volume(volume_id)

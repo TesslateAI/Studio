@@ -2664,6 +2664,22 @@ async def fork_project(
             )
             db.add(new_preview)
 
+        # Fork the btrfs volume (CoW snapshot on same node — instant).
+        # This gives the forked project its own writable copy of the data.
+        if source_project.volume_id:
+            try:
+                from ..services.volume_manager import get_volume_manager
+
+                vm = get_volume_manager()
+                new_vol_id, _ = await vm.fork_volume(source_project.volume_id)
+                forked_project.volume_id = new_vol_id
+            except Exception:
+                logger.warning(
+                    "[FORK] Failed to fork volume %s — project will have no volume",
+                    source_project.volume_id,
+                    exc_info=True,
+                )
+
         # Single atomic commit — all or nothing
         await db.commit()
         await db.refresh(forked_project)

@@ -291,6 +291,14 @@ type (
 		NewNode  string `json:"new_node"`
 	}
 
+	ForkVolumeRequest struct {
+		SourceVolumeID string `json:"source_volume_id"`
+	}
+	ForkVolumeResponse struct {
+		VolumeID string `json:"volume_id"`
+		NodeName string `json:"node_name"`
+	}
+
 	Empty struct{}
 )
 
@@ -320,6 +328,7 @@ func registerVolumeHubServer(srv *grpc.Server, s *Server) {
 			{MethodName: "RestoreToSnapshot", Handler: s.handleRestoreToSnapshot},
 			{MethodName: "ResolveVolume", Handler: s.handleResolveVolume},
 			{MethodName: "TransferOwnership", Handler: s.handleTransferOwnership},
+			{MethodName: "ForkVolume", Handler: s.handleForkVolume},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -1282,6 +1291,69 @@ func (s *Server) handleTransferOwnership(_ interface{}, _ context.Context, dec f
 		req.VolumeID, oldOwner, req.NewNode)
 
 	return &Empty{}, nil
+}
+
+func (s *Server) handleForkVolume(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req ForkVolumeRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+
+	if req.SourceVolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "source_volume_id is required")
+	}
+
+	newVolumeID, nodeName, err := s.ForkVolumeOnNode(ctx, req.SourceVolumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "%v", err)
+	}
+	return &ForkVolumeResponse{VolumeID: newVolumeID, NodeName: nodeName}, nil
+}
+
+// ForkVolumeOnNode creates a new volume by snapshotting an existing one
+// on the same node (btrfs CoW clone — instant, zero copy). The new volume
+// gets its own manifest with the source's latest hash as its base.
+func (s *Server) ForkVolumeOnNode(ctx context.Context, sourceVolumeID string) (string, string, error) {
+	ownerNode := s.registry.GetOwner(sourceVolumeID)
+	if ownerNode == "" {
+		return "", "", fmt.Errorf("no owner for source volume %q", sourceVolumeID)
+	}
+
+	newVolumeID, err := generateVolumeID()
+	if err != nil {
+		return "", "", fmt.Errorf("generate volume id: %v", err)
+	}
+
+	client, err := s.nodeClient(ownerNode)
+	if err != nil {
+		return "", "", fmt.Errorf("connect to owner %s: %v", ownerNode, err)
+	}
+	defer client.Close()
+
+	srcPath := "volumes/" + sourceVolumeID
+	dstPath := "volumes/" + newVolumeID
+
+	// btrfs snapshot (CoW clone — instant, no data copy)
+	if err := client.SnapshotSubvolume(ctx, srcPath, dstPath, false); err != nil {
+		return "", "", fmt.Errorf("snapshot %s → %s: %v", srcPath, dstPath, err)
+	}
+
+	// Register new volume + set ownership
+	s.registry.RegisterVolume(newVolumeID)
+	s.registry.SetCached(newVolumeID, ownerNode)
+	s.registry.SetOwner(newVolumeID, ownerNode)
+
+	// Track for sync with no template info. The first syncOne will do a
+	// full send (captures entire forked state), then auto-promote creates a
+	// synthetic template for future incremental syncs. No pre-created
+	// manifest — an empty-layers manifest pointing to the source's template
+	// would restore to the wrong base on node loss.
+	if err := client.TrackVolume(ctx, newVolumeID, "", ""); err != nil {
+		klog.Warningf("ForkVolume: TrackVolume for %s: %v (periodic discovery will pick it up)", newVolumeID, err)
+	}
+
+	klog.Infof("Forked volume %s → %s on node %s", sourceVolumeID, newVolumeID, ownerNode)
+	return newVolumeID, ownerNode, nil
 }
 
 // Internal helpers

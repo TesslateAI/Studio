@@ -124,6 +124,33 @@ class HubClient:
         )
         return volume_id, node_name
 
+    async def fork_volume(
+        self, source_volume_id: str, *, timeout: float = 300.0
+    ) -> tuple[str, str]:
+        """Fork a volume by snapshotting it on the same node (btrfs CoW clone).
+
+        Args:
+            source_volume_id: Volume to fork from.
+            timeout: gRPC deadline in seconds.
+
+        Returns:
+            Tuple of ``(new_volume_id, node_name)``.
+        """
+        resp = await self._call(
+            "ForkVolume",
+            {"source_volume_id": source_volume_id},
+            timeout=timeout,
+        )
+        volume_id = resp["volume_id"]
+        node_name = resp["node_name"]
+        logger.info(
+            "ForkVolume succeeded: %s → %s on %s",
+            source_volume_id,
+            volume_id,
+            node_name,
+        )
+        return volume_id, node_name
+
     async def delete_volume(self, volume_id: str, *, timeout: float = 300.0) -> None:
         """Delete from Hub + S3 + all node caches.  Idempotent.
 
