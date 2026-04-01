@@ -612,6 +612,15 @@ export default function ProjectPage() {
           );
           setPreviewableContainers(previewable);
 
+          // Setup failed — redirect to dashboard, user should delete and recreate
+          if (freshProject.environment_status === 'setup_failed') {
+            toast.error('This project failed to set up. Please delete it and create a new one.', {
+              duration: 5000,
+            });
+            navigate('/dashboard');
+            return;
+          }
+
           // Stopping state
           if (
             status?.environment_status === 'stopping' ||

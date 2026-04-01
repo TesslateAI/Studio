@@ -956,8 +956,15 @@ export default function Dashboard() {
                     isLive: project.status === 'launch',
                     slug: project.slug,
                     compute_tier: project.compute_tier,
+                    environment_status: project.environment_status,
                   }}
-                  onOpen={() => navigate(`/project/${project.slug}`)}
+                  onOpen={() => {
+                    if (project.environment_status === 'setup_failed') {
+                      deleteProject(project.id);
+                    } else {
+                      navigate(`/project/${project.slug}`);
+                    }
+                  }}
                   onDelete={() => deleteProject(project.id)}
                   onStatusChange={(status) => updateProjectStatus(project.id, status)}
                   onFork={() => handleForkProject(project.id)}
@@ -996,8 +1003,14 @@ export default function Dashboard() {
                       selectedProjectIds.has(project.id)
                         ? 'bg-[var(--surface)]'
                         : 'hover:bg-[var(--surface)]'
-                    } ${deletingProjectIds.has(project.id) ? 'opacity-40 pointer-events-none' : ''}`}
-                    onClick={() => navigate(`/project/${project.slug}`)}
+                    } ${deletingProjectIds.has(project.id) ? 'opacity-40 pointer-events-none' : ''} ${project.environment_status === 'setup_failed' ? 'border-l-2 border-red-500/50' : ''}`}
+                    onClick={() => {
+                      if (project.environment_status === 'setup_failed') {
+                        deleteProject(project.id);
+                      } else {
+                        navigate(`/project/${project.slug}`);
+                      }
+                    }}
                   >
                     {/* Checkbox */}
                     <div className="w-8 flex-shrink-0 flex items-center">
@@ -1045,11 +1058,13 @@ export default function Dashboard() {
                           {project.description}
                         </span>
                       )}
-                      {project.environment_status && project.environment_status !== 'active' && (
+                      {project.environment_status === 'setup_failed' ? (
+                        <span className="text-[10px] text-red-400 flex-shrink-0">Setup failed</span>
+                      ) : project.environment_status && project.environment_status !== 'active' ? (
                         <span className="text-[10px] text-[var(--text-subtle)] flex-shrink-0">
                           {project.environment_status}
                         </span>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Status */}

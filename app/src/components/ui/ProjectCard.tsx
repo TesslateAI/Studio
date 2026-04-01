@@ -19,6 +19,7 @@ interface Project {
   gitSyncStatus?: 'synced' | 'ahead' | 'behind' | 'diverged' | 'error';
   slug?: string;
   compute_tier?: string;
+  environment_status?: string;
 }
 
 interface ProjectCardProps {
@@ -150,13 +151,19 @@ export function ProjectCard({
                 {project.name}
               </h3>
               {/* Environment Status Badge */}
-              {(() => {
-                const status = getEnvironmentStatus(
-                  (project.compute_tier ?? 'none') as ComputeTier
-                );
-                if (!status) return null;
-                return <EnvironmentStatusBadge status={status} size="sm" />;
-              })()}
+              {project.environment_status === 'setup_failed' ? (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+                  Setup failed
+                </span>
+              ) : (
+                (() => {
+                  const status = getEnvironmentStatus(
+                    (project.compute_tier ?? 'none') as ComputeTier
+                  );
+                  if (!status) return null;
+                  return <EnvironmentStatusBadge status={status} size="sm" />;
+                })()
+              )}
               {project.hasGitRepo && (
                 <div className="flex items-center gap-1 px-2 py-0.5 bg-[rgba(var(--status-green-rgb),0.1)] border border-[rgba(var(--status-green-rgb),0.2)] rounded text-xs text-[var(--status-green)] flex-shrink-0">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 256 256">
@@ -217,41 +224,59 @@ export function ProjectCard({
 
         {/* Action Buttons — pill buttons, hug text */}
         <div className="flex gap-1 flex-wrap">
-          <button onClick={onOpen} className="btn btn-primary">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-              <path d="M224.49,136.49l-72,72a12,12,0,0,1-17,0l-72-72a12,12,0,0,1,17-17L116,155V40a12,12,0,0,1,24,0V155l35.51-35.52a12,12,0,0,1,17,17ZM216,204H40a12,12,0,0,0,0,24H216a12,12,0,0,0,0-24Z" />
-            </svg>
-            Open
-          </button>
-
-          {onFork && (
+          {project.environment_status === 'setup_failed' ? (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onFork();
+                onDelete();
               }}
-              className="btn"
+              className="btn btn-danger"
+              title="Delete failed project"
             >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64ZM144,192a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z" />
+                <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
               </svg>
-              Fork
+              Delete
             </button>
-          )}
+          ) : (
+            <>
+              <button onClick={onOpen} className="btn btn-primary">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M224.49,136.49l-72,72a12,12,0,0,1-17,0l-72-72a12,12,0,0,1,17-17L116,155V40a12,12,0,0,1,24,0V155l35.51-35.52a12,12,0,0,1,17,17ZM216,204H40a12,12,0,0,0,0,24H216a12,12,0,0,0,0-24Z" />
+                </svg>
+                Open
+              </button>
 
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="btn btn-danger"
-            title="Delete project"
-          >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-              <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
-            </svg>
-            Delete
-          </button>
+              {onFork && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFork();
+                  }}
+                  className="btn"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                    <path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64ZM144,192a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z" />
+                  </svg>
+                  Fork
+                </button>
+              )}
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+                className="btn btn-danger"
+                title="Delete project"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
+                </svg>
+                Delete
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
