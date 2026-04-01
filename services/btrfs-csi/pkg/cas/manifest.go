@@ -113,3 +113,31 @@ func (s *Store) DeleteManifest(ctx context.Context, volumeID string) error {
 func (s *Store) HasManifest(ctx context.Context, volumeID string) (bool, error) {
 	return s.obj.Exists(ctx, manifestKey(volumeID))
 }
+
+// tombstoneKey returns the S3 object key for a volume deletion tombstone.
+func tombstoneKey(volumeID string) string {
+	return fmt.Sprintf("tombstones/%s", volumeID)
+}
+
+// PutTombstone writes a deletion tombstone for a volume. This is a durable
+// S3 marker that prevents offline nodes from resurrecting the volume when
+// they restart and run discoverVolumes. The tombstone must be written
+// BEFORE any local cleanup — it is the durable intent record.
+func (s *Store) PutTombstone(ctx context.Context, volumeID string) error {
+	if err := s.obj.Upload(ctx, tombstoneKey(volumeID), bytes.NewReader([]byte{0}), 1); err != nil {
+		return fmt.Errorf("write tombstone for %s: %w", volumeID, err)
+	}
+	klog.V(2).Infof("Wrote tombstone for volume %s", volumeID)
+	return nil
+}
+
+// HasTombstone returns true if a deletion tombstone exists for the volume.
+func (s *Store) HasTombstone(ctx context.Context, volumeID string) (bool, error) {
+	return s.obj.Exists(ctx, tombstoneKey(volumeID))
+}
+
+// DeleteTombstone removes a deletion tombstone. Called after a tombstoned
+// volume's local resources have been cleaned up on all nodes.
+func (s *Store) DeleteTombstone(ctx context.Context, volumeID string) error {
+	return s.obj.Delete(ctx, tombstoneKey(volumeID))
+}

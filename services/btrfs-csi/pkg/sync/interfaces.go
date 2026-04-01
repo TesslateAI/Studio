@@ -29,6 +29,9 @@ type casOps interface {
 	PutManifest(ctx context.Context, m *cas.Manifest) error
 	DeleteManifest(ctx context.Context, volumeID string) error
 	CleanupStaging(ctx context.Context) (int, error)
+	PutTombstone(ctx context.Context, volumeID string) error
+	HasTombstone(ctx context.Context, volumeID string) (bool, error)
+	DeleteTombstone(ctx context.Context, volumeID string) error
 }
 
 // templateOps abstracts the template manager operations used by the sync Daemon.

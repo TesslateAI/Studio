@@ -141,18 +141,20 @@ func (f *fakeBtrfs) GetGeneration(_ context.Context, name string) (uint64, error
 // ---------------------------------------------------------------------------
 
 type fakeCAS struct {
-	mu        stdsync.Mutex
-	blobs     map[string]string // hash → data
-	manifests map[string]*cas.Manifest
-	putCount  int
-	nextHash  string // hash returned by PutBlob
+	mu         stdsync.Mutex
+	blobs      map[string]string // hash → data
+	manifests  map[string]*cas.Manifest
+	tombstones map[string]bool // volumeID → exists
+	putCount   int
+	nextHash   string // hash returned by PutBlob
 }
 
 func newFakeCAS() *fakeCAS {
 	return &fakeCAS{
-		blobs:     make(map[string]string),
-		manifests: make(map[string]*cas.Manifest),
-		nextHash:  "sha256:aabbccddee001122334455667788990011223344556677889900112233445566",
+		blobs:      make(map[string]string),
+		manifests:  make(map[string]*cas.Manifest),
+		tombstones: make(map[string]bool),
+		nextHash:   "sha256:aabbccddee001122334455667788990011223344556677889900112233445566",
 	}
 }
 
@@ -209,6 +211,26 @@ func (f *fakeCAS) DeleteManifest(_ context.Context, volumeID string) error {
 
 func (f *fakeCAS) CleanupStaging(_ context.Context) (int, error) {
 	return 0, nil
+}
+
+func (f *fakeCAS) PutTombstone(_ context.Context, volumeID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tombstones[volumeID] = true
+	return nil
+}
+
+func (f *fakeCAS) HasTombstone(_ context.Context, volumeID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tombstones[volumeID], nil
+}
+
+func (f *fakeCAS) DeleteTombstone(_ context.Context, volumeID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.tombstones, volumeID)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1484,4 +1506,150 @@ func TestCleanupStaging_NilCAS(t *testing.T) {
 	d := newDaemonWithInterfaces(newFakeBtrfs(), nil, nil, 15*time.Second)
 	// Should not panic.
 	d.cleanupStaging(context.Background())
+}
+
+// ---------------------------------------------------------------------------
+// Tombstone + safe delete tests
+// ---------------------------------------------------------------------------
+
+// TestUntrackVolume_WaitsForInflightSync verifies that UntrackVolume blocks
+// until the per-volume lock is released, preventing a race with SyncVolume.
+func TestUntrackVolume_WaitsForInflightSync(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+
+	volID := "vol-concurrent"
+	fb.mu.Lock()
+	fb.subvolumes["volumes/"+volID] = true
+	fb.mu.Unlock()
+	d.TrackVolume(volID, "", "")
+
+	// Hold the per-volume lock to simulate an inflight SyncVolume.
+	vl := d.volumeLock(volID)
+	vl.Lock()
+
+	untrackDone := make(chan struct{})
+	go func() {
+		d.UntrackVolume(volID)
+		close(untrackDone)
+	}()
+
+	// Give UntrackVolume time to reach the lock.
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-untrackDone:
+		t.Fatal("UntrackVolume returned before per-volume lock was released")
+	default:
+		// expected — still blocked
+	}
+
+	// Release the lock.
+	vl.Unlock()
+
+	select {
+	case <-untrackDone:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("UntrackVolume did not complete after lock release")
+	}
+
+	// Volume should be untracked.
+	d.mu.Lock()
+	_, exists := d.tracked[volID]
+	d.mu.Unlock()
+	if exists {
+		t.Error("volume should be untracked")
+	}
+}
+
+// TestDiscoverVolumes_SkipsTombstoned verifies that discoverVolumes skips
+// tombstoned volumes and cleans up their local resources.
+func TestDiscoverVolumes_SkipsTombstoned(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+
+	// Volume exists on disk.
+	fb.mu.Lock()
+	fb.subvolumes["volumes/vol-deleted"] = true
+	fb.subvolumes["layers/vol-deleted@abc123"] = true
+	fb.subvolumes["templates/_vol_vol-deleted"] = true
+	fb.mu.Unlock()
+
+	// Tombstone exists in CAS.
+	fc.mu.Lock()
+	fc.tombstones["vol-deleted"] = true
+	fc.mu.Unlock()
+
+	d.discoverVolumes(context.Background())
+
+	// Should NOT be tracked.
+	d.mu.Lock()
+	_, tracked := d.tracked["vol-deleted"]
+	d.mu.Unlock()
+	if tracked {
+		t.Error("tombstoned volume should not be tracked")
+	}
+
+	// Local subvolume should be cleaned up (self-healing).
+	fb.mu.Lock()
+	volExists := fb.subvolumes["volumes/vol-deleted"]
+	layerExists := fb.subvolumes["layers/vol-deleted@abc123"]
+	tmplExists := fb.subvolumes["templates/_vol_vol-deleted"]
+	fb.mu.Unlock()
+	if volExists {
+		t.Error("tombstoned volume subvolume should be deleted from disk")
+	}
+	if layerExists {
+		t.Error("tombstoned volume layer should be deleted from disk")
+	}
+	if tmplExists {
+		t.Error("tombstoned volume synthetic template should be deleted from disk")
+	}
+
+	// Tombstone should be deleted after cleanup.
+	fc.mu.Lock()
+	tombExists := fc.tombstones["vol-deleted"]
+	fc.mu.Unlock()
+	if tombExists {
+		t.Error("tombstone should be removed after local cleanup")
+	}
+}
+
+// TestDiscoverVolumes_TombstonedAndNormal verifies that tombstoned volumes
+// are cleaned up while normal volumes are still tracked.
+func TestDiscoverVolumes_TombstonedAndNormal(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+
+	// Normal volume on disk.
+	fb.mu.Lock()
+	fb.subvolumes["volumes/vol-alive"] = true
+	fb.generations["volumes/vol-alive"] = 100
+	// Tombstoned volume on disk.
+	fb.subvolumes["volumes/vol-dead"] = true
+	fb.mu.Unlock()
+
+	fc.mu.Lock()
+	fc.tombstones["vol-dead"] = true
+	fc.mu.Unlock()
+
+	d.discoverVolumes(context.Background())
+
+	d.mu.Lock()
+	_, aliveTracked := d.tracked["vol-alive"]
+	_, deadTracked := d.tracked["vol-dead"]
+	d.mu.Unlock()
+
+	if !aliveTracked {
+		t.Error("normal volume should be tracked")
+	}
+	if deadTracked {
+		t.Error("tombstoned volume should not be tracked")
+	}
 }

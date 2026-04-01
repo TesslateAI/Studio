@@ -1391,6 +1391,21 @@ async def _perform_project_deletion(
         except Exception as e:
             logger.warning(f"[DELETE] Error stopping containers: {e}")
 
+        # Clean up btrfs volume and CAS data via Hub (fire-and-forget).
+        # If Hub is unreachable, the GC collector will clean up eventually.
+        if project and project.volume_id:
+            try:
+                from ..services.volume_manager import VolumeManager
+
+                vm = VolumeManager()
+                await vm.delete_volume(project.volume_id)
+            except Exception:
+                logger.warning(
+                    "Failed to delete volume %s for project %s (GC will clean up)",
+                    project.volume_id,
+                    project.slug,
+                )
+
         task.update_progress(30, 100, "Deleting chats and messages...")
 
         # 2. Delete all chats associated with this project (and their messages will cascade)
@@ -1610,8 +1625,7 @@ async def get_setup_config(
         }
         if config_data.connections:
             response["connections"] = [
-                {"from": c.from_node, "to": c.to_node}
-                for c in config_data.connections
+                {"from": c.from_node, "to": c.to_node} for c in config_data.connections
             ]
         if config_data.deployments:
             response["deployments"] = {
@@ -1819,9 +1833,15 @@ async def save_setup_config(
         if infra_name in existing_containers:
             container = existing_containers[infra_name]
             container.internal_port = infra_config.port
-            container.environment_vars = encode_secret_map(infra_config.env) if infra_config.env else container.environment_vars
+            container.environment_vars = (
+                encode_secret_map(infra_config.env)
+                if infra_config.env
+                else container.environment_vars
+            )
             container.exports = infra_config.exports or None
-            container.deployment_mode = infra_config.infra_type if infra_config.infra_type == "external" else "container"
+            container.deployment_mode = (
+                infra_config.infra_type if infra_config.infra_type == "external" else "container"
+            )
             container.external_endpoint = infra_config.endpoint
             if infra_config.x is not None:
                 container.position_x = infra_config.x
@@ -1839,7 +1859,9 @@ async def save_setup_config(
                 exports=infra_config.exports or None,
                 container_type="service",
                 service_slug=infra_name,
-                deployment_mode="external" if infra_config.infra_type == "external" else "container",
+                deployment_mode="external"
+                if infra_config.infra_type == "external"
+                else "container",
                 external_endpoint=infra_config.endpoint,
                 status="stopped",
                 position_x=infra_config.x or 400,
@@ -1873,13 +1895,15 @@ async def save_setup_config(
         source = container_by_name.get(conn_config.from_node)
         target = container_by_name.get(conn_config.to_node)
         if source and target:
-            db.add(ContainerConnection(
-                project_id=project.id,
-                source_container_id=source.id,
-                target_container_id=target.id,
-                connector_type="env_injection",
-                connection_type="depends_on",
-            ))
+            db.add(
+                ContainerConnection(
+                    project_id=project.id,
+                    source_container_id=source.id,
+                    target_container_id=target.id,
+                    connector_type="env_injection",
+                    connection_type="depends_on",
+                )
+            )
 
     # Sync deployment targets (full replace — always delete, then re-create)
     existing_targets = await db.execute(
@@ -1905,12 +1929,14 @@ async def save_setup_config(
         for target_app_name in dep_config.targets:
             target_container = container_by_name.get(target_app_name)
             if target_container:
-                db.add(DeploymentTargetConnection(
-                    project_id=project.id,
-                    container_id=target_container.id,
-                    deployment_target_id=dep_target.id,
-                    deployment_settings=dep_config.env or {},
-                ))
+                db.add(
+                    DeploymentTargetConnection(
+                        project_id=project.id,
+                        container_id=target_container.id,
+                        deployment_target_id=dep_target.id,
+                        deployment_settings=dep_config.env or {},
+                    )
+                )
 
     # Sync previews (full replace — always delete, then re-create)
     existing_previews = await db.execute(
@@ -1921,13 +1947,15 @@ async def save_setup_config(
 
     for _preview_name, preview_config in config.previews.items():
         target_container = container_by_name.get(preview_config.target)
-        db.add(BrowserPreview(
-            project_id=project.id,
-            connected_container_id=target_container.id if target_container else None,
-            position_x=preview_config.x or 0,
-            position_y=preview_config.y or 0,
-            current_path="/",
-        ))
+        db.add(
+            BrowserPreview(
+                project_id=project.id,
+                connected_container_id=target_container.id if target_container else None,
+                position_x=preview_config.x or 0,
+                position_y=preview_config.y or 0,
+                current_path="/",
+            )
+        )
 
     await db.commit()
 
@@ -5128,6 +5156,9 @@ async def stop_all_containers(
 
         await orchestrator.stop_project(project.slug, project.id, current_user.id)
 
+        project.environment_status = "stopped"
+        await db.commit()
+
         logger.info(
             f"[{deployment_mode.value.upper()}] Stopped all containers for project {project.slug}"
         )
@@ -5897,6 +5928,7 @@ async def hibernate_project(
         )
 
     project.environment_status = "stopping"
+    project.hibernated_at = func.now()
     await db.commit()
 
     from ..services.hibernate import hibernate_project_bg

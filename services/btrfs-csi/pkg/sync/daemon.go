@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -28,6 +29,11 @@ type trackedVolume struct {
 	lastSyncAt    time.Time
 	dirty         bool // true = volume has changed since last successful sync
 }
+
+// errVolumeGone is returned by syncOne when the volume subvolume no longer
+// exists on disk. syncAll uses this to auto-untrack the volume instead of
+// retrying every cycle.
+var errVolumeGone = errors.New("volume subvolume gone")
 
 // discoverInterval is the number of syncAll cycles between periodic
 // discoverVolumes runs. With a 15s sync interval this means re-discovery
@@ -168,15 +174,16 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 		return
 	}
 
-	// --- Pass 2: Fetch manifests from S3 in parallel (the slow part). ---
-	// GetManifest is a pure read — safe to call concurrently. Results are
-	// collected into a map and consumed serially in pass 3. Cap at 10
-	// concurrent S3 reads to avoid overwhelming the connection.
+	// --- Pass 2: Fetch manifests + check tombstones from S3 in parallel. ---
+	// GetManifest is a pure read — safe to call concurrently. Cap at 10
+	// concurrent S3 reads. Tombstoned volumes are collected for local
+	// cleanup instead of being tracked.
 	type manifestInfo struct {
 		templateName string
 		templateHash string
 	}
 	manifestMap := make(map[string]manifestInfo, len(volIDs))
+	var tombstoned []string
 	if d.cas != nil {
 		var mu sync.Mutex
 		var wg sync.WaitGroup
@@ -189,6 +196,15 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
+				// Check tombstone BEFORE fetching manifest. If tombstoned,
+				// skip manifest fetch — the volume is deleted.
+				if isTombstoned, err := d.cas.HasTombstone(ctx, vid); err == nil && isTombstoned {
+					mu.Lock()
+					tombstoned = append(tombstoned, vid)
+					mu.Unlock()
+					return
+				}
+
 				if m, err := d.cas.GetManifest(ctx, vid); err == nil {
 					mu.Lock()
 					manifestMap[vid] = manifestInfo{
@@ -200,6 +216,52 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 			}(volID)
 		}
 		wg.Wait()
+	}
+
+	// --- Self-healing: clean up tombstoned volumes found on disk. ---
+	// The volume was deleted (tombstone written) but the subvolume persists
+	// on this node (e.g., the node was offline when delete was issued).
+	// Delete local resources and remove the tombstone.
+	for _, vid := range tombstoned {
+		klog.Infof("discoverVolumes: volume %s is tombstoned, cleaning up local resources", vid)
+		cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		volPath := "volumes/" + vid
+		if d.btrfs.SubvolumeExists(cleanupCtx, volPath) {
+			if err := d.btrfs.DeleteSubvolume(cleanupCtx, volPath); err != nil {
+				klog.Warningf("discoverVolumes: failed to delete tombstoned subvolume %s: %v", volPath, err)
+			}
+		}
+		// Clean up layer snapshots.
+		if layerSubs, err := d.btrfs.ListSubvolumes(cleanupCtx, fmt.Sprintf("layers/%s@", vid)); err == nil {
+			for _, sub := range layerSubs {
+				_ = d.btrfs.DeleteSubvolume(cleanupCtx, sub.Path)
+			}
+		}
+		// Clean up synthetic template.
+		synthPath := "templates/_vol_" + vid
+		if d.btrfs.SubvolumeExists(cleanupCtx, synthPath) {
+			_ = d.btrfs.DeleteSubvolume(cleanupCtx, synthPath)
+		}
+		// Remove the tombstone now that local cleanup is done.
+		if err := d.cas.DeleteTombstone(cleanupCtx, vid); err != nil {
+			klog.Warningf("discoverVolumes: failed to remove tombstone for %s: %v", vid, err)
+		}
+		cancel()
+	}
+
+	// Filter tombstoned volumes from the tracking list.
+	if len(tombstoned) > 0 {
+		tombSet := make(map[string]bool, len(tombstoned))
+		for _, vid := range tombstoned {
+			tombSet[vid] = true
+		}
+		filtered := volIDs[:0]
+		for _, vid := range volIDs {
+			if !tombSet[vid] {
+				filtered = append(filtered, vid)
+			}
+		}
+		volIDs = filtered
 	}
 
 	// --- Pass 3: Track volumes with generation-based dirty detection. ---
@@ -388,8 +450,16 @@ func (d *Daemon) MarkDirty(volumeID string) {
 }
 
 // UntrackVolume removes a volume from sync tracking and cleans up the last
-// layer snapshot if one exists.
+// layer snapshot if one exists. Acquires the per-volume lock first to wait
+// for any inflight SyncVolume/CreateSnapshot/RestoreToSnapshot to finish,
+// preventing a race where the layer snapshot is deleted while syncOne is
+// using it as a btrfs send parent.
 func (d *Daemon) UntrackVolume(volumeID string) {
+	// Lock ordering: per-volume lock → d.mu (same as SyncVolume, syncAll).
+	vl := d.volumeLock(volumeID)
+	vl.Lock()
+	defer vl.Unlock()
+
 	d.mu.Lock()
 	tv, exists := d.tracked[volumeID]
 	if !exists {
@@ -400,6 +470,7 @@ func (d *Daemon) UntrackVolume(volumeID string) {
 	delete(d.tracked, volumeID)
 	d.mu.Unlock()
 
+	// Safe to delete — no sync is running on this volume.
 	if lastSnapPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -844,6 +915,15 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 		vl.Unlock()
 
 		if err != nil {
+			if errors.Is(err, errVolumeGone) {
+				// Volume was deleted externally (e.g. Hub DeleteVolumeFromNode
+				// on a different node, or manual btrfs subvolume delete).
+				// Untrack it so we stop retrying every cycle. The per-volume
+				// lock is already released, so UntrackVolume can acquire it.
+				klog.Warningf("Volume %s subvolume gone — auto-untracking", item.tv.volumeID)
+				d.UntrackVolume(item.tv.volumeID)
+				continue
+			}
 			klog.Errorf("CAS sync failed for volume %s: %v", item.tv.volumeID, err)
 			metrics.SyncFailures.Inc()
 			if firstErr == nil {
@@ -890,7 +970,7 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 	pendingPath := fmt.Sprintf("layers/%s@pending", tv.volumeID)
 
 	if !d.btrfs.SubvolumeExists(ctx, volumePath) {
-		return "", "", fmt.Errorf("volume subvolume %q does not exist", volumePath)
+		return "", "", fmt.Errorf("%w: %s", errVolumeGone, volumePath)
 	}
 
 	// Clean up stale pending snapshot from a previous failed run.

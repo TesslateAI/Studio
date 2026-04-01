@@ -112,6 +112,7 @@ async def _check_idle_environments() -> None:
                     )
 
                     project.environment_status = "stopping"
+                    project.hibernated_at = datetime.now(UTC)
                     await db.commit()
 
                     from .hibernate import hibernate_project_bg
@@ -131,8 +132,8 @@ async def _recover_stuck_stopping(db, now: datetime) -> None:
         select(Project).where(
             Project.environment_status == "stopping",
             or_(
-                Project.last_activity < now - timedelta(minutes=10),
-                Project.last_activity.is_(None),
+                Project.hibernated_at < now - timedelta(minutes=10),
+                Project.hibernated_at.is_(None),
             ),
         )
     )

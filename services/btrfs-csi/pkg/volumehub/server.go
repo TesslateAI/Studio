@@ -1,6 +1,7 @@
 package volumehub
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -56,13 +58,14 @@ type inflightRestore struct {
 // It holds zero storage, zero btrfs — nodes handle all data. The Hub only
 // coordinates: volume→owner_node mapping, template→cached_nodes, node→capacity.
 type Server struct {
-	registry    *NodeRegistry
-	cas         *cas.Store // for manifest reads (ListSnapshots, EnsureCached)
-	nodeClient  NodeClientFactory
-	resolveAddr NodeAddrResolver
-	liveNodes   LiveNodesFn
-	resWatcher  *ResourceWatcher // standalone resource headroom (no registry dependency)
-	srv         *grpc.Server
+	registry        *NodeRegistry
+	cas             *cas.Store // for manifest reads (ListSnapshots, EnsureCached)
+	nodeClient      NodeClientFactory
+	resolveAddr     NodeAddrResolver
+	liveNodes       LiveNodesFn
+	resWatcher      *ResourceWatcher // standalone resource headroom (no registry dependency)
+	orchestratorURL string           // base URL for volume event callbacks (fire-and-forget)
+	srv             *grpc.Server
 
 	mu       sync.Mutex
 	inflight map[string]*inflightRestore
@@ -79,6 +82,39 @@ func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClien
 		resWatcher:  resWatcher,
 		inflight:    make(map[string]*inflightRestore),
 	}
+}
+
+// SetOrchestratorURL enables volume event callbacks to the orchestrator.
+// The Hub POSTs to {url}/api/internal/volume-events after completing async
+// operations (EnsureCached, DeleteVolume) so the frontend can be notified
+// in real time via WebSocket.
+func (s *Server) SetOrchestratorURL(url string) {
+	s.orchestratorURL = url
+}
+
+// notifyOrchestrator sends a fire-and-forget volume event to the orchestrator.
+// Errors are logged but never block the caller.
+func (s *Server) notifyOrchestrator(volumeID, event string) {
+	if s.orchestratorURL == "" {
+		return
+	}
+	go func() {
+		body, _ := json.Marshal(map[string]string{
+			"volume_id": volumeID,
+			"event":     event,
+		})
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Post(
+			s.orchestratorURL+"/api/internal/volume-events",
+			"application/json",
+			bytes.NewReader(body),
+		)
+		if err != nil {
+			klog.V(2).Infof("notifyOrchestrator: %v (non-fatal)", err)
+			return
+		}
+		resp.Body.Close()
+	}()
 }
 
 // TLSConfig holds paths for mTLS certificate files.
@@ -468,6 +504,7 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 			} else {
 				s.registry.SetCached(req.VolumeID, targetNode)
 				klog.Infof("EnsureCached: peer-transferred volume %s from %s to %s", req.VolumeID, sourceNode, targetNode)
+				s.notifyOrchestrator(req.VolumeID, "ready")
 				return &EnsureCachedResponse{NodeName: targetNode}, nil
 			}
 		}
@@ -543,6 +580,7 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		if entry.err != nil {
 			return nil, status.Errorf(codes.Internal, "restore volume %s: %v", req.VolumeID, entry.err)
 		}
+		s.notifyOrchestrator(req.VolumeID, "ready")
 		return &EnsureCachedResponse{NodeName: entry.node}, nil
 	case <-ctx.Done():
 		return nil, status.Errorf(codes.DeadlineExceeded, "restore in progress for volume %s", req.VolumeID)
@@ -975,30 +1013,62 @@ func (s *Server) tryCreateOnNode(ctx context.Context, volumeID, template, target
 	return targetNode, nil
 }
 
-// DeleteVolumeFromNode deletes a volume by finding its owner node in the
-// registry. Idempotent: returns nil if the volume is unknown.
+// DeleteVolumeFromNode deletes a volume by writing a durable tombstone to S3,
+// then performing best-effort cleanup on the owner node. The tombstone ensures
+// that offline nodes self-heal on next restart via discoverVolumes.
+//
+// Returns an error only if the tombstone write fails — the caller should retry.
+// Node-side cleanup errors are logged as warnings but do not fail the operation.
 func (s *Server) DeleteVolumeFromNode(ctx context.Context, volumeID string) error {
+	// Step 1: Write tombstone to S3 FIRST. This is the durable intent record.
+	// Even if the Hub crashes after this point, every node's discoverVolumes
+	// will see the tombstone and clean up locally.
+	if s.cas != nil {
+		if err := s.cas.PutTombstone(ctx, volumeID); err != nil {
+			return fmt.Errorf("write tombstone for %s: %w", volumeID, err)
+		}
+	}
+
+	// Step 2: Untrack on ALL cached nodes (not just owner) so no node keeps
+	// trying to sync a deleted volume. Best-effort per node.
+	cachedNodes := s.registry.GetCachedNodes(volumeID)
 	ownerNode := s.registry.GetOwner(volumeID)
+
+	// Include owner in the untrack set even if not in cachedNodes.
+	untrackNodes := make(map[string]bool, len(cachedNodes)+1)
+	for _, n := range cachedNodes {
+		untrackNodes[n] = true
+	}
 	if ownerNode != "" {
-		client, err := s.nodeClient(ownerNode)
+		untrackNodes[ownerNode] = true
+	}
+
+	for nodeName := range untrackNodes {
+		client, err := s.nodeClient(nodeName)
 		if err != nil {
-			klog.Warningf("DeleteVolumeFromNode: connect to owner %s: %v", ownerNode, err)
-		} else {
-			defer client.Close()
-			if err := client.UntrackVolume(ctx, volumeID); err != nil {
-				klog.Warningf("DeleteVolumeFromNode: untrack %s on %s: %v", volumeID, ownerNode, err)
-			}
+			klog.Warningf("DeleteVolumeFromNode: connect to %s: %v (tombstone written, will self-heal)", nodeName, err)
+			continue
+		}
+		if err := client.UntrackVolume(ctx, volumeID); err != nil {
+			klog.Warningf("DeleteVolumeFromNode: untrack %s on %s: %v", volumeID, nodeName, err)
+		}
+		// Only delete the actual subvolume + CAS data on the owner node.
+		if nodeName == ownerNode {
 			if err := client.DeleteSubvolume(ctx, "volumes/"+volumeID); err != nil {
-				klog.Warningf("DeleteVolumeFromNode: delete %s on %s: %v", volumeID, ownerNode, err)
+				klog.Warningf("DeleteVolumeFromNode: delete %s on %s: %v", volumeID, nodeName, err)
 			}
 			if err := client.DeleteVolumeCAS(ctx, volumeID); err != nil {
 				klog.Warningf("DeleteVolumeFromNode: CAS cleanup %s: %v", volumeID, err)
 			}
 		}
+		client.Close()
 	}
 
+	// Step 3: Remove from in-memory registry.
 	s.registry.UnregisterVolume(volumeID)
-	klog.Infof("Deleted volume %s", volumeID)
+
+	s.notifyOrchestrator(volumeID, "deleted")
+	klog.Infof("Deleted volume %s (tombstone written)", volumeID)
 	return nil
 }
 

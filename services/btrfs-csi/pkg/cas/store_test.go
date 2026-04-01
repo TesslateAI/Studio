@@ -130,3 +130,44 @@ func TestCleanupStaging_NoOrphans(t *testing.T) {
 		t.Errorf("expected 0 deleted, got %d", deleted)
 	}
 }
+
+// TestTombstone_PutHasDelete verifies the tombstone lifecycle.
+func TestTombstone_PutHasDelete(t *testing.T) {
+	obj := newFakeObjStore()
+	store := NewStore(obj)
+	ctx := context.Background()
+
+	// Initially no tombstone.
+	exists, err := store.HasTombstone(ctx, "vol-123")
+	if err != nil {
+		t.Fatalf("HasTombstone: %v", err)
+	}
+	if exists {
+		t.Error("tombstone should not exist initially")
+	}
+
+	// Write tombstone.
+	if err := store.PutTombstone(ctx, "vol-123"); err != nil {
+		t.Fatalf("PutTombstone: %v", err)
+	}
+
+	// Now exists.
+	exists, err = store.HasTombstone(ctx, "vol-123")
+	if err != nil {
+		t.Fatalf("HasTombstone: %v", err)
+	}
+	if !exists {
+		t.Error("tombstone should exist after PutTombstone")
+	}
+
+	// Delete tombstone.
+	if err := store.DeleteTombstone(ctx, "vol-123"); err != nil {
+		t.Fatalf("DeleteTombstone: %v", err)
+	}
+
+	// Gone again.
+	exists, _ = store.HasTombstone(ctx, "vol-123")
+	if exists {
+		t.Error("tombstone should not exist after DeleteTombstone")
+	}
+}

@@ -102,6 +102,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         "/api/auth/2fa/resend",  # Uses temp_token, not cookie auth
         "/api/track-landing",  # Referral tracking endpoint
         "/api/webhooks/stripe",  # Stripe webhooks need to bypass CSRF
+        "/api/internal/",  # Cluster-internal endpoints (NetworkPolicy protected, no user auth)
         "/docs",
         "/redoc",
         "/openapi.json",

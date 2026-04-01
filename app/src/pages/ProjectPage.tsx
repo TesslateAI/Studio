@@ -1136,6 +1136,15 @@ export default function ProjectPage() {
     onIdleWarning: handleIdleWarning,
     onEnvironmentStopping: handleEnvironmentStopping,
     onEnvironmentStopped: handleEnvironmentStopped,
+    onVolumeReady: () => {
+      // Refresh project state when the Hub reports the volume is ready.
+      if (slug) {
+        projectsApi
+          .get(slug)
+          .then(setProject)
+          .catch(() => {});
+      }
+    },
   } as const;
 
   // ---------------------------------------------------------------------------

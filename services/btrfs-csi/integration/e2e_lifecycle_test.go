@@ -1250,3 +1250,184 @@ func TestStagingGC_DeletesOrphanedKeys(t *testing.T) {
 
 	t.Log("CleanupStaging correctly preserved fresh staging key (would delete keys >1h old)")
 }
+
+// ---------------------------------------------------------------------------
+// Tombstone + safe delete integration tests
+// ---------------------------------------------------------------------------
+
+// TestTombstone_DiscoverVolumesSkipsAndCleansUp verifies that a tombstoned
+// volume found on disk is cleaned up (subvolume, layers, synthetic template)
+// and the tombstone is removed from S3 afterwards.
+func TestTombstone_DiscoverVolumesSkipsAndCleansUp(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	bucket := uniqueName("tombstone")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create a volume and sync it (so it has layers and a manifest).
+	volID := uniqueName("tomb-vol")
+	volPath := "volumes/" + volID
+	if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("create volume: %v", err)
+	}
+	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", "tombstone-test")
+
+	daemon := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+	daemon.TrackVolume(volID, "", "")
+	if err := daemon.SyncVolume(ctx, volID); err != nil {
+		t.Fatalf("SyncVolume: %v", err)
+	}
+
+	// Verify manifest exists.
+	if has, _ := casStore.HasManifest(ctx, volID); !has {
+		t.Fatal("manifest should exist after sync")
+	}
+
+	// Write a tombstone (simulating DeleteVolumeFromNode).
+	if err := casStore.PutTombstone(ctx, volID); err != nil {
+		t.Fatalf("PutTombstone: %v", err)
+	}
+
+	// Create a NEW daemon (simulating node restart) that doesn't know about the volume.
+	// Use 1h interval so the daemon only runs initial discovery, not periodic syncs.
+	daemon2 := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+
+	// Start the daemon — initial discoverVolumes runs synchronously in Start()
+	// before the ticker begins. We use a short-lived context: Start blocks on
+	// discoverVolumes, then enters the ticker loop. We wait long enough for
+	// initial discovery + tombstone cleanup to complete, then cancel.
+	dCtx, dCancel := context.WithCancel(ctx)
+	go daemon2.Start(dCtx)
+	// Initial discovery can take 30+ seconds with S3 manifest fetches.
+	// Poll for the tombstone to be cleaned up.
+	for i := 0; i < 60; i++ {
+		time.Sleep(1 * time.Second)
+		if !mgr.SubvolumeExists(ctx, volPath) {
+			break
+		}
+	}
+	dCancel()
+	daemon2.Stop()
+
+	// Verify the subvolume was cleaned up.
+	if mgr.SubvolumeExists(ctx, volPath) {
+		t.Error("tombstoned volume subvolume should be deleted")
+	}
+
+	// Verify the tombstone was removed after cleanup.
+	if has, _ := casStore.HasTombstone(ctx, volID); has {
+		t.Error("tombstone should be removed after local cleanup")
+	}
+
+	// Verify the volume is NOT tracked.
+	for _, s := range daemon2.GetTrackedState() {
+		if s.VolumeID == volID {
+			t.Error("tombstoned volume should not be tracked")
+		}
+	}
+
+	t.Logf("Tombstone self-healing: volume %s cleaned up on simulated restart", volID)
+
+	// Cleanup: layers and synthetic templates should already be gone.
+	// But clean up anything remaining to be safe.
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+		subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
+		for _, sub := range subs {
+			mgr.DeleteSubvolume(context.Background(), sub.Path)
+		}
+		synth := "templates/_vol_" + volID
+		if mgr.SubvolumeExists(context.Background(), synth) {
+			mgr.DeleteSubvolume(context.Background(), synth)
+		}
+	})
+}
+
+// TestUntrackVolume_SafeWithConcurrentSync verifies that UntrackVolume
+// waits for an inflight SyncVolume to complete before deleting resources.
+func TestUntrackVolume_SafeWithConcurrentSync(t *testing.T) {
+	pool := getPoolPath(t)
+	mgr := newBtrfsManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := mgr.EnsurePoolStructure(ctx); err != nil {
+		t.Fatalf("EnsurePoolStructure: %v", err)
+	}
+
+	bucket := uniqueName("untrack-safe")
+	store := newObjectStorage(t, bucket)
+	casStore := cas.NewStore(store)
+	tmplMgr := template.NewManager(mgr, casStore, pool)
+
+	// Create a volume with data.
+	volID := uniqueName("safe-vol")
+	volPath := "volumes/" + volID
+	if err := mgr.CreateSubvolume(ctx, volPath); err != nil {
+		t.Fatalf("create volume: %v", err)
+	}
+	t.Cleanup(func() {
+		mgr.DeleteSubvolume(context.Background(), volPath)
+		subs, _ := mgr.ListSubvolumes(context.Background(), "layers/"+volID)
+		for _, sub := range subs {
+			mgr.DeleteSubvolume(context.Background(), sub.Path)
+		}
+		synth := "templates/_vol_" + volID
+		if mgr.SubvolumeExists(context.Background(), synth) {
+			mgr.DeleteSubvolume(context.Background(), synth)
+		}
+	})
+	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", "sync-before-untrack")
+
+	daemon := bsync.NewDaemon(mgr, casStore, tmplMgr, 1*time.Hour)
+	daemon.TrackVolume(volID, "", "")
+
+	// Start a sync and untrack concurrently.
+	// With the per-volume lock fix, UntrackVolume waits for SyncVolume.
+	syncDone := make(chan error, 1)
+	go func() {
+		syncDone <- daemon.SyncVolume(ctx, volID)
+	}()
+
+	// Small delay to let SyncVolume acquire the lock first.
+	time.Sleep(10 * time.Millisecond)
+
+	untrackDone := make(chan struct{})
+	go func() {
+		daemon.UntrackVolume(volID)
+		close(untrackDone)
+	}()
+
+	// SyncVolume should complete first (it has the lock).
+	if err := <-syncDone; err != nil {
+		t.Fatalf("SyncVolume: %v", err)
+	}
+
+	// UntrackVolume should complete after SyncVolume releases.
+	select {
+	case <-untrackDone:
+		// success
+	case <-time.After(30 * time.Second):
+		t.Fatal("UntrackVolume did not complete")
+	}
+
+	// Verify the sync actually wrote a manifest (data was captured).
+	manifest, err := casStore.GetManifest(ctx, volID)
+	if err != nil {
+		t.Fatalf("GetManifest: %v (sync should have completed before untrack)", err)
+	}
+	if len(manifest.Layers) == 0 {
+		t.Error("sync should have created at least 1 layer before untrack")
+	}
+
+	t.Logf("UntrackVolume waited for SyncVolume — %d layer(s) safely persisted", len(manifest.Layers))
+}

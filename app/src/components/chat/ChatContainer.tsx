@@ -12,7 +12,11 @@ import { createWebSocket, chatApi, marketplaceApi } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
-import { type AgentMessageData, type DBMessage, type SerializedAttachment } from '../../types/agent';
+import {
+  type AgentMessageData,
+  type DBMessage,
+  type SerializedAttachment,
+} from '../../types/agent';
 import { type ChatAgent } from '../../types/chat';
 
 function formatAgentError(raw: string): string {
@@ -80,6 +84,7 @@ interface ChatContainerProps {
   onIdleWarning?: (minutesLeft: number) => void;
   onEnvironmentStopping?: () => void;
   onEnvironmentStopped?: (reason: string) => void;
+  onVolumeReady?: () => void;
 }
 
 export function ChatContainer({
@@ -102,6 +107,7 @@ export function ChatContainer({
   onIdleWarning,
   onEnvironmentStopping,
   onEnvironmentStopped,
+  onVolumeReady,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const { hasRole } = useAuth();
@@ -124,15 +130,20 @@ export function ChatContainer({
   // Fetch model vision support map once
   useEffect(() => {
     let cancelled = false;
-    marketplaceApi.getAvailableModels().then((data) => {
-      if (cancelled) return;
-      const map: Record<string, boolean> = {};
-      for (const m of data.models || []) {
-        map[m.id] = m.supports_vision ?? false;
-      }
-      setModelVisionMap(map);
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    marketplaceApi
+      .getAvailableModels()
+      .then((data) => {
+        if (cancelled) return;
+        const map: Record<string, boolean> = {};
+        for (const m of data.models || []) {
+          map[m.id] = m.supports_vision ?? false;
+        }
+        setModelVisionMap(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const currentModelId = currentAgent.selectedModel || currentAgent.model;
@@ -254,7 +265,9 @@ export function ChatContainer({
                 id: `msg-${idx}`,
                 type: messageType,
                 content: msg.content,
-                attachments: msg.message_metadata?.attachments as SerializedAttachment[] | undefined,
+                attachments: msg.message_metadata?.attachments as
+                  | SerializedAttachment[]
+                  | undefined,
               });
             }
             return;
@@ -794,6 +807,10 @@ export function ChatContainer({
                 id: 'volume-restore',
                 duration: 30000,
               });
+            } else if (eventType === 'volume_ready') {
+              toast.dismiss('volume-restore');
+              toast.success('Environment ready', { duration: 2000 });
+              onVolumeReady?.();
               // Legacy status-based events
             } else if (status === 'hibernating') {
               toast.loading(message || 'Project is being saved...', { duration: 5000 });

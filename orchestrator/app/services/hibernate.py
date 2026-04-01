@@ -49,19 +49,14 @@ async def hibernate_project_bg(project_id: UUID, user_id: UUID) -> None:
                 cm = get_compute_manager()
                 await cm.stop_environment(project, db)
 
-            # Trigger S3 sync on the node that owns the volume
-            if project.volume_id:
-                try:
-                    from .volume_manager import get_volume_manager
-
-                    vm = get_volume_manager()
-                    await vm.trigger_sync(project.volume_id)
-                except Exception:
-                    logger.warning(
-                        "[HIBERNATE] Sync trigger failed for project %s — Hub "
-                        "will catch up on next access",
-                        project_id,
-                    )
+            await db.refresh(project)
+            if project.environment_status != "stopping":
+                logger.info(
+                    "Hibernate aborted for project %s — status changed to %s",
+                    project.slug,
+                    project.environment_status,
+                )
+                return
 
             project.environment_status = "hibernated"
             project.hibernated_at = datetime.now(UTC)
