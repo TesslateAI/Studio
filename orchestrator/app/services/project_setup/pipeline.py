@@ -308,10 +308,9 @@ async def setup_project(
         task.update_progress(90, 100, "Finalizing...")
         primary_id, all_ids = None, []
 
-        # Update project metadata
+        # Update project metadata — cache_node is NOT written (Hub is truth).
         if placed.volume_id:
             db_project.volume_id = placed.volume_id
-            db_project.cache_node = placed.node_name
         if spec.kind == "template_snapshot":
             db_project.compute_tier = "none"
         if spec.git_url:

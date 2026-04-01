@@ -20,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 def _has_volume_hints(context: dict[str, Any]) -> bool:
     """Check if the context includes volume routing hints (required for K8s execution)."""
-    volume_id = context.get("volume_id")
-    cache_node = context.get("cache_node")
-    return volume_id is not None and cache_node is not None
+    return context.get("volume_id") is not None
 
 
 async def _run_ephemeral(context: dict[str, Any], command: str, timeout: int) -> dict[str, Any]:
@@ -32,10 +30,16 @@ async def _run_ephemeral(context: dict[str, Any], command: str, timeout: int) ->
     from ....services.compute_manager import ComputeQuotaExceeded, get_compute_manager
 
     volume_id = context["volume_id"]
-    node_name = context["cache_node"]
     project_id = context["project_id"]
 
     compute = get_compute_manager()
+
+    # Resolve the live node from the Hub (~5ms) so the pod lands on the
+    # volume's node. Never use stale DB cache — the Hub is truth.
+    from ....services.volume_manager import get_volume_manager
+
+    vm = get_volume_manager()
+    node_name = await vm.get_volume_node(volume_id)
 
     # Mark compute state in an isolated transaction (don't hold the agent session open)
     async def _set_compute_state(tier: str, pod: str | None = None) -> None:

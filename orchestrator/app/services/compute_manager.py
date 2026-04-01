@@ -874,7 +874,6 @@ class ComputeManager:
         settings = get_settings()
         k8s = self._k8s_client()
         volume_id = project.volume_id
-        node_name = project.cache_node  # Hint only — ensure_cached resolves the real node
         namespace = f"proj-{project.id}"
 
         # WebSocket progress
@@ -910,7 +909,9 @@ class ComputeManager:
         )
 
         # 2. Ensure volume is cached on a schedulable compute node with
-        #    enough headroom for the placement unit.
+        #    enough headroom for the placement unit. The Hub handles data
+        #    transfer internally (peer-transfer or CAS restore) and
+        #    prefers the node where the volume already lives (fast path).
         vm = get_volume_manager()
         candidate_nodes = await self._get_schedulable_nodes()
         if not candidate_nodes:
@@ -922,24 +923,13 @@ class ComputeManager:
             budget_mem=budget.memory_mib * 1024 * 1024,  # MiB → bytes for Hub
         )
 
-        migrated_from = None  # Track migration for deferred ownership transfer
-        if node_name != project.cache_node:
-            old_node = project.cache_node
-            # If environment is already running on old node, migrate first
-            if old_node and project.compute_tier == "environment":
-                await send_progress("migrating", f"Migrating project to node {node_name}...", 5)
-                await self._migrate_placement_unit(
-                    project,
-                    volume_id,
-                    old_node,
-                    node_name,
-                    user_id,
-                    db,
-                )
-                migrated_from = old_node
-            else:
-                project.cache_node = node_name
-                await db.commit()
+        # 3. Idempotent start: clean up any existing namespace before
+        #    creating fresh. This replaces the old _migrate_placement_unit
+        #    flow — no separate migration code path. The Hub already moved
+        #    the data in ensure_cached; we just manage K8s resources.
+        if project.compute_tier == "environment":
+            await send_progress("migrating", "Cleaning up old environment...", 5)
+            await self._stop_environment_inner(project, db)
 
         # 3. Separate service and dev containers
         service_containers = [
@@ -1222,23 +1212,18 @@ class ComputeManager:
         project.last_activity = datetime.now(UTC)
         await db.commit()
 
-        # 10. Transfer ownership after pods are healthy (deferred from migration)
-        if migrated_from:
-            try:
-                await vm.transfer_ownership(volume_id, node_name)
-                logger.info(
-                    "[COMPUTE-T2] Ownership transferred: %s → %s (project %s)",
-                    migrated_from,
-                    node_name,
-                    project.id,
-                )
-            except Exception:
-                logger.warning(
-                    "[COMPUTE-T2] Ownership transfer failed for project %s — "
-                    "pods are running, will retry on next start",
-                    project.id,
-                    exc_info=True,
-                )
+        # 10. Transfer ownership to the node where pods are running.
+        # Best-effort — if Hub is briefly unavailable, the next ensure_cached
+        # will fix it. No stale cache_node in DB to worry about.
+        try:
+            await vm.transfer_ownership(volume_id, node_name)
+        except Exception:
+            logger.warning(
+                "[COMPUTE-T2] Ownership transfer failed for project %s — "
+                "pods are running, will fix on next ensure_cached",
+                project.id,
+                exc_info=True,
+            )
 
         await send_progress("ready", "Environment is ready!", 100, container_status="ready")
 
@@ -1248,50 +1233,6 @@ class ComputeManager:
             len(containers),
         )
         return container_urls
-
-    async def _migrate_placement_unit(
-        self,
-        project,
-        volume_id: str,
-        old_node: str,
-        new_node: str,
-        user_id: UUID,
-        db: AsyncSession,
-    ) -> None:
-        """Warm-migrate a placement unit to a new node.
-
-        Called from start_environment() when Hub returns a different node.
-        Volume is already cached on new_node (Hub did peer-transfer in
-        EnsureCached). We stop old pods, then let the normal start flow
-        recreate on the new node with soft affinity.
-
-        Ownership transfer happens AFTER pods are healthy — the caller
-        (start_environment) handles that after the normal start flow
-        completes successfully.
-        """
-        logger.info(
-            "[COMPUTE-T2] Migrating project %s: %s → %s",
-            project.id,
-            old_node,
-            new_node,
-        )
-
-        # 1. Stop old environment (deletes namespace + PVs)
-        # Use _stop_environment_inner — we're already under the env lock
-        # via start_environment → _start_environment_inner.
-        if project.compute_tier == "environment":
-            await self._stop_environment_inner(project, db)
-
-        # 2. Update project cache_node — ownership transfer deferred
-        project.cache_node = new_node
-        project.compute_tier = "none"  # Will be set back by start flow
-        await db.commit()
-
-        logger.info(
-            "[COMPUTE-T2] Migration complete for project %s → node %s",
-            project.id,
-            new_node,
-        )
 
     async def stop_environment(self, project, db: AsyncSession) -> None:
         """Delete namespace + PVs for a v2 project. btrfs subvolumes stay on node.

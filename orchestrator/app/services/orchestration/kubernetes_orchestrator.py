@@ -240,9 +240,10 @@ class KubernetesOrchestrator(BaseOrchestrator):
             raise
 
     async def _get_project_volume_info(self, project_id: UUID) -> tuple[str | None, str | None]:
-        """Look up volume fields from DB.
+        """Look up volume_id from DB.
 
-        Returns: (volume_id, cache_node)
+        Returns: (volume_id, None) — cache_node is dead (Hub is truth).
+        Second element kept for signature compat with callers.
         """
         from sqlalchemy import select as sa_select
 
@@ -250,12 +251,10 @@ class KubernetesOrchestrator(BaseOrchestrator):
         from ...models import Project
 
         async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                sa_select(Project.volume_id, Project.cache_node).where(Project.id == project_id)
-            )
+            result = await db.execute(sa_select(Project.volume_id).where(Project.id == project_id))
             row = result.one_or_none()
             if row:
-                return row.volume_id, row.cache_node
+                return row[0], None
             raise ValueError(f"Project {project_id} not found")
 
     @staticmethod

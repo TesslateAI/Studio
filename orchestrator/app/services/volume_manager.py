@@ -10,7 +10,6 @@ No local state machine, no node selection, no S3 interaction.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -163,7 +162,6 @@ class VolumeManager:
         state = resp.get("state", "unavailable")
 
         if state == "cached":
-            asyncio.create_task(self._safe_update_cache_node(volume_id, resp.get("node_name", "")))
             return resp
 
         if state == "restoring":
@@ -186,23 +184,18 @@ class VolumeManager:
             raise VolumeUnavailableError(f"No fileops address for {volume_id}")
         return FileOpsClient(address)
 
-    async def _safe_update_cache_node(self, volume_id: str, node_name: str) -> None:
-        """Fire-and-forget DB write-behind for cache_node."""
-        try:
-            from sqlalchemy import update as sa_update
+    async def get_volume_node(self, volume_id: str) -> str:
+        """Get the live node where a volume is cached.
 
-            from ..database import AsyncSessionLocal
-            from ..models import Project
+        Quick Hub round-trip (~5ms). Used by T1 pods and builds to set
+        node affinity so the pod lands on the volume's node.
 
-            async with AsyncSessionLocal() as db:
-                await db.execute(
-                    sa_update(Project)
-                    .where(Project.volume_id == volume_id)
-                    .values(cache_node=node_name)
-                )
-                await db.commit()
-        except Exception:
-            logger.warning("[VOLUME] Failed to update cache_node for %s", volume_id)
+        Raises:
+            VolumeRestoringError: If volume is being restored from S3.
+            VolumeUnavailableError: If restore failed or no CAS data.
+        """
+        resp = await self.resolve_volume(volume_id)
+        return resp.get("node_name", "")
 
 
 # ------------------------------------------------------------------

@@ -118,9 +118,7 @@ class DeploymentBuilder:
             work_dir = await self._find_project_root(
                 orchestrator, user_id, project_id, effective_container, work_dir
             )
-            logger.info(
-                f"Running build command: {build_command} (work_dir: {work_dir})"
-            )
+            logger.info(f"Running build command: {build_command} (work_dir: {work_dir})")
 
             full_cmd = (
                 f"set -e && mkdir -p {work_dir} && cd {work_dir} "
@@ -131,18 +129,22 @@ class DeploymentBuilder:
             )
 
             try:
-                if is_kubernetes_mode() and volume_id and cache_node:
+                if is_kubernetes_mode() and volume_id:
                     # K8s: run build in an ephemeral pod so it doesn't conflict
                     # with the running dev server (no lock files, no port conflicts)
                     from ..compute_manager import get_compute_manager
+                    from ..volume_manager import get_volume_manager
 
                     cm = get_compute_manager()
+                    vm = get_volume_manager()
+                    # Resolve live node from Hub (~5ms) for pod scheduling
+                    live_node = await vm.get_volume_node(volume_id)
                     logger.info(
-                        f"[BUILD] Using ephemeral pod for build (volume={volume_id}, node={cache_node})"
+                        f"[BUILD] Using ephemeral pod for build (volume={volume_id}, node={live_node})"
                     )
                     output, exit_code, pod_name = await cm.run_command(
                         volume_id=volume_id,
-                        node_name=cache_node,
+                        node_name=live_node,
                         command=["/bin/sh", "-c", full_cmd],
                         timeout=300,
                     )
@@ -435,9 +437,7 @@ class DeploymentBuilder:
 
         return files
 
-    async def _find_project_root_via_fileops(
-        self, volume_id: str, expected_rel: str
-    ) -> str:
+    async def _find_project_root_via_fileops(self, volume_id: str, expected_rel: str) -> str:
         """
         Find the actual project root directory using FileOps (no exec needed).
 
@@ -526,11 +526,25 @@ class DeploymentBuilder:
 
         # List all files with server-side exclusions
         exclude_dirs = [
-            "node_modules", ".git", "__pycache__", ".venv", "venv",
-            ".cache", ".turbo", "coverage", ".nyc_output", "lost+found",
+            "node_modules",
+            ".git",
+            "__pycache__",
+            ".venv",
+            "venv",
+            ".cache",
+            ".turbo",
+            "coverage",
+            ".nyc_output",
+            "lost+found",
         ]
-        exclude_files = [".DS_Store", "Thumbs.db", ".env", ".env.local",
-                         ".env.production", ".env.development"]
+        exclude_files = [
+            ".DS_Store",
+            "Thumbs.db",
+            ".env",
+            ".env.local",
+            ".env.production",
+            ".env.development",
+        ]
         exclude_exts = ["map", "lock"]
 
         entries = await client.list_tree(
@@ -568,11 +582,11 @@ class DeploymentBuilder:
             tasks = []
             for entry in batch:
                 if entry.size > max_file_size:
-                    logger.warning(
-                        f"Skipping oversized file {entry.path} ({entry.size} bytes)"
-                    )
+                    logger.warning(f"Skipping oversized file {entry.path} ({entry.size} bytes)")
                     continue
-                tasks.append(self._read_single_file_via_fileops(client, volume_id, entry, target_rel))
+                tasks.append(
+                    self._read_single_file_via_fileops(client, volume_id, entry, target_rel)
+                )
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for result in results:
@@ -595,7 +609,7 @@ class DeploymentBuilder:
             if target_rel != ".":
                 prefix = target_rel.rstrip("/") + "/"
                 if rel_path.startswith(prefix):
-                    rel_path = rel_path[len(prefix):]
+                    rel_path = rel_path[len(prefix) :]
             return DeploymentFile(path=rel_path, content=content)
         except Exception as e:
             logger.warning(f"Failed to read {entry.path}: {e}")
@@ -647,10 +661,10 @@ class DeploymentBuilder:
             f"echo '{expected_dir}'; "
             f"else "
             f"for d in /app/*/; do "
-            f"if [ -f \"${{d}}package.json\" ] || "
-            f"[ -f \"${{d}}requirements.txt\" ] || "
-            f"[ -f \"${{d}}go.mod\" ]; then "
-            f"echo \"${{d%/}}\"; exit 0; fi; done; "
+            f'if [ -f "${{d}}package.json" ] || '
+            f'[ -f "${{d}}requirements.txt" ] || '
+            f'[ -f "${{d}}go.mod" ]; then '
+            f'echo "${{d%/}}"; exit 0; fi; done; '
             f"echo '{expected_dir}'; fi"
         )
         try:
@@ -664,9 +678,7 @@ class DeploymentBuilder:
             resolved = result.strip().split("\n")[0].strip()
             if resolved and resolved.startswith("/app"):
                 if resolved != expected_dir:
-                    logger.info(
-                        f"Project root resolved: {expected_dir} → {resolved}"
-                    )
+                    logger.info(f"Project root resolved: {expected_dir} → {resolved}")
                 return resolved
         except Exception as e:
             logger.warning(f"Failed to resolve project root, using {expected_dir}: {e}")
