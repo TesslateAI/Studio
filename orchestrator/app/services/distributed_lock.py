@@ -209,6 +209,26 @@ class DistributedLock:
                 await loop_task
             raise
 
+    @contextlib.asynccontextmanager
+    async def hold(self, lock_name: str, ttl_seconds: int = 600):
+        """Context manager: acquire lock, yield, release on exit.
+
+        Raises RuntimeError if the lock cannot be acquired (another operation
+        is already running). TTL is a safety net — the lock is always
+        explicitly released in the finally block.
+
+        Usage:
+            async with lock.hold(f"env:{project_id}"):
+                await start_environment(...)
+        """
+        acquired = await self.acquire(lock_name, ttl_seconds)
+        if not acquired:
+            raise RuntimeError(f"Lock {lock_name!r} is held by another operation")
+        try:
+            yield
+        finally:
+            await self.release(lock_name)
+
 
 # =============================================================================
 # Global Instance

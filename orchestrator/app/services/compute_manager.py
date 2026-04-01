@@ -832,8 +832,29 @@ class ComputeManager:
     ) -> dict[str, str]:
         """Create namespace + deployments + services + ingress for a v2 project.
 
+        Acquires a per-project distributed lock to prevent concurrent
+        start/stop races (e.g., two browser tabs clicking Start).
+
         Returns: {container_directory: preview_url}
         """
+        from .distributed_lock import get_distributed_lock
+
+        lock = get_distributed_lock()
+        async with lock.hold(f"env:{project.id}", ttl_seconds=600):
+            return await self._start_environment_inner(
+                project, containers, connections, user_id, db, progress_queue
+            )
+
+    async def _start_environment_inner(
+        self,
+        project,
+        containers: list,
+        connections: list,
+        user_id: UUID,
+        db: AsyncSession,
+        progress_queue: asyncio.Queue | None = None,
+    ) -> dict[str, str]:
+        """Inner start logic, called under the per-project lock."""
         from ..config import get_settings
         from .orchestration.kubernetes.helpers import (
             create_ingress_manifest,
@@ -1256,8 +1277,10 @@ class ComputeManager:
         )
 
         # 1. Stop old environment (deletes namespace + PVs)
+        # Use _stop_environment_inner — we're already under the env lock
+        # via start_environment → _start_environment_inner.
         if project.compute_tier == "environment":
-            await self.stop_environment(project, db)
+            await self._stop_environment_inner(project, db)
 
         # 2. Update project cache_node — ownership transfer deferred
         project.cache_node = new_node
@@ -1271,7 +1294,21 @@ class ComputeManager:
         )
 
     async def stop_environment(self, project, db: AsyncSession) -> None:
-        """Delete namespace + PVs for a v2 project. btrfs subvolumes stay on node."""
+        """Delete namespace + PVs for a v2 project. btrfs subvolumes stay on node.
+
+        Acquires the same per-project lock as start_environment to prevent
+        stop racing with a concurrent start. Callers already under the lock
+        (e.g., _migrate_placement_unit) should call _stop_environment_inner
+        directly to avoid deadlock.
+        """
+        from .distributed_lock import get_distributed_lock
+
+        lock = get_distributed_lock()
+        async with lock.hold(f"env:{project.id}", ttl_seconds=600):
+            await self._stop_environment_inner(project, db)
+
+    async def _stop_environment_inner(self, project, db: AsyncSession) -> None:
+        """Inner stop logic. Call directly when already holding the env lock."""
         namespace = f"proj-{project.id}"
         k8s = self._k8s_client()
         v1 = self._api()
