@@ -355,6 +355,9 @@ async def _perform_project_setup(
                 task=task,
             )
 
+            db_project.environment_status = "active"
+            await db.commit()
+
             task.update_progress(100, 100, "Project setup complete")
             logger.info(f"[CREATE] Project {db_project.id} setup completed successfully")
 
@@ -5115,6 +5118,13 @@ async def start_all_containers(
     In Kubernetes mode: Creates namespace, deployments, and services.
     """
     project = await get_project_by_slug(db, project_slug, current_user)
+
+    if project.environment_status == "provisioning":
+        raise HTTPException(
+            status_code=409,
+            detail="Project is still being provisioned. Please wait for setup to complete.",
+        )
+
     await track_project_activity(project.id, db)
 
     try:
@@ -5486,6 +5496,12 @@ async def start_single_container(
     # Verify project ownership
     project = await get_project_by_slug(db, project_slug, current_user)
 
+    if project.environment_status == "provisioning":
+        raise HTTPException(
+            status_code=409,
+            detail="Project is still being provisioned. Please wait for setup to complete.",
+        )
+
     # Verify container exists and belongs to project
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
@@ -5751,6 +5767,12 @@ async def restart_single_container(
     for status updates.
     """
     project = await get_project_by_slug(db, project_slug, current_user)
+
+    if project.environment_status == "provisioning":
+        raise HTTPException(
+            status_code=409,
+            detail="Project is still being provisioned. Please wait for setup to complete.",
+        )
 
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:

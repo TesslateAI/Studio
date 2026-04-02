@@ -147,7 +147,9 @@ class Project(ProjectBase):
     network_name: str | None = None
     created_at: datetime
     updated_at: datetime | None
-    environment_status: str | None = None  # 'active', 'hibernated', 'hibernating', 'corrupted'
+    environment_status: str | None = (
+        None  # 'provisioning', 'active', 'hibernated', 'stopping', 'stopped', 'setup_failed'
+    )
     hibernated_at: datetime | None = None
     compute_tier: str = "none"  # none | ephemeral | environment
 
@@ -666,6 +668,7 @@ class AgentCommandStatsResponse(BaseModel):
 
 class ChatAttachmentSchema(BaseModel):
     """Attachment sent alongside a chat message."""
+
     type: str  # "image", "pasted_text", "file_reference"
     content: str | None = None  # base64 for images, full text for pasted_text
     mime_type: str | None = None

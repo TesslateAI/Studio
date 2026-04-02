@@ -151,7 +151,9 @@ export function ProjectCard({
                 {project.name}
               </h3>
               {/* Environment Status Badge */}
-              {project.environment_status === 'setup_failed' ? (
+              {project.environment_status === 'provisioning' ? (
+                <EnvironmentStatusBadge status="provisioning" size="sm" />
+              ) : project.environment_status === 'setup_failed' ? (
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
                   Setup failed
                 </span>

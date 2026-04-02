@@ -1058,7 +1058,11 @@ export default function Dashboard() {
                           {project.description}
                         </span>
                       )}
-                      {project.environment_status === 'setup_failed' ? (
+                      {project.environment_status === 'provisioning' ? (
+                        <span className="text-[10px] text-blue-400 flex-shrink-0">
+                          Setting up...
+                        </span>
+                      ) : project.environment_status === 'setup_failed' ? (
                         <span className="text-[10px] text-red-400 flex-shrink-0">Setup failed</span>
                       ) : project.environment_status && project.environment_status !== 'active' ? (
                         <span className="text-[10px] text-[var(--text-subtle)] flex-shrink-0">

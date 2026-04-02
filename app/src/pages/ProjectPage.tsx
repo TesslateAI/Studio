@@ -161,6 +161,7 @@ export default function ProjectPage() {
   // Lifecycle warning state
   const [idleWarningMinutes, setIdleWarningMinutes] = useState<number | null>(null);
   const [environmentStopping, setEnvironmentStopping] = useState(false);
+  const [environmentProvisioning, setEnvironmentProvisioning] = useState(false);
 
   // ---------------------------------------------------------------------------
   // File tree hook
@@ -238,10 +239,17 @@ export default function ProjectPage() {
   const environmentStatus = useMemo(
     () =>
       getEnvironmentStatus(computeTier, {
+        provisioning: environmentProvisioning,
         stopping: environmentStopping,
         starting: needsContainerStart && containerStartup.isLoading,
       }),
-    [computeTier, environmentStopping, needsContainerStart, containerStartup.isLoading]
+    [
+      computeTier,
+      environmentProvisioning,
+      environmentStopping,
+      needsContainerStart,
+      containerStartup.isLoading,
+    ]
   );
 
   // ---------------------------------------------------------------------------
@@ -557,6 +565,16 @@ export default function ProjectPage() {
     if (!slug) return;
     try {
       const freshProject = await projectsApi.get(slug);
+
+      // Provisioning — files/containers aren't ready yet. Show the badge,
+      // skip container logic entirely, and let loadProject handle file display.
+      if (freshProject.environment_status === 'provisioning') {
+        setEnvironmentProvisioning(true);
+        setNeedsContainerStart(false);
+        return;
+      }
+      setEnvironmentProvisioning(false);
+
       const allContainers = await projectsApi.getContainers(slug);
       setContainers(allContainers);
 
@@ -961,6 +979,25 @@ export default function ProjectPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
+
+  // Provisioning poll — re-check every 3s until status transitions
+  useEffect(() => {
+    if (!environmentProvisioning || !slug) return;
+    const interval = setInterval(async () => {
+      try {
+        const p = await projectsApi.get(slug);
+        if (p.environment_status !== 'provisioning') {
+          setEnvironmentProvisioning(false);
+          loadProject();
+          loadContainer();
+        }
+      } catch {
+        // ignore — next tick will retry
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [environmentProvisioning, slug]);
 
   // Container change effect — restore from localStorage, load container
   useEffect(() => {

@@ -855,6 +855,9 @@ class ComputeManager:
         progress_queue: asyncio.Queue | None = None,
     ) -> dict[str, str]:
         """Inner start logic, called under the per-project lock."""
+        if project.environment_status == "provisioning":
+            raise RuntimeError("Cannot start environment: project is still being provisioned")
+
         from ..config import get_settings
         from .orchestration.kubernetes.helpers import (
             create_ingress_manifest,

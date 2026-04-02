@@ -84,6 +84,12 @@ async def graph_start_container_executor(
                 message="Project not found", suggestion="Ensure you're in a valid project context"
             )
 
+        if project.environment_status == "provisioning":
+            return error_output(
+                message="Project is still being provisioned. Wait for setup to complete before starting containers.",
+                suggestion="Try again in a moment.",
+            )
+
         # Fetch all containers and connections (needed for orchestrator)
         all_containers_result = await db.execute(
             select(Container)
@@ -250,6 +256,12 @@ async def graph_start_all_executor(
         if not project:
             return error_output(
                 message="Project not found", suggestion="Ensure you're in a valid project context"
+            )
+
+        if project.environment_status == "provisioning":
+            return error_output(
+                message="Project is still being provisioned. Wait for setup to complete before starting containers.",
+                suggestion="Try again in a moment.",
             )
 
         # Fetch all containers

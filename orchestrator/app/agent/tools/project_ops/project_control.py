@@ -31,6 +31,7 @@ _LOG_TAIL_LINES = 100
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _resolve_container_dir(project_id, container) -> str:
     """Resolve the K8s deployment directory key for *container*.
 
@@ -115,6 +116,7 @@ async def _fetch_connections(db, project_id):
 # Action implementations
 # ---------------------------------------------------------------------------
 
+
 async def _action_status(context: dict[str, Any]) -> dict[str, Any]:
     db = context["db"]
     project_id = context["project_id"]
@@ -139,13 +141,15 @@ async def _action_status(context: dict[str, Any]) -> dict[str, Any]:
                 container_status = info
                 break
 
-        container_list.append({
-            "name": container.name,
-            "directory": container.directory,
-            "status": "running" if container_status.get("running") else "stopped",
-            "url": container_status.get("url"),
-            "port": container.effective_port,
-        })
+        container_list.append(
+            {
+                "name": container.name,
+                "directory": container.directory,
+                "status": "running" if container_status.get("running") else "stopped",
+                "url": container_status.get("url"),
+                "port": container.effective_port,
+            }
+        )
 
     return success_output(
         message=f"Found {len(containers)} container(s)",
@@ -154,9 +158,7 @@ async def _action_status(context: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-async def _action_restart_container(
-    container_name: str, context: dict[str, Any]
-) -> dict[str, Any]:
+async def _action_restart_container(container_name: str, context: dict[str, Any]) -> dict[str, Any]:
     db = context["db"]
     user_id = context["user_id"]
     project_id = context["project_id"]
@@ -176,6 +178,12 @@ async def _action_restart_container(
         return error_output(
             message="Project not found",
             suggestion="Ensure you are in a valid project context",
+        )
+
+    if project.environment_status == "provisioning":
+        return error_output(
+            message="Project is still being provisioned. Wait for setup to complete before restarting containers.",
+            suggestion="Try again in a moment.",
         )
 
     orchestrator = get_orchestrator()
@@ -244,6 +252,12 @@ async def _action_restart_all(context: dict[str, Any]) -> dict[str, Any]:
         return error_output(
             message="Project not found",
             suggestion="Ensure you are in a valid project context",
+        )
+
+    if project.environment_status == "provisioning":
+        return error_output(
+            message="Project is still being provisioned. Wait for setup to complete before restarting containers.",
+            suggestion="Try again in a moment.",
         )
 
     containers = await _fetch_all_containers(db, project_id)
@@ -394,9 +408,7 @@ async def _action_reload_config(context: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-async def _action_container_logs(
-    container_name: str, context: dict[str, Any]
-) -> dict[str, Any]:
+async def _action_container_logs(container_name: str, context: dict[str, Any]) -> dict[str, Any]:
     db = context["db"]
     project_id = context["project_id"]
     project_slug = context.get("project_slug", "")
@@ -456,9 +468,7 @@ async def _action_container_logs(
     )
 
 
-async def _action_health_check(
-    container_name: str, context: dict[str, Any]
-) -> dict[str, Any]:
+async def _action_health_check(container_name: str, context: dict[str, Any]) -> dict[str, Any]:
     db = context["db"]
     project_id = context["project_id"]
     project_slug = context.get("project_slug", "")
@@ -605,9 +615,7 @@ async def project_control_executor(
                 suggestion="Choose one of: status, restart_container, restart_all, reload_config, container_logs, health_check",
             )
     except Exception as exc:
-        logger.error(
-            "project_control action '%s' failed: %s", action, exc, exc_info=True
-        )
+        logger.error("project_control action '%s' failed: %s", action, exc, exc_info=True)
         return error_output(
             message=f"Action '{action}' failed: {exc}",
             suggestion="Check container configuration and try again",
@@ -617,6 +625,7 @@ async def project_control_executor(
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
+
 
 def register_project_control_tools(registry):
     """Register the project_control tool."""

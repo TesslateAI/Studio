@@ -5,7 +5,8 @@ export type EnvironmentStatus =
   | 'agent_active'
   | 'files_ready'
   | 'stopping'
-  | 'starting';
+  | 'starting'
+  | 'provisioning';
 
 export interface StatusConfig {
   label: string;
@@ -52,13 +53,23 @@ export const STATUS_MAP: Record<EnvironmentStatus, StatusConfig> = {
     textColor: 'text-yellow-400',
     spin: true,
   },
+  provisioning: {
+    label: 'Setting up',
+    tooltip: 'Project files are being provisioned.',
+    className: 'bg-blue-500/10 border-blue-500/20',
+    textColor: 'text-blue-400',
+    spin: true,
+  },
 };
 
 /** Derive environment status from compute tier + optional transient flags. */
 export function getEnvironmentStatus(
   computeTier: ComputeTier,
-  options?: { stopping?: boolean; starting?: boolean }
+  options?: { stopping?: boolean; starting?: boolean; provisioning?: boolean }
 ): EnvironmentStatus | null {
+  // Provisioning takes priority — project isn't ready yet
+  if (options?.provisioning) return 'provisioning';
+
   // Transient WS/UI-driven states (highest priority)
   if (options?.stopping) return 'stopping';
   if (options?.starting) return 'starting';
