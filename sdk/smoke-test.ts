@@ -133,13 +133,41 @@ async function main() {
 
   const files = ts.projects.files(slug);
 
-  await test('file tree', async () => {
+  await test('file tree contains template files', async () => {
     const tree = await files.tree();
-    assert(typeof tree.status === 'string', 'should have status field');
-    assert(Array.isArray(tree.files), 'should have files array');
+    assert(tree.status === 'ready', `status should be ready, got ${tree.status}`);
+    assert(tree.files.length > 0, 'should have files from template');
+    const names = tree.files.map((f) => f.name);
+    assert(names.includes('package.json'), 'should have package.json from template');
   });
 
-  await test('write + read roundtrip', async () => {
+  await test('read existing template file (package.json)', async () => {
+    const result = await files.read('package.json');
+    assert(result.content.includes('"name"'), 'package.json should have a name field');
+    assert(result.content.includes('"dependencies"'), 'package.json should have dependencies');
+    assert(result.size > 0, 'should have non-zero size');
+  });
+
+  await test('modify existing file and read back', async () => {
+    // Read the original
+    const original = await files.read('package.json');
+    assert(original.content.length > 0, 'original should have content');
+
+    // Modify it
+    const modified = original.content.replace('"private": true', '"private": false');
+    assert(modified !== original.content, 'modification should change content');
+    await files.write('package.json', modified);
+
+    // Read back and verify the edit stuck
+    const readBack = await files.read('package.json');
+    assert(readBack.content.includes('"private": false'), 'edit should persist');
+    assert(!readBack.content.includes('"private": true'), 'old value should be gone');
+
+    // Restore original
+    await files.write('package.json', original.content);
+  });
+
+  await test('write + read roundtrip (new file)', async () => {
     const content = `sdk-test-${Date.now()}`;
     const writeResult = await files.write('sdk-test.txt', content);
     assert(typeof writeResult.message === 'string', 'write should return message');

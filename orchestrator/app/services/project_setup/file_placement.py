@@ -1,8 +1,10 @@
 import asyncio
+import io
 import logging
 import os
 import shutil
 import subprocess
+import tarfile
 from dataclasses import dataclass
 
 from ...services.base_config_parser import (
@@ -105,7 +107,6 @@ async def _place_kubernetes(
     from ...services.fileops_client import FileOpsClient
     from ...services.node_discovery import NodeDiscovery
     from ...services.volume_manager import get_volume_manager
-    from ...utils.async_fileio import read_file_async, walk_directory_async
 
     if task:
         task.update_progress(50, 100, "Creating project volume...")
@@ -116,34 +117,20 @@ async def _place_kubernetes(
     if task:
         task.update_progress(60, 100, "Writing files to volume...")
 
-    # Write source files to volume
-    walk_results = await walk_directory_async(source_path, exclude_dirs=list(SKIP_DIRS))
+    # Build tar archive locally — one gRPC call instead of N per-file writes
+    tar_data, files_written = await asyncio.to_thread(
+        _build_source_tar, source_path, config if write_config else None
+    )
 
     discovery = NodeDiscovery()
     address = await discovery.get_fileops_address(node_name)
-    files_written = 0
 
     async with FileOpsClient(address) as client:
-        for root, _, files in walk_results:
-            for fname in files:
-                file_full_path = os.path.join(root, fname)
-                relative_path = os.path.relpath(file_full_path, source_path).replace("\\", "/")
+        await client.tar_extract(volume_id, ".", tar_data)
 
-                try:
-                    content = await read_file_async(file_full_path)
-                    data = content.encode("utf-8") if isinstance(content, str) else content
-                    await client.write_file(volume_id, relative_path, data)
-                    files_written += 1
-                except Exception as e:
-                    logger.warning(f"[PLACEMENT] Could not write file {relative_path}: {e}")
-
-        # Write resolved config to volume (skip for fallback — let Setup page handle it)
-        if write_config:
-
-            config_json = serialize_config_to_json(config)
-            await client.write_file(volume_id, ".tesslate/config.json", config_json.encode("utf-8"))
-
-    logger.info(f"[PLACEMENT] Wrote {files_written} files to volume {volume_id}")
+    logger.info(
+        f"[PLACEMENT] Placed {files_written} files on volume {volume_id} via tar ({len(tar_data)} bytes)"
+    )
 
     if task:
         task.update_progress(80, 100, f"Wrote {files_written} files to volume")
@@ -151,3 +138,40 @@ async def _place_kubernetes(
     return PlacedFiles(volume_id=volume_id, node_name=node_name)
 
 
+def _build_source_tar(
+    source_path: str,
+    config: TesslateProjectConfig | None = None,
+) -> tuple[bytes, int]:
+    """Build a tar archive from a source directory.
+
+    Runs in a thread (blocking I/O). Returns (tar_bytes, file_count).
+    Excludes common generated/dependency directories (node_modules, .git, etc.).
+    Optionally injects .tesslate/config.json into the archive.
+    """
+    buf = io.BytesIO()
+    file_count = 0
+
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for root, dirs, files in os.walk(source_path):
+            # Prune skipped directories in-place so os.walk doesn't descend
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+
+            for fname in files:
+                full_path = os.path.join(root, fname)
+                arcname = os.path.relpath(full_path, source_path).replace("\\", "/")
+                try:
+                    tar.add(full_path, arcname=arcname)
+                    file_count += 1
+                except (OSError, ValueError) as e:
+                    logger.warning("[PLACEMENT] Skipping %s: %s", arcname, e)
+
+        # Inject .tesslate/config.json if provided
+        if config is not None:
+            config_bytes = serialize_config_to_json(config).encode("utf-8")
+            info = tarfile.TarInfo(name=".tesslate/config.json")
+            info.size = len(config_bytes)
+            info.mode = 0o644
+            tar.addfile(info, io.BytesIO(config_bytes))
+            file_count += 1
+
+    return buf.getvalue(), file_count
