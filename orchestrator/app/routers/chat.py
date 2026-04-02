@@ -22,6 +22,7 @@ from ..agent import create_agent_from_db_model
 from ..agent.iterative_agent import _convert_uuids_to_strings
 from ..agent.models import create_model_adapter
 from ..agent.tools.registry import get_tool_registry
+from ..auth_unified import enforce_project_scope, get_authenticated_user
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
@@ -44,7 +45,7 @@ from ..services.agent_context import (
     _get_chat_history,
     _resolve_container_name,
 )
-from ..users import current_active_user, current_superuser
+from ..users import current_superuser
 from ..utils.resource_naming import get_project_path
 
 settings = get_settings()
@@ -97,7 +98,7 @@ async def _get_arq_pool():
 
 @router.get("/", response_model=list[ChatSchema])
 async def get_chats(
-    current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_authenticated_user), db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Chat).where(Chat.user_id == current_user.id))
     chats = result.scalars().all()
@@ -107,7 +108,7 @@ async def get_chats(
 @router.post("/")
 async def create_chat(
     chat_data: dict,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     project_id = chat_data.get("project_id")
@@ -198,7 +199,7 @@ async def debug_tool_execute(
 async def get_user_sessions(
     limit: int = 30,
     offset: int = 0,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List user's standalone chat sessions (may have a project connected later)."""
@@ -247,7 +248,7 @@ async def get_user_sessions(
 @router.get("/session/{chat_id}/messages")
 async def get_session_messages(
     chat_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get messages for a standalone chat session (no project required)."""
@@ -299,7 +300,7 @@ async def update_chat_project(
     request: Request,
     chat_id: UUID,
     data: dict,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Connect or disconnect a project from a chat session."""
@@ -321,6 +322,7 @@ async def update_chat_project(
         )
         if not project_result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Project not found")
+        enforce_project_scope(current_user, UUID(project_id))
         chat.project_id = UUID(project_id)
     else:
         chat.project_id = None
@@ -332,7 +334,7 @@ async def update_chat_project(
 @router.get("/{project_id}/sessions")
 async def list_chat_sessions(
     project_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all chat sessions for a project with status and message count."""
@@ -371,7 +373,7 @@ async def list_chat_sessions(
 async def update_chat_session(
     chat_id: str,
     update_data: dict,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a chat session (title, archive status)."""
@@ -395,7 +397,7 @@ async def update_chat_session(
 @router.delete("/{chat_id}")
 async def delete_chat_session(
     chat_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a chat session and all its messages/steps (cascade)."""
@@ -428,7 +430,7 @@ async def delete_chat_session(
 async def get_project_messages(
     project_id: str,
     chat_id: str | None = None,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get all messages for a specific project's chat.
@@ -568,7 +570,7 @@ async def get_project_messages(
 @router.delete("/{project_id}/messages")
 async def delete_project_messages(
     project_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete all messages for a specific project's chat (clear chat history)."""
@@ -621,7 +623,7 @@ async def delete_project_messages(
 @router.post("/agent", response_model=AgentChatResponse)
 async def agent_chat(
     request: AgentChatRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -659,6 +661,7 @@ async def agent_chat(
 
             if not project:
                 raise HTTPException(status_code=404, detail="Project not found or access denied")
+            enforce_project_scope(current_user, project.id)
         except HTTPException:
             raise
         except Exception as e:
@@ -1113,7 +1116,7 @@ async def agent_chat(
 
 @router.post("/agent/approval")
 async def handle_agent_approval(
-    approval_data: dict, current_user: User = Depends(current_active_user)
+    approval_data: dict, current_user: User = Depends(get_authenticated_user)
 ):
     """
     Handle approval response for agent tool execution.
@@ -1151,7 +1154,7 @@ async def handle_agent_approval(
 @router.post("/agent/stream")
 async def agent_chat_stream(
     request: AgentChatRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -1208,6 +1211,8 @@ async def agent_chat_stream(
                     }
                     yield f"data: {json.dumps(error_event)}\n\n"
                     return
+
+                enforce_project_scope(current_user, project.id)
 
                 # Track activity for idle cleanup (database-based)
                 from ..services.activity_tracker import track_project_activity
@@ -1700,7 +1705,7 @@ async def agent_chat_stream(
 @router.post("/agent/cancel/{task_id}")
 async def cancel_agent_task(
     task_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
 ):
     """Explicitly cancel a running agent task."""
     from ..services.pubsub import get_pubsub
@@ -1717,7 +1722,7 @@ async def cancel_agent_task(
 async def get_active_agent_task(
     project_id: str,
     chat_id: str | None = None,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
 ):
     """Check if there's an active agent task for a project (optionally scoped to a chat session).
 
@@ -1807,7 +1812,7 @@ async def get_active_agent_task(
 async def subscribe_agent_events(
     task_id: str,
     last_event_id: str | None = None,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
 ):
     """Subscribe to agent events via SSE. Supports reconnection with last_event_id."""
     from starlette.responses import StreamingResponse as StarletteStreamingResponse

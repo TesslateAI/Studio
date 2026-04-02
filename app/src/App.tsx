@@ -37,6 +37,7 @@ import PreferencesSettings from './pages/settings/PreferencesSettings';
 import SecuritySettings from './pages/settings/SecuritySettings';
 import DeploymentSettings from './pages/settings/DeploymentSettings';
 import BillingSettings from './pages/settings/BillingSettings';
+import ApiKeysSettings from './pages/settings/ApiKeysSettings';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
 import { CommandPalette } from './components/CommandPalette';
@@ -346,7 +347,7 @@ function AppContent() {
           <Route path="preferences" element={<PreferencesSettings />} />
           <Route path="security" element={<SecuritySettings />} />
           <Route path="deployment" element={<DeploymentSettings />} />
-          <Route path="api-keys" element={<Navigate to="/library?tab=models" replace />} />
+          <Route path="api-keys" element={<ApiKeysSettings />} />
           <Route path="billing" element={<BillingSettings />} />
         </Route>
 

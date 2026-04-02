@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
+from ..auth_unified import enforce_project_scope, get_authenticated_user
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
@@ -78,7 +79,7 @@ from ..services.secret_codec import decode_secret_map, encode_secret_map
 from ..services.secret_manager_env import build_env_overrides, get_injected_env_vars_for_container
 from ..services.service_definitions import get_service
 from ..services.task_manager import Task, get_task_manager
-from ..users import current_active_user, current_optional_user
+from ..users import current_optional_user
 from ..utils.async_fileio import makedirs_async, read_file_async, walk_directory_async
 from ..utils.resource_naming import get_project_path
 from ..utils.slug_generator import generate_project_slug
@@ -217,27 +218,37 @@ async def _check_repo_size_limit(
         logger.warning(f"[CREATE] Could not check repository size for {owner}/{repo}: {e}")
 
 
-async def get_project_by_slug(db: AsyncSession, project_slug: str, user_id: UUID) -> Project:
+async def get_project_by_slug(
+    db: AsyncSession, project_slug: str, user_id_or_user: UUID | User
+) -> Project:
     """
     Get a project by its slug or numeric ID and verify ownership.
 
     Args:
         db: Database session
         project_slug: Project slug (e.g., "my-awesome-app-k3x8n2") or numeric ID as string (e.g., "4")
-        user_id: User ID to verify ownership
+        user_id_or_user: User ID (UUID) or User object to verify ownership.
+            When a User object is passed, API-key scope enforcement is applied.
 
     Returns:
         Project object if found and owned by user
 
     Raises:
         HTTPException 404 if project not found
-        HTTPException 403 if user doesn't own the project
+        HTTPException 403 if user doesn't own the project or API key lacks scope
     """
+    user_obj: User | None = None
+    if isinstance(user_id_or_user, User):
+        user_obj = user_id_or_user
+        user_id = user_id_or_user.id
+    else:
+        user_id = user_id_or_user
+
     # Try to parse as UUID first (for direct ID access)
     try:
-        from uuid import UUID
+        from uuid import UUID as _UUID
 
-        project_id = UUID(project_slug)
+        project_id = _UUID(project_slug)
         result = await db.execute(select(Project).where(Project.id == project_id))
         project = result.scalar_one_or_none()
     except ValueError:
@@ -250,6 +261,10 @@ async def get_project_by_slug(db: AsyncSession, project_slug: str, user_id: UUID
 
     if project.owner_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this project")
+
+    # Enforce API-key project scope when a User object is available
+    if user_obj is not None:
+        enforce_project_scope(user_obj, project.id)
 
     return project
 
@@ -271,7 +286,7 @@ async def track_project_activity(project_id: UUID, db: AsyncSession) -> None:
 
 @router.get("/", response_model=list[ProjectSchema])
 async def get_projects(
-    current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_authenticated_user), db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Project).where(Project.owner_id == current_user.id))
     projects = result.scalars().all()
@@ -362,7 +377,7 @@ async def _perform_project_setup(
 @router.post("/")
 async def create_project(
     project: ProjectCreate,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -486,11 +501,11 @@ async def create_project(
 @router.get("/{project_slug}", response_model=ProjectSchema)
 async def get_project(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a project by its slug."""
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     return project
 
 
@@ -498,13 +513,13 @@ async def get_project(
 async def get_file_tree(
     project_slug: str,
     container_dir: str | None = None,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get recursive filtered file tree (metadata only, no content)."""
     from ..services.volume_manager import VolumeRestoringError, VolumeUnavailableError
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     from ..services.orchestration import get_orchestrator
 
@@ -543,13 +558,13 @@ async def get_file_content(
     project_slug: str,
     path: str,
     container_dir: str | None = None,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get content of a single file."""
     from ..services.volume_manager import VolumeRestoringError, VolumeUnavailableError
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     from ..services.orchestration import get_orchestrator
 
@@ -593,13 +608,13 @@ async def get_files_content_batch(
     project_slug: str,
     body: BatchContentRequest,
     container_dir: str | None = None,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Batch-read multiple files in one request."""
     from ..services.volume_manager import VolumeRestoringError, VolumeUnavailableError
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     from ..services.orchestration import get_orchestrator
 
@@ -639,7 +654,7 @@ async def get_files_content_batch(
 @router.get("/{project_slug}/files", response_model=list[ProjectFileSchema])
 async def get_project_files(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
     from_pod: bool = False,  # Optional query param to force reading from pod
     from_volume: bool = True,  # Default: Try reading from Docker volume for multi-container projects
@@ -658,7 +673,7 @@ async def get_project_files(
     with paths relative to that directory (appearing as root-level).
     """
     # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id  # For internal operations
 
     settings = get_settings()
@@ -840,7 +855,7 @@ async def get_project_files(
 @router.get("/{project_slug}/dev-server-url")
 async def get_dev_server_url(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -853,7 +868,7 @@ async def get_dev_server_url(
     4. Return detailed status for better UX
     """
     # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id  # For internal operations
 
     logger.info(
@@ -901,7 +916,7 @@ async def get_dev_server_url(
 @router.get("/{project_slug}/container-status")
 async def get_container_status(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -911,7 +926,7 @@ async def get_container_status(
     Frontend should poll this endpoint to know when pod is ready.
     """
     # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id  # For internal operations
 
     try:
@@ -989,7 +1004,7 @@ async def get_container_status(
 async def save_project_file(
     project_slug: str,
     file_data: dict,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -999,7 +1014,7 @@ async def save_project_file(
     Instead, it writes files directly to the dev container pod via K8s API.
     """
     # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id  # For internal operations
 
     file_path = file_data.get("file_path")
@@ -1119,11 +1134,11 @@ def _validate_file_path(path: str) -> str:
 async def delete_project_file(
     project_slug: str,
     body: FileDeleteRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a file or directory from the user's dev container."""
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     file_path = _validate_file_path(body.file_path)
 
     try:
@@ -1186,11 +1201,11 @@ async def delete_project_file(
 async def rename_project_file(
     project_slug: str,
     body: FileRenameRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Rename / move a file or directory inside the user's dev container."""
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     old_path = _validate_file_path(body.old_path)
     new_path = _validate_file_path(body.new_path)
 
@@ -1250,11 +1265,11 @@ async def rename_project_file(
 async def create_project_directory(
     project_slug: str,
     body: DirectoryCreateRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a directory inside the user's dev container."""
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     dir_path = _validate_file_path(body.dir_path)
 
     try:
@@ -1282,7 +1297,7 @@ async def create_project_directory(
 @router.get("/{project_slug}/container-info")
 async def get_container_info(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -1303,7 +1318,7 @@ async def get_container_info(
           - command_prefix: docker exec command prefix
     """
     # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id  # For internal operations
 
     settings = get_settings()
@@ -1500,7 +1515,7 @@ async def _perform_project_deletion(
 @router.delete("/{project_slug}")
 async def delete_project(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a project and ALL associated data including chats, messages, files, and containers.
@@ -1509,7 +1524,7 @@ async def delete_project(
     track its progress using the returned task_id.
     """
     # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id  # For internal operations
 
     # Create a background task for deletion
@@ -1550,13 +1565,13 @@ async def delete_project(
 @router.get("/{project_slug}/setup-config", response_model=TesslateConfigResponse)
 async def get_setup_config(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Read .tesslate/config.json from the project filesystem/PVC.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     await track_project_activity(project.id, db)
     settings = get_settings()
 
@@ -1665,14 +1680,14 @@ async def get_setup_config(
 async def save_setup_config(
     project_slug: str,
     config_data: TesslateConfigCreate,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Save .tesslate/config.json and sync Container records.
     Creates/updates/deletes containers to match the config.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     await track_project_activity(project.id, db)
     settings = get_settings()
 
@@ -1975,7 +1990,7 @@ async def save_setup_config(
 @router.post("/{project_slug}/sync-config")
 async def sync_config_to_file(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Save current canvas state (DB) to .tesslate/config.json.
@@ -1983,7 +1998,7 @@ async def sync_config_to_file(
     Reads all Container, ContainerConnection, DeploymentTarget, and BrowserPreview
     records for the project and writes a complete config.json.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     await track_project_activity(project.id, db)
     settings = get_settings()
 
@@ -2034,7 +2049,7 @@ async def sync_config_to_file(
 async def analyze_project(
     project_slug: str,
     model: str | None = None,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -2042,7 +2057,7 @@ async def analyze_project(
     Returns a TesslateConfigResponse with the generated configuration.
     """
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     settings = get_settings()
 
     # Read file tree from filesystem/PVC
@@ -2230,12 +2245,12 @@ async def analyze_project(
 @router.get("/{project_slug}/settings")
 async def get_project_settings(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get project settings."""
     # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     settings = project.settings or {}
     return {
@@ -2251,12 +2266,12 @@ async def get_project_settings(
 async def update_project_settings(
     project_slug: str,
     settings_data: dict,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update project settings."""
     # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     try:
         # Merge new settings with existing
@@ -2283,7 +2298,7 @@ async def export_project_as_template(
     project_slug: str,
     export_data: TemplateExportRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Export a project as a reusable template archive.
@@ -2292,7 +2307,7 @@ async def export_project_as_template(
     a background task to package the project files into a tar.gz archive.
     """
     settings = get_settings()
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     # Create the marketplace base record
     template_slug = generate_project_slug(export_data.name)
@@ -2431,7 +2446,7 @@ async def export_project_as_template(
 @router.get("/{project_slug}/download-tesslate")
 async def download_tesslate_folder(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Download the .tesslate/ folder as a ZIP archive.
@@ -2446,7 +2461,7 @@ async def download_tesslate_folder(
 
     from ..services.orchestration import get_orchestrator
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     orchestrator = get_orchestrator()
 
     # Get the first container for file access
@@ -2517,7 +2532,7 @@ async def download_tesslate_folder(
 @router.post("/{project_id}/fork", response_model=ProjectSchema)
 async def fork_project(
     project_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -2792,14 +2807,14 @@ async def get_image_dimensions(file_path: str) -> tuple:
 @router.get("/{project_slug}/assets/directories")
 async def list_asset_directories(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     List all asset directories for this project.
     Scans the filesystem for directories and merges with database records.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id
 
     directories_set = set()
@@ -2859,14 +2874,14 @@ async def list_asset_directories(
 async def create_asset_directory(
     project_slug: str,
     directory_data: dict,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Create a new directory for assets.
     This creates the physical directory in the project filesystem.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id
 
     directory_path = directory_data.get("path", "").strip("/")
@@ -2932,7 +2947,7 @@ async def upload_asset(
     project_slug: str,
     file: UploadFile = File(...),
     directory: str = Form(...),
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -2945,7 +2960,7 @@ async def upload_asset(
 
     Stores the file in the project's filesystem and records metadata in the database.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id
 
     # Validate directory path
@@ -3093,13 +3108,13 @@ async def upload_asset(
 async def list_assets(
     project_slug: str,
     directory: str | None = Query(None),
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     List all assets for a project, optionally filtered by directory.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     query = select(ProjectAsset).where(ProjectAsset.project_id == project.id)
 
@@ -3167,7 +3182,7 @@ async def get_asset_file(
     if not current_user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     asset = await db.get(ProjectAsset, asset_id)
     if not asset or asset.project_id != project.id:
@@ -3222,13 +3237,13 @@ async def get_asset_file(
 async def delete_asset(
     project_slug: str,
     asset_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Delete an asset and its file from the filesystem.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     asset = await db.get(ProjectAsset, asset_id)
     if not asset or asset.project_id != project.id:
@@ -3277,13 +3292,13 @@ async def rename_asset(
     project_slug: str,
     asset_id: UUID,
     rename_data: dict,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Rename an asset file.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     asset = await db.get(ProjectAsset, asset_id)
     if not asset or asset.project_id != project.id:
@@ -3370,13 +3385,13 @@ async def move_asset(
     project_slug: str,
     asset_id: UUID,
     move_data: dict,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Move an asset to a different directory.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     asset = await db.get(ProjectAsset, asset_id)
     if not asset or asset.project_id != project.id:
@@ -3464,7 +3479,7 @@ async def move_asset(
 @router.post("/{project_slug}/deploy")
 async def deploy_project(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -3472,7 +3487,7 @@ async def deploy_project(
     This is a premium feature with tier-based limits.
     """
     # Get project
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     # Check if already deployed
     if project.is_deployed:
@@ -3534,14 +3549,14 @@ async def deploy_project(
 @router.delete("/{project_slug}/deploy")
 async def undeploy_project(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Remove deployment status from a project (allows container to be stopped when idle).
     """
     # Get project
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     if not project.is_deployed:
         return {"message": "Project is not deployed", "project_id": str(project.id)}
@@ -3561,7 +3576,7 @@ async def undeploy_project(
 
 @router.get("/deployment/limits")
 async def get_deployment_limits(
-    current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_authenticated_user), db: AsyncSession = Depends(get_db)
 ):
     """
     Get current deployment limits and usage for the user.
@@ -3610,7 +3625,7 @@ async def get_deployment_limits(
 @router.post("/deployment/purchase-slot")
 async def purchase_additional_deploy_slot(
     request: Request,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -3759,14 +3774,14 @@ async def stream_container_logs(
 @router.get("/{project_slug}/containers", response_model=list[ContainerSchema])
 async def get_project_containers(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Get all containers for a project (for the React Flow node graph).
     Returns containers with their positions and base information.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     result = await db.execute(
         select(Container)
@@ -3783,7 +3798,7 @@ async def add_container_to_project(
     project_slug: str,
     container_data: ContainerCreate,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -3806,7 +3821,7 @@ async def add_container_to_project(
             "task_id": UUID for tracking background initialization
         }
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     try:
         # Handle service containers differently from base containers
@@ -4123,13 +4138,13 @@ async def add_container_to_project(
 )
 async def get_container_connections(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Get all connections between containers in the project.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     result = await db.execute(
         select(ContainerConnection).where(ContainerConnection.project_id == project.id)
@@ -4143,14 +4158,14 @@ async def get_container_connections(
 async def create_container_connection(
     project_slug: str,
     connection_data: ContainerConnectionCreate,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Create a connection between two containers (React Flow edge).
     This represents a dependency or network connection.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     try:
         # Verify both containers exist and belong to this project
@@ -4265,13 +4280,13 @@ async def create_container_connection(
 async def delete_container_connection(
     project_slug: str,
     connection_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Delete a connection between containers.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     connection = await db.get(ContainerConnection, connection_id)
     if not connection or connection.project_id != project.id:
@@ -4301,13 +4316,13 @@ async def delete_container_connection(
 @router.get("/{project_slug}/browser-previews", response_model=list[BrowserPreviewSchema])
 async def get_browser_previews(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Get all browser preview nodes for a project.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     result = await db.execute(select(BrowserPreview).where(BrowserPreview.project_id == project.id))
     previews = result.scalars().all()
@@ -4319,13 +4334,13 @@ async def get_browser_previews(
 async def create_browser_preview(
     project_slug: str,
     preview_data: BrowserPreviewCreate,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Create a new browser preview node on the canvas.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     try:
         # If a container ID is provided, verify it exists in this project
@@ -4364,13 +4379,13 @@ async def update_browser_preview(
     project_slug: str,
     preview_id: UUID,
     preview_data: BrowserPreviewUpdate,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Update a browser preview node (position, connected container, current path).
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     preview = await db.get(BrowserPreview, preview_id)
     if not preview or preview.project_id != project.id:
@@ -4411,13 +4426,13 @@ async def update_browser_preview(
 async def delete_browser_preview(
     project_slug: str,
     preview_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Delete a browser preview node.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     preview = await db.get(BrowserPreview, preview_id)
     if not preview or preview.project_id != project.id:
@@ -4447,13 +4462,13 @@ async def connect_browser_to_container(
     project_slug: str,
     preview_id: UUID,
     container_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Connect a browser preview to a container for preview.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     preview = await db.get(BrowserPreview, preview_id)
     if not preview or preview.project_id != project.id:
@@ -4484,13 +4499,13 @@ async def connect_browser_to_container(
 async def disconnect_browser_from_container(
     project_slug: str,
     preview_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Disconnect a browser preview from its container.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     preview = await db.get(BrowserPreview, preview_id)
     if not preview or preview.project_id != project.id:
@@ -4519,7 +4534,7 @@ async def disconnect_browser_from_container(
 @router.get("/{project_slug}/containers/status")
 async def get_containers_status(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -4530,7 +4545,7 @@ async def get_containers_status(
     sanitized container display name so the frontend graph canvas polling
     can always find the correct entry.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     try:
         from ..services.orchestration import get_orchestrator
@@ -4608,13 +4623,13 @@ def _container_response(container, injected_env_vars: list | None = None) -> dic
 async def get_container(
     project_slug: str,
     container_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Get a single container's details including environment variables.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     result = await db.execute(
         select(Container).where(Container.id == container_id).options(selectinload(Container.base))
@@ -4632,13 +4647,13 @@ async def update_container(
     project_slug: str,
     container_id: UUID,
     container_data: ContainerUpdate,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Update container settings (mainly position for React Flow).
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
@@ -4687,11 +4702,11 @@ async def update_container_credentials(
     project_slug: str,
     container_id: UUID,
     body: ContainerCredentialUpdate,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update credentials for an external service container."""
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
@@ -4765,7 +4780,7 @@ async def rename_container(
     project_slug: str,
     container_id: UUID,
     rename_data: ContainerRename,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -4779,7 +4794,7 @@ async def rename_container(
     """
     import re
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     result = await db.execute(
         select(Container).where(Container.id == container_id).options(selectinload(Container.base))
@@ -4916,7 +4931,7 @@ async def assign_deployment_target(
     project_slug: str,
     container_id: UUID,
     assignment: DeploymentTargetAssignment,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -4927,7 +4942,7 @@ async def assign_deployment_target(
     """
     from ..services.service_definitions import DEPLOYMENT_COMPATIBILITY, is_deployment_compatible
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     # Get container with base relationship for tech stack info
     result = await db.execute(
@@ -4989,14 +5004,14 @@ async def assign_deployment_target(
 async def delete_container(
     project_slug: str,
     container_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Remove a container from the project.
     Deletes the container record and its directory from the monorepo.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
@@ -5090,7 +5105,7 @@ async def delete_container(
 @router.post("/{project_slug}/containers/start-all")
 async def start_all_containers(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -5099,7 +5114,7 @@ async def start_all_containers(
     In Docker mode: Uses docker-compose up to start containers.
     In Kubernetes mode: Creates namespace, deployments, and services.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     await track_project_activity(project.id, db)
 
     try:
@@ -5151,7 +5166,7 @@ async def start_all_containers(
 @router.post("/{project_slug}/containers/stop-all")
 async def stop_all_containers(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -5160,7 +5175,7 @@ async def stop_all_containers(
     In Docker mode: Uses docker-compose down.
     In Kubernetes mode: Deletes the project namespace.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     try:
         # Use unified orchestration (handles both Docker and Kubernetes)
@@ -5439,7 +5454,7 @@ async def _start_container_background_task(
 async def start_single_container(
     project_slug: str,
     container_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -5469,7 +5484,7 @@ async def start_single_container(
         }
     """
     # Verify project ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     # Verify container exists and belongs to project
     container = await db.get(Container, container_id)
@@ -5566,13 +5581,13 @@ async def start_single_container(
 async def stop_single_container(
     project_slug: str,
     container_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Stop a specific container in the project.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     # Get the container
     container = await db.get(Container, container_id)
@@ -5621,7 +5636,7 @@ async def stop_single_container(
 async def check_container_health(
     project_slug: str,
     container_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -5638,7 +5653,7 @@ async def check_container_health(
     """
     import httpx
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
@@ -5726,7 +5741,7 @@ async def check_container_health(
 async def restart_single_container(
     project_slug: str,
     container_id: UUID,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -5735,7 +5750,7 @@ async def restart_single_container(
     This endpoint returns immediately with a task ID. The client should poll
     for status updates.
     """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
@@ -5906,7 +5921,7 @@ async def _restart_container_background_task(
 @router.post("/{project_slug}/activity", status_code=204)
 async def touch_project_activity(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Lightweight endpoint to reset the idle timer.
@@ -5916,14 +5931,14 @@ async def touch_project_activity(
     """
     from ..services.activity_tracker import track_project_activity as _track
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
     await _track(db, project.id, "keep_active")
 
 
 @router.post("/{project_slug}/hibernate", status_code=202)
 async def hibernate_project(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Hibernate a project — stops compute, volume stays local.
@@ -5939,7 +5954,7 @@ async def hibernate_project(
             status_code=400, detail="Hibernation is only available in Kubernetes mode"
         )
 
-    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project = await get_project_by_slug(db, project_slug, current_user)
 
     if project.environment_status in ("hibernated", "stopping"):
         raise HTTPException(status_code=400, detail="Already hibernated or stopping")

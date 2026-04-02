@@ -11,6 +11,7 @@ import {
   CreditCard,
   ChevronLeft,
   ChevronRight,
+  KeyRound,
 } from 'lucide-react';
 
 interface SettingsSidebarProps {
@@ -40,7 +41,10 @@ const navSections: NavSection[] = [
   },
   {
     title: 'INTEGRATIONS',
-    items: [{ label: 'Deployment', path: '/settings/deployment', icon: Cloud }],
+    items: [
+      { label: 'Deployment', path: '/settings/deployment', icon: Cloud },
+      { label: 'API Keys', path: '/settings/api-keys', icon: KeyRound },
+    ],
   },
   {
     title: 'BILLING',

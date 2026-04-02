@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth_unified import enforce_project_scope, get_authenticated_user
 from ..database import get_db
 from ..models import Container, GitRepository, Project, User
 from ..schemas import (
@@ -32,7 +33,6 @@ from ..schemas import (
 from ..services.credential_manager import get_credential_manager
 from ..services.git_manager import GitManager
 from ..services.github_client import GitHubClient
-from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ async def verify_project_access(project_id: UUID, current_user: User, db: AsyncS
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
+    enforce_project_scope(current_user, project.id)
     return project
 
 
@@ -66,7 +67,7 @@ def _create_git_manager(current_user: User, project_id: str) -> GitManager:
 async def initialize_repository(
     project_id: str,
     request: GitInitRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -121,7 +122,7 @@ async def initialize_repository(
 async def clone_repository(
     project_id: str,
     request: GitCloneRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -229,7 +230,7 @@ async def clone_repository(
 @router.get("/status", response_model=GitStatusResponse)
 async def get_git_status(
     project_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -259,7 +260,7 @@ async def get_git_status(
 async def create_commit(
     project_id: str,
     request: GitCommitRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -300,7 +301,7 @@ async def create_commit(
 async def push_commits(
     project_id: str,
     request: GitPushRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -346,7 +347,7 @@ async def push_commits(
 async def pull_changes(
     project_id: str,
     request: GitPullRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -391,7 +392,7 @@ async def get_commit_history(
     project_id: str,
     limit: int = 50,
     branch: str | None = None,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -420,7 +421,7 @@ async def get_commit_history(
 @router.get("/branches", response_model=GitBranchesResponse)
 async def list_branches(
     project_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -454,7 +455,7 @@ async def list_branches(
 async def create_branch(
     project_id: str,
     request: GitBranchRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -488,7 +489,7 @@ async def create_branch(
 async def switch_branch(
     project_id: str,
     request: GitSwitchBranchRequest,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -518,7 +519,7 @@ async def switch_branch(
 @router.get("/info", response_model=GitRepositoryResponse | None)
 async def get_repository_info(
     project_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -552,7 +553,7 @@ async def get_repository_info(
 @router.delete("/disconnect")
 async def disconnect_repository(
     project_id: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """

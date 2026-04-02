@@ -6,6 +6,7 @@ const settingsTabs = [
   { label: 'Preferences', path: '/settings/preferences' },
   { label: 'Security', path: '/settings/security' },
   { label: 'Deployment', path: '/settings/deployment' },
+  { label: 'API Keys', path: '/settings/api-keys' },
   { label: 'Billing', path: '/settings/billing' },
 ];
 
@@ -34,9 +35,16 @@ export function SettingsLayout() {
         }}
       >
         {/* Settings sub-nav toolbar */}
-        <div className="h-10 flex items-center gap-1 flex-shrink-0 border-b border-[var(--border)]" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
-          {settingsTabs.map(tab => (
-            <button key={tab.path} onClick={() => navigate(tab.path)} className={`btn ${isActive(tab.path) ? 'btn-tab-active' : 'btn-tab'}`}>
+        <div
+          className="h-10 flex items-center gap-1 flex-shrink-0 border-b border-[var(--border)]"
+          style={{ paddingLeft: '7px', paddingRight: '10px' }}
+        >
+          {settingsTabs.map((tab) => (
+            <button
+              key={tab.path}
+              onClick={() => navigate(tab.path)}
+              className={`btn ${isActive(tab.path) ? 'btn-tab-active' : 'btn-tab'}`}
+            >
               {tab.label}
             </button>
           ))}
