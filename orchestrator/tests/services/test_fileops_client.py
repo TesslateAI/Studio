@@ -27,6 +27,7 @@ _mod = importlib.util.module_from_spec(_spec)
 sys.modules["app.services.fileops_client"] = _mod
 _spec.loader.exec_module(_mod)
 
+FileContent = _mod.FileContent
 FileInfo = _mod.FileInfo
 FileOpsClient = _mod.FileOpsClient
 _serialize = _mod._serialize
@@ -187,9 +188,7 @@ class TestReadFile:
     async def test_returns_base64_decoded_bytes(self):
         raw_content = b"console.log('hello world');\n"
         channel, rpc_callable = _make_mock_channel()
-        rpc_callable.return_value = {
-            "data": base64.b64encode(raw_content).decode("ascii")
-        }
+        rpc_callable.return_value = {"data": base64.b64encode(raw_content).decode("ascii")}
 
         client = FileOpsClient("addr:1234")
         client._channel = channel
@@ -249,8 +248,12 @@ class TestWriteFile:
             "path": "/app/out.js",
             "data": base64.b64encode(content).decode("ascii"),
             "mode": 0o644,
+            "uid": 1000,
+            "gid": 1000,
         }
-        rpc_callable.assert_awaited_once_with(expected_payload, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        rpc_callable.assert_awaited_once_with(
+            expected_payload, timeout=30.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
     async def test_custom_mode_and_timeout(self):
         channel, rpc_callable = _make_mock_channel()
@@ -385,7 +388,14 @@ class TestStatPath:
     async def test_calls_correct_grpc_path(self):
         channel, rpc_callable = _make_mock_channel()
         rpc_callable.return_value = {
-            "info": {"name": "f", "path": "/f", "size": 0, "is_dir": False, "mod_time": 0, "mode": 0}
+            "info": {
+                "name": "f",
+                "path": "/f",
+                "size": 0,
+                "is_dir": False,
+                "mod_time": 0,
+                "mode": 0,
+            }
         }
 
         client = FileOpsClient("addr:1234")
@@ -398,7 +408,14 @@ class TestStatPath:
     async def test_sends_correct_payload(self):
         channel, rpc_callable = _make_mock_channel()
         rpc_callable.return_value = {
-            "info": {"name": "f", "path": "/f", "size": 0, "is_dir": False, "mod_time": 0, "mode": 0}
+            "info": {
+                "name": "f",
+                "path": "/f",
+                "size": 0,
+                "is_dir": False,
+                "mod_time": 0,
+                "mode": 0,
+            }
         }
 
         client = FileOpsClient("addr:1234")
@@ -507,7 +524,7 @@ class TestMkdirAll:
         await client.mkdir_all("vol-1", "/app/src/components", timeout=8.0)
 
         rpc_callable.assert_awaited_once_with(
-            {"volume_id": "vol-1", "path": "/app/src/components"},
+            {"volume_id": "vol-1", "path": "/app/src/components", "uid": 1000, "gid": 1000},
             timeout=8.0,
             metadata=(("content-type", "application/grpc+json"),),
         )
@@ -551,9 +568,7 @@ class TestTarCreate:
     async def test_returns_base64_decoded_bytes(self):
         tar_data = b"\x1f\x8b" + b"\x00" * 100  # fake gzip header
         channel, rpc_callable = _make_mock_channel()
-        rpc_callable.return_value = {
-            "data": base64.b64encode(tar_data).decode("ascii")
-        }
+        rpc_callable.return_value = {"data": base64.b64encode(tar_data).decode("ascii")}
 
         client = FileOpsClient("addr:1234")
         client._channel = channel
@@ -602,8 +617,12 @@ class TestTarExtract:
             "volume_id": "vol-1",
             "path": "/app/dest",
             "data": base64.b64encode(tar_bytes).decode("ascii"),
+            "uid": 1000,
+            "gid": 1000,
         }
-        rpc_callable.assert_awaited_once_with(expected_payload, timeout=120.0, metadata=(("content-type", "application/grpc+json"),))
+        rpc_callable.assert_awaited_once_with(
+            expected_payload, timeout=120.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
     async def test_default_timeout_is_60(self):
         channel, rpc_callable = _make_mock_channel()
@@ -629,9 +648,7 @@ class TestReadFileText:
     async def test_returns_decoded_utf8_string(self):
         channel, rpc_callable = _make_mock_channel()
         text = "Hello, world! Unicode: \u2603\u2764"
-        rpc_callable.return_value = {
-            "data": base64.b64encode(text.encode("utf-8")).decode("ascii")
-        }
+        rpc_callable.return_value = {"data": base64.b64encode(text.encode("utf-8")).decode("ascii")}
 
         client = FileOpsClient("addr:1234")
         client._channel = channel
@@ -681,7 +698,9 @@ class TestWriteFileText:
         client = FileOpsClient("addr:1234")
         client._channel = channel
 
-        await client.write_file_text("vol-1", "/app/run.sh", "#!/bin/bash", mode=0o755, timeout=10.0)
+        await client.write_file_text(
+            "vol-1", "/app/run.sh", "#!/bin/bash", mode=0o755, timeout=10.0
+        )
 
         sent_payload = rpc_callable.call_args[0][0]
         assert sent_payload["mode"] == 0o755
@@ -820,3 +839,115 @@ class TestSerializerWiring:
         call_kwargs = channel.unary_unary.call_args[1]
         assert call_kwargs["request_serializer"] is _serialize
         assert call_kwargs["response_deserializer"] is _deserialize
+
+
+# ---------------------------------------------------------------------------
+# Go nil-slice JSON null handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestGoNilSliceNullHandling:
+    """Go's json.Marshal encodes nil slices as JSON null, not [].
+
+    Python's dict.get("key", []) returns None when the key exists with
+    value None — it only returns the default when the key is MISSING.
+    These tests verify every list-returning RPC handles null correctly.
+    """
+
+    async def test_read_files_null_errors(self):
+        """ReadFiles with errors: null (Go nil slice) must return empty list, not None."""
+        channel, rpc_callable = _make_mock_channel()
+        rpc_callable.return_value = {
+            "files": [{"path": "index.ts", "data": base64.b64encode(b"hi").decode(), "size": 2}],
+            "errors": None,  # Go nil slice
+        }
+
+        client = FileOpsClient("addr:1234")
+        client._channel = channel
+
+        files, errors = await client.read_files("vol-1", ["index.ts"])
+        assert len(files) == 1
+        assert files[0].path == "index.ts"
+        assert errors == []
+
+    async def test_read_files_null_files(self):
+        """ReadFiles with files: null must return empty list, not None."""
+        channel, rpc_callable = _make_mock_channel()
+        rpc_callable.return_value = {
+            "files": None,  # Go nil slice
+            "errors": ["missing.txt"],
+        }
+
+        client = FileOpsClient("addr:1234")
+        client._channel = channel
+
+        files, errors = await client.read_files("vol-1", ["missing.txt"])
+        assert files == []
+        assert errors == ["missing.txt"]
+
+    async def test_read_files_both_null(self):
+        """ReadFiles with both fields null must return ([], [])."""
+        channel, rpc_callable = _make_mock_channel()
+        rpc_callable.return_value = {"files": None, "errors": None}
+
+        client = FileOpsClient("addr:1234")
+        client._channel = channel
+
+        files, errors = await client.read_files("vol-1", ["a.txt"])
+        assert files == []
+        assert errors == []
+
+    async def test_read_files_missing_fields(self):
+        """ReadFiles with missing fields (empty response) must return ([], [])."""
+        channel, rpc_callable = _make_mock_channel()
+        rpc_callable.return_value = {}
+
+        client = FileOpsClient("addr:1234")
+        client._channel = channel
+
+        files, errors = await client.read_files("vol-1", ["a.txt"])
+        assert files == []
+        assert errors == []
+
+    async def test_read_files_normal_response(self):
+        """ReadFiles with normal non-null response works correctly."""
+        channel, rpc_callable = _make_mock_channel()
+        rpc_callable.return_value = {
+            "files": [
+                {"path": "a.txt", "data": base64.b64encode(b"aaa").decode(), "size": 3},
+                {"path": "b.txt", "data": base64.b64encode(b"bbb").decode(), "size": 3},
+            ],
+            "errors": ["c.txt"],
+        }
+
+        client = FileOpsClient("addr:1234")
+        client._channel = channel
+
+        files, errors = await client.read_files("vol-1", ["a.txt", "b.txt", "c.txt"])
+        assert len(files) == 2
+        assert files[0].data == "aaa"
+        assert files[1].data == "bbb"
+        assert errors == ["c.txt"]
+
+    async def test_list_dir_null_entries(self):
+        """ListDir with entries: null must return empty list."""
+        channel, rpc_callable = _make_mock_channel()
+        rpc_callable.return_value = {"entries": None}
+
+        client = FileOpsClient("addr:1234")
+        client._channel = channel
+
+        result = await client.list_dir("vol-1", "/app")
+        assert result == []
+
+    async def test_list_tree_null_entries(self):
+        """ListTree with entries: null must return empty list."""
+        channel, rpc_callable = _make_mock_channel()
+        rpc_callable.return_value = {"entries": None}
+
+        client = FileOpsClient("addr:1234")
+        client._channel = channel
+
+        result = await client.list_tree("vol-1", ".")
+        assert result == []

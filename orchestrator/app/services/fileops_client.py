@@ -156,7 +156,7 @@ class FileOpsClient:
                 mod_time=e.get("mod_time", 0),
                 mode=e.get("mode", 0),
             )
-            for e in resp.get("entries", [])
+            for e in (resp.get("entries") or [])
         ]
 
     async def list_tree(
@@ -190,7 +190,7 @@ class FileOpsClient:
                 mod_time=e.get("mod_time", 0),
                 mode=e.get("mode", 0),
             )
-            for e in resp.get("entries", [])
+            for e in (resp.get("entries") or [])
         ]
 
     async def read_files(
@@ -217,9 +217,9 @@ class FileOpsClient:
                 data=base64.b64decode(f.get("data", "")).decode("utf-8", errors="replace"),
                 size=f.get("size", 0),
             )
-            for f in resp.get("files", [])
+            for f in (resp.get("files") or [])
         ]
-        errors = resp.get("errors", [])
+        errors = resp.get("errors") or []
         return files, errors
 
     async def stat_path(self, volume_id: str, path: str, *, timeout: float = 30.0) -> FileInfo:
