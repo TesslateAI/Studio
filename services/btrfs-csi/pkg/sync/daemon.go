@@ -612,20 +612,12 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
 	}
 
-	// Ensure base template exists locally. If manifest.Base is empty but
-	// layers have a parent hash (auto-promoted volumes with stale manifest),
-	// use the layer parent as the effective base.
-	effectiveBase := manifest.Base
-	effectiveTmpl := manifest.TemplateName
-	if effectiveBase == "" && len(manifest.Layers) > 0 && manifest.Layers[0].Parent != "" {
-		effectiveBase = manifest.Layers[0].Parent
-		effectiveTmpl = "_vol_" + volumeID
-		klog.Infof("RestoreVolume: manifest.Base empty, using layer parent %s as base for %s",
-			cas.ShortHash(effectiveBase), volumeID)
-	}
-	if effectiveBase != "" && effectiveTmpl != "" {
-		if err := d.tmplMgr.EnsureTemplateByHash(ctx, effectiveTmpl, effectiveBase); err != nil {
-			return fmt.Errorf("ensure base template %s: %w", effectiveTmpl, err)
+	// Ensure base template exists locally (if volume was created from a template).
+	// Template-less volumes have Base=="" — their layers are full sends that
+	// btrfs receive can apply directly without a parent.
+	if manifest.Base != "" && manifest.TemplateName != "" {
+		if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
+			return fmt.Errorf("ensure base template %s: %w", manifest.TemplateName, err)
 		}
 	}
 
@@ -1020,54 +1012,14 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 		return "", "", fmt.Errorf("put blob: %w", err)
 	}
 
-	// Auto-promote: template-less volumes get a synthetic per-volume template
-	// after their first successful sync. This converts the full send into a
-	// base layer so all future syncs are incremental diffs — same as
-	// template-based volumes.
-	if tv.templateName == "" {
-		syntheticName := "_vol_" + tv.volumeID
-		tmplPath := "templates/" + syntheticName
-
-		if d.btrfs.SubvolumeExists(ctx, tmplPath) {
-			// Template already exists on disk (e.g. from a previous run before
-			// pod restart). Re-upload to get the hash and adopt it.
-			if uploadHash, uploadErr := d.tmplMgr.UploadTemplate(ctx, syntheticName); uploadErr != nil {
-				klog.Warningf("Auto-promote: failed to upload existing template for %s: %v (syncs will remain full sends)", tv.volumeID, uploadErr)
-			} else {
-				klog.Infof("Auto-promote: volume %s adopted existing synthetic template %s (future syncs incremental)", tv.volumeID, syntheticName)
-				tv.templateName = syntheticName
-				tv.templateHash = uploadHash
-			}
-		} else if snapErr := d.btrfs.SnapshotSubvolume(ctx, pendingPath, tmplPath, true); snapErr != nil {
-			klog.Warningf("Auto-promote: failed to create synthetic template for %s: %v (syncs will remain full sends)", tv.volumeID, snapErr)
-		} else if uploadHash, uploadErr := d.tmplMgr.UploadTemplate(ctx, syntheticName); uploadErr != nil {
-			klog.Warningf("Auto-promote: failed to upload synthetic template for %s: %v (syncs will remain full sends)", tv.volumeID, uploadErr)
-			_ = d.btrfs.DeleteSubvolume(ctx, tmplPath)
-		} else {
-			klog.Infof("Auto-promote: volume %s now has synthetic template %s (future syncs incremental)", tv.volumeID, syntheticName)
-			tv.templateName = syntheticName
-			tv.templateHash = uploadHash
-		}
-	}
-
 	// 4. Update manifest.
 	manifest, manErr := d.cas.GetManifest(ctx, tv.volumeID)
 	if manErr != nil {
-		// Manifest doesn't exist yet — create it.
 		manifest = &cas.Manifest{
 			VolumeID:     tv.volumeID,
 			Base:         tv.templateHash,
 			TemplateName: tv.templateName,
 		}
-	} else if manifest.Base == "" && tv.templateHash != "" {
-		// Auto-promote adopted or created a synthetic template but the
-		// manifest was created before the template existed (e.g. pod restart).
-		// Backfill Base/TemplateName so RestoreVolume can download the
-		// template for cross-node restores.
-		manifest.Base = tv.templateHash
-		manifest.TemplateName = tv.templateName
-		klog.Infof("Backfilled manifest Base for %s: template=%s hash=%s",
-			tv.volumeID, tv.templateName, cas.ShortHash(tv.templateHash))
 	}
 
 	parentHash := tv.templateHash

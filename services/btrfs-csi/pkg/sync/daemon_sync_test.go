@@ -238,8 +238,9 @@ func (f *fakeCAS) DeleteTombstone(_ context.Context, volumeID string) error {
 // ---------------------------------------------------------------------------
 
 type fakeTemplate struct {
-	uploaded map[string]string // name → hash
-	nextHash string
+	uploaded  map[string]string // name → hash
+	ensured   []string          // names passed to EnsureTemplateByHash
+	nextHash  string
 	uploadErr error
 }
 
@@ -258,7 +259,8 @@ func (f *fakeTemplate) UploadTemplate(_ context.Context, name string) (string, e
 	return f.nextHash, nil
 }
 
-func (f *fakeTemplate) EnsureTemplateByHash(_ context.Context, _, _ string) error {
+func (f *fakeTemplate) EnsureTemplateByHash(_ context.Context, name, _ string) error {
+	f.ensured = append(f.ensured, name)
 	return nil
 }
 
@@ -272,22 +274,21 @@ func setupDaemon(fb *fakeBtrfs, fc *fakeCAS, ft *fakeTemplate) *Daemon {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Template-less volume tests (no auto-promotion)
 // ---------------------------------------------------------------------------
 
-func TestSyncOne_AutoPromote_TemplatelessVolume(t *testing.T) {
+func TestSyncOne_TemplatelessVolume_FullSend(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
 	d := setupDaemon(fb, fc, ft)
 
-	volID := "vol-no-template"
-	// Simulate volume subvolume existing.
+	volID := "vol-templateless"
 	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
 
 	tv := &trackedVolume{
 		volumeID:     volID,
-		templateName: "", // no template
+		templateName: "",
 		templateHash: "",
 	}
 
@@ -295,95 +296,49 @@ func TestSyncOne_AutoPromote_TemplatelessVolume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("syncOne failed: %v", err)
 	}
-
 	if hash == "" {
 		t.Fatal("expected non-empty hash from syncOne")
 	}
 
-	// Verify auto-promote set templateName and templateHash on tv.
-	expectedTmplName := "_vol_" + volID
-	if tv.templateName != expectedTmplName {
-		t.Errorf("templateName = %q, want %q", tv.templateName, expectedTmplName)
+	// templateName and templateHash must remain empty — no auto-promotion.
+	if tv.templateName != "" {
+		t.Errorf("templateName = %q, want empty (no auto-promotion)", tv.templateName)
 	}
-	if tv.templateHash == "" {
-		t.Error("templateHash should be set after auto-promote")
-	}
-
-	// Verify template was uploaded.
-	if _, ok := ft.uploaded[expectedTmplName]; !ok {
-		t.Error("synthetic template was not uploaded")
+	if tv.templateHash != "" {
+		t.Errorf("templateHash = %q, want empty (no auto-promotion)", tv.templateHash)
 	}
 
-	// Verify snapshot was created at templates/_vol_{volID}.
-	tmplPath := "templates/" + expectedTmplName
-	found := false
-	for _, s := range fb.snapshots {
-		if s.Dest == tmplPath && s.ReadOnly {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected read-only snapshot at %s, snapshots: %+v", tmplPath, fb.snapshots)
+	// No template uploads should have occurred.
+	if len(ft.uploaded) != 0 {
+		t.Errorf("expected no template uploads, got %d", len(ft.uploaded))
 	}
 
-	// Verify manifest was created with template info.
+	// Manifest should have Base="" and TemplateName="".
 	manifest, err := fc.GetManifest(context.Background(), volID)
 	if err != nil {
 		t.Fatalf("manifest not found: %v", err)
 	}
-	if manifest.TemplateName != expectedTmplName {
-		t.Errorf("manifest.TemplateName = %q, want %q", manifest.TemplateName, expectedTmplName)
+	if manifest.Base != "" {
+		t.Errorf("manifest.Base = %q, want empty", manifest.Base)
 	}
-	if manifest.Base != ft.nextHash {
-		t.Errorf("manifest.Base = %q, want %q", manifest.Base, ft.nextHash)
+	if manifest.TemplateName != "" {
+		t.Errorf("manifest.TemplateName = %q, want empty", manifest.TemplateName)
+	}
+	if len(manifest.Layers) != 1 {
+		t.Fatalf("expected 1 layer, got %d", len(manifest.Layers))
+	}
+	if manifest.Layers[0].Parent != "" {
+		t.Errorf("layer.Parent = %q, want empty (full send)", manifest.Layers[0].Parent)
 	}
 }
 
-func TestSyncOne_SkipsAutoPromote_TemplateBasedVolume(t *testing.T) {
+func TestSyncOne_TemplatelessVolume_SecondSync_StillFullSend(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
 	d := setupDaemon(fb, fc, ft)
 
-	volID := "vol-with-template"
-	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
-	// Template exists locally.
-	fb.subvolumes["templates/nodejs"] = true
-
-	tv := &trackedVolume{
-		volumeID:     volID,
-		templateName: "nodejs",
-		templateHash: "sha256:existinghash",
-	}
-
-	_, _, err := d.syncOne(context.Background(), tv, "sync", "")
-	if err != nil {
-		t.Fatalf("syncOne failed: %v", err)
-	}
-
-	// templateName should remain unchanged.
-	if tv.templateName != "nodejs" {
-		t.Errorf("templateName changed to %q, should remain %q", tv.templateName, "nodejs")
-	}
-	if tv.templateHash != "sha256:existinghash" {
-		t.Errorf("templateHash changed to %q, should remain unchanged", tv.templateHash)
-	}
-
-	// No synthetic template should have been uploaded.
-	if len(ft.uploaded) != 0 {
-		t.Errorf("expected no template uploads, got %d", len(ft.uploaded))
-	}
-}
-
-func TestSyncOne_AutoPromote_UploadFailure_GracefulDegradation(t *testing.T) {
-	fb := newFakeBtrfs()
-	fc := newFakeCAS()
-	ft := newFakeTemplate()
-	ft.uploadErr = fmt.Errorf("S3 unavailable")
-	d := setupDaemon(fb, fc, ft)
-
-	volID := "vol-upload-fail"
+	volID := "vol-still-full"
 	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
 
 	tv := &trackedVolume{
@@ -392,207 +347,30 @@ func TestSyncOne_AutoPromote_UploadFailure_GracefulDegradation(t *testing.T) {
 		templateHash: "",
 	}
 
-	hash, _, err := d.syncOne(context.Background(), tv, "sync", "")
-	if err != nil {
-		t.Fatalf("syncOne should succeed even when auto-promote fails: %v", err)
-	}
-	if hash == "" {
-		t.Fatal("expected non-empty hash")
-	}
-
-	// templateName should still be empty — auto-promote failed gracefully.
-	if tv.templateName != "" {
-		t.Errorf("templateName = %q, should remain empty after failed auto-promote", tv.templateName)
-	}
-	if tv.templateHash != "" {
-		t.Errorf("templateHash = %q, should remain empty after failed auto-promote", tv.templateHash)
-	}
-
-	// Synthetic template snapshot should have been cleaned up.
-	tmplPath := "templates/_vol_" + volID
-	if fb.subvolumes[tmplPath] {
-		t.Error("synthetic template subvolume should be cleaned up after upload failure")
-	}
-}
-
-func TestSyncVolume_WritesBackTemplateFields(t *testing.T) {
-	fb := newFakeBtrfs()
-	fc := newFakeCAS()
-	ft := newFakeTemplate()
-	d := setupDaemon(fb, fc, ft)
-
-	volID := "vol-writeback"
-	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
-
-	// Track with no template.
-	d.TrackVolume(volID, "", "")
-
-	err := d.SyncVolume(context.Background(), volID)
-	if err != nil {
-		t.Fatalf("SyncVolume failed: %v", err)
-	}
-
-	// Verify tracked map has the promoted template fields.
-	d.mu.Lock()
-	tv := d.tracked[volID]
-	d.mu.Unlock()
-
-	expectedTmplName := "_vol_" + volID
-	if tv.templateName != expectedTmplName {
-		t.Errorf("tracked templateName = %q, want %q", tv.templateName, expectedTmplName)
-	}
-	if tv.templateHash == "" {
-		t.Error("tracked templateHash should be set after auto-promote write-back")
-	}
-	if tv.lastLayerHash == "" {
-		t.Error("tracked lastLayerHash should be set")
-	}
-	if tv.lastSyncAt.IsZero() {
-		t.Error("tracked lastSyncAt should be set")
-	}
-}
-
-func TestSyncAll_WritesBackTemplateFields(t *testing.T) {
-	fb := newFakeBtrfs()
-	fc := newFakeCAS()
-	ft := newFakeTemplate()
-	d := setupDaemon(fb, fc, ft)
-
-	volID := "vol-syncall"
-	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
-	d.TrackVolume(volID, "", "")
-
-	err := d.syncAll(context.Background())
-	if err != nil {
-		t.Fatalf("syncAll failed: %v", err)
-	}
-
-	d.mu.Lock()
-	tv := d.tracked[volID]
-	d.mu.Unlock()
-
-	expectedTmplName := "_vol_" + volID
-	if tv.templateName != expectedTmplName {
-		t.Errorf("tracked templateName = %q, want %q", tv.templateName, expectedTmplName)
-	}
-	if tv.templateHash == "" {
-		t.Error("tracked templateHash should be set after auto-promote via syncAll")
-	}
-}
-
-func TestCreateSnapshot_WritesBackTemplateFields(t *testing.T) {
-	fb := newFakeBtrfs()
-	fc := newFakeCAS()
-	ft := newFakeTemplate()
-	d := setupDaemon(fb, fc, ft)
-
-	volID := "vol-snapshot-wb"
-	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
-	d.TrackVolume(volID, "", "")
-
-	hash, err := d.CreateSnapshot(context.Background(), volID, "test-label")
-	if err != nil {
-		t.Fatalf("CreateSnapshot failed: %v", err)
-	}
-	if hash == "" {
-		t.Fatal("expected non-empty hash from CreateSnapshot")
-	}
-
-	d.mu.Lock()
-	tv := d.tracked[volID]
-	d.mu.Unlock()
-
-	expectedTmplName := "_vol_" + volID
-	if tv.templateName != expectedTmplName {
-		t.Errorf("tracked templateName = %q, want %q", tv.templateName, expectedTmplName)
-	}
-	if tv.templateHash == "" {
-		t.Error("tracked templateHash should be set after auto-promote via CreateSnapshot")
-	}
-}
-
-func TestDeleteVolume_CleansSyntheticTemplate(t *testing.T) {
-	fb := newFakeBtrfs()
-	fc := newFakeCAS()
-	ft := newFakeTemplate()
-	d := setupDaemon(fb, fc, ft)
-
-	volID := "vol-delete-tmpl"
-	syntheticPath := "templates/_vol_" + volID
-	fb.subvolumes[syntheticPath] = true
-
-	err := d.DeleteVolume(context.Background(), volID)
-	if err != nil {
-		t.Fatalf("DeleteVolume failed: %v", err)
-	}
-
-	// Synthetic template should have been deleted.
-	if fb.subvolumes[syntheticPath] {
-		t.Error("synthetic template subvolume should be deleted")
-	}
-
-	// Verify it was in the deletes list.
-	found := false
-	for _, p := range fb.deletes {
-		if p == syntheticPath {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected %s in deletes list, got %v", syntheticPath, fb.deletes)
-	}
-}
-
-func TestDeleteVolume_NoSyntheticTemplate_NoError(t *testing.T) {
-	fb := newFakeBtrfs()
-	fc := newFakeCAS()
-	ft := newFakeTemplate()
-	d := setupDaemon(fb, fc, ft)
-
-	volID := "vol-no-synth"
-	// No synthetic template exists — should not error.
-
-	err := d.DeleteVolume(context.Background(), volID)
-	if err != nil {
-		t.Fatalf("DeleteVolume failed: %v", err)
-	}
-}
-
-func TestSyncOne_SecondSync_UsesTemplate(t *testing.T) {
-	fb := newFakeBtrfs()
-	fc := newFakeCAS()
-	ft := newFakeTemplate()
-	d := setupDaemon(fb, fc, ft)
-
-	volID := "vol-second-sync"
-	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
-
-	tv := &trackedVolume{
-		volumeID:     volID,
-		templateName: "",
-		templateHash: "",
-	}
-
-	// First sync: auto-promote creates synthetic template.
+	// First sync.
 	_, _, err := d.syncOne(context.Background(), tv, "sync", "")
 	if err != nil {
 		t.Fatalf("first syncOne failed: %v", err)
 	}
-	if tv.templateName == "" {
-		t.Fatal("auto-promote should have set templateName")
-	}
 
-	// Use a different hash for the second blob to distinguish it.
+	// Second sync with a different hash.
 	fc.nextHash = "sha256:secondhash00000000000000000000000000000000000000000000000000000000"
-
-	// Second sync: should use the synthetic template as parent (incremental).
 	_, _, err = d.syncOne(context.Background(), tv, "sync", "")
 	if err != nil {
 		t.Fatalf("second syncOne failed: %v", err)
 	}
 
-	// Verify manifest has 2 layers, both with the template hash as parent.
+	// templateName must still be empty — no promotion happened.
+	if tv.templateName != "" {
+		t.Errorf("templateName = %q after second sync, want empty", tv.templateName)
+	}
+
+	// No template uploads at all.
+	if len(ft.uploaded) != 0 {
+		t.Errorf("expected no template uploads, got %d", len(ft.uploaded))
+	}
+
+	// Both layers should have empty Parent (both are full sends).
 	manifest, err := fc.GetManifest(context.Background(), volID)
 	if err != nil {
 		t.Fatalf("manifest not found: %v", err)
@@ -601,44 +379,72 @@ func TestSyncOne_SecondSync_UsesTemplate(t *testing.T) {
 		t.Fatalf("expected 2 layers, got %d", len(manifest.Layers))
 	}
 	for i, layer := range manifest.Layers {
-		if layer.Parent != tv.templateHash {
-			t.Errorf("layer[%d].Parent = %q, want %q (template hash)", i, layer.Parent, tv.templateHash)
+		if layer.Parent != "" {
+			t.Errorf("layer[%d].Parent = %q, want empty (full send)", i, layer.Parent)
 		}
 	}
 }
 
-func TestSyncOne_AutoPromote_OnlyOnFirstSync(t *testing.T) {
+func TestRestoreVolume_TemplatelessVolume(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
 	d := setupDaemon(fb, fc, ft)
 
-	volID := "vol-once"
-	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
+	volID := "vol-restore-templateless"
+	layerHash := "sha256:fulllayerhash000000000000000000000000000000000000000000000000000000"
 
-	tv := &trackedVolume{
-		volumeID:     volID,
-		templateName: "",
-		templateHash: "",
+	// Set up a manifest with no base template — layers are full sends.
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         "",
+		TemplateName: "",
+		Layers: []cas.Layer{
+			{Hash: layerHash, Parent: "", Type: "sync", TS: "2026-04-01T00:00:00Z"},
+		},
 	}
+	// The blob exists in CAS.
+	fc.blobs[layerHash] = "full-send-data"
 
-	// First sync: triggers auto-promote.
-	_, _, err := d.syncOne(context.Background(), tv, "sync", "")
+	err := d.RestoreVolume(context.Background(), volID)
 	if err != nil {
-		t.Fatalf("syncOne failed: %v", err)
+		t.Fatalf("RestoreVolume failed: %v", err)
 	}
 
-	uploadCountAfterFirst := len(ft.uploaded)
-
-	// Second sync: should NOT trigger auto-promote (templateName is now set).
-	fc.nextHash = "sha256:anotherhash0000000000000000000000000000000000000000000000000000000"
-	_, _, err = d.syncOne(context.Background(), tv, "sync", "")
-	if err != nil {
-		t.Fatalf("second syncOne failed: %v", err)
+	// No template should have been downloaded.
+	if len(ft.ensured) != 0 {
+		t.Errorf("expected no template downloads, got %d: %v", len(ft.ensured), ft.ensured)
 	}
 
-	if len(ft.uploaded) != uploadCountAfterFirst {
-		t.Errorf("auto-promote ran twice: uploads went from %d to %d", uploadCountAfterFirst, len(ft.uploaded))
+	// Volume should exist as a writable snapshot.
+	volumePath := fmt.Sprintf("volumes/%s", volID)
+	if !fb.subvolumes[volumePath] {
+		t.Errorf("expected volume at %s", volumePath)
+	}
+}
+
+func TestRestoreVolume_TemplatelessVolume_NoLayers(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-restore-empty"
+
+	// Manifest with no base and no layers — unrestorable.
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         "",
+		TemplateName: "",
+		Layers:       []cas.Layer{},
+	}
+
+	err := d.RestoreVolume(context.Background(), volID)
+	if err == nil {
+		t.Fatal("RestoreVolume should fail for volume with no base and no layers")
+	}
+	if !strings.Contains(err.Error(), "no layers and no base template") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
