@@ -189,6 +189,41 @@ func (m *Manifest) BuildRestoreChain(targetIdx int) []int {
 	return chain
 }
 
+// NeedsMigration returns true if the manifest has layers that were all
+// created with the same parent (old sync algorithm) and no consolidation
+// points exist. Covers two cases:
+//   - Template-based: all parents == Base hash (non-empty)
+//   - Template-less: all parents == "" (full sends)
+//
+// Marking the latest as consolidation makes restore O(1) instead of O(N).
+func (m *Manifest) NeedsMigration() bool {
+	if len(m.Snapshots) == 0 {
+		return false
+	}
+	if m.LatestConsolidation() != nil {
+		return false
+	}
+	// All parents must be the same value (either Base hash or "").
+	commonParent := m.Snapshots[0].Parent
+	for _, s := range m.Snapshots {
+		if s.Parent != commonParent {
+			return false
+		}
+	}
+	return true
+}
+
+// Migrate upgrades a legacy manifest to the incremental chain model by
+// marking the latest snapshot as a consolidation point (it's a full diff
+// from template, so it IS a valid consolidation). Returns true if modified.
+func (m *Manifest) Migrate() bool {
+	if !m.NeedsMigration() {
+		return false
+	}
+	m.Snapshots[len(m.Snapshots)-1].Consolidation = true
+	return true
+}
+
 // ShortHash returns the first 12 hex chars of a "sha256:..." hash.
 func ShortHash(hash string) string {
 	h := strings.TrimPrefix(hash, "sha256:")

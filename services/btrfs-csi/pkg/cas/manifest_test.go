@@ -260,3 +260,139 @@ func TestLatestConsolidation_None(t *testing.T) {
 		t.Errorf("got %v, want nil", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Manifest migration tests
+// ---------------------------------------------------------------------------
+
+func TestNeedsMigration_LegacyManifest(t *testing.T) {
+	m := &Manifest{
+		VolumeID: "vol-1",
+		Base:     "sha256:tmpl",
+		Snapshots: []Snapshot{
+			{Hash: "s1", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s2", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s3", Parent: "sha256:tmpl", Role: "checkpoint"},
+		},
+	}
+	if !m.NeedsMigration() {
+		t.Error("legacy manifest (all parents=template) should need migration")
+	}
+}
+
+func TestNeedsMigration_AlreadyMigrated(t *testing.T) {
+	m := &Manifest{
+		VolumeID: "vol-1",
+		Base:     "sha256:tmpl",
+		Snapshots: []Snapshot{
+			{Hash: "s1", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s2", Parent: "sha256:tmpl", Role: "sync", Consolidation: true},
+		},
+	}
+	if m.NeedsMigration() {
+		t.Error("manifest with consolidation should NOT need migration")
+	}
+}
+
+func TestNeedsMigration_IncrementalChain(t *testing.T) {
+	m := &Manifest{
+		VolumeID: "vol-1",
+		Base:     "sha256:tmpl",
+		Snapshots: []Snapshot{
+			{Hash: "s1", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s2", Parent: "sha256:s1", Role: "sync"},
+		},
+	}
+	if m.NeedsMigration() {
+		t.Error("incremental chain should NOT need migration")
+	}
+}
+
+func TestNeedsMigration_Empty(t *testing.T) {
+	m := &Manifest{VolumeID: "vol-1", Base: "sha256:tmpl"}
+	if m.NeedsMigration() {
+		t.Error("empty manifest should NOT need migration")
+	}
+}
+
+func TestNeedsMigration_TemplateLess(t *testing.T) {
+	// Template-less volumes: all parents = "" (full sends).
+	// These SHOULD be migrated — latest marked as consolidation.
+	m := &Manifest{
+		VolumeID: "vol-1",
+		Snapshots: []Snapshot{
+			{Hash: "s1", Parent: "", Role: "sync"},
+			{Hash: "s2", Parent: "", Role: "sync"},
+		},
+	}
+	if !m.NeedsMigration() {
+		t.Error("template-less volume with all same parents should need migration")
+	}
+}
+
+func TestNeedsMigration_SingleSnapshot(t *testing.T) {
+	m := &Manifest{
+		VolumeID:  "vol-1",
+		Snapshots: []Snapshot{{Hash: "s1", Parent: "", Role: "sync"}},
+	}
+	if !m.NeedsMigration() {
+		t.Error("single snapshot should need migration")
+	}
+}
+
+func TestMigrate_MarksLatestAsConsolidation(t *testing.T) {
+	m := &Manifest{
+		VolumeID: "vol-1",
+		Base:     "sha256:tmpl",
+		Snapshots: []Snapshot{
+			{Hash: "s1", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s2", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s3", Parent: "sha256:tmpl", Role: "checkpoint"},
+		},
+	}
+	if !m.Migrate() {
+		t.Fatal("Migrate should return true for legacy manifest")
+	}
+	if !m.Snapshots[2].Consolidation {
+		t.Error("latest snapshot should be marked as consolidation")
+	}
+	if m.Snapshots[0].Consolidation || m.Snapshots[1].Consolidation {
+		t.Error("only the latest snapshot should be consolidation")
+	}
+}
+
+func TestMigrate_Idempotent(t *testing.T) {
+	m := &Manifest{
+		VolumeID:  "vol-1",
+		Base:      "sha256:tmpl",
+		Snapshots: []Snapshot{{Hash: "s1", Parent: "sha256:tmpl", Consolidation: true}},
+	}
+	if m.Migrate() {
+		t.Error("Migrate on already-migrated manifest should return false")
+	}
+}
+
+func TestMigrate_RestoreChainAfterMigration(t *testing.T) {
+	m := &Manifest{
+		VolumeID: "vol-1",
+		Base:     "sha256:tmpl",
+		Snapshots: []Snapshot{
+			{Hash: "s1", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s2", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s3", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s4", Parent: "sha256:tmpl", Role: "sync"},
+			{Hash: "s5", Parent: "sha256:tmpl", Role: "checkpoint"},
+		},
+	}
+	// Before migration: full chain [0,1,2,3,4]
+	chain := m.BuildRestoreChain(4)
+	if len(chain) != 5 {
+		t.Fatalf("pre-migration chain length = %d, want 5", len(chain))
+	}
+	m.Migrate()
+	// After migration: only [4] (latest is consolidation)
+	chain = m.BuildRestoreChain(4)
+	if len(chain) != 1 || chain[0] != 4 {
+		t.Errorf("post-migration chain = %v, want [4]", chain)
+	}
+}
