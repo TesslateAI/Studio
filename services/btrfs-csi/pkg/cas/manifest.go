@@ -90,6 +90,105 @@ func (m *Manifest) NearestConsolidationBefore(idx int) int {
 	return -1
 }
 
+// SnapshotsSinceLastConsolidation returns the number of non-consolidation
+// snapshots appended after the most recent consolidation (or from the
+// beginning if no consolidation exists).
+func (m *Manifest) SnapshotsSinceLastConsolidation() int {
+	count := 0
+	for i := len(m.Snapshots) - 1; i >= 0; i-- {
+		if m.Snapshots[i].Consolidation {
+			break
+		}
+		count++
+	}
+	return count
+}
+
+// ConsolidationHashes returns the hashes of all consolidation snapshots,
+// ordered oldest to newest.
+func (m *Manifest) ConsolidationHashes() []string {
+	var hashes []string
+	for _, s := range m.Snapshots {
+		if s.Consolidation {
+			hashes = append(hashes, s.Hash)
+		}
+	}
+	return hashes
+}
+
+// PruneConsolidations removes the Consolidation flag from the oldest
+// consolidation entries beyond the retention count and returns the blob
+// hashes that should be deleted from CAS. The pruned entries remain in
+// the manifest as regular snapshots (their blobs are deleted externally).
+func (m *Manifest) PruneConsolidations(retention int) []string {
+	hashes := m.ConsolidationHashes()
+	if len(hashes) <= retention {
+		return nil
+	}
+
+	pruneCount := len(hashes) - retention
+	pruneSet := make(map[string]bool, pruneCount)
+	for i := 0; i < pruneCount; i++ {
+		pruneSet[hashes[i]] = true
+	}
+
+	for i := range m.Snapshots {
+		if pruneSet[m.Snapshots[i].Hash] {
+			m.Snapshots[i].Consolidation = false
+		}
+	}
+
+	pruned := make([]string, 0, pruneCount)
+	for h := range pruneSet {
+		pruned = append(pruned, h)
+	}
+	return pruned
+}
+
+// BuildRestoreChain returns the ordered list of snapshot indices needed to
+// restore to the given target index. The chain walks back through
+// consolidations to the template, then includes incrementals up to target:
+//
+//	template → [consolidation chain] → [incrementals after last consolidation to target]
+//
+// If no consolidation exists at or before target, the full incremental
+// chain from index 0 is returned.
+func (m *Manifest) BuildRestoreChain(targetIdx int) []int {
+	if targetIdx < 0 || targetIdx >= len(m.Snapshots) {
+		return nil
+	}
+
+	// Find nearest consolidation at or before target.
+	consolIdx := m.NearestConsolidationBefore(targetIdx)
+
+	if consolIdx >= 0 {
+		// Walk consolidation chain backward to collect all needed consolidations.
+		var consolChain []int
+		for i := consolIdx; i >= 0; {
+			consolChain = append([]int{i}, consolChain...)
+			prev := m.NearestConsolidationBefore(i - 1)
+			if prev < 0 {
+				break
+			}
+			i = prev
+		}
+
+		// Append incrementals from consolIdx+1 to targetIdx.
+		chain := consolChain
+		for i := consolIdx + 1; i <= targetIdx; i++ {
+			chain = append(chain, i)
+		}
+		return chain
+	}
+
+	// No consolidation — full incremental chain from beginning.
+	chain := make([]int, targetIdx+1)
+	for i := range chain {
+		chain[i] = i
+	}
+	return chain
+}
+
 // ShortHash returns the first 12 hex chars of a "sha256:..." hash.
 func ShortHash(hash string) string {
 	h := strings.TrimPrefix(hash, "sha256:")

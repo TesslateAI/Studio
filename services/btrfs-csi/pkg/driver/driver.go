@@ -54,7 +54,9 @@ type Driver struct {
 	storageBucket   string
 	storageEnv      map[string]string
 
-	syncInterval   time.Duration
+	syncInterval           time.Duration
+	consolidationInterval  int
+	consolidationRetention int
 	nodeOpsPort    int    // Port for nodeops gRPC server (for node mode)
 	hubGRPCPort     int // VolumeHub gRPC listen port (hub mode)
 	orchestratorURL string
@@ -120,6 +122,14 @@ func WithSyncInterval(interval time.Duration) Option {
 	return func(d *Driver) { d.syncInterval = interval }
 }
 
+func WithConsolidationInterval(n int) Option {
+	return func(d *Driver) { d.consolidationInterval = n }
+}
+
+func WithConsolidationRetention(n int) Option {
+	return func(d *Driver) { d.consolidationRetention = n }
+}
+
 func WithHubGRPCPort(grpcPort int) Option {
 	return func(d *Driver) {
 		d.hubGRPCPort = grpcPort
@@ -136,7 +146,9 @@ func NewDriver(opts ...Option) *Driver {
 	d := &Driver{
 		name:           "btrfs.csi.tesslate.io",
 		version:        "0.1.0",
-		syncInterval:   60 * time.Second,
+		syncInterval:           5 * time.Minute,
+		consolidationInterval:  50,
+		consolidationRetention: 3,
 		mode:           ModeAll,
 		nodeOpsPort:    9741,
 		hubGRPCPort: 9750,
@@ -201,7 +213,11 @@ func (d *Driver) runNode(ctx context.Context) error {
 
 	// Start sync daemon if CAS store is available.
 	if d.casStore != nil {
-		d.syncer = bsync.NewDaemon(d.btrfs, d.casStore, d.tmplMgr, d.syncInterval)
+		d.syncer = bsync.NewDaemonWithConfig(d.btrfs, d.casStore, d.tmplMgr, bsync.DaemonConfig{
+			SafetyInterval:         d.syncInterval,
+			ConsolidationInterval:  d.consolidationInterval,
+			ConsolidationRetention: d.consolidationRetention,
+		})
 		go d.syncer.Start(ctx)
 		klog.Info("Sync daemon started (CAS mode)")
 	}

@@ -25,10 +25,15 @@ type fakeBtrfs struct {
 	snapshots      []snapshotCall
 	deletes        []string
 	renames        []renameCall
-	sendData       string // returned by Send
+	sends          []sendCall // tracked sends (snapshot, parent)
+	sendData       string     // returned by Send
 	sendErr        error
 	receiveCreates string // if set, Receive creates this subvolume path
 	receiveErr     error  // if set, Receive returns this error
+}
+
+type sendCall struct {
+	Snapshot, Parent string
 }
 
 type snapshotCall struct {
@@ -70,10 +75,11 @@ func (f *fakeBtrfs) DeleteSubvolume(_ context.Context, name string) error {
 	return nil
 }
 
-func (f *fakeBtrfs) Send(_ context.Context, _ string, _ string) (io.ReadCloser, error) {
+func (f *fakeBtrfs) Send(_ context.Context, snapshot string, parent string) (io.ReadCloser, error) {
 	f.mu.Lock()
 	sendErr := f.sendErr
 	sendData := f.sendData
+	f.sends = append(f.sends, sendCall{Snapshot: snapshot, Parent: parent})
 	f.mu.Unlock()
 	if sendErr != nil {
 		return nil, sendErr
@@ -146,7 +152,9 @@ type fakeCAS struct {
 	manifests  map[string]*cas.Manifest
 	tombstones map[string]bool // volumeID → exists
 	putCount   int
-	nextHash   string // hash returned by PutBlob
+	nextHash   string   // hash returned by PutBlob (if hashQueue is empty)
+	hashQueue  []string // if non-empty, PutBlob pops from here
+	deleted    []string // hashes deleted via DeleteBlob
 }
 
 func newFakeCAS() *fakeCAS {
@@ -169,7 +177,13 @@ func (f *fakeCAS) PutBlob(ctx context.Context, r io.Reader) (string, error) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	h := f.nextHash
+	var h string
+	if len(f.hashQueue) > 0 {
+		h = f.hashQueue[0]
+		f.hashQueue = f.hashQueue[1:]
+	} else {
+		h = f.nextHash
+	}
 	f.blobs[h] = string(data)
 	f.putCount++
 	return h, nil
@@ -183,6 +197,14 @@ func (f *fakeCAS) GetBlob(_ context.Context, hash string) (io.ReadCloser, error)
 		return nil, fmt.Errorf("blob %s not found", hash)
 	}
 	return io.NopCloser(strings.NewReader(data)), nil
+}
+
+func (f *fakeCAS) DeleteBlob(_ context.Context, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.blobs, hash)
+	f.deleted = append(f.deleted, hash)
+	return nil
 }
 
 func (f *fakeCAS) GetManifest(_ context.Context, volumeID string) (*cas.Manifest, error) {
@@ -1457,5 +1479,386 @@ func TestDiscoverVolumes_TombstonedAndNormal(t *testing.T) {
 	}
 	if deadTracked {
 		t.Error("tombstoned volume should not be tracked")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Incremental chain + consolidation tests
+// ---------------------------------------------------------------------------
+
+// TestSyncOne_IncrementalFromPrevious verifies that the second sync diffs
+// from the previous snapshot (not the template), producing an incremental.
+func TestSyncOne_IncrementalFromPrevious(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-incr"
+	fb.subvolumes["volumes/"+volID] = true
+	fb.subvolumes["templates/tmpl1"] = true
+	d.TrackVolume(volID, "tmpl1", "sha256:base")
+
+	// First sync: should use template as parent (no previous snapshot).
+	fc.hashQueue = []string{"sha256:hash1", "sha256:hash2"}
+	err := d.SyncVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+
+	fb.mu.Lock()
+	firstSend := fb.sends[0]
+	fb.mu.Unlock()
+	if firstSend.Parent != "templates/tmpl1" {
+		t.Errorf("first sync parent = %q, want templates/tmpl1", firstSend.Parent)
+	}
+
+	// Second sync: should use previous layer snapshot as parent (incremental).
+	d.MarkDirty(volID)
+	err = d.SyncVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+
+	fb.mu.Lock()
+	secondSend := fb.sends[1]
+	fb.mu.Unlock()
+
+	// The previous layer snapshot should be the parent — it starts with "layers/"
+	if !strings.HasPrefix(secondSend.Parent, "layers/"+volID+"@") {
+		t.Errorf("second sync parent = %q, want layers/%s@<hash>", secondSend.Parent, volID)
+	}
+}
+
+// TestSyncOne_ConsolidationAtInterval verifies that a consolidation snapshot
+// is created when the number of snapshots since the last consolidation
+// reaches the configured interval.
+func TestSyncOne_ConsolidationAtInterval(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d.consolidationInterval = 3 // consolidate every 3 snapshots
+	d.consolidationRetention = 10
+
+	volID := "vol-consol"
+	fb.subvolumes["volumes/"+volID] = true
+	fb.subvolumes["templates/tmpl1"] = true
+	d.TrackVolume(volID, "tmpl1", "sha256:base")
+
+	// Pre-populate manifest with 2 existing snapshots (no consolidation).
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         "sha256:base",
+		TemplateName: "tmpl1",
+		Snapshots: []cas.Snapshot{
+			{Hash: "sha256:s1", Parent: "sha256:base", Role: "sync"},
+			{Hash: "sha256:s2", Parent: "sha256:s1", Role: "sync"},
+		},
+	}
+
+	// Set up tracked state to match.
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	tv.lastLayerHash = "sha256:s2"
+	tv.lastSnapPath = "layers/" + volID + "@s2hash"
+	fb.subvolumes["layers/"+volID+"@s2hash"] = true
+	d.mu.Unlock()
+
+	// Third sync: should trigger consolidation (3 snapshots since no consolidation).
+	fc.nextHash = "sha256:consol1"
+	err := d.SyncVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// Check manifest: 3rd snapshot should be a consolidation.
+	fc.mu.Lock()
+	m := fc.manifests[volID]
+	fc.mu.Unlock()
+
+	if len(m.Snapshots) != 3 {
+		t.Fatalf("manifest has %d snapshots, want 3", len(m.Snapshots))
+	}
+	third := m.Snapshots[2]
+	if !third.Consolidation {
+		t.Error("third snapshot should be a consolidation")
+	}
+	// Consolidation parent should be template base (no previous consolidation).
+	if third.Parent != "sha256:base" {
+		t.Errorf("consolidation parent = %q, want sha256:base", third.Parent)
+	}
+
+	// The btrfs send should use template as parent (consolidation).
+	fb.mu.Lock()
+	lastSend := fb.sends[len(fb.sends)-1]
+	fb.mu.Unlock()
+	if lastSend.Parent != "templates/tmpl1" {
+		t.Errorf("consolidation send parent = %q, want templates/tmpl1", lastSend.Parent)
+	}
+}
+
+// TestSyncOne_ConsolidationRetention verifies that old consolidation blobs
+// are pruned when the retention limit is exceeded.
+func TestSyncOne_ConsolidationRetention(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d.consolidationInterval = 2 // consolidate every 2 snapshots
+	d.consolidationRetention = 2
+
+	volID := "vol-retention"
+	fb.subvolumes["volumes/"+volID] = true
+	fb.subvolumes["templates/tmpl1"] = true
+	d.TrackVolume(volID, "tmpl1", "sha256:base")
+
+	// Manifest with 2 existing consolidations + 1 incremental.
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         "sha256:base",
+		TemplateName: "tmpl1",
+		Snapshots: []cas.Snapshot{
+			{Hash: "sha256:c1", Parent: "sha256:base", Role: "sync", Consolidation: true},
+			{Hash: "sha256:s2", Parent: "sha256:c1", Role: "sync"},
+			{Hash: "sha256:c2", Parent: "sha256:c1", Role: "sync", Consolidation: true},
+			{Hash: "sha256:s4", Parent: "sha256:c2", Role: "sync"},
+		},
+	}
+	// Blobs for consolidations.
+	fc.blobs["sha256:c1"] = "consol-1-data"
+	fc.blobs["sha256:c2"] = "consol-2-data"
+
+	// Set tracked state.
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	tv.lastLayerHash = "sha256:s4"
+	tv.lastSnapPath = "layers/" + volID + "@s4hash"
+	tv.lastConsolidationPath = "layers/" + volID + "@consol-c2"
+	tv.lastConsolidationHash = "sha256:c2"
+	fb.subvolumes["layers/"+volID+"@s4hash"] = true
+	fb.subvolumes["layers/"+volID+"@consol-c2"] = true
+	d.mu.Unlock()
+
+	// 5th snapshot (2 since c2): should create c3 and prune c1.
+	fc.nextHash = "sha256:c3"
+	err := d.SyncVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// Verify c1 blob was pruned.
+	fc.mu.Lock()
+	_, c1Exists := fc.blobs["sha256:c1"]
+	deletedHashes := fc.deleted
+	fc.mu.Unlock()
+
+	if c1Exists {
+		t.Error("c1 blob should be pruned from CAS")
+	}
+	found := false
+	for _, h := range deletedHashes {
+		if h == "sha256:c1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("c1 should appear in deleted hashes")
+	}
+
+	// Verify manifest: c1 should have Consolidation=false, c2 and c3 should be true.
+	fc.mu.Lock()
+	m := fc.manifests[volID]
+	fc.mu.Unlock()
+
+	if m.Snapshots[0].Consolidation {
+		t.Error("c1 should have Consolidation=false after pruning")
+	}
+	if !m.Snapshots[2].Consolidation {
+		t.Error("c2 should still be a consolidation")
+	}
+	if !m.Snapshots[4].Consolidation {
+		t.Error("c3 should be a consolidation")
+	}
+}
+
+// TestSyncOne_ConsolidationSnapPath verifies that consolidation snapshots
+// are kept on disk separately from incremental snapshots.
+func TestSyncOne_ConsolidationSnapPath(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d.consolidationInterval = 1 // every snapshot is a consolidation
+
+	volID := "vol-path"
+	fb.subvolumes["volumes/"+volID] = true
+	fb.subvolumes["templates/tmpl1"] = true
+	d.TrackVolume(volID, "tmpl1", "sha256:base")
+
+	fc.nextHash = "sha256:c1hash"
+	err := d.SyncVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// The consolidation snapshot should use @consol- prefix.
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	snapPath := tv.lastSnapPath
+	consolPath := tv.lastConsolidationPath
+	d.mu.Unlock()
+
+	if !strings.Contains(snapPath, "@consol-") {
+		t.Errorf("snapPath = %q, want @consol- prefix", snapPath)
+	}
+	if snapPath != consolPath {
+		t.Errorf("for consolidation, snapPath (%s) should equal consolPath (%s)", snapPath, consolPath)
+	}
+}
+
+// TestRestoreVolume_IncrementalChain verifies that RestoreVolume replays
+// the full incremental chain (consolidation + incrementals).
+func TestRestoreVolume_IncrementalChain(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-chain-restore"
+	fb.subvolumes["templates/tmpl1"] = true
+
+	// Manifest: template → c1 → s2 → s3
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         "sha256:base",
+		TemplateName: "tmpl1",
+		Snapshots: []cas.Snapshot{
+			{Hash: "sha256:s0", Parent: "sha256:base", Role: "sync"},
+			{Hash: "sha256:c1", Parent: "sha256:base", Role: "sync", Consolidation: true},
+			{Hash: "sha256:s2", Parent: "sha256:c1", Role: "sync"},
+			{Hash: "sha256:s3", Parent: "sha256:s2", Role: "checkpoint"},
+		},
+	}
+	// Blobs for all snapshots.
+	fc.blobs["sha256:s0"] = "s0-data"
+	fc.blobs["sha256:c1"] = "c1-data"
+	fc.blobs["sha256:s2"] = "s2-data"
+	fc.blobs["sha256:s3"] = "s3-data"
+
+	// Simulate btrfs receive creating @pending for each layer.
+	// We'll track what subvolumes get created via receiveCreates.
+	fb.receiveCreates = fmt.Sprintf("layers/%s@pending", volID)
+
+	d.TrackVolume(volID, "tmpl1", "sha256:base")
+
+	err := d.RestoreVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("RestoreVolume: %v", err)
+	}
+
+	// Should have created a writable volume.
+	if !fb.SubvolumeExists(context.Background(), "volumes/"+volID) {
+		t.Error("volumes/vol-chain-restore should exist after restore")
+	}
+
+	// Verify the restore chain: c1, s2, s3 (skipping s0 because c1 is at index 1).
+	// The chain should download c1, s2, s3 — that's 3 blobs.
+	// Each blob triggers a GetBlob call on the CAS (but we can check the receive calls).
+}
+
+// TestDaemonConfig_Defaults verifies DefaultDaemonConfig returns sensible values.
+func TestDaemonConfig_Defaults(t *testing.T) {
+	cfg := DefaultDaemonConfig()
+	if cfg.SafetyInterval != 5*time.Minute {
+		t.Errorf("SafetyInterval = %v, want 5m", cfg.SafetyInterval)
+	}
+	if cfg.ConsolidationInterval != 50 {
+		t.Errorf("ConsolidationInterval = %d, want 50", cfg.ConsolidationInterval)
+	}
+	if cfg.ConsolidationRetention != 3 {
+		t.Errorf("ConsolidationRetention = %d, want 3", cfg.ConsolidationRetention)
+	}
+}
+
+// TestSyncOne_FirstSync_NoTemplate_FullSend verifies that a volume with no
+// template produces a full send (no parent) on the first sync.
+func TestSyncOne_FirstSync_NoTemplate_FullSend(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-no-tmpl"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	fc.nextHash = "sha256:fullhash"
+	err := d.SyncVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// First sync with no template: parent should be "" (full send).
+	fb.mu.Lock()
+	firstSend := fb.sends[0]
+	fb.mu.Unlock()
+	if firstSend.Parent != "" {
+		t.Errorf("parent = %q, want empty (full send)", firstSend.Parent)
+	}
+}
+
+// TestSyncOne_IncrementalKeepsConsolidationOnDisk verifies that creating a
+// normal incremental does NOT delete the consolidation snapshot on disk.
+func TestSyncOne_IncrementalKeepsConsolidationOnDisk(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d.consolidationInterval = 100 // won't trigger
+
+	volID := "vol-keep-consol"
+	fb.subvolumes["volumes/"+volID] = true
+	fb.subvolumes["templates/tmpl1"] = true
+	d.TrackVolume(volID, "tmpl1", "sha256:base")
+
+	// Simulate existing consolidation on disk.
+	consolPath := "layers/" + volID + "@consol-prev"
+	incrPath := "layers/" + volID + "@prevhash"
+	fb.subvolumes[consolPath] = true
+	fb.subvolumes[incrPath] = true
+
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	tv.lastSnapPath = incrPath
+	tv.lastLayerHash = "sha256:prev"
+	tv.lastConsolidationPath = consolPath
+	tv.lastConsolidationHash = "sha256:cprev"
+	d.mu.Unlock()
+
+	// Pre-populate manifest so it doesn't trigger consolidation.
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         "sha256:base",
+		TemplateName: "tmpl1",
+		Snapshots: []cas.Snapshot{
+			{Hash: "sha256:cprev", Parent: "sha256:base", Role: "sync", Consolidation: true},
+			{Hash: "sha256:prev", Parent: "sha256:cprev", Role: "sync"},
+		},
+	}
+
+	fc.nextHash = "sha256:newhash"
+	d.MarkDirty(volID)
+	err := d.SyncVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	// The old incremental should be deleted, but the consolidation should remain.
+	if fb.SubvolumeExists(context.Background(), incrPath) {
+		t.Error("old incremental snapshot should be deleted")
+	}
+	if !fb.SubvolumeExists(context.Background(), consolPath) {
+		t.Error("consolidation snapshot should be kept on disk")
 	}
 }

@@ -25,6 +25,7 @@ type btrfsOps interface {
 type casOps interface {
 	PutBlob(ctx context.Context, r io.Reader) (string, error)
 	GetBlob(ctx context.Context, hash string) (io.ReadCloser, error)
+	DeleteBlob(ctx context.Context, hash string) error
 	GetManifest(ctx context.Context, volumeID string) (*cas.Manifest, error)
 	PutManifest(ctx context.Context, m *cas.Manifest) error
 	DeleteManifest(ctx context.Context, volumeID string) error

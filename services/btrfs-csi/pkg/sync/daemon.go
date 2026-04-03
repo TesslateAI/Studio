@@ -21,13 +21,15 @@ import (
 
 // trackedVolume holds per-volume CAS sync state.
 type trackedVolume struct {
-	volumeID      string
-	templateName  string // template used to create this volume
-	templateHash  string // base blob hash from template
-	lastLayerHash string // hash of most recent layer (parent for next send)
-	lastSnapPath  string // local path of last layer snapshot (for -p parent)
-	lastSyncAt    time.Time
-	dirty         bool // true = volume has changed since last successful sync
+	volumeID              string
+	templateName          string // template used to create this volume
+	templateHash          string // base blob hash from template
+	lastLayerHash         string // hash of most recent layer (parent for next send)
+	lastSnapPath          string // local path of last layer snapshot (for -p parent)
+	lastConsolidationPath string // local path of latest consolidation snapshot
+	lastConsolidationHash string // hash of latest consolidation
+	lastSyncAt            time.Time
+	dirty                 bool // true = volume has changed since last successful sync
 }
 
 // errVolumeGone is returned by syncOne when the volume subvolume no longer
@@ -40,13 +42,14 @@ var errVolumeGone = errors.New("volume subvolume gone")
 // every ~75s — fast enough to catch service volumes created by the Hub.
 const discoverInterval = 5
 
-// Daemon periodically snapshots tracked volumes, uploads incremental layers
-// to the CAS store, and maintains volume manifests.
+// Daemon snapshots tracked volumes on demand (event-driven) and via a
+// periodic safety-net timer, uploads incremental layers to the CAS store,
+// and maintains volume manifests with automatic consolidation.
 type Daemon struct {
 	btrfs    btrfsOps
 	cas      casOps
 	tmplMgr  templateOps
-	interval time.Duration
+	interval time.Duration // safety-net periodic sync interval
 	mu       sync.Mutex
 	tracked  map[string]*trackedVolume
 	syncLocks   sync.Mutex                  // guards volLocks
@@ -54,18 +57,54 @@ type Daemon struct {
 	discoverCycle atomic.Int32               // counts syncAll cycles for periodic discovery
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
+
+	// Consolidation config.
+	consolidationInterval  int // create consolidation every N snapshots (0 = disabled)
+	consolidationRetention int // keep last K consolidation blobs (0 = keep all)
+}
+
+// DaemonConfig holds configuration for the sync Daemon.
+type DaemonConfig struct {
+	// SafetyInterval is the periodic safety-net sync interval. Volumes that
+	// haven't been synced by an explicit event within this window will be
+	// synced automatically. Default: 5 minutes.
+	SafetyInterval time.Duration
+
+	// ConsolidationInterval is the number of snapshots between automatic
+	// consolidation points. 0 disables consolidation.
+	ConsolidationInterval int
+
+	// ConsolidationRetention is the number of consolidation blobs to keep.
+	// Older consolidations have their blobs pruned from CAS. 0 = keep all.
+	ConsolidationRetention int
+}
+
+// DefaultDaemonConfig returns sensible defaults for production.
+func DefaultDaemonConfig() DaemonConfig {
+	return DaemonConfig{
+		SafetyInterval:         5 * time.Minute,
+		ConsolidationInterval:  50,
+		ConsolidationRetention: 3,
+	}
 }
 
 // NewDaemon creates a sync Daemon that uses the CAS store for all storage.
 func NewDaemon(bm *btrfs.Manager, casStore *cas.Store, tmplMgr *template.Manager, interval time.Duration) *Daemon {
+	cfg := DefaultDaemonConfig()
+	cfg.SafetyInterval = interval
+	return NewDaemonWithConfig(bm, casStore, tmplMgr, cfg)
+}
+
+// NewDaemonWithConfig creates a sync Daemon with explicit configuration.
+func NewDaemonWithConfig(bm *btrfs.Manager, casStore *cas.Store, tmplMgr *template.Manager, cfg DaemonConfig) *Daemon {
 	d := &Daemon{
-		interval:  interval,
-		tracked:   make(map[string]*trackedVolume),
-		volLocks:  make(map[string]*sync.Mutex),
-		stopCh:    make(chan struct{}),
+		interval:               cfg.SafetyInterval,
+		consolidationInterval:  cfg.ConsolidationInterval,
+		consolidationRetention: cfg.ConsolidationRetention,
+		tracked:                make(map[string]*trackedVolume),
+		volLocks:               make(map[string]*sync.Mutex),
+		stopCh:                 make(chan struct{}),
 	}
-	// Store concrete types as interfaces for testability.
-	// nil checks preserve backward compatibility with callers that pass nil.
 	if bm != nil {
 		d.btrfs = bm
 	}
@@ -82,13 +121,15 @@ func NewDaemon(bm *btrfs.Manager, casStore *cas.Store, tmplMgr *template.Manager
 // implementations. Used by tests to inject fakes.
 func newDaemonWithInterfaces(b btrfsOps, c casOps, t templateOps, interval time.Duration) *Daemon {
 	return &Daemon{
-		btrfs:    b,
-		cas:      c,
-		tmplMgr:  t,
-		interval: interval,
-		tracked:  make(map[string]*trackedVolume),
-		volLocks: make(map[string]*sync.Mutex),
-		stopCh:   make(chan struct{}),
+		btrfs:                  b,
+		cas:                    c,
+		tmplMgr:                t,
+		interval:               interval,
+		consolidationInterval:  50,
+		consolidationRetention: 3,
+		tracked:                make(map[string]*trackedVolume),
+		volLocks:               make(map[string]*sync.Mutex),
+		stopCh:                 make(chan struct{}),
 	}
 }
 
@@ -554,6 +595,8 @@ func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
 		tv.lastSyncAt = time.Now()
 		tv.templateName = tvCopy.templateName
 		tv.templateHash = tvCopy.templateHash
+		tv.lastConsolidationPath = tvCopy.lastConsolidationPath
+		tv.lastConsolidationHash = tvCopy.lastConsolidationHash
 		tv.dirty = false
 	}
 	d.mu.Unlock()
@@ -588,15 +631,17 @@ func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (st
 		tv.lastSyncAt = time.Now()
 		tv.templateName = tvCopy.templateName
 		tv.templateHash = tvCopy.templateHash
+		tv.lastConsolidationPath = tvCopy.lastConsolidationPath
+		tv.lastConsolidationHash = tvCopy.lastConsolidationHash
 	}
 	d.mu.Unlock()
 	return hash, nil
 }
 
-// RestoreVolume restores a volume from CAS by downloading the latest layer
-// from the manifest and applying it on top of the base template. Each layer
-// is a full diff from the template (not incremental from the previous layer),
-// so only one layer download is needed regardless of manifest history.
+// RestoreVolume restores a volume from CAS by replaying the incremental
+// snapshot chain. The chain is: template → consolidations → incrementals.
+// Only the minimum set of snapshots needed to reconstruct the latest state
+// is downloaded.
 func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	if d.cas == nil {
 		return fmt.Errorf("CAS store not configured, cannot restore volume %q", volumeID)
@@ -613,61 +658,104 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	}
 
 	// Ensure base template exists locally (if volume was created from a template).
-	// Template-less volumes have Base=="" — their layers are full sends that
-	// btrfs receive can apply directly without a parent.
 	if manifest.Base != "" && manifest.TemplateName != "" {
 		if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
 			return fmt.Errorf("ensure base template %s: %w", manifest.TemplateName, err)
 		}
 	}
 
-	// Determine source for writable volume: latest layer or base template.
-	var sourcePath string
-	if len(manifest.Snapshots) > 0 {
-		latest := manifest.Snapshots[len(manifest.Snapshots)-1]
-		targetPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latest.Hash))
+	volumePath := fmt.Sprintf("volumes/%s", volumeID)
 
-		if !d.btrfs.SubvolumeExists(ctx, targetPath) {
-			if err := d.downloadLayer(ctx, volumeID, latest.Hash, targetPath); err != nil {
-				return fmt.Errorf("restore layer %s: %w", latest.Hash, err)
+	if len(manifest.Snapshots) == 0 {
+		// No snapshots — restore from template directly.
+		if manifest.TemplateName == "" {
+			return fmt.Errorf("no layers and no base template for volume %s", volumeID)
+		}
+		tmplPath := fmt.Sprintf("templates/%s", manifest.TemplateName)
+		if d.btrfs.SubvolumeExists(ctx, volumePath) {
+			if err := d.btrfs.DeleteSubvolume(ctx, volumePath); err != nil {
+				return fmt.Errorf("delete existing volume %s: %w", volumeID, err)
 			}
 		}
-		sourcePath = targetPath
-	} else if manifest.TemplateName != "" {
-		sourcePath = fmt.Sprintf("templates/%s", manifest.TemplateName)
+		if err := d.btrfs.SnapshotSubvolume(ctx, tmplPath, volumePath, false); err != nil {
+			return fmt.Errorf("snapshot template to volume %s: %w", volumeID, err)
+		}
+		klog.Infof("Restored volume %s from template (no snapshots)", volumeID)
+		return nil
 	}
 
-	if sourcePath == "" {
-		return fmt.Errorf("no layers and no base template for volume %s", volumeID)
+	// Build the restore chain for the latest snapshot.
+	targetIdx := len(manifest.Snapshots) - 1
+	chain := manifest.BuildRestoreChain(targetIdx)
+
+	// Download and receive each layer in the chain in order.
+	// btrfs receive creates subvolumes that serve as parents for the next receive.
+	var lastReceivedPath string
+	for _, idx := range chain {
+		snap := manifest.Snapshots[idx]
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
+
+		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
+			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath); err != nil {
+				return fmt.Errorf("restore snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), err)
+			}
+		}
+		lastReceivedPath = layerPath
 	}
 
-	// Create writable volume from source.
-	volumePath := fmt.Sprintf("volumes/%s", volumeID)
+	if lastReceivedPath == "" {
+		return fmt.Errorf("empty restore chain for volume %s", volumeID)
+	}
+
+	// Create writable volume from the final received snapshot.
 	if d.btrfs.SubvolumeExists(ctx, volumePath) {
 		if err := d.btrfs.DeleteSubvolume(ctx, volumePath); err != nil {
 			return fmt.Errorf("delete existing volume %s: %w", volumeID, err)
 		}
 	}
-
-	if err := d.btrfs.SnapshotSubvolume(ctx, sourcePath, volumePath, false); err != nil {
+	if err := d.btrfs.SnapshotSubvolume(ctx, lastReceivedPath, volumePath, false); err != nil {
 		return fmt.Errorf("snapshot to volume %s: %w", volumeID, err)
+	}
+
+	// Clean up intermediate layer snapshots (keep only the latest + latest consolidation).
+	latestSnap := manifest.Snapshots[targetIdx]
+	latestConsolHash := ""
+	if consol := manifest.LatestConsolidation(); consol != nil {
+		latestConsolHash = consol.Hash
+	}
+	for _, idx := range chain {
+		snap := manifest.Snapshots[idx]
+		if snap.Hash == latestSnap.Hash || snap.Hash == latestConsolHash {
+			continue // keep these
+		}
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
+		if d.btrfs.SubvolumeExists(ctx, layerPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
+		}
 	}
 
 	// Update tracked state.
 	latestHash := manifest.LatestHash()
+	latestSnapPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latestSnap.Hash))
 	d.mu.Lock()
 	if tv, ok := d.tracked[volumeID]; ok {
 		tv.lastLayerHash = latestHash
-		tv.lastSnapPath = sourcePath
+		tv.lastSnapPath = latestSnapPath
+		if latestConsolHash != "" {
+			consolPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latestConsolHash))
+			tv.lastConsolidationPath = consolPath
+			tv.lastConsolidationHash = latestConsolHash
+		}
 	}
 	d.mu.Unlock()
 
-	klog.Infof("Restored volume %s from CAS (latest layer)", volumeID)
+	klog.Infof("Restored volume %s from CAS (%d snapshots in chain)", volumeID, len(chain))
 	return nil
 }
 
 // RestoreToSnapshot restores a volume to a specific snapshot hash. The current
-// state is saved as a "pre-restore" layer first as an undo point.
+// state is saved as a "pre-restore" layer first as an undo point. The
+// incremental chain is replayed from the nearest consolidation/template.
 func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash string) error {
 	// Per-volume lock serializes with concurrent SyncVolume/CreateSnapshot.
 	vl := d.volumeLock(volumeID)
@@ -675,7 +763,6 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 	defer vl.Unlock()
 
 	// Save current state as an undo point before restoring.
-	// Call syncOne directly (not CreateSnapshot) since we already hold the lock.
 	d.mu.Lock()
 	tv, exists := d.tracked[volumeID]
 	if !exists {
@@ -703,52 +790,80 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
 	}
 
-	// Find the target layer path.
-	var targetLayerPath string
-	if targetHash == manifest.Base {
-		// Restore to base template.
-		if manifest.TemplateName != "" {
-			if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
-				return fmt.Errorf("ensure base template: %w", err)
-			}
-			targetLayerPath = fmt.Sprintf("templates/%s", manifest.TemplateName)
-		}
-	} else {
-		// Each layer is independently restorable (full diff from template),
-		// so download only the target layer directly.
-		var targetLayer *cas.Layer
-		for i := range manifest.Snapshots {
-			if manifest.Snapshots[i].Hash == targetHash {
-				targetLayer = &manifest.Snapshots[i]
-				break
-			}
-		}
-		if targetLayer == nil {
-			return fmt.Errorf("target hash %s not found in manifest for volume %s", targetHash, volumeID)
-		}
+	volumePath := fmt.Sprintf("volumes/%s", volumeID)
 
-		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(targetLayer.Hash))
-		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
-			if err := d.downloadLayer(ctx, volumeID, targetLayer.Hash, layerPath); err != nil {
-				return fmt.Errorf("restore layer %s: %w", targetLayer.Hash, err)
-			}
+	// Restore to base template.
+	if targetHash == manifest.Base {
+		if manifest.TemplateName == "" {
+			return fmt.Errorf("target hash %s is template base but no template name set", targetHash)
 		}
-		targetLayerPath = layerPath
+		if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
+			return fmt.Errorf("ensure base template: %w", err)
+		}
+		tmplPath := fmt.Sprintf("templates/%s", manifest.TemplateName)
+		if d.btrfs.SubvolumeExists(ctx, volumePath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, volumePath)
+		}
+		if err := d.btrfs.SnapshotSubvolume(ctx, tmplPath, volumePath, false); err != nil {
+			return fmt.Errorf("snapshot template to volume: %w", err)
+		}
+		manifest.TruncateAfter(targetHash)
+		_ = d.cas.PutManifest(ctx, manifest)
+
+		d.mu.Lock()
+		if tv, ok := d.tracked[volumeID]; ok {
+			tv.lastLayerHash = targetHash
+			tv.lastSnapPath = tmplPath
+		}
+		d.mu.Unlock()
+
+		klog.Infof("Restored volume %s to template base", volumeID)
+		return nil
 	}
 
-	if targetLayerPath == "" {
+	// Find target index in manifest.
+	targetIdx := -1
+	for i := range manifest.Snapshots {
+		if manifest.Snapshots[i].Hash == targetHash {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
 		return fmt.Errorf("target hash %s not found in manifest for volume %s", targetHash, volumeID)
 	}
 
-	// Replace the volume with a writable snapshot of the target layer.
-	volumePath := fmt.Sprintf("volumes/%s", volumeID)
-	if d.btrfs.SubvolumeExists(ctx, volumePath) {
-		if err := d.btrfs.DeleteSubvolume(ctx, volumePath); err != nil {
-			return fmt.Errorf("delete volume for restore: %w", err)
+	// Ensure template exists for chain replay.
+	if manifest.Base != "" && manifest.TemplateName != "" {
+		if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
+			return fmt.Errorf("ensure base template: %w", err)
 		}
 	}
-	if err := d.btrfs.SnapshotSubvolume(ctx, targetLayerPath, volumePath, false); err != nil {
-		return fmt.Errorf("snapshot target layer to volume: %w", err)
+
+	// Build and replay the restore chain.
+	chain := manifest.BuildRestoreChain(targetIdx)
+	var lastReceivedPath string
+	for _, idx := range chain {
+		snap := manifest.Snapshots[idx]
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
+		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
+			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath); err != nil {
+				return fmt.Errorf("restore snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), err)
+			}
+		}
+		lastReceivedPath = layerPath
+	}
+
+	if lastReceivedPath == "" {
+		return fmt.Errorf("empty restore chain for volume %s target %s", volumeID, targetHash)
+	}
+
+	// Replace volume with writable snapshot of the target.
+	if d.btrfs.SubvolumeExists(ctx, volumePath) {
+		_ = d.btrfs.DeleteSubvolume(ctx, volumePath)
+	}
+	if err := d.btrfs.SnapshotSubvolume(ctx, lastReceivedPath, volumePath, false); err != nil {
+		return fmt.Errorf("snapshot target to volume: %w", err)
 	}
 
 	// Truncate manifest to target.
@@ -757,15 +872,36 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		return fmt.Errorf("save truncated manifest: %w", err)
 	}
 
+	// Clean up intermediate layers (keep target + latest consolidation).
+	latestConsolHash := ""
+	if consol := manifest.LatestConsolidation(); consol != nil {
+		latestConsolHash = consol.Hash
+	}
+	for _, idx := range chain {
+		snap := manifest.Snapshots[idx]
+		if snap.Hash == targetHash || snap.Hash == latestConsolHash {
+			continue
+		}
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
+		if d.btrfs.SubvolumeExists(ctx, layerPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
+		}
+	}
+
 	// Update tracked state.
 	d.mu.Lock()
 	if tv, ok := d.tracked[volumeID]; ok {
 		tv.lastLayerHash = targetHash
-		tv.lastSnapPath = targetLayerPath
+		tv.lastSnapPath = lastReceivedPath
+		if latestConsolHash != "" {
+			consolPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latestConsolHash))
+			tv.lastConsolidationPath = consolPath
+			tv.lastConsolidationHash = latestConsolHash
+		}
 	}
 	d.mu.Unlock()
 
-	klog.Infof("Restored volume %s to snapshot %s", volumeID, cas.ShortHash(targetHash))
+	klog.Infof("Restored volume %s to snapshot %s (%d in chain)", volumeID, cas.ShortHash(targetHash), len(chain))
 	return nil
 }
 
@@ -931,6 +1067,8 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 			tv.lastSyncAt = time.Now()
 			tv.templateName = item.tv.templateName
 			tv.templateHash = item.tv.templateHash
+			tv.lastConsolidationPath = item.tv.lastConsolidationPath
+			tv.lastConsolidationHash = item.tv.lastConsolidationHash
 			tv.dirty = false
 		}
 		d.mu.Unlock()
@@ -948,11 +1086,12 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 
 // syncOne performs the CAS sync algorithm for a single volume:
 //  1. Create read-only snapshot: layers/{volumeID}@pending
-//  2. Determine parent snapshot path for incremental send
+//  2. Determine parent: previous snapshot (incremental) or previous
+//     consolidation/template (consolidation point)
 //  3. btrfs send → cas.PutBlob() → get hash
-//  4. Update manifest with new layer
-//  5. Rotate layer snapshot to layers/{volumeID}@{shortHash}
-func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, label string) (string, string, error) {
+//  4. Update manifest with new snapshot, run consolidation retention
+//  5. Rotate layer snapshots on disk
+func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label string) (string, string, error) {
 	if d.cas == nil {
 		return "", "", fmt.Errorf("CAS store not configured")
 	}
@@ -978,41 +1117,7 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 		return "", "", fmt.Errorf("create pending snapshot: %w", err)
 	}
 
-	// 2. Determine parent for incremental send. Always use the template so
-	// every layer is independently restorable (no chain dependency).
-	var parentPath string
-	if tv.templateName != "" {
-		tmplPath := fmt.Sprintf("templates/%s", tv.templateName)
-		if d.btrfs.SubvolumeExists(ctx, tmplPath) {
-			parentPath = tmplPath
-		}
-	}
-	// If no template, full send (blank project or template not locally cached).
-
-	// 3. btrfs send → CAS PutBlob with stall detection.
-	sendReader, err := d.btrfs.Send(ctx, pendingPath, parentPath)
-	if err != nil {
-		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
-		return "", "", fmt.Errorf("btrfs send: %w", err)
-	}
-
-	// Wrap with stall detection: if no bytes flow for 30s, the sync is stuck
-	// (S3 hang, network partition, dead rclone). Cancel to unblock.
-	stallCtx, stallCancel := context.WithCancelCause(ctx)
-	stallR := ioutil.NewStallReader(sendReader, stallCtx, stallCancel, ioutil.StallTimeout)
-
-	hash, err := d.cas.PutBlob(stallCtx, stallR)
-	stallR.Close() // stops timer + closes underlying sendReader
-	if err != nil {
-		// Annotate with stall cause if the stall timer (not parent ctx) caused cancellation.
-		if cause := context.Cause(stallCtx); cause != nil {
-			err = fmt.Errorf("%w (cause: %v)", err, cause)
-		}
-		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
-		return "", "", fmt.Errorf("put blob: %w", err)
-	}
-
-	// 4. Update manifest.
+	// 2. Check manifest to decide if this snapshot should be a consolidation.
 	manifest, manErr := d.cas.GetManifest(ctx, tv.volumeID)
 	if manErr != nil {
 		manifest = &cas.Manifest{
@@ -1022,43 +1127,145 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 		}
 	}
 
-	parentHash := tv.templateHash
+	isConsolidation := false
+	if d.consolidationInterval > 0 {
+		sinceLastConsol := manifest.SnapshotsSinceLastConsolidation()
+		// The snapshot we're about to create will be the (sinceLastConsol+1)th.
+		// Trigger consolidation when that count reaches the interval.
+		if sinceLastConsol+1 >= d.consolidationInterval {
+			isConsolidation = true
+		}
+	}
+
+	// 2b. Determine parent for btrfs send.
+	var parentPath string
+	var parentHash string
+
+	if isConsolidation {
+		// Consolidation: diff from previous consolidation snapshot (or template).
+		if tv.lastConsolidationPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastConsolidationPath) {
+			parentPath = tv.lastConsolidationPath
+			parentHash = tv.lastConsolidationHash
+		} else if tv.templateName != "" {
+			tmplPath := fmt.Sprintf("templates/%s", tv.templateName)
+			if d.btrfs.SubvolumeExists(ctx, tmplPath) {
+				parentPath = tmplPath
+			}
+			parentHash = tv.templateHash
+		}
+	} else {
+		// Incremental: diff from previous snapshot.
+		if tv.lastSnapPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastSnapPath) {
+			parentPath = tv.lastSnapPath
+			parentHash = tv.lastLayerHash
+		} else if tv.templateName != "" {
+			// First sync or previous snapshot lost — fall back to template.
+			tmplPath := fmt.Sprintf("templates/%s", tv.templateName)
+			if d.btrfs.SubvolumeExists(ctx, tmplPath) {
+				parentPath = tmplPath
+			}
+			parentHash = tv.templateHash
+		}
+	}
+	// If no parent found, parentPath="" → full send (no template, no previous).
+	if parentHash == "" {
+		parentHash = tv.templateHash // may also be "" for template-less volumes
+	}
+
+	// 3. btrfs send → CAS PutBlob with stall detection.
+	sendReader, err := d.btrfs.Send(ctx, pendingPath, parentPath)
+	if err != nil {
+		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		return "", "", fmt.Errorf("btrfs send: %w", err)
+	}
+
+	stallCtx, stallCancel := context.WithCancelCause(ctx)
+	stallR := ioutil.NewStallReader(sendReader, stallCtx, stallCancel, ioutil.StallTimeout)
+
+	hash, err := d.cas.PutBlob(stallCtx, stallR)
+	stallR.Close()
+	if err != nil {
+		if cause := context.Cause(stallCtx); cause != nil {
+			err = fmt.Errorf("%w (cause: %v)", err, cause)
+		}
+		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		return "", "", fmt.Errorf("put blob: %w", err)
+	}
+
+	// 4. Update manifest with new snapshot.
 	manifest.AppendSnapshot(cas.Snapshot{
-		Hash:   hash,
-		Parent: parentHash,
-		Role:   layerType,
-		Label:  label,
-		TS:     time.Now().UTC().Format(time.RFC3339),
+		Hash:          hash,
+		Parent:        parentHash,
+		Role:          role,
+		Label:         label,
+		Consolidation: isConsolidation,
+		TS:            time.Now().UTC().Format(time.RFC3339),
 	})
+
+	// Prune old consolidation blobs if retention is configured.
+	if isConsolidation && d.consolidationRetention > 0 {
+		pruned := manifest.PruneConsolidations(d.consolidationRetention)
+		for _, prunedHash := range pruned {
+			if delErr := d.cas.DeleteBlob(ctx, prunedHash); delErr != nil {
+				klog.Warningf("Failed to prune consolidation blob %s: %v", cas.ShortHash(prunedHash), delErr)
+			} else {
+				klog.V(2).Infof("Pruned consolidation blob %s for volume %s", cas.ShortHash(prunedHash), tv.volumeID)
+			}
+		}
+	}
 
 	if err := d.cas.PutManifest(ctx, manifest); err != nil {
 		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 		return "", "", fmt.Errorf("put manifest: %w", err)
 	}
 
-	// 5. Rotate layer snapshots: delete old, rename pending to final.
+	// 5. Rotate layer snapshots on disk.
 	shortHash := cas.ShortHash(hash)
-	newSnapPath := fmt.Sprintf("layers/%s@%s", tv.volumeID, shortHash)
+	var newSnapPath string
 
-	if tv.lastSnapPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastSnapPath) {
-		if delErr := d.btrfs.DeleteSubvolume(ctx, tv.lastSnapPath); delErr != nil {
-			klog.Warningf("Failed to delete old layer snapshot %s: %v", tv.lastSnapPath, delErr)
+	if isConsolidation {
+		newSnapPath = fmt.Sprintf("layers/%s@consol-%s", tv.volumeID, shortHash)
+
+		// Delete old incremental if it's different from the consolidation.
+		if tv.lastSnapPath != "" && tv.lastSnapPath != tv.lastConsolidationPath &&
+			d.btrfs.SubvolumeExists(ctx, tv.lastSnapPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, tv.lastSnapPath)
+		}
+		// Delete old consolidation snapshot.
+		if tv.lastConsolidationPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastConsolidationPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, tv.lastConsolidationPath)
+		}
+
+		if d.btrfs.SubvolumeExists(ctx, newSnapPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, newSnapPath)
+		}
+		if err := d.btrfs.RenameSubvolume(ctx, pendingPath, newSnapPath); err != nil {
+			klog.Warningf("Failed to rename pending to %s: %v", newSnapPath, err)
+			newSnapPath = pendingPath
+		}
+		tv.lastConsolidationPath = newSnapPath
+		tv.lastConsolidationHash = hash
+	} else {
+		newSnapPath = fmt.Sprintf("layers/%s@%s", tv.volumeID, shortHash)
+
+		// Delete old incremental, but NOT the consolidation snapshot.
+		if tv.lastSnapPath != "" && tv.lastSnapPath != tv.lastConsolidationPath &&
+			d.btrfs.SubvolumeExists(ctx, tv.lastSnapPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, tv.lastSnapPath)
+		}
+
+		if d.btrfs.SubvolumeExists(ctx, newSnapPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, newSnapPath)
+		}
+		if err := d.btrfs.RenameSubvolume(ctx, pendingPath, newSnapPath); err != nil {
+			klog.Warningf("Failed to rename pending to %s: %v", newSnapPath, err)
+			newSnapPath = pendingPath
 		}
 	}
 
-	// Rename pending snapshot to content-addressed name. os.Rename preserves
-	// UUID and received_uuid, critical for cross-node incremental restore.
-	if d.btrfs.SubvolumeExists(ctx, newSnapPath) {
-		_ = d.btrfs.DeleteSubvolume(ctx, newSnapPath)
-	}
-	if err := d.btrfs.RenameSubvolume(ctx, pendingPath, newSnapPath); err != nil {
-		klog.Warningf("Failed to rename pending to %s: %v", newSnapPath, err)
-		newSnapPath = pendingPath // Keep using pending path as fallback.
-	}
-
 	metrics.SyncDuration.Observe(time.Since(start).Seconds())
-	klog.V(2).Infof("CAS synced volume %s → blob %s (type=%s)",
-		tv.volumeID, cas.ShortHash(hash), layerType)
+	klog.V(2).Infof("CAS synced volume %s → blob %s (role=%s, consolidation=%v)",
+		tv.volumeID, cas.ShortHash(hash), role, isConsolidation)
 
 	return hash, newSnapPath, nil
 }
