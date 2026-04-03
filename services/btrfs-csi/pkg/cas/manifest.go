@@ -116,33 +116,17 @@ func (m *Manifest) ConsolidationHashes() []string {
 	return hashes
 }
 
-// PruneConsolidations removes the Consolidation flag from the oldest
-// consolidation entries beyond the retention count and returns the blob
-// hashes that should be deleted from CAS. The pruned entries remain in
-// the manifest as regular snapshots (their blobs are deleted externally).
+// PruneConsolidations is a no-op placeholder for future consolidation
+// retention. Consolidation blobs form a chain (each diffs from the
+// previous), so deleting any blob in the chain breaks all subsequent
+// restores. Safe pruning requires re-basing the oldest surviving
+// consolidation as a full diff from template, which is not yet implemented.
+//
+// All consolidation blobs are kept. Storage impact is minimal: ~MB each,
+// one every N snapshots (default 50).
 func (m *Manifest) PruneConsolidations(retention int) []string {
-	hashes := m.ConsolidationHashes()
-	if len(hashes) <= retention {
-		return nil
-	}
-
-	pruneCount := len(hashes) - retention
-	pruneSet := make(map[string]bool, pruneCount)
-	for i := 0; i < pruneCount; i++ {
-		pruneSet[hashes[i]] = true
-	}
-
-	for i := range m.Snapshots {
-		if pruneSet[m.Snapshots[i].Hash] {
-			m.Snapshots[i].Consolidation = false
-		}
-	}
-
-	pruned := make([]string, 0, pruneCount)
-	for h := range pruneSet {
-		pruned = append(pruned, h)
-	}
-	return pruned
+	// No-op: keep all consolidation blobs to maintain chain integrity.
+	return nil
 }
 
 // BuildRestoreChain returns the ordered list of snapshot indices needed to
@@ -286,8 +270,10 @@ func (s *Store) GetManifest(ctx context.Context, volumeID string) (*Manifest, er
 					raw["snapshots"] = patched
 				}
 			}
-			delete(raw, "layers")
 		}
+		// Always remove "layers" — even if "snapshots" also exists (ambiguous
+		// state from partial upgrade). "snapshots" takes precedence.
+		delete(raw, "layers")
 	}
 
 	normalized, err := json.Marshal(raw)

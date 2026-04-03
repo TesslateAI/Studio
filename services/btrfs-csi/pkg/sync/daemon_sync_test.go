@@ -1598,22 +1598,22 @@ func TestSyncOne_ConsolidationAtInterval(t *testing.T) {
 	}
 }
 
-// TestSyncOne_ConsolidationRetention verifies that old consolidation blobs
-// are pruned when the retention limit is exceeded.
-func TestSyncOne_ConsolidationRetention(t *testing.T) {
+// TestSyncOne_ConsolidationBlobsKept verifies that all consolidation blobs
+// are kept in CAS (no pruning — chain integrity requires all blobs).
+func TestSyncOne_ConsolidationBlobsKept(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
 	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
-	d.consolidationInterval = 2 // consolidate every 2 snapshots
-	d.consolidationRetention = 2
+	d.consolidationInterval = 2
+	d.consolidationRetention = 2 // retention is set but pruning is a no-op
 
 	volID := "vol-retention"
 	fb.subvolumes["volumes/"+volID] = true
 	fb.subvolumes["templates/tmpl1"] = true
 	d.TrackVolume(volID, "tmpl1", "sha256:base")
 
-	// Manifest with 2 existing consolidations + 1 incremental.
+	// Manifest with 2 existing consolidations.
 	fc.manifests[volID] = &cas.Manifest{
 		VolumeID:     volID,
 		Base:         "sha256:base",
@@ -1625,11 +1625,9 @@ func TestSyncOne_ConsolidationRetention(t *testing.T) {
 			{Hash: "sha256:s4", Parent: "sha256:c2", Role: "sync"},
 		},
 	}
-	// Blobs for consolidations.
 	fc.blobs["sha256:c1"] = "consol-1-data"
 	fc.blobs["sha256:c2"] = "consol-2-data"
 
-	// Set tracked state.
 	d.mu.Lock()
 	tv := d.tracked[volID]
 	tv.lastLayerHash = "sha256:s4"
@@ -1640,45 +1638,43 @@ func TestSyncOne_ConsolidationRetention(t *testing.T) {
 	fb.subvolumes["layers/"+volID+"@consol-c2"] = true
 	d.mu.Unlock()
 
-	// 5th snapshot (2 since c2): should create c3 and prune c1.
+	// 5th snapshot: triggers c3 consolidation.
 	fc.nextHash = "sha256:c3"
 	err := d.SyncVolume(context.Background(), volID)
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 
-	// Verify c1 blob was pruned.
+	// All consolidation blobs should still exist (no pruning).
 	fc.mu.Lock()
 	_, c1Exists := fc.blobs["sha256:c1"]
-	deletedHashes := fc.deleted
+	_, c2Exists := fc.blobs["sha256:c2"]
+	deletedCount := len(fc.deleted)
 	fc.mu.Unlock()
 
-	if c1Exists {
-		t.Error("c1 blob should be pruned from CAS")
+	if !c1Exists {
+		t.Error("c1 blob should be kept (no pruning)")
 	}
-	found := false
-	for _, h := range deletedHashes {
-		if h == "sha256:c1" {
-			found = true
-		}
+	if !c2Exists {
+		t.Error("c2 blob should be kept (no pruning)")
 	}
-	if !found {
-		t.Error("c1 should appear in deleted hashes")
+	if deletedCount > 0 {
+		t.Errorf("no blobs should be deleted, got %d", deletedCount)
 	}
 
-	// Verify manifest: c1 should have Consolidation=false, c2 and c3 should be true.
+	// All 3 consolidations should be marked in the manifest.
 	fc.mu.Lock()
 	m := fc.manifests[volID]
 	fc.mu.Unlock()
 
-	if m.Snapshots[0].Consolidation {
-		t.Error("c1 should have Consolidation=false after pruning")
+	consolCount := 0
+	for _, s := range m.Snapshots {
+		if s.Consolidation {
+			consolCount++
+		}
 	}
-	if !m.Snapshots[2].Consolidation {
-		t.Error("c2 should still be a consolidation")
-	}
-	if !m.Snapshots[4].Consolidation {
-		t.Error("c3 should be a consolidation")
+	if consolCount != 3 {
+		t.Errorf("expected 3 consolidations, got %d", consolCount)
 	}
 }
 

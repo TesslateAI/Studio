@@ -220,8 +220,9 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 	// concurrent S3 reads. Tombstoned volumes are collected for local
 	// cleanup instead of being tracked.
 	type manifestInfo struct {
-		templateName string
-		templateHash string
+		templateName      string
+		templateHash      string
+		latestConsolHash  string // hash of latest consolidation snapshot (empty if none)
 	}
 	manifestMap := make(map[string]manifestInfo, len(volIDs))
 	var tombstoned []string
@@ -247,11 +248,15 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 				}
 
 				if m, err := d.cas.GetManifest(ctx, vid); err == nil {
-					mu.Lock()
-					manifestMap[vid] = manifestInfo{
+					info := manifestInfo{
 						templateName: m.TemplateName,
 						templateHash: m.Base,
 					}
+					if consol := m.LatestConsolidation(); consol != nil {
+						info.latestConsolHash = consol.Hash
+					}
+					mu.Lock()
+					manifestMap[vid] = info
 					mu.Unlock()
 				}
 			}(volID)
@@ -342,6 +347,29 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 			clean++
 		} else {
 			dirty++
+		}
+
+		// Recover consolidation state from manifest + disk.
+		if mi.latestConsolHash != "" {
+			consolShort := cas.ShortHash(mi.latestConsolHash)
+			consolPath := fmt.Sprintf("layers/%s@consol-%s", volID, consolShort)
+			// Also check non-prefixed path (consolidation may use regular naming).
+			consolPathAlt := fmt.Sprintf("layers/%s@%s", volID, consolShort)
+			d.mu.Lock()
+			if tv, ok := d.tracked[volID]; ok {
+				if d.btrfs.SubvolumeExists(ctx, consolPath) {
+					tv.lastConsolidationPath = consolPath
+					tv.lastConsolidationHash = mi.latestConsolHash
+				} else if d.btrfs.SubvolumeExists(ctx, consolPathAlt) {
+					tv.lastConsolidationPath = consolPathAlt
+					tv.lastConsolidationHash = mi.latestConsolHash
+				} else {
+					// Consolidation in manifest but not on disk — will use
+					// template or full send for next consolidation. Safe.
+					tv.lastConsolidationHash = mi.latestConsolHash
+				}
+			}
+			d.mu.Unlock()
 		}
 		discovered++
 	}
@@ -1037,17 +1065,15 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 		}
 
 		// Per-volume lock serializes with concurrent SyncVolume/CreateSnapshot RPCs.
+		// Hold vl across both syncOne AND the write-back to prevent a concurrent
+		// SyncVolume/CreateSnapshot from reading stale consolidation state.
 		vl := d.volumeLock(item.tv.volumeID)
 		vl.Lock()
 		hash, newSnapPath, err := d.syncOne(ctx, &item.tv, "sync", "")
-		vl.Unlock()
 
 		if err != nil {
+			vl.Unlock() // release before UntrackVolume (which acquires vl)
 			if errors.Is(err, errVolumeGone) {
-				// Volume was deleted externally (e.g. Hub DeleteVolumeFromNode
-				// on a different node, or manual btrfs subvolume delete).
-				// Untrack it so we stop retrying every cycle. The per-volume
-				// lock is already released, so UntrackVolume can acquire it.
 				klog.Warningf("Volume %s subvolume gone — auto-untracking", item.tv.volumeID)
 				d.UntrackVolume(item.tv.volumeID)
 				continue
@@ -1072,6 +1098,7 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 			tv.dirty = false
 		}
 		d.mu.Unlock()
+		vl.Unlock()
 		metrics.SyncLag.WithLabelValues(item.tv.volumeID).Set(0)
 
 		// Update qgroup metrics if quotas are enabled.
@@ -1201,18 +1228,6 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 		Consolidation: isConsolidation,
 		TS:            time.Now().UTC().Format(time.RFC3339),
 	})
-
-	// Prune old consolidation blobs if retention is configured.
-	if isConsolidation && d.consolidationRetention > 0 {
-		pruned := manifest.PruneConsolidations(d.consolidationRetention)
-		for _, prunedHash := range pruned {
-			if delErr := d.cas.DeleteBlob(ctx, prunedHash); delErr != nil {
-				klog.Warningf("Failed to prune consolidation blob %s: %v", cas.ShortHash(prunedHash), delErr)
-			} else {
-				klog.V(2).Infof("Pruned consolidation blob %s for volume %s", cas.ShortHash(prunedHash), tv.volumeID)
-			}
-		}
-	}
 
 	if err := d.cas.PutManifest(ctx, manifest); err != nil {
 		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)

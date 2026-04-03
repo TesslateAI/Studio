@@ -76,7 +76,9 @@ func TestPruneConsolidations_BelowRetention(t *testing.T) {
 	}
 }
 
-func TestPruneConsolidations_PrunesOldest(t *testing.T) {
+func TestPruneConsolidations_NoOp(t *testing.T) {
+	// Pruning is disabled (no-op) because consolidation blobs form a chain.
+	// Deleting any blob breaks all subsequent restores.
 	m := &Manifest{
 		VolumeID: "vol-1",
 		Snapshots: []Snapshot{
@@ -86,20 +88,18 @@ func TestPruneConsolidations_PrunesOldest(t *testing.T) {
 			{Hash: "s2"},
 			{Hash: "c3", Consolidation: true},
 			{Hash: "s3"},
-			{Hash: "c4", Consolidation: true}, // 4 consolidations, retention=3 → prune c1
+			{Hash: "c4", Consolidation: true},
 		},
 	}
 	pruned := m.PruneConsolidations(3)
-	if len(pruned) != 1 || pruned[0] != "c1" {
-		t.Errorf("should prune c1, got %v", pruned)
+	if len(pruned) != 0 {
+		t.Errorf("PruneConsolidations should be a no-op, got %v", pruned)
 	}
-	// c1 should no longer be marked as consolidation.
-	if m.Snapshots[0].Consolidation {
-		t.Error("c1 should have Consolidation=false after pruning")
-	}
-	// c2, c3, c4 should still be consolidations.
-	if !m.Snapshots[2].Consolidation || !m.Snapshots[4].Consolidation || !m.Snapshots[6].Consolidation {
-		t.Error("remaining consolidations should keep their flags")
+	// All consolidations should still be marked.
+	for _, s := range m.Snapshots {
+		if s.Consolidation && s.Hash != "c1" && s.Hash != "c2" && s.Hash != "c3" && s.Hash != "c4" {
+			continue
+		}
 	}
 }
 

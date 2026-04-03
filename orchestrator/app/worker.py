@@ -560,18 +560,20 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     f"iterations={iterations}, tool_calls={tool_calls_made}"
                 )
 
-                # 10b. Create CAS checkpoint snapshot (non-blocking)
+                # 10b. Create CAS checkpoint snapshot (bounded, shutdown-safe)
                 if (
                     project
                     and getattr(project, "volume_id", None)
                     and completion_reason != "cancelled"
                 ):
-                    asyncio.create_task(
-                        _create_agent_checkpoint(
-                            project.volume_id,
-                            final_response or "Agent task completed",
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(
+                            _create_agent_checkpoint(
+                                project.volume_id,
+                                final_response or "Agent task completed",
+                            ),
+                            timeout=35.0,
                         )
-                    )
 
                 # 11. Increment usage count
                 agent_model.usage_count = (agent_model.usage_count or 0) + 1

@@ -25,6 +25,10 @@ class NodeResourcesExhausted(Exception):
     """Raised when no node has enough resources for a placement unit."""
 
 
+class VolumeNotFound(Exception):
+    """Raised when a volume is not registered in the Hub."""
+
+
 _MAX_MESSAGE_SIZE = 64 * 1024 * 1024  # 64 MiB
 
 
@@ -385,7 +389,14 @@ class HubClient:
         request: dict = {"volume_id": volume_id}
         if label:
             request["label"] = label
-        resp = await self._call("CreateSnapshot", request, timeout=timeout)
+        try:
+            resp = await self._call("CreateSnapshot", request, timeout=timeout)
+        except grpc.aio.AioRpcError as e:
+            if e.code() in (grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INTERNAL):
+                raise VolumeNotFound(
+                    f"Volume {volume_id} not found or not tracked: {e.details()}"
+                ) from e
+            raise
         hash_val = resp.get("hash", "")
         logger.info(
             "CreateSnapshot succeeded: volume_id=%s hash=%s label=%s",
@@ -414,7 +425,14 @@ class HubClient:
             List of snapshot dicts with ``hash``, ``role``, ``label``,
             ``ts`` fields.
         """
-        resp = await self._call("ListSnapshots", {"volume_id": volume_id}, timeout=timeout)
+        try:
+            resp = await self._call("ListSnapshots", {"volume_id": volume_id}, timeout=timeout)
+        except grpc.aio.AioRpcError as e:
+            if e.code() in (grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INTERNAL):
+                # NOT_FOUND: volume not registered. INTERNAL: manifest missing
+                # in CAS (volume exists but never synced). Both mean no snapshots.
+                return []
+            raise
         snapshots = resp.get("snapshots") or []
         logger.info(
             "ListSnapshots: volume_id=%s count=%d",
