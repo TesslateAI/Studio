@@ -88,7 +88,9 @@ spec:
             - "--mode=node"
             - "--nodeops-port=9741"
             - "--hub-address=tesslate-volume-hub.kube-system.svc:9750"
-            - "--sync-interval=15s"
+            - "--sync-interval=5m"
+            - "--consolidation-interval=50"
+            - "--consolidation-retention=3"
           lifecycle:
             preStop:
               exec:
