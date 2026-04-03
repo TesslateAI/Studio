@@ -56,6 +56,28 @@ async def _auto_title_chat(chat, model_adapter, user_message: str, db) -> None:
         logger.warning(f"[WORKER] Auto-title generation failed: {e}")
 
 
+async def _create_agent_checkpoint(volume_id: str, summary: str) -> None:
+    """Fire-and-forget CAS checkpoint after agent task completion.
+
+    Creates a labeled snapshot so the user can restore to any agent run.
+    Failures are logged but never propagated — agent completion is not
+    contingent on snapshot success.
+    """
+    try:
+        from .config import get_settings
+        from .services.hub_client import HubClient
+
+        settings = get_settings()
+        if not settings.volume_hub_address:
+            return
+        label = f"agent: {summary[:80]}"
+        async with HubClient(settings.volume_hub_address) as client:
+            await client.create_snapshot(volume_id, label, timeout=30.0)
+        logger.info("[WORKER] Agent checkpoint created: volume=%s", volume_id)
+    except Exception as e:
+        logger.warning("[WORKER] Agent checkpoint failed (non-fatal): %s", e)
+
+
 def _build_step_dict(step_data: dict, _convert_uuids_to_strings) -> dict:
     """Build a normalized step dict from raw agent step data."""
     return {
@@ -537,6 +559,19 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     f"[WORKER] Agent finished: task={task_id}, events={event_count}, "
                     f"iterations={iterations}, tool_calls={tool_calls_made}"
                 )
+
+                # 10b. Create CAS checkpoint snapshot (non-blocking)
+                if (
+                    project
+                    and getattr(project, "volume_id", None)
+                    and completion_reason != "cancelled"
+                ):
+                    asyncio.create_task(
+                        _create_agent_checkpoint(
+                            project.volume_id,
+                            final_response or "Agent task completed",
+                        )
+                    )
 
                 # 11. Increment usage count
                 agent_model.usage_count = (agent_model.usage_count or 0) + 1

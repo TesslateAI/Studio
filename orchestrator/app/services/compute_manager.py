@@ -1253,6 +1253,17 @@ class ComputeManager:
 
     async def _stop_environment_inner(self, project, db: AsyncSession) -> None:
         """Inner stop logic. Call directly when already holding the env lock."""
+        # Sync volume to CAS before tearing down compute (non-blocking on failure).
+        if getattr(project, "volume_id", None):
+            try:
+                from .volume_manager import get_volume_manager
+
+                vm = get_volume_manager()
+                await vm.trigger_sync(project.volume_id)
+                logger.info("[COMPUTE-T2] Volume %s synced before stop", project.volume_id)
+            except Exception as e:
+                logger.warning("[COMPUTE-T2] Volume sync before stop failed (non-fatal): %s", e)
+
         namespace = f"proj-{project.id}"
         k8s = self._k8s_client()
         v1 = self._api()

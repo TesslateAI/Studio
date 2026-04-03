@@ -359,6 +359,71 @@ class HubClient:
         return volume_id
 
     # ------------------------------------------------------------------
+    # Snapshots
+    # ------------------------------------------------------------------
+
+    async def create_snapshot(
+        self,
+        volume_id: str,
+        label: str = "",
+        *,
+        timeout: float = 300.0,
+    ) -> str:
+        """Create a labeled CAS snapshot (checkpoint) for a volume.
+
+        The Hub delegates to the volume's owner node which creates a
+        btrfs snapshot, uploads it to CAS, and updates the manifest.
+
+        Args:
+            volume_id: Volume to snapshot.
+            label: Human-readable label (e.g. ``"agent: Fix auth bug"``).
+            timeout: gRPC deadline in seconds.
+
+        Returns:
+            The CAS blob hash of the snapshot.
+        """
+        request: dict = {"volume_id": volume_id}
+        if label:
+            request["label"] = label
+        resp = await self._call("CreateSnapshot", request, timeout=timeout)
+        hash_val = resp.get("hash", "")
+        logger.info(
+            "CreateSnapshot succeeded: volume_id=%s hash=%s label=%s",
+            volume_id,
+            hash_val[:16] if hash_val else "",
+            label,
+        )
+        return hash_val
+
+    async def list_snapshots(
+        self,
+        volume_id: str,
+        *,
+        timeout: float = 300.0,
+    ) -> list[dict]:
+        """List checkpoint snapshots for a volume.
+
+        Returns only snapshots with ``role=checkpoint`` from the CAS
+        manifest — sync and consolidation snapshots are excluded.
+
+        Args:
+            volume_id: Volume to query.
+            timeout: gRPC deadline in seconds.
+
+        Returns:
+            List of snapshot dicts with ``hash``, ``role``, ``label``,
+            ``ts`` fields.
+        """
+        resp = await self._call("ListSnapshots", {"volume_id": volume_id}, timeout=timeout)
+        snapshots = resp.get("snapshots") or []
+        logger.info(
+            "ListSnapshots: volume_id=%s count=%d",
+            volume_id,
+            len(snapshots),
+        )
+        return snapshots
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
