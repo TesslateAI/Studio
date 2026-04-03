@@ -724,11 +724,11 @@ func (l *localNodeOps) GetVolumeMetadata(ctx context.Context, volumeID string) (
 		TemplateName: manifest.TemplateName,
 		TemplateHash: manifest.Base,
 		LatestHash:   manifest.LatestHash(),
-		LayerCount:   len(manifest.Layers),
+		LayerCount:   len(manifest.Snapshots),
 	}
-	for _, l := range manifest.Layers {
-		if l.Type == "snapshot" {
-			meta.Snapshots = append(meta.Snapshots, l)
+	for _, s := range manifest.Snapshots {
+		if s.Role == "checkpoint" {
+			meta.Snapshots = append(meta.Snapshots, s)
 		}
 	}
 	return meta, nil

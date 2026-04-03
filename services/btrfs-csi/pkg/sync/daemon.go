@@ -576,7 +576,7 @@ func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (st
 	tvCopy := *tv
 	d.mu.Unlock()
 
-	hash, newSnapPath, err := d.syncOne(ctx, &tvCopy, "snapshot", label)
+	hash, newSnapPath, err := d.syncOne(ctx, &tvCopy, "checkpoint", label)
 	if err != nil {
 		return "", err
 	}
@@ -623,8 +623,8 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 
 	// Determine source for writable volume: latest layer or base template.
 	var sourcePath string
-	if len(manifest.Layers) > 0 {
-		latest := manifest.Layers[len(manifest.Layers)-1]
+	if len(manifest.Snapshots) > 0 {
+		latest := manifest.Snapshots[len(manifest.Snapshots)-1]
 		targetPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latest.Hash))
 
 		if !d.btrfs.SubvolumeExists(ctx, targetPath) {
@@ -685,7 +685,7 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 	tvCopy := *tv
 	d.mu.Unlock()
 
-	if hash, newSnapPath, syncErr := d.syncOne(ctx, &tvCopy, "snapshot", "pre-restore"); syncErr != nil {
+	if hash, newSnapPath, syncErr := d.syncOne(ctx, &tvCopy, "checkpoint", "pre-restore"); syncErr != nil {
 		klog.Warningf("RestoreToSnapshot: failed to save undo point for %s: %v", volumeID, syncErr)
 	} else {
 		d.mu.Lock()
@@ -717,9 +717,9 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		// Each layer is independently restorable (full diff from template),
 		// so download only the target layer directly.
 		var targetLayer *cas.Layer
-		for i := range manifest.Layers {
-			if manifest.Layers[i].Hash == targetHash {
-				targetLayer = &manifest.Layers[i]
+		for i := range manifest.Snapshots {
+			if manifest.Snapshots[i].Hash == targetHash {
+				targetLayer = &manifest.Snapshots[i]
 				break
 			}
 		}
@@ -1023,10 +1023,10 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, layerType, labe
 	}
 
 	parentHash := tv.templateHash
-	manifest.AppendLayer(cas.Layer{
+	manifest.AppendSnapshot(cas.Snapshot{
 		Hash:   hash,
 		Parent: parentHash,
-		Type:   layerType,
+		Role:   layerType,
 		Label:  label,
 		TS:     time.Now().UTC().Format(time.RFC3339),
 	})

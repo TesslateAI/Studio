@@ -10,60 +10,87 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Manifest describes a volume as an ordered chain of content-addressed layers.
-// The Base field is the template blob hash; layers are incremental sends on top.
+// Manifest describes a volume as an ordered chain of content-addressed snapshots.
 type Manifest struct {
-	VolumeID     string  `json:"volume_id"`
-	Base         string  `json:"base"`
-	TemplateName string  `json:"template_name,omitempty"`
-	Layers       []Layer `json:"layers"`
+	VolumeID     string     `json:"volume_id"`
+	Base         string     `json:"base"`
+	TemplateName string     `json:"template_name,omitempty"`
+	Snapshots    []Snapshot `json:"snapshots"`
 }
 
-// Layer is a single incremental btrfs send stream stored as a CAS blob.
-type Layer struct {
-	Hash   string `json:"hash"`
-	Parent string `json:"parent"`
-	Type   string `json:"type"`            // "sync" | "snapshot"
-	Label  string `json:"label,omitempty"`
-	TS     string `json:"ts"`
+// Snapshot is a single btrfs send stream stored as a CAS blob.
+// Each snapshot diffs from its Parent — either the previous snapshot
+// (incremental) or the previous consolidation/template (consolidation point).
+type Snapshot struct {
+	Hash          string `json:"hash"`
+	Parent        string `json:"parent"`
+	Role          string `json:"role"`                    // "sync" | "checkpoint" | "consolidation"
+	Label         string `json:"label,omitempty"`
+	Consolidation bool   `json:"consolidation,omitempty"` // true = parent is previous consolidation, not previous snapshot
+	TS            string `json:"ts"`
 }
+
+// Layer is an alias kept so existing callers compile during migration.
+type Layer = Snapshot
 
 // manifestKey returns the S3 object key for a volume manifest.
 func manifestKey(volumeID string) string {
 	return fmt.Sprintf("manifests/%s.json", volumeID)
 }
 
-// LatestHash returns the hash of the most recent layer, or Base if no layers.
+// LatestHash returns the hash of the most recent snapshot, or Base if none exist.
 func (m *Manifest) LatestHash() string {
-	if len(m.Layers) > 0 {
-		return m.Layers[len(m.Layers)-1].Hash
+	if len(m.Snapshots) > 0 {
+		return m.Snapshots[len(m.Snapshots)-1].Hash
 	}
 	return m.Base
 }
 
-// AppendLayer adds a layer to the manifest's layer chain.
-func (m *Manifest) AppendLayer(l Layer) {
-	m.Layers = append(m.Layers, l)
+// AppendSnapshot adds a snapshot to the manifest chain.
+func (m *Manifest) AppendSnapshot(s Snapshot) {
+	m.Snapshots = append(m.Snapshots, s)
 }
 
-// TruncateAfter drops all layers after the one matching targetHash.
-// Used for restore: rewind the manifest to a previous point in time.
-// If targetHash equals Base, all layers are removed.
+// AppendLayer is an alias for AppendSnapshot during migration.
+func (m *Manifest) AppendLayer(l Layer) {
+	m.AppendSnapshot(l)
+}
+
+// TruncateAfter drops all snapshots after the one matching targetHash.
 func (m *Manifest) TruncateAfter(targetHash string) {
 	if targetHash == m.Base {
-		m.Layers = nil
+		m.Snapshots = nil
 		return
 	}
-	for i, l := range m.Layers {
-		if l.Hash == targetHash {
-			m.Layers = m.Layers[:i+1]
+	for i, s := range m.Snapshots {
+		if s.Hash == targetHash {
+			m.Snapshots = m.Snapshots[:i+1]
 			return
 		}
 	}
 }
 
-// ShortHash returns the first 12 hex chars of a full "sha256:..." hash.
-// Useful for constructing human-readable local snapshot paths.
+// LatestConsolidation returns the most recent consolidation snapshot, or nil.
+func (m *Manifest) LatestConsolidation() *Snapshot {
+	for i := len(m.Snapshots) - 1; i >= 0; i-- {
+		if m.Snapshots[i].Consolidation {
+			return &m.Snapshots[i]
+		}
+	}
+	return nil
+}
+
+// NearestConsolidationBefore returns the index of the consolidation at or before idx, or -1.
+func (m *Manifest) NearestConsolidationBefore(idx int) int {
+	for i := idx; i >= 0; i-- {
+		if m.Snapshots[i].Consolidation {
+			return i
+		}
+	}
+	return -1
+}
+
+// ShortHash returns the first 12 hex chars of a "sha256:..." hash.
 func ShortHash(hash string) string {
 	h := strings.TrimPrefix(hash, "sha256:")
 	if len(h) > 12 {
@@ -84,11 +111,13 @@ func (s *Store) PutManifest(ctx context.Context, m *Manifest) error {
 		return fmt.Errorf("upload manifest %s: %w", m.VolumeID, err)
 	}
 
-	klog.V(3).Infof("Saved manifest for volume %s (%d layers)", m.VolumeID, len(m.Layers))
+	klog.V(3).Infof("Saved manifest for volume %s (%d snapshots)", m.VolumeID, len(m.Snapshots))
 	return nil
 }
 
 // GetManifest reads a volume manifest from object storage.
+// If the manifest is in legacy format ("layers"/"type"), it is normalized
+// to the current format in-memory. The next PutManifest will persist the upgrade.
 func (s *Store) GetManifest(ctx context.Context, volumeID string) (*Manifest, error) {
 	key := manifestKey(volumeID)
 	reader, err := s.obj.Download(ctx, key)
@@ -97,10 +126,55 @@ func (s *Store) GetManifest(ctx context.Context, volumeID string) (*Manifest, er
 	}
 	defer reader.Close()
 
-	var m Manifest
-	if err := json.NewDecoder(reader).Decode(&m); err != nil {
+	// Decode into raw map to detect legacy keys.
+	var raw map[string]json.RawMessage
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(reader); err != nil {
+		return nil, fmt.Errorf("read manifest %s: %w", volumeID, err)
+	}
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
 		return nil, fmt.Errorf("decode manifest %s: %w", volumeID, err)
 	}
+
+	// Normalize legacy format: "layers" → "snapshots", per-entry "type" → "role".
+	if _, hasLayers := raw["layers"]; hasLayers {
+		if _, hasSnapshots := raw["snapshots"]; !hasSnapshots {
+			// Rename per-entry "type" → "role" inside the array.
+			var entries []map[string]json.RawMessage
+			if err := json.Unmarshal(raw["layers"], &entries); err == nil {
+				for i := range entries {
+					if t, ok := entries[i]["type"]; ok {
+						entries[i]["role"] = t
+						delete(entries[i], "type")
+					}
+				}
+				if patched, err := json.Marshal(entries); err == nil {
+					raw["snapshots"] = patched
+				}
+			}
+			delete(raw, "layers")
+		}
+	}
+
+	normalized, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode manifest %s: %w", volumeID, err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(normalized, &m); err != nil {
+		return nil, fmt.Errorf("unmarshal manifest %s: %w", volumeID, err)
+	}
+
+	// Normalize role values: legacy "snapshot" → "checkpoint", empty → "sync".
+	for i := range m.Snapshots {
+		switch m.Snapshots[i].Role {
+		case "snapshot":
+			m.Snapshots[i].Role = "checkpoint"
+		case "":
+			m.Snapshots[i].Role = "sync"
+		}
+	}
+
 	return &m, nil
 }
 
@@ -119,10 +193,7 @@ func tombstoneKey(volumeID string) string {
 	return fmt.Sprintf("tombstones/%s", volumeID)
 }
 
-// PutTombstone writes a deletion tombstone for a volume. This is a durable
-// S3 marker that prevents offline nodes from resurrecting the volume when
-// they restart and run discoverVolumes. The tombstone must be written
-// BEFORE any local cleanup — it is the durable intent record.
+// PutTombstone writes a deletion tombstone for a volume.
 func (s *Store) PutTombstone(ctx context.Context, volumeID string) error {
 	if err := s.obj.Upload(ctx, tombstoneKey(volumeID), bytes.NewReader([]byte{0}), 1); err != nil {
 		return fmt.Errorf("write tombstone for %s: %w", volumeID, err)
@@ -136,8 +207,7 @@ func (s *Store) HasTombstone(ctx context.Context, volumeID string) (bool, error)
 	return s.obj.Exists(ctx, tombstoneKey(volumeID))
 }
 
-// DeleteTombstone removes a deletion tombstone. Called after a tombstoned
-// volume's local resources have been cleaned up on all nodes.
+// DeleteTombstone removes a deletion tombstone.
 func (s *Store) DeleteTombstone(ctx context.Context, volumeID string) error {
 	return s.obj.Delete(ctx, tombstoneKey(volumeID))
 }

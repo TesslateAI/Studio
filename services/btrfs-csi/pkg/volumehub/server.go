@@ -673,10 +673,10 @@ func (s *Server) handleVolumeStatus(_ interface{}, ctx context.Context, dec func
 		manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
 		if err == nil {
 			regStatus.LatestHash = manifest.LatestHash()
-			regStatus.LayerCount = len(manifest.Layers)
-			for _, l := range manifest.Layers {
-				if l.Type == "snapshot" {
-					regStatus.Snapshots = append(regStatus.Snapshots, l)
+			regStatus.LayerCount = len(manifest.Snapshots)
+			for _, s := range manifest.Snapshots {
+				if s.Role == "checkpoint" {
+					regStatus.Snapshots = append(regStatus.Snapshots, s)
 				}
 			}
 		}
@@ -781,10 +781,10 @@ func (s *Server) handleListSnapshots(_ interface{}, ctx context.Context, dec fun
 		return nil, status.Errorf(codes.Internal, "get manifest for %s: %v", req.VolumeID, err)
 	}
 
-	var snapshots []cas.Layer
-	for _, l := range manifest.Layers {
-		if l.Type == "snapshot" {
-			snapshots = append(snapshots, l)
+	var snapshots []cas.Snapshot
+	for _, s := range manifest.Snapshots {
+		if s.Role == "checkpoint" {
+			snapshots = append(snapshots, s)
 		}
 	}
 

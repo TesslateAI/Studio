@@ -324,11 +324,11 @@ func TestSyncOne_TemplatelessVolume_FullSend(t *testing.T) {
 	if manifest.TemplateName != "" {
 		t.Errorf("manifest.TemplateName = %q, want empty", manifest.TemplateName)
 	}
-	if len(manifest.Layers) != 1 {
-		t.Fatalf("expected 1 layer, got %d", len(manifest.Layers))
+	if len(manifest.Snapshots) != 1 {
+		t.Fatalf("expected 1 layer, got %d", len(manifest.Snapshots))
 	}
-	if manifest.Layers[0].Parent != "" {
-		t.Errorf("layer.Parent = %q, want empty (full send)", manifest.Layers[0].Parent)
+	if manifest.Snapshots[0].Parent != "" {
+		t.Errorf("layer.Parent = %q, want empty (full send)", manifest.Snapshots[0].Parent)
 	}
 }
 
@@ -375,10 +375,10 @@ func TestSyncOne_TemplatelessVolume_SecondSync_StillFullSend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manifest not found: %v", err)
 	}
-	if len(manifest.Layers) != 2 {
-		t.Fatalf("expected 2 layers, got %d", len(manifest.Layers))
+	if len(manifest.Snapshots) != 2 {
+		t.Fatalf("expected 2 layers, got %d", len(manifest.Snapshots))
 	}
-	for i, layer := range manifest.Layers {
+	for i, layer := range manifest.Snapshots {
 		if layer.Parent != "" {
 			t.Errorf("layer[%d].Parent = %q, want empty (full send)", i, layer.Parent)
 		}
@@ -399,8 +399,8 @@ func TestRestoreVolume_TemplatelessVolume(t *testing.T) {
 		VolumeID:     volID,
 		Base:         "",
 		TemplateName: "",
-		Layers: []cas.Layer{
-			{Hash: layerHash, Parent: "", Type: "sync", TS: "2026-04-01T00:00:00Z"},
+		Snapshots: []cas.Layer{
+			{Hash: layerHash, Parent: "", Role: "sync", TS: "2026-04-01T00:00:00Z"},
 		},
 	}
 	// The blob exists in CAS.
@@ -436,7 +436,7 @@ func TestRestoreVolume_TemplatelessVolume_NoLayers(t *testing.T) {
 		VolumeID:     volID,
 		Base:         "",
 		TemplateName: "",
-		Layers:       []cas.Layer{},
+		Snapshots:       []cas.Layer{},
 	}
 
 	err := d.RestoreVolume(context.Background(), volID)
@@ -763,8 +763,8 @@ func TestSyncAll_LocksPerVolume(t *testing.T) {
 	}
 	// Should have at most 2 layers (one from each sync). Previously without
 	// locking, concurrent syncOne could produce duplicate/corrupt layers.
-	if len(m.Layers) > 2 {
-		t.Errorf("expected ≤2 layers, got %d (possible race)", len(m.Layers))
+	if len(m.Snapshots) > 2 {
+		t.Errorf("expected ≤2 layers, got %d (possible race)", len(m.Snapshots))
 	}
 }
 
@@ -807,8 +807,8 @@ func TestSyncAll_PromotesDirtyViaGeneration(t *testing.T) {
 		t.Fatalf("GetManifest: %v", err)
 	}
 	// Should have 2+ layers: one from SyncVolume, one from syncAll after promotion.
-	if len(m.Layers) < 2 {
-		t.Errorf("expected ≥2 layers after generation-promoted sync, got %d", len(m.Layers))
+	if len(m.Snapshots) < 2 {
+		t.Errorf("expected ≥2 layers after generation-promoted sync, got %d", len(m.Snapshots))
 	}
 }
 
@@ -1186,8 +1186,8 @@ func TestRestoreVolume_WithStalePending(t *testing.T) {
 		VolumeID:     volID,
 		TemplateName: "test-tmpl",
 		Base:         "sha256:tmplbase",
-		Layers: []cas.Layer{
-			{Hash: blobHash, Parent: "sha256:tmplbase", Type: "sync"},
+		Snapshots: []cas.Layer{
+			{Hash: blobHash, Parent: "sha256:tmplbase", Role: "sync"},
 		},
 	}
 	fc.blobs[blobHash] = "restore-layer-data"
