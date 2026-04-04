@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
-from ..auth_unified import enforce_project_scope, get_authenticated_user
+from ..auth_unified import get_authenticated_user
 from ..config import get_settings
 from ..database import get_db
 from ..models import (

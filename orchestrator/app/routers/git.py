@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth_unified import enforce_project_scope, get_authenticated_user
+from ..auth_unified import get_authenticated_user
 from ..database import get_db
 from ..models import Container, GitRepository, Project, User
 from ..schemas import (
