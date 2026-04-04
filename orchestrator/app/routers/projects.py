@@ -219,7 +219,7 @@ async def _check_repo_size_limit(
 
 
 async def get_project_by_slug(
-    db: AsyncSession, project_slug: str, user_id: UUID
+    db: AsyncSession, project_slug: str, user_id_or_user: UUID | User
 ) -> Project:
     """
     Fetch project and verify access via RBAC. Raises 403/404.
@@ -227,7 +227,7 @@ async def get_project_by_slug(
     Args:
         db: Database session
         project_slug: Project slug (e.g., "my-awesome-app-k3x8n2") or UUID string
-        user_id: User ID to verify access
+        user_id_or_user: User ID (UUID) or User object to verify access
 
     Returns:
         Project object if found and user has access
@@ -238,6 +238,7 @@ async def get_project_by_slug(
     """
     from ..permissions import Permission, get_project_with_access
 
+    user_id = user_id_or_user.id if isinstance(user_id_or_user, User) else user_id_or_user
     project, _role = await get_project_with_access(db, project_slug, user_id, Permission.PROJECT_VIEW)
     return project
 
