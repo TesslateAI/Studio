@@ -35,6 +35,11 @@ sys.modules["app.services.base_config_parser"] = _config_mod
 
 _spec.loader.exec_module(_mod)
 
+# Clean up the stub modules so they don't pollute other tests in the session.
+# The file_placement module has already resolved its imports above.
+sys.modules.pop("app.services.base_config_parser", None)
+sys.modules.pop("app.services.project_setup.file_placement", None)
+
 _build_source_tar = _mod._build_source_tar
 SKIP_DIRS = _mod.SKIP_DIRS
 PlacedFiles = _mod.PlacedFiles

@@ -477,7 +477,16 @@ class TestReloadConfigAction:
         mock_orch = Mock()
         mock_orch.read_file = AsyncMock(return_value=config_json)
 
-        with patch(_ORCH_GET, return_value=mock_orch):
+        # Mock AsyncSessionLocal as safety net in case the early return
+        # is not reached (avoids real DB connection in CI).
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=AsyncMock())
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(_ORCH_GET, return_value=mock_orch),
+            patch(_ASYNC_SESSION, return_value=mock_session_cm),
+        ):
             result = await project_control_executor(
                 {"action": "reload_config"}, project_control_context
             )
