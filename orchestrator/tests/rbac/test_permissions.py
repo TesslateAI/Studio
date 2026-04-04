@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import app.models  # noqa: F401 — register all ORM models so mapper resolves cross-module relationships
+
 from app.permissions import (
     ROLE_PERMISSIONS,
     Permission,

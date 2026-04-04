@@ -567,7 +567,7 @@ async def create_project(
 @router.get("/{project_slug}/my-role")
 async def get_my_project_role(
     project_slug: str,
-    current_user: User = Depends(current_active_user),
+    current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the current user's effective role on a project (team role + project override)."""
