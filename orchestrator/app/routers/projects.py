@@ -34,7 +34,6 @@ from sqlalchemy.orm.attributes import flag_modified
 from ..auth_unified import get_authenticated_user
 from ..config import get_settings
 from ..database import get_db
-from ..permissions import Permission
 from ..models import (
     BrowserPreview,
     Chat,
@@ -52,6 +51,7 @@ from ..models import (
     User,
     UserPurchasedBase,
 )
+from ..permissions import Permission
 from ..schemas import (
     BatchContentRequest,
     BrowserPreviewCreate,
