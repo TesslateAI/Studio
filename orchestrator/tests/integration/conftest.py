@@ -225,6 +225,16 @@ def mock_orchestrator():
         mock_orch.start_project = AsyncMock(return_value=True)
         mock_orch.stop_project = AsyncMock(return_value=True)
         mock_orch.delete_project = AsyncMock(return_value=True)
+        # list_tree / read_file / write_file are called by file-tree and file
+        # operations tests. Return concrete values so FastAPI can serialize the
+        # response without recursing through bare AsyncMock objects.
+        mock_orch.list_tree = AsyncMock(return_value=[])
+        mock_orch.read_file = AsyncMock(return_value="")
+        mock_orch.write_file = AsyncMock(return_value=True)
+        mock_orch.delete_file = AsyncMock(return_value=True)
+        mock_orch.get_project_status = AsyncMock(
+            return_value={"status": "inactive", "containers": {}}
+        )
 
         mock_get_orch.return_value = mock_orch
 
