@@ -112,6 +112,17 @@ class TestPermissionEnum:
     def test_editor_cannot_export_audit(self):
         assert Permission.AUDIT_EXPORT not in ROLE_PERMISSIONS["editor"]
 
+    def test_editor_cannot_view_audit_log(self):
+        # Regression: AUDIT_VIEW previously leaked to editors via auto-".view" set.
+        assert Permission.AUDIT_VIEW not in ROLE_PERMISSIONS["editor"]
+
+    def test_viewer_cannot_view_audit_log(self):
+        # Regression: AUDIT_VIEW previously leaked to viewers via auto-".view" set.
+        assert Permission.AUDIT_VIEW not in ROLE_PERMISSIONS["viewer"]
+
+    def test_only_admin_can_view_audit_log(self):
+        assert Permission.AUDIT_VIEW in ROLE_PERMISSIONS["admin"]
+
     def test_editor_can_create_projects(self):
         assert Permission.PROJECT_CREATE in ROLE_PERMISSIONS["editor"]
 

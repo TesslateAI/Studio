@@ -15,12 +15,12 @@ const ROLE_PERMISSIONS: Record<string, Set<string>> = {
     'kanban.view', 'kanban.edit', 'snapshot.view', 'snapshot.create',
     'snapshot.restore', 'terminal.access', 'credentials.view', 'credentials.manage',
     'channel.view', 'channel.manage', 'mcp.view', 'mcp.manage',
-    'agent.view', 'agent.manage', 'audit.view',
+    'agent.view', 'agent.manage',
   ]),
   viewer: new Set([
     'team.view', 'billing.view', 'project.list', 'project.view', 'file.read',
     'container.view', 'chat.view', 'deployment.view', 'git.view', 'kanban.view',
-    'snapshot.view', 'channel.view', 'mcp.view', 'agent.view', 'audit.view',
+    'snapshot.view', 'credentials.view', 'channel.view', 'mcp.view', 'agent.view',
   ]),
 };
 

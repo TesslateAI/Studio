@@ -85,12 +85,16 @@ def test_audit_log_records_team_update(authenticated_client):
 @pytest.mark.integration
 def test_audit_log_records_member_joined(authenticated_client, api_client_session):
     """Accepting an invite should generate a member.joined audit entry."""
+    # Capture admin auth BEFORE helper overwrites the shared session headers
+    client_a, _ = authenticated_client
+    admin_token = api_client_session.headers.get("Authorization")
+
     _, _, slug, _ = _create_team_and_user_b(
         api_client_session, authenticated_client, "al-joined"
     )
 
-    # Restore admin auth to read audit log
-    client_a, _ = authenticated_client
+    # Restore admin auth to read audit log (helper left User B's token on the shared session)
+    api_client_session.headers["Authorization"] = admin_token
     log_resp = client_a.get(f"/api/teams/{slug}/audit-log")
     assert log_resp.status_code == 200, f"Audit log fetch failed: {log_resp.text}"
 
@@ -190,11 +194,16 @@ def test_audit_log_filter_by_action(authenticated_client):
 @pytest.mark.integration
 def test_audit_log_filter_by_resource_type(authenticated_client, api_client_session):
     """Filtering by resource_type should return only matching entries."""
+    # Capture admin auth BEFORE helper overwrites the shared session headers
+    client_a, _ = authenticated_client
+    admin_token = api_client_session.headers.get("Authorization")
+
     _, _, slug, _ = _create_team_and_user_b(
         api_client_session, authenticated_client, "al-filt-rt"
     )
 
-    client_a, _ = authenticated_client
+    # Restore admin auth (helper left User B's token on the shared session)
+    api_client_session.headers["Authorization"] = admin_token
 
     # Filter for team resource type
     resp_team = client_a.get(
@@ -307,9 +316,14 @@ def test_audit_log_export_admin_only(authenticated_client, api_client_session):
 
 
 @pytest.mark.integration
-def test_viewer_can_view_audit_log(authenticated_client, api_client_session):
-    """Viewers should be able to read the audit log (AUDIT_VIEW is a .view permission)."""
-    # Create team, add User B as viewer
+def test_viewer_cannot_view_audit_log(authenticated_client, api_client_session):
+    """Viewers must NOT be able to read the audit log — AUDIT_VIEW is admin-only.
+
+    Regression guard: `_VIEWER_PERMISSIONS` previously auto-included every
+    permission whose value ended in `.view`, which unintentionally granted
+    AUDIT_VIEW to viewers and editors. See docs/testing/rbac-manual-testing.md
+    Bug #4 for the full history.
+    """
     client_b, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "al-viewer", role="viewer"
     )
@@ -317,9 +331,23 @@ def test_viewer_can_view_audit_log(authenticated_client, api_client_session):
     client_b.headers["Authorization"] = f"Bearer {token_b}"
     log_resp = client_b.get(f"/api/teams/{slug}/audit-log")
 
-    # Per permissions.py, AUDIT_VIEW ends with .view so viewers have it
-    assert log_resp.status_code == 200, (
-        f"Viewer should be able to view audit log, got {log_resp.status_code}: {log_resp.text}"
+    assert log_resp.status_code == 403, (
+        f"Viewer must be blocked from audit log, got {log_resp.status_code}: {log_resp.text}"
+    )
+
+
+@pytest.mark.integration
+def test_editor_cannot_view_audit_log(authenticated_client, api_client_session):
+    """Editors must NOT be able to read the audit log — AUDIT_VIEW is admin-only."""
+    client_b, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "al-editor-audit", role="editor"
+    )
+
+    client_b.headers["Authorization"] = f"Bearer {token_b}"
+    log_resp = client_b.get(f"/api/teams/{slug}/audit-log")
+
+    assert log_resp.status_code == 403, (
+        f"Editor must be blocked from audit log, got {log_resp.status_code}: {log_resp.text}"
     )
 
 

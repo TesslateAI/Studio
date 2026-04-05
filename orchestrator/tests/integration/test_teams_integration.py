@@ -883,10 +883,14 @@ def test_project_role_override_grants_write_access(
 
 
 @pytest.mark.integration
-def test_viewer_can_view_audit_log(authenticated_client, api_client_session):
-    """Viewer can view the team audit log (team.view permission)."""
+def test_viewer_cannot_view_audit_log(authenticated_client, api_client_session):
+    """Viewer cannot view the team audit log — audit.view is admin-only.
+
+    Regression guard for the permission leak where `_VIEWER_PERMISSIONS`
+    auto-included every permission ending in `.view`, unintentionally
+    granting `AUDIT_VIEW` to viewers.
+    """
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "vaudit", role="viewer"
@@ -894,7 +898,21 @@ def test_viewer_can_view_audit_log(authenticated_client, api_client_session):
 
     client_a.headers["Authorization"] = f"Bearer {token_b}"
     resp = client_a.get(f"/api/teams/{slug}/audit-log")
-    assert resp.status_code == 200
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+def test_editor_cannot_view_audit_log(authenticated_client, api_client_session):
+    """Editor cannot view the team audit log — audit.view is admin-only."""
+    client_a, _ = authenticated_client
+
+    _, _, slug, token_b = _create_team_and_user_b(
+        api_client_session, authenticated_client, "eaudit", role="editor"
+    )
+
+    client_a.headers["Authorization"] = f"Bearer {token_b}"
+    resp = client_a.get(f"/api/teams/{slug}/audit-log")
+    assert resp.status_code == 403
 
 
 @pytest.mark.integration

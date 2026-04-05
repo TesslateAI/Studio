@@ -133,16 +133,31 @@ _ADMIN_ONLY: frozenset[Permission] = frozenset(
         Permission.CONTAINER_DELETE,
         Permission.DEPLOYMENT_DELETE,
         Permission.API_KEYS_MANAGE,
+        Permission.AUDIT_VIEW,
         Permission.AUDIT_EXPORT,
     }
 )
 
+# Explicit viewer allowlist. Do NOT auto-derive from ".view" suffix — that
+# accidentally grants sensitive read permissions like AUDIT_VIEW. Every
+# permission listed here is intentionally safe for read-only role.
 _VIEWER_PERMISSIONS: frozenset[Permission] = frozenset(
-    {p for p in Permission if p.value.endswith(".view")}
-    | {
-        Permission.FILE_READ,
-        Permission.PROJECT_LIST,
+    {
+        Permission.TEAM_VIEW,
         Permission.BILLING_VIEW,
+        Permission.PROJECT_LIST,
+        Permission.PROJECT_VIEW,
+        Permission.FILE_READ,
+        Permission.CONTAINER_VIEW,
+        Permission.CHAT_VIEW,
+        Permission.DEPLOYMENT_VIEW,
+        Permission.GIT_VIEW,
+        Permission.KANBAN_VIEW,
+        Permission.SNAPSHOT_VIEW,
+        Permission.CREDENTIALS_VIEW,
+        Permission.CHANNEL_VIEW,
+        Permission.MCP_VIEW,
+        Permission.AGENT_VIEW,
     }
 )
 

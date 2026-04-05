@@ -78,6 +78,13 @@ export default function AuditLogPage() {
 
   const loadAuditLog = useCallback(async () => {
     if (!activeTeam) return;
+    // Skip the fetch for non-admins — the API will return 403 and show a
+    // useless error toast, and the component renders the "admin access
+    // required" message anyway.
+    if (membership && membership.role !== 'admin') {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const params: Record<string, string | number> = {
@@ -98,7 +105,7 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTeam, page, filters]);
+  }, [activeTeam, page, filters, membership]);
 
   useEffect(() => {
     if (!teamLoading && activeTeam) {

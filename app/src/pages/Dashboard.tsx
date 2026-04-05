@@ -56,6 +56,7 @@ export default function Dashboard() {
   const { activeTeam, can, teamSwitchKey } = useTeam();
   const isAdmin = can('team.edit');
   const canCreateProject = can('project.create');
+  const canDeleteProject = can('project.delete');
   const [projects, setProjects] = useState<Project[]>([]);
   const [accessProject, setAccessProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -639,14 +640,16 @@ export default function Dashboard() {
 
           <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Projects</h2>
 
-          <button
-            onClick={() => setShowCreateDialog(true)}
-            disabled={isCreating}
-            className="btn btn-icon"
-            aria-label="New project"
-          >
-            <FilePlus className="w-4 h-4" />
-          </button>
+          {canCreateProject && (
+            <button
+              onClick={() => setShowCreateDialog(true)}
+              disabled={isCreating}
+              className="btn btn-icon"
+              aria-label="New project"
+            >
+              <FilePlus className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Tab Bar — views left, filter/sort/display right */}
@@ -1010,7 +1013,7 @@ export default function Dashboard() {
                       navigate(`/project/${project.slug}`);
                     }
                   }}
-                  onDelete={() => deleteProject(project.id)}
+                  onDelete={canDeleteProject ? () => deleteProject(project.id) : undefined}
                   onStatusChange={(status) => updateProjectStatus(project.id, status)}
                   onFork={() => handleForkProject(project.id)}
                   onHibernate={
@@ -1154,16 +1157,18 @@ export default function Dashboard() {
                       >
                         <GitBranch className="w-3.5 h-3.5" />
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteProject(project.id);
-                        }}
-                        className="btn btn-icon btn-sm btn-danger"
-                        title="Delete"
-                      >
-                        <Trash className="w-3.5 h-3.5" />
-                      </button>
+                      {canDeleteProject && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteProject(project.id);
+                          }}
+                          className="btn btn-icon btn-sm btn-danger"
+                          title="Delete"
+                        >
+                          <Trash className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1171,20 +1176,22 @@ export default function Dashboard() {
             ) : (
               <div className="text-center py-16 flex flex-col items-center gap-4">
                 <p className="text-[var(--text-muted)] text-xs">No projects yet</p>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowCreateDialog(true)}
-                    disabled={isCreating}
-                    className="btn"
-                  >
-                    <FilePlus className="w-4 h-4" />
-                    Create project
-                  </button>
-                  <button onClick={() => setShowImportDialog(true)} className="btn">
-                    <GitBranch className="w-4 h-4" />
-                    Import repo
-                  </button>
-                </div>
+                {canCreateProject && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowCreateDialog(true)}
+                      disabled={isCreating}
+                      className="btn"
+                    >
+                      <FilePlus className="w-4 h-4" />
+                      Create project
+                    </button>
+                    <button onClick={() => setShowImportDialog(true)} className="btn">
+                      <GitBranch className="w-4 h-4" />
+                      Import repo
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1207,14 +1214,16 @@ export default function Dashboard() {
             <X className="w-4 h-4" />
           </button>
 
-          <button
-            onClick={() => setShowBulkDeleteDialog(true)}
-            className="btn btn-danger"
-            tabIndex={-1}
-          >
-            <Trash className="w-4 h-4" />
-            Delete
-          </button>
+          {canDeleteProject && (
+            <button
+              onClick={() => setShowBulkDeleteDialog(true)}
+              className="btn btn-danger"
+              tabIndex={-1}
+            >
+              <Trash className="w-4 h-4" />
+              Delete
+            </button>
+          )}
         </div>
       )}
 

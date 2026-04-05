@@ -34,7 +34,8 @@ interface Project {
 interface ProjectCardProps {
   project: Project;
   onOpen: () => void;
-  onDelete: () => void;
+  /** When undefined, delete button is hidden (viewers lack project.delete). */
+  onDelete?: () => void;
   onFork?: () => void;
   onHibernate?: () => void;
   onStatusChange: (status: Status) => void;
@@ -254,7 +255,7 @@ export function ProjectCard({
 
         {/* Action Buttons — pill buttons, hug text */}
         <div className="flex gap-1 flex-wrap">
-          {project.environment_status === 'setup_failed' ? (
+          {project.environment_status === 'setup_failed' && onDelete ? (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -292,19 +293,21 @@ export function ProjectCard({
                 </button>
               )}
 
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-                className="btn btn-danger"
-                title="Delete project"
-              >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                  <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
-                </svg>
-                Delete
-              </button>
+              {onDelete && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete();
+                  }}
+                  className="btn btn-danger"
+                  title="Delete project"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                    <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
+                  </svg>
+                  Delete
+                </button>
+              )}
             </>
           )}
         </div>

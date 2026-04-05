@@ -93,15 +93,20 @@ export default function TeamSettingsPage() {
     try {
       await teamsApi.leave(team.slug);
       toast.success('Left team successfully');
+      setShowLeaveConfirm(false);
       await refreshTeams();
       navigate('/dashboard');
     } catch (error) {
       console.error('Failed to leave team:', error);
       const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to leave team');
+      // Keep confirm dialog open so the user clearly sees the error next to
+      // the action they just took — closing it would hide the toast behind
+      // the rest of the page on fast displays.
+      toast.error(err.response?.data?.detail || 'Failed to leave team', {
+        duration: 6000,
+      });
     } finally {
       setLeaving(false);
-      setShowLeaveConfirm(false);
     }
   };
 
