@@ -195,10 +195,11 @@ class TestKanbanRegistryExecution:
         assert result["tool"] == "kanban"
         assert result["success"] is True
 
-        # Inner result
+        # Inner result — rich data is in details
         inner = result["result"]
         assert inner["success"] is True
-        assert "columns" in inner
+        assert "details" in inner
+        assert "columns" in inner["details"]
 
     @pytest.mark.asyncio
     async def test_execute_missing_action_returns_error(self):
@@ -338,10 +339,9 @@ class TestKanbanEndToEndFlows:
         assert result["tool"] == "kanban"
         inner = result["result"]
         assert inner["success"] is True
-        assert inner["task"]["title"] == "Fix auth bug"
-        assert inner["task"]["priority"] == "high"
-        assert inner["task"]["point_value"] == 5
         assert "Created task" in inner["message"]
+        assert inner["details"]["column"] == "To Do"
+        assert "task_id" in inner["details"]
 
     @pytest.mark.asyncio
     async def test_move_task_flow(self):
@@ -392,8 +392,8 @@ class TestKanbanEndToEndFlows:
         assert result["success"] is True
         inner = result["result"]
         assert inner["success"] is True
-        assert inner["task"]["title"] == "Implement login"
         assert "In Progress" in inner["message"]
+        assert inner["details"]["to_column"] == "In Progress"
         # The task's column_id should have been updated
         assert task.column_id == dest_column.id
 
@@ -463,10 +463,10 @@ class TestKanbanEndToEndFlows:
         assert result["success"] is True
         inner = result["result"]
         assert inner["success"] is True
-        assert inner["total"] == 2
-        assert len(inner["tasks"]) == 2
+        assert inner["details"]["total"] == 2
+        assert len(inner["details"]["tasks"]) == 2
         # Enriched with column name
-        assert inner["tasks"][0]["column_name"] == "To Do"
+        assert inner["details"]["tasks"][0]["column_name"] == "To Do"
 
     @pytest.mark.asyncio
     async def test_create_column_flow(self):
@@ -505,9 +505,8 @@ class TestKanbanEndToEndFlows:
         assert result["success"] is True
         inner = result["result"]
         assert inner["success"] is True
-        assert inner["column"]["name"] == "Review"
-        assert inner["column"]["color"] == "purple"
-        assert inner["column"]["position"] == 4  # max_pos(3) + 1
+        assert inner["details"]["name"] == "Review"
+        assert inner["details"]["position"] == 4  # max_pos(3) + 1
         assert "Created column" in inner["message"]
 
     @pytest.mark.asyncio
@@ -546,8 +545,8 @@ class TestKanbanEndToEndFlows:
         assert result["success"] is True
         inner = result["result"]
         assert inner["success"] is True
-        assert inner["comment_id"] == str(comment_id)
-        assert inner["task_id"] == str(task.id)
+        assert inner["details"]["comment_id"] == str(comment_id)
+        assert inner["details"]["task_id"] == str(task.id)
         assert "Added comment" in inner["message"]
 
     @pytest.mark.asyncio

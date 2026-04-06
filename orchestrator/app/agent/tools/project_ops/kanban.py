@@ -216,28 +216,39 @@ async def _action_get_board(context: dict[str, Any]) -> dict[str, Any]:
 
     total_points = 0
     total_tasks = 0
-    columns_out = []
+    columns_summary = []
     for col in sorted(board.columns, key=lambda c: c.position):
         tasks_sorted = sorted(col.tasks, key=lambda t: t.position)
         col_points = sum(t.point_value or 0 for t in tasks_sorted)
         total_points += col_points
         total_tasks += len(tasks_sorted)
-        columns_out.append(
+        task_summaries = [
             {
-                **_serialize_column(col),
+                "id": str(t.id),
+                "title": t.title,
+                "priority": t.priority,
+                "task_type": t.task_type,
+                "point_value": t.point_value,
+                "assignee_id": str(t.assignee_id) if t.assignee_id else None,
+            }
+            for t in tasks_sorted
+        ]
+        columns_summary.append(
+            {
+                "column_id": str(col.id),
+                "name": col.name,
                 "task_count": len(tasks_sorted),
                 "total_points": col_points,
-                "tasks": [_serialize_task(t) for t in tasks_sorted],
+                "tasks": task_summaries,
             }
         )
 
     return success_output(
-        message=f"Board has {total_tasks} task(s) across {len(columns_out)} column(s)",
-        board_id=str(board.id),
-        board_name=board.name,
-        total_tasks=total_tasks,
-        total_points=total_points,
-        columns=columns_out,
+        message=f"Board has {total_tasks} task(s) across {len(columns_summary)} column(s), {total_points} total points",
+        details={
+            "board_id": str(board.id),
+            "columns": columns_summary,
+        },
     )
 
 
@@ -304,7 +315,7 @@ async def _action_create_task(params: dict[str, Any], context: dict[str, Any]) -
 
     return success_output(
         message=f"Created task '{title}' in column '{column.name}'",
-        task=_serialize_task(task),
+        details={"task_id": str(task.id), "column": column.name},
     )
 
 
@@ -351,7 +362,7 @@ async def _action_update_task(params: dict[str, Any], context: dict[str, Any]) -
 
     return success_output(
         message=f"Updated task '{task.title}' — changed: {', '.join(updated_fields)}",
-        task=_serialize_task(task),
+        details={"task_id": str(task.id), "updated_fields": updated_fields},
     )
 
 
@@ -429,7 +440,10 @@ async def _action_move_task(params: dict[str, Any], context: dict[str, Any]) -> 
         msg += f" from '{old_column_name}'"
     msg += f" to '{target_column.name}'"
 
-    return success_output(message=msg, task=_serialize_task(task))
+    return success_output(
+        message=msg,
+        details={"task_id": str(task.id), "from_column": old_column_name, "to_column": target_column.name},
+    )
 
 
 async def _action_delete_task(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -461,9 +475,25 @@ async def _action_search_tasks(
     if not board:
         return error_output(message="Could not load kanban board")
 
-    from ....models_kanban import KanbanTask
+    from ....models_kanban import KanbanColumn, KanbanTask
+
+    # Resolve column filter first (by name or UUID).
+    column_ref = params.get("column")
+    target_column_id = None
+    if column_ref:
+        col = await _resolve_column(db, board.id, column_ref)
+        if col:
+            target_column_id = col.id
+        else:
+            return error_output(
+                message=f"Column '{column_ref}' not found",
+                suggestion="Use get_board to see available columns",
+            )
 
     query = select(KanbanTask).where(KanbanTask.board_id == board.id)
+
+    if target_column_id:
+        query = query.where(KanbanTask.column_id == target_column_id)
 
     q = params.get("query")
     if q:
@@ -491,8 +521,6 @@ async def _action_search_tasks(
     tasks = result.scalars().all()
 
     # Enrich with column names.
-    from ....models_kanban import KanbanColumn
-
     col_ids = {t.column_id for t in tasks}
     col_map: dict[_UUID, str] = {}
     if col_ids:
@@ -504,14 +532,19 @@ async def _action_search_tasks(
 
     tasks_out = []
     for t in tasks:
-        d = _serialize_task(t)
-        d["column_name"] = col_map.get(t.column_id, "Unknown")
-        tasks_out.append(d)
+        tasks_out.append({
+            "id": str(t.id),
+            "title": t.title,
+            "column_name": col_map.get(t.column_id, "Unknown"),
+            "priority": t.priority,
+            "task_type": t.task_type,
+            "point_value": t.point_value,
+            "assignee_id": str(t.assignee_id) if t.assignee_id else None,
+        })
 
     return success_output(
         message=f"Found {len(tasks_out)} task(s)",
-        tasks=tasks_out,
-        total=len(tasks_out),
+        details={"tasks": tasks_out, "total": len(tasks_out)},
     )
 
 
@@ -545,8 +578,7 @@ async def _action_add_comment(
 
     return success_output(
         message=f"Added comment to '{task.title}'",
-        comment_id=str(comment.id),
-        task_id=str(task.id),
+        details={"comment_id": str(comment.id), "task_id": str(task.id)},
     )
 
 
@@ -592,7 +624,7 @@ async def _action_create_column(
 
     return success_output(
         message=f"Created column '{title}' at position {column.position}",
-        column=_serialize_column(column),
+        details={"column_id": str(column.id), "name": column.name, "position": column.position},
     )
 
 
@@ -636,7 +668,7 @@ async def _action_update_column(
 
     return success_output(
         message=f"Updated column '{column.name}' — changed: {', '.join(updated_fields)}",
-        column=_serialize_column(column),
+        details={"column_id": str(column.id), "updated_fields": updated_fields},
     )
 
 
@@ -754,7 +786,7 @@ parameters = {
             "type": "string",
             "description": (
                 "Column name (e.g. 'In Progress') or UUID. "
-                "Used by create_task and move_task."
+                "Used by create_task, move_task, and search_tasks (filter by column)."
             ),
         },
         "title": {
@@ -865,6 +897,7 @@ def register_kanban_tools(registry):
                 '{"tool_name": "kanban", "parameters": {"action": "create_task", "title": "Fix auth bug", "column": "To Do", "priority": "high", "point_value": 5}}',
                 '{"tool_name": "kanban", "parameters": {"action": "move_task", "task_id": "...", "column": "In Progress"}}',
                 '{"tool_name": "kanban", "parameters": {"action": "add_comment", "task_id": "...", "content": "Started working on this"}}',
+                '{"tool_name": "kanban", "parameters": {"action": "search_tasks", "column": "In Progress"}}',
                 '{"tool_name": "kanban", "parameters": {"action": "search_tasks", "priority": "critical"}}',
             ],
         )
