@@ -7,11 +7,11 @@ default_team_id to users, team_id to usage_logs + credit_purchases.
 Data migration: creates a personal team for every existing user, copies
 billing fields, creates admin membership, links all projects.
 
-Revision ID: 0034_rbac_teams
+Revision ID: 0035_rbac_teams
 Revises: 0034_refresh_tokens
 """
 
-revision = "0034_rbac_teams"
+revision = "0035_rbac_teams"
 down_revision = "0034_refresh_tokens"
 branch_labels = None
 depends_on = None
@@ -30,7 +30,12 @@ def upgrade() -> None:
         sa.Column("slug", sa.String(100), unique=True, nullable=False, index=True),
         sa.Column("avatar_url", sa.Text, nullable=True),
         sa.Column("is_personal", sa.Boolean, nullable=False, server_default="false"),
-        sa.Column("created_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "created_by_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         # Billing (copied from users during data migration)
         sa.Column("subscription_tier", sa.String, nullable=False, server_default="free"),
         sa.Column("stripe_customer_id", sa.String, nullable=True, unique=True),
@@ -45,8 +50,12 @@ def upgrade() -> None:
         sa.Column("daily_credits_reset_date", sa.DateTime(timezone=True), nullable=True),
         sa.Column("support_tier", sa.String(20), nullable=False, server_default="community"),
         sa.Column("deployed_projects_count", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_teams_stripe_customer_id", "teams", ["stripe_customer_id"])
 
@@ -54,13 +63,32 @@ def upgrade() -> None:
     op.create_table(
         "team_memberships",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("team_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "team_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("teams.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("role", sa.String(20), nullable=False),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
-        sa.Column("invited_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("joined_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "invited_by_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column(
+            "joined_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.UniqueConstraint("team_id", "user_id", name="uq_team_memberships_team_user"),
     )
     op.create_index("ix_team_memberships_user_id", "team_memberships", ["user_id"])
@@ -69,13 +97,32 @@ def upgrade() -> None:
     op.create_table(
         "project_memberships",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "project_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("role", sa.String(20), nullable=False),
-        sa.Column("granted_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "granted_by_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.UniqueConstraint("project_id", "user_id", name="uq_project_memberships_project_user"),
     )
     op.create_index("ix_project_memberships_user_id", "project_memberships", ["user_id"])
@@ -84,19 +131,36 @@ def upgrade() -> None:
     op.create_table(
         "team_invitations",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("team_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "team_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("teams.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("email", sa.String(255), nullable=False),
         sa.Column("role", sa.String(20), nullable=False),
         sa.Column("token", sa.String(64), unique=True, nullable=False),
         sa.Column("invite_type", sa.String(20), nullable=False, server_default="email"),
-        sa.Column("invited_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=False),
+        sa.Column(
+            "invited_by_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=False,
+        ),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("accepted_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "accepted_by_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("max_uses", sa.Integer, nullable=True),
         sa.Column("use_count", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_team_invitations_token", "team_invitations", ["token"])
     op.create_index("ix_team_invitations_team_email", "team_invitations", ["team_id", "email"])
@@ -105,16 +169,33 @@ def upgrade() -> None:
     op.create_table(
         "audit_logs",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("team_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=False),
+        sa.Column(
+            "team_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("teams.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "project_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("projects.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=False,
+        ),
         sa.Column("action", sa.String(100), nullable=False),
         sa.Column("resource_type", sa.String(50), nullable=False),
         sa.Column("resource_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("details", postgresql.JSON, nullable=True),
         sa.Column("ip_address", sa.String(45), nullable=True),
         sa.Column("user_agent", sa.String(500), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_audit_logs_team_created", "audit_logs", ["team_id", "created_at"])
     op.create_index("ix_audit_logs_project_created", "audit_logs", ["project_id", "created_at"])
@@ -125,20 +206,39 @@ def upgrade() -> None:
 
     # projects: team_id (nullable initially) + visibility
     op.add_column("projects", sa.Column("team_id", postgresql.UUID(as_uuid=True), nullable=True))
-    op.add_column("projects", sa.Column("visibility", sa.String(20), nullable=False, server_default="team"))
-    op.create_foreign_key("fk_projects_team_id", "projects", "teams", ["team_id"], ["id"], ondelete="CASCADE")
+    op.add_column(
+        "projects", sa.Column("visibility", sa.String(20), nullable=False, server_default="team")
+    )
+    op.create_foreign_key(
+        "fk_projects_team_id", "projects", "teams", ["team_id"], ["id"], ondelete="CASCADE"
+    )
 
     # users: default_team_id
-    op.add_column("users", sa.Column("default_team_id", postgresql.UUID(as_uuid=True), nullable=True))
-    op.create_foreign_key("fk_users_default_team", "users", "teams", ["default_team_id"], ["id"], ondelete="SET NULL")
+    op.add_column(
+        "users", sa.Column("default_team_id", postgresql.UUID(as_uuid=True), nullable=True)
+    )
+    op.create_foreign_key(
+        "fk_users_default_team", "users", "teams", ["default_team_id"], ["id"], ondelete="SET NULL"
+    )
 
     # usage_logs: team_id
     op.add_column("usage_logs", sa.Column("team_id", postgresql.UUID(as_uuid=True), nullable=True))
-    op.create_foreign_key("fk_usage_logs_team_id", "usage_logs", "teams", ["team_id"], ["id"], ondelete="SET NULL")
+    op.create_foreign_key(
+        "fk_usage_logs_team_id", "usage_logs", "teams", ["team_id"], ["id"], ondelete="SET NULL"
+    )
 
     # credit_purchases: team_id
-    op.add_column("credit_purchases", sa.Column("team_id", postgresql.UUID(as_uuid=True), nullable=True))
-    op.create_foreign_key("fk_credit_purchases_team_id", "credit_purchases", "teams", ["team_id"], ["id"], ondelete="SET NULL")
+    op.add_column(
+        "credit_purchases", sa.Column("team_id", postgresql.UUID(as_uuid=True), nullable=True)
+    )
+    op.create_foreign_key(
+        "fk_credit_purchases_team_id",
+        "credit_purchases",
+        "teams",
+        ["team_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
 
     # ── 7. Data migration: create personal teams for existing users ─────
     # Using raw SQL for bulk efficiency in migration context.

@@ -4,8 +4,8 @@ Adds task_counter to kanban_boards (auto-incrementing counter) and
 ref_number to kanban_tasks (human-readable reference like TSK-0001).
 Backfills existing tasks with sequential ref_numbers per board.
 
-Revision ID: 0038_kanban_task_ref
-Revises: 0037_kanban_point_value
+Revision ID: 0039_kanban_task_ref
+Revises: 0038_kanban_point_value
 """
 
 from collections.abc import Sequence
@@ -13,8 +13,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0038_kanban_task_ref"
-down_revision: str | Sequence[str] | None = "0037_kanban_point_value"
+revision: str = "0039_kanban_task_ref"
+down_revision: str | Sequence[str] | None = "0038_kanban_point_value"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -35,9 +35,7 @@ def upgrade() -> None:
     boards = conn.execute(sa.text("SELECT id FROM kanban_boards")).fetchall()
     for (board_id,) in boards:
         tasks = conn.execute(
-            sa.text(
-                "SELECT id FROM kanban_tasks WHERE board_id = :bid ORDER BY created_at"
-            ),
+            sa.text("SELECT id FROM kanban_tasks WHERE board_id = :bid ORDER BY created_at"),
             {"bid": board_id},
         ).fetchall()
         for idx, (task_id,) in enumerate(tasks, start=1):

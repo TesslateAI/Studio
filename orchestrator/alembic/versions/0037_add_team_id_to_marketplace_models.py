@@ -1,16 +1,16 @@
 """Add team_id to marketplace ownership models
 
-Revision ID: 0036_marketplace_models_team_id
-Revises: 0035_marketplace_team_id
+Revision ID: 0037_marketplace_models_team_id
+Revises: 0036_marketplace_team_id
 """
 
-revision = "0036_marketplace_models_team_id"
-down_revision = "0035_marketplace_team_id"
+revision = "0037_marketplace_models_team_id"
+down_revision = "0036_marketplace_team_id"
 branch_labels = None
 depends_on = None
 
-import sqlalchemy as sa
-from alembic import op
+import sqlalchemy as sa  # noqa: E402
+from alembic import op  # noqa: E402
 
 _TABLES = [
     "user_purchased_agents",
@@ -25,7 +25,9 @@ _TABLES = [
 def upgrade() -> None:
     for table in _TABLES:
         op.add_column(table, sa.Column("team_id", sa.UUID(as_uuid=True), nullable=True))
-        op.create_foreign_key(f"fk_{table}_team_id", table, "teams", ["team_id"], ["id"], ondelete="SET NULL")
+        op.create_foreign_key(
+            f"fk_{table}_team_id", table, "teams", ["team_id"], ["id"], ondelete="SET NULL"
+        )
         op.create_index(f"ix_{table}_team_id", table, ["team_id"])
 
     # Backfill: set team_id = user.default_team_id for existing rows

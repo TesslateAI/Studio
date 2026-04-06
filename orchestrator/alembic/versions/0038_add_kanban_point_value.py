@@ -1,7 +1,7 @@
 """Add point_value column to kanban_tasks for story point estimation
 
-Revision ID: 0037_kanban_point_value
-Revises: 0036_marketplace_models_team_id
+Revision ID: 0038_kanban_point_value
+Revises: 0037_marketplace_models_team_id
 """
 
 from collections.abc import Sequence
@@ -9,8 +9,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0037_kanban_point_value"
-down_revision: str | Sequence[str] | None = "0036_marketplace_models_team_id"
+revision: str = "0038_kanban_point_value"
+down_revision: str | Sequence[str] | None = "0037_marketplace_models_team_id"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

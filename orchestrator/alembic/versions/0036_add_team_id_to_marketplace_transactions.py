@@ -1,16 +1,16 @@
 """Add team_id to marketplace_transactions
 
-Revision ID: 0035_marketplace_team_id
-Revises: 0034_rbac_teams
+Revision ID: 0036_marketplace_team_id
+Revises: 0035_rbac_teams
 """
 
-revision = "0035_marketplace_team_id"
-down_revision = "0034_rbac_teams"
+revision = "0036_marketplace_team_id"
+down_revision = "0035_rbac_teams"
 branch_labels = None
 depends_on = None
 
-import sqlalchemy as sa
-from alembic import op
+import sqlalchemy as sa  # noqa: E402
+from alembic import op  # noqa: E402
 
 
 def upgrade() -> None:
