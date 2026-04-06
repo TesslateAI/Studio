@@ -32,6 +32,9 @@ class KanbanBoard(Base):
     name = Column(String, nullable=False, default="Project Board")
     description = Column(Text, nullable=True)
 
+    # Auto-incrementing counter for task reference IDs (TSK-0001, TSK-0002, ...)
+    task_counter = Column(Integer, nullable=False, default=0)
+
     # Board settings
     settings = Column(JSON, nullable=True)  # Custom settings: colors, automation rules, etc.
 
@@ -103,6 +106,9 @@ class KanbanTask(Base):
         UUID(as_uuid=True), ForeignKey("kanban_columns.id", ondelete="CASCADE"), nullable=False
     )
 
+    # Human-readable reference number (auto-incremented per board, e.g. TSK-0001)
+    ref_number = Column(Integer, nullable=True, index=True)
+
     # Task content
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)  # Markdown supported
@@ -125,6 +131,7 @@ class KanbanTask(Base):
     )  # Who created it
     estimate_hours = Column(Integer, nullable=True)  # Time estimate
     spent_hours = Column(Integer, nullable=True)  # Time tracked
+    point_value = Column(Integer, nullable=True)  # Story points (1, 2, 3, 5, 8, 13, 21)
 
     # Dates
     due_date = Column(DateTime(timezone=True), nullable=True)

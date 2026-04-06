@@ -439,6 +439,17 @@ export function ChatContainer({
             const data = JSON.parse(event.data);
             resetSafetyTimeout(); // Got data, reset the silence timeout
             if (data.type === 'agent_step') {
+              // Notify panels when a kanban tool call succeeds
+              const toolCalls = data.data?.tool_calls || [];
+              const toolResults = data.data?.tool_results || [];
+              const hasSuccessfulKanban = toolCalls.some(
+                (tc: { name: string }, idx: number) =>
+                  tc.name === 'kanban' && toolResults[idx]?.result?.success !== false
+              );
+              if (hasSuccessfulKanban) {
+                window.dispatchEvent(new CustomEvent('kanban-updated'));
+              }
+
               setMessages((prev) => {
                 const updated = [...prev];
                 const lastMsg = updated[updated.length - 1];
@@ -1159,6 +1170,17 @@ export function ChatContainer({
           }
 
           if (event.type === 'agent_step') {
+            // Notify panels when a kanban tool call succeeds
+            const toolCalls = event.data.tool_calls || [];
+            const toolResults = event.data.tool_results || [];
+            const hasSuccessfulKanban = toolCalls.some(
+              (tc: { name: string }, idx: number) =>
+                tc.name === 'kanban' && toolResults[idx]?.result?.success !== false
+            );
+            if (hasSuccessfulKanban) {
+              window.dispatchEvent(new CustomEvent('kanban-updated'));
+            }
+
             // Transform tool_results array to match HTTP format
             const transformedStep = {
               ...event.data,

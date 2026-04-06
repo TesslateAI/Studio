@@ -5,7 +5,7 @@ import {
   X,
   Calendar,
   User,
-  Clock,
+
   Trash,
   ArrowsDownUp,
   Funnel,
@@ -35,6 +35,7 @@ interface Column {
 
 interface Task {
   id: string;
+  ref_number?: number;
   column_id: string;
   title: string;
   description?: string;
@@ -53,6 +54,7 @@ interface Task {
     name: string;
     username: string;
   };
+  point_value?: number;
   estimate_hours?: number;
   spent_hours?: number;
   due_date?: string;
@@ -113,11 +115,26 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
     priority: 'medium' as const,
     task_type: 'task' as const,
     tags: [] as string[],
-    estimate_hours: undefined as number | undefined,
+    point_value: undefined as number | undefined,
   });
 
   useEffect(() => {
     loadBoard();
+  }, [projectId]);
+
+  // Auto-refresh when the agent completes a kanban tool call.
+  // Short delay ensures the DB commit is fully visible to the API.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onKanbanUpdated = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => loadBoard(), 300);
+    };
+    window.addEventListener('kanban-updated', onKanbanUpdated);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('kanban-updated', onKanbanUpdated);
+    };
   }, [projectId]);
 
   const loadBoard = async () => {
@@ -159,7 +176,7 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
         priority: 'medium',
         task_type: 'task',
         tags: [],
-        estimate_hours: undefined,
+        point_value: undefined,
       });
       await loadBoard();
     } catch (error: unknown) {
@@ -270,9 +287,10 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
         column_id: destination.droppableId.replace('column-', ''),
         position: destination.index,
       });
+      await loadBoard(); // Sync with server to prevent stale state
     } catch {
       toast.error('Failed to move task');
-      await loadBoard(); // Reload on error
+      await loadBoard();
     }
   };
 
@@ -423,10 +441,17 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                               }`}
                             >
                               {/* Task Header */}
-                              <div className="flex items-start justify-between gap-2 mb-2">
-                                <h4 className="text-sm font-medium text-[var(--text)] flex-1 line-clamp-2">
-                                  {task.title}
-                                </h4>
+                              <div className="flex items-start justify-between gap-2 mb-1">
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  {task.ref_number != null && (
+                                    <span className="text-[10px] font-mono text-[var(--text)]/40 shrink-0">
+                                      TSK-{String(task.ref_number).padStart(4, '0')}
+                                    </span>
+                                  )}
+                                  <h4 className="text-sm font-medium text-[var(--text)] flex-1 line-clamp-2">
+                                    {task.title}
+                                  </h4>
+                                </div>
                                 {task.task_type && (
                                   <span className="text-base" title={task.task_type}>
                                     {taskTypeIcons[task.task_type]}
@@ -442,6 +467,11 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                                   >
                                     <ArrowsDownUp size={12} weight="bold" />
                                     {task.priority}
+                                  </span>
+                                )}
+                                {task.point_value != null && (
+                                  <span className="px-1.5 py-0.5 bg-[rgba(var(--primary-rgb),0.15)] text-[var(--primary)] rounded font-medium">
+                                    {task.point_value} pts
                                   </span>
                                 )}
                                 {task.tags && task.tags.length > 0 && (
@@ -525,7 +555,7 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                   placeholder="Add details..."
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">
                     Priority
@@ -564,6 +594,24 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                     <option value="epic">Epic</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                    Estimate (pts)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newTask.point_value ?? ''}
+                    onChange={(e) =>
+                      setNewTask({
+                        ...newTask,
+                        point_value: e.target.value ? parseInt(e.target.value, 10) : undefined,
+                      })
+                    }
+                    className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
+                    placeholder="e.g. 5"
+                  />
+                </div>
               </div>
               <div className="flex gap-4 pt-4">
                 <button
@@ -594,7 +642,14 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                 {selectedTask.task_type && (
                   <span className="text-2xl">{taskTypeIcons[selectedTask.task_type]}</span>
                 )}
-                <h3 className="text-xl font-bold text-[var(--text)]">{selectedTask.title}</h3>
+                <div className="flex items-center gap-2">
+                  {selectedTask.ref_number != null && (
+                    <span className="text-xs font-mono text-[var(--text)]/40">
+                      TSK-{String(selectedTask.ref_number).padStart(4, '0')}
+                    </span>
+                  )}
+                  <h3 className="text-xl font-bold text-[var(--text)]">{selectedTask.title}</h3>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {!readOnly && (
@@ -675,17 +730,29 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                     </select>
                   )}
                 </div>
-                {selectedTask.estimate_hours !== undefined && (
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                      Estimate
-                    </label>
-                    <div className="flex items-center gap-2 text-sm text-[var(--text)]/80">
-                      <Clock size={16} weight="bold" />
-                      {selectedTask.estimate_hours}h
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                    Estimate (pts)
+                  </label>
+                  {readOnly ? (
+                    <div className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm">
+                      {selectedTask.point_value != null ? `${selectedTask.point_value} pts` : '—'}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <input
+                      type="number"
+                      min={0}
+                      value={selectedTask.point_value ?? ''}
+                      onChange={(e) =>
+                        updateTask(selectedTask.id, {
+                          point_value: e.target.value ? parseInt(e.target.value, 10) : undefined,
+                        } as Partial<Task>)
+                      }
+                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)]"
+                      placeholder="e.g. 5"
+                    />
+                  )}
+                </div>
                 {selectedTask.assignee && (
                   <div>
                     <label className="block text-sm font-medium text-[var(--text)] mb-2">

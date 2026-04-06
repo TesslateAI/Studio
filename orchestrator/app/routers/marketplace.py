@@ -469,9 +469,7 @@ async def get_marketplace_agents(
             else UserPurchasedAgent.user_id == current_user.id
         )
         purchased_result = await db.execute(
-            select(UserPurchasedAgent.agent_id).where(
-                purchase_filter, UserPurchasedAgent.is_active
-            )
+            select(UserPurchasedAgent.agent_id).where(purchase_filter)
         )
         purchased_agent_ids = [row[0] for row in purchased_result.fetchall()]
 
@@ -585,7 +583,6 @@ async def get_agent_details(
             select(UserPurchasedAgent).where(
                 detail_ownership,
                 UserPurchasedAgent.agent_id == agent.id,
-                UserPurchasedAgent.is_active,
             )
         )
         is_purchased = purchased_result.scalar_one_or_none() is not None
@@ -683,7 +680,7 @@ async def get_related_agents_endpoint(
     if current_user:
         purchased_result = await db.execute(
             select(UserPurchasedAgent.agent_id).where(
-                UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.is_active
+                UserPurchasedAgent.user_id == current_user.id,
             )
         )
         exclude_ids = [row[0] for row in purchased_result.fetchall()]

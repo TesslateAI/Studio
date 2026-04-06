@@ -58,6 +58,7 @@ class KanbanTaskCreate(BaseModel):
     task_type: str | None = None
     tags: list[str] | None = None
     assignee_id: UUID | None = None
+    point_value: int | None = None
     estimate_hours: int | None = None
     due_date: datetime | None = None
 
@@ -72,6 +73,7 @@ class KanbanTaskUpdate(BaseModel):
     task_type: str | None = None
     tags: list[str] | None = None
     assignee_id: UUID | None = None
+    point_value: int | None = None
     estimate_hours: int | None = None
     spent_hours: int | None = None
     due_date: datetime | None = None
@@ -237,6 +239,7 @@ async def get_board(
                 "tasks": [
                     {
                         "id": task.id,
+                        "ref_number": task.ref_number,
                         "title": task.title,
                         "description": task.description,
                         "position": task.position,
@@ -258,6 +261,7 @@ async def get_board(
                         }
                         if task.reporter
                         else None,
+                        "point_value": task.point_value,
                         "estimate_hours": task.estimate_hours,
                         "spent_hours": task.spent_hours,
                         "due_date": task.due_date.isoformat() if task.due_date else None,
@@ -387,9 +391,14 @@ async def create_task(
     )
     max_position = result.scalar() or -1
 
+    # Increment board task counter for ref_number
+    board.task_counter = (board.task_counter or 0) + 1
+    ref_num = board.task_counter
+
     task = KanbanTask(
         board_id=board.id,
         position=max_position + 1,
+        ref_number=ref_num,
         reporter_id=current_user.id,
         **task_data.dict(),
     )
@@ -397,7 +406,7 @@ async def create_task(
     await db.commit()
     await db.refresh(task)
 
-    return {"id": task.id, "message": "Task created successfully"}
+    return {"id": task.id, "ref_number": task.ref_number, "message": "Task created successfully"}
 
 
 @router.get("/tasks/{task_id}")
@@ -427,6 +436,7 @@ async def get_task(
 
     return {
         "id": task.id,
+        "ref_number": task.ref_number,
         "board_id": task.board_id,
         "column_id": task.column_id,
         "title": task.title,
@@ -450,6 +460,7 @@ async def get_task(
         }
         if task.reporter
         else None,
+        "point_value": task.point_value,
         "estimate_hours": task.estimate_hours,
         "spent_hours": task.spent_hours,
         "due_date": task.due_date.isoformat() if task.due_date else None,
@@ -649,12 +660,14 @@ async def search_tasks(
         "tasks": [
             {
                 "id": task.id,
+                "ref_number": task.ref_number,
                 "column_id": task.column_id,
                 "title": task.title,
                 "description": task.description,
                 "priority": task.priority,
                 "task_type": task.task_type,
                 "tags": task.tags,
+                "point_value": task.point_value,
                 "assignee": {"id": task.assignee.id, "name": task.assignee.name}
                 if task.assignee
                 else None,

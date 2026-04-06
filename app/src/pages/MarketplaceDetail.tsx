@@ -24,6 +24,11 @@ import {
   ArrowRight,
   GitCommit,
   GitBranch,
+  Kanban,
+  Gauge,
+  MagnifyingGlass,
+  PaperPlaneTilt,
+  BookOpen,
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import {
@@ -72,6 +77,11 @@ const toolIcons: Record<string, { icon: React.ReactNode; label: string }> = {
   todo_read: { icon: <ListChecks size={14} weight="fill" />, label: 'Todo Read' },
   todo_write: { icon: <ListChecks size={14} weight="fill" />, label: 'Todo Write' },
   web_fetch: { icon: <Globe size={14} weight="fill" />, label: 'Web Fetch' },
+  web_search: { icon: <MagnifyingGlass size={14} weight="fill" />, label: 'Web Search' },
+  send_message: { icon: <PaperPlaneTilt size={14} weight="fill" />, label: 'Send Message' },
+  kanban: { icon: <Kanban size={14} weight="fill" />, label: 'Kanban' },
+  project_control: { icon: <Gauge size={14} weight="fill" />, label: 'Project Control' },
+  load_skill: { icon: <BookOpen size={14} weight="fill" />, label: 'Load Skill' },
 };
 
 const ALL_TOOLS = Object.keys(toolIcons);

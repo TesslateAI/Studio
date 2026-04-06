@@ -200,3 +200,4 @@ nul
 
 # Code Analysis Output
 analysis-output/
+/.playwright-mcp
