@@ -115,7 +115,6 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
     task_type: 'task' as const,
     tags: [] as string[],
     point_value: undefined as number | undefined,
-    estimate_hours: undefined as number | undefined,
   });
 
   useEffect(() => {
@@ -169,7 +168,6 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
         task_type: 'task',
         tags: [],
         point_value: undefined,
-        estimate_hours: undefined,
       });
       await loadBoard();
     } catch (error: unknown) {
@@ -581,7 +579,7 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                    Story Points
+                    Estimate (pts)
                   </label>
                   <input
                     type="number"
@@ -708,29 +706,29 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                     </select>
                   )}
                 </div>
-                {selectedTask.point_value != null && (
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                      Story Points
-                    </label>
-                    <div className="flex items-center gap-2 text-sm text-[var(--text)]/80">
-                      <span className="px-2 py-0.5 bg-[rgba(var(--primary-rgb),0.15)] text-[var(--primary)] rounded font-medium">
-                        {selectedTask.point_value} pts
-                      </span>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                    Estimate (pts)
+                  </label>
+                  {readOnly ? (
+                    <div className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm">
+                      {selectedTask.point_value != null ? `${selectedTask.point_value} pts` : '—'}
                     </div>
-                  </div>
-                )}
-                {selectedTask.estimate_hours !== undefined && (
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                      Estimate
-                    </label>
-                    <div className="flex items-center gap-2 text-sm text-[var(--text)]/80">
-                      <Clock size={16} weight="bold" />
-                      {selectedTask.estimate_hours}h
-                    </div>
-                  </div>
-                )}
+                  ) : (
+                    <input
+                      type="number"
+                      min={0}
+                      value={selectedTask.point_value ?? ''}
+                      onChange={(e) =>
+                        updateTask(selectedTask.id, {
+                          point_value: e.target.value ? parseInt(e.target.value, 10) : undefined,
+                        } as Partial<Task>)
+                      }
+                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)]"
+                      placeholder="e.g. 5"
+                    />
+                  )}
+                </div>
                 {selectedTask.assignee && (
                   <div>
                     <label className="block text-sm font-medium text-[var(--text)] mb-2">

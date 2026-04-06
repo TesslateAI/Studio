@@ -158,7 +158,7 @@ describe('KanbanPanel', () => {
     expect(screen.queryByText(/pts/)).not.toBeInTheDocument();
   });
 
-  it('shows Story Points input in create task modal', async () => {
+  it('shows Estimate (pts) input in create task modal', async () => {
     render(<KanbanPanel projectId="proj-1" />);
 
     await waitFor(() => {
@@ -169,7 +169,7 @@ describe('KanbanPanel', () => {
     const addButtons = screen.getAllByTitle('Add task');
     fireEvent.click(addButtons[0]);
 
-    expect(screen.getByText('Story Points')).toBeInTheDocument();
+    expect(screen.getByText('Estimate (pts)')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('e.g. 5')).toBeInTheDocument();
   });
 
@@ -241,7 +241,7 @@ describe('KanbanPanel', () => {
     fireEvent.click(screen.getByText('Fix login bug'));
 
     await waitFor(() => {
-      expect(screen.getByText('Story Points')).toBeInTheDocument();
+      expect(screen.getByText('Estimate (pts)')).toBeInTheDocument();
     });
 
     // The details modal should show "5 pts"
