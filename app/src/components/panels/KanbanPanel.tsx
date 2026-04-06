@@ -122,6 +122,13 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
     loadBoard();
   }, [projectId]);
 
+  // Auto-refresh when the agent completes a kanban tool call
+  useEffect(() => {
+    const onKanbanUpdated = () => loadBoard();
+    window.addEventListener('kanban-updated', onKanbanUpdated);
+    return () => window.removeEventListener('kanban-updated', onKanbanUpdated);
+  }, [projectId]);
+
   const loadBoard = async () => {
     try {
       const response = await api.get(`/api/kanban/projects/${projectId}/board`);

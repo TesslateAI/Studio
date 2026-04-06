@@ -258,4 +258,23 @@ describe('KanbanPanel', () => {
 
     expect(screen.queryByTitle('Add task')).not.toBeInTheDocument();
   });
+
+  it('reloads board when kanban-updated event is dispatched', async () => {
+    render(<KanbanPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Fix login bug')).toBeInTheDocument();
+    });
+
+    // Initial load call
+    expect(mockGet).toHaveBeenCalledTimes(1);
+
+    // Simulate agent completing a kanban tool call
+    window.dispatchEvent(new CustomEvent('kanban-updated'));
+
+    await waitFor(() => {
+      // Should have made a second GET to reload the board
+      expect(mockGet).toHaveBeenCalledTimes(2);
+    });
+  });
 });
