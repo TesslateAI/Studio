@@ -279,9 +279,10 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
         column_id: destination.droppableId.replace('column-', ''),
         position: destination.index,
       });
+      await loadBoard(); // Sync with server to prevent stale state
     } catch {
       toast.error('Failed to move task');
-      await loadBoard(); // Reload on error
+      await loadBoard();
     }
   };
 
