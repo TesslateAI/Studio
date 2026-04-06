@@ -122,11 +122,19 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
     loadBoard();
   }, [projectId]);
 
-  // Auto-refresh when the agent completes a kanban tool call
+  // Auto-refresh when the agent completes a kanban tool call.
+  // Short delay ensures the DB commit is fully visible to the API.
   useEffect(() => {
-    const onKanbanUpdated = () => loadBoard();
+    let timer: ReturnType<typeof setTimeout>;
+    const onKanbanUpdated = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => loadBoard(), 300);
+    };
     window.addEventListener('kanban-updated', onKanbanUpdated);
-    return () => window.removeEventListener('kanban-updated', onKanbanUpdated);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('kanban-updated', onKanbanUpdated);
+    };
   }, [projectId]);
 
   const loadBoard = async () => {
