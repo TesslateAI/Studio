@@ -143,6 +143,10 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         except Exception as e:
             logger.error(f"Failed to grant signup bonus to {user.username}: {e}")
 
+        # Create personal team (RBAC) — must happen before agent/theme assignment
+        # so that team_id is available for library scoping
+        await self._create_personal_team(user)
+
         # Auto-add default agents (Tesslate Agent) to new users
         try:
             from sqlalchemy import select
@@ -160,7 +164,11 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
                 if agent:
                     purchase = UserPurchasedAgent(
-                        user_id=user.id, agent_id=agent.id, purchase_type="free", is_active=True
+                        user_id=user.id,
+                        team_id=user.default_team_id,
+                        agent_id=agent.id,
+                        purchase_type="free",
+                        is_active=True,
                     )
                     self.user_db.session.add(purchase)
                     logger.info(f"Auto-added {agent.name} to user {user.username}")
@@ -234,9 +242,6 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             except Exception as e:
                 logger.error(f"Failed to track referral conversion: {e}")
 
-        # Create personal team (RBAC)
-        await self._create_personal_team(user)
-
         # Auto-accept any pending team invitations matching this email
         await self._auto_accept_pending_invites(user)
 
@@ -245,6 +250,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         import logging
 
         logger = logging.getLogger(__name__)
+        if user.default_team_id is not None:
+            logger.info(f"User {user.username} already has a personal team, skipping")
+            return
         try:
             import uuid as _uuid
 

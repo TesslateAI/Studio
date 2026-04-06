@@ -511,6 +511,7 @@ async def seed_marketplace_agents(db: AsyncSession) -> int:
         Number of newly created agents.
     """
     from ..config import get_settings
+
     default_model = get_settings().default_model
 
     tesslate_user = await get_or_create_tesslate_account(db)
@@ -572,17 +573,25 @@ async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
     added = 0
 
     for user in users:
+        # Check for existing record (with or without team_id)
         result = await db.execute(
             select(UserPurchasedAgent).where(
                 UserPurchasedAgent.user_id == user.id,
                 UserPurchasedAgent.agent_id == tesslate_agent.id,
             )
         )
-        if result.scalar_one_or_none():
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            # Backfill team_id on records that were created before team existed
+            if existing.team_id is None and user.default_team_id is not None:
+                existing.team_id = user.default_team_id
+                added += 1
             continue
 
         purchase = UserPurchasedAgent(
             user_id=user.id,
+            team_id=user.default_team_id,
             agent_id=tesslate_agent.id,
             purchase_type="free",
             is_active=True,
@@ -592,7 +601,7 @@ async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
 
     if added:
         await db.commit()
-        logger.info("Added Tesslate Agent to %d users", added)
+        logger.info("Added/fixed Tesslate Agent for %d users", added)
     else:
         logger.info("All users already have Tesslate Agent")
 
@@ -605,9 +614,7 @@ async def auto_add_librarian_agent_to_users(db: AsyncSession) -> int:
     Returns:
         Number of users who received the agent.
     """
-    result = await db.execute(
-        select(MarketplaceAgent).where(MarketplaceAgent.slug == "librarian")
-    )
+    result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.slug == "librarian"))
     librarian_agent = result.scalar_one_or_none()
     if not librarian_agent:
         logger.warning("Librarian agent not found, skipping auto-add")
@@ -624,11 +631,18 @@ async def auto_add_librarian_agent_to_users(db: AsyncSession) -> int:
                 UserPurchasedAgent.agent_id == librarian_agent.id,
             )
         )
-        if result.scalar_one_or_none():
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            # Backfill team_id on records that were created before team existed
+            if existing.team_id is None and user.default_team_id is not None:
+                existing.team_id = user.default_team_id
+                added += 1
             continue
 
         purchase = UserPurchasedAgent(
             user_id=user.id,
+            team_id=user.default_team_id,
             agent_id=librarian_agent.id,
             purchase_type="free",
             is_active=True,
@@ -638,7 +652,7 @@ async def auto_add_librarian_agent_to_users(db: AsyncSession) -> int:
 
     if added:
         await db.commit()
-        logger.info("Added Librarian agent to %d users", added)
+        logger.info("Added/fixed Librarian agent for %d users", added)
     else:
         logger.info("All users already have Librarian agent")
 
