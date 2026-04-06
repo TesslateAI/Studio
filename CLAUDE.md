@@ -376,6 +376,7 @@ tesslate-studio/
 | `todos.py` | Task planning and tracking |
 | `metadata.py` | Query project info |
 | `project_control.py` | Container lifecycle control (status, restart, logs, health) |
+| `kanban.py` | Kanban board management (create/move/update tasks by TSK-NNNN ref, columns, comments) |
 
 ## Documentation Knowledge Graph
 
@@ -469,6 +470,7 @@ Each `CLAUDE.md` file contains:
 | Volume Hub client | `orchestrator/app/services/hub_client.py` (gRPC client for Hub RPCs) |
 | Config.json schema & lifecycle | `docs/orchestrator/services/config-json.md` |
 | Container lifecycle tool | `docs/orchestrator/agent/tools/project-control.md` |
+| Kanban agent tool | `docs/orchestrator/agent/kanban-agent-tool.md` |
 | Teams & RBAC | `docs/orchestrator/routers/CLAUDE.md` → teams.py, `orchestrator/app/permissions.py` |
 
 ## Deployment Modes

@@ -555,11 +555,7 @@ async def _action_search_tasks(
         pri = f" ({t.priority})" if t.priority else ""
         lines.append(f"  - {ref} {t.title}{pri}{pts} column={col_name}")
 
-    if lines:
-        summary = f"Found {len(tasks)} task(s):\n" + "\n".join(lines)
-    else:
-        summary = "Found 0 task(s)"
-
+    summary = f"Found {len(tasks)} task(s):\n" + "\n".join(lines) if lines else "Found 0 task(s)"
     return success_output(message=summary)
 
 

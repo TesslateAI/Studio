@@ -29,6 +29,7 @@ This context provides information about Tesslate Studio's AI agent system, inclu
 - `orchestrator/app/agent/tools/skill_ops/` - Skill loading via progressive disclosure
   - `load_skill.py` - Loads full skill instructions on-demand from DB or project files
 - `orchestrator/app/agent/tools/project_ops/project_control.py` - project_control tool for container lifecycle management
+- `orchestrator/app/agent/tools/project_ops/kanban.py` - kanban tool for board/task/column management (10 actions, TSK-NNNN refs)
 - `orchestrator/app/agent/tools/graph_ops/` - Container management tools for graph view
 
 ### TesslateAgent Supporting Files

@@ -5,7 +5,7 @@ import {
   X,
   Calendar,
   User,
-  Clock,
+
   Trash,
   ArrowsDownUp,
   Funnel,
