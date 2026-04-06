@@ -216,40 +216,21 @@ async def _action_get_board(context: dict[str, Any]) -> dict[str, Any]:
 
     total_points = 0
     total_tasks = 0
-    columns_summary = []
+    lines = []
     for col in sorted(board.columns, key=lambda c: c.position):
         tasks_sorted = sorted(col.tasks, key=lambda t: t.position)
         col_points = sum(t.point_value or 0 for t in tasks_sorted)
         total_points += col_points
         total_tasks += len(tasks_sorted)
-        task_summaries = [
-            {
-                "id": str(t.id),
-                "title": t.title,
-                "priority": t.priority,
-                "task_type": t.task_type,
-                "point_value": t.point_value,
-                "assignee_id": str(t.assignee_id) if t.assignee_id else None,
-            }
-            for t in tasks_sorted
-        ]
-        columns_summary.append(
-            {
-                "column_id": str(col.id),
-                "name": col.name,
-                "task_count": len(tasks_sorted),
-                "total_points": col_points,
-                "tasks": task_summaries,
-            }
-        )
+        lines.append(f"\n[{col.name}] ({len(tasks_sorted)} tasks, {col_points} pts)")
+        for t in tasks_sorted:
+            pts = f" [{t.point_value}pts]" if t.point_value else ""
+            pri = f" ({t.priority})" if t.priority else ""
+            lines.append(f"  - {t.title}{pri}{pts} id={t.id}")
 
-    return success_output(
-        message=f"Board has {total_tasks} task(s) across {len(columns_summary)} column(s), {total_points} total points",
-        details={
-            "board_id": str(board.id),
-            "columns": columns_summary,
-        },
-    )
+    summary = f"Board: {total_tasks} task(s), {total_points} pts\n" + "\n".join(lines)
+
+    return success_output(message=summary)
 
 
 async def _action_create_task(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -314,8 +295,7 @@ async def _action_create_task(params: dict[str, Any], context: dict[str, Any]) -
     await db.refresh(task)
 
     return success_output(
-        message=f"Created task '{title}' in column '{column.name}'",
-        details={"task_id": str(task.id), "column": column.name},
+        message=f"Created task '{title}' in column '{column.name}' (id={task.id})",
     )
 
 
@@ -361,8 +341,7 @@ async def _action_update_task(params: dict[str, Any], context: dict[str, Any]) -
     await db.refresh(task)
 
     return success_output(
-        message=f"Updated task '{task.title}' — changed: {', '.join(updated_fields)}",
-        details={"task_id": str(task.id), "updated_fields": updated_fields},
+        message=f"Updated task '{task.title}' (id={task.id}) — changed: {', '.join(updated_fields)}",
     )
 
 
@@ -440,10 +419,7 @@ async def _action_move_task(params: dict[str, Any], context: dict[str, Any]) -> 
         msg += f" from '{old_column_name}'"
     msg += f" to '{target_column.name}'"
 
-    return success_output(
-        message=msg,
-        details={"task_id": str(task.id), "from_column": old_column_name, "to_column": target_column.name},
-    )
+    return success_output(message=msg)
 
 
 async def _action_delete_task(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -530,22 +506,19 @@ async def _action_search_tasks(
         for col in col_result.scalars().all():
             col_map[col.id] = col.name
 
-    tasks_out = []
+    lines = []
     for t in tasks:
-        tasks_out.append({
-            "id": str(t.id),
-            "title": t.title,
-            "column_name": col_map.get(t.column_id, "Unknown"),
-            "priority": t.priority,
-            "task_type": t.task_type,
-            "point_value": t.point_value,
-            "assignee_id": str(t.assignee_id) if t.assignee_id else None,
-        })
+        col_name = col_map.get(t.column_id, "Unknown")
+        pts = f" [{t.point_value}pts]" if t.point_value else ""
+        pri = f" ({t.priority})" if t.priority else ""
+        lines.append(f"  - {t.title}{pri}{pts} column={col_name} id={t.id}")
 
-    return success_output(
-        message=f"Found {len(tasks_out)} task(s)",
-        details={"tasks": tasks_out, "total": len(tasks_out)},
-    )
+    if lines:
+        summary = f"Found {len(tasks)} task(s):\n" + "\n".join(lines)
+    else:
+        summary = "Found 0 task(s)"
+
+    return success_output(message=summary)
 
 
 async def _action_add_comment(
@@ -577,8 +550,7 @@ async def _action_add_comment(
     await db.refresh(comment)
 
     return success_output(
-        message=f"Added comment to '{task.title}'",
-        details={"comment_id": str(comment.id), "task_id": str(task.id)},
+        message=f"Added comment to '{task.title}' (task_id={task.id})",
     )
 
 
@@ -623,8 +595,7 @@ async def _action_create_column(
     await db.refresh(column)
 
     return success_output(
-        message=f"Created column '{title}' at position {column.position}",
-        details={"column_id": str(column.id), "name": column.name, "position": column.position},
+        message=f"Created column '{title}' at position {column.position} (id={column.id})",
     )
 
 
@@ -667,8 +638,7 @@ async def _action_update_column(
     await db.refresh(column)
 
     return success_output(
-        message=f"Updated column '{column.name}' — changed: {', '.join(updated_fields)}",
-        details={"column_id": str(column.id), "updated_fields": updated_fields},
+        message=f"Updated column '{column.name}' (id={column.id}) — changed: {', '.join(updated_fields)}",
     )
 
 
