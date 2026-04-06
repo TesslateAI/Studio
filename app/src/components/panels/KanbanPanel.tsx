@@ -53,6 +53,7 @@ interface Task {
     name: string;
     username: string;
   };
+  point_value?: number;
   estimate_hours?: number;
   spent_hours?: number;
   due_date?: string;
@@ -113,6 +114,7 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
     priority: 'medium' as const,
     task_type: 'task' as const,
     tags: [] as string[],
+    point_value: undefined as number | undefined,
     estimate_hours: undefined as number | undefined,
   });
 
@@ -159,6 +161,7 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
         priority: 'medium',
         task_type: 'task',
         tags: [],
+        point_value: undefined,
         estimate_hours: undefined,
       });
       await loadBoard();
@@ -444,6 +447,11 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                                     {task.priority}
                                   </span>
                                 )}
+                                {task.point_value != null && (
+                                  <span className="px-1.5 py-0.5 bg-[rgba(var(--primary-rgb),0.15)] text-[var(--primary)] rounded font-medium">
+                                    {task.point_value} pts
+                                  </span>
+                                )}
                                 {task.tags && task.tags.length > 0 && (
                                   <div className="flex gap-1">
                                     {task.tags.slice(0, 2).map((tag, idx) => (
@@ -525,7 +533,7 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                   placeholder="Add details..."
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">
                     Priority
@@ -563,6 +571,24 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                     <option value="bug">Bug</option>
                     <option value="epic">Epic</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                    Story Points
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newTask.point_value ?? ''}
+                    onChange={(e) =>
+                      setNewTask({
+                        ...newTask,
+                        point_value: e.target.value ? parseInt(e.target.value, 10) : undefined,
+                      })
+                    }
+                    className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
+                    placeholder="e.g. 5"
+                  />
                 </div>
               </div>
               <div className="flex gap-4 pt-4">
@@ -675,6 +701,18 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                     </select>
                   )}
                 </div>
+                {selectedTask.point_value != null && (
+                  <div>
+                    <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                      Story Points
+                    </label>
+                    <div className="flex items-center gap-2 text-sm text-[var(--text)]/80">
+                      <span className="px-2 py-0.5 bg-[rgba(var(--primary-rgb),0.15)] text-[var(--primary)] rounded font-medium">
+                        {selectedTask.point_value} pts
+                      </span>
+                    </div>
+                  </div>
+                )}
                 {selectedTask.estimate_hours !== undefined && (
                   <div>
                     <label className="block text-sm font-medium text-[var(--text)] mb-2">
