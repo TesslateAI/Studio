@@ -58,6 +58,7 @@ class KanbanTaskCreate(BaseModel):
     task_type: str | None = None
     tags: list[str] | None = None
     assignee_id: UUID | None = None
+    point_value: int | None = None
     estimate_hours: int | None = None
     due_date: datetime | None = None
 
@@ -72,6 +73,7 @@ class KanbanTaskUpdate(BaseModel):
     task_type: str | None = None
     tags: list[str] | None = None
     assignee_id: UUID | None = None
+    point_value: int | None = None
     estimate_hours: int | None = None
     spent_hours: int | None = None
     due_date: datetime | None = None
@@ -258,6 +260,7 @@ async def get_board(
                         }
                         if task.reporter
                         else None,
+                        "point_value": task.point_value,
                         "estimate_hours": task.estimate_hours,
                         "spent_hours": task.spent_hours,
                         "due_date": task.due_date.isoformat() if task.due_date else None,
@@ -450,6 +453,7 @@ async def get_task(
         }
         if task.reporter
         else None,
+        "point_value": task.point_value,
         "estimate_hours": task.estimate_hours,
         "spent_hours": task.spent_hours,
         "due_date": task.due_date.isoformat() if task.due_date else None,
@@ -655,6 +659,7 @@ async def search_tasks(
                 "priority": task.priority,
                 "task_type": task.task_type,
                 "tags": task.tags,
+                "point_value": task.point_value,
                 "assignee": {"id": task.assignee.id, "name": task.assignee.name}
                 if task.assignee
                 else None,

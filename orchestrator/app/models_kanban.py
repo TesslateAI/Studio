@@ -125,6 +125,7 @@ class KanbanTask(Base):
     )  # Who created it
     estimate_hours = Column(Integer, nullable=True)  # Time estimate
     spent_hours = Column(Integer, nullable=True)  # Time tracked
+    point_value = Column(Integer, nullable=True)  # Story points (1, 2, 3, 5, 8, 13, 21)
 
     # Dates
     due_date = Column(DateTime(timezone=True), nullable=True)
