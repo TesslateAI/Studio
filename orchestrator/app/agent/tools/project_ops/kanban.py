@@ -114,17 +114,63 @@ async def _resolve_column(db, board_id, column_ref: str):
     return result.scalars().first()
 
 
-async def _fetch_task(db, task_id: str):
-    """Fetch a KanbanTask by UUID string, or ``None``."""
+async def _fetch_task(db, task_id: str, board_id=None):
+    """Fetch a KanbanTask by UUID, ref number, or ref label (e.g. 'TSK-0001').
+
+    Tries UUID first, then parses as a reference number within the board.
+    """
     from ....models_kanban import KanbanTask
 
+    # Try UUID first.
     try:
         tid = _UUID(task_id)
+        result = await db.execute(select(KanbanTask).where(KanbanTask.id == tid))
+        task = result.scalar_one_or_none()
+        if task:
+            return task
+    except ValueError:
+        pass
+
+    # Parse reference number: "TSK-0001", "0001", "1", "#1", "#0001"
+    ref_str = task_id.strip().upper().replace("TSK-", "").lstrip("#")
+    try:
+        ref_num = int(ref_str)
     except ValueError:
         return None
 
-    result = await db.execute(select(KanbanTask).where(KanbanTask.id == tid))
-    return result.scalar_one_or_none()
+    query = select(KanbanTask).where(KanbanTask.ref_number == ref_num)
+    if board_id:
+        query = query.where(KanbanTask.board_id == board_id)
+    result = await db.execute(query)
+    return result.scalars().first()
+
+
+async def _next_ref_number(db, board):
+    """Atomically increment the board's task counter and return the new value."""
+    board.task_counter = (board.task_counter or 0) + 1
+    await db.flush()
+    return board.task_counter
+
+
+def _ref_label(task) -> str:
+    """Format a task's reference number as TSK-NNNN."""
+    if task.ref_number:
+        return f"TSK-{task.ref_number:04d}"
+    return str(task.id)[:8]
+
+
+async def _resolve_task_param(params, db, board_id=None):
+    """Resolve a task from 'task_id' or 'ref' param. Returns (task, error_output)."""
+    task_id = params.get("task_id") or params.get("ref")
+    if not task_id:
+        return None, error_output(
+            message="'task_id' or 'ref' is required (e.g. 'TSK-0001' or UUID)",
+            suggestion="Use get_board to see task reference numbers",
+        )
+    task = await _fetch_task(db, str(task_id), board_id=board_id)
+    if not task:
+        return None, error_output(message=f"Task '{task_id}' not found")
+    return task, None
 
 
 async def _reorder_tasks_in_column(db, column_id, exclude_task_id=None):
@@ -224,9 +270,10 @@ async def _action_get_board(context: dict[str, Any]) -> dict[str, Any]:
         total_tasks += len(tasks_sorted)
         lines.append(f"\n[{col.name}] ({len(tasks_sorted)} tasks, {col_points} pts)")
         for t in tasks_sorted:
+            ref = _ref_label(t)
             pts = f" [{t.point_value}pts]" if t.point_value else ""
             pri = f" ({t.priority})" if t.priority else ""
-            lines.append(f"  - {t.title}{pri}{pts} id={t.id}")
+            lines.append(f"  - {ref} {t.title}{pri}{pts}")
 
     summary = f"Board: {total_tasks} task(s), {total_points} pts\n" + "\n".join(lines)
 
@@ -265,6 +312,7 @@ async def _action_create_task(params: dict[str, Any], context: dict[str, Any]) -
     from ....models_kanban import KanbanTask
 
     position = await _max_position(db, column.id) + 1
+    ref_num = await _next_ref_number(db, board)
 
     # Parse due_date if provided as string.
     due_date = params.get("due_date")
@@ -277,6 +325,7 @@ async def _action_create_task(params: dict[str, Any], context: dict[str, Any]) -
     task = KanbanTask(
         board_id=board.id,
         column_id=column.id,
+        ref_number=ref_num,
         title=title,
         description=params.get("description"),
         position=position,
@@ -294,23 +343,18 @@ async def _action_create_task(params: dict[str, Any], context: dict[str, Any]) -
     await db.commit()
     await db.refresh(task)
 
+    ref = _ref_label(task)
     return success_output(
-        message=f"Created task '{title}' in column '{column.name}' (id={task.id})",
+        message=f"Created {ref} '{title}' in column '{column.name}'",
     )
 
 
 async def _action_update_task(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     db = context["db"]
-    task_id = params.get("task_id")
-    if not task_id:
-        return error_output(
-            message="'task_id' is required for update_task",
-            suggestion="Provide the UUID of the task to update",
-        )
 
-    task = await _fetch_task(db, task_id)
-    if not task:
-        return error_output(message=f"Task '{task_id}' not found")
+    task, err = await _resolve_task_param(params, db)
+    if err:
+        return err
 
     updatable = [
         "title", "description", "priority", "status", "task_type",
@@ -340,8 +384,9 @@ async def _action_update_task(params: dict[str, Any], context: dict[str, Any]) -
     await db.commit()
     await db.refresh(task)
 
+    ref = _ref_label(task)
     return success_output(
-        message=f"Updated task '{task.title}' (id={task.id}) — changed: {', '.join(updated_fields)}",
+        message=f"Updated {ref} '{task.title}' — changed: {', '.join(updated_fields)}",
     )
 
 
@@ -349,19 +394,16 @@ async def _action_move_task(params: dict[str, Any], context: dict[str, Any]) -> 
     db = context["db"]
     project_id = context["project_id"]
 
-    task_id = params.get("task_id")
     column_ref = params.get("column")
-    if not task_id:
-        return error_output(message="'task_id' is required for move_task")
     if not column_ref:
         return error_output(
             message="'column' is required for move_task",
             suggestion="Specify destination column name or UUID",
         )
 
-    task = await _fetch_task(db, task_id)
-    if not task:
-        return error_output(message=f"Task '{task_id}' not found")
+    task, err = await _resolve_task_param(params, db)
+    if err:
+        return err
 
     board = await _get_or_create_board(db, project_id)
     if not board:
@@ -414,7 +456,8 @@ async def _action_move_task(params: dict[str, Any], context: dict[str, Any]) -> 
     await db.commit()
     await db.refresh(task)
 
-    msg = f"Moved '{task.title}'"
+    ref = _ref_label(task)
+    msg = f"Moved {ref} '{task.title}'"
     if old_column_name:
         msg += f" from '{old_column_name}'"
     msg += f" to '{target_column.name}'"
@@ -424,21 +467,19 @@ async def _action_move_task(params: dict[str, Any], context: dict[str, Any]) -> 
 
 async def _action_delete_task(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     db = context["db"]
-    task_id = params.get("task_id")
-    if not task_id:
-        return error_output(message="'task_id' is required for delete_task")
 
-    task = await _fetch_task(db, task_id)
-    if not task:
-        return error_output(message=f"Task '{task_id}' not found")
+    task, err = await _resolve_task_param(params, db)
+    if err:
+        return err
 
+    ref = _ref_label(task)
     title = task.title
     column_id = task.column_id
     await db.delete(task)
     await _reorder_tasks_in_column(db, column_id)
     await db.commit()
 
-    return success_output(message=f"Deleted task '{title}'")
+    return success_output(message=f"Deleted {ref} '{title}'")
 
 
 async def _action_search_tasks(
@@ -508,10 +549,11 @@ async def _action_search_tasks(
 
     lines = []
     for t in tasks:
+        ref = _ref_label(t)
         col_name = col_map.get(t.column_id, "Unknown")
         pts = f" [{t.point_value}pts]" if t.point_value else ""
         pri = f" ({t.priority})" if t.priority else ""
-        lines.append(f"  - {t.title}{pri}{pts} column={col_name} id={t.id}")
+        lines.append(f"  - {ref} {t.title}{pri}{pts} column={col_name}")
 
     if lines:
         summary = f"Found {len(tasks)} task(s):\n" + "\n".join(lines)
@@ -527,16 +569,13 @@ async def _action_add_comment(
     db = context["db"]
     user_id = context["user_id"]
 
-    task_id = params.get("task_id")
     content = params.get("content")
-    if not task_id:
-        return error_output(message="'task_id' is required for add_comment")
     if not content:
         return error_output(message="'content' is required for add_comment")
 
-    task = await _fetch_task(db, task_id)
-    if not task:
-        return error_output(message=f"Task '{task_id}' not found")
+    task, err = await _resolve_task_param(params, db)
+    if err:
+        return err
 
     from ....models_kanban import KanbanTaskComment
 
@@ -549,9 +588,8 @@ async def _action_add_comment(
     await db.commit()
     await db.refresh(comment)
 
-    return success_output(
-        message=f"Added comment to '{task.title}' (task_id={task.id})",
-    )
+    ref = _ref_label(task)
+    return success_output(message=f"Added comment to {ref} '{task.title}'")
 
 
 async def _action_create_column(
@@ -750,7 +788,11 @@ parameters = {
         },
         "task_id": {
             "type": "string",
-            "description": "UUID of the task. Required for update_task, move_task, delete_task, add_comment.",
+            "description": "Task UUID or reference (e.g. 'TSK-0001', '0001', '1'). Required for update_task, move_task, delete_task, add_comment.",
+        },
+        "ref": {
+            "type": "string",
+            "description": "Task reference number (e.g. 'TSK-0001', '1', '0001'). Alternative to task_id.",
         },
         "column": {
             "type": "string",
@@ -865,10 +907,10 @@ def register_kanban_tools(registry):
             examples=[
                 '{"tool_name": "kanban", "parameters": {"action": "get_board"}}',
                 '{"tool_name": "kanban", "parameters": {"action": "create_task", "title": "Fix auth bug", "column": "To Do", "priority": "high", "point_value": 5}}',
-                '{"tool_name": "kanban", "parameters": {"action": "move_task", "task_id": "...", "column": "In Progress"}}',
-                '{"tool_name": "kanban", "parameters": {"action": "add_comment", "task_id": "...", "content": "Started working on this"}}',
+                '{"tool_name": "kanban", "parameters": {"action": "move_task", "task_id": "TSK-0001", "column": "In Progress"}}',
+                '{"tool_name": "kanban", "parameters": {"action": "update_task", "task_id": "TSK-0003", "point_value": 4}}',
+                '{"tool_name": "kanban", "parameters": {"action": "add_comment", "task_id": "TSK-0005", "content": "Started working on this"}}',
                 '{"tool_name": "kanban", "parameters": {"action": "search_tasks", "column": "In Progress"}}',
-                '{"tool_name": "kanban", "parameters": {"action": "search_tasks", "priority": "critical"}}',
             ],
         )
     )

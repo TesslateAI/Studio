@@ -35,6 +35,7 @@ interface Column {
 
 interface Task {
   id: string;
+  ref_number?: number;
   column_id: string;
   title: string;
   description?: string;
@@ -431,10 +432,17 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                               }`}
                             >
                               {/* Task Header */}
-                              <div className="flex items-start justify-between gap-2 mb-2">
-                                <h4 className="text-sm font-medium text-[var(--text)] flex-1 line-clamp-2">
-                                  {task.title}
-                                </h4>
+                              <div className="flex items-start justify-between gap-2 mb-1">
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  {task.ref_number != null && (
+                                    <span className="text-[10px] font-mono text-[var(--text)]/40 shrink-0">
+                                      TSK-{String(task.ref_number).padStart(4, '0')}
+                                    </span>
+                                  )}
+                                  <h4 className="text-sm font-medium text-[var(--text)] flex-1 line-clamp-2">
+                                    {task.title}
+                                  </h4>
+                                </div>
                                 {task.task_type && (
                                   <span className="text-base" title={task.task_type}>
                                     {taskTypeIcons[task.task_type]}
@@ -625,7 +633,14 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                 {selectedTask.task_type && (
                   <span className="text-2xl">{taskTypeIcons[selectedTask.task_type]}</span>
                 )}
-                <h3 className="text-xl font-bold text-[var(--text)]">{selectedTask.title}</h3>
+                <div className="flex items-center gap-2">
+                  {selectedTask.ref_number != null && (
+                    <span className="text-xs font-mono text-[var(--text)]/40">
+                      TSK-{String(selectedTask.ref_number).padStart(4, '0')}
+                    </span>
+                  )}
+                  <h3 className="text-xl font-bold text-[var(--text)]">{selectedTask.title}</h3>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {!readOnly && (

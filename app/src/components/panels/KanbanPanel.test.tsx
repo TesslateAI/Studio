@@ -64,6 +64,7 @@ function makeBoard(overrides?: { tasks?: Partial<Record<string, unknown>>[] }) {
         tasks: overrides?.tasks ?? [
           {
             id: 'task-1',
+            ref_number: 1,
             column_id: 'col-1',
             title: 'Fix login bug',
             description: 'Auth is broken',
@@ -121,6 +122,14 @@ describe('KanbanPanel', () => {
 
     expect(screen.getByText('To Do')).toBeInTheDocument();
     expect(screen.getByText('Done')).toBeInTheDocument();
+  });
+
+  it('displays reference number on task card', async () => {
+    render(<KanbanPanel projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('TSK-0001')).toBeInTheDocument();
+    });
   });
 
   it('displays point_value badge on task card', async () => {
@@ -214,6 +223,7 @@ describe('KanbanPanel', () => {
         return Promise.resolve({
           data: {
             id: 'task-1',
+            ref_number: 1,
             title: 'Fix login bug',
             description: 'Auth is broken',
             priority: 'high',

@@ -28,6 +28,7 @@ def _make_board(**overrides):
         "id": uuid4(),
         "project_id": uuid4(),
         "name": "Project Board",
+        "task_counter": 0,
         "columns": [],
     }
     defaults.update(overrides)
@@ -57,6 +58,7 @@ def _make_task(**overrides):
         "id": uuid4(),
         "board_id": uuid4(),
         "column_id": uuid4(),
+        "ref_number": 1,
         "title": "Sample task",
         "description": "A description",
         "position": 0,
@@ -338,9 +340,9 @@ class TestKanbanEndToEndFlows:
         assert result["tool"] == "kanban"
         inner = result["result"]
         assert inner["success"] is True
-        assert "Created task" in inner["message"]
+        assert "Created TSK-" in inner["message"]
         assert "To Do" in inner["message"]
-        assert str(task_id) in inner["message"]
+        assert "Fix auth bug" in inner["message"]
 
     @pytest.mark.asyncio
     async def test_move_task_flow(self):
@@ -543,7 +545,7 @@ class TestKanbanEndToEndFlows:
         inner = result["result"]
         assert inner["success"] is True
         assert "Added comment" in inner["message"]
-        assert str(task.id) in inner["message"]
+        assert "TSK-" in inner["message"]
 
     @pytest.mark.asyncio
     async def test_handler_exception_surfaces_through_registry(self):

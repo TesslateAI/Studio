@@ -239,6 +239,7 @@ async def get_board(
                 "tasks": [
                     {
                         "id": task.id,
+                        "ref_number": task.ref_number,
                         "title": task.title,
                         "description": task.description,
                         "position": task.position,
@@ -390,9 +391,14 @@ async def create_task(
     )
     max_position = result.scalar() or -1
 
+    # Increment board task counter for ref_number
+    board.task_counter = (board.task_counter or 0) + 1
+    ref_num = board.task_counter
+
     task = KanbanTask(
         board_id=board.id,
         position=max_position + 1,
+        ref_number=ref_num,
         reporter_id=current_user.id,
         **task_data.dict(),
     )
@@ -400,7 +406,7 @@ async def create_task(
     await db.commit()
     await db.refresh(task)
 
-    return {"id": task.id, "message": "Task created successfully"}
+    return {"id": task.id, "ref_number": task.ref_number, "message": "Task created successfully"}
 
 
 @router.get("/tasks/{task_id}")
@@ -430,6 +436,7 @@ async def get_task(
 
     return {
         "id": task.id,
+        "ref_number": task.ref_number,
         "board_id": task.board_id,
         "column_id": task.column_id,
         "title": task.title,
@@ -653,6 +660,7 @@ async def search_tasks(
         "tasks": [
             {
                 "id": task.id,
+                "ref_number": task.ref_number,
                 "column_id": task.column_id,
                 "title": task.title,
                 "description": task.description,

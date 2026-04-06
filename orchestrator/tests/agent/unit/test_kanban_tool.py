@@ -41,6 +41,7 @@ def _make_task(**overrides):
     defaults = {
         "id": uuid4(),
         "column_id": uuid4(),
+        "ref_number": 1,
         "title": "Sample task",
         "description": "A description",
         "position": 0,
@@ -164,7 +165,7 @@ class TestKanbanActionValidation:
             {"action": "update_task", "title": "New title"}, test_context
         )
         assert result["success"] is False
-        assert "'task_id' is required" in result["message"]
+        assert "'task_id' or 'ref' is required" in result["message"]
 
     @pytest.mark.asyncio
     async def test_update_task_no_updatable_fields(self, test_context):
@@ -185,7 +186,7 @@ class TestKanbanActionValidation:
             {"action": "move_task", "column": "Done"}, test_context
         )
         assert result["success"] is False
-        assert "'task_id' is required" in result["message"]
+        assert "'task_id' or 'ref' is required" in result["message"]
 
     @pytest.mark.asyncio
     async def test_move_task_missing_column(self, test_context):
@@ -201,7 +202,7 @@ class TestKanbanActionValidation:
     async def test_delete_task_missing_task_id(self, test_context):
         result = await kanban_executor({"action": "delete_task"}, test_context)
         assert result["success"] is False
-        assert "'task_id' is required" in result["message"]
+        assert "'task_id' or 'ref' is required" in result["message"]
 
     # -- add_comment --
 
@@ -211,7 +212,7 @@ class TestKanbanActionValidation:
             {"action": "add_comment", "content": "A comment"}, test_context
         )
         assert result["success"] is False
-        assert "'task_id' is required" in result["message"]
+        assert "'task_id' or 'ref' is required" in result["message"]
 
     @pytest.mark.asyncio
     async def test_add_comment_missing_content(self, test_context):
