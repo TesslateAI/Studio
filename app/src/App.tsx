@@ -7,6 +7,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ChatPositionProvider } from './contexts/ChatPositionContext';
 import { TeamProvider } from './contexts/TeamContext';
 import { CommandProvider } from './contexts/CommandContext';
+import { FeatureFlagProvider } from './contexts/FeatureFlagContext';
 import { DashboardLayout } from './components/DashboardLayout';
 import { PrivateRoute, PublicOnlyRoute } from './components/RouteGuards';
 import Landing from './pages/Landing';
@@ -390,23 +391,25 @@ function AppContent() {
 function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <TeamProvider>
-          <ChatPositionProvider>
-            <CommandProvider>
-              <style>{`
+      <FeatureFlagProvider>
+        <AuthProvider>
+          <TeamProvider>
+            <ChatPositionProvider>
+              <CommandProvider>
+                <style>{`
               @keyframes spin {
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
               }
             `}</style>
-              <BrowserRouter>
-                <AppContent />
-              </BrowserRouter>
-            </CommandProvider>
-          </ChatPositionProvider>
-        </TeamProvider>
-      </AuthProvider>
+                <BrowserRouter>
+                  <AppContent />
+                </BrowserRouter>
+              </CommandProvider>
+            </ChatPositionProvider>
+          </TeamProvider>
+        </AuthProvider>
+      </FeatureFlagProvider>
     </ThemeProvider>
   );
 }

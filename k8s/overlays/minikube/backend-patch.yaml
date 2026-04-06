@@ -17,6 +17,8 @@ spec:
       - name: backend
         imagePullPolicy: Never  # Use locally built image
         env:
+          - name: DEPLOYMENT_ENV
+            value: "minikube"
           # Override devserver image to use local build (same tag as production)
           - name: K8S_DEVSERVER_IMAGE
             value: "tesslate-devserver:latest"

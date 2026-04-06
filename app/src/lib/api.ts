@@ -3409,4 +3409,34 @@ export const schedulesApi = {
   },
 };
 
+// =============================================================================
+// Feature Flags
+// =============================================================================
+
+export interface FeatureFlagsResponse {
+  env: string;
+  flags: Record<string, boolean>;
+}
+
+// Always fetch fresh flags. On success, cache the result as a fallback
+// for future failures. On error, return the last known good value (or empty).
+let _lastGoodFlags: FeatureFlagsResponse = { env: '', flags: {} };
+
+function _fetchFlags(): Promise<FeatureFlagsResponse> {
+  return api
+    .get('/api/feature-flags')
+    .then((r) => {
+      _lastGoodFlags = r.data as FeatureFlagsResponse;
+      return _lastGoodFlags;
+    })
+    .catch(() => _lastGoodFlags);
+}
+
+// Prefetch at module load — fires alongside CSRF token fetch, before React mounts.
+_fetchFlags();
+
+export const featureFlagsApi = {
+  getFlags: (): Promise<FeatureFlagsResponse> => _fetchFlags(),
+};
+
 export default api;

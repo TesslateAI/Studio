@@ -8,6 +8,7 @@ resources:
 
 patches:
   - path: replicas-patch.yaml
+  - path: env-patch.yaml
 
 images:
   - name: tesslate-backend

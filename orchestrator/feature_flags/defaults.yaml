@@ -1,0 +1,38 @@
+# =============================================================================
+# Feature Flags — defaults.yaml
+# =============================================================================
+# This file IS the schema. Every feature flag must be defined here with its
+# default value. Per-environment files (minikube.yaml, beta.yaml, etc.) may
+# only override keys that exist in this file — unknown keys are rejected.
+#
+# Adding a new flag:
+#   1. Add it here with its default value
+#   2. Optionally override in per-env files
+#   3. Access via get_feature_flags().enabled("my_flag")
+#   4. If the frontend needs it, add the key to the `public` list below
+#
+# Values must be boolean (true/false).
+# Only add flags that are actually consumed by code.
+# =============================================================================
+
+# -- Authentication -----------------------------------------------------------
+two_fa: false
+
+# -- Infrastructure -----------------------------------------------------------
+template_builder: true
+fileops_v2: true
+
+# -- Agent Capabilities -------------------------------------------------------
+agent_streaming: true
+agent_web_search: true
+agent_plan_mode: true
+agent_subagents: true
+agent_apply_patch: true
+
+# =============================================================================
+# Public flags — exposed via GET /api/feature-flags for the frontend.
+# Backend can access ALL flags. Only flags listed here are served to clients.
+# =============================================================================
+public:
+  - two_fa
+  - template_builder

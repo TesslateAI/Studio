@@ -34,6 +34,7 @@ from .routers import (
     design,
     desktop_pair,
     external_agent,
+    feature_flags,
     feedback,
     gateway,
     git,
@@ -1148,6 +1149,7 @@ app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoin
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 app.include_router(internal.router, prefix="/api")  # /api/internal - Cluster-internal endpoints
+app.include_router(feature_flags.router, tags=["feature-flags"])  # /api/feature-flags
 
 # Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
 try:

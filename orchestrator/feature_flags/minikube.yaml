@@ -1,0 +1,3 @@
+# Minikube overrides — local development
+# Only list flags that differ from defaults.yaml
+# Currently all flags match defaults — no overrides needed.

@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     # Use the orchestration module for type-safe access: from app.services.orchestration import is_docker_mode
     deployment_mode: str = "docker"
 
+    # Deployment environment: determines which feature flag overlay to load.
+    # Values: "docker" (local docker-compose), "minikube", "beta", "production"
+    # Falls back to defaults.yaml when the env file doesn't exist.
+    deployment_env: str = "docker"
+
     @property
     def is_docker_mode(self) -> bool:
         """Check if running in Docker deployment mode."""

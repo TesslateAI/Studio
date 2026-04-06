@@ -1,0 +1,14 @@
+# Set DEPLOYMENT_ENV for feature flag overlay selection
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+  namespace: tesslate
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend
+          env:
+            - name: DEPLOYMENT_ENV
+              value: "production"
