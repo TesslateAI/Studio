@@ -10,14 +10,21 @@ from uuid import UUID
 
 import aiofiles
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Agent imports - new factory-based system
 from ..agent import create_agent_from_db_model
 from ..agent.iterative_agent import _convert_uuids_to_strings
 from ..agent.models import create_model_adapter

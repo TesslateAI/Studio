@@ -2076,7 +2076,7 @@ export function ChatContainer({
             </div>
           )}
 
-          {messages.map((message, msgIdx) => {
+          {messages.map((message) => {
             // Check if this is a new message that should animate
             const isNewMessage = !animatedMessagesRef.current.has(message.id);
             if (isNewMessage && !isLoadingHistory) {
