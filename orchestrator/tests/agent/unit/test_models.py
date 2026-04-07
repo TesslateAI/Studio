@@ -9,8 +9,6 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from app.agent.models import (
-    ANTHROPIC_AVAILABLE,
-    AnthropicAdapter,
     ModelAdapter,
     OpenAIAdapter,
     create_model_adapter,
@@ -77,9 +75,7 @@ class TestOpenAIAdapter:
 
     def test_openai_adapter_stores_model_name(self, mock_openai_client):
         """Test that adapter stores the model name as given."""
-        adapter = OpenAIAdapter(
-            model_name="anthropic/claude-3.5-sonnet", client=mock_openai_client
-        )
+        adapter = OpenAIAdapter(model_name="anthropic/claude-3.5-sonnet", client=mock_openai_client)
 
         assert adapter.model_name == "anthropic/claude-3.5-sonnet"
 
@@ -133,9 +129,7 @@ class TestOpenAIAdapter:
         mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         # Adapter receives already-stripped model name from create_model_adapter
-        adapter = OpenAIAdapter(
-            model_name="anthropic/claude-3.5-sonnet", client=mock_openai_client
-        )
+        adapter = OpenAIAdapter(model_name="anthropic/claude-3.5-sonnet", client=mock_openai_client)
 
         messages = [{"role": "user", "content": "test"}]
 
@@ -209,33 +203,6 @@ class TestOpenAIAdapter:
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(not ANTHROPIC_AVAILABLE, reason="Anthropic library not installed")
-class TestAnthropicAdapter:
-    """Test suite for AnthropicAdapter."""
-
-    def test_anthropic_adapter_initialization(self):
-        """Test Anthropic adapter initialization."""
-        with patch("app.agent.models.AsyncAnthropic"):
-            adapter = AnthropicAdapter(
-                model_name="claude-3-5-sonnet-20241022",
-                api_key="test-key",
-                temperature=0.8,
-                max_tokens=2000,
-            )
-
-            assert adapter.model_name == "claude-3-5-sonnet-20241022"
-            assert adapter.temperature == 0.8
-            assert adapter.max_tokens == 2000
-
-    def test_anthropic_adapter_get_model_name(self):
-        """Test getting model name from Anthropic adapter."""
-        with patch("app.agent.models.AsyncAnthropic"):
-            adapter = AnthropicAdapter(model_name="claude-3-opus-20240229", api_key="test-key")
-
-            assert adapter.get_model_name() == "claude-3-opus-20240229"
-
-
-@pytest.mark.unit
 class TestCreateModelAdapter:
     """Test suite for create_model_adapter factory function."""
 
@@ -302,14 +269,14 @@ class TestCreateModelAdapter:
             assert adapter.max_tokens == 3000
 
     @pytest.mark.asyncio
-    async def test_create_adapter_anthropic_provider_not_implemented(self, mock_user_id, mock_db):
-        """Test that native Anthropic provider raises NotImplementedError."""
-        with pytest.raises(NotImplementedError) as exc_info:
+    async def test_create_adapter_anthropic_provider_unsupported(self, mock_user_id, mock_db):
+        """Test that native Anthropic provider raises ValueError (unsupported)."""
+        with pytest.raises(ValueError) as exc_info:
             await create_model_adapter(
                 model_name="claude-3-opus", user_id=mock_user_id, db=mock_db, provider="anthropic"
             )
 
-        assert "Native Anthropic adapter not yet updated" in str(exc_info.value)
+        assert "Unsupported provider" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_create_adapter_unsupported_provider(self, mock_user_id, mock_db):
@@ -363,7 +330,9 @@ class TestCreateModelAdapter:
             )
 
     @pytest.mark.asyncio
-    async def test_create_adapter_custom_prefix_not_detected_as_anthropic(self, mock_user_id, mock_db):
+    async def test_create_adapter_custom_prefix_not_detected_as_anthropic(
+        self, mock_user_id, mock_db
+    ):
         """Test that custom/anthropic/model is NOT auto-detected as native Anthropic provider."""
         with patch("app.agent.models.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()

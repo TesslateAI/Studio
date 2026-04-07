@@ -272,11 +272,25 @@ export default function AgentsPage({
         toast.success('Agent created successfully!');
       } else {
         // Updating existing agent
-        response = await marketplaceApi.updateAgent(editingAgent.id, updatedData);
+        const currentModel = editingAgent.selected_model || editingAgent.model;
+        const modelChanged = updatedData.model && updatedData.model !== currentModel;
+
+        // For non-owned agents, use select-model endpoint for model changes
+        // instead of sending model in the PATCH (which would trigger a fork)
+        if (!editingAgent.is_custom && modelChanged) {
+          await marketplaceApi.selectAgentModel(editingAgent.id, updatedData.model!);
+        }
+
+        const patchData = { ...updatedData };
+        if (!editingAgent.is_custom) {
+          delete patchData.model;
+        }
+
+        response = await marketplaceApi.updateAgent(editingAgent.id, patchData);
         if (response.forked) {
           toast.success('Created a custom fork with your changes!');
         } else {
-          toast.success('Agent updated successfully');
+          toast.success(modelChanged ? 'Agent and model updated' : 'Agent updated successfully');
         }
       }
       setEditingAgent(null);
@@ -831,7 +845,7 @@ function EditAgentModal({
   const [systemPrompt, setSystemPrompt] = useState(agent.system_prompt || '');
   const currentModel = agent.selected_model || agent.model;
   const [model, setModel] = useState(currentModel);
-  const [originalPrompt] = useState(agent.system_prompt || '');
+  const [originalPrompt, setOriginalPrompt] = useState(agent.system_prompt || '');
   const [tools, setTools] = useState<string[]>(agent.tools || []);
   const [toolConfigs, setToolConfigs] = useState<
     Record<string, { description?: string; examples?: string[]; system_prompt?: string }>
@@ -857,6 +871,23 @@ function EditAgentModal({
   const [contextWindow, setContextWindow] = useState(
     (agent.config?.context_window as number) || DEFAULT_CONTEXT_WINDOW
   );
+
+  // Reset all local state when the agent prop changes (e.g. clicking a different agent)
+  useEffect(() => {
+    setName(agent.name);
+    setDescription(agent.description);
+    setSystemPrompt(agent.system_prompt || '');
+    setModel(agent.selected_model || agent.model);
+    setOriginalPrompt(agent.system_prompt || '');
+    setTools(agent.tools || []);
+    setToolConfigs(agent.tool_configs || {});
+    setAvatarUrl(agent.avatar_url || null);
+    setFeatures({ ...defaultFeatures, ...(agent.config?.features || {}) });
+    setCompactionModel((agent.config?.compaction_model as string) || '');
+    setContextWindow((agent.config?.context_window as number) || DEFAULT_CONTEXT_WINDOW);
+    setSubagents([]);
+    setAgentSkills([]);
+  }, [agent.id]);
 
   // Subagents state
   const [subagents, setSubagents] = useState<SubagentItem[]>([]);

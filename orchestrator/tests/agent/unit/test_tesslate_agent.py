@@ -17,11 +17,8 @@ import pytest
 from app.agent.base import AbstractAgent
 from app.agent.compaction import (
     APPROX_BYTES_PER_TOKEN,
-    SUMMARY_PREFIX,
+    ContextCompressor,
     approx_token_count,
-    build_compacted_history,
-    collect_user_messages,
-    compact_conversation,
     estimate_messages_tokens,
 )
 from app.agent.factory import AGENT_CLASS_MAP, create_agent_from_db_model
@@ -513,89 +510,55 @@ class TestContextCompaction:
         tokens = estimate_messages_tokens(messages)
         assert tokens > 0
 
-    @pytest.mark.asyncio
-    async def test_compaction_does_not_trigger_below_threshold(self):
-        """Compaction returns None when under threshold."""
+    def test_compressor_should_compress_preflight_below_threshold(self):
+        """ContextCompressor.should_compress_preflight returns False under threshold."""
+        adapter = MockToolCallingAdapter([])
+        compressor = ContextCompressor(model_adapter=adapter, context_window=128_000)
         messages = [
             {"role": "system", "content": "Short prompt"},
             {"role": "user", "content": "Short message"},
         ]
-        adapter = MockToolCallingAdapter([])
-        result = await compact_conversation(messages, adapter, 128_000, 0.8)
-        assert result is None
+        assert compressor.should_compress_preflight(messages) is False
 
-    @pytest.mark.asyncio
-    async def test_compaction_triggers_at_threshold(self):
-        """Compaction triggers when tokens exceed threshold."""
-        # Create messages that exceed 80% of a small context window
-        big_content = "x" * 4000  # ~1000 tokens
+    def test_compressor_should_compress_preflight_above_threshold(self):
+        """ContextCompressor.should_compress_preflight returns True over threshold."""
+        adapter = MockToolCallingAdapter([])
+        compressor = ContextCompressor(model_adapter=adapter, context_window=1000, threshold=0.8)
+        big_content = "x" * 4000  # ~1000 tokens, exceeds 800 threshold
         messages = [
             {"role": "system", "content": "System"},
             {"role": "user", "content": big_content},
             {"role": "assistant", "content": big_content},
-            {"role": "user", "content": big_content},
         ]
-        adapter = MockToolCallingAdapter([])
-        # Use a small context window so messages exceed threshold
-        result = await compact_conversation(messages, adapter, 1000, 0.8)
-        assert result is not None
+        assert compressor.should_compress_preflight(messages) is True
 
-    def test_compaction_preserves_system_message(self):
-        """System message is always preserved in compacted history."""
+    @pytest.mark.asyncio
+    async def test_compressor_compress_too_few_messages(self):
+        """Compress returns messages unchanged when too few to compress."""
+        adapter = MockToolCallingAdapter([])
+        compressor = ContextCompressor(
+            model_adapter=adapter,
+            context_window=1000,
+            protect_first_n=2,
+            protect_last_n=2,
+        )
         messages = [
-            {"role": "system", "content": "You are helpful"},
+            {"role": "system", "content": "System"},
             {"role": "user", "content": "Hi"},
             {"role": "assistant", "content": "Hello"},
         ]
-        compacted = build_compacted_history(messages, "Summary of conversation")
+        result = await compressor.compress(messages)
+        assert result == messages
 
-        system_msgs = [m for m in compacted if m["role"] == "system"]
-        assert len(system_msgs) == 1
-        assert system_msgs[0]["content"] == "You are helpful"
-
-    def test_compaction_adds_summary_with_prefix(self):
-        """Summary message has SUMMARY_PREFIX."""
-        messages = [
-            {"role": "system", "content": "System"},
-            {"role": "user", "content": "Hello"},
-        ]
-        compacted = build_compacted_history(messages, "The user said hello")
-
-        summary_msgs = [m for m in compacted if m.get("content", "").startswith(SUMMARY_PREFIX)]
-        assert len(summary_msgs) == 1
-
-    def test_collect_user_messages_filters_system(self):
-        """System messages are excluded from collection."""
-        messages = [
-            {"role": "system", "content": "System prompt that should not appear"},
-            {"role": "user", "content": "User question"},
-            {"role": "assistant", "content": "Assistant answer"},
-        ]
-        collected = collect_user_messages(messages)
-
-        assert "System prompt that should not appear" not in collected
-        assert "User question" in collected
-
-    def test_collect_user_messages_filters_summaries(self):
-        """Previous summary messages are excluded (prevents summary-of-summary)."""
-        messages = [
-            {"role": "user", "content": f"{SUMMARY_PREFIX}\nOld summary"},
-            {"role": "user", "content": "New question"},
-        ]
-        collected = collect_user_messages(messages)
-
-        assert "Old summary" not in collected
-        assert "New question" in collected
-
-    def test_collect_user_messages_respects_max_bytes(self):
-        """Collection respects byte limit."""
-        messages = [
-            {"role": "user", "content": "x" * 1000},
-            {"role": "user", "content": "y" * 1000},
-        ]
-        collected = collect_user_messages(messages, max_bytes=500)
-
-        assert len(collected.encode("utf-8")) <= 600  # Some overhead for [user]: prefix
+    def test_compressor_get_status(self):
+        """ContextCompressor.get_status returns expected fields."""
+        adapter = MockToolCallingAdapter([])
+        compressor = ContextCompressor(model_adapter=adapter, context_window=128_000)
+        status = compressor.get_status()
+        assert "last_prompt_tokens" in status
+        assert "threshold_tokens" in status
+        assert "compression_count" in status
+        assert status["compression_count"] == 0
 
 
 # =============================================================================
