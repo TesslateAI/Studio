@@ -2985,7 +2985,8 @@ export const teamsApi = {
     await api.delete(`/api/teams/${slug}`);
   },
   async switch(slug: string) {
-    await api.post(`/api/teams/${slug}/switch`);
+    const response = await api.post(`/api/teams/${slug}/switch`);
+    return response.data;
   },
 
   // Members

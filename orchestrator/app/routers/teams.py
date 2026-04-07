@@ -489,7 +489,10 @@ async def switch_team(
 
     user.default_team_id = team.id
     await db.commit()
-    return {"default_team_id": str(team.id)}
+    return {
+        "default_team_id": str(team.id),
+        "theme_preset": team.theme_preset or "default-dark",
+    }
 
 
 # ============================================================================

@@ -55,6 +55,9 @@ class Team(Base):
     support_tier = Column(String(20), nullable=False, default="community")
     deployed_projects_count = Column(Integer, nullable=False, default=0)
 
+    # Appearance
+    theme_preset = Column(String, nullable=True, default="default-dark")
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
