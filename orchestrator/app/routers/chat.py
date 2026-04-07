@@ -10,7 +10,7 @@ from uuid import UUID
 
 import aiofiles
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
