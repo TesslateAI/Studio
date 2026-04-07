@@ -629,6 +629,81 @@ async def delete_project_messages(
         ) from e
 
 
+@router.post("/{chat_id}/undo")
+async def undo_last_exchange(
+    chat_id: str,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the last user+assistant message pair from a chat session.
+
+    Returns the content of the removed user message so the frontend can
+    re-send it for /retry behaviour.
+    """
+    result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == current_user.id)
+    )
+    chat = result.scalar_one_or_none()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.status in ("running", "waiting_approval"):
+        raise HTTPException(
+            status_code=409, detail="Cannot undo while the agent is running"
+        )
+
+    # Walk backwards from newest: find the last assistant, then the user before it
+    msgs_result = await db.execute(
+        select(Message)
+        .where(Message.chat_id == chat.id)
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(10)  # look back enough to find the pair
+    )
+    recent = msgs_result.scalars().all()
+
+    if not recent:
+        raise HTTPException(status_code=400, detail="No messages to undo")
+
+    to_delete: list[Message] = []
+    removed_user_content: str | None = None
+
+    # Phase 1: find & collect the trailing assistant message(s)
+    idx = 0
+    while idx < len(recent) and recent[idx].role == "assistant":
+        to_delete.append(recent[idx])
+        idx += 1
+
+    # Phase 2: collect the user message that preceded the assistant reply
+    if idx < len(recent) and recent[idx].role == "user":
+        removed_user_content = recent[idx].content
+        to_delete.append(recent[idx])
+
+    if not to_delete:
+        raise HTTPException(status_code=400, detail="No messages to undo")
+
+    removed_ids = [str(m.id) for m in to_delete]
+
+    # Bulk delete — AgentStep rows cascade via FK
+    from sqlalchemy import delete as sql_delete
+
+    await db.execute(
+        sql_delete(Message).where(Message.id.in_([m.id for m in to_delete]))
+    )
+    await db.commit()
+
+    logger.info(
+        f"[CHAT] Undo: removed {len(to_delete)} message(s) from chat {chat_id}, "
+        f"user {current_user.id}"
+    )
+
+    return {
+        "success": True,
+        "removed_count": len(to_delete),
+        "removed_ids": removed_ids,
+        "last_user_message": removed_user_content,
+    }
+
+
 @router.post("/agent", response_model=AgentChatResponse)
 async def agent_chat(
     request: AgentChatRequest,

@@ -41,6 +41,7 @@ The Project Builder is the main development environment where users write code, 
 Switch between different main content areas:
 - **Preview**: Browser preview of running app
 - **Code**: Monaco editor with file tree
+- **Design**: Visual design/inspect tool (see below)
 - **Kanban**: Task board for project planning
 - **Assets**: File browser with upload/download
 - **Terminal**: xterm.js terminal for shell commands
@@ -115,7 +116,7 @@ const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
 const [container, setContainer] = useState<Record<string, unknown> | null>(null);
 
 // View state
-const [activeView, setActiveView] = useState<'preview' | 'code' | 'kanban' | 'assets' | 'terminal'>('preview');
+const [activeView, setActiveView] = useState<'preview' | 'code' | 'design' | 'kanban' | 'assets' | 'terminal'>('preview');
 const [activePanel, setActivePanel] = useState<PanelType>(null);
 const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(true);
 
@@ -403,6 +404,45 @@ const handleViewChange = (view: MainViewType) => {
 )}
 ```
 
+### 6. Design View
+
+**Component**: `app/src/components/views/DesignView.tsx`
+**Sub-components**: `app/src/components/views/design/`
+
+A visual design/inspect tool that lets users interact with the live preview to inspect elements, modify CSS styles, and navigate the file tree. The Design view includes its own built-in AI chat tab, so the main ChatContainer is hidden when this view is active.
+
+```typescript
+{activeView === 'design' && project?.id && devServerUrl && (
+  <DesignView
+    slug={slug}
+    projectId={project.id}
+    devServerUrl={devServerUrl}
+    files={files}
+    onSaveFile={handleSaveFile}
+    // ... additional props
+  />
+)}
+```
+
+**Sub-components**:
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `DesignBridge` | `design/DesignBridge.ts` | Communication bridge between editor and preview iframe |
+| `DesignToolbar` | `design/DesignToolbar.tsx` | Toolbar with mode toggles and open file tabs |
+| `FileTreePanel` | `design/FileTreePanel.tsx` | File tree sidebar for the design view |
+| `InsertPalette` | `design/InsertPalette.tsx` | Component/element insert palette |
+| `InspectorPanel` | `design/InspectorPanel.tsx` | Element inspector showing computed styles |
+| `InspectorTab` | `design/InspectorTab.tsx` | Inspector tab within the panel |
+| `PreviewCanvas` | `design/PreviewCanvas.tsx` | Managed preview iframe with design overlays |
+| `VisualTab` | `design/VisualTab.tsx` | Visual editing tab |
+| `bridgeInstaller` | `design/bridgeInstaller.ts` | Installs the design bridge script into the preview iframe |
+
+**Key behaviors**:
+- Chat is hidden on the main layout when Design view is active (Design has its own AI tab)
+- File tree loads when switching to Design view (same as Code view)
+- Mobile shows a placeholder since the design tools require a wider viewport
+
 ## Chat Integration
 
 The chat interface is always visible in the right sidebar:
@@ -615,7 +655,8 @@ PUT /api/projects/{slug}/settings
 ## Related Components
 
 - **`ChatContainer`**: AI chat interface
-- **`CodeEditor`**: Monaco editor wrapper
+- **`CodeEditor`**: Monaco editor wrapper (see new props below)
+- **`DesignView`**: Visual design/inspect tool with sub-components in `views/design/`
 - **`BrowserPreview`**: iframe preview with controls
 - **`FloatingPanel`**: Panel overlay wrapper
 - **`GitHubPanel`**: Git operations

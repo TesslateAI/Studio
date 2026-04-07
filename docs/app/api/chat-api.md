@@ -39,6 +39,13 @@ export const chatApi = {
     const response = await api.delete(`/api/chat/${projectId}/messages`);
     return response.data;
   },
+
+  // Undo last user+assistant exchange
+  undoLastExchange: async (chatId: string) => {
+    const response = await api.post(`/api/chat/${chatId}/undo`);
+    return response.data;
+    // Returns: { success: boolean, removed_count: number, removed_ids: string[], last_user_message: string | null }
+  },
 };
 ```
 

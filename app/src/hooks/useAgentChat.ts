@@ -751,6 +751,50 @@ export function useAgentChat({
     setMessages([]);
   }, []);
 
+  const undoLastExchange = useCallback(async (): Promise<string | null> => {
+    if (isExecutingRef.current) return null;
+    const targetChatId = chatId;
+    if (!targetChatId) return null;
+
+    try {
+      const result = await chatApi.undoLastExchange(targetChatId);
+      if (!result.success || result.removed_count === 0) return null;
+
+      // Remove the last user + ai messages from local state
+      setMessages((prev) => {
+        // Walk backwards: remove last ai, then last user
+        const copy = [...prev];
+        // Remove last ai message
+        for (let i = copy.length - 1; i >= 0; i--) {
+          if (copy[i].type === 'ai') {
+            copy.splice(i, 1);
+            break;
+          }
+        }
+        // Remove last user message
+        for (let i = copy.length - 1; i >= 0; i--) {
+          if (copy[i].type === 'user') {
+            copy.splice(i, 1);
+            break;
+          }
+        }
+        return copy;
+      });
+
+      return result.last_user_message;
+    } catch (err) {
+      console.error('[UNDO] Failed:', err);
+      return null;
+    }
+  }, [chatId]);
+
+  const retryLastMessage = useCallback(async () => {
+    const lastContent = await undoLastExchange();
+    if (lastContent) {
+      sendMessage(lastContent);
+    }
+  }, [undoLastExchange, sendMessage]);
+
   return {
     messages,
     isExecuting,
@@ -760,5 +804,7 @@ export function useAgentChat({
     stopExecution,
     handleApproval,
     clearMessages,
+    undoLastExchange,
+    retryLastMessage,
   };
 }

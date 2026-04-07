@@ -52,7 +52,7 @@ import {
 
 export type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
 
-export type ViewType = 'architecture' | 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
+export type ViewType = 'architecture' | 'preview' | 'code' | 'design' | 'kanban' | 'assets' | 'terminal';
 
 /**
  * All available command handlers that components can register

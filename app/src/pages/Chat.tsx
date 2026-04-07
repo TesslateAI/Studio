@@ -104,6 +104,8 @@ export default function Chat() {
     stopExecution,
     handleApproval,
     clearMessages,
+    undoLastExchange,
+    retryLastMessage,
   } = useAgentChat({
     chatId: currentSessionId,
     projectId: connectedProjectId,
@@ -117,6 +119,15 @@ export default function Chat() {
     ),
     onSessionNeeded: createSession,
   });
+
+  // Deep-link: if navigated with a specific sessionId (e.g. from sidebar Recent), switch to it
+  useEffect(() => {
+    const targetSessionId = (location.state as Record<string, unknown>)?.sessionId as string | undefined;
+    if (targetSessionId && targetSessionId !== currentSessionId) {
+      clearMessages();
+      switchSession(targetSessionId);
+    }
+  }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load user's agents (same pattern as Project.tsx) — re-fetch on team switch
   useEffect(() => {
@@ -348,6 +359,8 @@ export default function Chat() {
                 isExecuting={isExecuting}
                 onStop={stopExecution}
                 onClearHistory={clearMessages}
+                onUndo={undoLastExchange}
+                onRetry={retryLastMessage}
                 editMode={editMode}
                 onModeChange={setEditMode}
                 onModelChange={handleModelChange}
@@ -389,6 +402,8 @@ export default function Chat() {
                 isExecuting={isExecuting}
                 onStop={stopExecution}
                 onClearHistory={clearMessages}
+                onUndo={undoLastExchange}
+                onRetry={retryLastMessage}
                 editMode={editMode}
                 onModeChange={setEditMode}
                 onModelChange={handleModelChange}

@@ -20,10 +20,11 @@ import {
   Rocket,
   Package,
   MessagesSquare,
+  Clock,
 } from 'lucide-react';
 import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Plus } from '@phosphor-icons/react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
-import { billingApi, teamsApi } from '../../lib/api';
+import { billingApi, chatApi, projectsApi, teamsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../contexts/TeamContext';
@@ -58,6 +59,28 @@ interface NavigationSidebarProps {
   forceVisible?: boolean;
 }
 
+// Recent activity item type
+type RecentItem = {
+  id: string;
+  type: 'chat' | 'project';
+  title: string;
+  slug?: string;
+  updatedAt: string;
+};
+
+function formatRelativeTime(dateStr: string): string {
+  if (!dateStr) return '';
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 // Library sub-items for dropdown
 const LIBRARY_ITEMS = [
   { key: 'agents', label: 'Agents', icon: Package },
@@ -89,6 +112,8 @@ export function NavigationSidebar({
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(() => activePage === 'library');
+  const [recentOpen, setRecentOpen] = useState(true);
+  const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -197,6 +222,52 @@ export function NavigationSidebar({
     onExpandedChange?.(isExpanded);
   }, [isExpanded, onExpandedChange]);
 
+
+  // Fetch recent chats + projects for sidebar (refreshes on route change)
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      chatApi.getUserSessions({ limit: 5 }).catch(() => ({ sessions: [] })),
+      projectsApi.getAll().catch(() => []),  // API returns all; sliced below
+    ]).then(([chatData, projects]) => {
+      if (cancelled) return;
+      const chats: RecentItem[] = ((chatData as { sessions?: Array<Record<string, unknown>> }).sessions || []).slice(0, 5).map((s) => ({
+        id: s.id as string,
+        type: 'chat' as const,
+        title: (s.title as string) || 'Untitled chat',
+        updatedAt: (s.updated_at as string) || (s.created_at as string) || '',
+      }));
+      const projs: RecentItem[] = (projects as Array<Record<string, unknown>>)
+        .map((p) => ({
+          id: p.id as string,
+          type: 'project' as const,
+          title: (p.name as string) || 'Untitled project',
+          slug: p.slug as string,
+          updatedAt: (p.updated_at as string) || (p.created_at as string) || new Date(0).toISOString(),
+        }))
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .slice(0, 5);
+      const merged = [...chats, ...projs]
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .slice(0, 5);
+      setRecentItems(merged);
+    });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRecentClick = useCallback((item: RecentItem) => {
+    // Move clicked item to top immediately
+    setRecentItems((prev) => {
+      const key = `${item.type}-${item.id}`;
+      const without = prev.filter((i) => `${i.type}-${i.id}` !== key);
+      return [{ ...item, updatedAt: new Date().toISOString() }, ...without].slice(0, 5);
+    });
+    if (item.type === 'project') {
+      navigate(`/project/${item.slug}/builder`);
+    } else {
+      navigate('/chat', { state: { sessionId: item.id } });
+    }
+  }, [navigate]);
 
   const handleLogout = async () => {
     await logout();
@@ -643,6 +714,66 @@ export function NavigationSidebar({
                 {isExpanded && <span className={inactiveLabelClass}>Documentation</span>}
               </a>
             </Tooltip>
+
+            {/* Recent — collapsible, mixed chats + projects */}
+            {recentItems.length > 0 && (
+              !isExpanded ? (
+                <Tooltip content="Recent" side="right" delay={200}>
+                  <button
+                    onClick={() => {
+                      setIsExpanded(true);
+                      setRecentOpen(true);
+                    }}
+                    className={navButtonClassCollapsed(false)}
+                  >
+                    <Clock size={16} className={inactiveIconClass} />
+                  </button>
+                </Tooltip>
+              ) : (
+                <>
+                  <div className="h-px bg-[var(--sidebar-border)] my-1 mx-3 flex-shrink-0" />
+                  <button
+                    onClick={() => setRecentOpen(!recentOpen)}
+                    className={inactiveNavButton}
+                  >
+                    <Clock size={16} className={`flex-shrink-0 ${inactiveIconClass}`} />
+                    <span className={`${inactiveLabelClass} flex items-center gap-1`}>
+                      Recent
+                      <ChevronDown
+                        size={10}
+                        className={`transition-transform duration-200 text-[var(--text-subtle)] ${
+                          recentOpen ? '' : '-rotate-90'
+                        }`}
+                      />
+                    </span>
+                  </button>
+                  {recentOpen && (
+                    <div className="flex flex-col gap-0.5 mt-0.5">
+                      {recentItems.map((item) => (
+                        <button
+                          key={`${item.type}-${item.id}`}
+                          onClick={() => handleRecentClick(item)}
+                          className="group flex items-center h-7 w-full transition-colors rounded-lg pl-[7px] pr-[7px] gap-2 hover:bg-[var(--sidebar-hover)]"
+                        >
+                          <span className="text-[13px] text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)] truncate flex-1 text-left transition-colors">
+                            {item.title}
+                          </span>
+                          <span className="text-[10px] text-[var(--text-subtle)] tabular-nums flex-shrink-0">
+                            {formatRelativeTime(item.updatedAt)}
+                          </span>
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => navigate('/dashboard')}
+                        className="group flex items-center h-7 w-full transition-colors rounded-lg pl-[7px] pr-[7px] gap-2 hover:bg-[var(--sidebar-hover)]"
+                      >
+                        <span className="text-[11px] text-[var(--text-subtle)] group-hover:text-[var(--text-muted)] transition-colors">See all →</span>
+                      </button>
+                    </div>
+                  )}
+                </>
+              )
+            )}
 
             {/* Settings is accessed via user dropdown, not sidebar nav */}
           </>

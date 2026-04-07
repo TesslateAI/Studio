@@ -19,21 +19,12 @@ import Editor from '@monaco-editor/react';
 import { useTheme } from '../theme/ThemeContext';
 import { projectsApi } from '../lib/api';
 import { fileEvents } from '../utils/fileEvents';
-
-interface FileNode {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-  children?: FileNode[];
-}
-
-interface FileTreeEntry {
-  path: string;
-  name: string;
-  is_dir: boolean;
-  size: number;
-  mod_time: number;
-}
+import {
+  buildFileTree as buildFileTreeUtil,
+  filterFileTree as filterFileTreeUtil,
+  type FileNode,
+  type FileTreeEntry,
+} from '../utils/buildFileTree';
 
 interface ContextMenuState {
   x: number;
@@ -66,6 +57,16 @@ interface CodeEditorProps {
   isFilesSyncing?: boolean;
   startupOverlay?: React.ReactNode;
   readOnly?: boolean;
+  /** Hide the left file tree sidebar (for Design view where tree is external) */
+  showSidebar?: boolean;
+  /** When set, opens this file path in the editor (controlled externally) */
+  externalOpenFile?: string;
+  /** Exposes the Monaco editor instance to the parent; may return a cleanup function */
+  onEditorRef?: (editor: unknown) => void | (() => void);
+  /** Callback when open tabs change (for Design toolbar component pills) */
+  onTabsChange?: (tabs: { path: string; name: string }[]) => void;
+  /** Callback when selected file changes */
+  onSelectedFileChange?: (path: string | null) => void;
 }
 
 function CodeEditor({
@@ -81,6 +82,11 @@ function CodeEditor({
   isFilesSyncing,
   startupOverlay,
   readOnly = false,
+  showSidebar = true,
+  externalOpenFile,
+  onEditorRef,
+  onTabsChange,
+  onSelectedFileChange,
 }: CodeEditorProps) {
   const { theme } = useTheme();
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
@@ -182,8 +188,14 @@ function CodeEditor({
 
   // ── Editor mount + Ctrl+S binding ─────────────────────────────────
 
+  const editorRefCleanupRef = useRef<(() => void) | null>(null);
+
   const handleEditorDidMount = useCallback((editor: unknown) => {
     editorRef.current = editor;
+    // Call onEditorRef and store its cleanup (if returned)
+    editorRefCleanupRef.current?.();
+    const cleanup = onEditorRef?.(editor);
+    editorRefCleanupRef.current = typeof cleanup === 'function' ? cleanup : null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const monacoEditor = editor as any;
     // Bind Ctrl+S / Cmd+S to save (uses ref to avoid stale closure)
@@ -311,58 +323,27 @@ function CodeEditor({
   // Keep ref current for keyboard shortcut (avoids stale closure)
   useEffect(() => { closeTabRef.current = (p) => closeTab(p); }, [closeTab]);
 
+  // ── External file opening (for Design view) ──────────────────────
+  useEffect(() => {
+    if (externalOpenFile) openFile(externalOpenFile);
+  }, [externalOpenFile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Notify parent of tab/file changes ─────────────────────────────
+  useEffect(() => { onTabsChange?.(openTabs); }, [openTabs]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onSelectedFileChange?.(selectedFile); }, [selectedFile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Build file tree ───────────────────────────────────────────────
 
   useEffect(() => {
-    // Build hierarchical FileNode[] tree from flat fileTreeProp entries
-    const tree: FileNode[] = [];
-    const pathMap = new Map<string, FileNode>();
-
-    // Sort entries by path for proper tree building
-    const sorted = [...fileTreeProp]
-      .filter((e) => e.path && e.path !== '.')
-      .sort((a, b) => a.path.localeCompare(b.path));
-
-    sorted.forEach((entry) => {
-      const parts = entry.path.split('/').filter(Boolean);
-      let currentPath = '';
-
-      parts.forEach((part: string, index: number) => {
-        const fullPath = currentPath ? `${currentPath}/${part}` : part;
-        const isLeaf = index === parts.length - 1;
-
-        if (!pathMap.has(fullPath)) {
-          const node: FileNode = {
-            name: part,
-            path: fullPath,
-            isDirectory: isLeaf ? entry.is_dir : true,
-            children: (isLeaf ? entry.is_dir : true) ? [] : undefined,
-          };
-          pathMap.set(fullPath, node);
-          if (currentPath === '') {
-            tree.push(node);
-          } else {
-            const parent = pathMap.get(currentPath);
-            if (parent && parent.children) parent.children.push(node);
-          }
-        }
-        currentPath = fullPath;
-      });
-    });
-
-    const sortNodes = (nodes: FileNode[]) => {
-      nodes.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-      });
-      nodes.forEach((n) => { if (n.children) sortNodes(n.children); });
-    };
-    sortNodes(tree);
+    const tree = buildFileTreeUtil(fileTreeProp);
     setFileTree(tree);
 
     // Auto-select the first actual file if none selected
-    if (!selectedFile && sorted.length > 0) {
-      const firstFile = sorted.find((e) => !e.is_dir);
+    if (!selectedFile && fileTreeProp.length > 0) {
+      const firstFile = [...fileTreeProp]
+        .filter((e) => e.path && e.path !== '.')
+        .sort((a, b) => a.path.localeCompare(b.path))
+        .find((e) => !e.is_dir);
       if (firstFile) {
         openFile(firstFile.path);
       }
@@ -551,23 +532,7 @@ function CodeEditor({
 
   // ── Search filtering ──────────────────────────────────────────────
 
-  const filterTree = useCallback((nodes: FileNode[], query: string): FileNode[] => {
-    if (!query) return nodes;
-    const lower = query.toLowerCase();
-    return nodes.reduce<FileNode[]>((acc, node) => {
-      if (node.isDirectory) {
-        const filtered = filterTree(node.children || [], query);
-        if (filtered.length > 0) {
-          acc.push({ ...node, children: filtered });
-        }
-      } else if (node.name.toLowerCase().includes(lower)) {
-        acc.push(node);
-      }
-      return acc;
-    }, []);
-  }, []);
-
-  const displayTree = searchQuery ? filterTree(fileTree, searchQuery) : fileTree;
+  const displayTree = searchQuery ? filterFileTreeUtil(fileTree, searchQuery) : fileTree;
 
   // ── Render inline input row ───────────────────────────────────────
 
@@ -718,7 +683,7 @@ function CodeEditor({
       )}
 
       {/* ── Explorer sidebar ───────────────────────────────────────── */}
-      <div
+      {showSidebar !== false && <div
         className={`bg-[var(--bg)] border-r border-[var(--border)] overflow-hidden flex flex-col transition-all duration-200 ${
           isMobile
             ? `fixed top-0 left-0 h-full z-50 w-64 ${mobileExplorerOpen ? 'translate-x-0' : '-translate-x-full'}`
@@ -823,20 +788,22 @@ function CodeEditor({
             </>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* ── Editor area ────────────────────────────────────────────── */}
       <div className="flex-1 bg-[var(--bg)] overflow-hidden flex flex-col min-w-0">
         {/* Tab bar */}
         <div className={`${isMobile ? 'h-[40px]' : 'h-[35px]'} bg-[var(--bg)] border-b border-[var(--border)] flex items-end shrink-0`}>
           {/* Sidebar toggle */}
-          <button
-            onClick={() => isMobile ? setMobileExplorerOpen(true) : setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="h-full px-2 flex items-center text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors shrink-0"
-            title={isSidebarCollapsed || isMobile ? 'Show explorer' : 'Hide explorer'}
-          >
-            {isSidebarCollapsed || isMobile ? <PanelLeft size={14} /> : <PanelLeftClose size={14} />}
-          </button>
+          {showSidebar !== false && (
+            <button
+              onClick={() => isMobile ? setMobileExplorerOpen(true) : setIsSidebarCollapsed(!isSidebarCollapsed)}
+              className="h-full px-2 flex items-center text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors shrink-0"
+              title={isSidebarCollapsed || isMobile ? 'Show explorer' : 'Hide explorer'}
+            >
+              {isSidebarCollapsed || isMobile ? <PanelLeft size={14} /> : <PanelLeftClose size={14} />}
+            </button>
+          )}
 
           {/* Tabs */}
           <div className="flex-1 flex items-end overflow-x-auto scrollbar-none min-w-0">

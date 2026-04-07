@@ -2874,6 +2874,24 @@ ALLOWED_MIME_TYPES = {
 # Maximum file size: 20MB
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB in bytes
 
+# Docker project root — must match DockerComposeOrchestrator.projects_path
+_DOCKER_PROJECTS_ROOT = "/projects"
+
+
+def _get_docker_asset_path(project_slug: str) -> str:
+    """Return the Docker-mode project root for asset file operations.
+
+    The Docker orchestrator stores project files at /projects/{slug}.
+    Asset endpoints must use the same root so uploads, deletes, renames,
+    and directory listings are visible in the file tree.
+    """
+    # Prevent path traversal — slug must be a simple name
+    safe_slug = os.path.basename(project_slug)
+    resolved = os.path.realpath(os.path.join(_DOCKER_PROJECTS_ROOT, safe_slug))
+    if not resolved.startswith(os.path.realpath(_DOCKER_PROJECTS_ROOT) + os.sep):
+        raise ValueError(f"Invalid project slug: {project_slug}")
+    return resolved
+
 
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename to prevent security issues."""
@@ -2942,9 +2960,9 @@ async def list_asset_directories(
     # Also scan filesystem for empty directories
     try:
         settings = get_settings()
-        project_path = get_project_path(current_user.id, project_id)
 
         if settings.deployment_mode == "docker":
+            project_path = _get_docker_asset_path(project_slug)
             # Scan filesystem for directories
             if os.path.exists(project_path):
                 from ..utils.async_fileio import walk_directory_async
@@ -3007,10 +3025,10 @@ async def create_asset_directory(
 
     try:
         settings = get_settings()
-        project_path = get_project_path(current_user.id, project_id)
-        full_dir_path = os.path.join(project_path, directory_path)
 
         if settings.deployment_mode == "docker":
+            project_path = _get_docker_asset_path(project_slug)
+            full_dir_path = os.path.join(project_path, directory_path)
             # Create directory on filesystem
             os.makedirs(full_dir_path, exist_ok=True)
             logger.info(f"[ASSETS] Created directory: {full_dir_path}")
@@ -3113,7 +3131,10 @@ async def upload_asset(
 
         # Get project path
         settings = get_settings()
-        project_path = get_project_path(current_user.id, project_id)
+        if settings.deployment_mode == "docker":
+            project_path = _get_docker_asset_path(project_slug)
+        else:
+            project_path = get_project_path(current_user.id, project_id)
 
         # Create assets directory path
         assets_dir = os.path.join(project_path, directory)
@@ -3302,10 +3323,10 @@ async def get_asset_file(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     settings = get_settings()
-    project_path = get_project_path(current_user.id, project.id)
-    file_path = os.path.join(project_path, asset.file_path)
 
     if settings.deployment_mode == "docker":
+        project_path = _get_docker_asset_path(project_slug)
+        file_path = os.path.join(project_path, asset.file_path)
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="Asset file not found on disk")
 
@@ -3363,13 +3384,12 @@ async def delete_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     try:
-        project_path = get_project_path(current_user.id, project.id)
-        file_path = os.path.join(project_path, asset.file_path)
-
         # Delete file from filesystem or container
         from ..services.orchestration import is_docker_mode
 
         if is_docker_mode():
+            project_path = _get_docker_asset_path(project_slug)
+            file_path = os.path.join(project_path, asset.file_path)
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"[ASSETS] Deleted file: {file_path}")
@@ -3440,16 +3460,15 @@ async def rename_asset(
         )
 
     try:
-        project_path = get_project_path(current_user.id, project.id)
-
-        old_file_path = os.path.join(project_path, asset.file_path)
-        new_file_path_relative = f"{asset.directory.strip('/')}/{new_filename}".lstrip("/")
-        new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
-
         # Rename file in filesystem or container
         from ..services.orchestration import get_orchestrator, is_docker_mode
 
+        new_file_path_relative = f"{asset.directory.strip('/')}/{new_filename}".lstrip("/")
+
         if is_docker_mode():
+            project_path = _get_docker_asset_path(project_slug)
+            old_file_path = os.path.join(project_path, asset.file_path)
+            new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
             if os.path.exists(old_file_path):
                 os.rename(old_file_path, new_file_path_absolute)
                 logger.info(f"[ASSETS] Renamed file: {old_file_path} -> {new_file_path_absolute}")
@@ -3525,16 +3544,16 @@ async def move_asset(
         return {"message": "Asset is already in this directory"}
 
     try:
-        project_path = get_project_path(current_user.id, project.id)
-
-        old_file_path = os.path.join(project_path, asset.file_path)
-        new_file_path_relative = f"{new_directory.strip('/')}/{asset.filename}".lstrip("/")
-        new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
-
         # Move file in filesystem or container
         from ..services.orchestration import get_orchestrator, is_docker_mode
 
+        new_file_path_relative = f"{new_directory.strip('/')}/{asset.filename}".lstrip("/")
+
         if is_docker_mode():
+            project_path = _get_docker_asset_path(project_slug)
+            old_file_path = os.path.join(project_path, asset.file_path)
+            new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
+
             # Ensure new directory exists (async to avoid blocking)
             new_dir_absolute = os.path.dirname(new_file_path_absolute)
             await asyncio.to_thread(os.makedirs, new_dir_absolute, exist_ok=True)

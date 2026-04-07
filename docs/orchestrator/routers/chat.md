@@ -172,6 +172,28 @@ Clears the chat history for a project. This also clears pending approvals.
 }
 ```
 
+## Undo Last Exchange
+
+### Undo Messages
+
+```
+POST /api/chat/{chat_id}/undo
+```
+
+Removes the last user+assistant message pair from a chat session. Returns the removed user message content so the frontend can re-send it for `/retry` behavior. AgentStep rows are cleaned up via database-level `ON DELETE CASCADE`.
+
+**Constraints**: Returns `409 Conflict` if the chat status is `running` or `waiting_approval`.
+
+**Response**:
+```json
+{
+  "success": true,
+  "removed_count": 2,
+  "removed_ids": ["uuid-1", "uuid-2"],
+  "last_user_message": "Add a dark mode toggle"
+}
+```
+
 ## Agent Chat - HTTP
 
 ### Non-Streaming Agent Chat

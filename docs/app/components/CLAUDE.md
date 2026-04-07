@@ -189,6 +189,10 @@ useEffect(() => {
 }, [projectId, token]);
 ```
 
+### NavigationSidebar Recents
+
+`app/src/components/ui/NavigationSidebar.tsx` includes a collapsible "Recent" section showing the 5 most recent chats and projects with relative timestamps (e.g., "now", "5m", "2h", "3d"). Recent items are fetched from `chatApi.getUserSessions` and `projectsApi.getAll`, merged and sorted by `updatedAt`.
+
 ### Multi-Session Chat Components
 
 New chat components for multi-session support:
@@ -227,6 +231,16 @@ const handleEditorDidMount = (editor: unknown) => {
   }}
 />
 ```
+
+**Additional CodeEditor props** (for Design view integration):
+
+| Prop | Type | Default | Purpose |
+|------|------|---------|---------|
+| `showSidebar` | `boolean` | `true` | Hide the built-in file tree sidebar (Design view provides its own) |
+| `externalOpenFile` | `string` | - | Open a specific file path from an external trigger |
+| `onEditorRef` | `(editor: unknown) => void` | - | Expose the Monaco editor instance to the parent |
+| `onTabsChange` | `(tabs: {path, name}[]) => void` | - | Callback when open tabs change (for Design toolbar pills) |
+| `onSelectedFileChange` | `(path: string \| null) => void` | - | Callback when the selected file changes |
 
 ### XYFlow Graph Integration
 

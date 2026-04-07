@@ -1558,6 +1558,44 @@ export function ChatContainer({
     }
   };
 
+  const removeLastExchangeFromState = () => {
+    setMessages((prev) => {
+      const copy = [...prev];
+      for (let i = copy.length - 1; i >= 0; i--) {
+        if (copy[i].type === 'ai') { copy.splice(i, 1); break; }
+      }
+      for (let i = copy.length - 1; i >= 0; i--) {
+        if (copy[i].type === 'user') { copy.splice(i, 1); break; }
+      }
+      return copy;
+    });
+  };
+
+  const handleUndo = async () => {
+    if (agentExecuting || !currentChatId) return;
+    try {
+      const result = await chatApi.undoLastExchange(currentChatId);
+      if (!result.success || result.removed_count === 0) return;
+      removeLastExchangeFromState();
+    } catch (error) {
+      console.error('[CHAT] Failed to undo:', error);
+      toast.error('Failed to undo last message');
+    }
+  };
+
+  const handleRetry = async () => {
+    if (agentExecuting || !currentChatId) return;
+    try {
+      const result = await chatApi.undoLastExchange(currentChatId);
+      if (!result.success || !result.last_user_message) return;
+      removeLastExchangeFromState();
+      sendAgentMessage(result.last_user_message);
+    } catch (error) {
+      console.error('[CHAT] Failed to retry:', error);
+      toast.error('Failed to retry last message');
+    }
+  };
+
   // Session management handlers
   const refreshSessions = useCallback(async () => {
     try {
@@ -2172,6 +2210,8 @@ export function ChatContainer({
             isExecuting={agentExecuting}
             onStop={stopAgentExecution}
             onClearHistory={handleClearHistory}
+            onUndo={handleUndo}
+            onRetry={handleRetry}
             isExpanded={effectiveIsExpanded}
             editMode={editMode}
             onModeChange={setEditMode}

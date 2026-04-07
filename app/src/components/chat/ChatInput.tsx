@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useMemo, type FormEvent, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { AgentSelector } from './AgentSelector';
 
 import { EditModeStatus, type EditMode } from './EditModeStatus';
@@ -10,6 +18,10 @@ import {
   DownloadSimple,
   Trash,
   Bug,
+  ArrowCounterClockwise,
+  ArrowClockwise,
+  Lightning,
+  ListChecks,
 } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
@@ -31,6 +43,13 @@ const COMPACT_WIDTH_THRESHOLD = 380;
 const EDIT_MODE_COMPACT_THRESHOLD = 480;
 const EMPTY_SKILLS: { name: string; description: string }[] = [];
 
+const COMMAND_ICONS: Record<string, ReactNode> = {
+  '/clear': <Trash size={14} weight="bold" />,
+  '/plan': <ListChecks size={14} weight="bold" />,
+  '/undo': <ArrowCounterClockwise size={14} weight="bold" />,
+  '/retry': <ArrowClockwise size={14} weight="bold" />,
+};
+
 interface ChatInputProps {
   agents: ChatAgent[];
   currentAgent: ChatAgent;
@@ -44,6 +63,8 @@ interface ChatInputProps {
   isExecuting?: boolean;
   onStop?: () => void;
   onClearHistory?: () => void;
+  onUndo?: () => void;
+  onRetry?: () => void;
   isExpanded?: boolean;
   editMode?: EditMode;
   onModeChange?: (mode: EditMode) => void;
@@ -74,6 +95,8 @@ export function ChatInput({
   isExecuting = false,
   onStop,
   onClearHistory,
+  onUndo,
+  onRetry,
   _isExpanded = true,
   editMode = 'allow',
   onModeChange,
@@ -97,6 +120,7 @@ export function ChatInput({
   >([]);
   const [messageHistory, setMessageHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [commandIndex, setCommandIndex] = useState(0);
   const [compactLevel, setCompactLevel] = useState<'normal' | 'compact' | 'veryCompact'>('normal');
   const [containerWidth, setContainerWidth] = useState(Infinity);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -207,6 +231,8 @@ export function ChatInput({
     const builtIn = [
       { command: '/clear', description: 'Clear chat history', isSkill: false },
       { command: '/plan', description: 'Toggle plan mode', isSkill: false },
+      { command: '/undo', description: 'Remove last message exchange', isSkill: false },
+      { command: '/retry', description: 'Retry the last message', isSkill: false },
     ];
     const skillCommands = stableSkills.map((skill) => ({
       command: `/${skill.name}`,
@@ -215,6 +241,13 @@ export function ChatInput({
     }));
     return [...builtIn, ...skillCommands];
   }, [stableSkills]);
+
+  // Detect when the typed message exactly matches a command (chip mode)
+  const recognizedCommand = useMemo(() => {
+    const trimmed = message.trim();
+    if (!trimmed.startsWith('/')) return null;
+    return slashCommands.find((c) => c.command === trimmed) || null;
+  }, [message, slashCommands]);
 
   // Handle prefill message from external triggers (e.g. "Ask Agent" button)
   useEffect(() => {
@@ -232,6 +265,7 @@ export function ChatInput({
         cmd.command.slice(1).toLowerCase().startsWith(query)
       );
       setFilteredCommands(matches);
+      setCommandIndex(0);
       setShowCommands(matches.length > 0);
     } else {
       setShowCommands(false);
@@ -271,8 +305,17 @@ export function ChatInput({
         onPlanMode();
         setMessage('');
       }
+    } else if (cmd === '/undo') {
+      if (onUndo) {
+        onUndo();
+        setMessage('');
+      }
+    } else if (cmd === '/retry') {
+      if (onRetry) {
+        onRetry();
+        setMessage('');
+      }
     }
-    // Add more command handlers here
   };
 
   const sendMessage = async () => {
@@ -281,7 +324,7 @@ export function ChatInput({
       const trimmed = message.trim();
       // Check if it's a built-in slash command
       if (trimmed.startsWith('/')) {
-        const isBuiltIn = ['/clear', '/plan'].includes(trimmed);
+        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry'].includes(trimmed);
         if (isBuiltIn) {
           executeCommand(trimmed);
         } else {
@@ -308,7 +351,57 @@ export function ChatInput({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Up arrow - navigate backwards through history
+    // --- Command dropdown keyboard navigation ---
+    if (showCommands && filteredCommands.length > 0 && !recognizedCommand) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCommandIndex((i) => (i + 1) % filteredCommands.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCommandIndex((i) => (i - 1 + filteredCommands.length) % filteredCommands.length);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const selected = filteredCommands[commandIndex];
+        setMessage(selected.command);
+        setShowCommands(false);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowCommands(false);
+        setMessage('');
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const selected = filteredCommands[commandIndex];
+        const cmd = selected.command;
+        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry'].includes(cmd);
+        if (isBuiltIn) {
+          executeCommand(cmd);
+        } else {
+          setMessageHistory((prev) => [...prev, cmd]);
+          onSendMessage(cmd);
+        }
+        setMessage('');
+        setHistoryIndex(-1);
+        setShowCommands(false);
+        return;
+      }
+    }
+
+    // --- Escape to dismiss chip mode ---
+    if (e.key === 'Escape' && recognizedCommand) {
+      e.preventDefault();
+      setMessage('');
+      return;
+    }
+
+    // --- Up arrow - navigate backwards through history ---
     if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       const atStart = !textareaRef.current || textareaRef.current.selectionStart === 0;
       if (atStart && messageHistory.length > 0) {
@@ -483,35 +576,133 @@ export function ChatInput({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Command suggestions bar - Minecraft style */}
-      {showCommands && filteredCommands.length > 0 && (
-        <div ref={commandsRef} className="absolute bottom-full left-0 right-0 mb-2 px-3">
-          <div className="bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg">
-            {filteredCommands.map((cmd, idx) => (
-              <div
-                key={idx}
-                onClick={() => {
-                  setMessage(cmd.command);
-                  setShowCommands(false);
-                }}
-                className="flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] cursor-pointer transition-colors"
-              >
-                <span className="text-[var(--text)] font-mono text-xs font-semibold">
-                  {cmd.command}
+      {/* Command autocomplete dropdown */}
+      {showCommands && filteredCommands.length > 0 && !recognizedCommand && (
+        <div ref={commandsRef} className="absolute bottom-full left-0 right-0 mb-2 px-3 z-20">
+          <div className="bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1 shadow-lg backdrop-blur-sm">
+            {/* Category label */}
+            {filteredCommands.some((c) => !c.isSkill) && (
+              <div className="px-3 pt-1.5 pb-1">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text)]/30">
+                  Commands
                 </span>
-                <span className="text-[var(--text-muted)] text-xs">{cmd.description}</span>
-                {cmd.isSkill && (
-                  <span className="ml-auto text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[var(--surface-hover)] text-[var(--text-muted)] border border-[var(--border)]">
-                    Skill
-                  </span>
-                )}
               </div>
-            ))}
-            <div className="mt-2 pt-2 border-t border-[var(--border)]">
-              <span className="text-xs text-[var(--text)]/40 px-3">
-                {filteredCommands.some((c) => c.isSkill)
-                  ? 'Press Enter to send'
-                  : 'Press Enter to execute'}
+            )}
+            {filteredCommands
+              .filter((c) => !c.isSkill)
+              .map((cmd) => {
+                const realIdx = filteredCommands.indexOf(cmd);
+                const isSelected = realIdx === commandIndex;
+                const matchLen = message.length;
+                return (
+                  <div
+                    key={cmd.command}
+                    onClick={() => {
+                      setMessage(cmd.command);
+                      setShowCommands(false);
+                    }}
+                    className={`flex items-center gap-2.5 px-3 py-1.5 rounded-[var(--radius-small)] cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'bg-[var(--primary)]/10 text-[var(--text)]'
+                        : 'hover:bg-[var(--surface-hover)] text-[var(--text)]'
+                    }`}
+                  >
+                    <span
+                      className={`shrink-0 ${isSelected ? 'text-[var(--primary)]' : 'text-[var(--text)]/40'}`}
+                    >
+                      {COMMAND_ICONS[cmd.command] || (
+                        <Lightning size={14} weight="bold" />
+                      )}
+                    </span>
+                    <span className="font-mono text-xs">
+                      <span className="font-semibold">{cmd.command.slice(0, matchLen)}</span>
+                      <span className="text-[var(--text)]/50">{cmd.command.slice(matchLen)}</span>
+                    </span>
+                    <span className="text-[var(--text-muted)] text-xs truncate">
+                      {cmd.description}
+                    </span>
+                    {isSelected && (
+                      <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] text-[var(--text)]/30">
+                        <kbd className="px-1 py-px rounded border border-[var(--border)] bg-[var(--surface)] font-mono text-[9px]">
+                          ↵
+                        </kbd>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            {/* Skill commands section */}
+            {filteredCommands.some((c) => c.isSkill) && (
+              <>
+                <div className="px-3 pt-2 pb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text)]/30">
+                    Skills
+                  </span>
+                </div>
+                {filteredCommands
+                  .filter((c) => c.isSkill)
+                  .map((cmd) => {
+                    const realIdx = filteredCommands.indexOf(cmd);
+                    const isSelected = realIdx === commandIndex;
+                    const matchLen = message.length;
+                    return (
+                      <div
+                        key={cmd.command}
+                        onClick={() => {
+                          setMessage(cmd.command);
+                          setShowCommands(false);
+                        }}
+                        className={`flex items-center gap-2.5 px-3 py-1.5 rounded-[var(--radius-small)] cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-[var(--primary)]/10 text-[var(--text)]'
+                            : 'hover:bg-[var(--surface-hover)] text-[var(--text)]'
+                        }`}
+                      >
+                        <span
+                          className={`shrink-0 ${isSelected ? 'text-amber-400' : 'text-[var(--text)]/40'}`}
+                        >
+                          <Lightning size={14} weight="fill" />
+                        </span>
+                        <span className="font-mono text-xs">
+                          <span className="font-semibold">{cmd.command.slice(0, matchLen)}</span>
+                          <span className="text-[var(--text)]/50">
+                            {cmd.command.slice(matchLen)}
+                          </span>
+                        </span>
+                        <span className="text-[var(--text-muted)] text-xs truncate">
+                          {cmd.description}
+                        </span>
+                        {isSelected && (
+                          <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] text-[var(--text)]/30">
+                            <kbd className="px-1 py-px rounded border border-[var(--border)] bg-[var(--surface)] font-mono text-[9px]">
+                              ↵
+                            </kbd>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+              </>
+            )}
+            {/* Footer hints */}
+            <div className="flex items-center gap-3 mt-1 pt-1.5 pb-1 px-3 border-t border-[var(--border)]">
+              <span className="flex items-center gap-1 text-[10px] text-[var(--text)]/30">
+                <kbd className="px-1 py-px rounded border border-[var(--border)] bg-[var(--surface)] font-mono text-[9px]">
+                  ↑↓
+                </kbd>
+                navigate
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-[var(--text)]/30">
+                <kbd className="px-1 py-px rounded border border-[var(--border)] bg-[var(--surface)] font-mono text-[9px]">
+                  Tab
+                </kbd>
+                complete
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-[var(--text)]/30">
+                <kbd className="px-1 py-px rounded border border-[var(--border)] bg-[var(--surface)] font-mono text-[9px]">
+                  Esc
+                </kbd>
+                dismiss
               </span>
             </div>
           </div>
@@ -633,9 +824,13 @@ export function ChatInput({
       <div
         className={`flex flex-col bg-[var(--surface)] w-full ${isDocked ? '' : 'border border-[var(--border)] rounded-[var(--radius-medium)] shadow-sm'}`}
       >
-        {/* First row: Growing textarea */}
+        {/* First row: Growing textarea / Command chip */}
         <div
-          className="px-3 flex items-center border-b border-[var(--border)]"
+          className={`px-3 flex items-center border-b transition-colors ${
+            recognizedCommand
+              ? 'border-[var(--primary)]/20 bg-[var(--primary)]/[0.03]'
+              : 'border-[var(--border)]'
+          }`}
           style={{ minHeight: '44px' }}
         >
           {viewerMode ? (
@@ -643,22 +838,53 @@ export function ChatInput({
               <span className="text-xs text-[var(--text-subtle)]">Viewer mode — chat is read-only</span>
             </div>
           ) : (
-            <textarea
-              ref={textareaRef}
-              value={message}
-              onChange={(e) => {
-                setMessage(e.target.value);
-              }}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder=""
-              rows={1}
-              className="chat-input bg-transparent border-none w-full text-[var(--text)] text-sm !outline-none focus:!outline-none placeholder:text-[var(--text)]/40 resize-none overflow-hidden leading-relaxed my-2"
-              style={{
-                minHeight: '24px',
-                maxHeight: '200px',
-              }}
-            />
+            <>
+              {/* Command chip overlay — visible when a command is fully recognized */}
+              {recognizedCommand && (
+                <div
+                  className="flex items-center gap-2.5 py-2 flex-1 min-w-0 cursor-text"
+                  onClick={() => textareaRef.current?.focus()}
+                >
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary)]/10 border border-[var(--primary)]/20 shrink-0">
+                    <span className="text-[var(--primary)]">
+                      {COMMAND_ICONS[recognizedCommand.command] || (
+                        <Lightning size={14} weight="fill" />
+                      )}
+                    </span>
+                    <span className="font-mono text-xs font-semibold text-[var(--primary)]">
+                      {recognizedCommand.command}
+                    </span>
+                  </div>
+                  <span className="text-xs text-[var(--text-muted)] truncate">
+                    {recognizedCommand.description}
+                  </span>
+                  <div className="ml-auto shrink-0 flex items-center gap-1.5 text-[10px] text-[var(--text)]/30">
+                    <kbd className="px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] font-mono text-[9px]">
+                      ↵
+                    </kbd>
+                    <span>execute</span>
+                  </div>
+                </div>
+              )}
+              <textarea
+                ref={textareaRef}
+                value={message}
+                onChange={(e) => {
+                  setMessage(e.target.value);
+                }}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                placeholder=""
+                rows={1}
+                className={`chat-input bg-transparent border-none text-[var(--text)] text-sm !outline-none focus:!outline-none placeholder:text-[var(--text)]/40 resize-none overflow-hidden leading-relaxed my-2 ${
+                  recognizedCommand ? 'w-0 opacity-0 p-0 m-0' : 'w-full'
+                }`}
+                style={{
+                  minHeight: recognizedCommand ? '0' : '24px',
+                  maxHeight: '200px',
+                }}
+              />
+            </>
           )}
         </div>
 

@@ -20,7 +20,7 @@ Load this context when:
 |------|------|-------|--------------|
 | Dashboard | `Dashboard.tsx` | `/dashboard` | Project list, creation, task polling |
 | Project Setup | `ProjectSetup.tsx` | `/project/:slug/setup` | Setup wizard with agent/manual tabs |
-| Project Builder | `Project.tsx` | `/project/:slug/builder` | Editor, chat, preview, panels |
+| Project Builder | `ProjectPage.tsx` | `/project/:slug/builder` | Editor, chat, preview, design, panels |
 | Graph Canvas | `ProjectGraphCanvas.tsx` | `/project/:slug` | XYFlow architecture visualization |
 | Marketplace | `Marketplace.tsx` | `/marketplace` | Browse agents/bases/skills/MCP servers |
 | Library | `Library.tsx` | `/library` | User's purchased items, skills, MCP servers |
@@ -266,7 +266,7 @@ See: `project-setup.md`
 
 **State Management**:
 ```typescript
-const [activeView, setActiveView] = useState<'preview' | 'code' | 'kanban' | 'assets' | 'terminal'>('preview');
+const [activeView, setActiveView] = useState<'architecture' | 'preview' | 'code' | 'design' | 'kanban' | 'assets' | 'terminal'>('preview');
 const [activePanel, setActivePanel] = useState<PanelType>(null);
 const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
 const [container, setContainer] = useState<Record<string, unknown> | null>(null);

@@ -19,6 +19,7 @@ import {
   TreeStructure,
   LockSimple,
   DeviceMobile,
+  PencilRuler,
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -50,6 +51,7 @@ import {
   ArchitectureView,
   type ArchitectureViewHandle,
 } from '../components/views/ArchitectureView';
+import DesignView from '../components/views/DesignView';
 import { projectsApi, marketplaceApi } from '../lib/api';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
@@ -67,13 +69,14 @@ import IdleWarningBanner from '../components/IdleWarningBanner';
 // Types
 // ---------------------------------------------------------------------------
 
-type ProjectViewType = 'architecture' | 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
+type ProjectViewType = 'architecture' | 'preview' | 'code' | 'design' | 'kanban' | 'assets' | 'terminal';
 type PanelType = 'github' | 'notes' | 'settings' | null;
 
 const VIEW_LABELS: Record<ProjectViewType, string> = {
   architecture: 'Architecture',
   preview: 'Builder',
   code: 'Code',
+  design: 'Design',
   kanban: 'Kanban',
   assets: 'Assets',
   terminal: 'Terminal',
@@ -83,6 +86,7 @@ const VALID_VIEWS: ProjectViewType[] = [
   'architecture',
   'preview',
   'code',
+  'design',
   'kanban',
   'assets',
   'terminal',
@@ -1074,7 +1078,7 @@ export default function ProjectPage() {
 
   // Refresh file tree when switching to code view
   useEffect(() => {
-    if (activeView === 'code' && slug) loadFileTree();
+    if ((activeView === 'code' || activeView === 'design') && slug) loadFileTree();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, slug]);
 
@@ -1125,6 +1129,12 @@ export default function ProjectPage() {
       active: activeView === 'code',
       disabled: false,
       restricted: false,
+    },
+    {
+      icon: <PencilRuler size={18} />,
+      title: 'Design',
+      onClick: () => setActiveView('design'),
+      active: activeView === 'design',
     },
     {
       icon: <Kanban size={18} />,
@@ -1421,11 +1431,45 @@ export default function ProjectPage() {
     </div>
   );
 
+  const renderDesignView = () => (
+    <div
+      className={`w-full h-full ${activeView === 'design' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
+    >
+      {project?.id && devServerUrl ? (
+        <DesignView
+          slug={slug!}
+          projectId={project.id as number}
+          fileTree={fileTree}
+          devServerUrl={devServerUrl}
+          devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
+          onFileUpdate={handleFileUpdate}
+          onFileCreate={handleFileCreate}
+          onFileDelete={handleFileDelete}
+          onFileRename={handleFileRename}
+          onDirectoryCreate={handleDirectoryCreate}
+          isFilesSyncing={!filesInitiallyLoaded && fileTree.length === 0}
+          chatProps={chatProps}
+          containerDir={containerDir}
+          onRefreshPreview={refreshPreview}
+        />
+      ) : (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center px-6">
+            <PencilRuler size={28} className="mx-auto mb-3 text-[var(--text-subtle)]" />
+            <p className="text-xs text-[var(--text-muted)]">Start your environment to use the Design view</p>
+            <p className="text-[10px] text-[var(--text-subtle)] mt-1">The visual builder requires a running dev server</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   const renderContentViews = () => (
     <>
       {renderArchitectureView()}
       {renderPreviewView()}
       {renderCodeView()}
+      {renderDesignView()}
       {renderKanbanView()}
       {renderAssetsView()}
       {renderTerminalView()}
@@ -1677,7 +1721,7 @@ export default function ProjectPage() {
         <div className="flex-1 flex overflow-hidden bg-[var(--bg)]">
           {/* Desktop layout */}
           <div className="hidden md:flex w-full h-full">
-            {(chatPosition === 'left' || chatPosition === 'right') && agents.length > 0 ? (
+            {(chatPosition === 'left' || chatPosition === 'right') && agents.length > 0 && activeView !== 'design' ? (
               <PanelGroup orientation="horizontal">
                 {/* LEFT DOCKED CHAT */}
                 {chatPosition === 'left' && (
@@ -1803,6 +1847,21 @@ export default function ProjectPage() {
                 </button>
               </div>
             </div>
+
+            {/* Mobile design (no design on mobile — placeholder) */}
+            <div
+              className={`w-full h-full ${activeView === 'design' ? 'flex' : 'hidden'} items-center justify-center`}
+            >
+              <div className="text-center p-6">
+                <PencilRuler size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
+                <p className="text-[var(--text-subtle)] text-sm">
+                  Design view is best experienced on desktop.
+                </p>
+                <button onClick={() => setActiveView('preview')} className="mt-3 btn btn-filled">
+                  Switch to Preview
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1840,7 +1899,8 @@ export default function ProjectPage() {
       </FloatingPanel>
 
       {/* FLOATING CHAT — mobile always, desktop only when center mode */}
-      {agents.length > 0 && (
+      {/* Hidden when Design view is active (it has its own built-in AI tab) */}
+      {agents.length > 0 && activeView !== 'design' && (
         <div className={chatPosition !== 'center' ? 'md:hidden' : ''}>
           <ChatContainer {...chatProps} onExpandedChange={setChatExpanded} />
         </div>

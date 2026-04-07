@@ -864,6 +864,18 @@ export const chatApi = {
     return response.data;
   },
 
+  undoLastExchange: async (
+    chatId: string
+  ): Promise<{
+    success: boolean;
+    removed_count: number;
+    removed_ids: string[];
+    last_user_message: string | null;
+  }> => {
+    const response = await api.post(`/api/chat/${chatId}/undo`);
+    return response.data;
+  },
+
   // Debug: List available tools (admin only)
   debugListTools: async (): Promise<
     Array<{

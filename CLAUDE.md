@@ -10,6 +10,11 @@ When the user describes an issue, pastes an error, asks a question, or says "inv
 
 Always read through the docs/ to find items it is a knowledgegraph
 
+## Research Folder
+
+The `research/` directory is gitignored and contains cloned repos for reference/research:
+- `research/hermes-agent/` — [NousResearch/hermes-agent](https://github.com/nousresearch/hermes-agent) — Hermes agent framework
+
 Use subagents generously if you are doing bulk task items that have a small / atomic scope. 
 
 don't do conditional logic for k8s and docker implementation differences. try to keep it as similar as possible unless if a platform requires differeces. Prioritize the k8s (keep that logic more intact than docker. )

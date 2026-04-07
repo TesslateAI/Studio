@@ -69,6 +69,27 @@ interface Message {
 )}
 ```
 
+### Built-in Slash Commands
+
+| Command | Description | Behavior |
+|---------|-------------|----------|
+| `/clear` | Clear chat history | Deletes all messages in the session |
+| `/undo` | Undo last exchange | Removes the last user+assistant message pair via `POST /api/chat/{chat_id}/undo` |
+| `/retry` | Retry last message | Performs `/undo` then re-sends the removed user message |
+
+`/undo` and `/retry` are handled in ChatContainer (`handleUndo`, `handleRetry`) and use `chatApi.undoLastExchange(chatId)`. The endpoint returns `last_user_message` so `/retry` can re-send it. Both are disabled while the agent is executing or the chat status is `running`/`waiting_approval`.
+
+Installed skills also appear as slash commands (e.g., `/docker-dev`).
+
+### Command Palette UX
+
+ChatInput renders a dropdown when the user types `/`. The dropdown supports:
+
+- **Keyboard navigation**: ArrowUp/ArrowDown to move, Tab to autocomplete, Enter to execute, Escape to dismiss
+- **Categorized sections**: "Commands" (built-in) and "Skills" (installed marketplace skills)
+- **Command icons**: Each command/skill displays an icon
+- **Chip mode**: When the typed text exactly matches a command (e.g., `/clear`), the input shows a chip badge and Enter executes it immediately
+
 ### Adding Slash Commands
 
 1. **Add command definition** in ChatInput.tsx:

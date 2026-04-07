@@ -75,6 +75,12 @@ vi.mock('../../lib/api', () => ({
     list: vi.fn().mockResolvedValue([]),
     create: vi.fn().mockResolvedValue({}),
   },
+  chatApi: {
+    getUserSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+  },
+  projectsApi: {
+    getAll: vi.fn().mockResolvedValue([]),
+  },
 }));
 
 vi.mock('../../lib/keyboard-registry', () => ({

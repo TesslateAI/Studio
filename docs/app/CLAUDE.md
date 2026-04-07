@@ -96,6 +96,8 @@ Load this context when:
 ### Utilities
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/fileEvents.ts`**: Event system for file changes
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/autoLayout.ts`**: Graph auto-layout with Dagre algorithm
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/buildFileTree.ts`**: Extracted file tree building logic (flat file list to nested tree structure)
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/classDetection.ts`**: CSS class detection utilities for Design view
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/lib/utils.ts`**: Utility functions (cn, isCanceledError)
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/theme/ThemeContext.tsx`**: Theme state management
 
@@ -132,8 +134,10 @@ For specific UI work, reference the actual component files:
 - **Billing**: `app/src/components/billing/`
 - **Marketplace**: `app/src/components/marketplace/` (includes `SkeletonCard`, `Pagination`, `AgentCard`, `FeaturedCard`)
 - **Settings**: `app/src/components/settings/` (see `docs/app/components/settings.md`)
+- **Views**: `app/src/components/views/` (DesignView, ArchitectureView)
+  - **Design sub-components**: `app/src/components/views/design/` (DesignBridge, DesignToolbar, FileTreePanel, InsertPalette, InspectorPanel, InspectorTab, PreviewCanvas, VisualTab, bridgeInstaller)
 - **Command**: `app/src/components/CommandPalette.tsx`, `KeyboardShortcutsModal.tsx`
-- **UI**: `app/src/components/ui/` (HelpButton, HelpMenu, UserDropdown, Tooltip)
+- **UI**: `app/src/components/ui/` (HelpButton, HelpMenu, UserDropdown, Tooltip, NavigationSidebar)
 - **SEO**: `app/src/components/SEO.tsx`
 
 ### Backend Integration
