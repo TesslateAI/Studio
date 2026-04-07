@@ -9,7 +9,10 @@ inbound payloads.
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -126,11 +129,134 @@ class AbstractChannel(ABC):
         Default no-op. Override for platforms that require explicit registration.
         Returns dict with registration status.
         """
-        return {"registered": False, "message": "Webhook registration not required for this platform"}
+        return {
+            "registered": False,
+            "message": "Webhook registration not required for this platform",
+        }
 
     async def deregister_webhook(self) -> dict[str, Any]:
         """
         Deregister/remove the webhook from the platform.
         Default no-op. Override for platforms that support deregistration.
         """
-        return {"deregistered": False, "message": "Webhook deregistration not supported for this platform"}
+        return {
+            "deregistered": False,
+            "message": "Webhook deregistration not supported for this platform",
+        }
+
+
+# ==========================================================================
+# Gateway Protocol v2 — Platform-agnostic message types & adapter base
+# ==========================================================================
+
+
+class MessageType(StrEnum):
+    """Inbound message content type."""
+
+    TEXT = "text"
+    VOICE = "voice"
+    IMAGE = "image"
+    DOCUMENT = "document"
+    COMMAND = "command"
+
+
+@dataclass
+class SessionSource:
+    """Origin metadata for routing and session keying."""
+
+    platform: str
+    chat_id: str
+    chat_type: str  # "dm", "group", "channel", "thread"
+    user_id: str
+    user_name: str = ""
+    thread_id: str = ""
+    chat_name: str = ""
+
+    def session_key(self) -> str:
+        """Deterministic, human-readable, survives restarts."""
+        parts = [self.platform, self.chat_type, self.chat_id]
+        if self.thread_id:
+            parts.append(self.thread_id)
+        return ":".join(parts)
+
+
+@dataclass
+class MessageEvent:
+    """Platform-agnostic inbound message envelope."""
+
+    text: str
+    message_type: MessageType
+    source: SessionSource
+    message_id: str
+    media_urls: list[str] = field(default_factory=list)
+    media_types: list[str] = field(default_factory=list)
+    reply_to_message_id: str = ""
+    reply_to_text: str = ""
+    timestamp: datetime | None = None
+    raw: Any = None
+
+
+@dataclass
+class SendResult:
+    """Standardized outbound delivery result."""
+
+    success: bool
+    message_id: str | None = None
+    error: str | None = None
+    retryable: bool = False
+
+
+class GatewayAdapter(AbstractChannel):
+    """Base for adapters supporting persistent gateway connections.
+
+    Extends AbstractChannel with connect/disconnect lifecycle for long-lived
+    platform connections (WebSocket, polling, Socket Mode). Adapters that only
+    support webhook inbound should leave ``supports_gateway`` as False.
+    """
+
+    channel_type: str = ""
+
+    def __init__(self, credentials: dict[str, Any], config_id: str = ""):
+        super().__init__(credentials)
+        self.config_id = config_id
+        self._message_handler: Callable[[MessageEvent], Awaitable[None]] | None = None
+        self._connected = False
+        self._fatal_error: str | None = None
+        self._fatal_retryable: bool = True
+
+    async def connect(self) -> bool:
+        """Start persistent connection. Return True on success."""
+        return False
+
+    async def disconnect(self) -> None:
+        """Gracefully stop persistent connection."""
+        pass
+
+    @property
+    def supports_gateway(self) -> bool:
+        """Whether this adapter supports persistent gateway connections."""
+        return False
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def set_message_handler(self, handler: Callable[[MessageEvent], Awaitable[None]]) -> None:
+        """Register the callback the gateway invokes for each inbound message."""
+        self._message_handler = handler
+
+    def mark_fatal_error(self, error: str, *, retryable: bool = True) -> None:
+        """Record a fatal adapter error. The reconnect watcher reads this."""
+        self._fatal_error = error
+        self._fatal_retryable = retryable
+        self._connected = False
+
+    async def send_media(
+        self,
+        chat_id: str,
+        media_url: str,
+        media_type: str,
+        caption: str = "",
+    ) -> SendResult:
+        """Send a media attachment. Override per platform."""
+        return SendResult(success=False, error="Media not supported by this platform")

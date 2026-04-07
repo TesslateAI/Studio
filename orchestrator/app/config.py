@@ -537,6 +537,33 @@ class Settings(BaseSettings):
         return self.channel_encryption_key or self.deployment_encryption_key or self.secret_key
 
     # ==========================================================================
+    # Gateway (Communication Protocol v2)
+    # ==========================================================================
+    gateway_enabled: bool = True
+    gateway_shard: int = 0
+    gateway_num_shards: int = 1
+    gateway_lock_dir: str = "/var/run/tesslate"
+    gateway_tick_interval: int = 60  # Cron scheduler tick interval in seconds
+    gateway_max_schedules_per_user: int = 50
+    gateway_session_idle_minutes: int = 1440  # 24 hours default session timeout
+    gateway_voice_transcription: bool = True
+    gateway_voice_model: str = "whisper-1"
+    gateway_media_cache_dir: str = "/tmp/tesslate-media-cache"
+    gateway_media_cache_max_age_hours: int = 24
+
+    # Identity pairing
+    gateway_pairing_code_ttl: int = 3600  # 1 hour
+    gateway_pairing_max_pending: int = 3
+    gateway_pairing_rate_limit_minutes: int = 10
+
+    # Signal adapter
+    signal_cli_url: str = ""
+
+    # Delivery stream
+    gateway_delivery_stream: str = "tesslate:gateway:deliveries"
+    gateway_delivery_maxlen: int = 10000
+
+    # ==========================================================================
     # MCP (Model Context Protocol) Configuration
     # ==========================================================================
     mcp_tool_cache_ttl: int = 300  # Seconds to cache MCP tool/resource/prompt schemas

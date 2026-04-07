@@ -16,13 +16,23 @@ export function SettingsLayout() {
   const { activeTeam, can } = useTeam();
 
   const isTeamSection = location.pathname.startsWith('/settings/team');
+  const isMessagingSection = location.pathname.startsWith('/settings/messaging');
 
   const isActive = (path: string) => location.pathname === path;
 
   const isTeamSubActive = (path: string) =>
-    path === '/settings/team'
-      ? location.pathname === '/settings/team'
+    path === '/settings/team' ? location.pathname === '/settings/team' : location.pathname === path;
+
+  const isMessagingSubActive = (path: string) =>
+    path === '/settings/messaging'
+      ? location.pathname === '/settings/messaging'
       : location.pathname === path;
+
+  const messagingSubTabs = [
+    { label: 'Connections', path: '/settings/messaging' },
+    { label: 'Channels', path: '/settings/messaging/channels' },
+    { label: 'Schedules', path: '/settings/messaging/schedules' },
+  ];
 
   // Build team sub-tabs based on role
   const teamSubTabs = [
@@ -51,8 +61,11 @@ export function SettingsLayout() {
         }}
       >
         {/* Settings sub-nav toolbar */}
-        <div className="h-10 flex items-center gap-6 flex-shrink-0 border-b border-[var(--border)]" style={{ paddingLeft: '11px', paddingRight: '10px' }}>
-          {settingsTabs.map(tab => (
+        <div
+          className="h-10 flex items-center gap-6 flex-shrink-0 border-b border-[var(--border)]"
+          style={{ paddingLeft: '11px', paddingRight: '10px' }}
+        >
+          {settingsTabs.map((tab) => (
             <button
               key={tab.path}
               onClick={() => navigate(tab.path)}
@@ -66,9 +79,25 @@ export function SettingsLayout() {
             </button>
           ))}
 
+          {/* Messaging tab */}
+          <button
+            onClick={() => {
+              if (!isMessagingSection) navigate('/settings/messaging');
+            }}
+            className={`text-sm font-medium transition-colors ${
+              isMessagingSection
+                ? 'text-[var(--text)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+            }`}
+          >
+            Messaging
+          </button>
+
           {/* Team tab — simple button, team switching is in sidebar */}
           <button
-            onClick={() => { if (!isTeamSection) navigate('/settings/team'); }}
+            onClick={() => {
+              if (!isTeamSection) navigate('/settings/team');
+            }}
             className={`text-sm font-medium transition-colors ${
               isTeamSection
                 ? 'text-[var(--text)]'
@@ -81,13 +110,38 @@ export function SettingsLayout() {
 
         {/* Team sub-tabs — shown when in /settings/team* */}
         {isTeamSection && (
-          <div className="h-9 flex items-center gap-6 flex-shrink-0 border-b border-[var(--border)]" style={{ paddingLeft: '11px', paddingRight: '10px' }}>
-            {teamSubTabs.map(tab => (
+          <div
+            className="h-9 flex items-center gap-6 flex-shrink-0 border-b border-[var(--border)]"
+            style={{ paddingLeft: '11px', paddingRight: '10px' }}
+          >
+            {teamSubTabs.map((tab) => (
               <button
                 key={tab.path}
                 onClick={() => navigate(tab.path)}
                 className={`text-sm font-medium transition-colors ${
                   isTeamSubActive(tab.path)
+                    ? 'text-[var(--text)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Messaging sub-tabs — shown when in /settings/messaging* */}
+        {isMessagingSection && (
+          <div
+            className="h-9 flex items-center gap-6 flex-shrink-0 border-b border-[var(--border)]"
+            style={{ paddingLeft: '11px', paddingRight: '10px' }}
+          >
+            {messagingSubTabs.map((tab) => (
+              <button
+                key={tab.path}
+                onClick={() => navigate(tab.path)}
+                className={`text-sm font-medium transition-colors ${
+                  isMessagingSubActive(tab.path)
                     ? 'text-[var(--text)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                 }`}

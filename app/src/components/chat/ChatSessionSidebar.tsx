@@ -154,7 +154,10 @@ export function ChatSessionSidebar({
                     onChange={(e) => setRenameValue(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') commitRename();
-                      if (e.key === 'Escape') { setRenamingId(null); setRenameValue(''); }
+                      if (e.key === 'Escape') {
+                        setRenamingId(null);
+                        setRenameValue('');
+                      }
                     }}
                     onBlur={commitRename}
                     onClick={(e) => e.stopPropagation()}
@@ -165,20 +168,31 @@ export function ChatSessionSidebar({
                     <span className="flex-1 text-[11px] text-[var(--text)] truncate">
                       {session.title}
                     </span>
+                    {session.platform && (
+                      <span className="ml-1 inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-full bg-[var(--primary)]/10 text-[var(--primary)] flex-shrink-0">
+                        {session.platform}
+                      </span>
+                    )}
                     <span className="text-[10px] text-[var(--text-subtle)] tabular-nums flex-shrink-0 hidden md:inline md:group-hover:hidden">
                       {formatRelativeTime(session.updated_at || session.created_at)}
                     </span>
                     {/* Hover actions */}
                     <div className="flex md:opacity-0 md:group-hover:opacity-100 items-center gap-0.5 flex-shrink-0 transition-opacity">
                       <button
-                        onClick={(e) => { e.stopPropagation(); startRename(session); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startRename(session);
+                        }}
                         className="p-0.5 rounded text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface)] transition-colors"
                         aria-label="Rename"
                       >
                         <Pencil size={11} />
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); onDeleteSession(session.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteSession(session.id);
+                        }}
                         className="p-0.5 rounded text-[var(--text-subtle)] hover:text-[var(--status-error)] hover:bg-[var(--surface)] transition-colors"
                         aria-label="Delete"
                       >

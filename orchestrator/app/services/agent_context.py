@@ -36,11 +36,7 @@ def _resolve_container_name(container) -> str | None:
     """
     if not container:
         return None
-    dir_for_name = (
-        container.name
-        if container.directory in (".", "", None)
-        else container.directory
-    )
+    dir_for_name = container.name if container.directory in (".", "", None) else container.directory
     safe = dir_for_name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
     return "".join(c for c in safe if c.isalnum() or c == "-")
 
@@ -522,4 +518,77 @@ async def _build_tesslate_context(
 
     except Exception as e:
         logger.error(f"[TESSLATE-CONTEXT] Failed to build TESSLATE context: {e}", exc_info=True)
+        return None
+
+
+async def _build_cross_platform_context(
+    chat_id: UUID,
+    user_id: UUID,
+    project_id: UUID | None,
+    platform: str | None,
+    db: AsyncSession,
+) -> str | None:
+    """
+    Build a brief summary of the user's recent activity on OTHER platforms.
+
+    Injected into the agent system prompt for gateway-originated tasks so
+    the agent has cross-platform awareness without merging conversations.
+    """
+    if not platform or not project_id:
+        return None
+
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from ..models import Chat
+
+        now = datetime.now(UTC)
+        result = await db.execute(
+            select(Chat)
+            .where(
+                Chat.user_id == user_id,
+                Chat.project_id == project_id,
+                Chat.platform.isnot(None),
+                Chat.platform != platform,
+                Chat.status == "active",
+                Chat.last_active_at > now - timedelta(hours=24),
+            )
+            .order_by(Chat.last_active_at.desc())
+            .limit(3)
+        )
+        other_sessions = result.scalars().all()
+
+        if not other_sessions:
+            return None
+
+        lines = ["Recent activity on other platforms:"]
+        for session in other_sessions:
+            # Fetch last 2 messages from each session
+            msgs_result = await db.execute(
+                select(Message)
+                .where(Message.chat_id == session.id)
+                .order_by(Message.created_at.desc())
+                .limit(2)
+            )
+            msgs = list(msgs_result.scalars().all())
+            msgs.reverse()
+
+            summary_parts = []
+            for msg in msgs:
+                role = "User" if msg.role == "user" else "Agent"
+                content = (msg.content or "")[:100]
+                if len(msg.content or "") > 100:
+                    content += "..."
+                summary_parts.append(f"{role}: {content}")
+
+            if summary_parts:
+                lines.append(f"- [{session.platform}] {' | '.join(summary_parts)}")
+
+        if len(lines) <= 1:
+            return None
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.warning("[CROSS-PLATFORM] Failed to build context: %s", e)
         return None

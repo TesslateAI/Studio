@@ -89,8 +89,30 @@ async def _get_arq_pool():
 
 
 # ---------------------------------------------------------------------------
+# Gateway reload signal
+# ---------------------------------------------------------------------------
+
+
+async def _signal_gateway_reload() -> None:
+    """Publish reload signal so the gateway picks up config changes.
+
+    Uses Redis pub/sub — the gateway's _reload_listener() subscribes to this
+    channel and triggers a diff-based adapter sync. Works across pods in K8s.
+    """
+    try:
+        from ..services.cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if redis:
+            await redis.publish("tesslate:gateway:reload", "config_changed")
+    except Exception:
+        logger.warning("[CHANNELS] Failed to signal gateway reload", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_webhook_url(channel_type: str, config_id: UUID) -> str:
     """Construct the full webhook URL for a channel config."""
@@ -110,9 +132,7 @@ def _mask_credentials(creds: dict) -> dict:
     return masked
 
 
-async def _load_config_for_user(
-    config_id: UUID, user: User, db: AsyncSession
-) -> ChannelConfig:
+async def _load_config_for_user(config_id: UUID, user: User, db: AsyncSession) -> ChannelConfig:
     """Load a ChannelConfig owned by the given user, or raise 404."""
     result = await db.execute(
         select(ChannelConfig).where(
@@ -231,6 +251,16 @@ async def webhook_inbound(
     if not config:
         raise HTTPException(status_code=404, detail="Channel config not found")
 
+    # --- Gateway mutual exclusion: skip if gateway is actively handling this config ---
+    try:
+        from ..services.cache_service import get_redis_client
+
+        _redis = await get_redis_client()
+        if _redis and await _redis.exists(f"tesslate:gateway:active:{config_id}"):
+            return Response(status_code=200)
+    except Exception:
+        pass  # Redis unavailable — proceed with webhook processing
+
     if config.channel_type != channel_type:
         raise HTTPException(
             status_code=400,
@@ -319,16 +349,12 @@ async def webhook_inbound(
     # --- Resolve project for agent context ---
     project = None
     if config.project_id:
-        proj_result = await db.execute(
-            select(Project).where(Project.id == config.project_id)
-        )
+        proj_result = await db.execute(select(Project).where(Project.id == config.project_id))
         project = proj_result.scalar_one_or_none()
 
     if not project:
         # No project linked — still acknowledge but log
-        logger.warning(
-            f"[WEBHOOK] Config {config_id} has no linked project, cannot dispatch agent"
-        )
+        logger.warning(f"[WEBHOOK] Config {config_id} has no linked project, cannot dispatch agent")
         return Response(status_code=200)
 
     # --- Create chat session for this inbound message ---
@@ -371,8 +397,7 @@ async def webhook_inbound(
     try:
         await arq_pool.enqueue_job("execute_agent_task", payload_obj.to_dict())
         logger.info(
-            f"[WEBHOOK] Enqueued agent task {task_id} for config {config_id} "
-            f"(jid={inbound.jid})"
+            f"[WEBHOOK] Enqueued agent task {task_id} for config {config_id} (jid={inbound.jid})"
         )
     except Exception:
         logger.exception(f"[WEBHOOK] Failed to enqueue agent task {task_id}")
@@ -429,9 +454,7 @@ async def create_channel_config(
     try:
         channel = get_channel(payload.channel_type, payload.credentials)
         reg_result = await channel.register_webhook(webhook_url, secret)
-        logger.info(
-            f"[CHANNELS] Webhook registration for {payload.channel_type}: {reg_result}"
-        )
+        logger.info(f"[CHANNELS] Webhook registration for {payload.channel_type}: {reg_result}")
     except Exception:
         logger.warning(
             f"[CHANNELS] Auto-registration failed for {payload.channel_type} "
@@ -443,6 +466,8 @@ async def create_channel_config(
         f"[CHANNELS] Created {payload.channel_type} config '{payload.name}' "
         f"(id={config.id}) for user {user.id}"
     )
+
+    await _signal_gateway_reload()
 
     return ChannelConfigResponse(
         id=config.id,
@@ -567,6 +592,8 @@ async def update_channel_config(
 
     logger.info(f"[CHANNELS] Updated config {config_id} for user {user.id}")
 
+    await _signal_gateway_reload()
+
     return ChannelConfigResponse(
         id=config.id,
         channel_type=config.channel_type,
@@ -617,6 +644,8 @@ async def delete_channel_config(
     await db.commit()
 
     logger.info(f"[CHANNELS] Deactivated config {config_id} for user {user.id}")
+
+    await _signal_gateway_reload()
 
     return {"status": "deactivated", "config_id": str(config_id)}
 

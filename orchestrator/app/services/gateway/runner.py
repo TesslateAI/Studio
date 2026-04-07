@@ -1,0 +1,753 @@
+"""
+Gateway Runner — manages persistent platform connections, routes inbound
+messages to the agent system, and delivers responses back to users.
+
+One runner per shard. Uses K8s Recreate strategy (replicas=1) + file lock
+as defense-in-depth for Docker Compose.
+"""
+
+import asyncio
+import contextlib
+import logging
+import os
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_PENDING_SENTINEL = object()
+_RECONNECT_BACKOFF_BASE = 30  # seconds
+_RECONNECT_BACKOFF_CAP = 300  # 5 minutes
+_RECONNECT_MAX_ATTEMPTS = 20
+
+
+class GatewayRunner:
+    """Unified messaging gateway process."""
+
+    def __init__(self, shard: int = 0):
+        self.shard = shard
+        self.adapters: dict[str, Any] = {}  # config_id → GatewayAdapter
+        self._active_sessions: dict[str, Any] = {}  # session_key → task_id or sentinel
+        self._pending_messages: dict[str, list] = {}  # session_key → queued msgs
+        self._failed_adapters: dict[str, int] = {}  # config_id → retry count
+        self._failed_timestamps: dict[str, float] = {}  # config_id → last failure time
+        self._running = False
+        self._shutdown_event = asyncio.Event()
+        self._background_tasks: list[asyncio.Task] = []
+        self._redis = None
+        self._arq_pool = None
+        self._db_factory = None
+
+    async def start(self, db_factory, redis, arq_pool) -> None:
+        """
+        Main entry point. Loads configs, connects adapters, starts background
+        tasks, and blocks until shutdown.
+        """
+        from ...config import get_settings
+
+        self._db_factory = db_factory
+        self._redis = redis
+        self._arq_pool = arq_pool
+        self._running = True
+        settings = get_settings()
+
+        logger.info("[GATEWAY] Starting shard %d", self.shard)
+
+        # Initial adapter sync
+        await self._sync_adapters()
+
+        # Start background tasks
+        self._background_tasks = [
+            asyncio.create_task(self._heartbeat()),
+            asyncio.create_task(self._reconnect_watcher()),
+            asyncio.create_task(self._delivery_consumer()),
+            asyncio.create_task(self._session_reaper()),
+            asyncio.create_task(self._media_cache_cleaner()),
+            asyncio.create_task(self._reload_listener()),
+        ]
+
+        # Start cron scheduler
+        from .scheduler import CronScheduler
+
+        scheduler = CronScheduler(lock_dir=settings.gateway_lock_dir)
+        self._background_tasks.append(
+            asyncio.create_task(
+                scheduler.run_loop(db_factory, arq_pool, interval=settings.gateway_tick_interval)
+            )
+        )
+
+        # Publish status
+        if self._redis:
+            import json
+
+            await self._redis.setex(
+                "tesslate:gateway:status",
+                120,
+                json.dumps(
+                    {
+                        "shard": self.shard,
+                        "adapters": len(self.adapters),
+                        "started_at": datetime.now(UTC).isoformat(),
+                    }
+                ),
+            )
+
+        logger.info(
+            "[GATEWAY] Shard %d running with %d adapters, %d background tasks",
+            self.shard,
+            len(self.adapters),
+            len(self._background_tasks),
+        )
+
+        # Block until shutdown
+        await self._shutdown_event.wait()
+
+    async def stop(self) -> None:
+        """Graceful shutdown."""
+        logger.info("[GATEWAY] Shutting down shard %d", self.shard)
+        self._running = False
+
+        # Cancel background tasks
+        for task in self._background_tasks:
+            task.cancel()
+        for task in self._background_tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        # Disconnect adapters
+        for config_id, adapter in self.adapters.items():
+            try:
+                await adapter.disconnect()
+            except Exception:
+                logger.exception("[GATEWAY] Error disconnecting adapter %s", config_id)
+
+        # Delete Redis active keys
+        if self._redis:
+            for config_id in self.adapters:
+                await self._redis.delete(f"tesslate:gateway:active:{config_id}")
+            await self._redis.delete("tesslate:gateway:status")
+
+        self.adapters.clear()
+        self._shutdown_event.set()
+        logger.info("[GATEWAY] Shard %d stopped", self.shard)
+
+    # ------------------------------------------------------------------
+    # Adapter sync & hot-reload
+    # ------------------------------------------------------------------
+
+    async def _sync_adapters(self) -> None:
+        """Load configs from DB, connect new adapters, disconnect removed ones.
+
+        Diff-based: already-connected adapters are left alone. Only new configs
+        get connected and removed/deactivated configs get disconnected.
+        """
+        from sqlalchemy import select
+
+        from ...models import ChannelConfig
+        from ..channels.base import GatewayAdapter
+        from ..channels.registry import decrypt_credentials, get_channel
+
+        async with self._db_factory() as db:
+            result = await db.execute(
+                select(ChannelConfig).where(
+                    ChannelConfig.is_active.is_(True),
+                    ChannelConfig.gateway_shard == self.shard,
+                )
+            )
+            configs = result.scalars().all()
+            db_configs = {str(c.id): c for c in configs}
+
+        desired_ids = set(db_configs.keys())
+        current_ids = set(self.adapters.keys())
+
+        # Disconnect removed/deactivated configs
+        to_remove = current_ids - desired_ids
+        for config_id in to_remove:
+            adapter = self.adapters.pop(config_id)
+            try:
+                await adapter.disconnect()
+            except Exception:
+                logger.exception("[GATEWAY] Error disconnecting adapter %s", config_id)
+            if self._redis:
+                await self._redis.delete(f"tesslate:gateway:active:{config_id}")
+            self._failed_adapters.pop(config_id, None)
+            self._failed_timestamps.pop(config_id, None)
+            logger.info("[GATEWAY] Removed adapter %s", config_id)
+
+        # Connect new configs
+        to_add = desired_ids - current_ids
+        for config_id in to_add:
+            config = db_configs[config_id]
+            try:
+                credentials = decrypt_credentials(config.credentials)
+                adapter = get_channel(config.channel_type, credentials)
+
+                if not isinstance(adapter, GatewayAdapter):
+                    continue
+                adapter.config_id = config_id
+                if not adapter.supports_gateway:
+                    continue
+
+                adapter.set_message_handler(self._handle_message)
+                if await adapter.connect():
+                    self.adapters[config_id] = adapter
+                    if self._redis:
+                        await self._redis.setex(f"tesslate:gateway:active:{config_id}", 60, "alive")
+                    logger.info(
+                        "[GATEWAY] Connected %s (config=%s)",
+                        config.channel_type,
+                        config_id,
+                    )
+                else:
+                    self._failed_adapters[config_id] = 0
+                    logger.warning(
+                        "[GATEWAY] Failed to connect %s (config=%s)",
+                        config.channel_type,
+                        config_id,
+                    )
+            except Exception:
+                logger.exception("[GATEWAY] Error connecting adapter %s", config_id)
+
+        logger.info(
+            "[GATEWAY] Sync complete: %d adapters (%d added, %d removed)",
+            len(self.adapters),
+            len(to_add),
+            len(to_remove),
+        )
+
+    async def _reload_listener(self) -> None:
+        """Subscribe to tesslate:gateway:reload and re-sync adapters on signal.
+
+        Uses Redis pub/sub — same cross-pod pattern as tesslate:ws:* channels.
+        Works identically in Docker (single Redis) and K8s (shared Redis/ElastiCache).
+        """
+        if not self._redis:
+            logger.warning("[GATEWAY] No Redis — reload listener disabled")
+            return
+
+        pubsub = self._redis.pubsub()
+        await pubsub.subscribe("tesslate:gateway:reload")
+        logger.info("[GATEWAY] Reload listener subscribed")
+
+        try:
+            while self._running:
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if msg and msg["type"] == "message":
+                    logger.info("[GATEWAY] Reload signal received, syncing adapters...")
+                    try:
+                        await self._sync_adapters()
+                    except Exception:
+                        logger.exception("[GATEWAY] Adapter sync failed after reload signal")
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await pubsub.unsubscribe("tesslate:gateway:reload")
+            await pubsub.aclose()
+
+    # ------------------------------------------------------------------
+    # Message handling with per-session ordering
+    # ------------------------------------------------------------------
+
+    async def _handle_message(self, event) -> None:
+        """
+        Per-session ordering via sentinel (synchronous placement, no race window).
+
+        Different sessions process fully in parallel. Same-session messages are
+        queued and processed sequentially.
+        """
+        key = event.source.session_key()
+
+        # If a task is already running for this session, queue the message
+        if key in self._active_sessions:
+            self._pending_messages.setdefault(key, []).append(event)
+            logger.debug("[GATEWAY] Queued message for busy session %s", key)
+            return
+
+        # Mark session as active (sync, before any await)
+        self._active_sessions[key] = _PENDING_SENTINEL
+
+        try:
+            await self._process_message(event, key)
+        except Exception:
+            logger.exception("[GATEWAY] Error processing message for session %s", key)
+            del self._active_sessions[key]
+
+    async def _process_message(self, event, session_key: str) -> None:
+        """Resolve identity, find/create session, enqueue agent task."""
+        from sqlalchemy import select
+
+        from ...config import get_settings
+        from ...models import ChannelConfig, ChannelMessage, Message, PlatformIdentity
+
+        settings = get_settings()
+
+        async with self._db_factory() as db:
+            # 1. Find the ChannelConfig for this adapter
+            config_id = self._find_config_id_for_event(event)
+            if not config_id:
+                logger.warning("[GATEWAY] No config found for event on %s", event.source.platform)
+                del self._active_sessions[session_key]
+                return
+
+            config = await db.scalar(
+                select(ChannelConfig).where(ChannelConfig.id == uuid.UUID(config_id))
+            )
+            if not config or not config.project_id:
+                logger.warning("[GATEWAY] Config %s has no project", config_id)
+                del self._active_sessions[session_key]
+                return
+
+            # 2. Resolve user — try linked identity first, fall back to config owner
+            identity = await db.scalar(
+                select(PlatformIdentity).where(
+                    PlatformIdentity.platform == event.source.platform,
+                    PlatformIdentity.platform_user_id == event.source.user_id,
+                    PlatformIdentity.is_verified.is_(True),
+                )
+            )
+
+            if identity:
+                user_id = identity.user_id
+            else:
+                # No linked identity — use the config owner directly.
+                # This is the common case: user set up their own bot.
+                user_id = config.user_id
+                logger.info(
+                    "[GATEWAY] No linked identity for %s:%s, using config owner %s",
+                    event.source.platform,
+                    event.source.user_id,
+                    user_id,
+                )
+
+            # 3. Find or create session
+            chat = await self._find_or_create_session(db, event.source, user_id, config, settings)
+
+            # 4. Transcribe voice if needed
+            text = event.text
+            if event.message_type.value == "voice" and event.media_urls:
+                text = await self._transcribe_voice(event)
+
+            if not text:
+                del self._active_sessions[session_key]
+                return
+
+            # 5. Store inbound audit
+            task_id = str(uuid.uuid4())
+            channel_message = ChannelMessage(
+                channel_config_id=config.id,
+                direction="inbound",
+                jid=f"{event.source.platform}:{event.source.chat_id}",
+                sender_name=event.source.user_name,
+                content=text,
+                platform_message_id=event.message_id,
+                task_id=task_id,
+                status="delivered",
+            )
+            db.add(channel_message)
+
+            # 6. Store user message
+            user_message = Message(chat_id=chat.id, role="user", content=text)
+            db.add(user_message)
+            await db.commit()
+
+            # 7. Build and enqueue agent task
+            from ...models import Project
+            from ..agent_task import AgentTaskPayload
+
+            project = await db.scalar(select(Project).where(Project.id == config.project_id))
+
+            payload = AgentTaskPayload(
+                task_id=task_id,
+                user_id=str(user_id),
+                project_id=str(config.project_id),
+                project_slug=project.slug if project else "",
+                chat_id=str(chat.id),
+                message=text,
+                agent_id=str(config.default_agent_id) if config.default_agent_id else None,
+                channel_config_id=str(config.id),
+                channel_jid=f"{event.source.platform}:{event.source.chat_id}",
+                channel_type=event.source.platform,
+                gateway_deliver="origin",
+                session_key=session_key,
+            )
+
+            await self._arq_pool.enqueue_job("execute_agent_task", payload.to_dict())
+            self._active_sessions[session_key] = task_id
+
+            logger.info(
+                "[GATEWAY] Enqueued task %s for session %s (user=%s)",
+                task_id,
+                session_key,
+                user_id,
+            )
+
+    def _find_config_id_for_event(self, event) -> str | None:
+        """Find the config_id of the adapter that produced this event."""
+        for config_id, adapter in self.adapters.items():
+            if adapter.channel_type == event.source.platform:
+                return config_id
+        return None
+
+    async def _find_or_create_session(self, db, source, user_id, config, settings):
+        """Find existing active session or create new one."""
+        from sqlalchemy import select
+
+        from ...models import Chat
+
+        key = source.session_key()
+        now = datetime.now(UTC)
+
+        chat = await db.scalar(
+            select(Chat).where(
+                Chat.session_key == key,
+                Chat.status != "archived",
+            )
+        )
+
+        # Check expiry
+        if chat and chat.last_active_at:
+            timeout = chat.idle_timeout_minutes or settings.gateway_session_idle_minutes
+            if (now - chat.last_active_at).total_seconds() > timeout * 60:
+                chat.status = "archived"
+                await db.flush()
+                chat = None
+
+        if not chat:
+            chat = Chat(
+                user_id=user_id,
+                project_id=config.project_id,
+                origin="gateway",
+                session_key=key,
+                platform=source.platform,
+                platform_chat_id=source.chat_id,
+                platform_thread_id=source.thread_id or None,
+                channel_config_id=config.id,
+                last_active_at=now,
+                title=f"[{source.platform}] {source.user_name or 'user'}",
+            )
+            db.add(chat)
+            await db.flush()
+
+        chat.last_active_at = now
+        await db.flush()
+        return chat
+
+    async def _transcribe_voice(self, event) -> str:
+        """Download and transcribe a voice message."""
+        try:
+            from ..channels.media import get_media_pipeline
+
+            pipeline = get_media_pipeline()
+
+            # Resolve platform-specific file URL
+            adapter = None
+            for a in self.adapters.values():
+                if a.channel_type == event.source.platform:
+                    adapter = a
+                    break
+
+            if not adapter:
+                return "[Voice message — no adapter]"
+
+            file_url = event.media_urls[0]
+
+            # For Telegram, resolve file_id to URL
+            if event.source.platform == "telegram" and hasattr(adapter, "get_file_url"):
+                resolved = await adapter.get_file_url(file_url)
+                if resolved:
+                    file_url = resolved
+
+            local_path = await pipeline.cache_media(file_url, event.source.platform, "audio")
+            return await pipeline.transcribe_audio(local_path)
+
+        except Exception as e:
+            logger.error("[GATEWAY] Voice transcription failed: %s", e)
+            return "[Voice message — transcription failed]"
+
+    async def _send_pairing_prompt(self, event, db) -> None:
+        """Send a pairing code to an unknown user."""
+        import secrets
+        import string
+
+        from ...config import get_settings
+        from ...models import PlatformIdentity
+
+        settings = get_settings()
+
+        # Check rate limit and max pending
+        from sqlalchemy import func, select
+
+        pending_count = await db.scalar(
+            select(func.count())
+            .select_from(PlatformIdentity)
+            .where(
+                PlatformIdentity.platform == event.source.platform,
+                PlatformIdentity.platform_user_id == event.source.user_id,
+                PlatformIdentity.is_verified.is_(False),
+            )
+        )
+
+        if pending_count and pending_count >= settings.gateway_pairing_max_pending:
+            return  # Too many pending, silently ignore
+
+        # Generate 8-char code from unambiguous alphabet
+        alphabet = string.ascii_uppercase.replace("O", "").replace("I", "")
+        alphabet += string.digits.replace("0", "").replace("1", "")
+        code = "".join(secrets.choice(alphabet) for _ in range(8))
+
+        identity = PlatformIdentity(
+            platform=event.source.platform,
+            platform_user_id=event.source.user_id,
+            platform_username=event.source.user_name,
+            pairing_code=code,
+            pairing_expires_at=datetime.now(UTC)
+            + timedelta(seconds=settings.gateway_pairing_code_ttl),
+        )
+        db.add(identity)
+        await db.commit()
+
+        # Send pairing message via the adapter
+        adapter = self.adapters.get(self._find_config_id_for_event(event) or "")
+        if adapter:
+            jid = f"{event.source.platform}:{event.source.chat_id}"
+            await adapter.send_message(
+                jid,
+                f"Link your Tesslate account: go to Settings → Connections "
+                f"and enter code **{code}**\n\nThis code expires in 1 hour.",
+            )
+
+    # ------------------------------------------------------------------
+    # Delivery consumer — processes agent responses
+    # ------------------------------------------------------------------
+
+    async def _delivery_consumer(self) -> None:
+        """XREADGROUP on tesslate:gateway:deliveries stream."""
+        if not self._redis:
+            return
+
+        from ...config import get_settings
+
+        settings = get_settings()
+        stream = settings.gateway_delivery_stream
+        group = f"gateway-shard-{self.shard}"
+        consumer = f"consumer-{os.getpid()}"
+
+        # Create consumer group if not exists
+        with contextlib.suppress(Exception):
+            await self._redis.xgroup_create(stream, group, id="0", mkstream=True)
+
+        while self._running:
+            try:
+                entries = await self._redis.xreadgroup(
+                    group,
+                    consumer,
+                    {stream: ">"},
+                    count=10,
+                    block=5000,
+                )
+                if not entries:
+                    continue
+
+                for _stream_name, messages in entries:
+                    for msg_id, data in messages:
+                        await self._process_delivery(data)
+                        await self._redis.xack(stream, group, msg_id)
+
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("[GATEWAY] Delivery consumer error")
+                await asyncio.sleep(2)
+
+    async def _process_delivery(self, data: dict) -> None:
+        """Process a single delivery from the stream."""
+        config_id = data.get(b"config_id", data.get("config_id", ""))
+        session_key = data.get(b"session_key", data.get("session_key", ""))
+        response_text = data.get(b"response", data.get("response", ""))
+
+        if isinstance(config_id, bytes):
+            config_id = config_id.decode()
+        if isinstance(session_key, bytes):
+            session_key = session_key.decode()
+        if isinstance(response_text, bytes):
+            response_text = response_text.decode()
+
+        if not response_text:
+            return
+
+        adapter = self.adapters.get(config_id)
+        if not adapter:
+            logger.warning("[GATEWAY] No adapter for delivery to config %s", config_id)
+            return
+
+        # Determine chat_id from the session_key
+        # Format: platform:chat_type:chat_id[:thread_id]
+        parts = session_key.split(":")
+        chat_id = parts[2] if len(parts) >= 3 else session_key
+
+        try:
+            if hasattr(adapter, "send_gateway_response"):
+                await adapter.send_gateway_response(chat_id, response_text)
+            else:
+                jid = f"{adapter.channel_type}:{chat_id}"
+                await adapter.send_message(jid, response_text)
+
+            logger.info("[GATEWAY] Delivered response to session %s", session_key)
+        except Exception:
+            logger.exception("[GATEWAY] Delivery failed for session %s", session_key)
+
+        # Store outbound audit
+        try:
+            from ...models import ChannelMessage
+
+            async with self._db_factory() as db:
+                task_id = data.get(b"task_id", data.get("task_id", ""))
+                if isinstance(task_id, bytes):
+                    task_id = task_id.decode()
+
+                msg = ChannelMessage(
+                    channel_config_id=uuid.UUID(config_id) if config_id else None,
+                    direction="outbound",
+                    jid=f"{adapter.channel_type}:{chat_id}",
+                    content=response_text[:2000],
+                    task_id=task_id,
+                    status="delivered",
+                )
+                db.add(msg)
+                await db.commit()
+        except Exception:
+            logger.warning("[GATEWAY] Failed to store outbound audit")
+
+        # Release session and process pending
+        if session_key in self._active_sessions:
+            del self._active_sessions[session_key]
+
+        pending = self._pending_messages.pop(session_key, [])
+        if pending:
+            next_event = pending[0]
+            if len(pending) > 1:
+                self._pending_messages[session_key] = pending[1:]
+            asyncio.create_task(self._handle_message(next_event))
+
+    # ------------------------------------------------------------------
+    # Background tasks
+    # ------------------------------------------------------------------
+
+    async def _heartbeat(self) -> None:
+        """Refresh Redis active keys every 30s."""
+        while self._running:
+            try:
+                if self._redis:
+                    for config_id in self.adapters:
+                        await self._redis.setex(f"tesslate:gateway:active:{config_id}", 60, "alive")
+                    import json
+
+                    await self._redis.setex(
+                        "tesslate:gateway:status",
+                        120,
+                        json.dumps(
+                            {
+                                "shard": self.shard,
+                                "adapters": len(self.adapters),
+                                "active_sessions": len(self._active_sessions),
+                                "heartbeat": datetime.now(UTC).isoformat(),
+                            }
+                        ),
+                    )
+            except Exception:
+                logger.warning("[GATEWAY] Heartbeat error", exc_info=True)
+            await asyncio.sleep(30)
+
+    async def _reconnect_watcher(self) -> None:
+        """Periodically try to reconnect failed adapters."""
+        while self._running:
+            await asyncio.sleep(10)
+
+            for config_id, attempts in list(self._failed_adapters.items()):
+                if attempts >= _RECONNECT_MAX_ATTEMPTS:
+                    continue
+
+                # Check backoff
+                last_fail = self._failed_timestamps.get(config_id, 0)
+                backoff = min(_RECONNECT_BACKOFF_BASE * (2**attempts), _RECONNECT_BACKOFF_CAP)
+                import time
+
+                if time.time() - last_fail < backoff:
+                    continue
+
+                adapter = self.adapters.get(config_id)
+                if adapter and adapter.is_connected:
+                    del self._failed_adapters[config_id]
+                    continue
+
+                # Try reconnect
+                if adapter:
+                    try:
+                        if await adapter.connect():
+                            del self._failed_adapters[config_id]
+                            if self._redis:
+                                await self._redis.setex(
+                                    f"tesslate:gateway:active:{config_id}", 60, "alive"
+                                )
+                            logger.info("[GATEWAY] Reconnected adapter %s", config_id)
+                        else:
+                            self._failed_adapters[config_id] = attempts + 1
+                            self._failed_timestamps[config_id] = time.time()
+                    except Exception:
+                        self._failed_adapters[config_id] = attempts + 1
+                        self._failed_timestamps[config_id] = time.time()
+                        logger.warning(
+                            "[GATEWAY] Reconnect attempt %d failed for %s",
+                            attempts + 1,
+                            config_id,
+                        )
+
+    async def _session_reaper(self) -> None:
+        """Archive sessions that have been idle past their timeout."""
+        while self._running:
+            await asyncio.sleep(60)
+
+            try:
+                from sqlalchemy import select
+
+                from ...config import get_settings
+                from ...models import Chat
+
+                settings = get_settings()
+                now = datetime.now(UTC)
+
+                async with self._db_factory() as db:
+                    result = await db.execute(
+                        select(Chat).where(
+                            Chat.session_key.isnot(None),
+                            Chat.status == "active",
+                            Chat.last_active_at
+                            < now - timedelta(minutes=settings.gateway_session_idle_minutes),
+                        )
+                    )
+                    stale = result.scalars().all()
+                    for chat in stale:
+                        chat.status = "archived"
+                    if stale:
+                        await db.commit()
+                        logger.info("[GATEWAY] Archived %d idle sessions", len(stale))
+            except Exception:
+                logger.warning("[GATEWAY] Session reaper error", exc_info=True)
+
+    async def _media_cache_cleaner(self) -> None:
+        """Clean up old media cache files hourly."""
+        while self._running:
+            await asyncio.sleep(3600)
+
+            try:
+                from ...config import get_settings
+                from ..channels.media import get_media_pipeline
+
+                settings = get_settings()
+                pipeline = get_media_pipeline()
+                await pipeline.cleanup_cache(
+                    max_age_hours=settings.gateway_media_cache_max_age_hours
+                )
+            except Exception:
+                logger.warning("[GATEWAY] Media cache cleanup error", exc_info=True)

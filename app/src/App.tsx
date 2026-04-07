@@ -42,6 +42,9 @@ import ApiKeysSettings from './pages/settings/ApiKeysSettings';
 import TeamSettingsPage from './pages/settings/TeamSettingsPage';
 import TeamMembersPage from './pages/settings/TeamMembersPage';
 import AuditLogPage from './pages/settings/AuditLogPage';
+import ConnectionsSettings from './pages/settings/ConnectionsSettings';
+import ChannelsSettings from './pages/settings/ChannelsSettings';
+import SchedulesSettings from './pages/settings/SchedulesSettings';
 import InviteAcceptPage from './pages/InviteAcceptPage';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
@@ -354,6 +357,9 @@ function AppContent() {
           <Route path="deployment" element={<DeploymentSettings />} />
           <Route path="api-keys" element={<ApiKeysSettings />} />
           <Route path="billing" element={<Navigate to="/settings/team/billing" replace />} />
+          <Route path="messaging" element={<ConnectionsSettings />} />
+          <Route path="messaging/channels" element={<ChannelsSettings />} />
+          <Route path="messaging/schedules" element={<SchedulesSettings />} />
           <Route path="team" element={<TeamSettingsPage />} />
           <Route path="team/members" element={<TeamMembersPage />} />
           <Route path="team/billing" element={<BillingSettings />} />
@@ -384,19 +390,19 @@ function App() {
     <ThemeProvider>
       <AuthProvider>
         <TeamProvider>
-        <ChatPositionProvider>
-          <CommandProvider>
-            <style>{`
+          <ChatPositionProvider>
+            <CommandProvider>
+              <style>{`
               @keyframes spin {
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
               }
             `}</style>
-            <BrowserRouter>
-              <AppContent />
-            </BrowserRouter>
-          </CommandProvider>
-        </ChatPositionProvider>
+              <BrowserRouter>
+                <AppContent />
+              </BrowserRouter>
+            </CommandProvider>
+          </ChatPositionProvider>
         </TeamProvider>
       </AuthProvider>
     </ThemeProvider>

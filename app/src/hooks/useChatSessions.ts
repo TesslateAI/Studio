@@ -6,6 +6,7 @@ export interface ChatSession {
   title: string;
   status: string;
   origin: string | null;
+  platform: string | null;
   project_id: string | null;
   project_name: string | null;
   created_at: string | null;
@@ -33,7 +34,9 @@ export function useChatSessions({ standalone = true, teamSwitchKey = 0 }: UseCha
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const fetchSessions = useCallback(async () => {
@@ -82,7 +85,9 @@ export function useChatSessions({ standalone = true, teamSwitchKey = 0 }: UseCha
       const newChat = await chatApi.create();
       if (!mountedRef.current) return tempId;
       setSessions((prev) =>
-        prev.map((s) => (s.id === tempId ? { ...s, id: newChat.id, title: newChat.title || 'New Chat' } : s))
+        prev.map((s) =>
+          s.id === tempId ? { ...s, id: newChat.id, title: newChat.title || 'New Chat' } : s
+        )
       );
       setCurrentSessionId(newChat.id);
       return newChat.id;
@@ -95,18 +100,14 @@ export function useChatSessions({ standalone = true, teamSwitchKey = 0 }: UseCha
   }, []);
 
   const updateSessionTitle = useCallback((sessionId: string, newTitle: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s))
-    );
+    setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s)));
   }, []);
 
   const renameSession = useCallback(async (sessionId: string, newTitle: string) => {
     try {
       await chatApi.updateChatSession(sessionId, { title: newTitle });
       if (!mountedRef.current) return;
-      setSessions((prev) =>
-        prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s))
-      );
+      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s)));
     } catch (err) {
       console.error('[SESSIONS] Failed to rename session:', err);
     }
@@ -143,9 +144,7 @@ export function useChatSessions({ standalone = true, teamSwitchKey = 0 }: UseCha
         // Optimistic update — avoids a full refetch
         setSessions((prev) =>
           prev.map((s) =>
-            s.id === sessionId
-              ? { ...s, project_id: projectId, project_name: projectName }
-              : s
+            s.id === sessionId ? { ...s, project_id: projectId, project_name: projectName } : s
           )
         );
       } catch (err) {

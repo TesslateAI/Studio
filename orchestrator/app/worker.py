@@ -132,6 +132,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     )
     from .services.agent_context import (
         _build_architecture_context,
+        _build_cross_platform_context,
         _build_git_context,
         _build_tesslate_context,
         _get_chat_history,
@@ -409,6 +410,18 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 context["channel_jid"] = payload.channel_jid
                 context["channel_type"] = payload.channel_type
 
+            # Inject cross-platform context for gateway-originated tasks
+            if payload.channel_type and project:
+                cross_platform = await _build_cross_platform_context(
+                    chat_id=UUID(payload.chat_id),
+                    user_id=UUID(payload.user_id),
+                    project_id=UUID(project_id) if project_id else None,
+                    platform=payload.channel_type,
+                    db=db,
+                )
+                if cross_platform:
+                    project_context["cross_platform_context"] = cross_platform
+
             # 9. Create placeholder Message before agent loop (crash-safe)
             assistant_message = Message(
                 chat_id=UUID(payload.chat_id),
@@ -554,7 +567,34 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     task_id, {"type": "done", "data": {"task_id": task_id}}
                 )
 
-            # 14. Enqueue webhook callback if configured
+            # 14a. Gateway delivery — XADD to delivery stream if gateway-bound
+            if payload.gateway_deliver:
+                try:
+                    from .services.cache_service import get_redis_client
+
+                    gw_redis = await get_redis_client()
+                    if gw_redis:
+                        await gw_redis.xadd(
+                            settings.gateway_delivery_stream,
+                            {
+                                "task_id": task_id,
+                                "config_id": payload.channel_config_id or "",
+                                "session_key": payload.session_key or "",
+                                "deliver": payload.gateway_deliver,
+                                "response": (final_response or "")[:8000],
+                                "schedule_id": payload.schedule_id or "",
+                            },
+                            maxlen=settings.gateway_delivery_maxlen,
+                        )
+                        logger.info(
+                            "[WORKER] XADD delivery for task %s (session=%s)",
+                            task_id,
+                            payload.session_key,
+                        )
+                except Exception as gw_err:
+                    logger.warning("[WORKER] Gateway delivery XADD failed: %s", gw_err)
+
+            # 14b. Enqueue webhook callback if configured
             if payload.webhook_callback_url:
                 try:
                     arq_redis = ctx.get("redis")

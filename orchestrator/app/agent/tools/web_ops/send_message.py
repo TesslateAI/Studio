@@ -44,10 +44,15 @@ async def send_message_executor(params: dict[str, Any], context: dict[str, Any])
             suggestion="Provide a meaningful message to send",
         )
 
-    if channel not in ("chat", "discord", "webhook", "reply"):
+    if not channel.startswith("platform:") and channel not in (
+        "chat",
+        "discord",
+        "webhook",
+        "reply",
+    ):
         return error_output(
             message=f"Invalid channel '{channel}'",
-            suggestion="Use 'chat', 'discord', 'webhook', or 'reply'",
+            suggestion="Use 'chat', 'discord', 'webhook', 'reply', or 'platform:<type>:<chat_id>'",
         )
 
     if channel == "chat":
@@ -192,6 +197,65 @@ async def send_message_executor(params: dict[str, Any], context: dict[str, Any])
                 suggestion="Check channel configuration and credentials",
             )
 
+    if channel.startswith("platform:"):
+        # Platform channel: "platform:telegram:123456" → send via ChannelConfig
+        parts = channel.split(":", 2)
+        if len(parts) < 3:
+            return error_output(
+                message=f"Invalid platform channel format '{channel}'",
+                suggestion="Use 'platform:<type>:<chat_id>' (e.g., 'platform:telegram:123456')",
+            )
+
+        platform_type = parts[1]
+        target_chat_id = parts[2]
+
+        try:
+            db = context.get("db")
+            if not db:
+                return error_output(message="Database session not available")
+
+            from sqlalchemy import select
+
+            from ....models import ChannelConfig
+            from ....services.channels.registry import decrypt_credentials, get_channel
+
+            user_id = context.get("user_id")
+            result = await db.execute(
+                select(ChannelConfig)
+                .where(
+                    ChannelConfig.user_id == user_id,
+                    ChannelConfig.channel_type == platform_type,
+                    ChannelConfig.is_active.is_(True),
+                )
+                .limit(1)
+            )
+            config = result.scalar_one_or_none()
+            if not config:
+                return error_output(
+                    message=f"No active {platform_type} channel configured",
+                    suggestion=f"Set up a {platform_type} channel in Settings → Channels",
+                )
+
+            credentials = decrypt_credentials(config.credentials)
+            channel_instance = get_channel(platform_type, credentials)
+            await channel_instance.send_message(
+                jid=f"{platform_type}:{target_chat_id}",
+                text=message,
+            )
+
+            return success_output(
+                message=f"Message sent to {platform_type}:{target_chat_id}",
+                channel="platform",
+                platform=platform_type,
+            )
+
+        except Exception as e:
+            logger.error("Failed to send platform message: %s", e)
+            return error_output(
+                message=f"Failed to send to {platform_type}: {str(e)}",
+                suggestion="Check channel configuration and chat ID",
+            )
+
     return error_output(message="Unexpected channel state")
 
 
@@ -211,9 +275,8 @@ def register_send_message_tools(registry):
                     },
                     "channel": {
                         "type": "string",
-                        "description": "Notification channel: 'chat' (default, appears in chat), 'discord' (webhook), 'webhook' (external callback URL), or 'reply' (respond via originating messaging channel)",
+                        "description": "Notification channel: 'chat' (default), 'discord' (webhook), 'webhook' (external callback), 'reply' (originating channel), or 'platform:<type>:<chat_id>' (e.g., 'platform:telegram:123456')",
                         "default": "chat",
-                        "enum": ["chat", "discord", "webhook", "reply"],
                     },
                     "sender": {
                         "type": "string",

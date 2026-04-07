@@ -63,6 +63,11 @@ class AgentTaskPayload:
     # API key scope restrictions (None = no restriction, list = only these scopes allowed)
     api_key_scopes: list[str] | None = None
 
+    # Gateway routing (Communication Protocol v2)
+    gateway_deliver: str | None = None  # "origin", "telegram", "discord:channel_id", etc.
+    session_key: str | None = None  # Per-platform session key
+    schedule_id: str | None = None  # AgentSchedule UUID if triggered by cron
+
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""
         return asdict(self)

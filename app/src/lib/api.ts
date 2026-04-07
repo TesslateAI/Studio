@@ -3006,7 +3006,10 @@ export const teamsApi = {
     const response = await api.post('/api/teams', data);
     return response.data;
   },
-  async update(slug: string, data: Partial<{ name: string; slug: string; avatar_url: string | null }>): Promise<Team> {
+  async update(
+    slug: string,
+    data: Partial<{ name: string; slug: string; avatar_url: string | null }>
+  ): Promise<Team> {
     const response = await api.patch(`/api/teams/${slug}`, data);
     return response.data;
   },
@@ -3027,7 +3030,10 @@ export const teamsApi = {
     const response = await api.post(`/api/teams/${slug}/members/invite`, data);
     return response.data;
   },
-  async createInviteLink(slug: string, data: { role: string; max_uses?: number; expires_in_days?: number }): Promise<TeamInvitation> {
+  async createInviteLink(
+    slug: string,
+    data: { role: string; max_uses?: number; expires_in_days?: number }
+  ): Promise<TeamInvitation> {
     const response = await api.post(`/api/teams/${slug}/members/link`, data);
     return response.data;
   },
@@ -3065,12 +3071,21 @@ export const teamsApi = {
   },
 
   // Audit log
-  async getAuditLog(slug: string, params?: Record<string, string | number>): Promise<AuditLogEntry[]> {
+  async getAuditLog(
+    slug: string,
+    params?: Record<string, string | number>
+  ): Promise<AuditLogEntry[]> {
     const response = await api.get(`/api/teams/${slug}/audit-log`, { params });
     return response.data;
   },
-  async getProjectAuditLog(teamSlug: string, projectSlug: string, params?: Record<string, string | number>): Promise<AuditLogEntry[]> {
-    const response = await api.get(`/api/teams/${teamSlug}/projects/${projectSlug}/audit-log`, { params });
+  async getProjectAuditLog(
+    teamSlug: string,
+    projectSlug: string,
+    params?: Record<string, string | number>
+  ): Promise<AuditLogEntry[]> {
+    const response = await api.get(`/api/teams/${teamSlug}/projects/${projectSlug}/audit-log`, {
+      params,
+    });
     return response.data;
   },
 
@@ -3080,18 +3095,202 @@ export const teamsApi = {
     return response.data;
   },
   async addProjectMember(teamSlug: string, projectSlug: string, userId: string, role: string) {
-    const response = await api.post(`/api/teams/${teamSlug}/projects/${projectSlug}/members`, { user_id: userId, role });
+    const response = await api.post(`/api/teams/${teamSlug}/projects/${projectSlug}/members`, {
+      user_id: userId,
+      role,
+    });
     return response.data;
   },
-  async updateProjectMemberRole(teamSlug: string, projectSlug: string, userId: string, role: string) {
-    const response = await api.patch(`/api/teams/${teamSlug}/projects/${projectSlug}/members/${userId}`, { role });
+  async updateProjectMemberRole(
+    teamSlug: string,
+    projectSlug: string,
+    userId: string,
+    role: string
+  ) {
+    const response = await api.patch(
+      `/api/teams/${teamSlug}/projects/${projectSlug}/members/${userId}`,
+      { role }
+    );
     return response.data;
   },
   async removeProjectMember(teamSlug: string, projectSlug: string, userId: string) {
     await api.delete(`/api/teams/${teamSlug}/projects/${projectSlug}/members/${userId}`);
   },
-  async updateProjectVisibility(teamSlug: string, projectSlug: string, visibility: 'team' | 'private') {
-    const response = await api.patch(`/api/teams/${teamSlug}/projects/${projectSlug}/visibility`, { visibility });
+  async updateProjectVisibility(
+    teamSlug: string,
+    projectSlug: string,
+    visibility: 'team' | 'private'
+  ) {
+    const response = await api.patch(`/api/teams/${teamSlug}/projects/${projectSlug}/visibility`, {
+      visibility,
+    });
+    return response.data;
+  },
+};
+
+// ============================================================================
+// Communication Protocol v2 — Gateway, Channels, Schedules
+// ============================================================================
+
+export interface PlatformIdentity {
+  id: string;
+  platform: string;
+  platform_user_id: string;
+  platform_username: string | null;
+  is_verified: boolean;
+  paired_at: string | null;
+  created_at: string;
+}
+
+export interface GatewayStatus {
+  shard: number | null;
+  adapters: number | null;
+  active_sessions: number | null;
+  heartbeat: string | null;
+  status: string;
+}
+
+export interface PlatformInfo {
+  platform: string;
+  display_name: string;
+  supports_gateway: boolean;
+  setup_notes: string;
+}
+
+export interface ChannelConfig {
+  id: string;
+  channel_type: string;
+  name: string;
+  project_id: string | null;
+  default_agent_id: string | null;
+  is_active: boolean;
+  webhook_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentSchedule {
+  id: string;
+  project_id: string;
+  name: string;
+  cron_expression: string;
+  normalized_cron: string;
+  prompt_template: string;
+  timezone: string;
+  deliver: string;
+  is_active: boolean;
+  repeat: number | null;
+  runs_completed: number;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const gatewayApi = {
+  async getStatus(): Promise<GatewayStatus> {
+    const response = await api.get('/api/gateway/status');
+    return response.data;
+  },
+  async getPlatforms(): Promise<PlatformInfo[]> {
+    const response = await api.get('/api/gateway/platforms');
+    return response.data;
+  },
+  async reload() {
+    await api.post('/api/gateway/reload');
+  },
+  async listIdentities(): Promise<PlatformIdentity[]> {
+    const response = await api.get('/api/gateway/identities');
+    return response.data;
+  },
+  async verifyPairing(platform: string, code: string) {
+    const response = await api.post('/api/gateway/pair/verify', { platform, pairing_code: code });
+    return response.data;
+  },
+  async unlinkIdentity(id: string) {
+    await api.delete(`/api/gateway/identities/${id}`);
+  },
+};
+
+export const channelsApi = {
+  async list(): Promise<ChannelConfig[]> {
+    const response = await api.get('/api/channels/configs');
+    return response.data;
+  },
+  async create(data: {
+    channel_type: string;
+    name: string;
+    credentials: Record<string, string>;
+    project_id?: string;
+    default_agent_id?: string;
+  }): Promise<ChannelConfig> {
+    const response = await api.post('/api/channels/configs', data);
+    return response.data;
+  },
+  async update(
+    id: string,
+    data: Partial<{
+      name: string;
+      credentials: Record<string, string>;
+      default_agent_id: string;
+      is_active: boolean;
+    }>
+  ): Promise<ChannelConfig> {
+    const response = await api.patch(`/api/channels/configs/${id}`, data);
+    return response.data;
+  },
+  async deactivate(id: string) {
+    await api.delete(`/api/channels/configs/${id}`);
+  },
+  async test(id: string, jid: string) {
+    const response = await api.post(`/api/channels/configs/${id}/test`, { jid });
+    return response.data;
+  },
+};
+
+export const schedulesApi = {
+  async list(projectId?: string): Promise<AgentSchedule[]> {
+    const params = projectId ? `?project_id=${projectId}` : '';
+    const response = await api.get(`/api/schedules${params}`);
+    return response.data;
+  },
+  async create(data: {
+    project_id: string;
+    name: string;
+    schedule: string;
+    prompt_template: string;
+    deliver?: string;
+  }): Promise<AgentSchedule> {
+    const response = await api.post('/api/schedules', data);
+    return response.data;
+  },
+  async update(
+    id: string,
+    data: Partial<{
+      name: string;
+      schedule: string;
+      prompt_template: string;
+      deliver: string;
+    }>
+  ): Promise<AgentSchedule> {
+    const response = await api.patch(`/api/schedules/${id}`, data);
+    return response.data;
+  },
+  async remove(id: string) {
+    await api.delete(`/api/schedules/${id}`);
+  },
+  async pause(id: string) {
+    const response = await api.post(`/api/schedules/${id}/pause`);
+    return response.data;
+  },
+  async resume(id: string) {
+    const response = await api.post(`/api/schedules/${id}/resume`);
+    return response.data;
+  },
+  async trigger(id: string) {
+    const response = await api.post(`/api/schedules/${id}/trigger`);
     return response.data;
   },
 };

@@ -552,6 +552,19 @@ class Chat(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # Gateway session fields (NULL for browser-origin chats)
+    session_key = Column(String(255), nullable=True, unique=True, index=True)
+    platform = Column(String(20), nullable=True)
+    platform_chat_id = Column(String(255), nullable=True)
+    platform_thread_id = Column(String(255), nullable=True)
+    channel_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("channel_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_active_at = Column(DateTime(timezone=True), nullable=True)
+    idle_timeout_minutes = Column(Integer, nullable=True)
+
     __table_args__ = (Index("ix_chats_user_project", "user_id", "project_id"),)
 
     user = relationship("User", back_populates="chats")
@@ -1825,6 +1838,7 @@ class ChannelConfig(Base):
         UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
     is_active = Column(Boolean, default=True)
+    gateway_shard = Column(Integer, default=0)  # Shard assignment for gateway process
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -1938,6 +1952,83 @@ class TemplateBuild(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     base = relationship("MarketplaceBase", backref="template_builds")
+
+
+# ============================================================================
+# Communication Protocol v2 — Gateway Identity & Scheduling
+# ============================================================================
+
+
+class PlatformIdentity(Base):
+    """Links a messaging platform user to a Tesslate user for gateway auth."""
+
+    __tablename__ = "platform_identities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    platform = Column(String(20), nullable=False)
+    platform_user_id = Column(String(255), nullable=False)
+    platform_username = Column(String(255), nullable=True)
+    is_verified = Column(Boolean, default=False)
+    pairing_code = Column(String(8), nullable=True)
+    pairing_expires_at = Column(DateTime(timezone=True), nullable=True)
+    paired_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("platform", "platform_user_id", name="uq_platform_identity"),
+    )
+
+    user = relationship("User", backref="platform_identities")
+
+
+class AgentSchedule(Base):
+    """Cron-scheduled agent tasks dispatched by the gateway process."""
+
+    __tablename__ = "agent_schedules"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("marketplace_agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    name = Column(String(200), nullable=False)
+    cron_expression = Column(String(100), nullable=False)
+    normalized_cron = Column(String(100), nullable=False)
+    prompt_template = Column(Text, nullable=False)
+    timezone = Column(String(50), default="UTC")
+
+    # Delivery routing
+    deliver = Column(String(100), default="origin")
+    origin_platform = Column(String(20), nullable=True)
+    origin_chat_id = Column(String(255), nullable=True)
+    origin_config_id = Column(UUID(as_uuid=True), nullable=True)
+
+    # Lifecycle
+    is_active = Column(Boolean, default=True)
+    repeat = Column(Integer, nullable=True)  # None = forever
+    runs_completed = Column(Integer, default=0)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_task_id = Column(String, nullable=True)
+    last_status = Column(String(20), nullable=True)
+    last_error = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", backref="agent_schedules")
+    project = relationship("Project", backref="agent_schedules")
 
 
 # Import team models so they're included in Base.metadata (same pattern as models_kanban)

@@ -62,6 +62,12 @@ dependencies = [
     "PyNaCl>=1.5.0",
     # gRPC client for btrfs CSI NodeOps service
     "grpcio>=1.60.0",
+    # Gateway: cron scheduling
+    "croniter>=2.0.0",
+    # Gateway: Discord WebSocket
+    "discord.py>=2.3.0",
+    # Gateway: Slack Socket Mode
+    "slack-sdk[socket-mode]>=3.27.0",
 ]
 
 [project.optional-dependencies]

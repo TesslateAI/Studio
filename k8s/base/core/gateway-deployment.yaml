@@ -1,0 +1,126 @@
+# Tesslate Gateway Deployment
+# Persistent messaging platform connections (Telegram polling, Discord WS, Slack Socket Mode)
+# Uses the SAME image as the backend — just a different entrypoint
+#
+# Strategy: Recreate — kills old pod BEFORE starting new one (single-instance guarantee)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-gateway
+  namespace: tesslate
+  labels:
+    app: tesslate-gateway
+    component: gateway
+spec:
+  revisionHistoryLimit: 3
+  replicas: 1  # Single instance per shard; scale via StatefulSet for multi-shard
+  strategy:
+    type: Recreate  # Single-instance guarantee — old pod killed before new starts
+  selector:
+    matchLabels:
+      app: tesslate-gateway
+      component: gateway
+  template:
+    metadata:
+      labels:
+        app: tesslate-gateway
+        component: gateway
+    spec:
+      terminationGracePeriodSeconds: 60  # Allow adapters to disconnect gracefully
+      serviceAccountName: tesslate-backend-sa  # Same SA for K8s API access
+      containers:
+      - name: gateway
+        image: tesslate-backend:latest  # Same image as API pod
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-m", "app.gateway"]
+        env:
+        # Core settings
+        - name: DEPLOYMENT_MODE
+          value: "kubernetes"
+        - name: KUBERNETES_NAMESPACE
+          value: "tesslate"
+
+        # Gateway-specific settings
+        - name: GATEWAY_SHARD
+          value: "0"
+        - name: GATEWAY_LOCK_DIR
+          value: "/var/run/tesslate"
+
+        # Redis (required for gateway)
+        - name: REDIS_URL
+          value: "redis://redis:6379/0"
+
+        # Database
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: DATABASE_URL
+
+        # Security
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: SECRET_KEY
+
+        # LiteLLM (for voice transcription via Whisper)
+        - name: LITELLM_API_BASE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_API_BASE
+        - name: LITELLM_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_MASTER_KEY
+        - name: LITELLM_DEFAULT_MODELS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_DEFAULT_MODELS
+
+        # Domain
+        - name: APP_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: APP_DOMAIN
+              optional: true
+
+        # Channel encryption
+        - name: CHANNEL_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: CHANNEL_ENCRYPTION_KEY
+              optional: true
+        - name: DEPLOYMENT_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: DEPLOYMENT_ENCRYPTION_KEY
+              optional: true
+
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+        volumeMounts:
+        - name: gateway-locks
+          mountPath: /var/run/tesslate
+        - name: media-cache
+          mountPath: /tmp/tesslate-media-cache
+
+      volumes:
+      - name: gateway-locks
+        emptyDir: {}
+      - name: media-cache
+        emptyDir:
+          sizeLimit: 1Gi

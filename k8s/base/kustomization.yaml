@@ -23,6 +23,7 @@ resources:
   - core/frontend-deployment.yaml
   - core/frontend-service.yaml
   - core/worker-deployment.yaml
+  - core/gateway-deployment.yaml
   - core/snapshot-cleanup-cronjob.yaml
   - core/namespace-reaper-cronjob.yaml
 

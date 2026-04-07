@@ -33,6 +33,7 @@ from .routers import (
     deployments,
     external_agent,
     feedback,
+    gateway,
     git,
     git_providers,
     github,
@@ -43,6 +44,7 @@ from .routers import (
     mcp_server,
     projects,
     referrals,
+    schedules,
     secrets,
     shell,
     snapshots,
@@ -1130,6 +1132,8 @@ app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapsh
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)
 app.include_router(channels.router, tags=["channels"])  # /api/channels - Messaging channels
+app.include_router(gateway.router, tags=["gateway"])  # /api/gateway - Gateway status + identity
+app.include_router(schedules.router, tags=["schedules"])  # /api/schedules - Cron schedules
 app.include_router(mcp.router, tags=["mcp"])  # /api/mcp - MCP server management
 app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoint
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])

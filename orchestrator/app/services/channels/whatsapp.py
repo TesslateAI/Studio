@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from .base import AbstractChannel, InboundMessage, sanitize_inbound_text
+from .base import GatewayAdapter, InboundMessage, sanitize_inbound_text
 from .formatting import format_for_whatsapp, split_message
 
 logger = logging.getLogger(__name__)
@@ -23,15 +23,19 @@ logger = logging.getLogger(__name__)
 GRAPH_API = "https://graph.facebook.com/v21.0"
 
 
-class WhatsAppChannel(AbstractChannel):
+class WhatsAppChannel(GatewayAdapter):
     channel_type = "whatsapp"
 
-    def __init__(self, credentials: dict[str, Any]):
-        super().__init__(credentials)
+    def __init__(self, credentials: dict[str, Any], config_id: str = ""):
+        super().__init__(credentials, config_id)
         self.access_token = credentials["access_token"]
         self.phone_number_id = credentials["phone_number_id"]
         self.verify_token = credentials.get("verify_token", "")
         self.app_secret = credentials.get("app_secret", "")
+
+    @property
+    def supports_gateway(self) -> bool:
+        return False  # WhatsApp uses webhook-only; no persistent connection
 
     async def send_message(
         self, jid: str, text: str, *, sender: str | None = None, **kwargs: Any
@@ -85,11 +89,14 @@ class WhatsAppChannel(AbstractChannel):
         if not signature.startswith("sha256="):
             return False
 
-        expected = "sha256=" + hmac.new(
-            self.app_secret.encode("utf-8"),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
+        expected = (
+            "sha256="
+            + hmac.new(
+                self.app_secret.encode("utf-8"),
+                body,
+                hashlib.sha256,
+            ).hexdigest()
+        )
 
         return hmac.compare_digest(expected, signature)
 

@@ -29,7 +29,9 @@ def _register_channels() -> None:
         return
     _registered = True
 
+    from .cli_websocket import CLIWebSocketChannel
     from .discord_bot import DiscordBotChannel
+    from .signal import SignalChannel
     from .slack import SlackChannel
     from .telegram import TelegramChannel
     from .whatsapp import WhatsAppChannel
@@ -38,8 +40,10 @@ def _register_channels() -> None:
     CHANNEL_MAP["slack"] = SlackChannel
     CHANNEL_MAP["discord"] = DiscordBotChannel
     CHANNEL_MAP["whatsapp"] = WhatsAppChannel
+    CHANNEL_MAP["signal"] = SignalChannel
+    CHANNEL_MAP["cli"] = CLIWebSocketChannel
 
-    logger.info(f"Registered {len(CHANNEL_MAP)} channel types: {list(CHANNEL_MAP.keys())}")
+    logger.info("Registered %d channel types: %s", len(CHANNEL_MAP), list(CHANNEL_MAP.keys()))
 
 
 def get_channel(channel_type: str, credentials: dict[str, Any]) -> AbstractChannel:
@@ -82,6 +86,7 @@ def _get_fernet() -> Fernet:
     except Exception:
         # Derive a Fernet key from the secret by padding/hashing
         import hashlib
+
         derived = base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest())
         return Fernet(derived)
 
