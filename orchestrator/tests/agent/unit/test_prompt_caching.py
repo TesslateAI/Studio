@@ -297,9 +297,10 @@ class TestInjectTrailingBreakpoint:
         inject_cache_breakpoints(msgs, "claude-opus-4.6")
 
         assert _has_bp(msgs[0])  # system
-        assert _has_bp(msgs[3])  # second-to-last (tool)
+        assert _has_bp(msgs[1])  # trailing BP on user (has content)
+        assert _has_bp(msgs[3])  # trailing BP on tool (has content)
         assert not _has_bp(msgs[4])  # last message — no BP
-        assert _count_bps(msgs) == 2
+        assert _count_bps(msgs) == 3
 
     def test_skips_none_content_assistant(self):
         """Trailing BP skips assistant messages with content=None."""
@@ -329,9 +330,12 @@ class TestInjectTrailingBreakpoint:
         inject_cache_breakpoints(msgs, "claude-opus-4.6")
 
         assert _has_bp(msgs[0])  # system
-        assert _has_bp(msgs[4])  # second-to-last = "second response"
-        assert not _has_bp(msgs[5])  # last message
-        assert _count_bps(msgs) == 2
+        # Trailing window: last 3 messages with cacheable content (backwards from second-to-last)
+        assert _has_bp(msgs[2])  # "first response"
+        assert _has_bp(msgs[3])  # "second turn"
+        assert _has_bp(msgs[4])  # "second response"
+        assert not _has_bp(msgs[5])  # last message — no BP
+        assert _count_bps(msgs) == 4
 
 
 # =============================================================================
@@ -342,7 +346,9 @@ class TestInjectTrailingBreakpoint:
 @pytest.mark.unit
 class TestStripAndReinject:
     def test_old_breakpoints_stripped(self):
-        """Breakpoints from a prior iteration are removed before fresh injection."""
+        """Breakpoints from a prior iteration are removed before fresh injection.
+        Old BPs are stripped, then up to 3 trailing BPs are re-injected on the
+        most recent messages with cacheable content."""
         msgs = [
             {
                 "role": "system",
@@ -365,16 +371,18 @@ class TestStripAndReinject:
         ]
         inject_cache_breakpoints(msgs, "claude-opus-4.6")
 
-        # Old BP on msgs[3] should be stripped and simplified back to string
-        assert msgs[3]["content"] == "old result"
-        # New trailing BP on msgs[5] (second-to-last with content)
-        assert _has_bp(msgs[4])
         # System still has BP
         assert _has_bp(msgs[0])
-        assert _count_bps(msgs) == 2
+        # Trailing BPs placed on the 3 most recent messages with content (from second-to-last backwards)
+        assert _has_bp(msgs[1])  # "hello"
+        assert _has_bp(msgs[3])  # "old result" — re-injected as part of trailing window
+        assert _has_bp(msgs[4])  # "new result"
+        assert not _has_bp(msgs[6])  # last message — no BP
+        assert _count_bps(msgs) == 4
 
     def test_rolling_breakpoint_moves_forward(self):
-        """Simulate two consecutive iterations — BP moves to the newer prefix."""
+        """Simulate two consecutive iterations — old BPs are stripped and fresh
+        trailing BPs are placed on the most recent cacheable messages."""
         msgs = [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hello"},
@@ -385,18 +393,21 @@ class TestStripAndReinject:
         # First injection
         inject_cache_breakpoints(msgs, "claude-opus-4.6")
         assert _has_bp(msgs[1])  # trailing on user (second-to-last with content)
+        assert _count_bps(msgs) == 2  # system + 1 trailing
 
         # Simulate next iteration: append new tool results
         msgs.append({"role": "assistant", "content": None, "tool_calls": [{"id": "tc2"}]})
         msgs.append({"role": "tool", "tool_call_id": "tc2", "content": "result 2"})
         msgs.append({"role": "tool", "tool_call_id": "tc3", "content": "result 3"})
 
-        # Second injection — BP should move forward
+        # Second injection — trailing window now covers more messages
         inject_cache_breakpoints(msgs, "claude-opus-4.6")
-        assert not _has_bp(msgs[1])  # old user BP stripped
-        assert _has_bp(msgs[5])  # new trailing on "result 2" (second-to-last)
+        assert _has_bp(msgs[0])  # system BP
+        assert _has_bp(msgs[1])  # "hello" — still in trailing window
+        assert _has_bp(msgs[3])  # "result 1"
+        assert _has_bp(msgs[5])  # "result 2"
         assert not _has_bp(msgs[6])  # last message, no BP
-        assert _count_bps(msgs) == 2
+        assert _count_bps(msgs) == 4
 
 
 # =============================================================================
