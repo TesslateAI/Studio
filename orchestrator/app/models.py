@@ -1596,7 +1596,9 @@ class UserLibraryTheme(Base):
     """Tracks which themes users have added to their library."""
 
     __tablename__ = "user_library_themes"
-    __table_args__ = (UniqueConstraint("user_id", "theme_id", name="uq_user_library_theme"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "theme_id", "team_id", name="uq_user_library_theme_team"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
