@@ -50,6 +50,7 @@ interface Message {
     label: string;
     onClick: () => void;
   }>;
+  timestamp?: string;
   // Approval-specific fields
   approvalId?: string;
   toolName?: string;
@@ -267,6 +268,7 @@ export function ChatContainer({
                 id: `msg-${idx}`,
                 type: messageType,
                 content: msg.content,
+                timestamp: msg.created_at,
                 attachments: msg.message_metadata?.attachments as
                   | SerializedAttachment[]
                   | undefined,
@@ -1057,6 +1059,7 @@ export function ChatContainer({
       id: `msg-${Date.now()}`,
       type: 'user',
       content: message,
+      timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMessage]);
     setIsStreaming(true);
@@ -1142,6 +1145,7 @@ export function ChatContainer({
       id: `msg-${Date.now()}`,
       type: 'user',
       content: message,
+      timestamp: new Date().toISOString(),
       attachments,
     };
     setMessages((prev) => [...prev, userMessage]);
@@ -1634,6 +1638,19 @@ export function ChatContainer({
     return session?.title || 'Untitled';
   }, [currentChatId, sessions]);
 
+  // Find the last user message ID for the retry button
+  const lastUserMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].type === 'user') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
+  const handleRetryMessage = (content: string) => {
+    if (agentExecuting || isStreaming) return;
+    handleSendMessage(content);
+  };
+
   const handleApprovalResponse = async (
     approvalId: string,
     response: 'allow_once' | 'allow_all' | 'stop',
@@ -2059,7 +2076,7 @@ export function ChatContainer({
             </div>
           )}
 
-          {messages.map((message) => {
+          {messages.map((message, msgIdx) => {
             // Check if this is a new message that should animate
             const isNewMessage = !animatedMessagesRef.current.has(message.id);
             if (isNewMessage && !isLoadingHistory) {
@@ -2104,6 +2121,7 @@ export function ChatContainer({
             }
 
             // Render regular messages
+            const isLastUser = message.id === lastUserMessageId;
             return (
               <div
                 key={message.id}
@@ -2117,6 +2135,9 @@ export function ChatContainer({
                   attachments={message.attachments}
                   toolCalls={message.toolCalls}
                   actions={message.actions}
+                  timestamp={message.timestamp}
+                  showRetry={isLastUser && !agentExecuting && !isStreaming}
+                  onRetry={isLastUser ? () => handleRetryMessage(message.content) : undefined}
                 />
               </div>
             );
