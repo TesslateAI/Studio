@@ -519,15 +519,35 @@ export function ChatContainer({
             // ignore parse errors
           }
         };
+        let sseRetried = false;
         eventSource.onerror = () => {
-          cleanupReconnect();
-          // Remove stale thinking message on connection failure
-          if (!cancelled) {
+          eventSource.close();
+          activeEventSource = null;
+          if (cancelled) return;
+
+          // Retry SSE once after a short delay before giving up
+          if (!sseRetried) {
+            sseRetried = true;
+            setTimeout(() => {
+              if (cancelled) return;
+              const retrySource = chatApi.subscribeToTask(activeTask.task_id);
+              activeEventSource = retrySource;
+              retrySource.onmessage = eventSource.onmessage;
+              retrySource.onerror = () => {
+                cleanupReconnect();
+                if (!cancelled) {
+                  setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+                }
+              };
+            }, 2000);
+          } else {
+            cleanupReconnect();
             setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
           }
         };
-      } catch {
-        // No active task, that's fine
+      } catch (err) {
+        // No active task — expected when nothing is running
+        console.debug('[CHAT] checkActiveTask:', err);
       }
     };
 
