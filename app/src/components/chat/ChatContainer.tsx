@@ -519,31 +519,33 @@ export function ChatContainer({
             // ignore parse errors
           }
         };
-        let sseRetried = false;
         eventSource.onerror = () => {
           eventSource.close();
           activeEventSource = null;
           if (cancelled) return;
 
-          // Retry SSE once after a short delay before giving up
-          if (!sseRetried) {
-            sseRetried = true;
-            setTimeout(() => {
-              if (cancelled) return;
-              const retrySource = chatApi.subscribeToTask(activeTask.task_id);
-              activeEventSource = retrySource;
-              retrySource.onmessage = eventSource.onmessage;
-              retrySource.onerror = () => {
+          // SSE failed but the task may still be running.
+          // Poll getActiveTask every 3s — keep thinking indicator until
+          // the task finishes, then clean up.
+          const pollId = setInterval(async () => {
+            if (cancelled) { clearInterval(pollId); return; }
+            try {
+              const still = await chatApi.getActiveTask(
+                projectId.toString(),
+                currentChatId || undefined
+              );
+              if (!still?.task_id) {
+                clearInterval(pollId);
                 cleanupReconnect();
-                if (!cancelled) {
-                  setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
-                }
-              };
-            }, 2000);
-          } else {
-            cleanupReconnect();
-            setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
-          }
+                setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+              }
+            } catch {
+              // Task endpoint failed — assume task is gone
+              clearInterval(pollId);
+              cleanupReconnect();
+              setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+            }
+          }, 3000);
         };
       } catch (err) {
         // No active task — expected when nothing is running
@@ -1414,9 +1416,7 @@ export function ChatContainer({
       // If an agent is already running (e.g. page was refreshed mid-execution),
       // reconnect to it instead of showing an error.
       if (typeof errorDetail === 'string' && errorDetail.includes('Another agent is running')) {
-        toast('Agent is still processing your previous request...', { duration: 3000 });
-        // Remove the user message we just added — they can resend after
-        setMessages((prev) => prev.filter((msg) => msg.id !== userMessage.id));
+        toast('Agent is still processing a previous request. Please wait for it to finish.', { duration: 4000 });
         // Trigger reconnection by checking for the active task
         try {
           const activeTask = await chatApi.getActiveTask(
