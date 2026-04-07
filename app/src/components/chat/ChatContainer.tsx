@@ -1389,6 +1389,102 @@ export function ChatContainer({
 
       console.error('[AGENT] Streaming execution error:', error);
 
+      const errorDetail = error instanceof Error ? error.message : 'Failed to execute agent';
+
+      // If an agent is already running (e.g. page was refreshed mid-execution),
+      // reconnect to it instead of showing an error.
+      if (typeof errorDetail === 'string' && errorDetail.includes('Another agent is running')) {
+        toast('Agent is still processing your previous request...', { duration: 3000 });
+        // Remove the user message we just added — they can resend after
+        setMessages((prev) => prev.filter((msg) => msg.id !== userMessage.id));
+        // Trigger reconnection by checking for the active task
+        try {
+          const activeTask = await chatApi.getActiveTask(
+            projectId.toString(),
+            currentChatId || undefined
+          );
+          if (activeTask?.task_id) {
+            agentTaskIdRef.current = activeTask.task_id;
+            // Add thinking placeholder
+            setMessages((prev) => [
+              ...prev.filter((m) => m.id !== thinkingMessageId),
+              {
+                id: `reconnect-${activeTask.task_id}`,
+                type: 'ai' as const,
+                content: '',
+                agentData: {
+                  steps: [],
+                  iterations: 0,
+                  tool_calls_made: 0,
+                  completion_reason: 'in_progress' as const,
+                },
+              },
+            ]);
+            // Keep agentExecuting=true so send is blocked; the finally
+            // block below is skipped via the early return.
+            const eventSource = chatApi.subscribeToTask(activeTask.task_id);
+            eventSource.onmessage = (event) => {
+              try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'agent_step') {
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const lastMsg = updated[updated.length - 1];
+                    if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                      lastMsg.agentData = {
+                        ...lastMsg.agentData,
+                        steps: [...(lastMsg.agentData.steps || []), data.data],
+                      };
+                    }
+                    return updated;
+                  });
+                } else if (data.type === 'complete' || data.type === 'done') {
+                  if (data.type === 'complete') {
+                    const finalContent = data.data?.final_response || '';
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                        lastMsg.content = finalContent;
+                        lastMsg.agentData = {
+                          ...lastMsg.agentData,
+                          completion_reason: data.data?.completion_reason || 'complete',
+                        };
+                      }
+                      return updated;
+                    });
+                  }
+                  eventSource.close();
+                  setAgentExecuting(false);
+                  agentTaskIdRef.current = null;
+                  refreshSessions();
+                } else if (data.type === 'error') {
+                  const errMsg = data.data?.message || 'Agent execution failed';
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const lastMsg = updated[updated.length - 1];
+                    if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                      lastMsg.content = errMsg;
+                      lastMsg.agentData = { ...lastMsg.agentData, completion_reason: 'error' };
+                    }
+                    return updated;
+                  });
+                  eventSource.close();
+                  setAgentExecuting(false);
+                  agentTaskIdRef.current = null;
+                }
+              } catch { /* ignore parse errors */ }
+            };
+            eventSource.onerror = () => {
+              eventSource.close();
+              setAgentExecuting(false);
+              agentTaskIdRef.current = null;
+            };
+            return; // Skip the finally block — agentExecuting stays true
+          }
+        } catch { /* fallback to normal error display */ }
+      }
+
       // Remove thinking message and add error message
       setMessages((prev) => {
         const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
@@ -1403,7 +1499,6 @@ export function ChatContainer({
         ];
       });
 
-      const errorDetail = error instanceof Error ? error.message : 'Failed to execute agent';
       toast.error(errorDetail, {
         duration: 5000,
       });

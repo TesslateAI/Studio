@@ -1712,6 +1712,29 @@ async def cancel_agent_task(
     return {"status": "cancellation_requested", "task_id": task_id}
 
 
+@router.post("/agent/force-cancel")
+async def force_cancel_agent(
+    chat_id: str = Query(..., description="Chat session to unlock"),
+    current_user: User = Depends(get_authenticated_user),
+):
+    """Force-release a stuck chat lock and cancel the holding task.
+
+    Use when an agent task is stuck and the user cannot send new messages
+    after refreshing the page.
+    """
+    from ..services.pubsub import get_pubsub
+
+    pubsub = get_pubsub()
+    if not pubsub:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    released = await pubsub.force_release_chat_lock(chat_id)
+    return {
+        "status": "force_cancelled" if released else "no_lock_found",
+        "chat_id": chat_id,
+    }
+
+
 @router.get("/agent/active")
 async def get_active_agent_task(
     project_id: str,

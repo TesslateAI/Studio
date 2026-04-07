@@ -453,6 +453,33 @@ class RedisPubSub:
             logger.warning(f"Failed to release chat lock: {e}")
             return False
 
+    async def force_release_chat_lock(self, chat_id: str) -> bool:
+        """Force-release a chat lock regardless of who holds it.
+
+        Used when a task is stuck and the user needs to send a new message.
+        Also requests cancellation of the holding task.
+        """
+        from .cache_service import get_redis_client
+
+        redis = await get_redis_client()
+        if not redis:
+            return False
+
+        key = f"{CHAT_LOCK_PREFIX}{chat_id}"
+        try:
+            # Get the holding task so we can cancel it
+            holding_task = await redis.get(key)
+            if holding_task:
+                task_id = holding_task.decode() if isinstance(holding_task, bytes) else holding_task
+                await self.request_cancellation(task_id)
+            deleted = await redis.delete(key)
+            if deleted:
+                logger.info(f"Force-released chat lock: {chat_id}")
+            return bool(deleted)
+        except Exception as e:
+            logger.warning(f"Failed to force-release chat lock: {e}")
+            return False
+
     async def get_chat_lock(self, chat_id: str) -> str | None:
         """
         Get the task_id currently holding the chat lock.

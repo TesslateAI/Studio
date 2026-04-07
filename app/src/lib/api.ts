@@ -801,6 +801,12 @@ export const chatApi = {
     return response.data;
   },
 
+  // Force-cancel a stuck agent and release the chat lock
+  forceCancelAgent: async (chatId: string) => {
+    const response = await api.post(`/api/chat/agent/force-cancel?chat_id=${chatId}`);
+    return response.data;
+  },
+
   // Check for active agent task on a project (optionally scoped to a chat session)
   getActiveTask: async (projectId: string, chatId?: string) => {
     const params: Record<string, string> = { project_id: projectId };
