@@ -89,6 +89,71 @@ async def _resolve_project_in_team(
     return project
 
 
+async def _copy_library_to_team(
+    db: AsyncSession,
+    user_id: UUID,
+    source_team_id: UUID,
+    target_team_id: UUID,
+) -> None:
+    """Copy a user's installed agents and bases from one team to another.
+
+    Called during team creation so the new team starts with the same
+    marketplace agents and bases as the creator's personal team.
+    Themes are NOT copied — each team starts with the default theme
+    and users install themes per-team from the marketplace.
+    """
+    from ..models import (
+        UserPurchasedAgent,
+        UserPurchasedBase,
+    )
+
+    # -- Agents --
+    result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == user_id,
+            UserPurchasedAgent.team_id == source_team_id,
+            UserPurchasedAgent.is_active.is_(True),
+        )
+    )
+    for agent in result.scalars().all():
+        db.add(
+            UserPurchasedAgent(
+                user_id=user_id,
+                team_id=target_team_id,
+                agent_id=agent.agent_id,
+                purchase_type=agent.purchase_type,
+                is_active=True,
+                selected_model=agent.selected_model,
+            )
+        )
+
+    # -- Bases --
+    result = await db.execute(
+        select(UserPurchasedBase).where(
+            UserPurchasedBase.user_id == user_id,
+            UserPurchasedBase.team_id == source_team_id,
+            UserPurchasedBase.is_active.is_(True),
+        )
+    )
+    for base in result.scalars().all():
+        db.add(
+            UserPurchasedBase(
+                user_id=user_id,
+                team_id=target_team_id,
+                base_id=base.base_id,
+                purchase_type=base.purchase_type,
+                is_active=True,
+            )
+        )
+
+    logger.info(
+        "Copied library from team %s to team %s for user %s",
+        source_team_id,
+        target_team_id,
+        user_id,
+    )
+
+
 # ============================================================================
 # Team CRUD
 # ============================================================================
@@ -138,6 +203,12 @@ async def create_team(
         details={"name": team.name, "slug": team.slug},
         request=request,
     )
+
+    # Copy the creator's installed library from their personal team to the new team.
+    personal_team_id = user.default_team_id
+    if personal_team_id:
+        await _copy_library_to_team(db, user.id, personal_team_id, team_id)
+
     await db.commit()
     await db.refresh(team)
     return team
@@ -400,7 +471,10 @@ async def switch_team(
 
     user.default_team_id = team.id
     await db.commit()
-    return {"default_team_id": str(team.id)}
+    return {
+        "default_team_id": str(team.id),
+        "theme_preset": team.theme_preset or "default-dark",
+    }
 
 
 # ============================================================================

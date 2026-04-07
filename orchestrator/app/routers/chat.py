@@ -10,14 +10,21 @@ from uuid import UUID
 
 import aiofiles
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Agent imports - new factory-based system
 from ..agent import create_agent_from_db_model
 from ..agent.iterative_agent import _convert_uuids_to_strings
 from ..agent.models import create_model_adapter
@@ -1710,6 +1717,29 @@ async def cancel_agent_task(
 
     await pubsub.request_cancellation(task_id)
     return {"status": "cancellation_requested", "task_id": task_id}
+
+
+@router.post("/agent/force-cancel")
+async def force_cancel_agent(
+    chat_id: str = Query(..., description="Chat session to unlock"),
+    current_user: User = Depends(get_authenticated_user),
+):
+    """Force-release a stuck chat lock and cancel the holding task.
+
+    Use when an agent task is stuck and the user cannot send new messages
+    after refreshing the page.
+    """
+    from ..services.pubsub import get_pubsub
+
+    pubsub = get_pubsub()
+    if not pubsub:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    released = await pubsub.force_release_chat_lock(chat_id)
+    return {
+        "status": "force_cancelled" if released else "no_lock_found",
+        "chat_id": chat_id,
+    }
 
 
 @router.get("/agent/active")

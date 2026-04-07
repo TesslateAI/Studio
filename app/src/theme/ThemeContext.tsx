@@ -119,6 +119,18 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     init();
   }, []);
 
+  // Apply the team's theme when switching teams
+  useEffect(() => {
+    const onTeamTheme = (e: Event) => {
+      const presetId = (e as CustomEvent).detail as string;
+      if (presetId) {
+        setThemePresetIdState(presetId);
+      }
+    };
+    window.addEventListener('team-theme-changed', onTeamTheme);
+    return () => window.removeEventListener('team-theme-changed', onTeamTheme);
+  }, []);
+
   // Apply theme whenever it changes
   useEffect(() => {
     applyThemePreset(themePreset);

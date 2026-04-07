@@ -335,10 +335,19 @@ async def get_projects(
 
 async def enforce_project_limit(user: User, db: AsyncSession) -> None:
     """Raise 403 if user has reached their tier's project limit."""
-    from ..models_team import TeamMembership
+    from ..models_team import Team, TeamMembership
 
     settings = get_settings()
     team_id = user.default_team_id
+
+    # Resolve the tier from the active team (billing lives on teams since RBAC)
+    tier = "free"
+    if team_id:
+        team_result = await db.execute(select(Team).where(Team.id == team_id))
+        team = team_result.scalar_one_or_none()
+        if team:
+            tier = team.subscription_tier or "free"
+
     if team_id:
         result = await db.execute(
             select(func.count(Project.id)).where(Project.team_id == team_id)
@@ -352,7 +361,6 @@ async def enforce_project_limit(user: User, db: AsyncSession) -> None:
             select(func.count(Project.id)).where(Project.team_id.in_(user_team_ids))
         )
     current_count = result.scalar()
-    tier = user.subscription_tier or "free"
     max_projects = settings.get_tier_max_projects(tier)
     if current_count >= max_projects:
         raise HTTPException(
@@ -3592,9 +3600,20 @@ async def deploy_project(
     settings = get_settings()
 
     # Count current deployed projects (team-scoped)
-    from ..models_team import TeamMembership
+    from ..models_team import Team, TeamMembership
 
     _team_id = current_user.default_team_id
+
+    # Resolve tier and total_spend from the active team
+    _tier = "free"
+    _total_spend = 0
+    if _team_id:
+        _team_result = await db.execute(select(Team).where(Team.id == _team_id))
+        _team = _team_result.scalar_one_or_none()
+        if _team:
+            _tier = _team.subscription_tier or "free"
+            _total_spend = _team.total_spend or 0
+
     if _team_id:
         deployed_count_result = await db.execute(
             select(func.count(Project.id)).where(
@@ -3612,22 +3631,19 @@ async def deploy_project(
         )
     deployed_count = deployed_count_result.scalar()
 
-    # Determine max deploys based on tier
-    max_deploys = settings.get_tier_max_deploys(current_user.subscription_tier or "free")
+    # Determine max deploys based on team tier
+    max_deploys = settings.get_tier_max_deploys(_tier)
 
     # Check if limit exceeded
     if deployed_count >= max_deploys:
-        # Check if user has purchased additional deploy slots
-        # For now, we'll use total_spend to track additional purchases
-        # In a real system, you'd have a separate table for tracking this
-        additional_slots_purchased = current_user.total_spend // settings.additional_deploy_price
+        additional_slots_purchased = _total_spend // settings.additional_deploy_price
         effective_max_deploys = max_deploys + additional_slots_purchased
 
         if deployed_count >= effective_max_deploys:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail={
-                    "message": f"Deploy limit reached. Your {current_user.subscription_tier} tier allows {max_deploys} deployed project(s).",
+                    "message": f"Deploy limit reached. Your {_tier} tier allows {max_deploys} deployed project(s).",
                     "current_deployed": deployed_count,
                     "max_deploys": effective_max_deploys,
                     "upgrade_required": True,
@@ -3692,9 +3708,21 @@ async def get_deployment_limits(
     settings = get_settings()
 
     # Count deployed projects (team-scoped)
+    from ..models_team import Team as _Team
     from ..models_team import TeamMembership as _TM
 
     _team_id = current_user.default_team_id
+
+    # Resolve tier and total_spend from the active team
+    _tier = "free"
+    _total_spend = 0
+    if _team_id:
+        _team_result = await db.execute(select(_Team).where(_Team.id == _team_id))
+        _team_obj = _team_result.scalar_one_or_none()
+        if _team_obj:
+            _tier = _team_obj.subscription_tier or "free"
+            _total_spend = _team_obj.total_spend or 0
+
     if _team_id:
         deployed_count_result = await db.execute(
             select(func.count(Project.id)).where(
@@ -3712,13 +3740,12 @@ async def get_deployment_limits(
         )
     deployed_count = deployed_count_result.scalar()
 
-    # Determine limits based on tier
-    tier = current_user.subscription_tier or "free"
-    base_max_deploys = settings.get_tier_max_deploys(tier)
-    base_max_projects = settings.get_tier_max_projects(tier)
+    # Determine limits based on team tier
+    base_max_deploys = settings.get_tier_max_deploys(_tier)
+    base_max_projects = settings.get_tier_max_projects(_tier)
 
     # Calculate additional slots from purchases
-    additional_slots = current_user.total_spend // settings.additional_deploy_price
+    additional_slots = _total_spend // settings.additional_deploy_price
     effective_max_deploys = base_max_deploys + additional_slots
 
     # Count total projects (team-scoped)
@@ -3733,7 +3760,7 @@ async def get_deployment_limits(
     total_projects = total_projects_result.scalar()
 
     return {
-        "tier": current_user.subscription_tier,
+        "tier": _tier,
         "projects": {"current": total_projects, "max": base_max_projects},
         "deploys": {
             "current": deployed_count,

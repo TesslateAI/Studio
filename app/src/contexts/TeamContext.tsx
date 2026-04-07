@@ -78,7 +78,13 @@ export function TeamProvider({ children }: { children: React.ReactNode }) {
         setActiveTeam(team);
         localStorage.setItem('tesslate_active_team', teamSlug);
         try {
-          await teamsApi.switch(teamSlug);
+          const result = await teamsApi.switch(teamSlug);
+          // Apply the team's theme on switch
+          if (result?.theme_preset) {
+            window.dispatchEvent(
+              new CustomEvent('team-theme-changed', { detail: result.theme_preset })
+            );
+          }
         } catch {
           /* non-blocking */
         }

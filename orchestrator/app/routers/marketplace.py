@@ -3842,12 +3842,18 @@ async def browse_themes(
     result = await db.execute(query)
     themes = result.scalars().all()
 
-    # Check which themes are in user's library
+    # Check which themes are in user's library (scoped to active team)
     user_theme_ids: set[str] = set()
     if current_user:
+        team_id = current_user.default_team_id
+        theme_filter = (
+            UserLibraryTheme.team_id == team_id
+            if team_id
+            else UserLibraryTheme.user_id == current_user.id
+        )
         lib_result = await db.execute(
             select(UserLibraryTheme.theme_id).where(
-                UserLibraryTheme.user_id == current_user.id,
+                theme_filter,
                 UserLibraryTheme.is_active.is_(True),
             )
         )
@@ -3899,9 +3905,15 @@ async def get_theme_detail(
 
     is_in_library = False
     if current_user:
+        team_id = current_user.default_team_id
+        theme_owner_filter = (
+            UserLibraryTheme.team_id == team_id
+            if team_id
+            else UserLibraryTheme.user_id == current_user.id
+        )
         lib_result = await db.execute(
             select(UserLibraryTheme).where(
-                UserLibraryTheme.user_id == current_user.id,
+                theme_owner_filter,
                 UserLibraryTheme.theme_id == theme.id,
                 UserLibraryTheme.is_active.is_(True),
             )

@@ -1,4 +1,5 @@
-import { type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { Copy, Check, ArrowClockwise } from '@phosphor-icons/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { SerializedAttachment } from '../../types/agent';
@@ -19,10 +20,45 @@ interface ChatMessageProps {
     name: string;
     description: string;
   }>;
+  timestamp?: string;
+  onRetry?: () => void;
+  showRetry?: boolean;
 }
 
-export function ChatMessage({ type, content, avatar, agentAvatarUrl, attachments, actions, toolCalls }: ChatMessageProps) {
+export function ChatMessage({
+  type,
+  content,
+  avatar,
+  agentAvatarUrl,
+  attachments,
+  actions,
+  toolCalls,
+  timestamp,
+  onRetry,
+  showRetry,
+}: ChatMessageProps) {
   const isUser = type === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const text = typeof content === 'string' ? content : '';
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  // Format timestamp for display
+  const formattedTime = (() => {
+    if (!timestamp) return null;
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return null;
+    }
+  })();
 
   // 60-30-10: User avatar (10% accent), AI avatar (30% secondary surface)
   const defaultAvatar = isUser ? (
@@ -44,7 +80,7 @@ export function ChatMessage({ type, content, avatar, agentAvatarUrl, attachments
   );
 
   return (
-    <div className={`message my-2 flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
+    <div className={`group/msg message my-2 flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       {/* Avatar */}
       <div className="message-avatar flex-shrink-0">
         {avatar || defaultAvatar}
@@ -106,6 +142,31 @@ export function ChatMessage({ type, content, avatar, agentAvatarUrl, attachments
             </div>
           ) : (
             content
+          )}
+        </div>
+
+        {/* Message footer: timestamp + hover actions (Claude-style) */}
+        <div className={`flex items-center gap-1.5 mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity ${isUser ? 'justify-end' : 'justify-start'}`}>
+          {formattedTime && (
+            <span className="text-[10px] text-[var(--text-muted)]">{formattedTime}</span>
+          )}
+          {typeof content === 'string' && content.length > 0 && (
+            <button
+              onClick={handleCopy}
+              className="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+              title={copied ? 'Copied!' : 'Copy'}
+            >
+              {copied ? <Check size={13} weight="bold" /> : <Copy size={13} />}
+            </button>
+          )}
+          {showRetry && onRetry && (
+            <button
+              onClick={onRetry}
+              className="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors"
+              title="Retry"
+            >
+              <ArrowClockwise size={13} />
+            </button>
           )}
         </div>
 

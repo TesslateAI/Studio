@@ -50,6 +50,7 @@ interface Message {
     label: string;
     onClick: () => void;
   }>;
+  timestamp?: string;
   // Approval-specific fields
   approvalId?: string;
   toolName?: string;
@@ -267,6 +268,7 @@ export function ChatContainer({
                 id: `msg-${idx}`,
                 type: messageType,
                 content: msg.content,
+                timestamp: msg.created_at,
                 attachments: msg.message_metadata?.attachments as
                   | SerializedAttachment[]
                   | undefined,
@@ -520,14 +522,36 @@ export function ChatContainer({
           }
         };
         eventSource.onerror = () => {
-          cleanupReconnect();
-          // Remove stale thinking message on connection failure
-          if (!cancelled) {
-            setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
-          }
+          eventSource.close();
+          activeEventSource = null;
+          if (cancelled) return;
+
+          // SSE failed but the task may still be running.
+          // Poll getActiveTask every 3s — keep thinking indicator until
+          // the task finishes, then clean up.
+          const pollId = setInterval(async () => {
+            if (cancelled) { clearInterval(pollId); return; }
+            try {
+              const still = await chatApi.getActiveTask(
+                projectId.toString(),
+                currentChatId || undefined
+              );
+              if (!still?.task_id) {
+                clearInterval(pollId);
+                cleanupReconnect();
+                setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+              }
+            } catch {
+              // Task endpoint failed — assume task is gone
+              clearInterval(pollId);
+              cleanupReconnect();
+              setMessages((prev) => prev.filter((m) => m.id !== thinkingId));
+            }
+          }, 3000);
         };
-      } catch {
-        // No active task, that's fine
+      } catch (err) {
+        // No active task — expected when nothing is running
+        console.debug('[CHAT] checkActiveTask:', err);
       }
     };
 
@@ -1035,6 +1059,7 @@ export function ChatContainer({
       id: `msg-${Date.now()}`,
       type: 'user',
       content: message,
+      timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMessage]);
     setIsStreaming(true);
@@ -1120,6 +1145,7 @@ export function ChatContainer({
       id: `msg-${Date.now()}`,
       type: 'user',
       content: message,
+      timestamp: new Date().toISOString(),
       attachments,
     };
     setMessages((prev) => [...prev, userMessage]);
@@ -1389,6 +1415,100 @@ export function ChatContainer({
 
       console.error('[AGENT] Streaming execution error:', error);
 
+      const errorDetail = error instanceof Error ? error.message : 'Failed to execute agent';
+
+      // If an agent is already running (e.g. page was refreshed mid-execution),
+      // reconnect to it instead of showing an error.
+      if (typeof errorDetail === 'string' && errorDetail.includes('Another agent is running')) {
+        toast('Agent is still processing a previous request. Please wait for it to finish.', { duration: 4000 });
+        // Trigger reconnection by checking for the active task
+        try {
+          const activeTask = await chatApi.getActiveTask(
+            projectId.toString(),
+            currentChatId || undefined
+          );
+          if (activeTask?.task_id) {
+            agentTaskIdRef.current = activeTask.task_id;
+            // Add thinking placeholder
+            setMessages((prev) => [
+              ...prev.filter((m) => m.id !== thinkingMessageId),
+              {
+                id: `reconnect-${activeTask.task_id}`,
+                type: 'ai' as const,
+                content: '',
+                agentData: {
+                  steps: [],
+                  iterations: 0,
+                  tool_calls_made: 0,
+                  completion_reason: 'in_progress' as const,
+                },
+              },
+            ]);
+            // Keep agentExecuting=true so send is blocked; the finally
+            // block below is skipped via the early return.
+            const eventSource = chatApi.subscribeToTask(activeTask.task_id);
+            eventSource.onmessage = (event) => {
+              try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'agent_step') {
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const lastMsg = updated[updated.length - 1];
+                    if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                      lastMsg.agentData = {
+                        ...lastMsg.agentData,
+                        steps: [...(lastMsg.agentData.steps || []), data.data],
+                      };
+                    }
+                    return updated;
+                  });
+                } else if (data.type === 'complete' || data.type === 'done') {
+                  if (data.type === 'complete') {
+                    const finalContent = data.data?.final_response || '';
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                        lastMsg.content = finalContent;
+                        lastMsg.agentData = {
+                          ...lastMsg.agentData,
+                          completion_reason: data.data?.completion_reason || 'complete',
+                        };
+                      }
+                      return updated;
+                    });
+                  }
+                  eventSource.close();
+                  setAgentExecuting(false);
+                  agentTaskIdRef.current = null;
+                  refreshSessions();
+                } else if (data.type === 'error') {
+                  const errMsg = data.data?.message || 'Agent execution failed';
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const lastMsg = updated[updated.length - 1];
+                    if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                      lastMsg.content = errMsg;
+                      lastMsg.agentData = { ...lastMsg.agentData, completion_reason: 'error' };
+                    }
+                    return updated;
+                  });
+                  eventSource.close();
+                  setAgentExecuting(false);
+                  agentTaskIdRef.current = null;
+                }
+              } catch { /* ignore parse errors */ }
+            };
+            eventSource.onerror = () => {
+              eventSource.close();
+              setAgentExecuting(false);
+              agentTaskIdRef.current = null;
+            };
+            return; // Skip the finally block — agentExecuting stays true
+          }
+        } catch { /* fallback to normal error display */ }
+      }
+
       // Remove thinking message and add error message
       setMessages((prev) => {
         const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
@@ -1403,7 +1523,6 @@ export function ChatContainer({
         ];
       });
 
-      const errorDetail = error instanceof Error ? error.message : 'Failed to execute agent';
       toast.error(errorDetail, {
         duration: 5000,
       });
@@ -1518,6 +1637,19 @@ export function ChatContainer({
     const session = sessions.find((s) => s.id === currentChatId);
     return session?.title || 'Untitled';
   }, [currentChatId, sessions]);
+
+  // Find the last user message ID for the retry button
+  const lastUserMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].type === 'user') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
+  const handleRetryMessage = (content: string) => {
+    if (agentExecuting || isStreaming) return;
+    handleSendMessage(content);
+  };
 
   const handleApprovalResponse = async (
     approvalId: string,
@@ -1989,6 +2121,7 @@ export function ChatContainer({
             }
 
             // Render regular messages
+            const isLastUser = message.id === lastUserMessageId;
             return (
               <div
                 key={message.id}
@@ -2002,6 +2135,9 @@ export function ChatContainer({
                   attachments={message.attachments}
                   toolCalls={message.toolCalls}
                   actions={message.actions}
+                  timestamp={message.timestamp}
+                  showRetry={isLastUser && !agentExecuting && !isStreaming}
+                  onRetry={isLastUser ? () => handleRetryMessage(message.content) : undefined}
                 />
               </div>
             );
