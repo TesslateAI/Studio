@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import PlatformIdentity, User
-from ..users import current_active_user
+from ..users import current_active_user, current_superuser
 
 router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ async def gateway_status():
 
 
 @router.post("/reload")
-async def gateway_reload(user: User = Depends(current_active_user)):
+async def gateway_reload(user: User = Depends(current_superuser)):
     """Signal the gateway process to reload configurations."""
     try:
         from ..services.cache_service import get_redis_client

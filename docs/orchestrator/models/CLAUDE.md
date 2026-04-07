@@ -71,10 +71,11 @@
 **Chat** (models.py)
 - Purpose: Conversation threads with AI agents, supports multi-session per project
 - Key fields: `user_id`, `project_id`, `title`, `origin`, `status`, `created_at`, `updated_at`
-- `origin`: Where the chat was initiated from ("browser", "api", "slack", "cli")
-- `status`: Session lifecycle ("active", "running", "completed")
+- `origin`: Where the chat was initiated from ("browser", "api", "slack", "cli", "gateway")
+- `status`: Session lifecycle ("active", "running", "completed", "archived")
+- Gateway session fields (NULL for browser-origin chats): `session_key` (unique, indexed), `platform` (telegram/discord/slack/etc.), `platform_chat_id`, `platform_thread_id`, `channel_config_id` (FK channel_configs), `last_active_at`, `idle_timeout_minutes`
 - Related: Messages (one-to-many), AgentSteps
-- Index: Composite on (user_id, project_id)
+- Index: Composite on (user_id, project_id); unique index on session_key
 
 **Message** (models.py)
 - Purpose: Individual messages in chat (user or assistant)
@@ -239,7 +240,10 @@
 ### Channel & MCP Models
 **ChannelConfig** (models.py)
 - Purpose: Messaging channel configurations (Telegram, Slack, Discord, WhatsApp)
-- Key fields: `user_id`, `project_id`, `channel_type`, `name`, `credentials` (Fernet-encrypted), `webhook_secret`, `default_agent_id`, `is_active`
+- Key fields: `user_id`, `project_id`, `channel_type`, `name`, `credentials` (Fernet-encrypted), `webhook_secret`, `default_agent_id`, `is_active`, `gateway_shard` (int, default 0)
+- `project_id`: FK to projects (SET NULL on delete), indexed. Links channel to a specific project for gateway routing.
+- `default_agent_id`: FK to marketplace_agents (SET NULL on delete). Agent used for inbound messages when no agent is specified.
+- `gateway_shard`: Assigns this config to a specific gateway shard for load distribution.
 - Related: User, Project, MarketplaceAgent (default agent)
 
 **ChannelMessage** (models.py)
@@ -256,6 +260,23 @@
 - Purpose: Tracks which MCP servers are attached to which agents per user
 - Key fields: `agent_id`, `mcp_config_id`, `user_id`, `enabled`, `added_at`
 - Unique constraint: (agent_id, mcp_config_id, user_id)
+
+### Gateway & Scheduling Models
+
+**PlatformIdentity** (models.py)
+- Purpose: Links a messaging platform user to a Tesslate user for gateway authentication
+- Key fields: `user_id` (FK users, CASCADE, nullable — NULL until paired), `platform` (telegram/discord/slack/etc.), `platform_user_id`, `platform_username`, `is_verified`, `pairing_code` (8-char, nullable), `pairing_expires_at`, `paired_at`, `created_at`
+- Unique constraint: (platform, platform_user_id)
+- Pairing flow: Gateway creates unverified record with code → user enters code in Settings → code verified, `user_id` set, `is_verified=True`
+- Related: User (backref `platform_identities`)
+
+**AgentSchedule** (models.py)
+- Purpose: Cron-scheduled agent tasks dispatched by the gateway process's CronScheduler
+- Key fields: `user_id` (FK users, CASCADE), `project_id` (FK projects, CASCADE), `agent_id` (FK marketplace_agents, SET NULL, nullable), `name`, `cron_expression` (original input), `normalized_cron` (5-field cron), `prompt_template` (Text), `timezone` (default "UTC")
+- Delivery routing: `deliver` (default "origin"), `origin_platform`, `origin_chat_id`, `origin_config_id`
+- Lifecycle: `is_active` (bool), `repeat` (int, NULL=forever), `runs_completed`, `last_run_at`, `next_run_at` (indexed), `last_task_id`, `last_status`, `last_error`
+- Timestamps: `created_at`, `updated_at`
+- Related: User (backref `agent_schedules`), Project (backref `agent_schedules`)
 
 ### Team & RBAC Models (models_team.py)
 
@@ -594,7 +615,7 @@ external_endpoint, credentials_id, status, position_x, position_y
 
 ### Chat/Message Fields
 ```
-Chat: id, user_id, project_id, title, origin, status, created_at, updated_at
+Chat: id, user_id, project_id, title, origin, status, created_at, updated_at, session_key, platform, platform_chat_id, platform_thread_id, channel_config_id, last_active_at, idle_timeout_minutes
 Message: id, chat_id, role, content, message_metadata, created_at, updated_at
 AgentStep: id, message_id, chat_id, step_index, step_data (JSON), created_at
 ExternalAPIKey: id, user_id, key_hash, key_prefix, name, scopes, project_ids, is_active, expires_at, last_used_at
@@ -612,11 +633,17 @@ downloads, rating, reviews_count, usage_count
 
 ### Channel & MCP Fields
 ```
-ChannelConfig: id, user_id, project_id, channel_type, name, credentials (encrypted), webhook_secret, default_agent_id, is_active
+ChannelConfig: id, user_id, project_id, channel_type, name, credentials (encrypted), webhook_secret, default_agent_id, is_active, gateway_shard
 ChannelMessage: id, channel_config_id, direction, jid, sender_name, content, platform_message_id, task_id, status
 UserMcpConfig: id, user_id, marketplace_agent_id, credentials (encrypted), enabled_capabilities (JSON), is_active
 AgentMcpAssignment: id, agent_id, mcp_config_id, user_id, enabled, added_at
 AgentSkillAssignment: id, agent_id, skill_id, user_id, enabled, added_at
+```
+
+### Gateway & Scheduling Fields
+```
+PlatformIdentity: id, user_id, platform, platform_user_id, platform_username, is_verified, pairing_code, pairing_expires_at, paired_at, created_at
+AgentSchedule: id, user_id, project_id, agent_id, name, cron_expression, normalized_cron, prompt_template, timezone, deliver, origin_platform, origin_chat_id, origin_config_id, is_active, repeat, runs_completed, last_run_at, next_run_at, last_task_id, last_status, last_error, created_at, updated_at
 ```
 
 ### Team & RBAC Fields

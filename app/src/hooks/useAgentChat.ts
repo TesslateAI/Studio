@@ -522,7 +522,58 @@ export function useAgentChat({
               agentTaskIdRef.current = event.data.task_id as string;
             }
 
-            if (event.type === 'agent_step') {
+            if (event.type === 'tool_call') {
+              // Per-tool streaming — accumulate into ONE message per iteration
+              const tc = event.data || {};
+              const iterMsgId = `${thinkingMessageId}-iter-${tc.iteration}`;
+              const newTool = {
+                name: tc.name as string,
+                parameters: tc.parameters,
+                result: tc.result,
+              };
+
+              setMessages((prev) => {
+                const withoutThinking = prev.filter((m) => m.id !== thinkingMessageId);
+                const existingIdx = withoutThinking.findIndex((m) => m.id === iterMsgId);
+
+                if (existingIdx >= 0) {
+                  const existing = withoutThinking[existingIdx];
+                  const currentTools = existing.agentData?.steps?.[0]?.tool_calls || [];
+                  withoutThinking[existingIdx] = {
+                    ...existing,
+                    agentData: {
+                      ...existing.agentData!,
+                      steps: [
+                        {
+                          ...existing.agentData!.steps[0],
+                          tool_calls: [...currentTools, newTool],
+                        },
+                      ],
+                      tool_calls_made: currentTools.length + 1,
+                    },
+                  };
+                } else {
+                  withoutThinking.push({
+                    id: iterMsgId,
+                    type: 'ai',
+                    content: '',
+                    agentData: {
+                      steps: [{ tool_calls: [newTool] }],
+                      iterations: (tc.iteration as number) || 0,
+                      tool_calls_made: 1,
+                      completion_reason: 'tool_streaming',
+                    },
+                    agentIcon: agent.icon,
+                    agentAvatarUrl: agent.avatar_url,
+                    agentType: agent.name,
+                  });
+                }
+
+                return [...withoutThinking, { ...thinkingMessage, id: thinkingMessageId }];
+              });
+            } else if (event.type === 'agent_step') {
+              // Finalize iteration message with canonical data
+              const iterMsgId = `${thinkingMessageId}-iter-${event.data.iteration}`;
               const transformedStep = {
                 ...event.data,
                 tool_calls:
@@ -537,7 +588,7 @@ export function useAgentChat({
               delete transformedStep.tool_results;
 
               const stepMessage: ChatMessage = {
-                id: `msg-${crypto.randomUUID()}-step-${event.data.iteration}`,
+                id: iterMsgId,
                 type: 'ai',
                 content: '',
                 agentData: {
@@ -553,11 +604,13 @@ export function useAgentChat({
 
               setMessages((prev) => {
                 const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
-                return [
-                  ...withoutThinking,
-                  stepMessage,
-                  { ...thinkingMessage, id: thinkingMessageId },
-                ];
+                const existingIdx = withoutThinking.findIndex((m) => m.id === iterMsgId);
+                if (existingIdx >= 0) {
+                  withoutThinking[existingIdx] = stepMessage;
+                } else {
+                  withoutThinking.push(stepMessage);
+                }
+                return [...withoutThinking, { ...thinkingMessage, id: thinkingMessageId }];
               });
             } else if (event.type === 'complete') {
               setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
@@ -667,6 +720,36 @@ export function useAgentChat({
                   toolDescription: event.data.tool_description as string,
                 };
                 setMessages((prev) => [...prev, approvalMessage]);
+              }
+            } else if (event.type === 'text_delta') {
+              const delta = (event.data?.content as string) || '';
+              if (delta) {
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  // Find the last non-thinking message
+                  const nonThinking = updated.filter((m) => m.id !== thinkingMessageId);
+                  const lastMsg = nonThinking[nonThinking.length - 1];
+                  if (lastMsg && lastMsg.type === 'ai' && !lastMsg.agentData?.steps?.length) {
+                    const idx = updated.indexOf(lastMsg);
+                    updated[idx] = { ...lastMsg, content: (lastMsg.content || '') + delta };
+                  } else {
+                    const streamMsg: ChatMessage = {
+                      id: `${thinkingMessageId}-stream`,
+                      type: 'ai',
+                      content: delta,
+                      agentIcon: agent.icon,
+                      agentAvatarUrl: agent.avatar_url,
+                      agentType: agent.name,
+                    };
+                    const thinkingIdx = updated.findIndex((m) => m.id === thinkingMessageId);
+                    if (thinkingIdx >= 0) {
+                      updated.splice(thinkingIdx, 0, streamMsg);
+                    } else {
+                      updated.push(streamMsg);
+                    }
+                  }
+                  return updated;
+                });
               }
             }
           },

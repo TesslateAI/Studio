@@ -186,6 +186,17 @@ POST /api/deployments → routers/deployments.py
   └─> Provider auto-deploys → Returns live URL
 ```
 
+### 5. Gateway (Communication Protocol v2)
+```
+POST /api/gateway/status → routers/gateway.py
+Gateway runner → services/gateway/runner.py
+  ├─ Hot-reload adapters via Redis pub/sub
+  ├─ Platform adapters (Telegram, Discord, Slack, WhatsApp, Signal, CLI)
+  ├─ Identity pairing (link platform accounts)
+  ├─ Cron scheduler (timezone-aware)
+  └─ Delivery stream (Redis XREADGROUP for response routing)
+```
+
 ## Directory Structure
 
 ```
@@ -236,6 +247,10 @@ tesslate-studio/
 │       │   │   ├── whatsapp.py             # WhatsApp
 │       │   │   ├── formatting.py           # Cross-platform message formatting
 │       │   │   └── registry.py             # Channel provider registry
+│       │   ├── gateway/                     # Communication Protocol v2
+│       │   │   ├── runner.py               # Gateway process (persistent platform connections)
+│       │   │   ├── scheduler.py            # Cron scheduler with timezone support
+│       │   │   └── schedule_parser.py      # Natural language → cron expression
 │       │   ├── mcp/                        # Model Context Protocol
 │       │   │   ├── client.py               # MCP client for server communication
 │       │   │   ├── bridge.py               # Bridge MCP tools into agent tool registry
@@ -256,8 +271,10 @@ tesslate-studio/
 │               │   ├── fetch.py      # HTTP requests for web content
 │               │   ├── send_message.py # Send messages via channels (Discord, etc.)
 │               │   └── providers.py  # Search provider implementations
-│               └── skill_ops/        # Skill operations
-│                   └── load_skill.py # Load skill instructions at runtime
+│               ├── skill_ops/        # Skill operations
+│               │   └── load_skill.py # Load skill instructions at runtime
+│               └── schedule_ops/     # Schedule operations
+│                   └── manage_schedule.py # Agent tool for cron schedule management
 │
 ├── app/                      # React frontend
 │   └── src/
@@ -365,6 +382,8 @@ tesslate-studio/
 - **ProjectMembership**: User ↔ Project role override (editor/viewer), granted_by_id
 - **TeamInvitation**: Email + link invites, token, expiry, max_uses, use_count
 - **AuditLog**: Team + project scoped event trail, action, resource_type, details JSON
+- **PlatformIdentity**: Platform account linking for gateway (user_id nullable for unlinked)
+- **AgentSchedule**: Cron schedules with timezone, repeat count, delivery target
 
 ## Agent Tools (orchestrator/app/agent/tools/)
 
@@ -382,6 +401,7 @@ tesslate-studio/
 | `metadata.py` | Query project info |
 | `project_control.py` | Container lifecycle control (status, restart, logs, health) |
 | `kanban.py` | Kanban board management (create/move/update tasks by TSK-NNNN ref, columns, comments) |
+| `schedule_ops/manage_schedule.py` | Manage cron schedules (create/update/delete/pause/resume) |
 
 ## Documentation Knowledge Graph
 
@@ -477,6 +497,8 @@ Each `CLAUDE.md` file contains:
 | Container lifecycle tool | `docs/orchestrator/agent/tools/project-control.md` |
 | Kanban agent tool | `docs/orchestrator/agent/kanban-agent-tool.md` |
 | Teams & RBAC | `docs/orchestrator/routers/CLAUDE.md` → teams.py, `orchestrator/app/permissions.py` |
+| Gateway / messaging channels | `docs/orchestrator/routers/CLAUDE.md` → gateway.py, schedules.py |
+| Agent scheduling | `docs/orchestrator/agent/tools/CLAUDE.md` → schedule_ops |
 
 ## Deployment Modes
 
@@ -551,6 +573,17 @@ channel_encryption_key: str        # Fernet key for channel credential encryptio
 mcp_tool_cache_ttl: int            # MCP tool schema cache TTL in seconds (300)
 mcp_tool_timeout: int              # MCP tool call timeout in seconds (30)
 mcp_max_servers_per_user: int      # Max installed MCP servers per user (20)
+
+# Gateway (Communication Protocol v2)
+gateway_enabled: bool              # Enable gateway process (False)
+gateway_shard: str                 # Shard identifier for multi-instance gateway
+gateway_tick_interval: int         # Scheduler tick interval in seconds
+gateway_session_idle_minutes: int  # Idle timeout for gateway sessions
+gateway_voice_transcription: bool  # Enable voice message transcription
+
+# Agent
+compaction_summary_model: str      # Cheap model for context summarization
+default_thinking_effort: str       # Extended thinking effort for supported models
 ```
 
 #### Minikube vs Production Config

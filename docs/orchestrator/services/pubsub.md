@@ -319,3 +319,74 @@ In K8s, multiple backend replicas each run their own subscriber. The pattern sub
 1. Verify the signal was set: `redis-cli GET tesslate:agent:cancel:{task_id}`
 2. Check the worker is polling for cancellation on each iteration
 3. Confirm the task_id matches between the cancel request and the running task
+
+## Subsystem 4: Gateway Delivery Stream
+
+Durable stream for routing agent responses back to the originating messaging platform (Telegram, Discord, Slack, etc.). Used by the gateway process to deliver agent output after task completion.
+
+### Stream Key
+
+```
+tesslate:gateway:deliveries
+```
+
+Configurable via `settings.gateway_delivery_stream`. Capped at `settings.gateway_delivery_maxlen` (default: 10,000 entries).
+
+### Consumer Group Pattern
+
+Uses `XREADGROUP` for reliable, exactly-once processing across gateway shards:
+
+```
+Consumer group: gateway-shard-{shard}
+Consumer name:  consumer-{pid}
+```
+
+Each gateway shard creates its own consumer group and reads with `>` (new messages only). Messages are acknowledged with `XACK` after successful delivery.
+
+### Message Fields
+
+| Field | Purpose |
+|-------|---------|
+| `config_id` | ChannelConfig UUID — identifies which adapter to use |
+| `session_key` | Session key (format: `platform:chat_type:chat_id[:thread_id]`) |
+| `response` | Agent response text to deliver |
+| `task_id` | Agent task ID for audit logging |
+
+### Writing Deliveries
+
+The worker publishes deliveries after agent task completion when `gateway_deliver` is set on the task payload:
+
+```python
+await redis.xadd(
+    settings.gateway_delivery_stream,
+    {"config_id": config_id, "session_key": key, "response": text, "task_id": task_id},
+    maxlen=settings.gateway_delivery_maxlen,
+)
+```
+
+### Reading Deliveries (Gateway Process)
+
+```python
+entries = await redis.xreadgroup(
+    group, consumer, {stream: ">"}, count=10, block=5000
+)
+for stream_name, messages in entries:
+    for msg_id, data in messages:
+        await process_delivery(data)
+        await redis.xack(stream, group, msg_id)
+```
+
+### Related Redis Keys
+
+| Key | Purpose | TTL |
+|-----|---------|-----|
+| `tesslate:gateway:status` | Gateway shard heartbeat (JSON) | 120s |
+| `tesslate:gateway:active:{config_id}` | Per-adapter liveness | 60s |
+| `tesslate:gateway:reload` | Pub/Sub channel for hot-reload signal | N/A |
+
+### Troubleshooting
+
+1. Check the stream exists and has entries: `redis-cli XLEN tesslate:gateway:deliveries`
+2. Check consumer group info: `redis-cli XINFO GROUPS tesslate:gateway:deliveries`
+3. Check pending (unacked) messages: `redis-cli XPENDING tesslate:gateway:deliveries gateway-shard-0`
+4. Verify the gateway process is running: `redis-cli GET tesslate:gateway:status`

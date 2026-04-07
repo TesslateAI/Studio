@@ -348,6 +348,42 @@ class TelegramChannel(GatewayAdapter):
             },
         )
 
+    async def send_status(
+        self, chat_id: str, text: str, message_id: str | None = None
+    ) -> str | None:
+        """Send or update an in-place status message."""
+        if message_id:
+            result = await self._api_call(
+                "editMessageText",
+                {
+                    "chat_id": chat_id,
+                    "message_id": int(message_id),
+                    "text": text,
+                    "parse_mode": "HTML",
+                },
+            )
+            return message_id
+        result = await self._api_call(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_notification": True,
+            },
+        )
+        if result.get("ok") and result.get("result"):
+            return str(result["result"]["message_id"])
+        return None
+
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        """Delete a message via Telegram Bot API."""
+        result = await self._api_call(
+            "deleteMessage",
+            {"chat_id": chat_id, "message_id": int(message_id)},
+        )
+        return result.get("ok", False)
+
     async def send_pool_message(
         self, jid: str, text: str, sender: str, group_id: str
     ) -> dict[str, Any]:

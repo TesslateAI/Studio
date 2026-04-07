@@ -193,7 +193,7 @@ class SignalChannel(GatewayAdapter):
                 if recipient.startswith("+"):
                     payload["recipients"] = [recipient]
                 else:
-                    payload["recipients"] = [recipient]
+                    payload["groupId"] = recipient
 
                 resp = await client.post(
                     f"{self.signal_cli_url}/v2/send",

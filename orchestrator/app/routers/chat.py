@@ -658,9 +658,7 @@ async def undo_last_exchange(
         raise HTTPException(status_code=404, detail="Chat not found")
 
     if chat.status in ("running", "waiting_approval"):
-        raise HTTPException(
-            status_code=409, detail="Cannot undo while the agent is running"
-        )
+        raise HTTPException(status_code=409, detail="Cannot undo while the agent is running")
 
     # Walk backwards from newest: find the last assistant, then the user before it
     msgs_result = await db.execute(
@@ -696,9 +694,7 @@ async def undo_last_exchange(
     # Bulk delete — AgentStep rows cascade via FK
     from sqlalchemy import delete as sql_delete
 
-    await db.execute(
-        sql_delete(Message).where(Message.id.in_([m.id for m in to_delete]))
-    )
+    await db.execute(sql_delete(Message).where(Message.id.in_([m.id for m in to_delete])))
     await db.commit()
 
     logger.info(
@@ -711,6 +707,126 @@ async def undo_last_exchange(
         "removed_count": len(to_delete),
         "removed_ids": removed_ids,
         "last_user_message": removed_user_content,
+    }
+
+
+@router.post("/{chat_id}/compact")
+async def compact_chat(
+    chat_id: str,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compact chat history by summarizing older messages.
+
+    Runs the ContextCompressor on the chat's message history, replaces
+    old messages with a summary, and returns the summary so the frontend
+    can clear and reload.
+    """
+    result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == current_user.id)
+    )
+    chat = result.scalar_one_or_none()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.status in ("running", "waiting_approval"):
+        raise HTTPException(status_code=409, detail="Cannot compact while the agent is running")
+
+    # Load all messages ordered chronologically
+    msgs_result = await db.execute(
+        select(Message).where(Message.chat_id == chat.id).order_by(Message.created_at.asc())
+    )
+    all_msgs = list(msgs_result.scalars().all())
+
+    if len(all_msgs) < 6:
+        return {"success": False, "detail": "Not enough messages to compact"}
+
+    # Build LLM message format
+    llm_messages = []
+    for msg in all_msgs:
+        if not msg.content or msg.role not in ("user", "assistant"):
+            continue
+        llm_messages.append({"role": msg.role, "content": msg.content})
+
+    if len(llm_messages) < 6:
+        return {"success": False, "detail": "Not enough messages to compact"}
+
+    # Run compressor
+    from ..agent.compaction import ContextCompressor
+    from ..agent.models import OpenAIAdapter
+
+    # Create a cheap LiteLLM-backed adapter for summarization
+    from ..config import get_settings
+
+    settings = get_settings()
+    compaction_model = settings.compaction_summary_model or settings.default_model
+
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(
+        api_key=settings.litellm_master_key or "na",
+        base_url=settings.litellm_api_base or "http://localhost:4000",
+    )
+    adapter = OpenAIAdapter(model_name=compaction_model, client=client, temperature=0.3)
+
+    compressor = ContextCompressor(
+        model_adapter=adapter,
+        context_window=128_000,
+        threshold=0.0,  # force compression regardless of size
+    )
+
+    try:
+        compressed = await compressor.compress(llm_messages)
+    except Exception as e:
+        logger.error("[CHAT] Compact failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Compaction failed: {e}") from e
+
+    # Find the summary message in compressed output
+    from ..agent.compaction import SUMMARY_PREFIX
+
+    summary_content = ""
+    for m in compressed:
+        if isinstance(m.get("content"), str) and m["content"].startswith(SUMMARY_PREFIX):
+            summary_content = m["content"]
+            break
+
+    if not summary_content:
+        return {"success": False, "detail": "Compressor did not produce a summary"}
+
+    # Delete all old messages except the most recent 2
+    from sqlalchemy import delete as sql_delete
+
+    keep_ids = {m.id for m in all_msgs[-2:]}
+    delete_ids = [m.id for m in all_msgs if m.id not in keep_ids]
+
+    if delete_ids:
+        await db.execute(sql_delete(Message).where(Message.id.in_(delete_ids)))
+
+    # Insert summary as an assistant message before the kept messages
+    summary_msg = Message(
+        chat_id=chat.id,
+        role="assistant",
+        content=summary_content,
+    )
+    db.add(summary_msg)
+    await db.commit()
+
+    before_count = len(all_msgs)
+    after_count = 3  # summary + 2 kept
+
+    logger.info(
+        "[CHAT] Compact: %d → %d messages in chat %s, user %s",
+        before_count,
+        after_count,
+        chat_id,
+        current_user.id,
+    )
+
+    return {
+        "success": True,
+        "before_count": before_count,
+        "after_count": after_count,
+        "summary": summary_content,
     }
 
 

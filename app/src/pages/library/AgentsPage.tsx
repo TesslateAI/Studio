@@ -2,17 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Package,
-  Pencil,
   Power,
   Rocket,
   Plus,
   Trash,
-  File,
-  FileText,
-  FilePlus,
-  Terminal,
-  Globe,
-  ListChecks,
   Wrench,
   Storefront,
   CaretDown,
@@ -51,28 +44,6 @@ import { FEATURE_FLAGS } from './types';
 
 // Re-export types for convenience
 export type { LibraryAgent } from './types';
-
-// Tool icon mapping helper
-const _getToolIcon = (toolName: string): { icon: React.ReactNode; label: string } | null => {
-  const toolIcons: Record<string, { icon: React.ReactNode; label: string }> = {
-    read_file: { icon: <File size={12} weight="fill" />, label: 'Read' },
-    write_file: { icon: <FilePlus size={12} weight="fill" />, label: 'Write' },
-    patch_file: { icon: <Pencil size={12} weight="fill" />, label: 'Patch' },
-    multi_edit: { icon: <FileText size={12} weight="fill" />, label: 'Multi-Edit' },
-    bash_exec: { icon: <Terminal size={12} weight="fill" />, label: 'Bash' },
-    shell_open: { icon: <Terminal size={12} weight="fill" />, label: 'Shell Open' },
-    shell_exec: { icon: <Terminal size={12} weight="fill" />, label: 'Shell' },
-    shell_close: { icon: <Terminal size={12} weight="fill" />, label: 'Shell Close' },
-    get_project_info: { icon: <Package size={12} weight="fill" />, label: 'Project Info' },
-    todo_read: { icon: <ListChecks size={12} weight="fill" />, label: 'Todo Read' },
-    todo_write: { icon: <ListChecks size={12} weight="fill" />, label: 'Todo Write' },
-    save_plan: { icon: <ListChecks size={12} weight="fill" />, label: 'Save Plan' },
-    update_plan: { icon: <ListChecks size={12} weight="fill" />, label: 'Update Plan' },
-    apply_patch: { icon: <FileText size={12} weight="fill" />, label: 'Apply Patch' },
-    web_fetch: { icon: <Globe size={12} weight="fill" />, label: 'Web Fetch' },
-  };
-  return toolIcons[toolName] || null;
-};
 
 // Category-to-icon mapping for skills
 const SKILL_CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -878,6 +849,15 @@ function EditAgentModal({
     ...(agent.config?.features || {}),
   });
 
+  // Advanced config
+  const [compactionModel, setCompactionModel] = useState(
+    (agent.config?.compaction_model as string) || ''
+  );
+  const DEFAULT_CONTEXT_WINDOW = 128000;
+  const [contextWindow, setContextWindow] = useState(
+    (agent.config?.context_window as number) || DEFAULT_CONTEXT_WINDOW
+  );
+
   // Subagents state
   const [subagents, setSubagents] = useState<SubagentItem[]>([]);
   const [subagentsExpanded, setSubagentsExpanded] = useState(false);
@@ -1086,7 +1066,13 @@ function EditAgentModal({
       tools,
       tool_configs: toolConfigs,
       avatar_url: avatarUrl,
-      config: { features },
+      config: {
+        features,
+        ...(compactionModel ? { compaction_model: compactionModel } : {}),
+        ...(contextWindow && contextWindow !== DEFAULT_CONTEXT_WINDOW
+          ? { context_window: contextWindow }
+          : {}),
+      },
     });
   };
 
@@ -1223,6 +1209,58 @@ function EditAgentModal({
                   </button>
                 </div>
               ))}
+
+            {/* Compaction model — uses same ModelSelector, defaults to agent's model */}
+            {agent.agent_type === 'TesslateAgent' && (
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] text-[var(--text-subtle)] w-14 flex-shrink-0">
+                  Compact
+                </span>
+                <div className="flex-1">
+                  <ModelSelector
+                    currentAgent={{
+                      id: agent.id,
+                      name: agent.name,
+                      icon: agent.icon || '',
+                      model: agent.model,
+                      selectedModel: compactionModel || model,
+                      sourceType: agent.source_type,
+                      isCustom: agent.is_custom,
+                    }}
+                    onModelChange={setCompactionModel}
+                    dropUp={false}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Context window — editable number, preset by model default */}
+            {agent.agent_type === 'TesslateAgent' && (
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] text-[var(--text-subtle)] w-14 flex-shrink-0">
+                  Context
+                </span>
+                <div className="flex-1 flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={contextWindow}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      setContextWindow(
+                        isNaN(v) ? DEFAULT_CONTEXT_WINDOW : Math.max(1000, Math.min(v, 2000000))
+                      );
+                    }}
+                    min={1000}
+                    max={2000000}
+                    step={1000}
+                    className="flex-1 text-[12px] px-2 py-1 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[10px] text-[var(--text-muted)] whitespace-nowrap">
+                    {(contextWindow / 1000).toFixed(0)}K
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

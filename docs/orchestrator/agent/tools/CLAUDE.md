@@ -49,6 +49,11 @@ This context provides information about Tesslate Studio's agent tool system, inc
   - `load_skill.py` - load_skill (loads full skill instructions on-demand from DB or project files)
   - **Progressive disclosure**: Only skill name + description are included in the system prompt; the agent calls `load_skill` to fetch the full instruction body when needed
 
+- `orchestrator/app/agent/tools/schedule_ops/` - Schedule management (1 tool)
+  - `manage_schedule.py` - manage_schedule (create, list, update, pause, resume, trigger, delete cron-scheduled agent tasks)
+  - **Actions**: 7 actions via single tool — `create` (natural language or cron), `list`, `update`, `pause`, `resume`, `trigger` (immediate test run), `delete`
+  - **Context**: Uses `user_id` and `project_id` from execution context; delegates to `schedule_parser.parse_schedule()` for NL→cron conversion
+
 ### View-Scoped Tools
 - `orchestrator/app/agent/tools/view_scoped_factory.py` - Create view-specific tool registries
 - `orchestrator/app/agent/tools/view_scoped_registry.py` - ViewScopedToolRegistry class
@@ -64,6 +69,7 @@ This context provides information about Tesslate Studio's agent tool system, inc
 | **Planning Operations** | 2 | `planning_ops/todos.py` |
 | **Web Operations** | 3 | `web_ops/fetch.py`, `web_ops/search.py`, `web_ops/send_message.py` |
 | **Skill Operations** | 1 | `skill_ops/load_skill.py` |
+| **Schedule Operations** | 1 | `schedule_ops/manage_schedule.py` |
 | **Graph Operations** | 9 | `graph_ops/containers.py`, `graph_ops/grid.py`, `graph_ops/shell.py` |
 
 ## Related Contexts
@@ -74,6 +80,7 @@ This context relates to:
 - **Chat Router** (`orchestrator/app/routers/chat.py`) - Tool execution endpoint
 - **Skill Discovery** (`orchestrator/app/services/skill_discovery.py`) - Discovers available skills for the `load_skill` tool
 - **Channel Service** (`orchestrator/app/services/channels/`) - Channel implementations used by `send_message` reply channel
+- **Gateway Service** (`orchestrator/app/services/gateway/`) - Schedule parser and scheduler used by `manage_schedule` tool
 - **MCP Service** (`orchestrator/app/services/mcp/`) - MCP tools dynamically registered on agent before task execution
 
 ## Quick Reference
@@ -210,3 +217,7 @@ Load this context when:
    - Adding new send_message channels
    - Debugging channel reply delivery
    - Understanding the reply channel flow (Telegram, Slack, Discord, WhatsApp)
+
+9. **Agent Schedules**
+   - Creating or managing cron-scheduled agent tasks via the manage_schedule tool
+   - Debugging schedule parsing (natural language → cron) or schedule lifecycle

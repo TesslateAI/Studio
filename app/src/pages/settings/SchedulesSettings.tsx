@@ -47,13 +47,14 @@ function formatDate(dateString: string | null): string {
 }
 
 function getStatusBadge(status: string | null): { label: string; className: string } {
-  if (!status) return { label: 'Never run', className: 'bg-white/5 text-[var(--text-subtle)]' };
+  if (!status)
+    return { label: 'Never run', className: 'bg-[var(--surface-hover)] text-[var(--text-subtle)]' };
   if (status === 'success')
     return { label: 'Success', className: 'bg-green-500/10 text-green-400' };
   if (status === 'failed' || status === 'error')
     return { label: 'Failed', className: 'bg-red-500/10 text-red-400' };
   if (status === 'running') return { label: 'Running', className: 'bg-blue-500/10 text-blue-400' };
-  return { label: status, className: 'bg-white/5 text-[var(--text-subtle)]' };
+  return { label: status, className: 'bg-[var(--surface-hover)] text-[var(--text-subtle)]' };
 }
 
 export default function SchedulesSettings() {
@@ -128,7 +129,7 @@ export default function SchedulesSettings() {
     try {
       await schedulesApi.create({
         name: formName.trim(),
-        schedule_expression: formExpression.trim(),
+        schedule: formExpression.trim(),
         prompt_template: formPrompt.trim(),
         deliver: formDeliver,
         project_id: formProjectId,
@@ -227,7 +228,7 @@ export default function SchedulesSettings() {
           <select
             value={selectedProjectId}
             onChange={(e) => setSelectedProjectId(e.target.value)}
-            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+            className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
           >
             <option value="">All projects</option>
             {projects.map((p) => (
@@ -284,7 +285,7 @@ export default function SchedulesSettings() {
                               {schedule.runs_completed !== 1 ? 's' : ''} completed
                             </span>
                             <span className="capitalize">{projectName(schedule.project_id)}</span>
-                            <span className="px-2 py-0.5 bg-white/5 text-[var(--text-subtle)] rounded text-[10px]">
+                            <span className="px-2 py-0.5 bg-[var(--surface-hover)] text-[var(--text-subtle)] rounded text-[10px]">
                               {schedule.deliver}
                             </span>
                           </div>
@@ -379,7 +380,7 @@ export default function SchedulesSettings() {
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     placeholder="e.g., Daily status report"
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                     maxLength={100}
                   />
                 </div>
@@ -394,7 +395,7 @@ export default function SchedulesSettings() {
                     value={formExpression}
                     onChange={(e) => setFormExpression(e.target.value)}
                     placeholder="e.g., daily at 9am or 0 9 * * *"
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                   />
                   <p className="text-[11px] text-[var(--text-subtle)] mt-1">
                     Accepts natural language like &quot;daily at 9am&quot; or standard cron
@@ -412,7 +413,7 @@ export default function SchedulesSettings() {
                     onChange={(e) => setFormPrompt(e.target.value)}
                     placeholder="What should the agent do on each run?"
                     rows={4}
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-y"
+                    className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-y"
                   />
                 </div>
 
@@ -424,7 +425,7 @@ export default function SchedulesSettings() {
                   <select
                     value={formDeliver}
                     onChange={(e) => setFormDeliver(e.target.value)}
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                   >
                     <option value="origin">Origin (in-app)</option>
                     <option value="telegram">Telegram</option>
@@ -441,7 +442,7 @@ export default function SchedulesSettings() {
                   <select
                     value={formProjectId}
                     onChange={(e) => setFormProjectId(e.target.value)}
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                   >
                     <option value="">Select a project</option>
                     {projects.map((p) => (

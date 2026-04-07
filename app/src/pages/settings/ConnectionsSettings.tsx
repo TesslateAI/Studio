@@ -21,14 +21,19 @@ import { ConfirmDialog } from '../../components/modals/ConfirmDialog';
 interface Identity {
   id: string;
   platform: string;
-  username: string;
-  paired_at: string;
+  platform_user_id: string;
+  platform_username: string | null;
+  is_verified: boolean;
+  paired_at: string | null;
+  created_at: string;
 }
 
 interface GatewayStatus {
-  online: boolean;
-  adapter_count: number;
-  active_sessions: number;
+  shard: number | null;
+  adapters: number | null;
+  active_sessions: number | null;
+  heartbeat: string | null;
+  status: string;
 }
 
 interface Platform {
@@ -133,7 +138,7 @@ export default function ConnectionsSettings() {
     setConfirmDialog({
       isOpen: true,
       title: `Unlink ${identity.platform}`,
-      message: `This will disconnect "${identity.username}" on ${identity.platform}. You will need to re-pair to restore the connection.`,
+      message: `This will disconnect "${identity.platform_username}" on ${identity.platform}. You will need to re-pair to restore the connection.`,
       confirmText: 'Unlink',
       variant: 'danger',
       onConfirm: async () => {
@@ -171,7 +176,7 @@ export default function ConnectionsSettings() {
         <SettingsGroup title="Gateway Status">
           <div className="p-4">
             <div className="flex items-center gap-3 mb-4">
-              {status?.online ? (
+              {status?.status === 'online' ? (
                 <div className="flex items-center gap-2 text-[var(--status-success)]">
                   <Wifi size={18} />
                   <span className="text-sm font-medium">Online</span>
@@ -186,9 +191,7 @@ export default function ConnectionsSettings() {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-3 bg-[var(--bg)] rounded-lg border border-[var(--border)]">
                 <p className="text-[11px] text-[var(--text-muted)] mb-1">Adapters</p>
-                <p className="text-lg font-semibold text-[var(--text)]">
-                  {status?.adapter_count ?? 0}
-                </p>
+                <p className="text-lg font-semibold text-[var(--text)]">{status?.adapters ?? 0}</p>
               </div>
               <div className="p-3 bg-[var(--bg)] rounded-lg border border-[var(--border)]">
                 <p className="text-[11px] text-[var(--text-muted)] mb-1">Active Sessions</p>
@@ -211,7 +214,7 @@ export default function ConnectionsSettings() {
                 <select
                   value={selectedPlatform}
                   onChange={(e) => setSelectedPlatform(e.target.value)}
-                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                 >
                   <option value="">Select a platform</option>
                   {platforms.map((p) => (
@@ -230,7 +233,7 @@ export default function ConnectionsSettings() {
                   value={pairingCode}
                   onChange={(e) => setPairingCode(e.target.value)}
                   placeholder="Enter the code from your platform"
-                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                 />
               </div>
               <button
@@ -288,10 +291,12 @@ export default function ConnectionsSettings() {
                         </h4>
                       </div>
                       <p className="text-xs text-[var(--text-muted)] truncate">
-                        {identity.username}
+                        {identity.platform_username}
                       </p>
                       <p className="text-[11px] text-[var(--text-subtle)] mt-0.5">
-                        Paired {formatDate(identity.paired_at)}
+                        {identity.paired_at
+                          ? `Paired ${formatDate(identity.paired_at)}`
+                          : 'Not paired'}
                       </p>
                     </div>
                   </div>

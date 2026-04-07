@@ -312,6 +312,33 @@ class DiscordBotChannel(GatewayAdapter):
             },
         )
 
+    async def send_status(
+        self, chat_id: str, text: str, message_id: str | None = None
+    ) -> str | None:
+        """Send or update an in-place status message."""
+        if message_id:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.patch(
+                    f"{DISCORD_API}/channels/{chat_id}/messages/{message_id}",
+                    headers={
+                        "Authorization": f"Bot {self.bot_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"content": text},
+                )
+            return message_id
+        result = await self.send_message(chat_id, text)
+        return result.get("platform_message_id")
+
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        """Delete a message via Discord API."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(
+                f"{DISCORD_API}/channels/{chat_id}/messages/{message_id}",
+                headers={"Authorization": f"Bot {self.bot_token}"},
+            )
+            return resp.status_code == 204
+
     async def set_typing(self, jid: str, on: bool = True) -> None:
         """Send typing indicator via Discord API."""
         if not on:

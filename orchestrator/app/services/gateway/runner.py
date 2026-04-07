@@ -14,6 +14,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import redis.exceptions
+
 logger = logging.getLogger(__name__)
 
 _PENDING_SENTINEL = object()
@@ -34,7 +36,7 @@ class GatewayRunner:
         self._failed_timestamps: dict[str, float] = {}  # config_id → last failure time
         self._running = False
         self._shutdown_event = asyncio.Event()
-        self._background_tasks: list[asyncio.Task] = []
+        self._background_tasks: set[asyncio.Task] = set()
         self._redis = None
         self._arq_pool = None
         self._db_factory = None
@@ -58,20 +60,20 @@ class GatewayRunner:
         await self._sync_adapters()
 
         # Start background tasks
-        self._background_tasks = [
+        self._background_tasks = {
             asyncio.create_task(self._heartbeat()),
             asyncio.create_task(self._reconnect_watcher()),
             asyncio.create_task(self._delivery_consumer()),
             asyncio.create_task(self._session_reaper()),
             asyncio.create_task(self._media_cache_cleaner()),
             asyncio.create_task(self._reload_listener()),
-        ]
+        }
 
         # Start cron scheduler
         from .scheduler import CronScheduler
 
         scheduler = CronScheduler(lock_dir=settings.gateway_lock_dir)
-        self._background_tasks.append(
+        self._background_tasks.add(
             asyncio.create_task(
                 scheduler.run_loop(db_factory, arq_pool, interval=settings.gateway_tick_interval)
             )
@@ -189,7 +191,11 @@ class GatewayRunner:
                 if not adapter.supports_gateway:
                     continue
 
-                adapter.set_message_handler(self._handle_message)
+                async def _tagged_handler(event, _cid=config_id):
+                    event.config_id = _cid
+                    await self._handle_message(event)
+
+                adapter.set_message_handler(_tagged_handler)
                 if await adapter.connect():
                     self.adapters[config_id] = adapter
                     if self._redis:
@@ -271,7 +277,8 @@ class GatewayRunner:
             await self._process_message(event, key)
         except Exception:
             logger.exception("[GATEWAY] Error processing message for session %s", key)
-            del self._active_sessions[key]
+            self._active_sessions.pop(key, None)
+            self._pending_messages.pop(key, None)
 
     async def _process_message(self, event, session_key: str) -> None:
         """Resolve identity, find/create session, enqueue agent task."""
@@ -287,7 +294,7 @@ class GatewayRunner:
             config_id = self._find_config_id_for_event(event)
             if not config_id:
                 logger.warning("[GATEWAY] No config found for event on %s", event.source.platform)
-                del self._active_sessions[session_key]
+                self._active_sessions.pop(session_key, None)
                 return
 
             config = await db.scalar(
@@ -295,7 +302,7 @@ class GatewayRunner:
             )
             if not config or not config.project_id:
                 logger.warning("[GATEWAY] Config %s has no project", config_id)
-                del self._active_sessions[session_key]
+                self._active_sessions.pop(session_key, None)
                 return
 
             # 2. Resolve user — try linked identity first, fall back to config owner
@@ -329,7 +336,7 @@ class GatewayRunner:
                 text = await self._transcribe_voice(event)
 
             if not text:
-                del self._active_sessions[session_key]
+                self._active_sessions.pop(session_key, None)
                 return
 
             # 5. Store inbound audit
@@ -375,6 +382,13 @@ class GatewayRunner:
             await self._arq_pool.enqueue_job("execute_agent_task", payload.to_dict())
             self._active_sessions[session_key] = task_id
 
+            # Fire-and-forget stream watcher for real-time status
+            task = asyncio.create_task(
+                self._stream_watcher(task_id, config_id, event.source.chat_id, session_key)
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+
             logger.info(
                 "[GATEWAY] Enqueued task %s for session %s (user=%s)",
                 task_id,
@@ -384,10 +398,194 @@ class GatewayRunner:
 
     def _find_config_id_for_event(self, event) -> str | None:
         """Find the config_id of the adapter that produced this event."""
-        for config_id, adapter in self.adapters.items():
+        config_id = getattr(event, "config_id", None)
+        if config_id and config_id in self.adapters:
+            return config_id
+        for cid, adapter in self.adapters.items():
             if adapter.channel_type == event.source.platform:
-                return config_id
+                return cid
         return None
+
+    # ------------------------------------------------------------------
+    # Stream watcher — real-time tool status for messaging platforms
+    # ------------------------------------------------------------------
+
+    _TOOL_STATUS_MAP: dict[str, str] = {
+        "read_file": "\U0001f4c4 Reading {arg}...",
+        "write_file": "\u270f\ufe0f Writing {arg}...",
+        "patch_file": "\u270f\ufe0f Editing {arg}...",
+        "multi_edit": "\u270f\ufe0f Editing files...",
+        "bash_exec": "\u26a1 Running command...",
+        "shell_exec": "\u26a1 Running command...",
+        "shell_open": "\u26a1 Opening shell...",
+        "web_search": "\U0001f50d Searching the web...",
+        "web_fetch": "\U0001f310 Fetching URL...",
+        "get_project_info": "\U0001f4cb Checking project info...",
+        "todo_read": "\U0001f4dd Reading tasks...",
+        "todo_write": "\U0001f4dd Updating tasks...",
+        "send_message": "\U0001f4ac Sending message...",
+        "load_skill": "\U0001f9e9 Loading skill...",
+    }
+
+    async def _stream_watcher(
+        self, task_id: str, config_id: str, chat_id: str, session_key: str
+    ) -> None:
+        """Watch agent Redis stream and send real-time status to messaging platform.
+
+        Fire-and-forget task launched after ARQ enqueue. Subscribes to the
+        per-task agent event stream and sends lightweight status updates
+        (typing indicators + editable status messages) to the platform.
+
+        Self-terminates on complete/done/error or after TIMEOUT seconds.
+        Failure here must NOT prevent final delivery.
+        """
+        import json
+        import time
+
+        adapter = self.adapters.get(config_id)
+        if not adapter or not self._redis:
+            return
+
+        stream_key = f"tesslate:agent:stream:{task_id}"
+        status_message_id: str | None = None
+        last_status_time = 0.0
+        last_typing_time = 0.0
+        _MIN_STATUS_INTERVAL = 3.0  # rate-limit platform API calls
+        _TYPING_INTERVAL = 5.0
+        _TIMEOUT = 600  # 10 min matches worker_job_timeout
+
+        try:
+            # Immediate typing indicator
+            await adapter.set_typing(chat_id, on=True)
+            last_typing_time = time.monotonic()
+
+            last_id = "0-0"
+            start_time = time.monotonic()
+
+            while time.monotonic() - start_time < _TIMEOUT:
+                try:
+                    entries = await self._redis.xread({stream_key: last_id}, count=10, block=3000)
+                except Exception:
+                    break
+
+                if not entries:
+                    now = time.monotonic()
+                    if now - last_typing_time >= _TYPING_INTERVAL:
+                        await adapter.set_typing(chat_id, on=True)
+                        last_typing_time = now
+                    continue
+
+                for _stream_name, messages in entries:
+                    for msg_id, data in messages:
+                        last_id = msg_id
+
+                        raw = data.get(b"data") or data.get("data", b"{}")
+                        if isinstance(raw, bytes):
+                            raw = raw.decode()
+                        try:
+                            event = json.loads(raw)
+                        except Exception:
+                            continue
+
+                        event_type = event.get("type", "")
+
+                        # Terminal events — clean up and stop
+                        if event_type in ("complete", "done"):
+                            if status_message_id:
+                                with contextlib.suppress(Exception):
+                                    await adapter.delete_message(chat_id, status_message_id)
+                            return
+
+                        if event_type == "error":
+                            error_text = "\u274c Something went wrong"
+                            with contextlib.suppress(Exception):
+                                await adapter.send_status(chat_id, error_text, status_message_id)
+                            return
+
+                        # Per-tool streaming — update status immediately
+                        if event_type == "tool_call":
+                            tc_data = event.get("data", {})
+                            now = time.monotonic()
+                            if now - last_status_time >= _MIN_STATUS_INTERVAL:
+                                tc_name = tc_data.get("name", "")
+                                tc_params = tc_data.get("parameters", {})
+                                status_text = self._build_status_text(
+                                    [{"name": tc_name, "parameters": tc_params}]
+                                )
+                                if status_text:
+                                    with contextlib.suppress(Exception):
+                                        new_id = await adapter.send_status(
+                                            chat_id,
+                                            status_text,
+                                            status_message_id,
+                                        )
+                                        if new_id:
+                                            status_message_id = new_id
+                                        last_status_time = now
+
+                        # Agent step summary — extract tool calls for status
+                        elif event_type == "agent_step":
+                            step_data = event.get("data", {})
+                            tool_calls = step_data.get("tool_calls", [])
+
+                            if tool_calls:
+                                now = time.monotonic()
+                                if now - last_status_time >= _MIN_STATUS_INTERVAL:
+                                    status_text = self._build_status_text(tool_calls)
+                                    if status_text:
+                                        with contextlib.suppress(Exception):
+                                            new_id = await adapter.send_status(
+                                                chat_id,
+                                                status_text,
+                                                status_message_id,
+                                            )
+                                            if new_id:
+                                                status_message_id = new_id
+                                            last_status_time = now
+                            else:
+                                # Thinking — refresh typing
+                                now = time.monotonic()
+                                if now - last_typing_time >= _TYPING_INTERVAL:
+                                    await adapter.set_typing(chat_id, on=True)
+                                    last_typing_time = now
+
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug(
+                "[GATEWAY] Stream watcher error for task %s",
+                task_id,
+                exc_info=True,
+            )
+        finally:
+            if status_message_id:
+                with contextlib.suppress(Exception):
+                    await adapter.delete_message(chat_id, status_message_id)
+
+    def _build_status_text(self, tool_calls: list[dict]) -> str:
+        """Build human-readable status from agent tool calls."""
+        parts: list[str] = []
+        for tc in tool_calls:
+            name = tc.get("name", "")
+            params = tc.get("parameters", {})
+            template = self._TOOL_STATUS_MAP.get(name)
+            if template:
+                arg = (
+                    params.get("file_path")
+                    or params.get("path")
+                    or (params.get("command") or "")[:40]
+                    or (params.get("query") or "")[:40]
+                    or ""
+                )
+                if arg and len(arg) > 30:
+                    arg = "..." + arg[-27:]
+                if arg:
+                    parts.append(template.format(arg=arg))
+                else:
+                    parts.append(template.format(arg="").rstrip(". ") + "...")
+            else:
+                parts.append(f"\u2699\ufe0f {name}...")
+        return "\n".join(parts[:3])
 
     async def _find_or_create_session(self, db, source, user_id, config, settings):
         """Find existing active session or create new one."""
@@ -534,7 +732,7 @@ class GatewayRunner:
         consumer = f"consumer-{os.getpid()}"
 
         # Create consumer group if not exists
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(redis.exceptions.ResponseError):
             await self._redis.xgroup_create(stream, group, id="0", mkstream=True)
 
         while self._running:
@@ -620,8 +818,7 @@ class GatewayRunner:
             logger.warning("[GATEWAY] Failed to store outbound audit")
 
         # Release session and process pending
-        if session_key in self._active_sessions:
-            del self._active_sessions[session_key]
+        self._active_sessions.pop(session_key, None)
 
         pending = self._pending_messages.pop(session_key, [])
         if pending:

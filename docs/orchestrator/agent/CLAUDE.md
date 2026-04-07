@@ -30,12 +30,14 @@ This context provides information about Tesslate Studio's AI agent system, inclu
   - `load_skill.py` - Loads full skill instructions on-demand from DB or project files
 - `orchestrator/app/agent/tools/project_ops/project_control.py` - project_control tool for container lifecycle management
 - `orchestrator/app/agent/tools/project_ops/kanban.py` - kanban tool for board/task/column management (10 actions, TSK-NNNN refs)
+- `orchestrator/app/agent/tools/schedule_ops/manage_schedule.py` - manage_schedule tool for cron-scheduled agent tasks (7 actions: create, list, update, pause, resume, trigger, delete)
 - `orchestrator/app/agent/tools/graph_ops/` - Container management tools for graph view
 
 ### TesslateAgent Supporting Files
 - `orchestrator/app/agent/subagent_manager.py` - Subagent lifecycle and execution management
 - `orchestrator/app/agent/apply_patch.py` - Apply patch tool for surgical file edits
-- `orchestrator/app/agent/compaction.py` - Context compaction for long conversations
+- `orchestrator/app/agent/compaction.py` - `ContextCompressor` class with 5-phase compression algorithm (see Compaction section below)
+- `orchestrator/app/agent/prompt_caching.py` - Prompt caching with 4 breakpoints (1 system + 3 trailing rolling cache window)
 - `orchestrator/app/agent/plan_manager.py` - Planning mode state management. Plans are persisted to Redis (24-hour TTL) for cross-pod visibility via `_persist_plan`/`_load_plan`. `get_plan_sync()` checks `context["_active_plan"]` first for pre-warmed plans injected by the worker, falling back to Redis and then in-memory cache.
 - `orchestrator/app/agent/trajectory.py` - Trajectory recording for agent steps
 - `orchestrator/app/agent/trajectory_writer.py` - Persistent trajectory storage
@@ -44,7 +46,7 @@ This context provides information about Tesslate Studio's AI agent system, inclu
 
 ### Supporting Files
 - `orchestrator/app/agent/parser.py` - Parse LLM responses for tool calls
-- `orchestrator/app/agent/models.py` - Model adapters and BYOK provider routing (see Provider Routing below)
+- `orchestrator/app/agent/models.py` - `ModelAdapter` ABC and `OpenAIAdapter` (unified adapter for OpenAI-compatible APIs including Anthropic via LiteLLM); BYOK provider routing (see Provider Routing below)
 - `orchestrator/app/agent/resource_limits.py` - Resource tracking: per-run cost limits ($5.00), iteration caps (env: `AGENT_MAX_ITERATIONS_PER_RUN`)
 
 ### Resource Limits & Iteration Controls
@@ -132,6 +134,78 @@ Each agent iteration is persisted as an `AgentStep` row immediately — not batc
 - `worker_job_timeout`: Task timeout in seconds (default: 600)
 - `worker_max_tries`: Retry count for transient failures (default: 2)
 
+## Context Compaction (`compaction.py`)
+
+The `ContextCompressor` class handles conversation compression when approaching the model's context window limit. It is instantiated per-agent run and supports an optional auxiliary compaction model (cheaper/faster) for summary generation.
+
+### 5-Phase Algorithm
+
+1. **Prune old tool results** — cheap pre-pass with no LLM call. Replaces tool result content (>200 chars) outside the protected tail with a placeholder.
+2. **Head protection** — preserves the first N messages (system prompt + first exchange). Boundary is aligned forward past orphaned tool results.
+3. **Token-budget tail** — walks backward from the end accumulating tokens until the tail budget is exhausted. Never splits tool_call/result groups. Falls back to a fixed `protect_last_n` minimum.
+4. **Structured summary** — summarizes the middle turns via an LLM call with a structured template (Goal, Constraints, Progress, Key Decisions, Relevant Files, Next Steps, Critical Context). On subsequent compactions the previous summary is iteratively updated rather than re-generated from scratch.
+5. **Tool pair sanitization** — removes orphaned tool results (no matching assistant tool_call) and inserts stub results for tool_calls whose results were dropped.
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `context_window` | 128,000 | Model context window in tokens |
+| `threshold` | 0.80 | Compression triggers at this fraction of context window |
+| `protect_first_n` | 3 | Head messages to always preserve |
+| `protect_last_n` | 20 | Minimum tail messages to preserve |
+| `summary_target_ratio` | 0.20 | Fraction of threshold budget reserved for tail |
+
+### Auxiliary Compaction Model
+
+The factory reads `config.compaction_model` from the agent's DB config (set via Library UI) or falls back to `settings.compaction_summary_model`. If set, a separate `OpenAIAdapter` is created with the same LiteLLM client but a different model name, used exclusively for summary generation.
+
+## Real-Time Token Streaming (`text_delta`)
+
+`text_delta` events flow through the full pipeline for real-time token-by-token streaming:
+
+```
+OpenAIAdapter.chat_with_tools()  →  yields {"type": "text_delta", "content": "..."}
+    ↓
+TesslateAgent._stream_llm()  →  re-yields text_delta events
+    ↓
+TesslateAgent.run()  →  yields text_delta to caller
+    ↓
+Worker / SSE endpoint  →  forwards as SSE event
+    ↓
+Frontend (ChatContainer / useAgentChat)  →  appends delta to streaming message
+```
+
+The `text_delta` event is distinct from the per-iteration `agent_step` events. It provides character-level streaming of the LLM's text output between tool calls, giving users immediate feedback while the agent is generating.
+
+## Extended Thinking
+
+Extended thinking is supported for Claude and DeepSeek reasoning models, configured via `thinking_effort` in the agent config (Library UI) or `settings.default_thinking_effort`.
+
+### Effort Levels
+
+| Level | Claude 4.6 (adaptive) | Older Claude / DeepSeek (budget_tokens) |
+|-------|----------------------|----------------------------------------|
+| `xhigh` | `effort: "max"` | 32,000 tokens |
+| `high` | `effort: "high"` | 16,000 tokens |
+| `medium` | `effort: "medium"` | 8,000 tokens |
+| `low` | `effort: "low"` | 4,000 tokens |
+
+Claude 4.6 models use adaptive thinking (`thinking.type: "adaptive"` + `output_config.effort`). Older models use manual `budget_tokens`. The factory threads `thinking_effort` from agent config into the `OpenAIAdapter`, and LiteLLM translates it to the appropriate provider format.
+
+## Prompt Caching (`prompt_caching.py`)
+
+Injects `cache_control` breakpoints for providers that support explicit prompt caching (Anthropic Claude). Up to 4 breakpoints per request:
+
+1. **System message** — large and stable across iterations
+2-4. **Trailing cache window** — the last 3 messages with cacheable content, creating a rolling cache of recent conversational turns
+
+Eligibility is determined from two sources (no hardcoded model names):
+- **Builtin/LiteLLM**: Models with `supports_prompt_caching: true` in their `model_info` (fetched at startup via `/model/info`)
+- **BYOK providers**: Entries in `BUILTIN_PROVIDERS` with `"prompt_caching": "explicit"` (currently only Anthropic)
+
+On each LLM call, old breakpoints are stripped and fresh ones injected. Content is converted to block format with `cache_control: {"type": "ephemeral"}` on the last block.
+
 ## Related Contexts
 
 This context relates to:
@@ -143,6 +217,7 @@ This context relates to:
 - **External API** (`orchestrator/app/routers/external_agent.py`) - External agent invocation
 - **Skill Discovery** (`orchestrator/app/services/skill_discovery.py`) - Discovers available skills for progressive disclosure
 - **Channel Service** (`orchestrator/app/services/channels/`) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
+- **Gateway Service** (`orchestrator/app/services/gateway/`) - Gateway process, cron scheduler, delivery stream
 - **MCP Service** (`orchestrator/app/services/mcp/`) - MCP server management and tool bridging
 - **Config System** (`orchestrator/app/services/base_config_parser.py`, `config_resolver.py`) - `.tesslate/config.json` parsing and resolution
 
@@ -202,22 +277,20 @@ else:
 ```python
 # TesslateAgent uses native LLM function calling instead of JSON parsing.
 # Tools are converted to provider-native format via tool_converter.py.
-# Supports trajectory recording, context compaction, planning mode, and subagents.
+# Supports trajectory recording, context compaction, planning mode,
+# subagents, real-time text_delta streaming, and extended thinking.
 
 agent = TesslateAgent(
     system_prompt=prompt,
     tools=tool_registry,
-    model_adapter=model,
-    features=AgentFeatures(
-        trajectory_enabled=True,
-        compaction_enabled=True,
-        planning_enabled=True,
-        subagents_enabled=True,
-    ),
+    model=model_adapter,        # OpenAIAdapter with optional thinking_effort
+    features=features,           # Features.from_config(agent_config)
+    compaction_adapter=compaction_adapter,  # Optional cheaper model for summaries
 )
 
 async for event in agent.run(user_request, context):
-    # Events: stream, tool_call, tool_result, plan_update, subagent_*, complete
+    # Events: text_delta, tool_call, tool_result, plan_update,
+    #         subagent_*, complete, error
     process_event(event)
 ```
 

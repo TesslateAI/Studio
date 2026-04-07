@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     worker_job_timeout: int = 600  # Agent run timeout in seconds (10 min default)
     worker_max_tries: int = 2  # Retry failed jobs once (transient errors)
 
+    # Agent Compaction
+    compaction_summary_model: str = ""  # e.g. "builtin/gemini-2.0-flash", empty = main model
+    compaction_protect_last_n: int = 20
+    compaction_summary_target_ratio: float = 0.20
+
+    # Agent Thinking
+    default_thinking_effort: str = ""  # "", "low", "medium", "high", "xhigh"
+
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""
     litellm_master_key: str = ""

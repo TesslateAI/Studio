@@ -12,6 +12,7 @@ import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from croniter import croniter
 
@@ -83,7 +84,17 @@ class CronScheduler:
             for schedule in schedules:
                 try:
                     # Advance next_run_at BEFORE execution (crash safety)
-                    cron = croniter(schedule.normalized_cron, now)
+                    try:
+                        tz = ZoneInfo(schedule.timezone) if schedule.timezone else UTC
+                    except KeyError:
+                        logger.warning(
+                            "Invalid timezone %r for schedule %s, falling back to UTC",
+                            schedule.timezone,
+                            schedule.id,
+                        )
+                        tz = UTC
+                    local_now = datetime.now(tz)
+                    cron = croniter(schedule.normalized_cron, local_now)
                     schedule.next_run_at = cron.get_next(datetime)
 
                     # Render prompt template

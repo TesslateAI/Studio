@@ -28,15 +28,14 @@ later call more than pays for it.
 
 Strategy
 --------
-Two breakpoints per request (Anthropic recommended for tool-use loops):
+Up to four breakpoints per request (Anthropic recommended for tool-use loops):
 
 1. **System message** – large, stable across every iteration.
-2. **Trailing prefix boundary** – the second-to-last message with content.
-   In an agentic loop this moves forward each iteration, creating a
-   rolling cache of the growing conversation prefix.
+2-4. **Trailing cache window** – the last 3 messages with cacheable content,
+   creating a rolling cache of recent conversational turns.
 
 On each LLM call old breakpoints are stripped and fresh ones injected so
-that exactly two breakpoints are present (the maximum useful for a loop).
+that up to four breakpoints are present.
 """
 
 import logging
@@ -152,14 +151,17 @@ def inject_cache_breakpoints(
     if messages[0].get("role") == "system":
         _set_cache_control(messages[0])
 
-    # 3. Breakpoint 2 – trailing prefix boundary.
-    #    Walk backwards from second-to-last looking for a message with content.
-    #    This captures the growing conversation prefix for cache reuse.
+    # 3. Breakpoints 2-4 – last 3 messages with cacheable content.
+    #    Creates a rolling cache window of recent conversational turns.
+    #    Anthropic supports up to 4 breakpoints for tool-use loops.
+    breakpoints_placed = 0
     if len(messages) >= 3:
         for i in range(len(messages) - 2, 0, -1):
+            if breakpoints_placed >= 3:
+                break
             if _has_cacheable_content(messages[i]):
                 _set_cache_control(messages[i])
-                break
+                breakpoints_placed += 1
 
     logger.debug(
         "[PromptCaching] Injected breakpoints for %s (%d messages)",

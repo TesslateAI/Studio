@@ -69,11 +69,12 @@ class MediaPipeline:
             # Use OpenAI-compatible Whisper API via LiteLLM
             import litellm
 
-            response = await asyncio.to_thread(
-                litellm.transcription,
-                model=settings.gateway_voice_model,
-                file=open(audio_path, "rb"),  # noqa: SIM115
-            )
+            with open(audio_path, "rb") as f:
+                response = await asyncio.to_thread(
+                    litellm.transcription,
+                    model=settings.gateway_voice_model,
+                    file=f,
+                )
             text = response.text if hasattr(response, "text") else str(response)
             logger.info("[MEDIA] Transcribed %s → %d chars", audio_path, len(text))
             return text

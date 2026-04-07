@@ -22,6 +22,8 @@ import {
   ArrowClockwise,
   Lightning,
   ListChecks,
+  Brain,
+  ArrowsClockwise,
 } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
@@ -48,6 +50,8 @@ const COMMAND_ICONS: Record<string, ReactNode> = {
   '/plan': <ListChecks size={14} weight="bold" />,
   '/undo': <ArrowCounterClockwise size={14} weight="bold" />,
   '/retry': <ArrowClockwise size={14} weight="bold" />,
+  '/effort': <Brain size={14} weight="bold" />,
+  '/compact': <ArrowsClockwise size={14} weight="bold" />,
 };
 
 interface ChatInputProps {
@@ -79,6 +83,7 @@ interface ChatInputProps {
   isAdmin?: boolean;
   onOpenDebugTools?: () => void;
   currentModelSupportsVision?: boolean;
+  onCompact?: () => void;
 }
 
 export function ChatInput({
@@ -111,6 +116,7 @@ export function ChatInput({
   isAdmin = false,
   onOpenDebugTools,
   currentModelSupportsVision,
+  onCompact,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -233,6 +239,12 @@ export function ChatInput({
       { command: '/plan', description: 'Toggle plan mode', isSkill: false },
       { command: '/undo', description: 'Remove last message exchange', isSkill: false },
       { command: '/retry', description: 'Retry the last message', isSkill: false },
+      {
+        command: '/effort',
+        description: 'Set thinking effort (low/medium/high/xhigh)',
+        isSkill: false,
+      },
+      { command: '/compact', description: 'Compact conversation context', isSkill: false },
     ];
     const skillCommands = stableSkills.map((skill) => ({
       command: `/${skill.name}`,
@@ -315,6 +327,16 @@ export function ChatInput({
         onRetry();
         setMessage('');
       }
+    } else if (cmd === '/effort') {
+      // Set message to "/effort " so user can type the level
+      setMessage('/effort ');
+      return;
+    } else if (cmd === '/compact') {
+      // Call the compact API endpoint directly, then reload chat
+      setMessage('');
+      if (onCompact) {
+        onCompact();
+      }
     }
   };
 
@@ -324,9 +346,26 @@ export function ChatInput({
       const trimmed = message.trim();
       // Check if it's a built-in slash command
       if (trimmed.startsWith('/')) {
-        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry'].includes(trimmed);
+        const baseCmd = trimmed.split(' ')[0];
+        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry'].includes(baseCmd);
         if (isBuiltIn) {
-          executeCommand(trimmed);
+          executeCommand(baseCmd);
+        } else if (baseCmd === '/effort') {
+          // /effort [low|medium|high|xhigh] — change thinking effort in real-time
+          const level = trimmed.split(' ')[1]?.toLowerCase() || '';
+          const validLevels = ['low', 'medium', 'high', 'xhigh', 'off', ''];
+          if (level && !validLevels.includes(level)) {
+            toast.error('Invalid effort level. Use: low, medium, high, xhigh, or off');
+          } else {
+            // Send as regular message — agent handles it server-side
+            setMessageHistory((prev) => [...prev, trimmed]);
+            onSendMessage(trimmed);
+          }
+        } else if (baseCmd === '/compact') {
+          // Call the compact API endpoint, then clear chat
+          if (onCompact) {
+            onCompact();
+          }
         } else {
           // Skill slash commands are sent as regular messages to the agent
           setMessageHistory((prev) => [...prev, trimmed]);
@@ -380,7 +419,9 @@ export function ChatInput({
         e.preventDefault();
         const selected = filteredCommands[commandIndex];
         const cmd = selected.command;
-        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry'].includes(cmd);
+        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry', '/effort', '/compact'].includes(
+          cmd
+        );
         if (isBuiltIn) {
           executeCommand(cmd);
         } else {
@@ -610,9 +651,7 @@ export function ChatInput({
                     <span
                       className={`shrink-0 ${isSelected ? 'text-[var(--primary)]' : 'text-[var(--text)]/40'}`}
                     >
-                      {COMMAND_ICONS[cmd.command] || (
-                        <Lightning size={14} weight="bold" />
-                      )}
+                      {COMMAND_ICONS[cmd.command] || <Lightning size={14} weight="bold" />}
                     </span>
                     <span className="font-mono text-xs">
                       <span className="font-semibold">{cmd.command.slice(0, matchLen)}</span>
@@ -835,7 +874,9 @@ export function ChatInput({
         >
           {viewerMode ? (
             <div className="flex items-center gap-2 w-full py-2">
-              <span className="text-xs text-[var(--text-subtle)]">Viewer mode — chat is read-only</span>
+              <span className="text-xs text-[var(--text-subtle)]">
+                Viewer mode — chat is read-only
+              </span>
             </div>
           ) : (
             <>

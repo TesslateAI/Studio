@@ -194,6 +194,7 @@ class MessageEvent:
     reply_to_text: str = ""
     timestamp: datetime | None = None
     raw: Any = None
+    config_id: str = ""
 
 
 @dataclass
@@ -260,3 +261,14 @@ class GatewayAdapter(AbstractChannel):
     ) -> SendResult:
         """Send a media attachment. Override per platform."""
         return SendResult(success=False, error="Media not supported by this platform")
+
+    async def send_status(
+        self, chat_id: str, text: str, message_id: str | None = None
+    ) -> str | None:
+        """Send or update an in-place status message. Returns message_id for edits."""
+        result = await self.send_message(chat_id, text)
+        return result.get("platform_message_id")
+
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        """Delete a message by ID. Returns True on success."""
+        return False

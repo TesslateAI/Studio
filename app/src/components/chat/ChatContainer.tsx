@@ -217,7 +217,6 @@ export function ChatContainer({
   const sessionsButtonRef = useRef<HTMLButtonElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isUserScrollingRef = useRef(false);
-  const _previousMessageCountRef = useRef(0);
   const animatedMessagesRef = useRef<Set<string>>(new Set());
   const isMountedRef = useRef(true);
   const agentTaskIdRef = useRef<string | null>(null);
@@ -454,13 +453,15 @@ export function ChatContainer({
 
               setMessages((prev) => {
                 const updated = [...prev];
-                const lastMsg = updated[updated.length - 1];
-                if (lastMsg && lastMsg.agentData?.completion_reason === 'in_progress') {
-                  const steps = lastMsg.agentData.steps || [];
+                const orig = updated[updated.length - 1];
+                if (orig && orig.agentData?.completion_reason === 'in_progress') {
+                  const steps = orig.agentData.steps || [];
+                  const lastMsg = { ...orig };
                   lastMsg.agentData = {
                     ...lastMsg.agentData,
                     steps: [...steps, data.data],
                   };
+                  updated[updated.length - 1] = lastMsg;
                 }
                 return updated;
               });
@@ -487,8 +488,9 @@ export function ChatContainer({
               const finalContent = completeData.final_response || '';
               setMessages((prev) => {
                 const updated = [...prev];
-                const lastMsg = updated[updated.length - 1];
-                if (lastMsg && lastMsg.agentData?.completion_reason === 'in_progress') {
+                const orig = updated[updated.length - 1];
+                if (orig && orig.agentData?.completion_reason === 'in_progress') {
+                  const lastMsg = { ...orig };
                   lastMsg.content = finalContent;
                   lastMsg.agentData = {
                     ...lastMsg.agentData,
@@ -497,6 +499,7 @@ export function ChatContainer({
                     tool_calls_made:
                       completeData.tool_calls_made ?? lastMsg.agentData.tool_calls_made,
                   };
+                  updated[updated.length - 1] = lastMsg;
                 }
                 return updated;
               });
@@ -504,13 +507,15 @@ export function ChatContainer({
               const errorMsg = data.data?.message || data.content || 'Agent execution failed';
               setMessages((prev) => {
                 const updated = [...prev];
-                const lastMsg = updated[updated.length - 1];
-                if (lastMsg && lastMsg.agentData?.completion_reason === 'in_progress') {
+                const orig = updated[updated.length - 1];
+                if (orig && orig.agentData?.completion_reason === 'in_progress') {
+                  const lastMsg = { ...orig };
                   lastMsg.content = errorMsg;
                   lastMsg.agentData = {
                     ...lastMsg.agentData,
                     completion_reason: 'error',
                   };
+                  updated[updated.length - 1] = lastMsg;
                 }
                 return updated;
               });
@@ -530,7 +535,10 @@ export function ChatContainer({
           // Poll getActiveTask every 3s — keep thinking indicator until
           // the task finishes, then clean up.
           const pollId = setInterval(async () => {
-            if (cancelled) { clearInterval(pollId); return; }
+            if (cancelled) {
+              clearInterval(pollId);
+              return;
+            }
             try {
               const still = await chatApi.getActiveTask(
                 projectId.toString(),
@@ -1195,19 +1203,98 @@ export function ChatContainer({
             agentTaskIdRef.current = event.data.task_id as string;
           }
 
-          if (event.type === 'agent_step') {
-            // Notify panels when a kanban tool call succeeds
-            const toolCalls = event.data.tool_calls || [];
-            const toolResults = event.data.tool_results || [];
-            const hasSuccessfulKanban = toolCalls.some(
-              (tc: { name: string }, idx: number) =>
-                tc.name === 'kanban' && toolResults[idx]?.result?.success !== false
-            );
-            if (hasSuccessfulKanban) {
+          if (event.type === 'text_delta') {
+            // Stream LLM text into a visible message, not the thinking indicator
+            const deltaContent = (event.data?.content as string) || '';
+            if (deltaContent) {
+              setMessages((prev) => {
+                const updated = [...prev];
+                // Find the last non-thinking message to append to
+                const nonThinking = updated.filter((m) => m.id !== thinkingMessageId);
+                const lastMsg = nonThinking[nonThinking.length - 1];
+
+                if (lastMsg && lastMsg.type === 'ai' && !lastMsg.agentData?.steps?.length) {
+                  // Append to existing streaming message
+                  const idx = updated.indexOf(lastMsg);
+                  updated[idx] = { ...lastMsg, content: (lastMsg.content || '') + deltaContent };
+                } else {
+                  // Create new streaming message before thinking indicator
+                  const streamMsg: Message = {
+                    id: `${thinkingMessageId}-stream`,
+                    type: 'ai' as const,
+                    content: deltaContent,
+                    agentIcon: currentAgent.icon,
+                    agentAvatarUrl: currentAgent.avatar_url,
+                    agentType: currentAgent.name,
+                  };
+                  const thinkingIdx = updated.findIndex((m) => m.id === thinkingMessageId);
+                  if (thinkingIdx >= 0) {
+                    updated.splice(thinkingIdx, 0, streamMsg);
+                  } else {
+                    updated.push(streamMsg);
+                  }
+                }
+                return updated;
+              });
+            }
+          } else if (event.type === 'tool_call') {
+            // Per-tool streaming — accumulate into ONE message per iteration
+            const tc = event.data || {};
+            const iterMsgId = `${thinkingMessageId}-iter-${tc.iteration}`;
+            const newTool = {
+              name: tc.name,
+              parameters: tc.parameters,
+              result: tc.result,
+            };
+
+            setMessages((prev) => {
+              const withoutThinking = prev.filter((m) => m.id !== thinkingMessageId);
+              const existingIdx = withoutThinking.findIndex((m) => m.id === iterMsgId);
+
+              if (existingIdx >= 0) {
+                // APPEND tool to existing iteration message
+                const existing = withoutThinking[existingIdx];
+                const currentTools = existing.agentData?.steps?.[0]?.tool_calls || [];
+                withoutThinking[existingIdx] = {
+                  ...existing,
+                  agentData: {
+                    ...existing.agentData!,
+                    steps: [
+                      {
+                        ...existing.agentData!.steps[0],
+                        tool_calls: [...currentTools, newTool],
+                      },
+                    ],
+                    tool_calls_made: currentTools.length + 1,
+                  },
+                };
+              } else {
+                // CREATE iteration message with first tool
+                withoutThinking.push({
+                  id: iterMsgId,
+                  type: 'ai',
+                  content: '',
+                  agentData: {
+                    steps: [{ tool_calls: [newTool] }],
+                    iterations: tc.iteration || 0,
+                    tool_calls_made: 1,
+                    completion_reason: 'tool_streaming',
+                  },
+                  agentIcon: currentAgent.icon,
+                  agentAvatarUrl: currentAgent.avatar_url,
+                  agentType: currentAgent.name,
+                });
+              }
+
+              return [...withoutThinking, { ...thinkingMessage, id: thinkingMessageId }];
+            });
+
+            if (tc.name === 'kanban' && tc.result?.result?.success !== false) {
               window.dispatchEvent(new CustomEvent('kanban-updated'));
             }
-
-            // Transform tool_results array to match HTTP format
+          } else if (event.type === 'agent_step') {
+            // Finalize iteration message with canonical data from backend
+            const iterMsgId = `${thinkingMessageId}-iter-${event.data.iteration}`;
             const transformedStep = {
               ...event.data,
               tool_calls:
@@ -1221,9 +1308,8 @@ export function ChatContainer({
             };
             delete transformedStep.tool_results;
 
-            // Create a new message for this step
             const stepMessage: Message = {
-              id: `msg-${Date.now()}-step-${event.data.iteration}`,
+              id: iterMsgId,
               type: 'ai',
               content: '',
               agentData: {
@@ -1237,15 +1323,28 @@ export function ChatContainer({
               agentType: currentAgent.name,
             };
 
-            // Remove thinking message, add step message, and re-add thinking message in one update
             setMessages((prev) => {
-              const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
-              return [
-                ...withoutThinking,
-                stepMessage,
-                { ...thinkingMessage, id: thinkingMessageId },
-              ];
+              const withoutThinking = prev.filter((m) => m.id !== thinkingMessageId);
+              const existingIdx = withoutThinking.findIndex((m) => m.id === iterMsgId);
+              if (existingIdx >= 0) {
+                withoutThinking[existingIdx] = stepMessage;
+              } else {
+                withoutThinking.push(stepMessage);
+              }
+              return [...withoutThinking, { ...thinkingMessage, id: thinkingMessageId }];
             });
+
+            // Side effects
+            const toolCalls = event.data.tool_calls || [];
+            const toolResults = event.data.tool_results || [];
+            if (
+              toolCalls.some(
+                (tc: { name: string }, idx: number) =>
+                  tc.name === 'kanban' && toolResults[idx]?.result?.success !== false
+              )
+            ) {
+              window.dispatchEvent(new CustomEvent('kanban-updated'));
+            }
           } else if (event.type === 'complete') {
             // Remove thinking message
             setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
@@ -1420,7 +1519,9 @@ export function ChatContainer({
       // If an agent is already running (e.g. page was refreshed mid-execution),
       // reconnect to it instead of showing an error.
       if (typeof errorDetail === 'string' && errorDetail.includes('Another agent is running')) {
-        toast('Agent is still processing a previous request. Please wait for it to finish.', { duration: 4000 });
+        toast('Agent is still processing a previous request. Please wait for it to finish.', {
+          duration: 4000,
+        });
         // Trigger reconnection by checking for the active task
         try {
           const activeTask = await chatApi.getActiveTask(
@@ -1453,12 +1554,14 @@ export function ChatContainer({
                 if (data.type === 'agent_step') {
                   setMessages((prev) => {
                     const updated = [...prev];
-                    const lastMsg = updated[updated.length - 1];
-                    if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                    const orig = updated[updated.length - 1];
+                    if (orig?.agentData?.completion_reason === 'in_progress') {
+                      const lastMsg = { ...orig };
                       lastMsg.agentData = {
                         ...lastMsg.agentData,
                         steps: [...(lastMsg.agentData.steps || []), data.data],
                       };
+                      updated[updated.length - 1] = lastMsg;
                     }
                     return updated;
                   });
@@ -1467,13 +1570,15 @@ export function ChatContainer({
                     const finalContent = data.data?.final_response || '';
                     setMessages((prev) => {
                       const updated = [...prev];
-                      const lastMsg = updated[updated.length - 1];
-                      if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                      const orig = updated[updated.length - 1];
+                      if (orig?.agentData?.completion_reason === 'in_progress') {
+                        const lastMsg = { ...orig };
                         lastMsg.content = finalContent;
                         lastMsg.agentData = {
                           ...lastMsg.agentData,
                           completion_reason: data.data?.completion_reason || 'complete',
                         };
+                        updated[updated.length - 1] = lastMsg;
                       }
                       return updated;
                     });
@@ -1486,10 +1591,12 @@ export function ChatContainer({
                   const errMsg = data.data?.message || 'Agent execution failed';
                   setMessages((prev) => {
                     const updated = [...prev];
-                    const lastMsg = updated[updated.length - 1];
-                    if (lastMsg?.agentData?.completion_reason === 'in_progress') {
+                    const orig = updated[updated.length - 1];
+                    if (orig?.agentData?.completion_reason === 'in_progress') {
+                      const lastMsg = { ...orig };
                       lastMsg.content = errMsg;
                       lastMsg.agentData = { ...lastMsg.agentData, completion_reason: 'error' };
+                      updated[updated.length - 1] = lastMsg;
                     }
                     return updated;
                   });
@@ -1497,7 +1604,9 @@ export function ChatContainer({
                   setAgentExecuting(false);
                   agentTaskIdRef.current = null;
                 }
-              } catch { /* ignore parse errors */ }
+              } catch {
+                /* ignore parse errors */
+              }
             };
             eventSource.onerror = () => {
               eventSource.close();
@@ -1506,7 +1615,9 @@ export function ChatContainer({
             };
             return; // Skip the finally block — agentExecuting stays true
           }
-        } catch { /* fallback to normal error display */ }
+        } catch {
+          /* fallback to normal error display */
+        }
       }
 
       // Remove thinking message and add error message
@@ -1562,10 +1673,16 @@ export function ChatContainer({
     setMessages((prev) => {
       const copy = [...prev];
       for (let i = copy.length - 1; i >= 0; i--) {
-        if (copy[i].type === 'ai') { copy.splice(i, 1); break; }
+        if (copy[i].type === 'ai') {
+          copy.splice(i, 1);
+          break;
+        }
       }
       for (let i = copy.length - 1; i >= 0; i--) {
-        if (copy[i].type === 'user') { copy.splice(i, 1); break; }
+        if (copy[i].type === 'user') {
+          copy.splice(i, 1);
+          break;
+        }
       }
       return copy;
     });
@@ -1593,6 +1710,40 @@ export function ChatContainer({
     } catch (error) {
       console.error('[CHAT] Failed to retry:', error);
       toast.error('Failed to retry last message');
+    }
+  };
+
+  const handleCompact = async () => {
+    if (agentExecuting || !currentChatId) return;
+    try {
+      toast('Compacting context...');
+      const result = await chatApi.compactChat(currentChatId);
+      if (!result.success) {
+        toast.error(result.detail || 'Could not compact');
+        return;
+      }
+      // Clear chat and show summary as a fresh conversation
+      setMessages([
+        {
+          id: `msg-compact-${Date.now()}`,
+          type: 'ai',
+          content: result.summary || 'Context compacted.',
+          agentData: {
+            steps: [],
+            iterations: 0,
+            tool_calls_made: 0,
+            completion_reason: 'compact',
+          },
+          agentIcon: currentAgent.icon,
+          agentAvatarUrl: currentAgent.avatar_url,
+          agentType: currentAgent.name,
+        },
+      ]);
+      animatedMessagesRef.current.clear();
+      toast.success(`Compacted: ${result.before_count} → ${result.after_count} messages`);
+    } catch (error) {
+      console.error('[CHAT] Failed to compact:', error);
+      toast.error('Failed to compact context');
     }
   };
 
@@ -2225,6 +2376,7 @@ export function ChatContainer({
             isAdmin={isAdmin}
             onOpenDebugTools={() => setShowDebugModal(true)}
             currentModelSupportsVision={currentModelSupportsVision}
+            onCompact={handleCompact}
           />
         </div>
       </div>

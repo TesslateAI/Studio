@@ -30,7 +30,7 @@ from typing import Any
 from uuid import UUID
 
 from .base import AbstractAgent
-from .compaction import compact_conversation
+from .compaction import ContextCompressor
 from .features import Feature, Features
 from .models import ModelAdapter
 from .plan_manager import PlanManager
@@ -218,6 +218,7 @@ class TesslateAgent(AbstractAgent):
         context_window: int = DEFAULT_CONTEXT_WINDOW,
         enable_subagents: bool = True,
         features: Features | None = None,
+        compaction_adapter: ModelAdapter | None = None,
     ):
         super().__init__(system_prompt, tools)
         self.model = model
@@ -226,6 +227,18 @@ class TesslateAgent(AbstractAgent):
         # enable_subagents kept for backward compat; features takes precedence
         self.enable_subagents = enable_subagents and self.features.enabled(Feature.SUBAGENTS)
 
+        # Persistent compressor — preserves _previous_summary across compressions
+        self.compressor = ContextCompressor(
+            model_adapter=model,
+            compaction_adapter=compaction_adapter,
+            context_window=context_window,
+            threshold=COMPACTION_THRESHOLD,
+        )
+
+        # Context pressure warning state (reset after each compression)
+        self._pressure_warned_70 = False
+        self._pressure_warned_90 = False
+
         logger.info(
             f"TesslateAgent initialized - "
             f"tools: {len(self.tools._tools) if self.tools else 0}, "
@@ -233,9 +246,69 @@ class TesslateAgent(AbstractAgent):
             f"features: {self.features}"
         )
 
-    def set_model(self, model: ModelAdapter):
-        """Set the model adapter (for lazy initialization)."""
-        self.model = model
+    # -------------------------------------------------------------------------
+    # Slash Commands
+    # -------------------------------------------------------------------------
+
+    _VALID_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "off"})
+
+    async def _handle_slash_command(
+        self, user_request: str, context: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Handle built-in slash commands. Returns a complete event or None."""
+        stripped = user_request.strip()
+        if not stripped.startswith("/"):
+            return None
+
+        parts = stripped.split(None, 1)
+        cmd = parts[0].lower()
+
+        if cmd == "/effort":
+            level = parts[1].strip().lower() if len(parts) > 1 else ""
+            if level not in self._VALID_EFFORTS:
+                return {
+                    "type": "complete",
+                    "data": {
+                        "success": True,
+                        "final_response": (
+                            f"Usage: `/effort [low|medium|high|xhigh|off]`\n\n"
+                            f"Current: **{getattr(self.model, 'thinking_effort', 'off') or 'off'}**"
+                        ),
+                        "iterations": 0,
+                        "tool_calls_made": 0,
+                        "completion_reason": "slash_command",
+                    },
+                }
+            # Update thinking effort on the model adapter
+            new_effort = "" if level == "off" else level
+            if hasattr(self.model, "thinking_effort"):
+                self.model.thinking_effort = new_effort
+            return {
+                "type": "complete",
+                "data": {
+                    "success": True,
+                    "final_response": f"Thinking effort set to **{level}**.",
+                    "iterations": 0,
+                    "tool_calls_made": 0,
+                    "completion_reason": "slash_command",
+                },
+            }
+
+        if cmd == "/compact":
+            # Handled by the frontend calling POST /api/chat/{id}/compact
+            # Return None so the agent doesn't process it as a message
+            return {
+                "type": "complete",
+                "data": {
+                    "success": True,
+                    "final_response": "Compacting context...",
+                    "iterations": 0,
+                    "tool_calls_made": 0,
+                    "completion_reason": "slash_command",
+                },
+            }
+
+        return None
 
     # -------------------------------------------------------------------------
     # Main Agent Loop
@@ -279,6 +352,12 @@ class TesslateAgent(AbstractAgent):
         )
         writer = TrajectoryWriter(context=context, session_id=session_id)
         subagent_counter = 0
+
+        # Handle slash commands before entering agent loop
+        slash_result = await self._handle_slash_command(user_request, context)
+        if slash_result is not None:
+            yield slash_result
+            return
 
         # Build messages
         messages = await self._build_initial_messages(user_request, context)
@@ -332,18 +411,25 @@ class TesslateAgent(AbstractAgent):
                     )
                     return
 
-                # Context compaction
-                compacted = await compact_conversation(
-                    messages, self.model, self.context_window, COMPACTION_THRESHOLD
-                )
-                if compacted is not None:
-                    messages = compacted
+                # Context compaction — pre-flight check (rough estimate)
+                if self.compressor.should_compress_preflight(messages):
+                    messages = await self.compressor.compress(messages)
+                    self._pressure_warned_70 = False
+                    self._pressure_warned_90 = False
 
                 # Call LLM
                 try:
-                    content, tool_calls, usage = await self._call_llm_with_retry(
-                        messages, openai_tools
-                    )
+                    content, tool_calls, usage = "", [], None
+                    async for llm_event in self._stream_llm_with_retry(messages, openai_tools):
+                        if llm_event["type"] == "text_delta":
+                            yield {
+                                "type": "text_delta",
+                                "content": llm_event["content"],
+                            }
+                        elif llm_event["type"] == "llm_complete":
+                            content = llm_event["content"]
+                            tool_calls = llm_event["tool_calls"]
+                            usage = llm_event["usage"]
                 except Exception as e:
                     logger.error(f"[TesslateAgent] LLM call failed: {e}")
                     yield {"type": "error", "content": f"Agent error: {str(e)}"}
@@ -362,6 +448,19 @@ class TesslateAgent(AbstractAgent):
                 # Record assistant response
                 recorder.record_assistant(content, tool_calls, usage)
                 await writer.flush(recorder)
+
+                # Post-LLM usage-based compaction check
+                if usage:
+                    self.compressor.update_from_usage(usage)
+                    for pressure_event in self._check_context_pressure():
+                        yield pressure_event
+                    prompt_tokens = usage.get("prompt_tokens")
+                    if prompt_tokens and self.compressor.should_compress(prompt_tokens):
+                        messages = await self.compressor.compress(
+                            messages, current_tokens=prompt_tokens
+                        )
+                        self._pressure_warned_70 = False
+                        self._pressure_warned_90 = False
 
                 # --- Credit deduction (non-blocking) ---
                 try:
@@ -470,51 +569,51 @@ class TesslateAgent(AbstractAgent):
                 # Add assistant message to history
                 messages.append(serialize_assistant_message(content, tool_calls))
 
-                # Emit tool_started so the frontend updates immediately
-                yield {
-                    "type": "tool_started",
-                    "data": {
-                        "iteration": iteration,
-                        "tools": [
-                            {
-                                "name": tc.get("function", {}).get("name", ""),
-                                "parameters": _convert_uuids(
-                                    _safe_json_loads(tc.get("function", {}).get("arguments", "{}"))
-                                ),
-                            }
-                            for tc in tool_calls
-                        ],
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    },
-                }
-
-                # Execute tool calls
+                # Execute tool calls and stream per-tool events
                 tool_results = await self._execute_tool_calls(tool_calls, context, subagent_manager)
                 tool_calls_count += len(tool_calls)
 
-                # Handle approval requests
-                for idx, result in enumerate(tool_results):
-                    if result.get("approval_required"):
-                        # Phase 1: Create approval request and yield event to SSE
-                        approval_id, request, event_data = await self._create_approval_request(
-                            result, tool_calls[idx]
-                        )
-                        yield event_data  # Frontend sees approval_required NOW
+                # Process each tool result individually — stream to frontend
+                for idx, tc in enumerate(tool_calls):
+                    fn = tc.get("function", {})
+                    tool_name = fn.get("name", "")
+                    tool_params = _convert_uuids(_safe_json_loads(fn.get("arguments", "{}")))
+                    result = tool_results[idx]
 
-                        # Phase 2: Wait for user response (with timeout)
+                    # Handle approval requests
+                    if result.get("approval_required"):
+                        approval_id, request, event_data = await self._create_approval_request(
+                            result, tc
+                        )
+                        yield event_data
+
                         approval_result = await self._wait_for_approval(
-                            approval_id, request, tool_calls[idx], context
+                            approval_id, request, tc, context
                         )
                         if approval_result.get("type") == "complete":
                             yield approval_result
                             return
                         elif "result" in approval_result:
                             tool_results[idx] = approval_result["result"]
+                            result = tool_results[idx]
 
-                # Add tool results to history and record for trajectory
-                for idx, tc in enumerate(tool_calls):
+                    # Yield per-tool event immediately
+                    yield {
+                        "type": "tool_call",
+                        "data": {
+                            "iteration": iteration,
+                            "index": idx,
+                            "total": len(tool_calls),
+                            "name": tool_name,
+                            "parameters": tool_params,
+                            "result": _convert_uuids(result),
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        },
+                    }
+
+                    # Add to history
                     tc_id = tc.get("id", f"call_{idx}")
-                    result_text = format_tool_result(tool_results[idx])
+                    result_text = format_tool_result(result)
                     messages.append(
                         {
                             "role": "tool",
@@ -524,14 +623,9 @@ class TesslateAgent(AbstractAgent):
                     )
                     recorder.record_tool_result(tc_id, result_text)
 
-                # Save subagent trajectories and mirror plans
-                for idx, tc in enumerate(tool_calls):
-                    fn = tc.get("function", {})
-                    tool_name = fn.get("name", "")
-
                     # Subagent trajectory
                     if tool_name == "invoke_subagent" and subagent_manager:
-                        result_data = tool_results[idx].get("result", {})
+                        result_data = result.get("result", {})
                         agent_id = (
                             result_data.get("agent_id") if isinstance(result_data, dict) else None
                         )
@@ -555,7 +649,7 @@ class TesslateAgent(AbstractAgent):
 
                 await writer.flush(recorder)
 
-                # Yield agent_step
+                # Yield agent_step summary (backward compat for worker persistence)
                 yield {
                     "type": "agent_step",
                     "data": {
@@ -722,36 +816,70 @@ class TesslateAgent(AbstractAgent):
     # LLM Calling with Retry
     # -------------------------------------------------------------------------
 
-    async def _call_llm_with_retry(
+    def _check_context_pressure(self) -> list[dict[str, Any]]:
+        """Emit context pressure warnings at 70% and 90% thresholds."""
+        events: list[dict[str, Any]] = []
+        if not self.compressor:
+            return events
+        status = self.compressor.get_status()
+        pct = status.get("usage_percent", 0)
+        if pct >= 90 and not self._pressure_warned_90:
+            self._pressure_warned_90 = True
+            events.append(
+                {
+                    "type": "context_pressure",
+                    "data": {"percent": round(pct, 1), "level": "critical"},
+                }
+            )
+        elif pct >= 70 and not self._pressure_warned_70:
+            self._pressure_warned_70 = True
+            events.append(
+                {"type": "context_pressure", "data": {"percent": round(pct, 1), "level": "warning"}}
+            )
+        return events
+
+    async def _stream_llm_with_retry(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-    ) -> tuple:
-        """Call LLM with exponential backoff. Returns (content, tool_calls, usage)."""
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream LLM with exponential backoff retry.
+
+        Only retries BEFORE any content has been yielded to the frontend.
+        Once a text_delta has been yielded, retrying would cause duplicated
+        output, so we raise immediately instead.
+        """
         last_error = None
 
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(MAX_RETRIES + 1):
             try:
-                return await self._call_llm_streaming(messages, tools)
+                yielded_any = False
+                async for event in self._stream_llm(messages, tools):
+                    yielded_any = True
+                    yield event
+                return
             except Exception as e:
                 last_error = e
-                if not _is_retryable_error(e) or attempt == MAX_RETRIES - 1:
+                if yielded_any or not _is_retryable_error(e) or attempt == MAX_RETRIES:
                     raise
-
                 delay = _backoff(attempt)
                 logger.warning(
-                    f"[TesslateAgent] Retry {attempt + 1}/{MAX_RETRIES} after {delay:.1f}s: {e}"
+                    "[Agent] Retryable LLM error (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1,
+                    MAX_RETRIES + 1,
+                    delay,
+                    e,
                 )
                 await asyncio.sleep(delay)
 
         raise last_error
 
-    async def _call_llm_streaming(
+    async def _stream_llm(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-    ) -> tuple:
-        """Call LLM and accumulate response. Returns (content, tool_calls, usage)."""
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream LLM response, yielding text_delta events as they arrive."""
         content = ""
         tool_calls = []
         usage = None
@@ -764,12 +892,18 @@ class TesslateAgent(AbstractAgent):
             t = event.get("type", "")
             if t == "text_delta":
                 content += event.get("content", "")
+                yield {"type": "text_delta", "content": event.get("content", "")}
             elif t == "tool_calls_complete":
                 tool_calls = event.get("tool_calls", [])
             elif t == "done":
                 usage = event.get("usage")
 
-        return content, tool_calls, usage
+        yield {
+            "type": "llm_complete",
+            "content": content,
+            "tool_calls": tool_calls,
+            "usage": usage,
+        }
 
     # -------------------------------------------------------------------------
     # Tool Execution (Parallel Reads, Sequential Writes)

@@ -123,7 +123,7 @@ class RedisPubSub:
             await redis.xadd(
                 stream_key,
                 {"data": json.dumps(event)},
-                maxlen=500,
+                maxlen=5000,
                 approximate=True,
             )
             # Auto-expire stream after terminal event

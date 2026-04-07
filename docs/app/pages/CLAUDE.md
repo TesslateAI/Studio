@@ -29,6 +29,9 @@ Load this context when:
 | Preferences | `PreferencesSettings.tsx` | `/settings/preferences` | Theme preset, chat position |
 | Security | `SecuritySettings.tsx` | `/settings/security` | Password, 2FA, sessions |
 | Deployment | `DeploymentSettings.tsx` | `/settings/deployment` | Provider credentials, API keys |
+| Connections | `ConnectionsSettings.tsx` | `/settings/connections` | Gateway connections (messaging platforms) |
+| Channels | `ChannelsSettings.tsx` | `/settings/channels` | Per-channel agent routing and config |
+| Schedules | `SchedulesSettings.tsx` | `/settings/schedules` | Cron-scheduled agent tasks |
 | Login | `Login.tsx` | `/login` | JWT + email 2FA and OAuth authentication |
 | Forgot Password | `ForgotPassword.tsx` | `/forgot-password` | Request password reset email |
 | Reset Password | `ResetPassword.tsx` | `/reset-password` | Set new password via token |
@@ -406,6 +409,12 @@ const tab = searchParams.get('tab') || 'agents';
 setSearchParams({ tab: 'bases' });
 ```
 
+**Agent Edit Modal (Advanced Settings)**:
+The Agents tab edit modal includes advanced configuration fields for TesslateAgent:
+- **Compaction Model**: Optional model selector for the auxiliary compaction/summary model (stored in `config.compaction_model`)
+- **Context Window Override**: Numeric input to override the default 128K context window (stored in `config.context_window`)
+- **Thinking Effort**: Selector for extended thinking intensity — `""` (off), `"low"`, `"medium"`, `"high"`, `"xhigh"` (stored in `config.thinking_effort`)
+
 ### Billing Settings (`BillingSettings.tsx`)
 **Purpose**: Subscription management, credit balance, and usage
 
@@ -439,6 +448,9 @@ See: `billing.md`
 3. **SecuritySettings.tsx** (`/settings/security`): Password change, 2FA status, active sessions
 4. **DeploymentSettings.tsx** (`/settings/deployment`): Provider credentials, external API keys (merged from old ApiKeysSettings)
 5. **BillingSettings.tsx** (`/settings/billing`): Subscription tiers, credit balance, usage, transactions
+6. **ConnectionsSettings.tsx** (`/settings/connections`): Gateway connections management (connect/disconnect messaging platforms like Telegram, Slack, Discord, WhatsApp)
+7. **ChannelsSettings.tsx** (`/settings/channels`): Per-channel configuration for connected messaging platforms (agent routing, project binding, credential management)
+8. **SchedulesSettings.tsx** (`/settings/schedules`): Cron-scheduled agent tasks management (create, pause, resume, trigger, delete scheduled agent runs)
 
 **Layout**: Uses `SettingsLayout.tsx` with a sidebar (`SettingsSidebar.tsx`) for navigation between pages.
 

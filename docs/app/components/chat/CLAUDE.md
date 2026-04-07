@@ -240,6 +240,35 @@ chatApi.deleteSession(sessionId): Promise<void>
 - No search — removed to eliminate N+1 backend query; re-add with debounce if needed later
 - Always loads messages via `GET /session/{chatId}/messages` (no standalone/project branching)
 
+## Real-Time Token Streaming (`text_delta`)
+
+The `text_delta` SSE event provides real-time token-by-token streaming of LLM output between tool calls.
+
+### Pipeline
+```
+OpenAIAdapter.chat_with_tools() → TesslateAgent._stream_llm() → TesslateAgent.run()
+  → Worker / SSE endpoint → SSE event → Frontend
+```
+
+### Frontend Handling (ChatContainer + useAgentChat)
+
+Both `ChatContainer.tsx` (project builder) and `useAgentChat.ts` (standalone chat) handle `text_delta` identically:
+
+1. On first `text_delta`, create a streaming message with ID `${thinkingMessageId}-stream` and insert it before the thinking indicator.
+2. On subsequent `text_delta` events, find the last non-thinking AI message without tool steps and append the delta to its content.
+3. When the next `agent_step` or `complete` event arrives, the streaming message is superseded by the final iteration message.
+
+```typescript
+if (event.type === 'text_delta') {
+  const delta = (event.data?.content as string) || '';
+  // Append to existing streaming message, or create one before thinking indicator
+}
+```
+
+### Per-Tool Iteration Message IDs
+
+Tool call events use a deterministic ID pattern `${thinkingMessageId}-iter-${iteration}` to accumulate multiple tool calls from the same agent iteration into a single message. This prevents duplicate messages when the agent makes parallel tool calls within one iteration.
+
 ## Real-Time Agent Visibility
 
 Agent execution events now flow through Redis Streams → WebSocket instead of only SSE:

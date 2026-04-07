@@ -27,6 +27,8 @@ export interface LibraryAgent {
   system_prompt?: string;
   config?: {
     features?: Record<string, boolean>;
+    compaction_model?: string;
+    context_window?: number;
     [key: string]: unknown;
   };
   is_enabled?: boolean;

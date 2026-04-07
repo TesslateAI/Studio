@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AgentChatRequest, AgentChatResponse, Agent, AgentCreate } from '../types/agent';
+import type { AgentChatRequest, AgentChatResponse, Agent } from '../types/agent';
 import type {
   BillingConfig,
   SubscriptionResponse,
@@ -876,6 +876,19 @@ export const chatApi = {
     return response.data;
   },
 
+  compactChat: async (
+    chatId: string
+  ): Promise<{
+    success: boolean;
+    before_count?: number;
+    after_count?: number;
+    summary?: string;
+    detail?: string;
+  }> => {
+    const response = await api.post(`/api/chat/${chatId}/compact`);
+    return response.data;
+  },
+
   // Debug: List available tools (admin only)
   debugListTools: async (): Promise<
     Array<{
@@ -1572,29 +1585,6 @@ export const creatorsApi = {
   },
 };
 
-export const agentsApi = {
-  getAll: async (): Promise<Agent[]> => {
-    const response = await api.get('/api/agents/');
-    return response.data;
-  },
-  get: async (id: string): Promise<Agent> => {
-    const response = await api.get(`/api/agents/${id}`);
-    return response.data;
-  },
-  create: async (agent: AgentCreate): Promise<Agent> => {
-    const response = await api.post('/api/agents/', agent);
-    return response.data;
-  },
-  update: async (id: string, agent: Partial<AgentCreate>): Promise<Agent> => {
-    const response = await api.put(`/api/agents/${id}`, agent);
-    return response.data;
-  },
-  delete: async (id: string) => {
-    const response = await api.delete(`/api/agents/${id}`);
-    return response.data;
-  },
-};
-
 export const secretsApi = {
   // List all API keys
   listApiKeys: async (provider?: string) => {
@@ -2005,31 +1995,6 @@ export const assetsApi = {
 // ============================================================================
 
 // Cache app config to avoid repeated fetches
-let appConfigCache: { app_domain: string; deployment_mode: string } | null = null;
-
-export const configApi = {
-  /**
-   * Get app configuration (app_domain, deployment_mode)
-   * Cached after first fetch
-   */
-  getConfig: async () => {
-    if (appConfigCache) {
-      return appConfigCache;
-    }
-    const response = await api.get('/api/config');
-    appConfigCache = response.data;
-    return appConfigCache;
-  },
-
-  /**
-   * Get app_domain, with fallback to 'localhost'
-   */
-  getAppDomain: async (): Promise<string> => {
-    const config = await configApi.getConfig();
-    return config?.app_domain || 'localhost';
-  },
-};
-
 // ============================================================================
 // Billing & Subscription API
 // ============================================================================

@@ -163,6 +163,8 @@ Load this root CLAUDE.md when:
 | Redis/pub-sub infrastructure | [orchestrator/services/pubsub.md](orchestrator/services/pubsub.md) |
 | Skills system | [orchestrator/agent/CLAUDE.md](orchestrator/agent/CLAUDE.md) |
 | Messaging channels | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → channels.py |
+| Gateway & messaging platforms | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → gateway.py, schedules.py |
+| Agent scheduling (cron) | [orchestrator/agent/tools/CLAUDE.md](orchestrator/agent/tools/CLAUDE.md) → schedule_ops |
 | MCP server integration | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → mcp.py, mcp_server.py |
 | Web search tool | [orchestrator/agent/tools/CLAUDE.md](orchestrator/agent/tools/CLAUDE.md) |
 | Universal project setup | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → projects.py setup-config |

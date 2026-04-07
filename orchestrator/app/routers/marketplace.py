@@ -422,7 +422,9 @@ async def get_marketplace_agents(
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
-            MarketplaceAgent.item_type.notin_(["skill", "subagent", "mcp_server"]),
+            MarketplaceAgent.item_type.notin_(
+                ["skill", "subagent", "mcp_server", "deployment_target"]
+            ),
             (MarketplaceAgent.forked_by_user_id.is_(None))
             | (MarketplaceAgent.is_published.is_(True)),
         )
@@ -746,9 +748,7 @@ async def purchase_agent(
         else UserPurchasedAgent.user_id == current_user.id
     )
     existing_result = await db.execute(
-        select(UserPurchasedAgent).where(
-            ownership_filter, UserPurchasedAgent.agent_id == agent_id
-        )
+        select(UserPurchasedAgent).where(ownership_filter, UserPurchasedAgent.agent_id == agent_id)
     )
     existing_purchase = existing_result.scalar_one_or_none()
 
@@ -764,7 +764,11 @@ async def purchase_agent(
         else:
             # Create new purchase record
             purchase = UserPurchasedAgent(
-                user_id=current_user.id, team_id=team_id, agent_id=agent_id, purchase_type="free", is_active=True
+                user_id=current_user.id,
+                team_id=team_id,
+                agent_id=agent_id,
+                purchase_type="free",
+                is_active=True,
             )
             db.add(purchase)
 
@@ -1481,6 +1485,23 @@ async def update_custom_agent(
         agent.avatar_url = update_data["avatar_url"]
     if update_data.get("model"):
         agent.required_models = [update_data["model"]]
+    # Sync selected_model on the purchase record so list/detail views stay consistent
+    if update_data.get("model"):
+        team_id = current_user.default_team_id
+        purchase_filter = (
+            UserPurchasedAgent.team_id == team_id
+            if team_id
+            else UserPurchasedAgent.user_id == current_user.id
+        )
+        purchase_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                purchase_filter,
+                UserPurchasedAgent.agent_id == agent_id,
+            )
+        )
+        purchase = purchase_result.scalar_one_or_none()
+        if purchase:
+            purchase.selected_model = update_data["model"]
     # Merge config (features, etc.) - deep merge so partial updates work
     if "config" in update_data and isinstance(update_data["config"], dict):
         existing_config = agent.config or {}
@@ -1517,7 +1538,9 @@ async def get_user_agents(
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
         .where(
             ownership_filter,
-            MarketplaceAgent.item_type.notin_(["skill", "subagent", "mcp_server"]),
+            MarketplaceAgent.item_type.notin_(
+                ["skill", "subagent", "mcp_server", "deployment_target"]
+            ),
         )
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .order_by(UserPurchasedAgent.purchase_date.desc())
@@ -1904,9 +1927,7 @@ async def remove_agent_from_library(
 
     # Find the purchase record
     result = await db.execute(
-        select(UserPurchasedAgent).where(
-            ownership_filter, UserPurchasedAgent.agent_id == agent_id
-        )
+        select(UserPurchasedAgent).where(ownership_filter, UserPurchasedAgent.agent_id == agent_id)
     )
     purchase = result.scalar_one_or_none()
 
@@ -1972,9 +1993,7 @@ async def select_agent_model(
 
     # Find the purchase record
     result = await db.execute(
-        select(UserPurchasedAgent).where(
-            ownership_filter, UserPurchasedAgent.agent_id == agent_id
-        )
+        select(UserPurchasedAgent).where(ownership_filter, UserPurchasedAgent.agent_id == agent_id)
     )
     purchase = result.scalar_one_or_none()
 
@@ -2573,9 +2592,7 @@ async def get_marketplace_bases(
             else UserPurchasedBase.user_id == current_user.id
         )
         purchased_result = await db.execute(
-            select(UserPurchasedBase.base_id).where(
-                base_ownership, UserPurchasedBase.is_active
-            )
+            select(UserPurchasedBase.base_id).where(base_ownership, UserPurchasedBase.is_active)
         )
         purchased_base_ids = [row[0] for row in purchased_result.fetchall()]
 
@@ -2876,9 +2893,7 @@ async def purchase_base(
         else UserPurchasedBase.user_id == current_user.id
     )
     existing_result = await db.execute(
-        select(UserPurchasedBase).where(
-            ownership_filter, UserPurchasedBase.base_id == base_id
-        )
+        select(UserPurchasedBase).where(ownership_filter, UserPurchasedBase.base_id == base_id)
     )
     existing_purchase = existing_result.scalar_one_or_none()
 
@@ -2892,7 +2907,11 @@ async def purchase_base(
             existing_purchase.purchase_date = datetime.now(UTC)
         else:
             purchase = UserPurchasedBase(
-                user_id=current_user.id, team_id=team_id, base_id=base_id, purchase_type="free", is_active=True
+                user_id=current_user.id,
+                team_id=team_id,
+                base_id=base_id,
+                purchase_type="free",
+                is_active=True,
             )
             db.add(purchase)
 

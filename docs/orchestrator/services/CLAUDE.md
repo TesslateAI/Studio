@@ -69,13 +69,19 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - **skill_discovery.py** - `SkillCatalogEntry` discovery from DB (`AgentSkillAssignment`) and project files (`.agents/skills/SKILL.md`). Only loads name + description for progressive disclosure; full body loaded on-demand by `load_skill` tool.
 
 ### Messaging Channels (orchestrator/app/services/channels/)
-- **base.py** - `AbstractChannel` ABC and `InboundMessage` dataclass for all channel implementations
-- **telegram.py** - Telegram Bot API channel implementation
-- **slack.py** - Slack Bot channel implementation
-- **discord_bot.py** - Discord Bot channel implementation
-- **whatsapp.py** - WhatsApp Business API channel implementation
+- **base.py** - `AbstractChannel` ABC, `GatewayAdapter` base class (persistent connections), `InboundMessage`/`MessageEvent`/`MessageSource` dataclasses
+- **telegram.py** - Telegram Bot API channel + gateway adapter (polling-based persistent connection)
+- **slack.py** - Slack Bot channel + gateway adapter (Socket Mode persistent connection)
+- **discord_bot.py** - Discord Bot channel + gateway adapter (WebSocket persistent connection)
+- **whatsapp.py** - WhatsApp Business API channel (webhook-only, no gateway adapter)
 - **registry.py** - Channel factory (`get_channel()`), credential encryption/decryption via Fernet
 - **formatting.py** - Platform-specific message formatting utilities
+- **media.py** - Media pipeline for voice transcription (LiteLLM/Whisper) and media caching
+
+### Gateway Process (orchestrator/app/services/gateway/)
+- **runner.py** - `GatewayRunner` — manages persistent platform connections, routes inbound messages to agent system, delivers responses via Redis delivery stream. Background tasks: heartbeat, reconnect watcher, delivery consumer (XREADGROUP), session reaper, media cache cleaner, reload listener.
+- **scheduler.py** - `CronScheduler` — timezone-aware cron evaluation, reads `agent_schedules` table every tick, enqueues matching prompts as agent tasks via ARQ.
+- **schedule_parser.py** - Natural language schedule parsing ("every day at 9am", "weekdays at 5pm") → normalized 5-field cron expressions.
 
 ### MCP Integration (orchestrator/app/services/mcp/)
 - **client.py** - MCP client with dual transport support (stdio + Streamable HTTP) via `connect_mcp()` context manager
@@ -118,6 +124,7 @@ Service definitions now include deployment targets (Vercel, Netlify, Cloudflare)
 - [session-router.md](./session-router.md) - Cross-pod shell session routing
 - [skill-discovery.md](./skill-discovery.md) - Skill discovery service for progressive disclosure
 - [channels.md](./channels.md) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
+- [gateway.md](./gateway.md) - Gateway process, delivery stream, cron scheduler
 - [mcp.md](./mcp.md) - MCP server management, client, and tool bridging
 
 ## Common Service Patterns
@@ -618,6 +625,10 @@ skills = await discover_skills(agent_id, user_id, project_id, container_name, db
 from services.channels.registry import get_channel, encrypt_credentials, decrypt_credentials
 channel = get_channel("telegram", credentials)
 await channel.send_message(jid="telegram:123456", text="Hello!")
+
+# Use gateway runner (standalone process, not imported in API pods)
+# Started via: python -m app.services.gateway.runner
+# See docs/infrastructure/CLAUDE.md for K8s deployment and Docker Compose service config
 
 # Use MCP manager
 from services.mcp.manager import McpManager

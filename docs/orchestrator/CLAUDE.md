@@ -17,6 +17,7 @@ The orchestrator is Tesslate Studio's FastAPI backend handling all API requests,
 | [auth_external.py](../../orchestrator/app/auth_external.py) | API key authentication for external agent API |
 | [services/skill_discovery.py](../../orchestrator/app/services/skill_discovery.py) | Skill discovery and loading for agents |
 | [services/channels/](../../orchestrator/app/services/channels/) | Messaging channel integrations (Telegram, Slack, Discord, WhatsApp) |
+| [services/gateway/](../../orchestrator/app/services/gateway/) | Gateway process (persistent connections, cron scheduler, delivery stream) |
 | [services/mcp/](../../orchestrator/app/services/mcp/) | MCP client, bridge, and server manager |
 
 ## Related Contexts (Load These For)
@@ -42,11 +43,14 @@ orchestrator/app/
 ├── models.py         # DB models
 ├── routers/          # API endpoints (25+ files)
 │   ├── channels.py   # Messaging channel config
+│   ├── gateway.py    # Gateway status, identity pairing
+│   ├── schedules.py  # Cron-scheduled agent tasks
 │   ├── mcp.py        # User MCP server management
 │   └── mcp_server.py # MCP server marketplace catalog
 ├── services/         # Business logic (30+ files)
 │   ├── skill_discovery.py  # Skill discovery & loading
 │   ├── channels/     # Channel integrations (Telegram, Slack, Discord, WhatsApp)
+│   ├── gateway/      # Gateway process, cron scheduler, schedule parser
 │   └── mcp/          # MCP client, bridge, manager
 ├── seeds/            # Database seed data
 │   ├── skills.py     # Marketplace skills (15+)
@@ -128,6 +132,8 @@ await orchestrator.start_project(project, containers, connections, user_id, db)
 | git | `/api/git` | Git operations |
 | external_agent | `/api/external` | External agent API (API key auth, SSE events) |
 | channels | `/api/channels` | Messaging channel configuration (Telegram, Slack, Discord, WhatsApp) |
+| gateway | `/api/gateway` | Gateway status, reload, platform list, identity pairing |
+| schedules | `/api/schedules` | Cron-scheduled agent tasks (CRUD, pause/resume, trigger) |
 | mcp | `/api/mcp` | User MCP server management and tool execution |
 | mcp_server | `/api/mcp-servers` | MCP server marketplace catalog |
 

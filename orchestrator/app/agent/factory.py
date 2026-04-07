@@ -127,12 +127,46 @@ async def create_agent_from_db_model(
     elif agent_type_str == "TesslateAgent":
         # Build feature flags from agent config (Library UI toggles write here)
         agent_config = agent_model.config if hasattr(agent_model, "config") else None
+        config = agent_config or {}
         features = Features.from_config(agent_config)
+
+        # Compaction adapter — cheaper model for context summarization
+        # Reuses the same LiteLLM client, just a different model name
+        compaction_adapter = None
+        compaction_model_name = config.get("compaction_model", "")
+        if not compaction_model_name:
+            from ..config import get_settings
+
+            compaction_model_name = get_settings().compaction_summary_model
+        if compaction_model_name and model_adapter and hasattr(model_adapter, "client"):
+            try:
+                from .models import OpenAIAdapter, resolve_model_name
+
+                bare_name = resolve_model_name(compaction_model_name)
+                compaction_adapter = OpenAIAdapter(
+                    model_name=bare_name,
+                    client=model_adapter.client,  # same LiteLLM proxy
+                    temperature=0.3,
+                )
+                logger.info("[AgentFactory] Compaction adapter: %s", bare_name)
+            except Exception as e:
+                logger.warning("[AgentFactory] Compaction model failed, using main: %s", e)
+
+        # Thread thinking effort from agent config → model adapter
+        thinking_effort = config.get("thinking_effort", "")
+        if not thinking_effort:
+            from ..config import get_settings as _gs
+
+            thinking_effort = _gs().default_thinking_effort
+        if thinking_effort and model_adapter and hasattr(model_adapter, "thinking_effort"):
+            model_adapter.thinking_effort = thinking_effort
+
         agent = TesslateAgent(
             system_prompt=agent_model.system_prompt,
             tools=tools,
             model=model_adapter,
             features=features,
+            compaction_adapter=compaction_adapter,
         )
     else:
         # Generic instantiation for future agent types

@@ -486,7 +486,7 @@ All base deployments include `revisionHistoryLimit: 3` to limit ReplicaSet histo
 CronJobs use `envFrom` with `secretRef` instead of individual `valueFrom` entries for simplified configuration.
 
 ### Namespaces
-- `tesslate`: Platform services (backend, frontend, postgres, Redis, worker)
+- `tesslate`: Platform services (backend, frontend, postgres, Redis, worker, gateway)
 - `ingress-nginx`: Ingress controller
 - `minio-system`: MinIO (Minikube only)
 - `proj-{uuid}`: User projects
@@ -510,6 +510,18 @@ CronJobs use `envFrom` with `secretRef` instead of individual `valueFrom` entrie
 
 ### CronJobs
 - `dev-environment-cleanup`: Runs every 2 minutes, hibernates idle projects
+
+### Gateway Process
+
+The gateway is a long-running process that manages persistent messaging platform connections (Telegram polling, Discord WebSocket, Slack Socket Mode). It runs as a separate deployment in the `tesslate` namespace.
+
+**K8s Deployment**: Uses `Recreate` strategy with `replicas=1` to ensure single-writer semantics. The gateway shard reads from the `channel_configs` table (filtered by `gateway_shard` column) and maintains persistent platform connections.
+
+**Docker Compose**: Runs as the `gateway` service. Uses a file lock (`gateway_lock_dir`) as defense-in-depth against accidental multi-instance.
+
+**Background tasks**: Heartbeat (30s), reconnect watcher, delivery consumer (XREADGROUP), session reaper, media cache cleaner, reload listener (Redis pub/sub), and cron scheduler.
+
+**Key config**: `GATEWAY_ENABLED`, `GATEWAY_SHARD`, `GATEWAY_NUM_SHARDS`, `GATEWAY_LOCK_DIR`, `GATEWAY_TICK_INTERVAL`, `GATEWAY_SESSION_IDLE_MINUTES`, `GATEWAY_DELIVERY_STREAM`.
 
 ## Best Practices
 

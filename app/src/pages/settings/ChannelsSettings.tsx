@@ -194,7 +194,7 @@ export default function ChannelsSettings() {
   const handleTest = async (channelId: string) => {
     setTestingId(channelId);
     try {
-      await channelsApi.test(channelId, '');
+      await channelsApi.test(channelId, 'self');
       toast.success('Test message sent');
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
@@ -250,7 +250,7 @@ export default function ChannelsSettings() {
           <select
             value={selectedProjectId}
             onChange={(e) => setSelectedProjectId(e.target.value)}
-            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+            className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
           >
             <option value="">All projects</option>
             {projects.map((p) => (
@@ -400,7 +400,7 @@ export default function ChannelsSettings() {
                   <select
                     value={formPlatform}
                     onChange={(e) => handlePlatformChange(e.target.value)}
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                   >
                     <option value="">Select a platform</option>
                     {platforms.map((p) => (
@@ -421,7 +421,7 @@ export default function ChannelsSettings() {
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     placeholder="e.g., Support Bot, Notifications"
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                     maxLength={100}
                   />
                 </div>
@@ -442,7 +442,7 @@ export default function ChannelsSettings() {
                           value={formCredentials[field.key] || ''}
                           onChange={(e) => handleCredentialChange(field.key, e.target.value)}
                           placeholder={field.placeholder || ''}
-                          className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                          className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                         />
                       </div>
                     ))}
@@ -457,7 +457,7 @@ export default function ChannelsSettings() {
                   <select
                     value={formProjectId}
                     onChange={(e) => setFormProjectId(e.target.value)}
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    className="w-full px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-base text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                   >
                     <option value="">Select a project</option>
                     {projects.map((p) => (

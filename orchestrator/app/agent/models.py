@@ -21,15 +21,6 @@ from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Optional: Anthropic import (only needed if using Claude)
-try:
-    from anthropic import AsyncAnthropic
-
-    ANTHROPIC_AVAILABLE = True
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
-    AsyncAnthropic = None
-
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -437,6 +428,41 @@ class ModelAdapter(ABC):
         pass
 
 
+THINKING_BUDGET = {"xhigh": 32_000, "high": 16_000, "medium": 8_000, "low": 4_000}
+
+# Adaptive effort values for Claude 4.6 models (uses output_config.effort
+# instead of manual budget_tokens)
+_ADAPTIVE_EFFORT_MAP = {
+    "xhigh": "max",
+    "high": "high",
+    "medium": "medium",
+    "low": "low",
+}
+
+# Models that support extended thinking via the OpenAI-compat API
+_THINKING_CAPABLE_PATTERNS = (
+    "claude-opus-4",
+    "claude-sonnet-4",
+    "claude-3-7",
+    "claude-3.7",
+    "deepseek-r1",
+    "deepseek-reasoner",
+)
+
+
+def _is_thinking_capable(model_name: str) -> bool:
+    """Check if a model supports extended thinking. Haiku does NOT."""
+    lower = model_name.lower()
+    if "haiku" in lower:
+        return False
+    return any(p in lower for p in _THINKING_CAPABLE_PATTERNS)
+
+
+def _supports_adaptive_thinking(model_name: str) -> bool:
+    """Return True for Claude 4.6 models that support adaptive thinking."""
+    return any(v in model_name for v in ("4-6", "4.6"))
+
+
 class OpenAIAdapter(ModelAdapter):
     """
     Adapter for OpenAI models (GPT-4, GPT-3.5-turbo, etc.)
@@ -449,6 +475,7 @@ class OpenAIAdapter(ModelAdapter):
         client: AsyncOpenAI,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        thinking_effort: str = "",
     ):
         """
         Initialize OpenAI adapter with a pre-configured client.
@@ -458,11 +485,13 @@ class OpenAIAdapter(ModelAdapter):
             client: Pre-configured AsyncOpenAI client (from get_llm_client())
             temperature: Sampling temperature (0-2)
             max_tokens: Maximum tokens in response
+            thinking_effort: "", "low", "medium", "high", "xhigh" — enables extended thinking
         """
         self.model_name = model_name
         self.client = client
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.thinking_effort = thinking_effort
 
         logger.info(f"OpenAIAdapter initialized - model: {model_name}")
 
@@ -558,6 +587,27 @@ class OpenAIAdapter(ModelAdapter):
 
         # Enable parallel tool calls if supported
         request_params["parallel_tool_calls"] = True
+
+        # Extended thinking for capable models.
+        # LiteLLM translates these to the appropriate provider format
+        # (Anthropic thinking param, OpenRouter reasoning, etc.)
+        if self.thinking_effort and _is_thinking_capable(self.model_name):
+            budget = THINKING_BUDGET.get(self.thinking_effort, 0)
+            if budget:
+                extra_body = request_params.get("extra_body", {})
+                if _supports_adaptive_thinking(self.model_name):
+                    # Claude 4.6: adaptive thinking + effort level
+                    extra_body["thinking"] = {"type": "adaptive"}
+                    extra_body["output_config"] = {
+                        "effort": _ADAPTIVE_EFFORT_MAP.get(self.thinking_effort, "medium")
+                    }
+                else:
+                    # Older Claude / other: manual budget
+                    extra_body["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": budget,
+                    }
+                request_params["extra_body"] = extra_body
 
         try:
             # Inject prompt caching breakpoints for eligible models (e.g. Claude).
@@ -658,92 +708,6 @@ class OpenAIAdapter(ModelAdapter):
         return self.model_name
 
 
-class AnthropicAdapter(ModelAdapter):
-    """
-    Adapter for Anthropic's Claude models.
-    """
-
-    def __init__(
-        self, model_name: str, api_key: str, temperature: float = 0.7, max_tokens: int = 4096
-    ):
-        """
-        Initialize Anthropic adapter.
-
-        Args:
-            model_name: Model identifier (e.g., "claude-3-5-sonnet-20241022")
-            api_key: Anthropic API key
-            temperature: Sampling temperature (0-1)
-            max_tokens: Maximum tokens in response
-        """
-        if not ANTHROPIC_AVAILABLE:
-            raise ImportError(
-                "Anthropic library not installed. Install with: pip install anthropic"
-            )
-
-        self.model_name = model_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.client = AsyncAnthropic(api_key=api_key)
-
-        logger.info(f"AnthropicAdapter initialized - model: {model_name}")
-
-    async def chat(self, messages: list[dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
-        """
-        Send messages to Anthropic API and stream response chunks.
-
-        Note: Anthropic requires system message to be separate from messages list.
-
-        Args:
-            messages: List of message dicts
-            **kwargs: Override temperature, max_tokens, etc.
-
-        Yields:
-            Text chunks as they're generated by the model
-        """
-        _ = kwargs.get("temperature", self.temperature)  # Reserved for future use
-        max_tokens = kwargs.get("max_tokens", self.max_tokens)
-
-        # Anthropic requires system message to be separate
-        system_message = None
-        conversation_messages = []
-
-        for msg in messages:
-            if msg["role"] == "system":
-                system_message = msg["content"]
-            else:
-                conversation_messages.append({"role": msg["role"], "content": msg["content"]})
-
-        try:
-            logger.debug(
-                f"Sending streaming request to {self.model_name} with {len(conversation_messages)} messages"
-            )
-
-            request_params = {
-                "model": self.model_name,
-                "messages": conversation_messages,
-                "temperature": self.temperature,
-                "max_tokens": max_tokens,
-                "stream": True,  # Enable streaming
-            }
-
-            if system_message:
-                request_params["system"] = system_message
-
-            # Stream response chunks
-            async with self.client.messages.stream(**request_params) as stream:
-                async for text in stream.text_stream:
-                    yield text
-
-            logger.debug(f"Streaming complete for {self.model_name}")
-
-        except Exception as e:
-            logger.error(f"Anthropic API streaming error: {e}", exc_info=True)
-            raise RuntimeError(f"Model API error: {str(e)}") from e
-
-    def get_model_name(self) -> str:
-        return self.model_name
-
-
 async def create_model_adapter(
     model_name: str, user_id: UUID, db: AsyncSession, provider: str | None = None, **kwargs
 ) -> ModelAdapter:
@@ -782,13 +746,7 @@ async def create_model_adapter(
         else:
             provider = "openai"
 
-    if provider == "anthropic":
-        # Native Anthropic API (not implemented for async client fetching yet)
-        # For now, this would require direct API key - not commonly used
-        raise NotImplementedError(
-            "Native Anthropic adapter not yet updated for centralized routing"
-        )
-    elif provider == "openai":
+    if provider == "openai":
         # Get configured client using centralized routing
         client = await get_llm_client(user_id, model_name, db)
 
