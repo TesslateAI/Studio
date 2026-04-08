@@ -1279,6 +1279,14 @@ class RestoreSnapshotResponse(BaseModel):
 # =============================================================================
 
 
+class ScopeOption(BaseModel):
+    """A single available scope for API key creation."""
+
+    value: str
+    label: str
+    category: str
+
+
 class ExternalAPIKeyCreate(BaseModel):
     """Create an external API key."""
 
@@ -1295,6 +1303,19 @@ class ExternalAPIKeyCreate(BaseModel):
         if len(v) > 100:
             raise ValueError("Name cannot exceed 100 characters")
         return v.strip()
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, v):
+        if v is None:
+            return v
+        from .permissions import Permission
+
+        valid_values = {p.value for p in Permission}
+        for scope in v:
+            if scope not in valid_values:
+                raise ValueError(f"Invalid scope: {scope}")
+        return v
 
 
 class ExternalAPIKeyResponse(BaseModel):

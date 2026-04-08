@@ -177,6 +177,77 @@ def has_permission(role: str, permission: Permission) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Scope labels for API key scope selector UI
+# ---------------------------------------------------------------------------
+
+SCOPE_LABELS: dict[str, dict[str, str]] = {
+    # Team-level
+    Permission.TEAM_VIEW: {"label": "Team — View", "category": "Team"},
+    Permission.TEAM_EDIT: {"label": "Team — Edit settings", "category": "Team"},
+    Permission.TEAM_DELETE: {"label": "Team — Delete", "category": "Team"},
+    Permission.TEAM_INVITE: {"label": "Team — Invite members", "category": "Team"},
+    Permission.TEAM_REMOVE_MEMBER: {"label": "Team — Remove members", "category": "Team"},
+    Permission.TEAM_CHANGE_ROLE: {"label": "Team — Change roles", "category": "Team"},
+    Permission.BILLING_VIEW: {"label": "Billing — View", "category": "Billing"},
+    Permission.BILLING_MANAGE: {"label": "Billing — Manage", "category": "Billing"},
+    Permission.BILLING_USAGE: {"label": "Billing — View usage", "category": "Billing"},
+    # Project-level
+    Permission.PROJECT_LIST: {"label": "Projects — List", "category": "Projects"},
+    Permission.PROJECT_CREATE: {"label": "Projects — Create", "category": "Projects"},
+    Permission.PROJECT_VIEW: {"label": "Projects — View", "category": "Projects"},
+    Permission.PROJECT_EDIT: {"label": "Projects — Edit", "category": "Projects"},
+    Permission.PROJECT_DELETE: {"label": "Projects — Delete", "category": "Projects"},
+    Permission.PROJECT_SETTINGS: {"label": "Projects — Settings", "category": "Projects"},
+    # File
+    Permission.FILE_READ: {"label": "Files — Read", "category": "Files"},
+    Permission.FILE_WRITE: {"label": "Files — Write", "category": "Files"},
+    Permission.FILE_DELETE: {"label": "Files — Delete", "category": "Files"},
+    # Container
+    Permission.CONTAINER_VIEW: {"label": "Containers — View", "category": "Containers"},
+    Permission.CONTAINER_CREATE: {"label": "Containers — Create", "category": "Containers"},
+    Permission.CONTAINER_EDIT: {"label": "Containers — Edit", "category": "Containers"},
+    Permission.CONTAINER_DELETE: {"label": "Containers — Delete", "category": "Containers"},
+    Permission.CONTAINER_START_STOP: {"label": "Containers — Start/Stop", "category": "Containers"},
+    # Chat / Agent
+    Permission.CHAT_VIEW: {"label": "Chat — View messages", "category": "Chat"},
+    Permission.CHAT_SEND: {"label": "Chat — Send messages", "category": "Chat"},
+    Permission.CHAT_DELETE: {"label": "Chat — Delete", "category": "Chat"},
+    # Deployment
+    Permission.DEPLOYMENT_VIEW: {"label": "Deployments — View", "category": "Deployments"},
+    Permission.DEPLOYMENT_CREATE: {"label": "Deployments — Create", "category": "Deployments"},
+    Permission.DEPLOYMENT_DELETE: {"label": "Deployments — Delete", "category": "Deployments"},
+    # Git
+    Permission.GIT_VIEW: {"label": "Git — View", "category": "Git"},
+    Permission.GIT_WRITE: {"label": "Git — Write", "category": "Git"},
+    # Kanban
+    Permission.KANBAN_VIEW: {"label": "Kanban — View", "category": "Kanban"},
+    Permission.KANBAN_EDIT: {"label": "Kanban — Edit", "category": "Kanban"},
+    # Snapshot
+    Permission.SNAPSHOT_VIEW: {"label": "Snapshots — View", "category": "Snapshots"},
+    Permission.SNAPSHOT_CREATE: {"label": "Snapshots — Create", "category": "Snapshots"},
+    Permission.SNAPSHOT_RESTORE: {"label": "Snapshots — Restore", "category": "Snapshots"},
+    # Terminal
+    Permission.TERMINAL_ACCESS: {"label": "Terminal — Access", "category": "Terminal"},
+    # Credentials
+    Permission.CREDENTIALS_VIEW: {"label": "Credentials — View", "category": "Credentials"},
+    Permission.CREDENTIALS_MANAGE: {"label": "Credentials — Manage", "category": "Credentials"},
+    Permission.API_KEYS_MANAGE: {"label": "API Keys — Manage", "category": "Credentials"},
+    # Channel
+    Permission.CHANNEL_VIEW: {"label": "Channels — View", "category": "Channels"},
+    Permission.CHANNEL_MANAGE: {"label": "Channels — Manage", "category": "Channels"},
+    # MCP
+    Permission.MCP_VIEW: {"label": "MCP — View", "category": "MCP"},
+    Permission.MCP_MANAGE: {"label": "MCP — Manage", "category": "MCP"},
+    # Agent
+    Permission.AGENT_VIEW: {"label": "Agents — View", "category": "Agents"},
+    Permission.AGENT_MANAGE: {"label": "Agents — Manage", "category": "Agents"},
+    # Audit
+    Permission.AUDIT_VIEW: {"label": "Audit Log — View", "category": "Audit"},
+    Permission.AUDIT_EXPORT: {"label": "Audit Log — Export", "category": "Audit"},
+}
+
+
+# ---------------------------------------------------------------------------
 # Core access-check functions
 # ---------------------------------------------------------------------------
 

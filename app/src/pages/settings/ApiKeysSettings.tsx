@@ -1,7 +1,19 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
-import { Key, Trash, Plus, Copy, Check, ShieldCheck, Clock } from '@phosphor-icons/react';
+import {
+  Key,
+  Trash,
+  Plus,
+  Copy,
+  Check,
+  ShieldCheck,
+  Clock,
+  CaretDown,
+  CaretRight,
+  LockSimple,
+} from '@phosphor-icons/react';
 import { externalApi, projectsApi } from '../../lib/api';
+import type { ScopeOption } from '../../lib/api';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { SettingsSection } from '../../components/settings';
 import { ConfirmDialog } from '../../components/modals/ConfirmDialog';
@@ -19,6 +31,56 @@ interface ApiKey {
   expires_at: string | null;
   key: string | null;
 }
+
+// Preset scope configurations
+const SCOPE_PRESETS: Record<string, { label: string; description: string; scopes: string[] }> = {
+  readonly: {
+    label: 'Read Only',
+    description: 'View projects, files, containers, and deployments',
+    scopes: [
+      'file.read',
+      'container.view',
+      'chat.view',
+      'project.view',
+      'project.list',
+      'deployment.view',
+      'git.view',
+      'snapshot.view',
+      'kanban.view',
+    ],
+  },
+  agent: {
+    label: 'Agent Only',
+    description: 'Invoke agents, read/write files, manage containers',
+    scopes: [
+      'chat.send',
+      'chat.view',
+      'file.read',
+      'file.write',
+      'container.view',
+      'container.start_stop',
+      'terminal.access',
+      'project.view',
+      'project.list',
+    ],
+  },
+  cicd: {
+    label: 'CI/CD',
+    description: 'Deploy, manage files, and control containers',
+    scopes: [
+      'file.read',
+      'file.write',
+      'container.start_stop',
+      'container.view',
+      'deployment.create',
+      'deployment.view',
+      'git.view',
+      'git.write',
+      'project.view',
+      'project.list',
+    ],
+  },
+};
 
 function formatRelativeDate(dateString: string | null): string {
   if (!dateString) return '';
@@ -60,10 +122,219 @@ function getExpiryStatus(expiresAt: string | null): { label: string; className: 
   };
 }
 
+function ScopeBadge({ scopes }: { scopes: string[] | null }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!scopes) {
+    return (
+      <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded text-[10px] flex items-center gap-1">
+        <LockSimple size={10} />
+        Full Access
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded(!expanded);
+        }}
+        className="px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded text-[10px] hover:bg-purple-500/20 transition-colors flex items-center gap-1"
+      >
+        <LockSimple size={10} />
+        {scopes.length} permission{scopes.length !== 1 ? 's' : ''}
+        {expanded ? <CaretDown size={10} /> : <CaretRight size={10} />}
+      </button>
+      {expanded && (
+        <div className="absolute mt-1 top-full left-0 z-10 p-2 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg max-w-xs">
+          <div className="space-y-0.5 max-h-40 overflow-y-auto">
+            {scopes.map((scope) => (
+              <div key={scope} className="text-[10px] text-[var(--text-subtle)] font-mono px-1">
+                {scope}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+function ScopeSelector({
+  availableScopes,
+  selectedScopes,
+  onScopesChange,
+  fullAccess,
+  onFullAccessChange,
+}: {
+  availableScopes: ScopeOption[];
+  selectedScopes: string[];
+  onScopesChange: (scopes: string[]) => void;
+  fullAccess: boolean;
+  onFullAccessChange: (fullAccess: boolean) => void;
+}) {
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
+  const groupedScopes = useMemo(() => {
+    const groups: Record<string, ScopeOption[]> = {};
+    for (const scope of availableScopes) {
+      if (!groups[scope.category]) groups[scope.category] = [];
+      groups[scope.category].push(scope);
+    }
+    return groups;
+  }, [availableScopes]);
+
+  const toggleCategory = (category: string) => {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
+
+  const toggleScope = (value: string) => {
+    if (selectedScopes.includes(value)) {
+      onScopesChange(selectedScopes.filter((s) => s !== value));
+    } else {
+      onScopesChange([...selectedScopes, value]);
+    }
+  };
+
+  const toggleAllInCategory = (category: string) => {
+    const categoryScopes = groupedScopes[category].map((s) => s.value);
+    const allSelected = categoryScopes.every((s) => selectedScopes.includes(s));
+    if (allSelected) {
+      onScopesChange(selectedScopes.filter((s) => !categoryScopes.includes(s)));
+    } else {
+      const newScopes = new Set([...selectedScopes, ...categoryScopes]);
+      onScopesChange([...newScopes]);
+    }
+  };
+
+  const applyPreset = (presetKey: string) => {
+    const preset = SCOPE_PRESETS[presetKey];
+    if (!preset) return;
+    const available = new Set(availableScopes.map((s) => s.value));
+    onScopesChange(preset.scopes.filter((s) => available.has(s)));
+    onFullAccessChange(false);
+  };
+
+  return (
+    <div>
+      <label className="text-xs font-medium text-[var(--text)] block mb-1.5">Permissions</label>
+
+      {/* Full access toggle */}
+      <label className="flex items-center gap-2 mb-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={fullAccess}
+          onChange={(e) => onFullAccessChange(e.target.checked)}
+          className="rounded border-[var(--border)]"
+        />
+        <span className="text-sm text-[var(--text)]">Full Access</span>
+        <span className="text-[11px] text-[var(--text-subtle)]">
+          (inherits all of your role's permissions)
+        </span>
+      </label>
+
+      {!fullAccess && (
+        <>
+          {/* Presets */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            {Object.entries(SCOPE_PRESETS).map(([key, preset]) => (
+              <button
+                key={key}
+                onClick={() => applyPreset(key)}
+                className="px-2.5 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-lg text-[11px] text-[var(--text-subtle)] hover:border-[var(--primary)] hover:text-[var(--primary)] transition-colors"
+                title={preset.description}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Category groups */}
+          <div className="bg-[var(--bg)] border border-[var(--border)] rounded-lg max-h-60 overflow-y-auto">
+            {Object.entries(groupedScopes).map(([category, scopes]) => {
+              const isExpanded = expandedCategories.has(category);
+              const selectedCount = scopes.filter((s) =>
+                selectedScopes.includes(s.value)
+              ).length;
+              const allSelected = selectedCount === scopes.length;
+
+              return (
+                <div key={category} className="border-b border-[var(--border)] last:border-b-0">
+                  <button
+                    onClick={() => toggleCategory(category)}
+                    className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--surface-hover)] transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      {isExpanded ? (
+                        <CaretDown size={12} className="text-[var(--text-subtle)]" />
+                      ) : (
+                        <CaretRight size={12} className="text-[var(--text-subtle)]" />
+                      )}
+                      <span className="text-xs font-medium text-[var(--text)]">{category}</span>
+                    </div>
+                    <span className="text-[10px] text-[var(--text-subtle)]">
+                      {selectedCount}/{scopes.length}
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="px-3 pb-2">
+                      {/* Select all in category */}
+                      <label className="flex items-center gap-2 px-2 py-1 rounded hover:bg-[var(--surface-hover)] cursor-pointer mb-1">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={() => toggleAllInCategory(category)}
+                          className="rounded border-[var(--border)]"
+                        />
+                        <span className="text-[11px] text-[var(--text-subtle)] italic">
+                          Select all
+                        </span>
+                      </label>
+                      {scopes.map((scope) => (
+                        <label
+                          key={scope.value}
+                          className="flex items-center gap-2 px-2 py-1 rounded hover:bg-[var(--surface-hover)] cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedScopes.includes(scope.value)}
+                            onChange={() => toggleScope(scope.value)}
+                            className="rounded border-[var(--border)]"
+                          />
+                          <span className="text-xs text-[var(--text)]">{scope.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {selectedScopes.length > 0 && (
+            <p className="text-[11px] text-[var(--text-subtle)] mt-2">
+              {selectedScopes.length} permission{selectedScopes.length !== 1 ? 's' : ''} selected
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ApiKeysSettings() {
   // Data
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [projects, setProjects] = useState<{ id: string; name: string; slug: string }[]>([]);
+  const [availableScopes, setAvailableScopes] = useState<ScopeOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Create form
@@ -71,6 +342,8 @@ export default function ApiKeysSettings() {
   const [newKeyName, setNewKeyName] = useState('');
   const [expiryDays, setExpiryDays] = useState<number | null>(null);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
+  const [fullAccess, setFullAccess] = useState(true);
   const [creating, setCreating] = useState(false);
 
   // Created key display
@@ -98,17 +371,21 @@ export default function ApiKeysSettings() {
   const { executeAll } = useCancellableParallelRequests();
 
   const loadData = useCallback(() => {
-    executeAll([() => externalApi.listKeys(), () => projectsApi.getAll()], {
-      onAllSuccess: ([keysData, projectsData]: [unknown, unknown]) => {
-        setKeys(keysData as ApiKey[]);
-        setProjects(projectsData as { id: string; name: string; slug: string }[]);
-      },
-      onError: (error: unknown) => {
-        const err = error as { response?: { data?: { detail?: string } } };
-        toast.error(err.response?.data?.detail || 'Failed to load API keys');
-      },
-      onFinally: () => setLoading(false),
-    });
+    executeAll(
+      [() => externalApi.listKeys(), () => projectsApi.getAll(), () => externalApi.listScopes()],
+      {
+        onAllSuccess: ([keysData, projectsData, scopesData]: unknown[]) => {
+          setKeys(keysData as ApiKey[]);
+          setProjects(projectsData as { id: string; name: string; slug: string }[]);
+          setAvailableScopes(scopesData as ScopeOption[]);
+        },
+        onError: (error: unknown) => {
+          const err = error as { response?: { data?: { detail?: string } } };
+          toast.error(err.response?.data?.detail || 'Failed to load API keys');
+        },
+        onFinally: () => setLoading(false),
+      }
+    );
   }, [executeAll]);
 
   useEffect(() => {
@@ -119,17 +396,25 @@ export default function ApiKeysSettings() {
     setNewKeyName('');
     setExpiryDays(null);
     setSelectedProjectIds([]);
+    setSelectedScopes([]);
+    setFullAccess(true);
   };
 
   const handleCreateKey = async () => {
     if (!newKeyName.trim()) return;
     setCreating(true);
     try {
-      const data: { name: string; expires_in_days?: number; project_ids?: string[] } = {
+      const data: {
+        name: string;
+        expires_in_days?: number;
+        project_ids?: string[];
+        scopes?: string[];
+      } = {
         name: newKeyName.trim(),
       };
       if (expiryDays !== null) data.expires_in_days = expiryDays;
       if (selectedProjectIds.length > 0) data.project_ids = selectedProjectIds;
+      if (!fullAccess && selectedScopes.length > 0) data.scopes = selectedScopes;
 
       const response = await externalApi.createKey(data);
       setCreatedKey(response as ApiKey);
@@ -205,7 +490,7 @@ export default function ApiKeysSettings() {
                 <code className="font-mono bg-blue-500/20 px-1 rounded">@tesslate/sdk</code>. Keys
                 are prefixed with{' '}
                 <code className="font-mono bg-blue-500/20 px-1 rounded">tsk_</code> and can be
-                scoped to specific projects.
+                scoped to specific projects and permissions.
               </p>
             </div>
           </div>
@@ -303,6 +588,15 @@ export default function ApiKeysSettings() {
                     <option value="90">90 days</option>
                   </select>
                 </div>
+
+                {/* Permissions / Scopes */}
+                <ScopeSelector
+                  availableScopes={availableScopes}
+                  selectedScopes={selectedScopes}
+                  onScopesChange={setSelectedScopes}
+                  fullAccess={fullAccess}
+                  onFullAccessChange={setFullAccess}
+                />
 
                 {/* Project scope */}
                 <div>
@@ -413,6 +707,9 @@ export default function ApiKeysSettings() {
                                 All projects
                               </span>
                             )}
+                            <span className="relative">
+                              <ScopeBadge scopes={apiKey.scopes} />
+                            </span>
                           </div>
                         </div>
                       </div>

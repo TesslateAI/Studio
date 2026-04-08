@@ -18,8 +18,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth_external import get_external_api_user
+from ..auth_external import get_external_api_user, require_api_scope
 from ..config import get_settings
+from ..permissions import Permission, ROLE_PERMISSIONS, SCOPE_LABELS, has_permission, get_team_membership
 from ..database import get_db
 from ..models import Chat, Container, ExternalAPIKey, Message, User
 from ..schemas import (
@@ -28,6 +29,7 @@ from ..schemas import (
     ExternalAgentStatusResponse,
     ExternalAPIKeyCreate,
     ExternalAPIKeyResponse,
+    ScopeOption,
 )
 from ..services.agent_context import (
     _build_architecture_context,
@@ -93,7 +95,7 @@ async def _get_arq_pool():
 @router.post("/agent/invoke", response_model=ExternalAgentInvokeResponse)
 async def invoke_agent(
     request: ExternalAgentInvokeRequest,
-    user: User = Depends(get_external_api_user),
+    user: User = Depends(require_api_scope(Permission.CHAT_SEND)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -107,7 +109,7 @@ async def invoke_agent(
     """
 
     # Verify project access via RBAC
-    from ..permissions import Permission, get_project_with_access
+    from ..permissions import get_project_with_access
 
     project, _role = await get_project_with_access(
         db, str(request.project_id), user.id, Permission.CHAT_SEND
@@ -275,7 +277,7 @@ async def invoke_agent(
 async def subscribe_agent_events(
     task_id: str,
     last_event_id: str | None = None,
-    user: User = Depends(get_external_api_user),
+    user: User = Depends(require_api_scope(Permission.CHAT_VIEW)),
 ):
     """
     Subscribe to agent execution events via Server-Sent Events (SSE).
@@ -327,7 +329,7 @@ async def subscribe_agent_events(
 @router.get("/agent/status/{task_id}", response_model=ExternalAgentStatusResponse)
 async def get_agent_status(
     task_id: str,
-    user: User = Depends(get_external_api_user),
+    user: User = Depends(require_api_scope(Permission.CHAT_VIEW)),
 ):
     """
     Get the current status of an agent task.
@@ -389,6 +391,22 @@ async def create_api_key(
             detail="Maximum of 10 active API keys allowed. Deactivate an existing key first.",
         )
 
+    # Validate scopes against the owner's role ceiling
+    if request.scopes:
+        owner_role = "admin"  # default
+        if user.default_team_id:
+            membership = await get_team_membership(db, user.default_team_id, user.id)
+            if membership:
+                owner_role = membership.role
+        owner_permissions = ROLE_PERMISSIONS.get(owner_role, frozenset())
+        for scope in request.scopes:
+            perm = Permission(scope)
+            if perm not in owner_permissions:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Scope '{scope}' exceeds your role's permissions (role: {owner_role})",
+                )
+
     # Generate key: tsk_ + 32 random hex chars
     raw_key = f"tsk_{secrets.token_hex(16)}"
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
@@ -426,6 +444,36 @@ async def create_api_key(
         expires_at=api_key.expires_at,
         key=raw_key,  # Only returned on creation
     )
+
+
+@router.get("/keys/scopes", response_model=list[ScopeOption])
+async def list_available_scopes(
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List available scopes for API key creation.
+
+    Returns only the scopes the current user's role allows, so the frontend
+    cannot show options the backend would reject.
+    """
+    owner_role = "admin"
+    if user.default_team_id:
+        membership = await get_team_membership(db, user.default_team_id, user.id)
+        if membership:
+            owner_role = membership.role
+    owner_permissions = ROLE_PERMISSIONS.get(owner_role, frozenset())
+
+    scopes = []
+    for perm in Permission:
+        if perm in owner_permissions and perm.value in SCOPE_LABELS:
+            info = SCOPE_LABELS[perm.value]
+            scopes.append(ScopeOption(
+                value=perm.value,
+                label=info["label"],
+                category=info["category"],
+            ))
+    return scopes
 
 
 @router.get("/keys", response_model=list[ExternalAPIKeyResponse])

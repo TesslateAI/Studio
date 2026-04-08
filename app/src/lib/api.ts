@@ -892,6 +892,12 @@ export const chatApi = {
   },
 };
 
+export interface ScopeOption {
+  value: string;
+  label: string;
+  category: string;
+}
+
 export const externalApi = {
   // API key management
   createKey: async (data: {
@@ -911,6 +917,11 @@ export const externalApi = {
 
   deleteKey: async (keyId: string) => {
     const response = await api.delete(`/api/external/keys/${keyId}`);
+    return response.data;
+  },
+
+  listScopes: async (): Promise<ScopeOption[]> => {
+    const response = await api.get('/api/external/keys/scopes');
     return response.data;
   },
 };
