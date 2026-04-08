@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -69,6 +70,11 @@ type Server struct {
 
 	mu       sync.Mutex
 	inflight map[string]*inflightRestore
+
+	// registryWarmed is set after the first successful RebuildRegistry.
+	// RPCs that hit an empty owner use this to decide whether to attempt
+	// a rebuild before returning NOT_FOUND.
+	registryWarmed atomic.Bool
 }
 
 // NewServer creates a VolumeHub Server.
@@ -406,7 +412,18 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 			}
 		}
 		if len(candidateSet) == 0 {
-			return nil, status.Errorf(codes.FailedPrecondition, "all candidate nodes are dead or unknown (candidates=%v)", candidates)
+			// All caller-specified candidates are dead — fall back to any
+			// live node.  This handles transient states like cordoned nodes
+			// or CSI pods restarting.  The caller can still schedule the pod
+			// on whatever node we pick (K8s treats unschedulable as a hint,
+			// DaemonSet pods tolerate it).
+			klog.Warningf("EnsureCached: all candidate nodes dead (candidates=%v) — falling back to any live node", candidates)
+			for n := range liveSet {
+				candidateSet[n] = struct{}{}
+			}
+		}
+		if len(candidateSet) == 0 {
+			return nil, status.Errorf(codes.FailedPrecondition, "no live compute nodes available (candidates=%v were dead, and no other live nodes)", candidates)
 		}
 	} else {
 		// No candidates specified — all live nodes are candidates.
@@ -633,9 +650,9 @@ func (s *Server) handleTriggerSync(_ interface{}, ctx context.Context, dec func(
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
-	ownerNode := s.registry.GetOwner(req.VolumeID)
-	if ownerNode == "" {
-		return nil, status.Errorf(codes.NotFound, "no owner node for volume %q", req.VolumeID)
+	ownerNode, err := s.resolveOwner(ctx, req.VolumeID)
+	if err != nil {
+		return nil, err
 	}
 
 	client, err := s.nodeClient(ownerNode)
@@ -801,9 +818,9 @@ func (s *Server) handleRestoreToSnapshot(_ interface{}, ctx context.Context, dec
 		return nil, status.Error(codes.InvalidArgument, "volume_id and target_hash required")
 	}
 
-	ownerNode := s.registry.GetOwner(req.VolumeID)
-	if ownerNode == "" {
-		return nil, status.Errorf(codes.NotFound, "no owner node for volume %q", req.VolumeID)
+	ownerNode, err := s.resolveOwner(ctx, req.VolumeID)
+	if err != nil {
+		return nil, err
 	}
 
 	client, err := s.nodeClient(ownerNode)
@@ -1084,8 +1101,8 @@ func (s *Server) DeleteVolumeFromNode(ctx context.Context, volumeID string) erro
 // CreateSnapshotForVolume creates a CAS user snapshot for the given volume,
 // delegating to the volume's owner node. Returns the snapshot layer hash.
 func (s *Server) CreateSnapshotForVolume(ctx context.Context, volumeID, label string) (string, error) {
-	ownerNode := s.registry.GetOwner(volumeID)
-	if ownerNode == "" {
+	ownerNode, err := s.resolveOwner(ctx, volumeID)
+	if err != nil {
 		return "", fmt.Errorf("no owner node for volume %q", volumeID)
 	}
 
@@ -1119,6 +1136,31 @@ func (s *Server) GetOwnerNode(volumeID string) string {
 // VolumeRegistered returns true if the volume has an owner in the registry.
 func (s *Server) VolumeRegistered(volumeID string) bool {
 	return s.registry.GetOwner(volumeID) != ""
+}
+
+// resolveOwner returns the owner node for a volume, triggering a one-time
+// registry rebuild if the registry hasn't been warmed yet. This closes the
+// startup gap where the Hub restarts and RPCs arrive before the first
+// RebuildRegistry completes.
+func (s *Server) resolveOwner(ctx context.Context, volumeID string) (string, error) {
+	owner := s.registry.GetOwner(volumeID)
+	if owner != "" {
+		return owner, nil
+	}
+
+	// Registry miss — if we haven't completed a rebuild yet, try now.
+	if !s.registryWarmed.Load() {
+		klog.Infof("resolveOwner: registry cold, triggering rebuild for %s", volumeID)
+		if err := s.RebuildRegistry(ctx); err != nil {
+			klog.Warningf("resolveOwner: rebuild failed: %v", err)
+		}
+		owner = s.registry.GetOwner(volumeID)
+		if owner != "" {
+			return owner, nil
+		}
+	}
+
+	return "", status.Errorf(codes.NotFound, "no owner node for volume %q", volumeID)
 }
 
 // AggregateCapacity returns the total available bytes across all live
@@ -1255,6 +1297,7 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 		klog.V(2).Infof("RebuildRegistry: processed node %s (%d volumes)", nodeName, len(states))
 	}
 
+	s.registryWarmed.Store(true)
 	klog.Info("RebuildRegistry: complete")
 	return nil
 }

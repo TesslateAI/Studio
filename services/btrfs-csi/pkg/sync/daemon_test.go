@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,9 +138,10 @@ func TestSyncVolume_NotTracked(t *testing.T) {
 		t.Fatal("expected error when syncing untracked volume")
 	}
 
-	wantMsg := `volume "vol-not-tracked" is not tracked for sync`
-	if err.Error() != wantMsg {
-		t.Errorf("error message = %q, want %q", err.Error(), wantMsg)
+	// With auto-track, untracked volumes without a subvolume on disk get
+	// "not tracked and subvolume missing" instead of the old error.
+	if !strings.Contains(err.Error(), "vol-not-tracked") {
+		t.Errorf("error should mention volume ID, got: %v", err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -83,7 +84,7 @@ type DaemonConfig struct {
 func DefaultDaemonConfig() DaemonConfig {
 	return DaemonConfig{
 		SafetyInterval:         5 * time.Minute,
-		ConsolidationInterval:  50,
+		ConsolidationInterval:  10,
 		ConsolidationRetention: 3,
 	}
 }
@@ -222,6 +223,7 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 	type manifestInfo struct {
 		templateName      string
 		templateHash      string
+		latestHash        string // hash of latest snapshot (for lastLayerHash recovery)
 		latestConsolHash  string // hash of latest consolidation snapshot (empty if none)
 	}
 	manifestMap := make(map[string]manifestInfo, len(volIDs))
@@ -251,6 +253,7 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 					info := manifestInfo{
 						templateName: m.TemplateName,
 						templateHash: m.Base,
+						latestHash:   m.LatestHash(),
 					}
 					if consol := m.LatestConsolidation(); consol != nil {
 						info.latestConsolHash = consol.Hash
@@ -337,17 +340,27 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 
 		d.TrackVolume(volID, mi.templateName, mi.templateHash)
 
-		if !isDirty {
-			d.mu.Lock()
-			if tv, ok := d.tracked[volID]; ok {
-				tv.dirty = false
-				tv.lastSnapPath = snapPath
+		d.mu.Lock()
+		if tv, ok := d.tracked[volID]; ok {
+			// Recover lastLayerHash from the manifest's latest snapshot.
+			// Without this, syncOne records Parent="" in the manifest despite
+			// using the on-disk layer as btrfs send parent, creating a
+			// mismatch between the actual send stream (incremental) and the
+			// manifest (claims full send).
+			if mi.latestHash != "" && tv.lastLayerHash == "" {
+				tv.lastLayerHash = mi.latestHash
 			}
-			d.mu.Unlock()
-			clean++
-		} else {
-			dirty++
+			if !isDirty {
+				tv.dirty = false
+				if hasSnap {
+					tv.lastSnapPath = snapPath
+				}
+				clean++
+			} else {
+				dirty++
+			}
 		}
+		d.mu.Unlock()
 
 		// Recover consolidation state from manifest + disk.
 		if mi.latestConsolHash != "" {
@@ -606,7 +619,21 @@ func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
 	tv, exists := d.tracked[volumeID]
 	if !exists {
 		d.mu.Unlock()
-		return fmt.Errorf("volume %q is not tracked for sync", volumeID)
+		// Volume exists on disk (Hub routed the RPC here) but isn't tracked.
+		// This happens after cross-node migration via EnsureCached or after
+		// CSI restart if discoverVolumes missed it. Auto-track it.
+		volPath := fmt.Sprintf("volumes/%s", volumeID)
+		if !d.btrfs.SubvolumeExists(ctx, volPath) {
+			return fmt.Errorf("volume %q is not tracked and subvolume missing", volumeID)
+		}
+		klog.Infof("SyncVolume: auto-tracking untracked volume %s", volumeID)
+		d.TrackVolume(volumeID, "", "")
+		d.mu.Lock()
+		tv = d.tracked[volumeID]
+		if tv == nil {
+			d.mu.Unlock()
+			return fmt.Errorf("volume %q failed to auto-track", volumeID)
+		}
 	}
 	tvCopy := *tv
 	d.mu.Unlock()
@@ -717,14 +744,20 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	chain := manifest.BuildRestoreChain(targetIdx)
 
 	// Download and receive each layer in the chain in order.
-	// btrfs receive creates subvolumes that serve as parents for the next receive.
+	// ensureParentLayer recursively downloads any missing parent layers
+	// before the child is received. The UUID rewriter patches parent
+	// references so btrfs receive finds the correct local parent.
 	var lastReceivedPath string
 	for _, idx := range chain {
 		snap := manifest.Snapshots[idx]
 		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
 
 		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
-			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath); err != nil {
+			parentPath, pErr := d.ensureParentLayer(ctx, manifest, chain, idx, volumeID)
+			if pErr != nil {
+				return fmt.Errorf("ensure parent for snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), pErr)
+			}
+			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath, parentPath); err != nil {
 				return fmt.Errorf("restore snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), err)
 			}
 		}
@@ -745,7 +778,10 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		return fmt.Errorf("snapshot to volume %s: %w", volumeID, err)
 	}
 
-	// Clean up intermediate layer snapshots (keep only the latest + latest consolidation).
+	// Clean up intermediate layer snapshots (keep only the latest + latest
+	// consolidation). With the UUID rewriter, parent layers no longer need
+	// to be preserved for UUID matching — any re-received layer will have
+	// its parent UUID rewritten to the local subvolume's native UUID.
 	latestSnap := manifest.Snapshots[targetIdx]
 	latestConsolHash := ""
 	if consol := manifest.LatestConsolidation(); consol != nil {
@@ -762,13 +798,19 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		}
 	}
 
-	// Update tracked state.
+	// Update tracked state. If the volume isn't tracked yet (e.g., just
+	// migrated to this node via EnsureCached), track it now so that
+	// subsequent syncs have correct lastLayerHash/lastSnapPath and don't
+	// produce broken manifest entries.
+	d.TrackVolume(volumeID, manifest.TemplateName, manifest.Base)
+
 	latestHash := manifest.LatestHash()
 	latestSnapPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latestSnap.Hash))
 	d.mu.Lock()
 	if tv, ok := d.tracked[volumeID]; ok {
 		tv.lastLayerHash = latestHash
 		tv.lastSnapPath = latestSnapPath
+		tv.dirty = false
 		if latestConsolHash != "" {
 			consolPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latestConsolHash))
 			tv.lastConsolidationPath = consolPath
@@ -795,7 +837,19 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 	tv, exists := d.tracked[volumeID]
 	if !exists {
 		d.mu.Unlock()
-		return fmt.Errorf("volume %q is not tracked for sync", volumeID)
+		// Auto-track if volume exists on disk (same as SyncVolume).
+		volPath := fmt.Sprintf("volumes/%s", volumeID)
+		if !d.btrfs.SubvolumeExists(ctx, volPath) {
+			return fmt.Errorf("volume %q is not tracked and subvolume missing", volumeID)
+		}
+		klog.Infof("RestoreToSnapshot: auto-tracking untracked volume %s", volumeID)
+		d.TrackVolume(volumeID, "", "")
+		d.mu.Lock()
+		tv = d.tracked[volumeID]
+		if tv == nil {
+			d.mu.Unlock()
+			return fmt.Errorf("volume %q failed to auto-track", volumeID)
+		}
 	}
 	tvCopy := *tv
 	d.mu.Unlock()
@@ -875,7 +929,11 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		snap := manifest.Snapshots[idx]
 		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
 		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
-			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath); err != nil {
+			parentPath, pErr := d.ensureParentLayer(ctx, manifest, chain, idx, volumeID)
+			if pErr != nil {
+				return fmt.Errorf("ensure parent for snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), pErr)
+			}
+			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath, parentPath); err != nil {
 				return fmt.Errorf("restore snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), err)
 			}
 		}
@@ -900,11 +958,15 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		return fmt.Errorf("save truncated manifest: %w", err)
 	}
 
-	// Clean up intermediate layers (keep target + latest consolidation).
 	latestConsolHash := ""
 	if consol := manifest.LatestConsolidation(); consol != nil {
 		latestConsolHash = consol.Hash
 	}
+
+	// Clean up intermediate layers. With the UUID rewriter, parent layers no
+	// longer need to be preserved for UUID matching — any re-received layer
+	// will have its parent UUID rewritten to the local subvolume's native UUID.
+	// Keep only the restore target and latest consolidation.
 	for _, idx := range chain {
 		snap := manifest.Snapshots[idx]
 		if snap.Hash == targetHash || snap.Hash == latestConsolHash {
@@ -1285,10 +1347,76 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 	return hash, newSnapPath, nil
 }
 
+// ensureParentLayer ensures the parent subvolume for the snapshot at manifest
+// index idx exists on disk and returns its path. It uses the snapshot's Parent
+// hash from the manifest to find the actual parent — NOT the previous entry in
+// the restore chain, which may differ (e.g., after manifest truncation from a
+// prior RestoreToSnapshot, or orphaned full-send layers).
+//
+// If the parent layer is not on disk (GC'd), it is downloaded from CAS.
+// The parent's own parent is resolved recursively so that the full dependency
+// chain is satisfied before btrfs receive runs.
+func (d *Daemon) ensureParentLayer(ctx context.Context, manifest *cas.Manifest, chain []int, idx int, volumeID string) (string, error) {
+	snap := manifest.Snapshots[idx]
+
+	// No parent → full send, no rewrite needed.
+	if snap.Parent == "" {
+		return "", nil
+	}
+
+	// Parent is the template base.
+	if snap.Parent == manifest.Base && manifest.TemplateName != "" {
+		return fmt.Sprintf("templates/%s", manifest.TemplateName), nil
+	}
+
+	// Find the parent's manifest index by hash.
+	parentIdx := -1
+	for i, s := range manifest.Snapshots {
+		if s.Hash == snap.Parent {
+			parentIdx = i
+			break
+		}
+	}
+	if parentIdx < 0 {
+		// Parent hash not in manifest at all — treat as full send.
+		klog.Warningf("ensureParentLayer: parent %s for snapshot %d not found in manifest, treating as full send",
+			cas.ShortHash(snap.Parent), idx)
+		return "", nil
+	}
+
+	parentPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Parent))
+
+	// If parent already on disk, we're done.
+	if d.btrfs.SubvolumeExists(ctx, parentPath) {
+		return parentPath, nil
+	}
+
+	// Parent not on disk — download it. First ensure ITS parent exists
+	// (recursive, but chains are shallow: max depth = consolidation interval).
+	grandparentPath, err := d.ensureParentLayer(ctx, manifest, chain, parentIdx, volumeID)
+	if err != nil {
+		return "", fmt.Errorf("ensure grandparent for snapshot %d: %w", parentIdx, err)
+	}
+
+	klog.Infof("ensureParentLayer: downloading missing parent %s for snapshot %d of volume %s",
+		cas.ShortHash(snap.Parent), idx, volumeID)
+
+	if err := d.downloadLayer(ctx, volumeID, snap.Parent, parentPath, grandparentPath); err != nil {
+		return "", fmt.Errorf("download missing parent %s: %w", cas.ShortHash(snap.Parent), err)
+	}
+
+	return parentPath, nil
+}
+
 // downloadLayer downloads a CAS blob and receives it as a layer snapshot.
 // Includes idempotent @pending cleanup (prevents permanent bricking after a
 // failed receive) and stall detection (cancels on 30s of zero I/O progress).
-func (d *Daemon) downloadLayer(ctx context.Context, volumeID, blobHash, targetPath string) error {
+//
+// parentSubvolPath is the local path of the parent subvolume that this
+// incremental layer was sent relative to. The send stream's parent UUID is
+// rewritten to match the local parent's native UUID so that btrfs receive
+// succeeds regardless of UUID lineage. For full sends (no parent), pass "".
+func (d *Daemon) downloadLayer(ctx context.Context, volumeID, blobHash, targetPath, parentSubvolPath string) error {
 	pendingPath := fmt.Sprintf("layers/%s@pending", volumeID)
 
 	// Idempotent cleanup: remove stale @pending from a previous failed run.
@@ -1307,7 +1435,18 @@ func (d *Daemon) downloadLayer(ctx context.Context, volumeID, blobHash, targetPa
 	stallCtx, stallCancel := context.WithCancelCause(ctx)
 	stallR := ioutil.NewStallReader(reader, stallCtx, stallCancel, ioutil.StallTimeout)
 
-	if err := d.btrfs.Receive(stallCtx, "layers", stallR); err != nil {
+	// Wrap with UUID rewriter if this is an incremental layer (has a parent).
+	var recvReader io.Reader = stallR
+	if parentSubvolPath != "" {
+		parentID, idErr := d.btrfs.GetSubvolumeIdentity(ctx, parentSubvolPath)
+		if idErr != nil {
+			stallR.Close()
+			return fmt.Errorf("get parent identity %s: %w", parentSubvolPath, idErr)
+		}
+		recvReader = btrfs.RewriteParentUUID(stallR, parentID)
+	}
+
+	if err := d.btrfs.Receive(stallCtx, "layers", recvReader); err != nil {
 		stallR.Close()
 		// Clean up partial @pending from the failed receive.
 		if d.btrfs.SubvolumeExists(ctx, pendingPath) {

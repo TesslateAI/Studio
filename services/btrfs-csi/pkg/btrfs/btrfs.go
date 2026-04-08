@@ -2,7 +2,9 @@ package btrfs
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -350,6 +352,58 @@ func (m *Manager) GetGeneration(ctx context.Context, name string) (uint64, error
 	return 0, fmt.Errorf("generation field not found in subvolume show output for %q", name)
 }
 
+// GetSubvolumeIdentity returns the native UUID and creation transid of a
+// subvolume by parsing `btrfs subvolume show` output. These values are used
+// by the send stream rewriter to patch parent references so that btrfs receive
+// finds the correct local parent regardless of UUID lineage.
+func (m *Manager) GetSubvolumeIdentity(ctx context.Context, name string) (SubvolumeIdentity, error) {
+	target, err := m.safePath(name)
+	if err != nil {
+		return SubvolumeIdentity{}, err
+	}
+	output, err := m.run(ctx, "subvolume", "show", target)
+	if err != nil {
+		return SubvolumeIdentity{}, fmt.Errorf("subvolume show %q: %w", name, err)
+	}
+
+	var id SubvolumeIdentity
+	var gotUUID, gotCT bool
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if after, ok := strings.CutPrefix(line, "UUID:"); ok && !gotUUID {
+			uuidStr := strings.TrimSpace(after)
+			uuidStr = strings.ReplaceAll(uuidStr, "-", "")
+			if b, hErr := hex.DecodeString(uuidStr); hErr == nil && len(b) == 16 {
+				copy(id.UUID[:], b)
+				gotUUID = true
+			}
+		}
+		// btrfs-progs versions differ: Ubuntu uses "Creation transid:",
+		// Alpine uses "Gen at creation:". Accept both.
+		var ctStr string
+		if after, ok := strings.CutPrefix(line, "Creation transid:"); ok {
+			ctStr = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "Gen at creation:"); ok {
+			ctStr = strings.TrimSpace(after)
+		}
+		if ctStr != "" && !gotCT {
+			ct, pErr := strconv.ParseUint(ctStr, 10, 64)
+			if pErr == nil {
+				id.Ctransid = ct
+				gotCT = true
+			}
+		}
+	}
+	if !gotUUID {
+		return id, fmt.Errorf("UUID not found in subvolume show output for %q", name)
+	}
+	if !gotCT {
+		return id, fmt.Errorf("Creation transid not found in subvolume show output for %q", name)
+	}
+	return id, nil
+}
+
 // ---------------------------------------------------------------------------
 // Send / Receive (for S3 persistence)
 // ---------------------------------------------------------------------------
@@ -404,10 +458,11 @@ func (m *Manager) Receive(ctx context.Context, destDir string, reader io.Reader)
 
 	cmd := exec.CommandContext(ctx, btrfsBin, "receive", destFull) // #nosec G204 -- destFull validated by safePath
 	cmd.Stdin = reader
-	cmd.Stderr = &logWriter{prefix: "btrfs receive"}
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = io.MultiWriter(&logWriter{prefix: "btrfs receive"}, &stderrBuf)
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("btrfs receive into %q: %w", destDir, err)
+		return fmt.Errorf("btrfs receive into %q: %w (stderr: %s)", destDir, err, stderrBuf.String())
 	}
 	klog.V(4).Infof("btrfs receive completed in %s", destFull)
 	return nil

@@ -27,6 +27,9 @@ patches:
       - op: replace
         path: /spec/template/spec/initContainers/0/env/0/value
         value: "10"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1Gi"
 
   # Volume Hub: local image, imagePullPolicy
   - target:

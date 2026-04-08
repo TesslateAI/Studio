@@ -142,6 +142,13 @@ func (f *fakeBtrfs) GetGeneration(_ context.Context, name string) (uint64, error
 	return gen, nil
 }
 
+func (f *fakeBtrfs) GetSubvolumeIdentity(_ context.Context, _ string) (btrfs.SubvolumeIdentity, error) {
+	// Return a deterministic identity for tests. The rewriter will patch the
+	// stream with these values, but fakeBtrfs.Receive ignores the stream
+	// content anyway (it just drains the reader).
+	return btrfs.SubvolumeIdentity{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Fake casOps
 // ---------------------------------------------------------------------------
@@ -1098,7 +1105,7 @@ func TestDownloadLayer_HappyPath(t *testing.T) {
 	// Simulate btrfs receive creating @pending.
 	fb.receiveCreates = fmt.Sprintf("layers/%s@pending", volID)
 
-	err := d.downloadLayer(context.Background(), volID, blobHash, targetPath)
+	err := d.downloadLayer(context.Background(), volID, blobHash, targetPath, "")
 	if err != nil {
 		t.Fatalf("downloadLayer: %v", err)
 	}
@@ -1137,7 +1144,7 @@ func TestDownloadLayer_CleansUpStalePending(t *testing.T) {
 	// Simulate btrfs receive creating @pending (after cleanup).
 	fb.receiveCreates = pendingPath
 
-	err := d.downloadLayer(context.Background(), volID, blobHash, targetPath)
+	err := d.downloadLayer(context.Background(), volID, blobHash, targetPath, "")
 	if err != nil {
 		t.Fatalf("downloadLayer: %v", err)
 	}
@@ -1183,7 +1190,7 @@ func TestDownloadLayer_StalePendingUndeletable(t *testing.T) {
 	// and the receive proceeds normally. The unique-suffix fallback path is
 	// exercised in integration tests where real btrfs subvolume deletion can fail.
 
-	err := d.downloadLayer(context.Background(), volID, blobHash, targetPath)
+	err := d.downloadLayer(context.Background(), volID, blobHash, targetPath, "")
 	if err != nil {
 		t.Fatalf("downloadLayer: %v", err)
 	}
@@ -1769,8 +1776,8 @@ func TestDaemonConfig_Defaults(t *testing.T) {
 	if cfg.SafetyInterval != 5*time.Minute {
 		t.Errorf("SafetyInterval = %v, want 5m", cfg.SafetyInterval)
 	}
-	if cfg.ConsolidationInterval != 50 {
-		t.Errorf("ConsolidationInterval = %d, want 50", cfg.ConsolidationInterval)
+	if cfg.ConsolidationInterval != 10 {
+		t.Errorf("ConsolidationInterval = %d, want 10", cfg.ConsolidationInterval)
 	}
 	if cfg.ConsolidationRetention != 3 {
 		t.Errorf("ConsolidationRetention = %d, want 3", cfg.ConsolidationRetention)

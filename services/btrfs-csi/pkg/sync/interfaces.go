@@ -17,6 +17,7 @@ type btrfsOps interface {
 	RenameSubvolume(ctx context.Context, oldName, newName string) error
 	ListSubvolumes(ctx context.Context, prefix string) ([]btrfs.SubvolumeInfo, error)
 	Receive(ctx context.Context, destDir string, reader io.Reader) error
+	GetSubvolumeIdentity(ctx context.Context, name string) (btrfs.SubvolumeIdentity, error)
 	GetQgroupUsage(ctx context.Context, name string) (exclusive int64, limit int64, err error)
 	GetGeneration(ctx context.Context, name string) (uint64, error)
 }

@@ -143,9 +143,12 @@ func TestEnsureCached_FastPath_LiveCachedCandidate(t *testing.T) {
 	}
 }
 
-func TestEnsureCached_StaleNode_ReturnsError(t *testing.T) {
+func TestEnsureCached_StaleNode_FallsBackToLiveNode(t *testing.T) {
 	// Volume cached on dead-node, candidates = [dead-node] but dead-node
-	// is NOT in the live set. Should return FailedPrecondition.
+	// is NOT in the live set. Should fall back to live-node.
+	// With only a basic test server (no fake node client), the call will
+	// fail trying to connect to live-node — but the key assertion is that
+	// it does NOT return FailedPrecondition (it should attempt the fallback).
 	srv, reg := newTestServer([]string{"live-node"})
 	reg.RegisterVolume("vol-1")
 	reg.SetOwner("vol-1", "dead-node")
@@ -156,12 +159,14 @@ func TestEnsureCached_StaleNode_ReturnsError(t *testing.T) {
 		CandidateNodes: []string{"dead-node"},
 	})
 	if err == nil {
-		t.Fatal("expected error for all-dead candidates")
+		return // success is fine if the mock handled it
 	}
 	st, ok := status.FromError(err)
-	if !ok || st.Code() != codes.FailedPrecondition {
-		t.Errorf("expected FailedPrecondition, got %v", err)
+	if ok && st.Code() == codes.FailedPrecondition {
+		t.Errorf("should have fallen back to live-node instead of FailedPrecondition")
 	}
+	// Other errors (Internal, Unavailable) are expected since the test server
+	// doesn't have a real node client for live-node.
 }
 
 func TestEnsureCached_StaleNode_CleansCacheEntry(t *testing.T) {
@@ -256,7 +261,9 @@ func TestEnsureCached_FastPath_VolumeMissing_EvictsAndRestores(t *testing.T) {
 	}
 }
 
-func TestEnsureCached_AllCandidatesDead_FailedPrecondition(t *testing.T) {
+func TestEnsureCached_AllCandidatesDead_FallsBackToLiveNode(t *testing.T) {
+	// All caller candidates are dead, but live-node-x exists.
+	// Should fall back to live-node-x instead of FailedPrecondition.
 	srv, _ := newTestServer([]string{"live-node-x"})
 
 	_, err := callEnsureCached(srv, EnsureCachedRequest{
@@ -264,11 +271,11 @@ func TestEnsureCached_AllCandidatesDead_FailedPrecondition(t *testing.T) {
 		CandidateNodes: []string{"dead-1", "dead-2"},
 	})
 	if err == nil {
-		t.Fatal("expected error for all-dead candidates")
+		return // success is fine if the mock handled it
 	}
 	st, ok := status.FromError(err)
-	if !ok || st.Code() != codes.FailedPrecondition {
-		t.Errorf("expected FailedPrecondition, got %v", err)
+	if ok && st.Code() == codes.FailedPrecondition {
+		t.Errorf("should have fallen back to live-node-x instead of FailedPrecondition")
 	}
 }
 

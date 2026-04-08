@@ -147,7 +147,7 @@ func NewDriver(opts ...Option) *Driver {
 		name:           "btrfs.csi.tesslate.io",
 		version:        "0.1.0",
 		syncInterval:           5 * time.Minute,
-		consolidationInterval:  50,
+		consolidationInterval:  10,
 		consolidationRetention: 3,
 		mode:           ModeAll,
 		nodeOpsPort:    9741,
