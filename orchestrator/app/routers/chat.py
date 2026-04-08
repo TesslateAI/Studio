@@ -29,7 +29,7 @@ from ..agent import create_agent_from_db_model
 from ..agent.iterative_agent import _convert_uuids_to_strings
 from ..agent.models import create_model_adapter
 from ..agent.tools.registry import get_tool_registry
-from ..auth_unified import enforce_project_scope, get_authenticated_user
+from ..auth_unified import enforce_permission_scope, enforce_project_scope, get_authenticated_user
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
@@ -43,6 +43,7 @@ from ..models import (
     User,
     UserPurchasedAgent,
 )
+from ..permissions import Permission
 from ..schemas import AgentChatRequest, AgentChatResponse, AgentStepResponse
 from ..schemas import Chat as ChatSchema
 from ..services.agent_context import (
@@ -330,6 +331,7 @@ async def update_chat_project(
         if not project_result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Project not found")
         enforce_project_scope(current_user, UUID(project_id))
+        enforce_permission_scope(current_user, Permission.CHAT_SEND)
         chat.project_id = UUID(project_id)
     else:
         chat.project_id = None
@@ -1214,6 +1216,7 @@ async def agent_chat_stream(
                     return
 
                 enforce_project_scope(current_user, project.id)
+                enforce_permission_scope(current_user, Permission.CHAT_SEND)
 
                 # Track activity for idle cleanup (database-based)
                 from ..services.activity_tracker import track_project_activity

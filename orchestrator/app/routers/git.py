@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth_unified import get_authenticated_user
 from ..database import get_db
 from ..models import Container, GitRepository, Project, User
+from ..permissions import Permission
 from ..schemas import (
     GitBranchesResponse,
     GitBranchInfo,
@@ -39,13 +40,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}/git", tags=["git"])
 
 
-async def verify_project_access(project_id: UUID, current_user: User, db: AsyncSession) -> Project:
-    """Verify that the user has access to the project via RBAC."""
+async def verify_project_access(
+    project_id: UUID,
+    current_user: User,
+    db: AsyncSession,
+    permission=None,
+) -> Project:
+    """Verify that the user has access to the project via RBAC + API key scopes."""
+    from ..auth_unified import enforce_permission_scope, enforce_project_scope
     from ..permissions import Permission, get_project_with_access
 
+    perm = permission or Permission.GIT_VIEW
+    enforce_permission_scope(current_user, perm)
+
     project, _role = await get_project_with_access(
-        db, str(project_id), current_user.id, Permission.GIT_VIEW
+        db, str(project_id), current_user.id, perm
     )
+    enforce_project_scope(current_user, project.id)
     return project
 
 
@@ -71,7 +82,7 @@ async def initialize_repository(
     """
     try:
         # Verify project access
-        project = await verify_project_access(project_id, current_user, db)
+        project = await verify_project_access(project_id, current_user, db, Permission.GIT_WRITE)
 
         # Initialize Git repository
         git_manager = _create_git_manager(current_user, project_id)
@@ -128,7 +139,7 @@ async def clone_repository(
     """
     try:
         # Verify project access
-        project = await verify_project_access(project_id, current_user, db)
+        project = await verify_project_access(project_id, current_user, db, Permission.GIT_WRITE)
 
         # Get GitHub access token
         credential_manager = get_credential_manager()
@@ -264,7 +275,7 @@ async def create_commit(
     """
     try:
         # Verify project access
-        await verify_project_access(project_id, current_user, db)
+        await verify_project_access(project_id, current_user, db, Permission.GIT_WRITE)
 
         # Create commit
         git_manager = _create_git_manager(current_user, project_id)
@@ -305,7 +316,7 @@ async def push_commits(
     """
     try:
         # Verify project access
-        await verify_project_access(project_id, current_user, db)
+        await verify_project_access(project_id, current_user, db, Permission.GIT_WRITE)
 
         # Push commits
         git_manager = _create_git_manager(current_user, project_id)
@@ -351,7 +362,7 @@ async def pull_changes(
     """
     try:
         # Verify project access
-        await verify_project_access(project_id, current_user, db)
+        await verify_project_access(project_id, current_user, db, Permission.GIT_WRITE)
 
         # Pull changes
         git_manager = _create_git_manager(current_user, project_id)
@@ -459,7 +470,7 @@ async def create_branch(
     """
     try:
         # Verify project access
-        await verify_project_access(project_id, current_user, db)
+        await verify_project_access(project_id, current_user, db, Permission.GIT_WRITE)
 
         # Create branch
         git_manager = _create_git_manager(current_user, project_id)
@@ -493,7 +504,7 @@ async def switch_branch(
     """
     try:
         # Verify project access
-        await verify_project_access(project_id, current_user, db)
+        await verify_project_access(project_id, current_user, db, Permission.GIT_WRITE)
 
         # Switch branch
         git_manager = _create_git_manager(current_user, project_id)
@@ -559,7 +570,7 @@ async def disconnect_repository(
     """
     try:
         # Verify project access
-        project = await verify_project_access(project_id, current_user, db)
+        project = await verify_project_access(project_id, current_user, db, Permission.GIT_WRITE)
 
         # Delete git_repository record
         result = await db.execute(

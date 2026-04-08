@@ -425,3 +425,107 @@ class TestMultipleScopeCombinations:
                 dep = require_api_scope(perm)
                 result = await dep(user=user, db=mock_db)
                 assert result.id == user.id
+
+
+# ── Centralized enforce_permission_scope Tests ───────────────────────
+
+
+class TestEnforcePermissionScope:
+    """Tests for the centralized enforce_permission_scope() in auth_unified.py."""
+
+    def test_jwt_user_bypasses_scope_check(self):
+        """JWT users (no _api_key_record) should never be scope-checked."""
+        from app.auth_unified import enforce_permission_scope
+
+        user = _make_user()
+        # No _api_key_record attribute → JWT user
+        if hasattr(user, "_api_key_record"):
+            delattr(user, "_api_key_record")
+
+        # Should not raise for any permission
+        enforce_permission_scope(user, Permission.FILE_WRITE)
+        enforce_permission_scope(user, Permission.PROJECT_DELETE)
+        enforce_permission_scope(user, Permission.AUDIT_VIEW)
+
+    def test_null_scopes_key_bypasses_scope_check(self):
+        """API key with null scopes (full access) should bypass scope check."""
+        from app.auth_unified import enforce_permission_scope
+
+        user = _make_user()
+        key = _make_api_key(user.id, scopes=None)
+        user._api_key_record = key
+
+        enforce_permission_scope(user, Permission.FILE_WRITE)
+        enforce_permission_scope(user, Permission.PROJECT_DELETE)
+
+    def test_scoped_key_allows_matching_permission(self):
+        """API key with matching scope should pass."""
+        from app.auth_unified import enforce_permission_scope
+
+        user = _make_user()
+        key = _make_api_key(user.id, scopes=["file.write", "file.read"])
+        user._api_key_record = key
+
+        enforce_permission_scope(user, Permission.FILE_WRITE)  # Should not raise
+        enforce_permission_scope(user, Permission.FILE_READ)  # Should not raise
+
+    def test_scoped_key_blocks_missing_permission(self):
+        """API key without matching scope should raise 403."""
+        from fastapi import HTTPException
+
+        from app.auth_unified import enforce_permission_scope
+
+        user = _make_user()
+        key = _make_api_key(user.id, scopes=["file.read"])
+        user._api_key_record = key
+
+        with pytest.raises(HTTPException) as exc:
+            enforce_permission_scope(user, Permission.FILE_WRITE)
+        assert exc.value.status_code == 403
+        assert "file.write" in exc.value.detail
+
+    def test_scoped_key_blocks_terminal_access(self):
+        """Read-only key should block terminal access."""
+        from fastapi import HTTPException
+
+        from app.auth_unified import enforce_permission_scope
+
+        user = _make_user()
+        key = _make_api_key(user.id, scopes=["file.read", "chat.view"])
+        user._api_key_record = key
+
+        with pytest.raises(HTTPException) as exc:
+            enforce_permission_scope(user, Permission.TERMINAL_ACCESS)
+        assert exc.value.status_code == 403
+
+    def test_scoped_key_blocks_git_write(self):
+        """Read-only key should block git write operations."""
+        from fastapi import HTTPException
+
+        from app.auth_unified import enforce_permission_scope
+
+        user = _make_user()
+        key = _make_api_key(user.id, scopes=["git.view", "file.read"])
+        user._api_key_record = key
+
+        with pytest.raises(HTTPException) as exc:
+            enforce_permission_scope(user, Permission.GIT_WRITE)
+        assert exc.value.status_code == 403
+
+    def test_enforce_project_scope_still_works(self):
+        """enforce_project_scope should still check project_ids restriction."""
+        from fastapi import HTTPException
+
+        from app.auth_unified import enforce_project_scope
+
+        user = _make_user()
+        allowed_project = uuid.uuid4()
+        other_project = uuid.uuid4()
+        key = _make_api_key(user.id, project_ids=[str(allowed_project)])
+        user._api_key_record = key
+
+        enforce_project_scope(user, allowed_project)  # Should not raise
+
+        with pytest.raises(HTTPException) as exc:
+            enforce_project_scope(user, other_project)
+        assert exc.value.status_code == 403

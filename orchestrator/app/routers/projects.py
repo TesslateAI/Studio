@@ -248,10 +248,22 @@ async def get_project_by_slug(
         HTTPException 404 if project not found
         HTTPException 403 if user lacks permission
     """
+    from ..auth_unified import enforce_permission_scope, enforce_project_scope
     from ..permissions import get_project_with_access
 
+    user = user_id_or_user if isinstance(user_id_or_user, User) else None
     user_id = user_id_or_user.id if isinstance(user_id_or_user, User) else user_id_or_user
+
+    # API key scope enforcement: check permission scopes before RBAC
+    if user is not None:
+        enforce_permission_scope(user, permission)
+
     project, _role = await get_project_with_access(db, project_slug, user_id, permission)
+
+    # API key project scope enforcement: check project_ids restriction
+    if user is not None:
+        enforce_project_scope(user, project.id)
+
     return project
 
 

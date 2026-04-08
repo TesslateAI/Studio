@@ -12,9 +12,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth_unified import get_authenticated_user
+from ..auth_unified import enforce_permission_scope, get_authenticated_user
 from ..database import get_db
 from ..models import ShellSession, User
+from ..permissions import Permission
 from ..services.shell_session_manager import get_shell_session_manager
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ async def create_shell_session(
 
     Returns session_id for subsequent operations.
     """
+    enforce_permission_scope(current_user, Permission.TERMINAL_ACCESS)
     session_manager = get_shell_session_manager()
 
     session_info = await session_manager.create_session(
@@ -107,6 +109,7 @@ async def write_to_session(
 
     Typically used to send commands (remember to include \\n).
     """
+    enforce_permission_scope(current_user, Permission.TERMINAL_ACCESS)
     session_manager = get_shell_session_manager()
 
     # Verify ownership

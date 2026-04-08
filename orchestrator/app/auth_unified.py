@@ -105,3 +105,31 @@ def enforce_project_scope(user: User, project_id: UUID) -> None:
             status_code=403,
             detail="API key does not have access to this project",
         )
+
+
+def enforce_permission_scope(user: User, permission) -> None:
+    """
+    For API-key users, verify the key's scopes include the requested permission.
+
+    No-op for JWT users or keys with null scopes (full access).
+    Raises 403 if the key has explicit scopes and the requested permission
+    is not among them.
+
+    This is the **centralized permission-scope gate** — call it from every
+    access-check choke point (``get_project_by_slug``, ``verify_project_access``,
+    shell session creation, etc.) so that scoped API keys cannot bypass
+    restrictions by hitting non-external endpoints directly.
+    """
+    api_key_record = getattr(user, "_api_key_record", None)
+    if api_key_record is None:
+        return  # JWT user — no scope restriction
+
+    scopes = api_key_record.scopes
+    if scopes is None:
+        return  # Null scopes = full owner permissions
+
+    if permission.value not in scopes:
+        raise HTTPException(
+            status_code=403,
+            detail=f"API key lacks required scope: {permission.value}",
+        )
