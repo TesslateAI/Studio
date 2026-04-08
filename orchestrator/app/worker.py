@@ -392,6 +392,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "_active_plan": active_plan,
                 "available_skills": available_skills,
                 "attachments": payload.attachments,
+                "api_key_scopes": payload.api_key_scopes,
                 # Volume routing — Hub is the live source of truth for node
                 # placement; cache_node is NOT passed (dead DB field).
                 "volume_id": project.volume_id if project else None,

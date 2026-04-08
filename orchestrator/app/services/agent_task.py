@@ -60,6 +60,9 @@ class AgentTaskPayload:
     # Attachments (images, pasted text, file references)
     attachments: list[dict] = field(default_factory=list)
 
+    # API key scope restrictions (None = no restriction, list = only these scopes allowed)
+    api_key_scopes: list[str] | None = None
+
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""
         return asdict(self)

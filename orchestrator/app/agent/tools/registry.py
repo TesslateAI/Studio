@@ -130,6 +130,50 @@ class ToolRegistry:
 
         return "\n".join(sections)
 
+    # Mapping from tool names to required Permission scope values.
+    # Tools not listed here are unrestricted (e.g., read_file, todo_write, metadata).
+    TOOL_REQUIRED_SCOPES: dict[str, str] = {
+        # File write operations
+        "write_file": "file.write",
+        "patch_file": "file.write",
+        "multi_edit": "file.write",
+        "apply_patch": "file.write",
+        # File delete is separate
+        "delete_file": "file.delete",
+        # Shell / terminal operations
+        "bash_exec": "terminal.access",
+        "shell_exec": "terminal.access",
+        "shell_open": "terminal.access",
+        "shell_close": "terminal.access",
+        # Web operations
+        "web_fetch": "file.read",
+        "web_search": "file.read",
+        # Messaging
+        "send_message": "channel.manage",
+        # Container control
+        "container_status": "container.view",
+        "container_restart": "container.start_stop",
+        "container_logs": "container.view",
+        "container_health": "container.view",
+        # Kanban
+        "kanban_create": "kanban.edit",
+        "kanban_move": "kanban.edit",
+        "kanban_update": "kanban.edit",
+        "kanban_comment": "kanban.edit",
+    }
+
+    def _check_tool_scope(self, tool_name: str, scopes: list[str]) -> str | None:
+        """Check if API key scopes allow this tool. Returns error message or None."""
+        required = self.TOOL_REQUIRED_SCOPES.get(tool_name)
+        if required is None:
+            return None  # Tool has no scope requirement (read-only tools, planning, etc.)
+        if required in scopes:
+            return None  # Key has the required scope
+        return (
+            f"API key scope restriction: '{tool_name}' requires the '{required}' permission, "
+            f"but this key only has: {scopes}"
+        )
+
     async def execute(
         self, tool_name: str, parameters: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any]:
@@ -152,6 +196,20 @@ class ToolRegistry:
                 "success": False,
                 "error": f"Unknown tool '{tool_name}'. Available tools: {', '.join(self._tools.keys())}",
             }
+
+        # ============================================================================
+        # API Key Scope Enforcement — block tools the key doesn't permit
+        # ============================================================================
+        api_key_scopes = context.get("api_key_scopes")
+        if api_key_scopes is not None:
+            scope_result = self._check_tool_scope(tool_name, api_key_scopes)
+            if scope_result is not None:
+                logger.warning(f"[SCOPE] Blocked tool {tool_name}: {scope_result}")
+                return {
+                    "success": False,
+                    "tool": tool_name,
+                    "error": scope_result,
+                }
 
         # ============================================================================
         # Edit Mode Control - Applies to ALL agents

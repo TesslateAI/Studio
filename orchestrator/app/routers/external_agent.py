@@ -205,6 +205,10 @@ async def invoke_agent(
 
     from ..services.agent_task import AgentTaskPayload
 
+    # Extract API key scopes for tool-level enforcement in the worker
+    api_key_record = getattr(user, "_api_key_record", None)
+    api_key_scopes = api_key_record.scopes if api_key_record else None
+
     payload = AgentTaskPayload(
         task_id=agent_task_id,
         user_id=str(user.id),
@@ -220,6 +224,7 @@ async def invoke_agent(
         chat_history=chat_history,
         project_context=project_context,
         webhook_callback_url=request.webhook_callback_url,
+        api_key_scopes=api_key_scopes,
     )
 
     await arq_pool.enqueue_job("execute_agent_task", payload.to_dict())

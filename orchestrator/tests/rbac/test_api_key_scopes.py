@@ -381,3 +381,141 @@ class TestScopeOptionSchema:
                 category=info["category"],
             )
             assert option.value == perm_value
+
+
+# ── Tool-Level Scope Enforcement Tests ────────────────────────────────
+
+
+class TestToolScopeEnforcement:
+    """Tests for scope enforcement at the tool execution level."""
+
+    def _get_registry(self):
+        from app.agent.tools.registry import ToolRegistry
+        return ToolRegistry()
+
+    def test_tool_scope_mapping_covers_write_tools(self):
+        """All write/dangerous tools should have a scope mapping."""
+        from app.agent.tools.registry import ToolRegistry
+        mapping = ToolRegistry.TOOL_REQUIRED_SCOPES
+        write_tools = ["write_file", "patch_file", "multi_edit", "apply_patch"]
+        for tool in write_tools:
+            assert tool in mapping, f"Write tool '{tool}' missing from TOOL_REQUIRED_SCOPES"
+            assert mapping[tool] == "file.write"
+
+    def test_tool_scope_mapping_covers_shell_tools(self):
+        """Shell tools should require terminal.access."""
+        from app.agent.tools.registry import ToolRegistry
+        mapping = ToolRegistry.TOOL_REQUIRED_SCOPES
+        shell_tools = ["bash_exec", "shell_exec", "shell_open"]
+        for tool in shell_tools:
+            assert tool in mapping, f"Shell tool '{tool}' missing from TOOL_REQUIRED_SCOPES"
+            assert mapping[tool] == "terminal.access"
+
+    def test_check_tool_scope_allows_matching_scope(self):
+        """Tool with matching scope in key should be allowed."""
+        registry = self._get_registry()
+        result = registry._check_tool_scope("write_file", ["file.write", "file.read"])
+        assert result is None  # None = allowed
+
+    def test_check_tool_scope_blocks_missing_scope(self):
+        """Tool requiring scope not in key should be blocked."""
+        registry = self._get_registry()
+        result = registry._check_tool_scope("write_file", ["file.read", "chat.view"])
+        assert result is not None
+        assert "file.write" in result
+        assert "write_file" in result
+
+    def test_check_tool_scope_allows_unmapped_tools(self):
+        """Tools not in the mapping (read_file, etc.) should always be allowed."""
+        registry = self._get_registry()
+        result = registry._check_tool_scope("read_file", ["file.read"])
+        assert result is None  # Unmapped tools are unrestricted
+
+    def test_check_tool_scope_allows_when_no_scopes(self):
+        """When api_key_scopes is None (full access), tools should not be checked."""
+        # This is handled by the caller (execute method), not _check_tool_scope
+        # _check_tool_scope is only called when scopes is not None
+        registry = self._get_registry()
+        # Even with empty list, unmapped tools pass
+        result = registry._check_tool_scope("read_file", [])
+        assert result is None
+
+    def test_check_tool_scope_blocks_shell_without_terminal(self):
+        """bash_exec should be blocked without terminal.access."""
+        registry = self._get_registry()
+        result = registry._check_tool_scope("bash_exec", ["file.read", "file.write"])
+        assert result is not None
+        assert "terminal.access" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_blocks_tool_via_scope(self):
+        """ToolRegistry.execute() should block write_file when scope is missing."""
+        from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry
+
+        registry = ToolRegistry()
+        registry.register(Tool(
+            name="write_file",
+            description="Write a file",
+            parameters={"type": "object", "properties": {}},
+            executor=lambda p, c: {"success": True},
+            category=ToolCategory.FILE_OPS,
+        ))
+
+        context = {
+            "api_key_scopes": ["file.read", "chat.view"],  # No file.write
+        }
+        result = await registry.execute("write_file", {}, context)
+        assert result["success"] is False
+        assert "scope restriction" in result["error"].lower() or "file.write" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_execute_allows_tool_with_scope(self):
+        """ToolRegistry.execute() should allow write_file when scope is present."""
+        from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry
+
+        registry = ToolRegistry()
+
+        async def mock_write(params, context):
+            return {"success": True, "message": "written"}
+
+        registry.register(Tool(
+            name="write_file",
+            description="Write a file",
+            parameters={"type": "object", "properties": {}},
+            executor=mock_write,
+            category=ToolCategory.FILE_OPS,
+        ))
+
+        context = {
+            "api_key_scopes": ["file.write", "file.read"],
+            "edit_mode": "normal",
+            "skip_approval_check": True,
+        }
+        result = await registry.execute("write_file", {}, context)
+        assert result.get("success") is True or "error" not in result or "scope" not in result.get("error", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_execute_no_scope_check_when_null(self):
+        """ToolRegistry.execute() should skip scope check when scopes is None (full access)."""
+        from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry
+
+        registry = ToolRegistry()
+
+        async def mock_write(params, context):
+            return {"success": True}
+
+        registry.register(Tool(
+            name="write_file",
+            description="Write a file",
+            parameters={"type": "object", "properties": {}},
+            executor=mock_write,
+            category=ToolCategory.FILE_OPS,
+        ))
+
+        context = {
+            "api_key_scopes": None,  # Full access — no restriction
+            "edit_mode": "normal",
+            "skip_approval_check": True,
+        }
+        result = await registry.execute("write_file", {}, context)
+        assert result.get("success") is True or "scope" not in result.get("error", "").lower()
