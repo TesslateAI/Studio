@@ -10,8 +10,8 @@ permissions on API-key-authenticated endpoints.
 
 import hashlib
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Callable
 
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
@@ -100,12 +100,11 @@ def require_api_scope(permission: Permission) -> Callable:
         key: ExternalAPIKey = user._api_key_record  # type: ignore
 
         # Gate 1: key-level scope check
-        if key.scopes is not None:
-            if permission.value not in key.scopes:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"API key lacks required scope: {permission.value}",
-                )
+        if key.scopes is not None and permission.value not in key.scopes:
+            raise HTTPException(
+                status_code=403,
+                detail=f"API key lacks required scope: {permission.value}",
+            )
 
         # Gate 2: owner's current role ceiling
         if user.default_team_id:

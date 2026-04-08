@@ -18,11 +18,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth_external import get_external_api_user, require_api_scope
+from ..auth_external import require_api_scope
 from ..config import get_settings
-from ..permissions import Permission, ROLE_PERMISSIONS, SCOPE_LABELS, has_permission, get_team_membership
 from ..database import get_db
 from ..models import Chat, Container, ExternalAPIKey, Message, User
+from ..permissions import (
+    ROLE_PERMISSIONS,
+    SCOPE_LABELS,
+    Permission,
+    get_team_membership,
+)
 from ..schemas import (
     ExternalAgentInvokeRequest,
     ExternalAgentInvokeResponse,
