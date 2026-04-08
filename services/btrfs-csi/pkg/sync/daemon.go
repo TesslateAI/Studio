@@ -342,48 +342,35 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 
 		d.mu.Lock()
 		if tv, ok := d.tracked[volID]; ok {
-			// Recover lastLayerHash from the manifest's latest snapshot.
-			// Without this, syncOne records Parent="" in the manifest despite
-			// using the on-disk layer as btrfs send parent, creating a
-			// mismatch between the actual send stream (incremental) and the
-			// manifest (claims full send).
+			// Recover lastLayerHash from manifest HEAD. Without this,
+			// syncOne records Parent="" despite using an on-disk parent.
 			if mi.latestHash != "" && tv.lastLayerHash == "" {
 				tv.lastLayerHash = mi.latestHash
 			}
+			// Recover lastSnapPath from on-disk layer (always, not just clean).
+			if hasSnap && tv.lastSnapPath == "" {
+				tv.lastSnapPath = snapPath
+			}
 			if !isDirty {
 				tv.dirty = false
-				if hasSnap {
-					tv.lastSnapPath = snapPath
-				}
 				clean++
 			} else {
 				dirty++
 			}
-		}
-		d.mu.Unlock()
-
-		// Recover consolidation state from manifest + disk.
-		if mi.latestConsolHash != "" {
-			consolShort := cas.ShortHash(mi.latestConsolHash)
-			consolPath := fmt.Sprintf("layers/%s@consol-%s", volID, consolShort)
-			// Also check non-prefixed path (consolidation may use regular naming).
-			consolPathAlt := fmt.Sprintf("layers/%s@%s", volID, consolShort)
-			d.mu.Lock()
-			if tv, ok := d.tracked[volID]; ok {
+			// Recover consolidation state from manifest + disk.
+			if mi.latestConsolHash != "" && tv.lastConsolidationHash == "" {
+				tv.lastConsolidationHash = mi.latestConsolHash
+				consolShort := cas.ShortHash(mi.latestConsolHash)
+				consolPath := fmt.Sprintf("layers/%s@consol-%s", volID, consolShort)
+				consolPathAlt := fmt.Sprintf("layers/%s@%s", volID, consolShort)
 				if d.btrfs.SubvolumeExists(ctx, consolPath) {
 					tv.lastConsolidationPath = consolPath
-					tv.lastConsolidationHash = mi.latestConsolHash
 				} else if d.btrfs.SubvolumeExists(ctx, consolPathAlt) {
 					tv.lastConsolidationPath = consolPathAlt
-					tv.lastConsolidationHash = mi.latestConsolHash
-				} else {
-					// Consolidation in manifest but not on disk — will use
-					// template or full send for next consolidation. Safe.
-					tv.lastConsolidationHash = mi.latestConsolHash
 				}
 			}
-			d.mu.Unlock()
 		}
+		d.mu.Unlock()
 		discovered++
 	}
 
@@ -521,6 +508,69 @@ func (d *Daemon) TrackVolume(volumeID, templateName, templateHash string) {
 		volumeID, templateName, cas.ShortHash(templateHash))
 }
 
+// autoTrackWithManifest ensures a volume is tracked with full state recovery
+// from the CAS manifest. This is the correct way to start tracking a volume
+// that already has history (e.g., after migration or CSI restart). It recovers:
+//   - templateName / templateHash from the manifest
+//   - lastLayerHash from manifest HEAD (so syncOne records correct Parent)
+//   - lastSnapPath from the on-disk layer matching HEAD
+//   - lastConsolidationPath / lastConsolidationHash from manifest
+//
+// Without this, syncOne records Parent="" in the manifest despite using the
+// on-disk layer as btrfs send parent, creating incremental blobs that claim
+// to be full sends — breaking all future restores.
+func (d *Daemon) autoTrackWithManifest(ctx context.Context, volumeID string) {
+	d.mu.Lock()
+	if _, exists := d.tracked[volumeID]; exists {
+		d.mu.Unlock()
+		return // already tracked
+	}
+	d.mu.Unlock()
+
+	// Fetch manifest from CAS to recover template context and HEAD.
+	var templateName, templateHash, latestHash, consolHash, consolPath string
+	if d.cas != nil {
+		if m, err := d.cas.GetManifest(ctx, volumeID); err == nil {
+			templateName = m.TemplateName
+			templateHash = m.Base
+			latestHash = m.LatestHash()
+			if lc := m.LatestConsolidation(); lc != nil {
+				consolHash = lc.Hash
+				// Check both naming conventions on disk.
+				cp := fmt.Sprintf("layers/%s@consol-%s", volumeID, cas.ShortHash(consolHash))
+				cpAlt := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(consolHash))
+				if d.btrfs.SubvolumeExists(ctx, cp) {
+					consolPath = cp
+				} else if d.btrfs.SubvolumeExists(ctx, cpAlt) {
+					consolPath = cpAlt
+				}
+			}
+		}
+	}
+
+	d.TrackVolume(volumeID, templateName, templateHash)
+
+	d.mu.Lock()
+	if tv, ok := d.tracked[volumeID]; ok {
+		if latestHash != "" {
+			tv.lastLayerHash = latestHash
+			// Find the layer snapshot on disk matching HEAD.
+			snapPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(latestHash))
+			if d.btrfs.SubvolumeExists(ctx, snapPath) {
+				tv.lastSnapPath = snapPath
+			}
+		}
+		if consolHash != "" {
+			tv.lastConsolidationHash = consolHash
+			tv.lastConsolidationPath = consolPath
+		}
+	}
+	d.mu.Unlock()
+
+	klog.Infof("autoTrackWithManifest: %s (head=%s, template=%s)",
+		volumeID, cas.ShortHash(latestHash), templateName)
+}
+
 // MarkDirty flags a tracked volume as needing sync. Safe to call from any
 // goroutine; no-op if the volume isn't tracked.
 func (d *Daemon) MarkDirty(volumeID string) {
@@ -626,8 +676,7 @@ func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
 		if !d.btrfs.SubvolumeExists(ctx, volPath) {
 			return fmt.Errorf("volume %q is not tracked and subvolume missing", volumeID)
 		}
-		klog.Infof("SyncVolume: auto-tracking untracked volume %s", volumeID)
-		d.TrackVolume(volumeID, "", "")
+		d.autoTrackWithManifest(ctx, volumeID)
 		d.mu.Lock()
 		tv = d.tracked[volumeID]
 		if tv == nil {
@@ -840,8 +889,7 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		if !d.btrfs.SubvolumeExists(ctx, volPath) {
 			return fmt.Errorf("volume %q is not tracked and subvolume missing", volumeID)
 		}
-		klog.Infof("RestoreToSnapshot: auto-tracking untracked volume %s", volumeID)
-		d.TrackVolume(volumeID, "", "")
+		d.autoTrackWithManifest(ctx, volumeID)
 		d.mu.Lock()
 		tv = d.tracked[volumeID]
 		if tv == nil {
