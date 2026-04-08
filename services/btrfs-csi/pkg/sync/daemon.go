@@ -1283,7 +1283,19 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 		if tv.lastConsolidationPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastConsolidationPath) {
 			parentPath = tv.lastConsolidationPath
 			parentHash = tv.lastConsolidationHash
-		} else if tv.templateName != "" {
+		} else if tv.lastConsolidationHash != "" && d.cas != nil {
+			// Consolidation layer GC'd — recover from CAS.
+			recoveredPath := fmt.Sprintf("layers/%s@consol-%s", tv.volumeID, cas.ShortHash(tv.lastConsolidationHash))
+			if recoverErr := d.recoverParentFromCAS(ctx, tv, recoveredPath); recoverErr != nil {
+				klog.Warningf("syncOne %s: failed to recover consolidation %s from CAS: %v",
+					tv.volumeID, cas.ShortHash(tv.lastConsolidationHash), recoverErr)
+			} else {
+				parentPath = recoveredPath
+				parentHash = tv.lastConsolidationHash
+			}
+		}
+		// Fall back to template.
+		if parentPath == "" && tv.templateName != "" {
 			tmplPath := fmt.Sprintf("templates/%s", tv.templateName)
 			if d.btrfs.SubvolumeExists(ctx, tmplPath) {
 				parentPath = tmplPath
@@ -1295,8 +1307,19 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 		if tv.lastSnapPath != "" && d.btrfs.SubvolumeExists(ctx, tv.lastSnapPath) {
 			parentPath = tv.lastSnapPath
 			parentHash = tv.lastLayerHash
-		} else if tv.templateName != "" {
-			// First sync or previous snapshot lost — fall back to template.
+		} else if tv.lastLayerHash != "" && d.cas != nil {
+			// Parent layer was GC'd but we know its hash — recover from CAS.
+			recoveredPath := fmt.Sprintf("layers/%s@%s", tv.volumeID, cas.ShortHash(tv.lastLayerHash))
+			if recoverErr := d.recoverParentFromCAS(ctx, tv, recoveredPath); recoverErr != nil {
+				klog.Warningf("syncOne %s: failed to recover parent %s from CAS: %v",
+					tv.volumeID, cas.ShortHash(tv.lastLayerHash), recoverErr)
+			} else {
+				parentPath = recoveredPath
+				parentHash = tv.lastLayerHash
+			}
+		}
+		// Fall back to template if no parent recovered.
+		if parentPath == "" && tv.templateName != "" {
 			tmplPath := fmt.Sprintf("templates/%s", tv.templateName)
 			if d.btrfs.SubvolumeExists(ctx, tmplPath) {
 				parentPath = tmplPath
@@ -1393,6 +1416,53 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 		tv.volumeID, cas.ShortHash(hash), role, isConsolidation)
 
 	return hash, newSnapPath, nil
+}
+
+// recoverParentFromCAS downloads the parent layer blob from CAS and receives
+// it so that syncOne can use it as the btrfs send parent. This is called when
+// the parent layer was GC'd (by RestoreToSnapshot or RestoreVolume cleanup)
+// but we still know its hash via tv.lastLayerHash / tv.lastConsolidationHash.
+//
+// The layer's own parent is resolved recursively via ensureParentLayer using
+// the manifest from CAS.
+func (d *Daemon) recoverParentFromCAS(ctx context.Context, tv *trackedVolume, targetPath string) error {
+	if d.btrfs.SubvolumeExists(ctx, targetPath) {
+		return nil // already on disk
+	}
+
+	hash := tv.lastLayerHash
+	if strings.Contains(targetPath, "@consol-") {
+		hash = tv.lastConsolidationHash
+	}
+	if hash == "" {
+		return fmt.Errorf("no hash to recover")
+	}
+
+	// Load manifest to resolve the parent chain for this layer.
+	manifest, err := d.cas.GetManifest(ctx, tv.volumeID)
+	if err != nil {
+		return fmt.Errorf("get manifest: %w", err)
+	}
+
+	snap, ok := manifest.Snapshots[hash]
+	if !ok {
+		return fmt.Errorf("hash %s not in manifest", cas.ShortHash(hash))
+	}
+
+	// Ensure the parent of THIS layer exists (recursive).
+	var grandparentPath string
+	if snap.Parent != "" && snap.Parent != manifest.Base {
+		gp, gpErr := d.ensureParentLayer(ctx, manifest, nil, hash, tv.volumeID)
+		if gpErr != nil {
+			return fmt.Errorf("ensure grandparent: %w", gpErr)
+		}
+		grandparentPath = gp
+	} else if snap.Parent == manifest.Base && manifest.TemplateName != "" {
+		grandparentPath = fmt.Sprintf("templates/%s", manifest.TemplateName)
+	}
+
+	klog.Infof("recoverParentFromCAS: downloading %s for volume %s", cas.ShortHash(hash), tv.volumeID)
+	return d.downloadLayer(ctx, tv.volumeID, hash, targetPath, grandparentPath)
 }
 
 // ensureParentLayer ensures the parent subvolume for the given snapshot hash
