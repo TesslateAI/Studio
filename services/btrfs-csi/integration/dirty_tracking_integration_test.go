@@ -218,9 +218,9 @@ func TestDirty_DrainSkipsCleanVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetManifest for dirty vol: %v", err)
 	}
-	if len(manifest.Layers) < 2 {
+	if len(manifest.Snapshots) < 2 {
 		t.Errorf("expected at least 2 layers for dirty volume (initial sync + drain sync), got %d",
-			len(manifest.Layers))
+			len(manifest.Snapshots))
 	}
 }
 
@@ -551,8 +551,8 @@ func TestDirty_FullCycle_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetManifest vol1: %v", err)
 	}
-	if len(manifest.Layers) < 2 {
-		t.Errorf("expected at least 2 layers (initial + update), got %d", len(manifest.Layers))
+	if len(manifest.Snapshots) < 2 {
+		t.Errorf("expected at least 2 layers (initial + update), got %d", len(manifest.Snapshots))
 	}
 
 	t.Log("Full dirty tracking cycle passed")

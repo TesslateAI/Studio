@@ -739,26 +739,25 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		return nil
 	}
 
-	// Build the restore chain for the latest snapshot.
-	targetIdx := len(manifest.Snapshots) - 1
-	chain := manifest.BuildRestoreChain(targetIdx)
+	// Build the restore chain for the HEAD snapshot.
+	chain := manifest.BuildRestoreChain(manifest.Head)
 
 	// Download and receive each layer in the chain in order.
 	// ensureParentLayer recursively downloads any missing parent layers
 	// before the child is received. The UUID rewriter patches parent
 	// references so btrfs receive finds the correct local parent.
 	var lastReceivedPath string
-	for _, idx := range chain {
-		snap := manifest.Snapshots[idx]
-		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
+	for _, snapHash := range chain {
+		snap := manifest.Snapshots[snapHash]
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snapHash))
 
 		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
-			parentPath, pErr := d.ensureParentLayer(ctx, manifest, chain, idx, volumeID)
+			parentPath, pErr := d.ensureParentLayer(ctx, manifest, chain, snapHash, volumeID)
 			if pErr != nil {
-				return fmt.Errorf("ensure parent for snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), pErr)
+				return fmt.Errorf("ensure parent for snapshot %s: %w", cas.ShortHash(snapHash), pErr)
 			}
 			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath, parentPath); err != nil {
-				return fmt.Errorf("restore snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), err)
+				return fmt.Errorf("restore snapshot %s: %w", cas.ShortHash(snapHash), err)
 			}
 		}
 		lastReceivedPath = layerPath
@@ -782,17 +781,16 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	// consolidation). With the UUID rewriter, parent layers no longer need
 	// to be preserved for UUID matching — any re-received layer will have
 	// its parent UUID rewritten to the local subvolume's native UUID.
-	latestSnap := manifest.Snapshots[targetIdx]
+	latestSnap := manifest.Snapshots[manifest.Head]
 	latestConsolHash := ""
 	if consol := manifest.LatestConsolidation(); consol != nil {
 		latestConsolHash = consol.Hash
 	}
-	for _, idx := range chain {
-		snap := manifest.Snapshots[idx]
-		if snap.Hash == latestSnap.Hash || snap.Hash == latestConsolHash {
+	for _, snapHash := range chain {
+		if snapHash == latestSnap.Hash || snapHash == latestConsolHash {
 			continue // keep these
 		}
-		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snapHash))
 		if d.btrfs.SubvolumeExists(ctx, layerPath) {
 			_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
 		}
@@ -889,7 +887,12 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		if err := d.btrfs.SnapshotSubvolume(ctx, tmplPath, volumePath, false); err != nil {
 			return fmt.Errorf("snapshot template to volume: %w", err)
 		}
-		manifest.TruncateAfter(targetHash)
+		// Save old HEAD as a branch before moving (like git auto-stash).
+		if manifest.Head != "" && manifest.Head != targetHash {
+			branchName := fmt.Sprintf("pre-restore-%s", time.Now().UTC().Format("20060102-150405"))
+			manifest.SaveBranch(branchName, manifest.Head)
+		}
+		manifest.SetHead(targetHash)
 		_ = d.cas.PutManifest(ctx, manifest)
 
 		d.mu.Lock()
@@ -903,15 +906,8 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		return nil
 	}
 
-	// Find target index in manifest.
-	targetIdx := -1
-	for i := range manifest.Snapshots {
-		if manifest.Snapshots[i].Hash == targetHash {
-			targetIdx = i
-			break
-		}
-	}
-	if targetIdx < 0 {
+	// Verify target hash exists in manifest.
+	if _, ok := manifest.Snapshots[targetHash]; !ok {
 		return fmt.Errorf("target hash %s not found in manifest for volume %s", targetHash, volumeID)
 	}
 
@@ -923,18 +919,18 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 	}
 
 	// Build and replay the restore chain.
-	chain := manifest.BuildRestoreChain(targetIdx)
+	chain := manifest.BuildRestoreChain(targetHash)
 	var lastReceivedPath string
-	for _, idx := range chain {
-		snap := manifest.Snapshots[idx]
-		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
+	for _, snapHash := range chain {
+		snap := manifest.Snapshots[snapHash]
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snapHash))
 		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
-			parentPath, pErr := d.ensureParentLayer(ctx, manifest, chain, idx, volumeID)
+			parentPath, pErr := d.ensureParentLayer(ctx, manifest, chain, snapHash, volumeID)
 			if pErr != nil {
-				return fmt.Errorf("ensure parent for snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), pErr)
+				return fmt.Errorf("ensure parent for snapshot %s: %w", cas.ShortHash(snapHash), pErr)
 			}
 			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath, parentPath); err != nil {
-				return fmt.Errorf("restore snapshot %d (%s): %w", idx, cas.ShortHash(snap.Hash), err)
+				return fmt.Errorf("restore snapshot %s: %w", cas.ShortHash(snapHash), err)
 			}
 		}
 		lastReceivedPath = layerPath
@@ -952,10 +948,15 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		return fmt.Errorf("snapshot target to volume: %w", err)
 	}
 
-	// Truncate manifest to target.
-	manifest.TruncateAfter(targetHash)
+	// Move HEAD to target (like git checkout). Save old HEAD as a branch
+	// so the timeline is preserved and can be restored later.
+	if manifest.Head != "" && manifest.Head != targetHash {
+		branchName := fmt.Sprintf("pre-restore-%s", time.Now().UTC().Format("20060102-150405"))
+		manifest.SaveBranch(branchName, manifest.Head)
+	}
+	manifest.SetHead(targetHash)
 	if err := d.cas.PutManifest(ctx, manifest); err != nil {
-		return fmt.Errorf("save truncated manifest: %w", err)
+		return fmt.Errorf("save manifest: %w", err)
 	}
 
 	latestConsolHash := ""
@@ -967,12 +968,11 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 	// longer need to be preserved for UUID matching — any re-received layer
 	// will have its parent UUID rewritten to the local subvolume's native UUID.
 	// Keep only the restore target and latest consolidation.
-	for _, idx := range chain {
-		snap := manifest.Snapshots[idx]
-		if snap.Hash == targetHash || snap.Hash == latestConsolHash {
+	for _, snapHash := range chain {
+		if snapHash == targetHash || snapHash == latestConsolHash {
 			continue
 		}
-		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snap.Hash))
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snapHash))
 		if d.btrfs.SubvolumeExists(ctx, layerPath) {
 			_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
 		}
@@ -1347,17 +1347,20 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 	return hash, newSnapPath, nil
 }
 
-// ensureParentLayer ensures the parent subvolume for the snapshot at manifest
-// index idx exists on disk and returns its path. It uses the snapshot's Parent
-// hash from the manifest to find the actual parent — NOT the previous entry in
-// the restore chain, which may differ (e.g., after manifest truncation from a
-// prior RestoreToSnapshot, or orphaned full-send layers).
+// ensureParentLayer ensures the parent subvolume for the given snapshot hash
+// exists on disk and returns its path. It uses the snapshot's Parent hash from
+// the manifest to find the actual parent — NOT the previous entry in the
+// restore chain, which may differ (e.g., after a restore that moved HEAD, or
+// orphaned full-send layers).
 //
 // If the parent layer is not on disk (GC'd), it is downloaded from CAS.
 // The parent's own parent is resolved recursively so that the full dependency
 // chain is satisfied before btrfs receive runs.
-func (d *Daemon) ensureParentLayer(ctx context.Context, manifest *cas.Manifest, chain []int, idx int, volumeID string) (string, error) {
-	snap := manifest.Snapshots[idx]
+func (d *Daemon) ensureParentLayer(ctx context.Context, manifest *cas.Manifest, chain []string, snapHash string, volumeID string) (string, error) {
+	snap, ok := manifest.Snapshots[snapHash]
+	if !ok {
+		return "", fmt.Errorf("snapshot %s not found in manifest", cas.ShortHash(snapHash))
+	}
 
 	// No parent → full send, no rewrite needed.
 	if snap.Parent == "" {
@@ -1369,18 +1372,11 @@ func (d *Daemon) ensureParentLayer(ctx context.Context, manifest *cas.Manifest, 
 		return fmt.Sprintf("templates/%s", manifest.TemplateName), nil
 	}
 
-	// Find the parent's manifest index by hash.
-	parentIdx := -1
-	for i, s := range manifest.Snapshots {
-		if s.Hash == snap.Parent {
-			parentIdx = i
-			break
-		}
-	}
-	if parentIdx < 0 {
+	// Verify the parent exists in the manifest map.
+	if _, exists := manifest.Snapshots[snap.Parent]; !exists {
 		// Parent hash not in manifest at all — treat as full send.
-		klog.Warningf("ensureParentLayer: parent %s for snapshot %d not found in manifest, treating as full send",
-			cas.ShortHash(snap.Parent), idx)
+		klog.Warningf("ensureParentLayer: parent %s for snapshot %s not found in manifest, treating as full send",
+			cas.ShortHash(snap.Parent), cas.ShortHash(snapHash))
 		return "", nil
 	}
 
@@ -1393,13 +1389,13 @@ func (d *Daemon) ensureParentLayer(ctx context.Context, manifest *cas.Manifest, 
 
 	// Parent not on disk — download it. First ensure ITS parent exists
 	// (recursive, but chains are shallow: max depth = consolidation interval).
-	grandparentPath, err := d.ensureParentLayer(ctx, manifest, chain, parentIdx, volumeID)
+	grandparentPath, err := d.ensureParentLayer(ctx, manifest, chain, snap.Parent, volumeID)
 	if err != nil {
-		return "", fmt.Errorf("ensure grandparent for snapshot %d: %w", parentIdx, err)
+		return "", fmt.Errorf("ensure grandparent for snapshot %s: %w", cas.ShortHash(snap.Parent), err)
 	}
 
-	klog.Infof("ensureParentLayer: downloading missing parent %s for snapshot %d of volume %s",
-		cas.ShortHash(snap.Parent), idx, volumeID)
+	klog.Infof("ensureParentLayer: downloading missing parent %s for snapshot %s of volume %s",
+		cas.ShortHash(snap.Parent), cas.ShortHash(snapHash), volumeID)
 
 	if err := d.downloadLayer(ctx, volumeID, snap.Parent, parentPath, grandparentPath); err != nil {
 		return "", fmt.Errorf("download missing parent %s: %w", cas.ShortHash(snap.Parent), err)

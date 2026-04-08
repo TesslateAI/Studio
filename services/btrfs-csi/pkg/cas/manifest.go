@@ -10,12 +10,25 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Manifest describes a volume as an ordered chain of content-addressed snapshots.
+// Manifest describes a volume as a DAG of content-addressed snapshots,
+// modeled after git: snapshots are an append-only hash-indexed store,
+// HEAD tracks the current position, and branches are named pointers.
+//
+// Restoring to a snapshot moves HEAD without deleting history. New syncs
+// after restore fork the timeline — the old branch is preserved and can
+// be restored later.
 type Manifest struct {
-	VolumeID     string     `json:"volume_id"`
-	Base         string     `json:"base"`
-	TemplateName string     `json:"template_name,omitempty"`
-	Snapshots    []Snapshot `json:"snapshots"`
+	VolumeID     string              `json:"volume_id"`
+	Base         string              `json:"base"`
+	TemplateName string              `json:"template_name,omitempty"`
+	Head         string              `json:"head,omitempty"`               // hash of current snapshot (like git HEAD)
+	Branches     map[string]string   `json:"branches,omitempty"`           // name → hash (like git refs)
+	Snapshots    map[string]Snapshot `json:"snapshots"`                    // hash → snapshot (append-only DAG)
+
+	// legacyList is populated during deserialization when the manifest uses
+	// the old []Snapshot format. It is NOT serialized — only used to convert
+	// to the hash-indexed map on first read.
+	legacyList []Snapshot `json:"-"`
 }
 
 // Snapshot is a single btrfs send stream stored as a CAS blob.
@@ -24,7 +37,7 @@ type Manifest struct {
 type Snapshot struct {
 	Hash          string `json:"hash"`
 	Parent        string `json:"parent"`
-	Role          string `json:"role"`                    // "sync" | "checkpoint" | "consolidation"
+	Role          string `json:"role"`                    // "sync" | "checkpoint"
 	Label         string `json:"label,omitempty"`
 	Consolidation bool   `json:"consolidation,omitempty"` // true = parent is previous consolidation, not previous snapshot
 	TS            string `json:"ts"`
@@ -38,17 +51,47 @@ func manifestKey(volumeID string) string {
 	return fmt.Sprintf("manifests/%s.json", volumeID)
 }
 
-// LatestHash returns the hash of the most recent snapshot, or Base if none exist.
+// ---------------------------------------------------------------------------
+// HEAD and branch operations
+// ---------------------------------------------------------------------------
+
+// LatestHash returns the HEAD hash, falling back to Base if no snapshots exist.
 func (m *Manifest) LatestHash() string {
-	if len(m.Snapshots) > 0 {
-		return m.Snapshots[len(m.Snapshots)-1].Hash
+	if m.Head != "" {
+		return m.Head
 	}
 	return m.Base
 }
 
-// AppendSnapshot adds a snapshot to the manifest chain.
+// SetHead moves HEAD to the given snapshot hash.
+func (m *Manifest) SetHead(hash string) {
+	m.Head = hash
+}
+
+// SaveBranch creates or updates a named branch pointer.
+func (m *Manifest) SaveBranch(name, hash string) {
+	if m.Branches == nil {
+		m.Branches = make(map[string]string)
+	}
+	m.Branches[name] = hash
+}
+
+// DeleteBranch removes a named branch.
+func (m *Manifest) DeleteBranch(name string) {
+	delete(m.Branches, name)
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot operations
+// ---------------------------------------------------------------------------
+
+// AppendSnapshot adds a snapshot to the DAG and advances HEAD.
 func (m *Manifest) AppendSnapshot(s Snapshot) {
-	m.Snapshots = append(m.Snapshots, s)
+	if m.Snapshots == nil {
+		m.Snapshots = make(map[string]Snapshot)
+	}
+	m.Snapshots[s.Hash] = s
+	m.Head = s.Hash
 }
 
 // AppendLayer is an alias for AppendSnapshot during migration.
@@ -56,130 +99,183 @@ func (m *Manifest) AppendLayer(l Layer) {
 	m.AppendSnapshot(l)
 }
 
-// TruncateAfter drops all snapshots after the one matching targetHash.
-func (m *Manifest) TruncateAfter(targetHash string) {
-	if targetHash == m.Base {
-		m.Snapshots = nil
-		return
+// GetSnapshot returns the snapshot with the given hash, or nil if not found.
+func (m *Manifest) GetSnapshot(hash string) *Snapshot {
+	s, ok := m.Snapshots[hash]
+	if !ok {
+		return nil
 	}
-	for i, s := range m.Snapshots {
-		if s.Hash == targetHash {
-			m.Snapshots = m.Snapshots[:i+1]
-			return
-		}
-	}
+	return &s
 }
 
-// LatestConsolidation returns the most recent consolidation snapshot, or nil.
+// TruncateAfter is a no-op preserved for backward compatibility.
+// With the DAG model, restore moves HEAD instead of truncating.
+// This method does nothing — callers should use SetHead instead.
+func (m *Manifest) TruncateAfter(targetHash string) {
+	// No-op: DAG model preserves all snapshots.
+	// HEAD is moved by SetHead, called by RestoreToSnapshot.
+}
+
+// SnapshotCount returns the total number of snapshots in the DAG.
+func (m *Manifest) SnapshotCount() int {
+	return len(m.Snapshots)
+}
+
+// ---------------------------------------------------------------------------
+// Chain traversal (walks parent pointers, like git log)
+// ---------------------------------------------------------------------------
+
+// LatestConsolidation returns the most recent consolidation snapshot
+// reachable from HEAD, or nil if none exists.
 func (m *Manifest) LatestConsolidation() *Snapshot {
-	for i := len(m.Snapshots) - 1; i >= 0; i-- {
-		if m.Snapshots[i].Consolidation {
-			return &m.Snapshots[i]
+	hash := m.Head
+	for hash != "" && hash != m.Base {
+		s, ok := m.Snapshots[hash]
+		if !ok {
+			break
 		}
+		if s.Consolidation {
+			return &s
+		}
+		hash = s.Parent
 	}
 	return nil
 }
 
-// NearestConsolidationBefore returns the index of the consolidation at or before idx, or -1.
-func (m *Manifest) NearestConsolidationBefore(idx int) int {
-	for i := idx; i >= 0; i-- {
-		if m.Snapshots[i].Consolidation {
-			return i
-		}
-	}
-	return -1
-}
-
-// SnapshotsSinceLastConsolidation returns the number of non-consolidation
-// snapshots appended after the most recent consolidation (or from the
-// beginning if no consolidation exists).
+// SnapshotsSinceLastConsolidation counts non-consolidation snapshots
+// from HEAD backward until a consolidation is found.
 func (m *Manifest) SnapshotsSinceLastConsolidation() int {
 	count := 0
-	for i := len(m.Snapshots) - 1; i >= 0; i-- {
-		if m.Snapshots[i].Consolidation {
+	hash := m.Head
+	for hash != "" && hash != m.Base {
+		s, ok := m.Snapshots[hash]
+		if !ok {
+			break
+		}
+		if s.Consolidation {
 			break
 		}
 		count++
+		hash = s.Parent
 	}
 	return count
 }
 
-// ConsolidationHashes returns the hashes of all consolidation snapshots,
+// ConsolidationHashes returns all consolidation hashes reachable from HEAD,
 // ordered oldest to newest.
 func (m *Manifest) ConsolidationHashes() []string {
 	var hashes []string
-	for _, s := range m.Snapshots {
-		if s.Consolidation {
-			hashes = append(hashes, s.Hash)
+	hash := m.Head
+	for hash != "" && hash != m.Base {
+		s, ok := m.Snapshots[hash]
+		if !ok {
+			break
 		}
+		if s.Consolidation {
+			hashes = append([]string{s.Hash}, hashes...)
+		}
+		hash = s.Parent
 	}
 	return hashes
 }
 
-// PruneConsolidations is a no-op placeholder for future consolidation
-// retention. Consolidation blobs form a chain (each diffs from the
-// previous), so deleting any blob in the chain breaks all subsequent
-// restores. Safe pruning requires re-basing the oldest surviving
-// consolidation as a full diff from template, which is not yet implemented.
+// BuildRestoreChain returns the ordered list of snapshot hashes needed to
+// restore to the given target. Walks backward from target through parent
+// pointers, collecting consolidations for efficient restore:
 //
-// All consolidation blobs are kept. Storage impact is minimal: ~MB each,
-// one every N snapshots (default 50).
-func (m *Manifest) PruneConsolidations(retention int) []string {
-	// No-op: keep all consolidation blobs to maintain chain integrity.
-	return nil
-}
-
-// BuildRestoreChain returns the ordered list of snapshot indices needed to
-// restore to the given target index. The chain walks back through
-// consolidations to the template, then includes incrementals up to target:
+//	template → [consolidation chain] → [incrementals to target]
 //
-//	template → [consolidation chain] → [incrementals after last consolidation to target]
-//
-// If no consolidation exists at or before target, the full incremental
-// chain from index 0 is returned.
-func (m *Manifest) BuildRestoreChain(targetIdx int) []int {
-	if targetIdx < 0 || targetIdx >= len(m.Snapshots) {
+// Returns hashes (not indices) since snapshots are hash-indexed.
+func (m *Manifest) BuildRestoreChain(targetHash string) []string {
+	if targetHash == "" || targetHash == m.Base {
 		return nil
 	}
 
-	// Find nearest consolidation at or before target.
-	consolIdx := m.NearestConsolidationBefore(targetIdx)
-
-	if consolIdx >= 0 {
-		// Walk consolidation chain backward to collect all needed consolidations.
-		var consolChain []int
-		for i := consolIdx; i >= 0; {
-			consolChain = append([]int{i}, consolChain...)
-			prev := m.NearestConsolidationBefore(i - 1)
-			if prev < 0 {
-				break
-			}
-			i = prev
+	// Walk backward from target to collect the full ancestor chain.
+	var fullChain []string
+	hash := targetHash
+	for hash != "" && hash != m.Base {
+		if _, ok := m.Snapshots[hash]; !ok {
+			break
 		}
-
-		// Append incrementals from consolIdx+1 to targetIdx.
-		chain := consolChain
-		for i := consolIdx + 1; i <= targetIdx; i++ {
-			chain = append(chain, i)
-		}
-		return chain
+		fullChain = append([]string{hash}, fullChain...)
+		hash = m.Snapshots[hash].Parent
 	}
 
-	// No consolidation — full incremental chain from beginning.
-	chain := make([]int, targetIdx+1)
-	for i := range chain {
-		chain[i] = i
+	if len(fullChain) == 0 {
+		return nil
+	}
+
+	// Optimize: find the nearest consolidation and skip earlier incrementals.
+	// Walk from end toward start to find the latest consolidation.
+	lastConsolIdx := -1
+	for i := len(fullChain) - 1; i >= 0; i-- {
+		if s, ok := m.Snapshots[fullChain[i]]; ok && s.Consolidation {
+			lastConsolIdx = i
+			break
+		}
+	}
+
+	if lastConsolIdx < 0 {
+		// No consolidation — need the full chain.
+		return fullChain
+	}
+
+	// Collect consolidation chain (each consolidation's parent may be an
+	// earlier consolidation, not the immediately previous entry).
+	consolChain := []string{fullChain[lastConsolIdx]}
+	ch := m.Snapshots[fullChain[lastConsolIdx]].Parent
+	for ch != "" && ch != m.Base {
+		s, ok := m.Snapshots[ch]
+		if !ok {
+			break
+		}
+		if s.Consolidation {
+			consolChain = append([]string{ch}, consolChain...)
+		}
+		ch = s.Parent
+	}
+
+	// Append incrementals from lastConsolIdx+1 to target.
+	chain := consolChain
+	for i := lastConsolIdx + 1; i < len(fullChain); i++ {
+		chain = append(chain, fullChain[i])
 	}
 	return chain
 }
 
+// ListCheckpoints returns all checkpoint snapshots reachable from HEAD,
+// ordered newest to oldest (for user-facing snapshot timeline).
+func (m *Manifest) ListCheckpoints() []Snapshot {
+	var checkpoints []Snapshot
+	hash := m.Head
+	for hash != "" && hash != m.Base {
+		s, ok := m.Snapshots[hash]
+		if !ok {
+			break
+		}
+		if s.Role == "checkpoint" {
+			checkpoints = append(checkpoints, s)
+		}
+		hash = s.Parent
+	}
+	return checkpoints
+}
+
+// PruneConsolidations is a no-op placeholder for future consolidation
+// retention. Consolidation blobs form a chain, so pruning requires
+// re-basing — not yet implemented.
+func (m *Manifest) PruneConsolidations(retention int) []string {
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Legacy migration
+// ---------------------------------------------------------------------------
+
 // NeedsMigration returns true if the manifest has layers that were all
 // created with the same parent (old sync algorithm) and no consolidation
-// points exist. Covers two cases:
-//   - Template-based: all parents == Base hash (non-empty)
-//   - Template-less: all parents == "" (full sends)
-//
-// Marking the latest as consolidation makes restore O(1) instead of O(N).
+// points exist.
 func (m *Manifest) NeedsMigration() bool {
 	if len(m.Snapshots) == 0 {
 		return false
@@ -187,25 +283,37 @@ func (m *Manifest) NeedsMigration() bool {
 	if m.LatestConsolidation() != nil {
 		return false
 	}
-	// All parents must be the same value (either Base hash or "").
-	commonParent := m.Snapshots[0].Parent
-	for _, s := range m.Snapshots {
-		if s.Parent != commonParent {
+	// All parents from HEAD chain must be the same value.
+	var commonParent *string
+	hash := m.Head
+	for hash != "" && hash != m.Base {
+		s, ok := m.Snapshots[hash]
+		if !ok {
+			break
+		}
+		if commonParent == nil {
+			cp := s.Parent
+			commonParent = &cp
+		} else if s.Parent != *commonParent {
 			return false
 		}
+		hash = s.Parent
 	}
-	return true
+	return commonParent != nil
 }
 
-// Migrate upgrades a legacy manifest to the incremental chain model by
-// marking the latest snapshot as a consolidation point (it's a full diff
-// from template, so it IS a valid consolidation). Returns true if modified.
+// Migrate upgrades a legacy manifest by marking the HEAD snapshot as a
+// consolidation point. Returns true if modified.
 func (m *Manifest) Migrate() bool {
 	if !m.NeedsMigration() {
 		return false
 	}
-	m.Snapshots[len(m.Snapshots)-1].Consolidation = true
-	return true
+	if s, ok := m.Snapshots[m.Head]; ok {
+		s.Consolidation = true
+		m.Snapshots[m.Head] = s
+		return true
+	}
+	return false
 }
 
 // ShortHash returns the first 12 hex chars of a "sha256:..." hash.
@@ -216,6 +324,10 @@ func ShortHash(hash string) string {
 	}
 	return h
 }
+
+// ---------------------------------------------------------------------------
+// S3 persistence
+// ---------------------------------------------------------------------------
 
 // PutManifest writes a volume manifest to object storage.
 func (s *Store) PutManifest(ctx context.Context, m *Manifest) error {
@@ -229,13 +341,19 @@ func (s *Store) PutManifest(ctx context.Context, m *Manifest) error {
 		return fmt.Errorf("upload manifest %s: %w", m.VolumeID, err)
 	}
 
-	klog.V(3).Infof("Saved manifest for volume %s (%d snapshots)", m.VolumeID, len(m.Snapshots))
+	klog.V(3).Infof("Saved manifest for volume %s (%d snapshots, head=%s)",
+		m.VolumeID, len(m.Snapshots), ShortHash(m.Head))
 	return nil
 }
 
 // GetManifest reads a volume manifest from object storage.
-// If the manifest is in legacy format ("layers"/"type"), it is normalized
-// to the current format in-memory. The next PutManifest will persist the upgrade.
+// Handles three formats:
+//  1. Current: hash-indexed map with head/branches
+//  2. Legacy v2: "snapshots" as []Snapshot (ordered list)
+//  3. Legacy v1: "layers" with per-entry "type" field
+//
+// Legacy formats are auto-converted to the DAG model in memory.
+// The next PutManifest persists the upgrade.
 func (s *Store) GetManifest(ctx context.Context, volumeID string) (*Manifest, error) {
 	key := manifestKey(volumeID)
 	reader, err := s.obj.Download(ctx, key)
@@ -244,58 +362,151 @@ func (s *Store) GetManifest(ctx context.Context, volumeID string) (*Manifest, er
 	}
 	defer reader.Close()
 
-	// Decode into raw map to detect legacy keys.
-	var raw map[string]json.RawMessage
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(reader); err != nil {
 		return nil, fmt.Errorf("read manifest %s: %w", volumeID, err)
 	}
-	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+
+	// Try decoding as current format first (map-indexed snapshots).
+	var m Manifest
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
 		return nil, fmt.Errorf("decode manifest %s: %w", volumeID, err)
 	}
 
-	// Normalize legacy format: "layers" → "snapshots", per-entry "type" → "role".
-	if _, hasLayers := raw["layers"]; hasLayers {
-		if _, hasSnapshots := raw["snapshots"]; !hasSnapshots {
-			// Rename per-entry "type" → "role" inside the array.
-			var entries []map[string]json.RawMessage
-			if err := json.Unmarshal(raw["layers"], &entries); err == nil {
-				for i := range entries {
-					if t, ok := entries[i]["type"]; ok {
-						entries[i]["role"] = t
-						delete(entries[i], "type")
-					}
-				}
-				if patched, err := json.Marshal(entries); err == nil {
-					raw["snapshots"] = patched
-				}
-			}
+	// Detect legacy format: if Snapshots is nil/empty but raw JSON has
+	// "snapshots" as an array or "layers", convert from list format.
+	if len(m.Snapshots) == 0 {
+		converted, convErr := convertLegacyManifest(buf.Bytes(), volumeID)
+		if convErr != nil {
+			// Not a conversion error — might just be an empty manifest.
+			return &m, nil
 		}
-		// Always remove "layers" — even if "snapshots" also exists (ambiguous
-		// state from partial upgrade). "snapshots" takes precedence.
-		delete(raw, "layers")
+		if converted != nil {
+			return converted, nil
+		}
 	}
 
-	normalized, err := json.Marshal(raw)
-	if err != nil {
-		return nil, fmt.Errorf("re-encode manifest %s: %w", volumeID, err)
-	}
-	var m Manifest
-	if err := json.Unmarshal(normalized, &m); err != nil {
-		return nil, fmt.Errorf("unmarshal manifest %s: %w", volumeID, err)
-	}
-
-	// Normalize role values: legacy "snapshot" → "checkpoint", empty → "sync".
-	for i := range m.Snapshots {
-		switch m.Snapshots[i].Role {
-		case "snapshot":
-			m.Snapshots[i].Role = "checkpoint"
-		case "":
-			m.Snapshots[i].Role = "sync"
-		}
+	// Ensure HEAD is set (manifests upgraded from legacy may not have it).
+	if m.Head == "" && len(m.Snapshots) > 0 {
+		m.Head = findChainTip(m.Snapshots)
 	}
 
 	return &m, nil
+}
+
+// convertLegacyManifest handles the old []Snapshot and []Layer formats.
+func convertLegacyManifest(data []byte, volumeID string) (*Manifest, error) {
+	// Decode into raw map to detect legacy keys.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	// Determine which key holds the list: "layers" (v1) or "snapshots" (v2 list).
+	listKey := ""
+	if _, ok := raw["layers"]; ok {
+		listKey = "layers"
+	} else if _, ok := raw["snapshots"]; ok {
+		listKey = "snapshots"
+	} else {
+		return nil, nil // no list found, not a legacy format
+	}
+
+	// Try to decode as array.
+	var list []json.RawMessage
+	if err := json.Unmarshal(raw[listKey], &list); err != nil {
+		return nil, nil // not an array — might be the new map format with zero entries
+	}
+	if len(list) == 0 {
+		return nil, nil
+	}
+
+	klog.V(2).Infof("Converting legacy manifest for %s (%d entries from %q key)",
+		volumeID, len(list), listKey)
+
+	// Parse each entry, handling "type" → "role" rename.
+	var snapshots []Snapshot
+	for _, raw := range list {
+		var entry map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			continue
+		}
+		// Rename "type" → "role" for v1.
+		if t, ok := entry["type"]; ok {
+			entry["role"] = t
+			delete(entry, "type")
+		}
+		patched, _ := json.Marshal(entry)
+		var s Snapshot
+		if err := json.Unmarshal(patched, &s); err != nil {
+			continue
+		}
+		// Normalize role values.
+		switch s.Role {
+		case "snapshot":
+			s.Role = "checkpoint"
+		case "":
+			s.Role = "sync"
+		}
+		snapshots = append(snapshots, s)
+	}
+
+	// Build the hash-indexed map.
+	m := &Manifest{
+		Snapshots: make(map[string]Snapshot, len(snapshots)),
+	}
+
+	// Decode top-level fields.
+	if v, ok := raw["volume_id"]; ok {
+		json.Unmarshal(v, &m.VolumeID)
+	}
+	if v, ok := raw["base"]; ok {
+		json.Unmarshal(v, &m.Base)
+	}
+	if v, ok := raw["template_name"]; ok {
+		json.Unmarshal(v, &m.TemplateName)
+	}
+
+	for _, s := range snapshots {
+		m.Snapshots[s.Hash] = s
+	}
+
+	// HEAD = last entry in the list (legacy format was ordered).
+	if len(snapshots) > 0 {
+		m.Head = snapshots[len(snapshots)-1].Hash
+	}
+
+	return m, nil
+}
+
+// findChainTip finds the snapshot hash that is not referenced as a parent
+// by any other snapshot — the tip of the longest chain. If ambiguous,
+// returns the one with the latest timestamp.
+func findChainTip(snaps map[string]Snapshot) string {
+	isParent := make(map[string]bool, len(snaps))
+	for _, s := range snaps {
+		if s.Parent != "" {
+			isParent[s.Parent] = true
+		}
+	}
+	var tip string
+	var tipTS string
+	for hash, s := range snaps {
+		if !isParent[hash] {
+			if tip == "" || s.TS > tipTS {
+				tip = hash
+				tipTS = s.TS
+			}
+		}
+	}
+	if tip != "" {
+		return tip
+	}
+	// Fallback: just pick any.
+	for hash := range snaps {
+		return hash
+	}
+	return ""
 }
 
 // DeleteManifest removes a volume manifest from object storage.

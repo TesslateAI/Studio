@@ -311,12 +311,12 @@ func TestLoadSyncThroughput(t *testing.T) {
 			t.Errorf("GetManifest(%s): %v", volID, err)
 			continue
 		}
-		if len(manifest.Layers) == 0 {
+		if len(manifest.Snapshots) == 0 {
 			t.Errorf("volume %s manifest has no layers", volID)
 			continue
 		}
 		// Verify the layer blob exists.
-		for _, layer := range manifest.Layers {
+		for _, layer := range manifest.Snapshots {
 			exists, err := casStore.HasBlob(ctx, layer.Hash)
 			if err != nil {
 				t.Errorf("HasBlob(%s) for volume %s: %v", layer.Hash, volID, err)

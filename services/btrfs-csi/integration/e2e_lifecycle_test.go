@@ -165,7 +165,7 @@ func TestDrainLifecycle(t *testing.T) {
 		if manifest.VolumeID != vid {
 			t.Errorf("manifest.VolumeID = %q, want %q", manifest.VolumeID, vid)
 		}
-		if len(manifest.Layers) == 0 {
+		if len(manifest.Snapshots) == 0 {
 			t.Errorf("manifest for %s has 0 layers, expected at least 1", vid)
 		}
 	}
@@ -466,8 +466,8 @@ func TestRestoreFromS3(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetManifest after sync: %v", err)
 	}
-	if len(manifest.Layers) != 2 {
-		t.Fatalf("expected 2 layers in manifest, got %d", len(manifest.Layers))
+	if len(manifest.Snapshots) != 2 {
+		t.Fatalf("expected 2 layers in manifest, got %d", len(manifest.Snapshots))
 	}
 
 	// Delete local volume and ALL layer snapshots (simulate fresh node).
@@ -570,10 +570,10 @@ func TestRestoreToSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetManifest: %v", err)
 	}
-	if len(manifest.Layers) != 1 {
-		t.Fatalf("expected 1 layer, got %d", len(manifest.Layers))
+	if len(manifest.Snapshots) != 1 {
+		t.Fatalf("expected 1 layer, got %d", len(manifest.Snapshots))
 	}
-	v1Hash := manifest.Layers[0].Hash
+	v1Hash := manifest.Head
 
 	// Second sync with different content.
 	v2Data := "version-2-" + uniqueName("v2")
@@ -657,8 +657,8 @@ func TestAutoPromote_TemplatelessVolume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetManifest after first sync: %v", err)
 	}
-	if len(manifest.Layers) != 1 {
-		t.Fatalf("expected 1 layer after first sync, got %d", len(manifest.Layers))
+	if len(manifest.Snapshots) != 1 {
+		t.Fatalf("expected 1 layer after first sync, got %d", len(manifest.Snapshots))
 	}
 
 	// Verify auto-promote: manifest should now have a synthetic template name.
@@ -698,12 +698,12 @@ func TestAutoPromote_TemplatelessVolume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetManifest after second sync: %v", err)
 	}
-	if len(manifest.Layers) != 2 {
-		t.Fatalf("expected 2 layers after second sync, got %d", len(manifest.Layers))
+	if len(manifest.Snapshots) != 2 {
+		t.Fatalf("expected 2 layers after second sync, got %d", len(manifest.Snapshots))
 	}
-	for i, layer := range manifest.Layers {
+	for hash, layer := range manifest.Snapshots {
 		if layer.Parent != manifest.Base {
-			t.Errorf("layer[%d].Parent = %q, want %q (synthetic template hash)", i, layer.Parent, manifest.Base)
+			t.Errorf("layer[%s].Parent = %q, want %q (synthetic template hash)", cas.ShortHash(hash), layer.Parent, manifest.Base)
 		}
 	}
 
@@ -911,7 +911,7 @@ func TestRestoreToSnapshot_StalePendingCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetManifest: %v", err)
 	}
-	v1Hash := manifest.Layers[0].Hash
+	v1Hash := manifest.Head
 
 	v2Data := "version-2-" + uniqueName("v2")
 	writeTestFile(t, filepath.Join(pool, volPath), "data.txt", v2Data)
@@ -1086,11 +1086,11 @@ func TestDrainAll_DiscoversUntrackedVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("volume %s should have a CAS manifest after drain (discovered + synced): %v", volID, err)
 	}
-	if len(manifest.Layers) == 0 {
+	if len(manifest.Snapshots) == 0 {
 		t.Error("manifest should have at least 1 layer after drain sync")
 	}
 
-	t.Logf("DrainAll discovered untracked volume %s and synced %d layer(s)", volID, len(manifest.Layers))
+	t.Logf("DrainAll discovered untracked volume %s and synced %d layer(s)", volID, len(manifest.Snapshots))
 }
 
 // TestPeriodicDiscovery_TracksNewVolume verifies that syncAll's periodic
@@ -1425,9 +1425,9 @@ func TestUntrackVolume_SafeWithConcurrentSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetManifest: %v (sync should have completed before untrack)", err)
 	}
-	if len(manifest.Layers) == 0 {
+	if len(manifest.Snapshots) == 0 {
 		t.Error("sync should have created at least 1 layer before untrack")
 	}
 
-	t.Logf("UntrackVolume waited for SyncVolume — %d layer(s) safely persisted", len(manifest.Layers))
+	t.Logf("UntrackVolume waited for SyncVolume — %d layer(s) safely persisted", len(manifest.Snapshots))
 }

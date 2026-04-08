@@ -630,13 +630,9 @@ func (s *Server) handleGetVolumeMetadata(_ interface{}, ctx context.Context, dec
 		TemplateName: manifest.TemplateName,
 		TemplateHash: manifest.Base,
 		LatestHash:   manifest.LatestHash(),
-		LayerCount:   len(manifest.Snapshots),
+		LayerCount:   manifest.SnapshotCount(),
 	}
-	for _, s := range manifest.Snapshots {
-		if s.Role == "checkpoint" {
-			meta.Snapshots = append(meta.Snapshots, s)
-		}
-	}
+	meta.Snapshots = manifest.ListCheckpoints()
 	return meta, nil
 }
 

@@ -451,7 +451,7 @@ func TestHub_RestoreVolume_CrossNodeWithSyntheticTemplate(t *testing.T) {
 		t.Fatal("manifest.Base is empty after auto-promote — backfill didn't work")
 	}
 	t.Logf("Manifest: base=%s, template=%s, layers=%d",
-		cas.ShortHash(manifest.Base), manifest.TemplateName, len(manifest.Layers))
+		cas.ShortHash(manifest.Base), manifest.TemplateName, len(manifest.Snapshots))
 
 	// Delete EVERYTHING local — simulate a completely fresh node.
 	if err := mgr.DeleteSubvolume(ctx, volPath); err != nil {

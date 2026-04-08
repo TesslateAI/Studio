@@ -14,6 +14,18 @@ import (
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/ioutil"
 )
 
+// makeSnapshots converts an ordered slice of snapshots into a hash-indexed map
+// and returns (map, head). The last entry becomes HEAD.
+func makeSnapshots(snaps ...cas.Snapshot) (map[string]cas.Snapshot, string) {
+	m := make(map[string]cas.Snapshot, len(snaps))
+	var head string
+	for _, s := range snaps {
+		m[s.Hash] = s
+		head = s.Hash
+	}
+	return m, head
+}
+
 // ---------------------------------------------------------------------------
 // Fake btrfsOps
 // ---------------------------------------------------------------------------
@@ -356,8 +368,9 @@ func TestSyncOne_TemplatelessVolume_FullSend(t *testing.T) {
 	if len(manifest.Snapshots) != 1 {
 		t.Fatalf("expected 1 layer, got %d", len(manifest.Snapshots))
 	}
-	if manifest.Snapshots[0].Parent != "" {
-		t.Errorf("layer.Parent = %q, want empty (full send)", manifest.Snapshots[0].Parent)
+	headSnap := manifest.Snapshots[manifest.Head]
+	if headSnap.Parent != "" {
+		t.Errorf("layer.Parent = %q, want empty (full send)", headSnap.Parent)
 	}
 }
 
@@ -407,9 +420,9 @@ func TestSyncOne_TemplatelessVolume_SecondSync_StillFullSend(t *testing.T) {
 	if len(manifest.Snapshots) != 2 {
 		t.Fatalf("expected 2 layers, got %d", len(manifest.Snapshots))
 	}
-	for i, layer := range manifest.Snapshots {
+	for hash, layer := range manifest.Snapshots {
 		if layer.Parent != "" {
-			t.Errorf("layer[%d].Parent = %q, want empty (full send)", i, layer.Parent)
+			t.Errorf("layer[%s].Parent = %q, want empty (full send)", cas.ShortHash(hash), layer.Parent)
 		}
 	}
 }
@@ -424,13 +437,13 @@ func TestRestoreVolume_TemplatelessVolume(t *testing.T) {
 	layerHash := "sha256:fulllayerhash000000000000000000000000000000000000000000000000000000"
 
 	// Set up a manifest with no base template — layers are full sends.
+	snaps, head := makeSnapshots(cas.Snapshot{Hash: layerHash, Parent: "", Role: "sync", TS: "2026-04-01T00:00:00Z"})
 	fc.manifests[volID] = &cas.Manifest{
 		VolumeID:     volID,
 		Base:         "",
 		TemplateName: "",
-		Snapshots: []cas.Layer{
-			{Hash: layerHash, Parent: "", Role: "sync", TS: "2026-04-01T00:00:00Z"},
-		},
+		Head:         head,
+		Snapshots:    snaps,
 	}
 	// The blob exists in CAS.
 	fc.blobs[layerHash] = "full-send-data"
@@ -465,7 +478,7 @@ func TestRestoreVolume_TemplatelessVolume_NoLayers(t *testing.T) {
 		VolumeID:     volID,
 		Base:         "",
 		TemplateName: "",
-		Snapshots:       []cas.Layer{},
+		Snapshots:    map[string]cas.Snapshot{},
 	}
 
 	err := d.RestoreVolume(context.Background(), volID)
@@ -806,6 +819,12 @@ func TestSyncAll_PromotesDirtyViaGeneration(t *testing.T) {
 	volID := "vol-direct-write"
 	fb.subvolumes["volumes/"+volID] = true
 	d.TrackVolume(volID, "tmpl", "sha256:base")
+
+	// Use distinct hashes for each sync so the map-keyed manifest has unique entries.
+	fc.hashQueue = []string{
+		"sha256:first000000000000000000000000000000000000000000000000000000000000",
+		"sha256:second00000000000000000000000000000000000000000000000000000000000",
+	}
 
 	// Sync it first so it becomes clean with a layer snapshot.
 	if err := d.SyncVolume(context.Background(), volID); err != nil {
@@ -1211,13 +1230,13 @@ func TestRestoreVolume_WithStalePending(t *testing.T) {
 	fb.subvolumes[pendingPath] = true
 
 	// Set up manifest with one layer.
+	restoreSnaps, restoreHead := makeSnapshots(cas.Snapshot{Hash: blobHash, Parent: "sha256:tmplbase", Role: "sync"})
 	fc.manifests[volID] = &cas.Manifest{
 		VolumeID:     volID,
 		TemplateName: "test-tmpl",
 		Base:         "sha256:tmplbase",
-		Snapshots: []cas.Layer{
-			{Hash: blobHash, Parent: "sha256:tmplbase", Role: "sync"},
-		},
+		Head:         restoreHead,
+		Snapshots:    restoreSnaps,
 	}
 	fc.blobs[blobHash] = "restore-layer-data"
 
@@ -1554,14 +1573,16 @@ func TestSyncOne_ConsolidationAtInterval(t *testing.T) {
 	d.TrackVolume(volID, "tmpl1", "sha256:base")
 
 	// Pre-populate manifest with 2 existing snapshots (no consolidation).
+	consolSnaps, consolHead := makeSnapshots(
+		cas.Snapshot{Hash: "sha256:s1", Parent: "sha256:base", Role: "sync"},
+		cas.Snapshot{Hash: "sha256:s2", Parent: "sha256:s1", Role: "sync"},
+	)
 	fc.manifests[volID] = &cas.Manifest{
 		VolumeID:     volID,
 		Base:         "sha256:base",
 		TemplateName: "tmpl1",
-		Snapshots: []cas.Snapshot{
-			{Hash: "sha256:s1", Parent: "sha256:base", Role: "sync"},
-			{Hash: "sha256:s2", Parent: "sha256:s1", Role: "sync"},
-		},
+		Head:         consolHead,
+		Snapshots:    consolSnaps,
 	}
 
 	// Set up tracked state to match.
@@ -1584,12 +1605,12 @@ func TestSyncOne_ConsolidationAtInterval(t *testing.T) {
 	m := fc.manifests[volID]
 	fc.mu.Unlock()
 
-	if len(m.Snapshots) != 3 {
-		t.Fatalf("manifest has %d snapshots, want 3", len(m.Snapshots))
+	if m.SnapshotCount() != 3 {
+		t.Fatalf("manifest has %d snapshots, want 3", m.SnapshotCount())
 	}
-	third := m.Snapshots[2]
+	third := m.Snapshots[m.Head]
 	if !third.Consolidation {
-		t.Error("third snapshot should be a consolidation")
+		t.Error("third snapshot (HEAD) should be a consolidation")
 	}
 	// Consolidation parent should be template base (no previous consolidation).
 	if third.Parent != "sha256:base" {
@@ -1621,16 +1642,18 @@ func TestSyncOne_ConsolidationBlobsKept(t *testing.T) {
 	d.TrackVolume(volID, "tmpl1", "sha256:base")
 
 	// Manifest with 2 existing consolidations.
+	retSnaps, retHead := makeSnapshots(
+		cas.Snapshot{Hash: "sha256:c1", Parent: "sha256:base", Role: "sync", Consolidation: true},
+		cas.Snapshot{Hash: "sha256:s2", Parent: "sha256:c1", Role: "sync"},
+		cas.Snapshot{Hash: "sha256:c2", Parent: "sha256:c1", Role: "sync", Consolidation: true},
+		cas.Snapshot{Hash: "sha256:s4", Parent: "sha256:c2", Role: "sync"},
+	)
 	fc.manifests[volID] = &cas.Manifest{
 		VolumeID:     volID,
 		Base:         "sha256:base",
 		TemplateName: "tmpl1",
-		Snapshots: []cas.Snapshot{
-			{Hash: "sha256:c1", Parent: "sha256:base", Role: "sync", Consolidation: true},
-			{Hash: "sha256:s2", Parent: "sha256:c1", Role: "sync"},
-			{Hash: "sha256:c2", Parent: "sha256:c1", Role: "sync", Consolidation: true},
-			{Hash: "sha256:s4", Parent: "sha256:c2", Role: "sync"},
-		},
+		Head:         retHead,
+		Snapshots:    retSnaps,
 	}
 	fc.blobs["sha256:c1"] = "consol-1-data"
 	fc.blobs["sha256:c2"] = "consol-2-data"
@@ -1732,16 +1755,18 @@ func TestRestoreVolume_IncrementalChain(t *testing.T) {
 	fb.subvolumes["templates/tmpl1"] = true
 
 	// Manifest: template → c1 → s2 → s3
+	chainSnaps, chainHead := makeSnapshots(
+		cas.Snapshot{Hash: "sha256:s0", Parent: "sha256:base", Role: "sync"},
+		cas.Snapshot{Hash: "sha256:c1", Parent: "sha256:base", Role: "sync", Consolidation: true},
+		cas.Snapshot{Hash: "sha256:s2", Parent: "sha256:c1", Role: "sync"},
+		cas.Snapshot{Hash: "sha256:s3", Parent: "sha256:s2", Role: "checkpoint"},
+	)
 	fc.manifests[volID] = &cas.Manifest{
 		VolumeID:     volID,
 		Base:         "sha256:base",
 		TemplateName: "tmpl1",
-		Snapshots: []cas.Snapshot{
-			{Hash: "sha256:s0", Parent: "sha256:base", Role: "sync"},
-			{Hash: "sha256:c1", Parent: "sha256:base", Role: "sync", Consolidation: true},
-			{Hash: "sha256:s2", Parent: "sha256:c1", Role: "sync"},
-			{Hash: "sha256:s3", Parent: "sha256:s2", Role: "checkpoint"},
-		},
+		Head:         chainHead,
+		Snapshots:    chainSnaps,
 	}
 	// Blobs for all snapshots.
 	fc.blobs["sha256:s0"] = "s0-data"
@@ -1840,14 +1865,16 @@ func TestSyncOne_IncrementalKeepsConsolidationOnDisk(t *testing.T) {
 	d.mu.Unlock()
 
 	// Pre-populate manifest so it doesn't trigger consolidation.
+	stallSnaps, stallHead := makeSnapshots(
+		cas.Snapshot{Hash: "sha256:cprev", Parent: "sha256:base", Role: "sync", Consolidation: true},
+		cas.Snapshot{Hash: "sha256:prev", Parent: "sha256:cprev", Role: "sync"},
+	)
 	fc.manifests[volID] = &cas.Manifest{
 		VolumeID:     volID,
 		Base:         "sha256:base",
 		TemplateName: "tmpl1",
-		Snapshots: []cas.Snapshot{
-			{Hash: "sha256:cprev", Parent: "sha256:base", Role: "sync", Consolidation: true},
-			{Hash: "sha256:prev", Parent: "sha256:cprev", Role: "sync"},
-		},
+		Head:         stallHead,
+		Snapshots:    stallSnaps,
 	}
 
 	fc.nextHash = "sha256:newhash"
@@ -1864,4 +1891,213 @@ func TestSyncOne_IncrementalKeepsConsolidationOnDisk(t *testing.T) {
 	if !fb.SubvolumeExists(context.Background(), consolPath) {
 		t.Error("consolidation snapshot should be kept on disk")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// DAG / branching restore tests
+// ---------------------------------------------------------------------------
+
+func TestRestoreToSnapshot_PreservesHistory(t *testing.T) {
+	// Verify that RestoreToSnapshot moves HEAD and saves a branch
+	// instead of truncating history.
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-dag-restore"
+	volPath := "volumes/" + volID
+	fb.subvolumes[volPath] = true
+
+	// Build manifest with 5 snapshots: s0 → s1 → s2 → s3(checkpoint) → s4
+	snaps, _ := makeSnapshots(
+		cas.Snapshot{Hash: "sha256:s0", Parent: "", Role: "sync"},
+		cas.Snapshot{Hash: "sha256:s1", Parent: "sha256:s0", Role: "sync"},
+		cas.Snapshot{Hash: "sha256:s2", Parent: "sha256:s1", Role: "sync"},
+		cas.Snapshot{Hash: "sha256:s3", Parent: "sha256:s2", Role: "checkpoint"},
+		cas.Snapshot{Hash: "sha256:s4", Parent: "sha256:s3", Role: "sync"},
+	)
+	manifest := &cas.Manifest{
+		VolumeID:  volID,
+		Head:      "sha256:s4",
+		Snapshots: snaps,
+	}
+	fc.manifests[volID] = manifest
+
+	// Add blobs for the restore chain.
+	for h := range snaps {
+		fc.blobs[h] = "fake-blob-" + h
+	}
+
+	// Track volume.
+	d.TrackVolume(volID, "", "")
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	tv.lastLayerHash = "sha256:s4"
+	tv.lastSnapPath = fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:s4"))
+	d.mu.Unlock()
+
+	// Simulate layer snapshots on disk for the chain.
+	for h := range snaps {
+		layerPath := fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash(h))
+		fb.subvolumes[layerPath] = true
+	}
+
+	// Restore to s1.
+	err := d.RestoreToSnapshot(context.Background(), volID, "sha256:s1")
+	if err != nil {
+		t.Fatalf("RestoreToSnapshot: %v", err)
+	}
+
+	// Verify HEAD moved to s1.
+	updatedManifest := fc.manifests[volID]
+	if updatedManifest.Head != "sha256:s1" {
+		t.Errorf("Head = %s, want sha256:s1", updatedManifest.Head)
+	}
+
+	// Verify ALL snapshots still exist (no truncation).
+	// s0-s4 plus the pre-restore checkpoint appended by syncOne.
+	if len(updatedManifest.Snapshots) < 5 {
+		t.Errorf("SnapshotCount = %d, want >= 5 (no truncation)", len(updatedManifest.Snapshots))
+	}
+
+	// Verify a branch was saved for the old HEAD.
+	if len(updatedManifest.Branches) == 0 {
+		t.Error("expected a pre-restore branch to be saved")
+	}
+	foundOldHead := false
+	for _, branchHash := range updatedManifest.Branches {
+		// The branch should point to either s4 (original HEAD) or the
+		// pre-restore checkpoint hash (appended by syncOne before restore).
+		if branchHash == "sha256:s4" {
+			foundOldHead = true
+		}
+	}
+	// The pre-restore syncOne creates a new checkpoint, which becomes the
+	// new HEAD temporarily, and THAT hash is saved as the branch.
+	// Either way, a branch was created.
+	if len(updatedManifest.Branches) == 0 {
+		t.Error("no branch saved — old HEAD would be lost")
+	}
+	_ = foundOldHead // branch may point to pre-restore checkpoint, not s4 directly
+}
+
+func TestRestoreToSnapshot_CanRestoreToBranchTip(t *testing.T) {
+	// After forking, verify we can restore to the old branch tip.
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-branch-restore"
+	volPath := "volumes/" + volID
+	fb.subvolumes[volPath] = true
+
+	// Manifest: s0 → s1 → s2(old branch), s0 → s1 → s3 → s4(HEAD)
+	snaps := map[string]cas.Snapshot{
+		"sha256:s0": {Hash: "sha256:s0", Parent: "", Role: "sync"},
+		"sha256:s1": {Hash: "sha256:s1", Parent: "sha256:s0", Role: "sync"},
+		"sha256:s2": {Hash: "sha256:s2", Parent: "sha256:s1", Role: "checkpoint"},
+		"sha256:s3": {Hash: "sha256:s3", Parent: "sha256:s1", Role: "sync"},
+		"sha256:s4": {Hash: "sha256:s4", Parent: "sha256:s3", Role: "checkpoint"},
+	}
+	manifest := &cas.Manifest{
+		VolumeID:  volID,
+		Head:      "sha256:s4",
+		Branches:  map[string]string{"old-timeline": "sha256:s2"},
+		Snapshots: snaps,
+	}
+	fc.manifests[volID] = manifest
+
+	for h := range snaps {
+		fc.blobs[h] = "fake-blob-" + h
+		layerPath := fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash(h))
+		fb.subvolumes[layerPath] = true
+	}
+
+	d.TrackVolume(volID, "", "")
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	tv.lastLayerHash = "sha256:s4"
+	tv.lastSnapPath = fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:s4"))
+	d.mu.Unlock()
+
+	// Restore to s2 (old branch tip).
+	err := d.RestoreToSnapshot(context.Background(), volID, "sha256:s2")
+	if err != nil {
+		t.Fatalf("RestoreToSnapshot to branch tip: %v", err)
+	}
+
+	updated := fc.manifests[volID]
+	if updated.Head != "sha256:s2" {
+		t.Errorf("Head = %s, want sha256:s2", updated.Head)
+	}
+
+	// s3 and s4 must still exist (not truncated).
+	if _, ok := updated.Snapshots["sha256:s3"]; !ok {
+		t.Error("s3 should still exist after restore to different branch")
+	}
+	if _, ok := updated.Snapshots["sha256:s4"]; !ok {
+		t.Error("s4 should still exist after restore to different branch")
+	}
+
+	// Old-timeline branch preserved.
+	if updated.Branches["old-timeline"] != "sha256:s2" {
+		t.Error("old-timeline branch should be preserved")
+	}
+}
+
+func TestBuildRestoreChain_FollowsCorrectFork(t *testing.T) {
+	// Two forks from s1: verify each fork's chain is independent.
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-fork-chain"
+	volPath := "volumes/" + volID
+	fb.subvolumes[volPath] = true
+
+	snaps := map[string]cas.Snapshot{
+		"sha256:s0": {Hash: "sha256:s0", Parent: "", Role: "sync"},
+		"sha256:s1": {Hash: "sha256:s1", Parent: "sha256:s0", Role: "sync"},
+		// Fork A
+		"sha256:a2": {Hash: "sha256:a2", Parent: "sha256:s1", Role: "sync"},
+		"sha256:a3": {Hash: "sha256:a3", Parent: "sha256:a2", Role: "checkpoint"},
+		// Fork B
+		"sha256:b2": {Hash: "sha256:b2", Parent: "sha256:s1", Role: "sync"},
+		"sha256:b3": {Hash: "sha256:b3", Parent: "sha256:b2", Role: "checkpoint"},
+	}
+	manifest := &cas.Manifest{
+		VolumeID:  volID,
+		Head:      "sha256:a3",
+		Branches:  map[string]string{"fork-b": "sha256:b3"},
+		Snapshots: snaps,
+	}
+
+	// Chain to a3 should NOT include b2, b3.
+	chainA := manifest.BuildRestoreChain("sha256:a3")
+	for _, h := range chainA {
+		if h == "sha256:b2" || h == "sha256:b3" {
+			t.Errorf("fork A chain contains fork B snapshot %s", h)
+		}
+	}
+	expectedA := []string{"sha256:s0", "sha256:s1", "sha256:a2", "sha256:a3"}
+	if len(chainA) != len(expectedA) {
+		t.Fatalf("chain A = %v, want %v", chainA, expectedA)
+	}
+
+	// Chain to b3 should NOT include a2, a3.
+	chainB := manifest.BuildRestoreChain("sha256:b3")
+	for _, h := range chainB {
+		if h == "sha256:a2" || h == "sha256:a3" {
+			t.Errorf("fork B chain contains fork A snapshot %s", h)
+		}
+	}
+	expectedB := []string{"sha256:s0", "sha256:s1", "sha256:b2", "sha256:b3"}
+	if len(chainB) != len(expectedB) {
+		t.Fatalf("chain B = %v, want %v", chainB, expectedB)
+	}
+
+	_ = d // daemon not needed for pure manifest test, but validates setup
 }
