@@ -1417,14 +1417,19 @@ async def agent_chat_stream(
                     yield f"data: {json.dumps(error_event)}\n\n"
                     return
 
-            # 2. Get user's selected model
+            # 2. Get user's selected model (team-scoped)
+            _purchase_filter = (
+                UserPurchasedAgent.team_id == current_user.default_team_id
+                if current_user.default_team_id
+                else UserPurchasedAgent.user_id == current_user.id
+            )
             user_purchase_result = await db.execute(
                 select(UserPurchasedAgent).where(
-                    UserPurchasedAgent.user_id == current_user.id,
+                    _purchase_filter,
                     UserPurchasedAgent.agent_id == agent_model.id,
                 )
             )
-            user_purchase = user_purchase_result.scalar_one_or_none()
+            user_purchase = user_purchase_result.scalars().first()
 
             model_name = (
                 user_purchase.selected_model
