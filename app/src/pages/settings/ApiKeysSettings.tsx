@@ -13,6 +13,7 @@ import {
   LockSimple,
 } from '@phosphor-icons/react';
 import { externalApi, projectsApi } from '../../lib/api';
+import { useTeam } from '../../contexts/TeamContext';
 import type { ScopeOption } from '../../lib/api';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { SettingsSection } from '../../components/settings';
@@ -331,6 +332,7 @@ function ScopeSelector({
 }
 
 export default function ApiKeysSettings() {
+  const { teamSwitchKey } = useTeam();
   // Data
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [projects, setProjects] = useState<{ id: string; name: string; slug: string }[]>([]);
@@ -390,7 +392,7 @@ export default function ApiKeysSettings() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [loadData, teamSwitchKey]);
 
   const resetForm = () => {
     setNewKeyName('');
