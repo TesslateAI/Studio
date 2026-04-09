@@ -67,9 +67,13 @@ async def list_api_keys(
     """
     List all API keys for the current user.
     """
-    query = select(UserAPIKey).where(
-        UserAPIKey.user_id == current_user.id, UserAPIKey.is_active.is_(True)
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserAPIKey.team_id == team_id
+        if team_id
+        else UserAPIKey.user_id == current_user.id
     )
+    query = select(UserAPIKey).where(ownership_filter, UserAPIKey.is_active.is_(True))
 
     if provider:
         query = query.where(UserAPIKey.provider == provider)
@@ -127,8 +131,14 @@ async def add_api_key(
         key_name = provider_config["name"] if provider_config else provider.title()
 
     # Check if key with same provider and name already exists
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserAPIKey.team_id == team_id
+        if team_id
+        else UserAPIKey.user_id == current_user.id
+    )
     existing_query = select(UserAPIKey).where(
-        UserAPIKey.user_id == current_user.id,
+        ownership_filter,
         UserAPIKey.provider == provider,
         UserAPIKey.key_name == key_name,
     )
@@ -158,6 +168,7 @@ async def add_api_key(
     # Create new API key
     new_key = UserAPIKey(
         user_id=current_user.id,
+        team_id=current_user.default_team_id,
         provider=provider,
         auth_type=auth_type,
         key_name=key_name,
@@ -196,7 +207,13 @@ async def update_api_key(
     """
     Update an existing API key.
     """
-    query = select(UserAPIKey).where(UserAPIKey.id == key_id, UserAPIKey.user_id == current_user.id)
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserAPIKey.team_id == team_id
+        if team_id
+        else UserAPIKey.user_id == current_user.id
+    )
+    query = select(UserAPIKey).where(UserAPIKey.id == key_id, ownership_filter)
     result = await db.execute(query)
     key_record = result.scalar_one_or_none()
 
@@ -231,7 +248,13 @@ async def delete_api_key(
     """
     Delete (deactivate) an API key.
     """
-    query = select(UserAPIKey).where(UserAPIKey.id == key_id, UserAPIKey.user_id == current_user.id)
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserAPIKey.team_id == team_id
+        if team_id
+        else UserAPIKey.user_id == current_user.id
+    )
+    query = select(UserAPIKey).where(UserAPIKey.id == key_id, ownership_filter)
     result = await db.execute(query)
     key_record = result.scalar_one_or_none()
 
@@ -257,7 +280,13 @@ async def get_api_key(
     """
     Get a specific API key. Use reveal=true to get the full key value.
     """
-    query = select(UserAPIKey).where(UserAPIKey.id == key_id, UserAPIKey.user_id == current_user.id)
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserAPIKey.team_id == team_id
+        if team_id
+        else UserAPIKey.user_id == current_user.id
+    )
+    query = select(UserAPIKey).where(UserAPIKey.id == key_id, ownership_filter)
     result = await db.execute(query)
     key_record = result.scalar_one_or_none()
 
@@ -345,9 +374,15 @@ async def list_custom_providers(
     """
     from ..models import UserProvider
 
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserProvider.team_id == team_id
+        if team_id
+        else UserProvider.user_id == current_user.id
+    )
     query = (
         select(UserProvider)
-        .where(UserProvider.user_id == current_user.id, UserProvider.is_active.is_(True))
+        .where(ownership_filter, UserProvider.is_active.is_(True))
         .order_by(UserProvider.created_at.desc())
     )
 
@@ -418,9 +453,15 @@ async def create_custom_provider(
     if api_type not in ["openai", "anthropic"]:
         raise HTTPException(status_code=400, detail="api_type must be 'openai' or 'anthropic'")
 
-    # Check if user already has a provider with this slug
+    # Check if team/user already has a provider with this slug
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserProvider.team_id == team_id
+        if team_id
+        else UserProvider.user_id == current_user.id
+    )
     existing_query = select(UserProvider).where(
-        UserProvider.user_id == current_user.id, UserProvider.slug == slug.lower()
+        ownership_filter, UserProvider.slug == slug.lower()
     )
     result = await db.execute(existing_query)
     existing_provider = result.scalar_one_or_none()
@@ -451,6 +492,7 @@ async def create_custom_provider(
     # Create new provider
     new_provider = UserProvider(
         user_id=current_user.id,
+        team_id=current_user.default_team_id,
         name=name,
         slug=slug.lower(),
         base_url=base_url,
@@ -490,9 +532,13 @@ async def update_custom_provider(
     """
     from ..models import UserProvider
 
-    query = select(UserProvider).where(
-        UserProvider.id == provider_id, UserProvider.user_id == current_user.id
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserProvider.team_id == team_id
+        if team_id
+        else UserProvider.user_id == current_user.id
     )
+    query = select(UserProvider).where(UserProvider.id == provider_id, ownership_filter)
     result = await db.execute(query)
     provider = result.scalar_one_or_none()
 
@@ -535,9 +581,13 @@ async def delete_custom_provider(
     """
     from ..models import UserProvider
 
-    query = select(UserProvider).where(
-        UserProvider.id == provider_id, UserProvider.user_id == current_user.id
+    team_id = current_user.default_team_id
+    ownership_filter = (
+        UserProvider.team_id == team_id
+        if team_id
+        else UserProvider.user_id == current_user.id
     )
+    query = select(UserProvider).where(UserProvider.id == provider_id, ownership_filter)
     result = await db.execute(query)
     provider = result.scalar_one_or_none()
 

@@ -154,9 +154,11 @@ async def get_available_models(
     # Map of providers user has keys for
     user_providers_set = {key.provider for key in user_keys}
 
-    # Get user's custom models
+    # Get user's custom models (team-scoped)
+    _cm_team = current_user.default_team_id
+    _cm_filter = UserCustomModel.team_id == _cm_team if _cm_team else UserCustomModel.user_id == current_user.id
     custom_models_query = select(UserCustomModel).where(
-        UserCustomModel.user_id == current_user.id, UserCustomModel.is_active
+        _cm_filter, UserCustomModel.is_active
     )
     result = await db.execute(custom_models_query)
     custom_models = result.scalars().all()
@@ -195,9 +197,10 @@ async def get_available_models(
     # (hardcoded default_models are no longer populated — users add models themselves)
     provider_models: list[dict] = []
 
-    # Custom user providers with available_models
+    # Custom user providers with available_models (team-scoped)
+    _cp_filter = UserProvider.team_id == _cm_team if _cm_team else UserProvider.user_id == current_user.id
     custom_providers_query = select(UserProvider).where(
-        UserProvider.user_id == current_user.id,
+        _cp_filter,
         UserProvider.is_active.is_(True),
     )
     result = await db.execute(custom_providers_query)
@@ -295,9 +298,11 @@ async def add_custom_model(
     # e.g. "z-ai/glm-5" under OpenRouter should stay under OpenRouter,
     # not get reassigned to "z-ai" just because z-ai is a known provider.
 
-    # Check if model already exists for this user + provider combo
+    # Check if model already exists for this team + provider combo
+    _add_team = current_user.default_team_id
+    _add_filter = UserCustomModel.team_id == _add_team if _add_team else UserCustomModel.user_id == current_user.id
     existing_query = select(UserCustomModel).where(
-        UserCustomModel.user_id == current_user.id,
+        _add_filter,
         UserCustomModel.model_id == model_id,
         UserCustomModel.provider == provider,
         UserCustomModel.is_active,
@@ -311,6 +316,7 @@ async def add_custom_model(
     # Create new custom model
     custom_model = UserCustomModel(
         user_id=current_user.id,
+        team_id=current_user.default_team_id,
         model_id=model_id,
         model_name=model_name,
         provider=provider,
@@ -354,9 +360,11 @@ async def delete_custom_model(
     """
     from ..models import UserCustomModel
 
-    # Find the model
+    # Find the model (team-scoped)
+    _del_team = current_user.default_team_id
+    _del_filter = UserCustomModel.team_id == _del_team if _del_team else UserCustomModel.user_id == current_user.id
     query = select(UserCustomModel).where(
-        UserCustomModel.id == model_id, UserCustomModel.user_id == current_user.id
+        UserCustomModel.id == model_id, _del_filter
     )
     result = await db.execute(query)
     model = result.scalar_one_or_none()
