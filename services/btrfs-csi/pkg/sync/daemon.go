@@ -1371,6 +1371,15 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 		return "", "", fmt.Errorf("put blob: %w", err)
 	}
 
+	// Skip empty blobs — btrfs send produces zero bytes when the snapshot
+	// is identical to its parent (volume wasn't actually modified).
+	const emptyBlobHash = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if hash == emptyBlobHash {
+		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		klog.V(2).Infof("syncOne %s: skipping empty blob (volume unchanged since parent)", tv.volumeID)
+		return "", "", nil
+	}
+
 	// 4. Update manifest with new snapshot via Hub.
 	snapshot := cas.Snapshot{
 		Hash:          hash,
