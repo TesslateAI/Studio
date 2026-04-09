@@ -125,6 +125,7 @@ async def create_chat(
     db_chat = Chat(
         user_id=current_user.id,
         project_id=project_id,
+        team_id=current_user.default_team_id,
         title=title,
         origin="standalone" if not project_id else "browser",
     )
