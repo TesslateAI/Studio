@@ -609,10 +609,20 @@ async def delete_custom_provider(
 
 
 @router.get("/model-preferences")
-async def get_model_preferences(user: User = Depends(current_active_user)):
+async def get_model_preferences(
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Get the user's disabled model IDs.
+    Get disabled model IDs for the active team.
     """
+    from ..models_team import Team
+
+    if user.default_team_id:
+        result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+        team = result.scalar_one_or_none()
+        if team:
+            return {"disabled_models": team.disabled_models or []}
     return {"disabled_models": user.disabled_models or []}
 
 
@@ -624,15 +634,25 @@ async def update_model_preferences(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Toggle a single model on/off for the current user.
+    Toggle a single model on/off for the active team.
     Disabled models are hidden from the chat model selector.
     """
-    disabled = list(user.disabled_models or [])
+    from ..models_team import Team
+
+    # Resolve target: team if available, else user
+    target = None
+    if user.default_team_id:
+        result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+        target = result.scalar_one_or_none()
+    if not target:
+        target = user
+
+    disabled = list(target.disabled_models or [])
     if enabled and model_id in disabled:
         disabled.remove(model_id)
     elif not enabled and model_id not in disabled:
         disabled.append(model_id)
-    user.disabled_models = disabled
-    db.add(user)
+    target.disabled_models = disabled
+    db.add(target)
     await db.commit()
     return {"disabled_models": disabled}

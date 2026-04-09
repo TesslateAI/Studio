@@ -58,6 +58,9 @@ class Team(Base):
     # Appearance
     theme_preset = Column(String, nullable=True, default="default-dark")
 
+    # Model preferences
+    disabled_models = Column(JSON, nullable=True, default=list)  # Model IDs hidden from chat selector
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
