@@ -211,21 +211,14 @@ async def get_user_sessions(
     db: AsyncSession = Depends(get_db),
 ):
     """List user's standalone chat sessions (may have a project connected later)."""
-    from sqlalchemy import or_
-
     filters = [
         Chat.user_id == current_user.id,
         Chat.origin == "standalone",
         Chat.status != "deleted",
     ]
-    # Team-scope: show chats with no project OR whose project is in the active team
+    # Team-scope: filter by Chat.team_id directly
     if current_user.default_team_id:
-        filters.append(
-            or_(
-                Chat.project_id.is_(None),
-                Project.team_id == current_user.default_team_id,
-            )
-        )
+        filters.append(Chat.team_id == current_user.default_team_id)
 
     query = (
         select(
@@ -905,7 +898,7 @@ async def agent_chat(
             chat = chat_result.scalar_one_or_none()
 
             if not chat:
-                chat = Chat(user_id=current_user.id, project_id=request.project_id)
+                chat = Chat(user_id=current_user.id, project_id=request.project_id, team_id=current_user.default_team_id)
                 db.add(chat)
                 await db.commit()
                 await db.refresh(chat)
@@ -1362,7 +1355,7 @@ async def agent_chat_stream(
                 chat = chat_result.scalar_one_or_none()
 
             if not chat:
-                chat = Chat(user_id=current_user.id, project_id=request.project_id)
+                chat = Chat(user_id=current_user.id, project_id=request.project_id, team_id=current_user.default_team_id)
                 db.add(chat)
                 await db.commit()
                 await db.refresh(chat)
@@ -2187,7 +2180,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
 
             if not chat:
                 # Create new chat for this project
-                chat = Chat(user_id=user.id, project_id=project_id)
+                chat = Chat(user_id=user.id, project_id=project_id, team_id=user.default_team_id)
                 db.add(chat)
                 await db.commit()
                 await db.refresh(chat)
