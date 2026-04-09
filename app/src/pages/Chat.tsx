@@ -88,7 +88,7 @@ export default function Chat() {
     deleteSession,
     switchSession,
     updateSessionProject,
-  } = useChatSessions({ standalone: true });
+  } = useChatSessions({ standalone: true, teamSwitchKey });
 
   // Derive connected project from the current session (persisted server-side)
   const currentSession = sessions.find((s) => s.id === currentSessionId);

@@ -15,9 +15,11 @@ export interface ChatSession {
 interface UseChatSessionsOptions {
   /** When true, only fetch standalone (project-less) sessions */
   standalone?: boolean;
+  /** Pass teamSwitchKey to re-fetch sessions on team change */
+  teamSwitchKey?: number;
 }
 
-export function useChatSessions({ standalone = true }: UseChatSessionsOptions = {}) {
+export function useChatSessions({ standalone = true, teamSwitchKey = 0 }: UseChatSessionsOptions = {}) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -47,18 +49,19 @@ export function useChatSessions({ standalone = true }: UseChatSessionsOptions = 
     }
   }, [standalone]);
 
-  // Initial load
+  // Initial load + re-fetch on team switch
   useEffect(() => {
     setIsLoading(true);
+    setCurrentSessionId(null);
     fetchSessions().then((sessions) => {
       if (!mountedRef.current) return;
       // Auto-select the most recent session
-      if (sessions && sessions.length > 0 && !currentSessionId) {
+      if (sessions && sessions.length > 0) {
         setCurrentSessionId(sessions[0].id);
       }
       setIsLoading(false);
     });
-  }, [fetchSessions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchSessions, teamSwitchKey]); // Re-fetch when team changes
 
   const createSession = useCallback(async () => {
     const tempId = `temp-${Date.now()}`;
