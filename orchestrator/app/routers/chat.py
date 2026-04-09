@@ -211,6 +211,15 @@ async def get_user_sessions(
     db: AsyncSession = Depends(get_db),
 ):
     """List user's standalone chat sessions (may have a project connected later)."""
+    filters = [
+        Chat.user_id == current_user.id,
+        Chat.origin == "standalone",
+        Chat.status != "deleted",
+    ]
+    # Team-scope: only show chats for projects in the active team
+    if current_user.default_team_id:
+        filters.append(Project.team_id == current_user.default_team_id)
+
     query = (
         select(
             Chat.id,
@@ -223,11 +232,7 @@ async def get_user_sessions(
             Chat.updated_at,
         )
         .outerjoin(Project, Chat.project_id == Project.id)
-        .where(
-            Chat.user_id == current_user.id,
-            Chat.origin == "standalone",
-            Chat.status != "deleted",
-        )
+        .where(*filters)
         .order_by(Chat.updated_at.desc().nullslast(), Chat.created_at.desc())
         .limit(limit)
         .offset(offset)

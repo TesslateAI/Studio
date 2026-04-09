@@ -104,7 +104,7 @@ export default function ProjectPage() {
   const containerId = searchParams.get('container');
 
   const { chatPosition } = useChatPosition();
-  const { can } = useTeam();
+  const { can, teamSwitchKey } = useTeam();
   const isBuilderPath = location.pathname.endsWith('/builder');
 
   // RBAC: viewer-level restriction flags
@@ -116,6 +116,16 @@ export default function ProjectPage() {
   const canEditSettings = can('project.settings');
   const canDeploy = can('deployment.create');
   const canEditAssets = can('file.write');
+
+  // Redirect to dashboard when the active team changes — the current project
+  // belongs to the old team and should no longer be displayed.
+  const teamSwitchRef = useRef(teamSwitchKey);
+  useEffect(() => {
+    if (teamSwitchRef.current !== teamSwitchKey) {
+      teamSwitchRef.current = teamSwitchKey;
+      navigate('/dashboard');
+    }
+  }, [teamSwitchKey, navigate]);
 
   // ---------------------------------------------------------------------------
   // Core state

@@ -128,7 +128,7 @@ export function NavigationSidebar({
 
   // Team + user profile state
   const { user, logout } = useAuth();
-  const { activeTeam, teams, switchTeam, refreshTeams, can } = useTeam();
+  const { activeTeam, teams, switchTeam, refreshTeams, can, teamSwitchKey } = useTeam();
   const canChat = can('chat.send');
   const subscriptionTier = activeTeam?.subscription_tier || 'free';
   const isPaidPlan = subscriptionTier !== 'free';
@@ -253,7 +253,7 @@ export function NavigationSidebar({
       setRecentItems(merged);
     });
     return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teamSwitchKey]); // Re-fetch when team changes
 
   const handleRecentClick = useCallback((item: RecentItem) => {
     // Move clicked item to top immediately
