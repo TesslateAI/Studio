@@ -211,14 +211,18 @@ async def get_user_sessions(
     db: AsyncSession = Depends(get_db),
 ):
     """List user's standalone chat sessions (may have a project connected later)."""
+    from sqlalchemy import or_
+
     filters = [
         Chat.user_id == current_user.id,
         Chat.origin == "standalone",
         Chat.status != "deleted",
     ]
-    # Team-scope: filter by Chat.team_id directly
+    # Team-scope: show chats belonging to the active team OR legacy chats with no team
     if current_user.default_team_id:
-        filters.append(Chat.team_id == current_user.default_team_id)
+        filters.append(
+            or_(Chat.team_id == current_user.default_team_id, Chat.team_id.is_(None))
+        )
 
     query = (
         select(
