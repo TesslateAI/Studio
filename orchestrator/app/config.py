@@ -578,6 +578,21 @@ class Settings(BaseSettings):
     mcp_tool_timeout: int = 30  # Seconds per MCP tool call (HTTP transport)
     mcp_max_servers_per_user: int = 20  # Max installed MCP servers per user
 
+    # Stdio transport
+    mcp_stdio_connect_timeout: int = 60  # Seconds to wait for stdio process to start
+    mcp_stdio_env_filter: bool = True  # Filter env vars passed to stdio subprocesses
+
+    # Session lifecycle
+    mcp_reconnect_max_retries: int = 5  # Max reconnection attempts on connection loss
+    mcp_reconnect_max_delay: int = 60  # Max exponential backoff delay (seconds)
+
+    # Sampling (MCP server-initiated LLM requests)
+    mcp_sampling_enabled: bool = True  # Allow MCP servers to request LLM completions
+    mcp_sampling_max_rpm: int = 10  # Default rate limit per server per minute
+    mcp_sampling_max_tokens: int = 4096  # Default max tokens cap per sampling request
+    mcp_sampling_timeout: int = 30  # LLM call timeout for sampling (seconds)
+    mcp_sampling_default_model: str = ""  # Default model for sampling (empty = use agent's model)
+
     class Config:
         # For Docker Compose: environment variables are passed directly
         # For native development: looks for .env in parent directory (project root)

@@ -400,7 +400,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "compute_tier": project.compute_tier if project else None,
             }
 
-            # Inject MCP server configs so bridge executors can reconnect
+            # Inject MCP server configs so bridge executors can connect per-call
             if mcp_context and mcp_context.get("mcp_configs"):
                 context["mcp_configs"] = mcp_context["mcp_configs"]
 
@@ -439,6 +439,29 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             await db.commit()
             await db.refresh(assistant_message)
             message_id = assistant_message.id
+
+            # Create file checkpoint before agent execution (for /undo file revert).
+            # Uses git ghost commits when a container is running, or a btrfs
+            # volume fork for K8s tier-0 projects (no pod).
+            checkpoint_hash = None
+            if project_id:
+                try:
+                    from .services.checkpoint_manager import CheckpointManager
+
+                    ckpt_mgr = CheckpointManager(
+                        user_id=UUID(payload.user_id),
+                        project_id=project_id,
+                        volume_id=project.volume_id if project else None,
+                    )
+                    checkpoint_hash = await ckpt_mgr.create_checkpoint()
+                    if checkpoint_hash:
+                        logger.info(
+                            "[WORKER] Checkpoint %s for task %s",
+                            checkpoint_hash[:12],
+                            task_id,
+                        )
+                except Exception as ckpt_err:
+                    logger.warning("[WORKER] Checkpoint failed (non-fatal): %s", ckpt_err)
 
             # Update chat status to running
             chat_result = await db.execute(select(Chat).where(Chat.id == UUID(payload.chat_id)))
@@ -530,6 +553,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     "session_id": session_id,
                     "executed_by": "worker",
                     "task_id": task_id,
+                    "checkpoint_hash": checkpoint_hash,
                     "trajectory_path": (
                         f".tesslate/trajectories/trajectory_{session_id}.json"
                         if session_id

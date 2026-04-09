@@ -2,8 +2,12 @@
 Bridges MCP tools, resources, and prompts into Tesslate's agent ToolRegistry.
 
 Each MCP capability is wrapped in a :class:`Tool` dataclass that the agent can
-invoke like any built-in tool.  All executors reconnect to the MCP server on
-every call (stateless) so we never hold long-lived subprocess handles.
+invoke like any built-in tool.  Executors connect to the MCP server per call
+(stateless) — the subprocess or HTTP connection lives only for the duration of
+a single tool invocation, then is torn down.
+
+All error messages are sanitised before reaching the LLM to prevent credential
+leakage.
 """
 
 from __future__ import annotations
@@ -14,8 +18,10 @@ from typing import Any
 from ...agent.tools.output_formatter import error_output, success_output
 from ...agent.tools.registry import Tool, ToolCategory
 from .client import connect_mcp
+from .security import sanitize_error
 
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Tool bridge
@@ -49,8 +55,6 @@ def bridge_mcp_tools(server_slug: str, mcp_tools: list[dict[str, Any]]) -> list[
         }
 
         tesslate_name = f"mcp__{server_slug}__{tool_name}"
-
-        # Build a closure that captures the original MCP tool name.
         executor = _make_tool_executor(server_slug, tool_name)
 
         tools.append(
@@ -83,7 +87,6 @@ def bridge_mcp_resources(
     if not mcp_resources and not mcp_templates:
         return None
 
-    # Build description listing available URIs / templates.
     lines = [f"[MCP:{server_slug}] Read a resource by URI."]
 
     if mcp_resources:
@@ -100,13 +103,9 @@ def bridge_mcp_resources(
             name = tpl.get("name", uri_template)
             lines.append(f"  - {name}: {uri_template}")
 
-    description = "\n".join(lines)
-
-    executor = _make_resource_executor(server_slug)
-
     return Tool(
         name=f"mcp__{server_slug}__read_resource",
-        description=description,
+        description="\n".join(lines),
         parameters={
             "type": "object",
             "properties": {
@@ -117,7 +116,7 @@ def bridge_mcp_resources(
             },
             "required": ["uri"],
         },
-        executor=executor,
+        executor=_make_resource_executor(server_slug),
         category=ToolCategory.WEB,
     )
 
@@ -147,13 +146,9 @@ def bridge_mcp_prompts(
         arg_names = ", ".join(a.get("name", "?") for a in args_list) if args_list else "none"
         lines.append(f"  - {name} (args: {arg_names}): {desc}")
 
-    description = "\n".join(lines)
-
-    executor = _make_prompt_executor(server_slug)
-
     return Tool(
         name=f"mcp__{server_slug}__get_prompt",
-        description=description,
+        description="\n".join(lines),
         parameters={
             "type": "object",
             "properties": {
@@ -169,9 +164,49 @@ def bridge_mcp_prompts(
             },
             "required": ["name"],
         },
-        executor=executor,
+        executor=_make_prompt_executor(server_slug),
         category=ToolCategory.WEB,
     )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_tool_result_text(result: Any) -> str:
+    """Extract text from an MCP tool call result.
+
+    Prefers structured output (MCP spec 2025-06-18+), falls back to
+    content block text extraction.
+    """
+    structured = getattr(result, "structuredContent", None)
+    if structured is not None:
+        import json as _json
+
+        return _json.dumps(structured, indent=2, default=str)
+
+    texts: list[str] = []
+    for item in getattr(result, "content", []):
+        text = getattr(item, "text", None)
+        if text is not None:
+            texts.append(text)
+    return "\n".join(texts) if texts else "(no output)"
+
+
+def _get_mcp_config(
+    server_slug: str,
+    context: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Look up MCP server config from execution context.
+
+    Returns ``None`` (with no exception) if the server is not configured,
+    allowing the caller to return a clean ``error_output``.
+    """
+    mcp_configs: dict[str, Any] | None = context.get("mcp_configs")
+    if not mcp_configs:
+        return None
+    return mcp_configs.get(server_slug)
 
 
 # ---------------------------------------------------------------------------
@@ -180,41 +215,30 @@ def bridge_mcp_prompts(
 
 
 def _make_tool_executor(server_slug: str, mcp_tool_name: str):
-    """Return an async executor that calls a single MCP tool."""
+    """Return an async executor that calls a single MCP tool.
+
+    Each invocation opens a fresh connection (stdio subprocess or HTTP
+    request), calls the tool, and tears down the connection.
+    """
 
     async def _executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        mcp_configs: dict[str, Any] | None = context.get("mcp_configs")
-        if not mcp_configs or server_slug not in mcp_configs:
+        cfg = _get_mcp_config(server_slug, context)
+        if cfg is None:
             return error_output(
                 f"MCP server '{server_slug}' is not configured for this session.",
-                suggestion="Ensure the MCP server is installed and active in your settings.",
+                suggestion="Install the MCP server from the marketplace and assign it to this agent.",
             )
-
-        cfg = mcp_configs[server_slug]
 
         try:
             async with connect_mcp(cfg["server"], cfg["credentials"]) as session:
                 result = await session.call_tool(mcp_tool_name, params)
 
-            # Prefer structured output if available (MCP spec 2025-06-18+)
-            structured = getattr(result, "structuredContent", None)
-            if structured is not None:
-                import json as _json
-
-                output_text = _json.dumps(structured, indent=2, default=str)
-            else:
-                # Extract text from content items.
-                texts: list[str] = []
-                for item in getattr(result, "content", []):
-                    text = getattr(item, "text", None)
-                    if text is not None:
-                        texts.append(text)
-                output_text = "\n".join(texts) if texts else "(no output)"
+            output_text = _extract_tool_result_text(result)
 
             if getattr(result, "isError", False):
                 return error_output(
                     f"MCP tool '{mcp_tool_name}' returned an error.",
-                    details={"output": output_text},
+                    details={"output": sanitize_error(output_text)},
                 )
 
             return success_output(
@@ -227,11 +251,11 @@ def _make_tool_executor(server_slug: str, mcp_tool_name: str):
                 "MCP tool call failed: server=%s tool=%s error=%s",
                 server_slug,
                 mcp_tool_name,
-                exc,
+                sanitize_error(str(exc)),
                 exc_info=True,
             )
             return error_output(
-                f"Failed to call MCP tool '{mcp_tool_name}': {exc}",
+                sanitize_error(f"Failed to call MCP tool '{mcp_tool_name}': {exc}"),
                 suggestion="Check that the MCP server is reachable and credentials are valid.",
             )
 
@@ -242,17 +266,15 @@ def _make_resource_executor(server_slug: str):
     """Return an async executor that reads an MCP resource."""
 
     async def _executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        mcp_configs = context.get("mcp_configs")
-        if not mcp_configs or server_slug not in mcp_configs:
-            return error_output(
-                f"MCP server '{server_slug}' is not configured for this session.",
-            )
-
         uri = params.get("uri", "")
         if not uri:
             return error_output("Missing required parameter 'uri'.")
 
-        cfg = mcp_configs[server_slug]
+        cfg = _get_mcp_config(server_slug, context)
+        if cfg is None:
+            return error_output(
+                f"MCP server '{server_slug}' is not configured for this session.",
+            )
 
         try:
             async with connect_mcp(cfg["server"], cfg["credentials"]) as session:
@@ -263,7 +285,6 @@ def _make_resource_executor(server_slug: str):
                 text = getattr(item, "text", None)
                 if text is not None:
                     texts.append(text)
-
             output_text = "\n".join(texts) if texts else "(empty resource)"
 
             return success_output(
@@ -276,11 +297,11 @@ def _make_resource_executor(server_slug: str):
                 "MCP resource read failed: server=%s uri=%s error=%s",
                 server_slug,
                 uri,
-                exc,
+                sanitize_error(str(exc)),
                 exc_info=True,
             )
             return error_output(
-                f"Failed to read MCP resource '{uri}': {exc}",
+                sanitize_error(f"Failed to read MCP resource '{uri}': {exc}"),
                 suggestion="Verify the resource URI is correct and the server is reachable.",
             )
 
@@ -291,18 +312,16 @@ def _make_prompt_executor(server_slug: str):
     """Return an async executor that fetches an MCP prompt."""
 
     async def _executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        mcp_configs = context.get("mcp_configs")
-        if not mcp_configs or server_slug not in mcp_configs:
-            return error_output(
-                f"MCP server '{server_slug}' is not configured for this session.",
-            )
-
         name = params.get("name", "")
         arguments = params.get("arguments", {})
         if not name:
             return error_output("Missing required parameter 'name'.")
 
-        cfg = mcp_configs[server_slug]
+        cfg = _get_mcp_config(server_slug, context)
+        if cfg is None:
+            return error_output(
+                f"MCP server '{server_slug}' is not configured for this session.",
+            )
 
         try:
             async with connect_mcp(cfg["server"], cfg["credentials"]) as session:
@@ -315,7 +334,6 @@ def _make_prompt_executor(server_slug: str):
                     text = getattr(content, "text", None)
                     if text is not None:
                         texts.append(text)
-
             output_text = "\n".join(texts) if texts else "(empty prompt)"
 
             return success_output(
@@ -328,11 +346,11 @@ def _make_prompt_executor(server_slug: str):
                 "MCP prompt fetch failed: server=%s prompt=%s error=%s",
                 server_slug,
                 name,
-                exc,
+                sanitize_error(str(exc)),
                 exc_info=True,
             )
             return error_output(
-                f"Failed to fetch MCP prompt '{name}': {exc}",
+                sanitize_error(f"Failed to fetch MCP prompt '{name}': {exc}"),
                 suggestion="Verify the prompt name and arguments are correct.",
             )
 

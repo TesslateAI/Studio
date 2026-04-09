@@ -2,13 +2,12 @@
 Seed popular MCP servers into the marketplace.
 
 Creates MarketplaceAgent entries with item_type='mcp_server' for well-known
-MCP servers that support streamable-http transport.
+MCP servers.  Supports both streamable-http and stdio transports.
 
-TRANSPORT POLICY: Tesslate only supports streamable-http MCP transport.
-Stdio transport spawns a process per tool call per user on orchestrator pods,
-which doesn't scale for multi-tenant SaaS. Streamable-http makes stateless
-HTTP calls to remote MCP servers, with per-user rate limits via their own
-API keys. See docs/orchestrator/services/mcp.md for details.
+TRANSPORT SUPPORT:
+- streamable-http: Stateless HTTP calls to remote MCP servers (cloud-hosted).
+- stdio: Spawns a subprocess in the worker pod (e.g. npx, uvx).  Sessions are
+  scoped to agent task lifetime and cleaned up automatically.
 
 HOW TO RUN:
 -----------
@@ -40,6 +39,9 @@ from app.database import AsyncSessionLocal
 from app.models import MarketplaceAgent
 
 MCP_SERVERS = [
+    # =========================================================================
+    # Streamable HTTP servers (cloud-hosted, no subprocess)
+    # =========================================================================
     {
         "name": "Context7",
         "slug": "mcp-context7",
@@ -73,34 +75,188 @@ MCP_SERVERS = [
         "source_type": "open",
         "git_repo_url": "https://github.com/upstash/context7",
     },
-]
-
-# Servers removed (stdio-only, no streamable-http endpoint available):
-# - GitHub Tools (@modelcontextprotocol/server-github) — stdio only
-# - Brave Search (@modelcontextprotocol/server-brave-search) — stdio only
-# - Slack (@modelcontextprotocol/server-slack) — stdio only
-# - PostgreSQL (@modelcontextprotocol/server-postgres) — stdio only, inherently local
-# - Filesystem (@modelcontextprotocol/server-filesystem) — stdio only, inherently local
-#
-# These can be re-added when their maintainers publish streamable-http endpoints.
-
-# Stdio-only slugs to deactivate in the DB (prevent install of broken servers).
-STDIO_ONLY_SLUGS = [
-    "mcp-github",
-    "mcp-brave-search",
-    "mcp-slack",
-    "mcp-postgresql",
-    "mcp-filesystem",
+    # =========================================================================
+    # Stdio servers (subprocess-based, task-scoped lifecycle)
+    # =========================================================================
+    {
+        "name": "GitHub",
+        "slug": "mcp-github",
+        "description": "Create and manage repositories, issues, pull requests, branches, and more via the GitHub API.",
+        "long_description": (
+            "The official GitHub MCP server provides full access to the GitHub API. "
+            "Create repositories, manage issues and pull requests, review code, "
+            "search across GitHub, manage branches, and automate workflows — all "
+            "through natural language. Requires a GitHub Personal Access Token."
+        ),
+        "item_type": "mcp_server",
+        "category": "developer-tools",
+        "config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+            "env_vars": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+            "capabilities": ["tools"],
+        },
+        "features": [
+            "create-issue",
+            "create-pull-request",
+            "search-repositories",
+            "manage-branches",
+            "review-code",
+            "manage-files",
+        ],
+        "tags": ["github", "git", "version-control", "developer-tools", "ci-cd"],
+        "is_active": True,
+        "is_featured": True,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "Github",
+        "source_type": "open",
+        "git_repo_url": "https://github.com/modelcontextprotocol/servers",
+    },
+    {
+        "name": "Brave Search",
+        "slug": "mcp-brave-search",
+        "description": "Web and local search powered by the Brave Search API with privacy-focused results.",
+        "long_description": (
+            "Search the web using Brave's independent search index. Get web search "
+            "results and local business information without tracking. Supports both "
+            "general web search and local search with detailed business listings. "
+            "Requires a Brave Search API key (free tier available)."
+        ),
+        "item_type": "mcp_server",
+        "category": "search",
+        "config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+            "env_vars": ["BRAVE_API_KEY"],
+            "capabilities": ["tools"],
+        },
+        "features": [
+            "web-search",
+            "local-search",
+            "privacy-focused",
+        ],
+        "tags": ["search", "web", "brave", "privacy", "api"],
+        "is_active": True,
+        "is_featured": False,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "Search",
+        "source_type": "open",
+        "git_repo_url": "https://github.com/modelcontextprotocol/servers",
+    },
+    {
+        "name": "Slack",
+        "slug": "mcp-slack",
+        "description": "Interact with Slack workspaces — read channels, send messages, manage conversations.",
+        "long_description": (
+            "Connect your AI agent to Slack. Read channel history, post messages, "
+            "reply to threads, manage channels, and search across your workspace. "
+            "Requires a Slack Bot Token with appropriate scopes."
+        ),
+        "item_type": "mcp_server",
+        "category": "communication",
+        "config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-slack"],
+            "env_vars": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
+            "capabilities": ["tools"],
+        },
+        "features": [
+            "read-channels",
+            "send-messages",
+            "search-messages",
+            "manage-channels",
+        ],
+        "tags": ["slack", "messaging", "communication", "team", "chat"],
+        "is_active": True,
+        "is_featured": False,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "MessageSquare",
+        "source_type": "open",
+        "git_repo_url": "https://github.com/modelcontextprotocol/servers",
+    },
+    {
+        "name": "PostgreSQL",
+        "slug": "mcp-postgresql",
+        "description": "Query and inspect PostgreSQL databases — run read-only SQL, explore schemas, analyze data.",
+        "long_description": (
+            "Connect your AI agent to a PostgreSQL database. Run read-only SQL "
+            "queries, inspect table schemas, list databases and tables, and analyze "
+            "data — all through natural language. Connects via a standard PostgreSQL "
+            "connection string. Queries are read-only by default for safety."
+        ),
+        "item_type": "mcp_server",
+        "category": "data",
+        "config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-postgres"],
+            "env_vars": ["POSTGRES_URL"],
+            "capabilities": ["tools", "resources"],
+        },
+        "features": [
+            "sql-queries",
+            "schema-inspection",
+            "data-analysis",
+            "read-only-safety",
+        ],
+        "tags": ["postgresql", "database", "sql", "data", "analytics"],
+        "is_active": True,
+        "is_featured": False,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "Database",
+        "source_type": "open",
+        "git_repo_url": "https://github.com/modelcontextprotocol/servers",
+    },
+    {
+        "name": "Filesystem",
+        "slug": "mcp-filesystem",
+        "description": "Read, search, and manage files and directories with configurable access controls.",
+        "long_description": (
+            "The Filesystem MCP server provides sandboxed file system access. "
+            "Read files, list directories, search file contents, get file metadata, "
+            "and perform file operations within allowed directories. Access is "
+            "restricted to configured paths for security."
+        ),
+        "item_type": "mcp_server",
+        "category": "developer-tools",
+        "config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+            "env_vars": [],
+            "capabilities": ["tools", "resources"],
+        },
+        "features": [
+            "read-files",
+            "list-directories",
+            "search-contents",
+            "file-metadata",
+        ],
+        "tags": ["filesystem", "files", "storage", "developer-tools"],
+        "is_active": True,
+        "is_featured": False,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "FolderOpen",
+        "source_type": "open",
+        "git_repo_url": "https://github.com/modelcontextprotocol/servers",
+    },
 ]
 
 
 async def seed_mcp_servers() -> tuple[int, int, int]:
-    """Seed MCP servers into the marketplace. Returns (created, updated, deactivated) counts."""
+    """Seed MCP servers into the marketplace. Returns (created, updated, skipped) counts."""
     created = 0
     updated = 0
-    deactivated = 0
+    skipped = 0
     async with AsyncSessionLocal() as db:
-        # Upsert streamable-http servers
         for server_data in MCP_SERVERS:
             slug = server_data["slug"]
             result = await db.execute(
@@ -119,27 +275,14 @@ async def seed_mcp_servers() -> tuple[int, int, int]:
                 created += 1
                 print(f"  [create] {slug}")
 
-        # Deactivate old stdio-only servers so they don't appear in marketplace
-        for slug in STDIO_ONLY_SLUGS:
-            result = await db.execute(
-                select(MarketplaceAgent).where(MarketplaceAgent.slug == slug)
-            )
-            existing = result.scalar_one_or_none()
-            if existing and existing.is_active:
-                existing.is_active = False
-                deactivated += 1
-                print(f"  [deactivate] {slug} (stdio-only, no HTTP endpoint)")
-            elif existing:
-                print(f"  [skip] {slug} already inactive")
-
         await db.commit()
-    return created, updated, deactivated
+    return created, updated, skipped
 
 
 async def main():
-    print("Seeding MCP servers (streamable-http only)...")
-    created, updated, deactivated = await seed_mcp_servers()
-    print(f"Done. Created {created}, updated {updated}, deactivated {deactivated} MCP server entries.")
+    print("Seeding MCP servers...")
+    created, updated, skipped = await seed_mcp_servers()
+    print(f"Done. Created {created}, updated {updated}, skipped {skipped} MCP server entries.")
 
 
 if __name__ == "__main__":

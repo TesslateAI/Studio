@@ -1694,9 +1694,14 @@ export function ChatContainer({
       const result = await chatApi.undoLastExchange(currentChatId);
       if (!result.success || result.removed_count === 0) return;
       removeLastExchangeFromState();
-    } catch (error) {
+      if (result.files_reverted) {
+        toast.success('Changes reverted');
+      }
+    } catch (error: unknown) {
       console.error('[CHAT] Failed to undo:', error);
-      toast.error('Failed to undo last message');
+      const detail = (error as Record<string, Record<string, Record<string, string>>>)?.response
+        ?.data?.detail;
+      toast.error(detail || 'Failed to undo last message');
     }
   };
 
@@ -1707,9 +1712,11 @@ export function ChatContainer({
       if (!result.success || !result.last_user_message) return;
       removeLastExchangeFromState();
       sendAgentMessage(result.last_user_message);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[CHAT] Failed to retry:', error);
-      toast.error('Failed to retry last message');
+      const detail = (error as Record<string, Record<string, Record<string, string>>>)?.response
+        ?.data?.detail;
+      toast.error(detail || 'Failed to retry last message');
     }
   };
 

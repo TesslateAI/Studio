@@ -871,6 +871,7 @@ export const chatApi = {
     removed_count: number;
     removed_ids: string[];
     last_user_message: string | null;
+    files_reverted?: boolean;
   }> => {
     const response = await api.post(`/api/chat/${chatId}/undo`);
     return response.data;

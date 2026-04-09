@@ -691,6 +691,37 @@ async def undo_last_exchange(
 
     removed_ids = [str(m.id) for m in to_delete]
 
+    # --- File revert via checkpoint ---
+    # If a checkpoint exists, file revert MUST succeed before we delete
+    # messages.  Half-undo (messages gone but files changed) is worse than
+    # no undo — it leaves the user in a confusing state.
+    files_reverted = False
+    checkpoint_hash = None
+    for msg in to_delete:
+        if msg.role == "assistant" and msg.message_metadata:
+            checkpoint_hash = msg.message_metadata.get("checkpoint_hash")
+            if checkpoint_hash:
+                break
+
+    if checkpoint_hash and chat.project_id:
+        try:
+            from ..services.checkpoint_manager import CheckpointManager
+
+            ckpt_mgr = CheckpointManager(
+                user_id=current_user.id,
+                project_id=str(chat.project_id),
+            )
+            files_reverted = await ckpt_mgr.restore_checkpoint(checkpoint_hash, db=db)
+        except Exception as revert_err:
+            logger.warning("[CHAT] File revert failed: %s", revert_err)
+
+        if not files_reverted:
+            raise HTTPException(
+                status_code=409,
+                detail="Could not revert file changes. The project container "
+                "may not be running — start it and try again.",
+            )
+
     # Bulk delete — AgentStep rows cascade via FK
     from sqlalchemy import delete as sql_delete
 
@@ -707,6 +738,7 @@ async def undo_last_exchange(
         "removed_count": len(to_delete),
         "removed_ids": removed_ids,
         "last_user_message": removed_user_content,
+        "files_reverted": files_reverted,
     }
 
 
