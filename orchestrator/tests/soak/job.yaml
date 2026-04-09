@@ -1,0 +1,84 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: soak-test
+  namespace: tesslate
+  labels:
+    app: soak-test
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 28800  # 8 hours max safety net
+  template:
+    metadata:
+      labels:
+        app: soak-test
+    spec:
+      serviceAccountName: tesslate-backend-sa
+      restartPolicy: Never
+      volumes:
+        - name: soak-code
+          configMap:
+            name: soak-test-code
+      containers:
+        - name: soak
+          image: tesslate-backend:latest
+          imagePullPolicy: Never
+          # Usage examples:
+          #   Stable (no chaos):     --hours 4 --users 6 --no-chaos
+          #   Mild chaos (10min):    --hours 4 --users 6 --chaos-interval 600
+          #   Heavy chaos (2min):    --hours 4 --users 6 --chaos-interval 120
+          #   Quick smoke test:      --cycles 20 --users 3 --no-chaos
+          command:
+            - python3
+            - "-u"
+            - "-m"
+            - tests.soak.run
+            - "--hours"
+            - "4"
+            - "--users"
+            - "6"
+            - "--projects"
+            - "3"
+            - "--chaos-interval"
+            - "600"
+          volumeMounts:
+            - name: soak-code
+              mountPath: /app/tests/soak/
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          envFrom:
+            - secretRef:
+                name: tesslate-app-secrets
+            - secretRef:
+                name: postgres-secret
+            - secretRef:
+                name: s3-credentials
+          env:
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+            - name: K8S_DEVSERVER_IMAGE
+              value: "tesslate-devserver:latest"
+            - name: K8S_IMAGE_PULL_SECRET
+              value: ""
+            - name: K8S_STORAGE_CLASS
+              value: "tesslate-btrfs"
+            - name: K8S_SNAPSHOT_CLASS
+              value: "tesslate-btrfs-snapshots"
+            - name: VOLUME_HUB_ADDRESS
+              value: "tesslate-volume-hub.kube-system.svc:9750"
+            - name: FILEOPS_ENABLED
+              value: "true"
+            - name: TEMPLATE_BUILD_STORAGE_CLASS
+              value: "tesslate-btrfs"
+            - name: REDIS_URL
+              value: "redis://redis.tesslate.svc:6379"
+            - name: K8S_INGRESS_DOMAIN
+              value: "localhost"
+            - name: K8S_WILDCARD_TLS_SECRET
+              value: ""

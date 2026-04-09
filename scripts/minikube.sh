@@ -278,14 +278,17 @@ cmd_start() {
 
     info "Starting minikube cluster..."
     local nodes_flag=""
+    local cni_flag=""
     if [[ "$MINIKUBE_NODES" -gt 1 ]]; then
       nodes_flag="--nodes=$MINIKUBE_NODES"
+      cni_flag="--cni=flannel"  # multi-node needs CNI from the start
     fi
 
     minikube start \
       -p "$PROFILE" \
       $driver_flag \
       $nodes_flag \
+      $cni_flag \
       --cpus="$MINIKUBE_CPUS" \
       --memory="$MINIKUBE_MEMORY" \
       --disk-size=40g \
