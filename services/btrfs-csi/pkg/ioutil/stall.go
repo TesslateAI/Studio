@@ -2,6 +2,7 @@ package ioutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -13,6 +14,10 @@ import (
 // partial reads should happen more frequently. A real stall (network partition,
 // dead rclone) produces zero bytes immediately.
 const StallTimeout = 30 * time.Second
+
+// ErrStall is the sentinel error used when a stall is detected. Callers can
+// check for it with errors.Is(err, ioutil.ErrStall).
+var ErrStall = errors.New("I/O stall")
 
 // StallReader wraps an io.Reader and cancels a context if no bytes are read
 // within the stall timeout. Every successful Read (n > 0) resets the timer.
@@ -44,7 +49,7 @@ func NewStallReader(r io.Reader, ctx context.Context, cancel context.CancelCause
 		ctx:     ctx,
 	}
 	sr.timer = time.AfterFunc(timeout, func() {
-		cancel(fmt.Errorf("I/O stall: no bytes read for %v", timeout))
+		cancel(fmt.Errorf("%w: no bytes read for %v", ErrStall, timeout))
 		// Close the underlying reader to unblock any stuck Read().
 		// Uses closeOnce to prevent double-close race with Close().
 		sr.closeOnce.Do(func() {

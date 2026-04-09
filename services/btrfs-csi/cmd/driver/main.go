@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -13,6 +15,44 @@ import (
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/driver"
 	"k8s.io/klog/v2"
 )
+
+func init() {
+	// Set GOMEMLIMIT from the container's cgroup memory limit so Go's GC
+	// gets aggressive before the OOM killer fires. Leaves 10% headroom
+	// for non-heap allocations (goroutine stacks, mmap, etc.).
+	//
+	// This replaces what GOMEMLIMIT=auto would do in Go 1.24+, but works
+	// on all versions and doesn't require env var configuration in K8s.
+	if limit := readCgroupMemoryLimit(); limit > 0 {
+		softLimit := int64(float64(limit) * 0.9)
+		debug.SetMemoryLimit(softLimit)
+		klog.Infof("GOMEMLIMIT set to %d MiB (cgroup limit: %d MiB)",
+			softLimit/(1024*1024), limit/(1024*1024))
+	}
+}
+
+// readCgroupMemoryLimit reads the container memory limit from cgroup v2/v1.
+func readCgroupMemoryLimit() int64 {
+	// cgroup v2
+	if data, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
+		s := strings.TrimSpace(string(data))
+		if s != "max" {
+			if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return v
+			}
+		}
+	}
+	// cgroup v1
+	if data, err := os.ReadFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"); err == nil {
+		if v, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); err == nil {
+			// cgroup v1 reports a huge number when unlimited
+			if v < 1<<62 {
+				return v
+			}
+		}
+	}
+	return 0
+}
 
 var (
 	version = "0.1.0"

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	stdsync "sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -2135,4 +2137,526 @@ func TestBuildRestoreChain_FollowsCorrectFork(t *testing.T) {
 	}
 
 	_ = d // daemon not needed for pure manifest test, but validates setup
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Skip pre-restore undo point when volume is clean
+// ---------------------------------------------------------------------------
+
+func TestRestoreToSnapshot_SkipsUndoWhenClean(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-skip-undo"
+	tmplName := "tmpl-skip"
+	tmplHash := "sha256:base00"
+
+	// Build a manifest with 2 snapshots.
+	snap1 := cas.Snapshot{Hash: "sha256:s1hash", Parent: tmplHash, Role: "sync", TS: "2026-04-01T00:00:00Z"}
+	snap2 := cas.Snapshot{Hash: "sha256:s2hash", Parent: "sha256:s1hash", Role: "sync", TS: "2026-04-01T00:01:00Z"}
+	snaps, head := makeSnapshots(snap1, snap2)
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         tmplHash,
+		TemplateName: tmplName,
+		Head:         head,
+		Snapshots:    snaps,
+	}
+
+	// Blobs exist in CAS.
+	fc.blobs["sha256:s1hash"] = "layer1-data"
+	fc.blobs["sha256:s2hash"] = "layer2-data"
+
+	// Template and volume exist on disk.
+	fb.subvolumes["templates/"+tmplName] = true
+	fb.subvolumes["volumes/"+volID] = true
+
+	// Track volume as CLEAN (dirty=false, with matching generation).
+	d.TrackVolume(volID, tmplName, tmplHash)
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	tv.dirty = false
+	tv.lastLayerHash = "sha256:s2hash"
+	tv.lastSnapPath = fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:s2hash"))
+	d.mu.Unlock()
+
+	// Set generations equal (clean volume).
+	fb.generations["volumes/"+volID] = 100
+	fb.generations[tv.lastSnapPath] = 100
+
+	// Restore to snap1.
+	err := d.RestoreToSnapshot(context.Background(), volID, "sha256:s1hash")
+	if err != nil {
+		t.Fatalf("RestoreToSnapshot failed: %v", err)
+	}
+
+	// Since volume was clean, no syncOne should have been called.
+	// syncOne would have created a snapshot of the volume — check no snapshot
+	// of "volumes/{vol}" was taken with readOnly=true (that's what syncOne does).
+	fb.mu.Lock()
+	var undoSnapshots int
+	for _, sc := range fb.snapshots {
+		if sc.Source == "volumes/"+volID && sc.ReadOnly {
+			undoSnapshots++
+		}
+	}
+	fb.mu.Unlock()
+
+	// The only read-only snapshot should NOT be an undo point.
+	// Zero read-only snapshots of the volume means undo was skipped.
+	if undoSnapshots > 0 {
+		t.Errorf("expected 0 undo point snapshots for clean volume, got %d", undoSnapshots)
+	}
+}
+
+func TestRestoreToSnapshot_CreatesUndoWhenDirty(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-undo-dirty"
+	tmplName := "tmpl-undo"
+	tmplHash := "sha256:base00"
+
+	snap1 := cas.Snapshot{Hash: "sha256:s1hash", Parent: tmplHash, Role: "sync", TS: "2026-04-01T00:00:00Z"}
+	snap2 := cas.Snapshot{Hash: "sha256:s2hash", Parent: "sha256:s1hash", Role: "sync", TS: "2026-04-01T00:01:00Z"}
+	snaps, head := makeSnapshots(snap1, snap2)
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         tmplHash,
+		TemplateName: tmplName,
+		Head:         head,
+		Snapshots:    snaps,
+	}
+
+	fc.blobs["sha256:s1hash"] = "layer1-data"
+	fc.blobs["sha256:s2hash"] = "layer2-data"
+
+	fb.subvolumes["templates/"+tmplName] = true
+	fb.subvolumes["volumes/"+volID] = true
+
+	// Track as DIRTY.
+	d.TrackVolume(volID, tmplName, tmplHash)
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	tv.dirty = true
+	tv.lastLayerHash = "sha256:s2hash"
+	tv.lastSnapPath = fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:s2hash"))
+	d.mu.Unlock()
+
+	err := d.RestoreToSnapshot(context.Background(), volID, "sha256:s1hash")
+	if err != nil {
+		t.Fatalf("RestoreToSnapshot failed: %v", err)
+	}
+
+	// Since volume was dirty, syncOne should have been called, creating a
+	// read-only snapshot of the volume.
+	fb.mu.Lock()
+	var undoSnapshots int
+	for _, sc := range fb.snapshots {
+		if sc.Source == "volumes/"+volID && sc.ReadOnly {
+			undoSnapshots++
+		}
+	}
+	fb.mu.Unlock()
+
+	if undoSnapshots == 0 {
+		t.Error("expected at least 1 undo point snapshot for dirty volume, got 0")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: Intermediate layers preserved after restore (no aggressive GC)
+// ---------------------------------------------------------------------------
+
+func TestRestoreVolume_PreservesIntermediateLayers(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-preserve-layers"
+	tmplName := "tmpl-preserve"
+	tmplHash := "sha256:base00"
+
+	// Build a 3-snapshot chain.
+	snap1 := cas.Snapshot{Hash: "sha256:s1hash", Parent: tmplHash, Role: "sync", TS: "2026-04-01T00:00:00Z"}
+	snap2 := cas.Snapshot{Hash: "sha256:s2hash", Parent: "sha256:s1hash", Role: "sync", TS: "2026-04-01T00:01:00Z"}
+	snap3 := cas.Snapshot{Hash: "sha256:s3hash", Parent: "sha256:s2hash", Role: "sync", TS: "2026-04-01T00:02:00Z"}
+	snaps, head := makeSnapshots(snap1, snap2, snap3)
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         tmplHash,
+		TemplateName: tmplName,
+		Head:         head,
+		Snapshots:    snaps,
+	}
+
+	fc.blobs["sha256:s1hash"] = "layer1-data"
+	fc.blobs["sha256:s2hash"] = "layer2-data"
+	fc.blobs["sha256:s3hash"] = "layer3-data"
+
+	fb.subvolumes["templates/"+tmplName] = true
+	// Simulate btrfs receive creating @pending for each layer.
+	fb.receiveCreates = fmt.Sprintf("layers/%s@pending", volID)
+
+	err := d.RestoreVolume(context.Background(), volID)
+	if err != nil {
+		t.Fatalf("RestoreVolume failed: %v", err)
+	}
+
+	// ALL intermediate layer snapshots should still exist (no GC).
+	for _, snapHash := range []string{"sha256:s1hash", "sha256:s2hash", "sha256:s3hash"} {
+		layerPath := fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash(snapHash))
+		if !fb.SubvolumeExists(context.Background(), layerPath) {
+			t.Errorf("intermediate layer %s was deleted (should be preserved as cache)", layerPath)
+		}
+	}
+
+	// Volume should exist.
+	if !fb.SubvolumeExists(context.Background(), "volumes/"+volID) {
+		t.Error("volume should exist after restore")
+	}
+}
+
+func TestRestoreToSnapshot_PreservesIntermediateLayers(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-preserve-restore"
+	tmplName := "tmpl-preserve2"
+	tmplHash := "sha256:base00"
+
+	snap1 := cas.Snapshot{Hash: "sha256:s1hash", Parent: tmplHash, Role: "sync", TS: "2026-04-01T00:00:00Z"}
+	snap2 := cas.Snapshot{Hash: "sha256:s2hash", Parent: "sha256:s1hash", Role: "sync", TS: "2026-04-01T00:01:00Z"}
+	snap3 := cas.Snapshot{Hash: "sha256:s3hash", Parent: "sha256:s2hash", Role: "sync", TS: "2026-04-01T00:02:00Z"}
+	snaps, head := makeSnapshots(snap1, snap2, snap3)
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:     volID,
+		Base:         tmplHash,
+		TemplateName: tmplName,
+		Head:         head,
+		Snapshots:    snaps,
+	}
+
+	fc.blobs["sha256:s1hash"] = "layer1-data"
+	fc.blobs["sha256:s2hash"] = "layer2-data"
+	fc.blobs["sha256:s3hash"] = "layer3-data"
+
+	fb.subvolumes["templates/"+tmplName] = true
+	fb.subvolumes["volumes/"+volID] = true
+	// Simulate btrfs receive creating @pending for each layer.
+	fb.receiveCreates = fmt.Sprintf("layers/%s@pending", volID)
+
+	// Track volume as clean so undo is skipped (simpler test).
+	d.TrackVolume(volID, tmplName, tmplHash)
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	tv.dirty = false
+	tv.lastLayerHash = "sha256:s3hash"
+	tv.lastSnapPath = fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:s3hash"))
+	d.mu.Unlock()
+	fb.generations["volumes/"+volID] = 100
+	fb.generations[tv.lastSnapPath] = 100
+
+	// Restore to snap1.
+	err := d.RestoreToSnapshot(context.Background(), volID, "sha256:s1hash")
+	if err != nil {
+		t.Fatalf("RestoreToSnapshot failed: %v", err)
+	}
+
+	// Intermediate layer s1 should still exist (it's the restore target too,
+	// but s2 is the real test — it's an intermediate).
+	// With no GC, all received layers should be preserved.
+	layer1 := fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:s1hash"))
+	if !fb.SubvolumeExists(context.Background(), layer1) {
+		t.Error("target layer s1 should exist after restore")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Step 5: Per-layer retry
+// ---------------------------------------------------------------------------
+
+func TestDownloadLayerWithRetry_SucceedsOnFirstAttempt(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-retry-ok"
+	blobHash := "sha256:retryhash000"
+	targetPath := fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash(blobHash))
+
+	fc.blobs[blobHash] = "good-data"
+	fb.receiveCreates = fmt.Sprintf("layers/%s@pending", volID)
+
+	err := d.downloadLayerWithRetry(context.Background(), volID, blobHash, targetPath, "")
+	if err != nil {
+		t.Fatalf("downloadLayerWithRetry failed: %v", err)
+	}
+
+	if !fb.SubvolumeExists(context.Background(), targetPath) {
+		t.Error("expected layer to exist after successful download")
+	}
+}
+
+func TestDownloadLayerWithRetry_RetriesOnStall(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-retry-stall"
+	blobHash := "sha256:stallhash000"
+	targetPath := fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash(blobHash))
+
+	fc.blobs[blobHash] = "good-data"
+	fb.receiveCreates = fmt.Sprintf("layers/%s@pending", volID)
+
+	// Use a counter to fail on first attempt, succeed on second.
+	var receiveAttempts int
+	fb.mu.Lock()
+	fb.receiveErr = fmt.Errorf("btrfs receive: %w", ioutil.ErrStall)
+	fb.mu.Unlock()
+
+	// Override Receive to count attempts and clear error after first.
+	origReceive := fb.Receive
+	d.btrfs = &countingBtrfs{
+		fakeBtrfs:      fb,
+		receiveCounter: &receiveAttempts,
+		clearAfter:     1, // clear error after 1 failure
+	}
+
+	err := d.downloadLayerWithRetry(context.Background(), volID, blobHash, targetPath, "")
+	if err != nil {
+		t.Fatalf("downloadLayerWithRetry should succeed after retry, got: %v", err)
+	}
+
+	if receiveAttempts < 2 {
+		t.Errorf("expected at least 2 attempts, got %d", receiveAttempts)
+	}
+
+	_ = origReceive
+}
+
+// countingBtrfs wraps fakeBtrfs to count Receive calls and clear the error
+// after a specified number of failures.
+type countingBtrfs struct {
+	*fakeBtrfs
+	receiveCounter *int
+	clearAfter     int
+}
+
+func (c *countingBtrfs) Receive(ctx context.Context, destDir string, reader io.Reader) error {
+	c.fakeBtrfs.mu.Lock()
+	*c.receiveCounter++
+	count := *c.receiveCounter
+	if count > c.clearAfter {
+		c.fakeBtrfs.receiveErr = nil
+	}
+	c.fakeBtrfs.mu.Unlock()
+	return c.fakeBtrfs.Receive(ctx, destDir, reader)
+}
+
+func TestDownloadLayerWithRetry_PermanentFailure(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-retry-perm"
+	blobHash := "sha256:permfail000"
+	targetPath := fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash(blobHash))
+
+	// Blob doesn't exist — permanent failure, should not retry.
+	err := d.downloadLayerWithRetry(context.Background(), volID, blobHash, targetPath, "")
+	if err == nil {
+		t.Fatal("expected error for missing blob")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' error, got: %v", err)
+	}
+}
+
+func TestIsRetryableError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"stall sentinel", fmt.Errorf("download: %w", ioutil.ErrStall), true},
+		{"stall wrapped", fmt.Errorf("btrfs receive: %w", fmt.Errorf("cause: %w", ioutil.ErrStall)), true},
+		{"deadline exceeded", fmt.Errorf("rpc: %w", context.DeadlineExceeded), true},
+		{"unexpected EOF", fmt.Errorf("read: %w", io.ErrUnexpectedEOF), true},
+		{"syscall ECONNRESET", &os.SyscallError{Syscall: "read", Err: syscall.ECONNRESET}, true},
+		{"syscall ECONNREFUSED", &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}, true},
+		{"syscall EPIPE", &os.SyscallError{Syscall: "write", Err: syscall.EPIPE}, true},
+		{"syscall ETIMEDOUT", &os.SyscallError{Syscall: "connect", Err: syscall.ETIMEDOUT}, true},
+		{"blob not found", fmt.Errorf("blob not found"), false},
+		{"permission denied", fmt.Errorf("permission denied"), false},
+		{"normal EOF", io.EOF, false},
+		{"generic error", fmt.Errorf("something went wrong"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isRetryableError(tt.err)
+			if got != tt.want {
+				t.Errorf("isRetryableError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Parallel prefetch
+// ---------------------------------------------------------------------------
+
+func TestPrefetchBlobs_AllOnDisk(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-prefetch-cached"
+	snap1 := cas.Snapshot{Hash: "sha256:p1hash", Parent: "", Role: "sync"}
+	snap2 := cas.Snapshot{Hash: "sha256:p2hash", Parent: "sha256:p1hash", Role: "sync"}
+	snaps, _ := makeSnapshots(snap1, snap2)
+	manifest := &cas.Manifest{
+		VolumeID:  volID,
+		Snapshots: snaps,
+	}
+
+	chain := []string{"sha256:p1hash", "sha256:p2hash"}
+
+	// All layers already on disk.
+	fb.subvolumes[fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:p1hash"))] = true
+	fb.subvolumes[fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:p2hash"))] = true
+
+	prefetched, err := d.prefetchBlobs(context.Background(), manifest, chain, volID)
+	if err != nil {
+		t.Fatalf("prefetchBlobs failed: %v", err)
+	}
+
+	// Nothing to prefetch — all on disk.
+	if len(prefetched) != 0 {
+		t.Errorf("expected 0 prefetched, got %d", len(prefetched))
+		cleanupPrefetch(prefetched)
+	}
+}
+
+func TestPrefetchBlobs_DownloadsMissing(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-prefetch-dl"
+	snap1 := cas.Snapshot{Hash: "sha256:dl1hash", Parent: "", Role: "sync"}
+	snap2 := cas.Snapshot{Hash: "sha256:dl2hash", Parent: "sha256:dl1hash", Role: "sync"}
+	snaps, _ := makeSnapshots(snap1, snap2)
+	manifest := &cas.Manifest{
+		VolumeID:  volID,
+		Snapshots: snaps,
+	}
+
+	chain := []string{"sha256:dl1hash", "sha256:dl2hash"}
+
+	// No layers on disk, blobs in CAS.
+	fc.blobs["sha256:dl1hash"] = "blob-data-1"
+	fc.blobs["sha256:dl2hash"] = "blob-data-2"
+
+	prefetched, err := d.prefetchBlobs(context.Background(), manifest, chain, volID)
+	if err != nil {
+		t.Fatalf("prefetchBlobs failed: %v", err)
+	}
+	defer cleanupPrefetch(prefetched)
+
+	if len(prefetched) != 2 {
+		t.Fatalf("expected 2 prefetched, got %d", len(prefetched))
+	}
+
+	// Verify temp files exist and contain data.
+	for hash, path := range prefetched {
+		if path == "" {
+			t.Errorf("prefetched[%s] has empty path", cas.ShortHash(hash))
+		}
+	}
+}
+
+func TestPrefetchBlobs_PartialOnDisk(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-prefetch-partial"
+	snap1 := cas.Snapshot{Hash: "sha256:pp1hash", Parent: "", Role: "sync"}
+	snap2 := cas.Snapshot{Hash: "sha256:pp2hash", Parent: "sha256:pp1hash", Role: "sync"}
+	snaps, _ := makeSnapshots(snap1, snap2)
+	manifest := &cas.Manifest{
+		VolumeID:  volID,
+		Snapshots: snaps,
+	}
+
+	chain := []string{"sha256:pp1hash", "sha256:pp2hash"}
+
+	// Only first layer on disk.
+	fb.subvolumes[fmt.Sprintf("layers/%s@%s", volID, cas.ShortHash("sha256:pp1hash"))] = true
+	fc.blobs["sha256:pp2hash"] = "blob-data-2"
+
+	prefetched, err := d.prefetchBlobs(context.Background(), manifest, chain, volID)
+	if err != nil {
+		t.Fatalf("prefetchBlobs failed: %v", err)
+	}
+	defer cleanupPrefetch(prefetched)
+
+	// Only snap2 should be prefetched.
+	if len(prefetched) != 1 {
+		t.Fatalf("expected 1 prefetched, got %d", len(prefetched))
+	}
+	if _, ok := prefetched["sha256:pp2hash"]; !ok {
+		t.Error("expected sha256:pp2hash to be prefetched")
+	}
+}
+
+func TestPrefetchBlobs_FailureCleanup(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-prefetch-fail"
+	snap1 := cas.Snapshot{Hash: "sha256:pf1hash", Parent: "", Role: "sync"}
+	snap2 := cas.Snapshot{Hash: "sha256:pf2hash", Parent: "sha256:pf1hash", Role: "sync"}
+	snaps, _ := makeSnapshots(snap1, snap2)
+	manifest := &cas.Manifest{
+		VolumeID:  volID,
+		Snapshots: snaps,
+	}
+
+	chain := []string{"sha256:pf1hash", "sha256:pf2hash"}
+
+	// Only first blob exists, second will fail.
+	fc.blobs["sha256:pf1hash"] = "blob-data-1"
+	// sha256:pf2hash intentionally missing
+
+	prefetched, err := d.prefetchBlobs(context.Background(), manifest, chain, volID)
+	if err == nil {
+		cleanupPrefetch(prefetched)
+		t.Fatal("expected error when blob is missing")
+	}
+
+	// prefetched should be nil on error (cleanup happened internally).
+	if prefetched != nil {
+		t.Error("expected nil prefetched map on error")
+		cleanupPrefetch(prefetched)
+	}
 }

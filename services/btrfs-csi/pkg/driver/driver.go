@@ -118,6 +118,28 @@ func WithS3Config(endpoint, bucket, accessKey, secretKey, region string) Option 
 	}
 }
 
+// createObjectStorage builds the appropriate ObjectStorage backend. For S3
+// providers it uses the native minio-go client (connection pooling, no process
+// overhead). Other providers fall back to rclone.
+func createObjectStorage(provider, bucket string, env map[string]string) (objstore.ObjectStorage, error) {
+	if provider == "s3" {
+		endpoint := env["RCLONE_S3_ENDPOINT"]
+		if endpoint == "" {
+			return nil, fmt.Errorf("S3 endpoint not configured (set RCLONE_S3_ENDPOINT)")
+		}
+		cfg := objstore.S3Config{
+			Endpoint:       endpoint,
+			AccessKeyID:    env["RCLONE_S3_ACCESS_KEY_ID"],
+			SecretAccessKey: env["RCLONE_S3_SECRET_ACCESS_KEY"],
+			Region:         env["RCLONE_S3_REGION"],
+			Bucket:         bucket,
+			UseSSL:         objstore.DetectSSL(endpoint),
+		}
+		return objstore.NewS3Storage(cfg)
+	}
+	return objstore.NewRcloneStorage(provider, bucket, env)
+}
+
 func WithSyncInterval(interval time.Duration) Option {
 	return func(d *Driver) { d.syncInterval = interval }
 }
@@ -195,10 +217,13 @@ func (d *Driver) runNode(ctx context.Context) error {
 
 	// Initialize object storage if configured.
 	if d.storageProvider != "" && d.storageBucket != "" {
-		store, err := objstore.NewRcloneStorage(d.storageProvider, d.storageBucket, d.storageEnv)
+		store, err := createObjectStorage(d.storageProvider, d.storageBucket, d.storageEnv)
 		if err != nil {
 			klog.Errorf("Failed to create object storage: %v", err)
 		} else {
+			if err := store.EnsureBucket(ctx); err != nil {
+				klog.Warningf("EnsureBucket: %v (may already exist)", err)
+			}
 			d.store = store
 		}
 	}
@@ -359,10 +384,13 @@ func (d *Driver) runHub(ctx context.Context) error {
 	// Initialize object storage for Hub's CAS manifest reads.
 	var casStore *cas.Store
 	if d.storageProvider != "" && d.storageBucket != "" {
-		store, err := objstore.NewRcloneStorage(d.storageProvider, d.storageBucket, d.storageEnv)
+		store, err := createObjectStorage(d.storageProvider, d.storageBucket, d.storageEnv)
 		if err != nil {
 			klog.Warningf("Hub: failed to create object storage: %v", err)
 		} else {
+			if err := store.EnsureBucket(ctx); err != nil {
+				klog.Warningf("Hub: EnsureBucket: %v (may already exist)", err)
+			}
 			casStore = cas.NewStore(store)
 		}
 	}

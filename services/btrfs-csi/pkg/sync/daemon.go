@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -804,10 +807,14 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	// Build the restore chain for the HEAD snapshot.
 	chain := manifest.BuildRestoreChain(manifest.Head)
 
-	// Download and receive each layer in the chain in order.
-	// ensureParentLayer recursively downloads any missing parent layers
-	// before the child is received. The UUID rewriter patches parent
-	// references so btrfs receive finds the correct local parent.
+	// Prefetch all needed blobs concurrently, then apply sequentially.
+	// This changes O(N * (download + receive)) → O(max(download)) + O(N * receive).
+	prefetched, pfErr := d.prefetchBlobs(ctx, manifest, chain, volumeID)
+	if pfErr != nil {
+		return fmt.Errorf("prefetch blobs for %s: %w", volumeID, pfErr)
+	}
+	defer cleanupPrefetch(prefetched)
+
 	var lastReceivedPath string
 	for _, snapHash := range chain {
 		snap := manifest.Snapshots[snapHash]
@@ -818,8 +825,14 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 			if pErr != nil {
 				return fmt.Errorf("ensure parent for snapshot %s: %w", cas.ShortHash(snapHash), pErr)
 			}
-			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath, parentPath); err != nil {
-				return fmt.Errorf("restore snapshot %s: %w", cas.ShortHash(snapHash), err)
+			if localPath, ok := prefetched[snap.Hash]; ok {
+				if err := d.downloadLayerFromLocal(ctx, volumeID, snap.Hash, layerPath, parentPath, localPath); err != nil {
+					return fmt.Errorf("restore snapshot %s: %w", cas.ShortHash(snapHash), err)
+				}
+			} else {
+				if err := d.downloadLayerWithRetry(ctx, volumeID, snap.Hash, layerPath, parentPath); err != nil {
+					return fmt.Errorf("restore snapshot %s: %w", cas.ShortHash(snapHash), err)
+				}
 			}
 		}
 		lastReceivedPath = layerPath
@@ -839,23 +852,15 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		return fmt.Errorf("snapshot to volume %s: %w", volumeID, err)
 	}
 
-	// Clean up intermediate layer snapshots (keep only the latest + latest
-	// consolidation). With the UUID rewriter, parent layers no longer need
-	// to be preserved for UUID matching — any re-received layer will have
-	// its parent UUID rewritten to the local subvolume's native UUID.
+	// Intermediate layers are kept on disk as warm cache. They are small
+	// (incremental diffs, typically KB-low MB) and avoiding re-downloads on
+	// subsequent restores is worth the disk space. Disk-pressure GC handles
+	// cleanup when space is actually needed.
+
 	latestSnap := manifest.Snapshots[manifest.Head]
 	latestConsolHash := ""
 	if consol := manifest.LatestConsolidation(); consol != nil {
 		latestConsolHash = consol.Hash
-	}
-	for _, snapHash := range chain {
-		if snapHash == latestSnap.Hash || snapHash == latestConsolHash {
-			continue // keep these
-		}
-		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snapHash))
-		if d.btrfs.SubvolumeExists(ctx, layerPath) {
-			_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
-		}
 	}
 
 	// Update tracked state. If the volume isn't tracked yet (e.g., just
@@ -913,16 +918,31 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 	tvCopy := *tv
 	d.mu.Unlock()
 
-	if hash, newSnapPath, syncErr := d.syncOne(ctx, &tvCopy, "checkpoint", "pre-restore"); syncErr != nil {
-		klog.Warningf("RestoreToSnapshot: failed to save undo point for %s: %v", volumeID, syncErr)
-	} else {
-		d.mu.Lock()
-		if tv, ok := d.tracked[volumeID]; ok {
-			tv.lastLayerHash = hash
-			tv.lastSnapPath = newSnapPath
-			tv.lastSyncAt = time.Now()
+	// Only save undo point if volume has been modified since last sync.
+	// Skipping this when clean saves 5-15s (btrfs snapshot + send + S3 upload + Hub RPC).
+	needUndo := tvCopy.dirty
+	if !needUndo && tvCopy.lastSnapPath != "" {
+		volGen, volErr := d.btrfs.GetGeneration(ctx, "volumes/"+volumeID)
+		snapGen, snapErr := d.btrfs.GetGeneration(ctx, tvCopy.lastSnapPath)
+		if volErr == nil && snapErr == nil && volGen > snapGen {
+			needUndo = true
 		}
-		d.mu.Unlock()
+	}
+
+	if needUndo {
+		if hash, newSnapPath, syncErr := d.syncOne(ctx, &tvCopy, "checkpoint", "pre-restore"); syncErr != nil {
+			klog.Warningf("RestoreToSnapshot: failed to save undo point for %s: %v", volumeID, syncErr)
+		} else {
+			d.mu.Lock()
+			if tv, ok := d.tracked[volumeID]; ok {
+				tv.lastLayerHash = hash
+				tv.lastSnapPath = newSnapPath
+				tv.lastSyncAt = time.Now()
+			}
+			d.mu.Unlock()
+		}
+	} else {
+		klog.V(2).Infof("RestoreToSnapshot: skipping undo point for %s (volume clean)", volumeID)
 	}
 
 	// Re-read manifest (may have been modified by the undo-point sync above).
@@ -982,8 +1002,15 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		}
 	}
 
-	// Build and replay the restore chain.
+	// Build and replay the restore chain with parallel prefetch.
 	chain := manifest.BuildRestoreChain(targetHash)
+
+	prefetched, pfErr := d.prefetchBlobs(ctx, manifest, chain, volumeID)
+	if pfErr != nil {
+		return fmt.Errorf("prefetch blobs for %s: %w", volumeID, pfErr)
+	}
+	defer cleanupPrefetch(prefetched)
+
 	var lastReceivedPath string
 	for _, snapHash := range chain {
 		snap := manifest.Snapshots[snapHash]
@@ -993,8 +1020,14 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 			if pErr != nil {
 				return fmt.Errorf("ensure parent for snapshot %s: %w", cas.ShortHash(snapHash), pErr)
 			}
-			if err := d.downloadLayer(ctx, volumeID, snap.Hash, layerPath, parentPath); err != nil {
-				return fmt.Errorf("restore snapshot %s: %w", cas.ShortHash(snapHash), err)
+			if localPath, ok := prefetched[snap.Hash]; ok {
+				if err := d.downloadLayerFromLocal(ctx, volumeID, snap.Hash, layerPath, parentPath, localPath); err != nil {
+					return fmt.Errorf("restore snapshot %s: %w", cas.ShortHash(snapHash), err)
+				}
+			} else {
+				if err := d.downloadLayerWithRetry(ctx, volumeID, snap.Hash, layerPath, parentPath); err != nil {
+					return fmt.Errorf("restore snapshot %s: %w", cas.ShortHash(snapHash), err)
+				}
 			}
 		}
 		lastReceivedPath = layerPath
@@ -1029,19 +1062,8 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		latestConsolHash = consol.Hash
 	}
 
-	// Clean up intermediate layers. With the UUID rewriter, parent layers no
-	// longer need to be preserved for UUID matching — any re-received layer
-	// will have its parent UUID rewritten to the local subvolume's native UUID.
-	// Keep only the restore target and latest consolidation.
-	for _, snapHash := range chain {
-		if snapHash == targetHash || snapHash == latestConsolHash {
-			continue
-		}
-		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snapHash))
-		if d.btrfs.SubvolumeExists(ctx, layerPath) {
-			_ = d.btrfs.DeleteSubvolume(ctx, layerPath)
-		}
-	}
+	// Intermediate layers are kept on disk as warm cache — avoiding
+	// re-downloads on subsequent restores is worth the disk space.
 
 	// Update tracked state.
 	d.mu.Lock()
@@ -1370,7 +1392,7 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 	closeErr := stallR.Close()
 	if err != nil {
 		if cause := context.Cause(stallCtx); cause != nil {
-			err = fmt.Errorf("%w (cause: %v)", err, cause)
+			err = errors.Join(err, cause)
 		}
 		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 		return "", "", fmt.Errorf("put blob: %w", err)
@@ -1507,7 +1529,7 @@ func (d *Daemon) recoverParentFromCAS(ctx context.Context, tv *trackedVolume, ta
 	}
 
 	klog.Infof("recoverParentFromCAS: downloading %s for volume %s", cas.ShortHash(hash), tv.volumeID)
-	return d.downloadLayer(ctx, tv.volumeID, hash, targetPath, grandparentPath)
+	return d.downloadLayerWithRetry(ctx, tv.volumeID, hash, targetPath, grandparentPath)
 }
 
 // ensureParentLayer ensures the parent subvolume for the given snapshot hash
@@ -1560,7 +1582,7 @@ func (d *Daemon) ensureParentLayer(ctx context.Context, manifest *cas.Manifest, 
 	klog.Infof("ensureParentLayer: downloading missing parent %s for snapshot %s of volume %s",
 		cas.ShortHash(snap.Parent), cas.ShortHash(snapHash), volumeID)
 
-	if err := d.downloadLayer(ctx, volumeID, snap.Parent, parentPath, grandparentPath); err != nil {
+	if err := d.downloadLayerWithRetry(ctx, volumeID, snap.Parent, parentPath, grandparentPath); err != nil {
 		return "", fmt.Errorf("download missing parent %s: %w", cas.ShortHash(snap.Parent), err)
 	}
 
@@ -1612,13 +1634,254 @@ func (d *Daemon) downloadLayer(ctx context.Context, volumeID, blobHash, targetPa
 			_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 		}
 		if cause := context.Cause(stallCtx); cause != nil {
-			err = fmt.Errorf("%w (cause: %v)", err, cause)
+			return fmt.Errorf("btrfs receive blob %s: %w", blobHash, errors.Join(err, cause))
 		}
 		return fmt.Errorf("btrfs receive blob %s: %w", blobHash, err)
 	}
 	stallR.Close()
 
 	// Rename received subvolume to content-addressed name.
+	if d.btrfs.SubvolumeExists(ctx, pendingPath) {
+		if d.btrfs.SubvolumeExists(ctx, targetPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, targetPath)
+		}
+		if err := d.btrfs.RenameSubvolume(ctx, pendingPath, targetPath); err != nil {
+			return fmt.Errorf("rename layer to %s: %w", targetPath, err)
+		}
+	}
+	return nil
+}
+
+// maxLayerRetries is the number of attempts for downloading a single layer
+// before giving up. Retries are only attempted for transient errors (stalls,
+// connection resets, timeouts).
+const maxLayerRetries = 3
+
+// downloadLayerWithRetry wraps downloadLayer with per-layer retry logic.
+// When a stall or transient error occurs, only the failed layer is retried —
+// not the entire restore chain. The existing downloadLayer already cleans up
+// partial @pending subvolumes, making retries idempotent.
+func (d *Daemon) downloadLayerWithRetry(ctx context.Context, volumeID, blobHash, targetPath, parentSubvolPath string) error {
+	var lastErr error
+	for attempt := range maxLayerRetries {
+		if attempt > 0 {
+			klog.Warningf("downloadLayer %s attempt %d/%d (previous: %v)",
+				cas.ShortHash(blobHash), attempt+1, maxLayerRetries, lastErr)
+		}
+		err := d.downloadLayer(ctx, volumeID, blobHash, targetPath, parentSubvolPath)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		// Parent context cancelled — don't retry.
+		if ctx.Err() != nil {
+			return err
+		}
+		if !isRetryableError(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("download layer %s failed after %d attempts: %w",
+		cas.ShortHash(blobHash), maxLayerRetries, lastErr)
+}
+
+// isRetryableError returns true for transient errors that warrant a retry.
+// Uses errors.Is and syscall error checks — no string matching.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Stall detection (our own sentinel).
+	if errors.Is(err, ioutil.ErrStall) {
+		return true
+	}
+
+	// Context deadline exceeded (gRPC timeout, S3 timeout).
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	// Unexpected EOF (connection dropped mid-stream).
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+
+	// Syscall-level transient errors (connection reset, broken pipe, refused).
+	var syscallErr *os.SyscallError
+	if errors.As(err, &syscallErr) {
+		switch syscallErr.Err {
+		case syscall.ECONNRESET, syscall.ECONNREFUSED, syscall.EPIPE, syscall.ETIMEDOUT:
+			return true
+		}
+	}
+
+	// net.OpError wraps transient network failures.
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return netErr.Temporary() || netErr.Timeout()
+	}
+
+	return false
+}
+
+// maxPrefetchWorkers is the concurrency limit for parallel blob prefetch.
+const maxPrefetchWorkers = 4
+
+// prefetchBlobs downloads chain blobs concurrently to local temp files.
+// Returns a map[blobHash] → *os.File (open for reading). The caller must
+// close and remove all files when done (use cleanupPrefetch).
+// Only blobs for layers not already on disk are prefetched.
+func (d *Daemon) prefetchBlobs(ctx context.Context, manifest *cas.Manifest, chain []string, volumeID string) (map[string]string, error) {
+	// Collect blobs that need downloading (skip layers already on disk).
+	var needed []string
+	for _, snapHash := range chain {
+		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snapHash))
+		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
+			snap := manifest.Snapshots[snapHash]
+			needed = append(needed, snap.Hash)
+		}
+	}
+
+	if len(needed) == 0 {
+		return nil, nil
+	}
+
+	klog.V(2).Infof("prefetchBlobs: %d blobs to download for volume %s", len(needed), volumeID)
+
+	result := make(map[string]string, len(needed))
+	var mu sync.Mutex
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxPrefetchWorkers)
+
+	for _, blobHash := range needed {
+		g.Go(func() error {
+			tmpFile, err := os.CreateTemp("", "prefetch-*.blob")
+			if err != nil {
+				return fmt.Errorf("create temp file for blob %s: %w", cas.ShortHash(blobHash), err)
+			}
+			tmpPath := tmpFile.Name()
+
+			// Download with retry on stall.
+			var lastErr error
+			for attempt := range maxLayerRetries {
+				if attempt > 0 {
+					klog.Warningf("prefetch blob %s attempt %d/%d (previous: %v)",
+						cas.ShortHash(blobHash), attempt+1, maxLayerRetries, lastErr)
+					// Reset file for retry.
+					if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+						break
+					}
+					if err := tmpFile.Truncate(0); err != nil {
+						break
+					}
+				}
+
+				reader, err := d.cas.GetBlob(gctx, blobHash)
+				if err != nil {
+					lastErr = fmt.Errorf("download blob %s: %w", cas.ShortHash(blobHash), err)
+					if gctx.Err() != nil || !isRetryableError(lastErr) {
+						break
+					}
+					continue
+				}
+
+				stallCtx, stallCancel := context.WithCancelCause(gctx)
+				stallR := ioutil.NewStallReader(reader, stallCtx, stallCancel, ioutil.StallTimeout)
+
+				_, copyErr := io.Copy(tmpFile, stallR)
+				stallR.Close()
+				stallCancel(nil) // prevent context leak
+
+				if copyErr != nil {
+					lastErr = fmt.Errorf("prefetch blob %s: %w", cas.ShortHash(blobHash), copyErr)
+					if gctx.Err() != nil || !isRetryableError(lastErr) {
+						break
+					}
+					continue
+				}
+
+				// Success — rewind file for reading.
+				if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+					tmpFile.Close()
+					os.Remove(tmpPath)
+					return fmt.Errorf("rewind prefetched blob %s: %w", cas.ShortHash(blobHash), err)
+				}
+				tmpFile.Close()
+
+				mu.Lock()
+				result[blobHash] = tmpPath
+				mu.Unlock()
+
+				klog.V(3).Infof("prefetched blob %s → %s", cas.ShortHash(blobHash), tmpPath)
+				return nil
+			}
+
+			// All retries exhausted.
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			if lastErr != nil {
+				return lastErr
+			}
+			return fmt.Errorf("prefetch blob %s: all retries exhausted", cas.ShortHash(blobHash))
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		// Clean up any successfully prefetched files on failure.
+		mu.Lock()
+		for _, path := range result {
+			os.Remove(path)
+		}
+		mu.Unlock()
+		return nil, fmt.Errorf("prefetch blobs: %w", err)
+	}
+
+	return result, nil
+}
+
+// cleanupPrefetch removes all temp files from a prefetch map.
+func cleanupPrefetch(prefetched map[string]string) {
+	for _, path := range prefetched {
+		os.Remove(path)
+	}
+}
+
+// downloadLayerFromLocal is like downloadLayer but reads the blob from a local
+// file instead of S3. Used after prefetchBlobs to apply pre-downloaded blobs.
+func (d *Daemon) downloadLayerFromLocal(ctx context.Context, volumeID, blobHash, targetPath, parentSubvolPath, localPath string) error {
+	pendingPath := fmt.Sprintf("layers/%s@pending", volumeID)
+
+	if d.btrfs.SubvolumeExists(ctx, pendingPath) {
+		if err := d.btrfs.DeleteSubvolume(ctx, pendingPath); err != nil {
+			klog.Warningf("stale pending snapshot %q undeletable, using unique suffix: %v", pendingPath, err)
+			pendingPath = fmt.Sprintf("layers/%s@pending-%d", volumeID, time.Now().UnixNano())
+		}
+	}
+
+	file, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open prefetched blob %s: %w", cas.ShortHash(blobHash), err)
+	}
+	defer file.Close()
+
+	var recvReader io.Reader = file
+	if parentSubvolPath != "" {
+		parentID, idErr := d.btrfs.GetSubvolumeIdentity(ctx, parentSubvolPath)
+		if idErr != nil {
+			return fmt.Errorf("get parent identity %s: %w", parentSubvolPath, idErr)
+		}
+		recvReader = btrfs.RewriteParentUUID(file, parentID)
+	}
+
+	if err := d.btrfs.Receive(ctx, "layers", recvReader); err != nil {
+		if d.btrfs.SubvolumeExists(ctx, pendingPath) {
+			_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		}
+		return fmt.Errorf("btrfs receive blob %s: %w", blobHash, err)
+	}
+
 	if d.btrfs.SubvolumeExists(ctx, pendingPath) {
 		if d.btrfs.SubvolumeExists(ctx, targetPath) {
 			_ = d.btrfs.DeleteSubvolume(ctx, targetPath)
