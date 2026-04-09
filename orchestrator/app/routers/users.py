@@ -65,9 +65,21 @@ async def get_user_preferences(
     current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
 ):
     """Get user preferences including diagram generation model, theme, and chat position."""
+    # Use the active team's theme if available, falling back to user's theme
+    theme = current_user.theme_preset or "default-dark"
+    if current_user.default_team_id:
+        from ..models_team import Team
+
+        team_result = await db.execute(
+            select(Team).where(Team.id == current_user.default_team_id)
+        )
+        team = team_result.scalar_one_or_none()
+        if team and team.theme_preset:
+            theme = team.theme_preset
+
     return UserPreferencesResponse(
         diagram_model=current_user.diagram_model,
-        theme_preset=current_user.theme_preset or "default-dark",
+        theme_preset=theme,
         chat_position=current_user.chat_position or "center",
     )
 
