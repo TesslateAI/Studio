@@ -1290,6 +1290,9 @@ class UserAPIKey(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     provider = Column(String, nullable=False)  # openrouter, anthropic, openai, google, github, etc.
     auth_type = Column(
         String, nullable=False, default="api_key"
@@ -1319,6 +1322,9 @@ class UserCustomModel(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     model_id = Column(String, nullable=False)  # e.g., "openrouter/model-name"
     model_name = Column(String, nullable=False)  # Display name
     provider = Column(String, nullable=False, default="openrouter")
@@ -1344,6 +1350,9 @@ class UserProvider(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id = Column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Provider identification
     name = Column(String, nullable=False)  # Display name (e.g., "My Local LLM")
@@ -1365,8 +1374,8 @@ class UserProvider(Base):
     # Relationships
     user = relationship("User", back_populates="custom_providers")
 
-    # Unique constraint: each user can only have one provider with a given slug
-    __table_args__ = (UniqueConstraint("user_id", "slug", name="uq_user_provider_slug"),)
+    # Unique constraint: each team can only have one provider with a given slug
+    __table_args__ = (UniqueConstraint("user_id", "slug", "team_id", name="uq_user_provider_slug_team"),)
 
 
 # ============================================================================
