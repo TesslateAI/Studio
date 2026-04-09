@@ -1362,7 +1362,12 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 	stallR := ioutil.NewStallReader(sendReader, stallCtx, stallCancel, ioutil.StallTimeout)
 
 	hash, err := d.cas.PutBlob(stallCtx, stallR)
-	stallR.Close()
+	// Close the stall reader AND the underlying btrfs send process.
+	// cmdReadCloser.Close() waits for btrfs send to exit and returns its
+	// error. If btrfs send failed (e.g., parent deleted mid-send), PutBlob
+	// may have read 0 bytes and returned an empty hash without error —
+	// the send failure only surfaces here.
+	closeErr := stallR.Close()
 	if err != nil {
 		if cause := context.Cause(stallCtx); cause != nil {
 			err = fmt.Errorf("%w (cause: %v)", err, cause)
@@ -1370,13 +1375,20 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
 		return "", "", fmt.Errorf("put blob: %w", err)
 	}
+	if closeErr != nil {
+		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+		return "", "", fmt.Errorf("btrfs send exited with error (blob %s discarded): %w", cas.ShortHash(hash), closeErr)
+	}
 
-	// Skip empty blobs — btrfs send produces zero bytes when the snapshot
-	// is identical to its parent (volume wasn't actually modified).
+	// Defense-in-depth: skip empty blobs. A valid btrfs send always
+	// produces at least a stream header + SNAPSHOT command. An empty
+	// hash means btrfs send wrote nothing (should be caught by closeErr
+	// above, but guard against edge cases).
 	const emptyBlobHash = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	if hash == emptyBlobHash {
 		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
-		klog.V(2).Infof("syncOne %s: skipping empty blob (volume unchanged since parent)", tv.volumeID)
+		klog.Warningf("syncOne %s: btrfs send produced empty stream (parent=%s), skipping",
+			tv.volumeID, cas.ShortHash(parentHash))
 		return "", "", nil
 	}
 
