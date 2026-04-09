@@ -144,10 +144,13 @@ async def get_available_models(
         if model.get("id")
     ]
 
-    # Check which providers the user has API keys for
-    user_keys_query = select(UserAPIKey).where(
-        UserAPIKey.user_id == current_user.id, UserAPIKey.is_active
+    # Check which providers the user/team has API keys for
+    _key_filter = (
+        UserAPIKey.team_id == current_user.default_team_id
+        if current_user.default_team_id
+        else UserAPIKey.user_id == current_user.id
     )
+    user_keys_query = select(UserAPIKey).where(_key_filter, UserAPIKey.is_active)
     result = await db.execute(user_keys_query)
     user_keys = result.scalars().all()
 
@@ -262,8 +265,16 @@ async def get_available_models(
     # Combine all model sources
     all_models = system_models + provider_models + custom_models_data
 
-    # Add disabled flag based on user preferences
-    disabled_set = set(current_user.disabled_models or [])
+    # Add disabled flag based on team preferences (fallback to user)
+    _disabled_source = current_user.disabled_models or []
+    if current_user.default_team_id:
+        from ..models_team import Team as _Team
+
+        _team_res = await db.execute(select(_Team).where(_Team.id == current_user.default_team_id))
+        _team_obj = _team_res.scalar_one_or_none()
+        if _team_obj and _team_obj.disabled_models is not None:
+            _disabled_source = _team_obj.disabled_models
+    disabled_set = set(_disabled_source)
     for model in all_models:
         model["disabled"] = model["id"] in disabled_set
 
