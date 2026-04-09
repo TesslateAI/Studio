@@ -213,11 +213,27 @@ func (d *Driver) runNode(ctx context.Context) error {
 
 	// Start sync daemon if CAS store is available.
 	if d.casStore != nil {
-		d.syncer = bsync.NewDaemonWithConfig(d.btrfs, d.casStore, d.tmplMgr, bsync.DaemonConfig{
+		cfg := bsync.DaemonConfig{
 			SafetyInterval:         d.syncInterval,
 			ConsolidationInterval:  d.consolidationInterval,
 			ConsolidationRetention: d.consolidationRetention,
-		})
+		}
+		// Hub client for manifest writes (single-writer model).
+		// "all" mode: Hub runs in-process → use direct CAS adapter.
+		// "node" mode: Hub is a separate pod → use gRPC client.
+		if d.mode == ModeAll {
+			cfg.Hub = bsync.NewLocalHubOps(d.casStore)
+			klog.Info("Sync daemon: using local Hub (all mode)")
+		} else if d.hubAddress != "" {
+			hubClient, err := volumehub.NewHubClient(d.hubAddress)
+			if err != nil {
+				klog.Errorf("Failed to create Hub client at %s: %v", d.hubAddress, err)
+			} else {
+				cfg.Hub = hubClient
+				klog.Infof("Sync daemon: using remote Hub at %s", d.hubAddress)
+			}
+		}
+		d.syncer = bsync.NewDaemonWithConfig(d.btrfs, d.casStore, d.tmplMgr, cfg)
 		go d.syncer.Start(ctx)
 		klog.Info("Sync daemon started (CAS mode)")
 	}

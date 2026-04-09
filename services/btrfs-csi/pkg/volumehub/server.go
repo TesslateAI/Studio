@@ -71,6 +71,10 @@ type Server struct {
 	mu       sync.Mutex
 	inflight map[string]*inflightRestore
 
+	// Per-volume write locks for manifest mutations (AppendSnapshot, SetManifestHead).
+	volMu    sync.Mutex
+	volLocks map[string]*sync.Mutex
+
 	// registryWarmed is set after the first successful RebuildRegistry.
 	// RPCs that hit an empty owner use this to decide whether to attempt
 	// a rebuild before returning NOT_FOUND.
@@ -87,6 +91,7 @@ func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClien
 		liveNodes:   liveNodes,
 		resWatcher:  resWatcher,
 		inflight:    make(map[string]*inflightRestore),
+		volLocks:    make(map[string]*sync.Mutex),
 	}
 }
 
@@ -335,6 +340,10 @@ func registerVolumeHubServer(srv *grpc.Server, s *Server) {
 			{MethodName: "ResolveVolume", Handler: s.handleResolveVolume},
 			{MethodName: "TransferOwnership", Handler: s.handleTransferOwnership},
 			{MethodName: "ForkVolume", Handler: s.handleForkVolume},
+			{MethodName: "AppendSnapshot", Handler: s.handleAppendSnapshot},
+			{MethodName: "SetManifestHead", Handler: s.handleSetManifestHead},
+			{MethodName: "DeleteVolumeManifest", Handler: s.handleDeleteVolumeManifest},
+			{MethodName: "DeleteTombstone", Handler: s.handleDeleteTombstoneRPC},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -1392,6 +1401,115 @@ func (s *Server) ForkVolumeOnNode(ctx context.Context, sourceVolumeID string) (s
 
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+// manifestLock returns a per-volume mutex for serializing manifest writes.
+func (s *Server) manifestLock(volumeID string) *sync.Mutex {
+	s.volMu.Lock()
+	defer s.volMu.Unlock()
+	mu, ok := s.volLocks[volumeID]
+	if !ok {
+		mu = &sync.Mutex{}
+		s.volLocks[volumeID] = mu
+	}
+	return mu
+}
+
+// ---------------------------------------------------------------------------
+// Manifest-write RPCs (Hub = single writer for all coordination state)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleAppendSnapshot(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req AppendSnapshotRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Snapshot.Hash == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and snapshot.hash are required")
+	}
+	if s.cas == nil {
+		return nil, status.Error(codes.FailedPrecondition, "CAS store not configured")
+	}
+
+	vl := s.manifestLock(req.VolumeID)
+	vl.Lock()
+	defer vl.Unlock()
+
+	manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
+	if err != nil {
+		manifest = &cas.Manifest{VolumeID: req.VolumeID, Snapshots: make(map[string]cas.Snapshot)}
+	}
+	manifest.AppendSnapshot(req.Snapshot)
+	if err := s.cas.PutManifest(ctx, manifest); err != nil {
+		return nil, status.Errorf(codes.Internal, "put manifest: %v", err)
+	}
+	return &AppendSnapshotResponse{Head: manifest.Head}, nil
+}
+
+func (s *Server) handleSetManifestHead(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req SetManifestHeadRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.TargetHash == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and target_hash are required")
+	}
+	if s.cas == nil {
+		return nil, status.Error(codes.FailedPrecondition, "CAS store not configured")
+	}
+
+	vl := s.manifestLock(req.VolumeID)
+	vl.Lock()
+	defer vl.Unlock()
+
+	manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "manifest for %s: %v", req.VolumeID, err)
+	}
+	branchSaved := false
+	if req.SaveBranchName != "" && manifest.Head != "" && manifest.Head != req.TargetHash {
+		manifest.SaveBranch(req.SaveBranchName, manifest.Head)
+		branchSaved = true
+	}
+	manifest.SetHead(req.TargetHash)
+	if err := s.cas.PutManifest(ctx, manifest); err != nil {
+		return nil, status.Errorf(codes.Internal, "put manifest: %v", err)
+	}
+	return &SetManifestHeadResponse{Head: manifest.Head, BranchSaved: branchSaved}, nil
+}
+
+func (s *Server) handleDeleteVolumeManifest(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req DeleteVolumeManifestRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if s.cas == nil {
+		return nil, status.Error(codes.FailedPrecondition, "CAS store not configured")
+	}
+	if err := s.cas.DeleteManifest(ctx, req.VolumeID); err != nil {
+		return nil, status.Errorf(codes.Internal, "delete manifest: %v", err)
+	}
+	return &Empty{}, nil
+}
+
+func (s *Server) handleDeleteTombstoneRPC(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req DeleteTombstoneRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if s.cas == nil {
+		return nil, status.Error(codes.FailedPrecondition, "CAS store not configured")
+	}
+	if err := s.cas.DeleteTombstone(ctx, req.VolumeID); err != nil {
+		return nil, status.Errorf(codes.Internal, "delete tombstone: %v", err)
+	}
+	return &Empty{}, nil
+}
 
 // generateVolumeID creates a volume ID in the format "vol-{12 hex chars}".
 func generateVolumeID() (string, error) {

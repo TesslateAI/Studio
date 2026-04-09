@@ -236,29 +236,8 @@ func (f *fakeCAS) GetManifest(_ context.Context, volumeID string) (*cas.Manifest
 	return m, nil
 }
 
-func (f *fakeCAS) PutManifest(_ context.Context, m *cas.Manifest) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.manifests[m.VolumeID] = m
-	return nil
-}
-
-func (f *fakeCAS) DeleteManifest(_ context.Context, volumeID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.manifests, volumeID)
-	return nil
-}
-
 func (f *fakeCAS) CleanupStaging(_ context.Context) (int, error) {
 	return 0, nil
-}
-
-func (f *fakeCAS) PutTombstone(_ context.Context, volumeID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.tombstones[volumeID] = true
-	return nil
 }
 
 func (f *fakeCAS) HasTombstone(_ context.Context, volumeID string) (bool, error) {
@@ -267,10 +246,66 @@ func (f *fakeCAS) HasTombstone(_ context.Context, volumeID string) (bool, error)
 	return f.tombstones[volumeID], nil
 }
 
-func (f *fakeCAS) DeleteTombstone(_ context.Context, volumeID string) error {
+// ---------------------------------------------------------------------------
+// Fake HubOps
+// ---------------------------------------------------------------------------
+
+type fakeHub struct {
+	mu  stdsync.Mutex
+	cas *fakeCAS // shared manifest storage
+}
+
+func newFakeHub(fc *fakeCAS) *fakeHub {
+	return &fakeHub{cas: fc}
+}
+
+func (f *fakeHub) AppendSnapshot(_ context.Context, volumeID string, snap cas.Snapshot) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.tombstones, volumeID)
+	f.cas.mu.Lock()
+	defer f.cas.mu.Unlock()
+	m, ok := f.cas.manifests[volumeID]
+	if !ok {
+		m = &cas.Manifest{VolumeID: volumeID, Snapshots: make(map[string]cas.Snapshot)}
+		f.cas.manifests[volumeID] = m
+	}
+	m.AppendSnapshot(snap)
+	return m.Head, nil
+}
+
+func (f *fakeHub) SetManifestHead(_ context.Context, volumeID, targetHash, saveBranchName string) (string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cas.mu.Lock()
+	defer f.cas.mu.Unlock()
+	m, ok := f.cas.manifests[volumeID]
+	if !ok {
+		return "", false, fmt.Errorf("manifest %s not found", volumeID)
+	}
+	branchSaved := false
+	if saveBranchName != "" && m.Head != "" && m.Head != targetHash {
+		m.SaveBranch(saveBranchName, m.Head)
+		branchSaved = true
+	}
+	m.SetHead(targetHash)
+	return m.Head, branchSaved, nil
+}
+
+func (f *fakeHub) DeleteVolumeManifest(_ context.Context, volumeID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cas.mu.Lock()
+	defer f.cas.mu.Unlock()
+	delete(f.cas.manifests, volumeID)
+	return nil
+}
+
+func (f *fakeHub) DeleteTombstone(_ context.Context, volumeID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cas.mu.Lock()
+	defer f.cas.mu.Unlock()
+	delete(f.cas.tombstones, volumeID)
 	return nil
 }
 
@@ -310,8 +345,8 @@ func (f *fakeTemplate) EnsureTemplateByHash(_ context.Context, name, _ string) e
 // ---------------------------------------------------------------------------
 
 func setupDaemon(fb *fakeBtrfs, fc *fakeCAS, ft *fakeTemplate) *Daemon {
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
-	return d
+	fh := newFakeHub(fc)
+	return newDaemonWithInterfaces(fb, fc, fh, ft, 1*time.Hour)
 }
 
 // ---------------------------------------------------------------------------
@@ -704,7 +739,7 @@ func TestDrainAll_Parallel_FasterThanSerial(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := &slowFakeCAS{fakeCAS: newFakeCAS(), delay: 50 * time.Millisecond}
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc.fakeCAS), ft, 1*time.Hour)
 
 	numVols := 6
 	for i := 0; i < numVols; i++ {
@@ -743,7 +778,7 @@ func TestDrainAll_ParallelOnlyDirty(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	// 3 clean + 2 dirty
 	for i := 0; i < 5; i++ {
@@ -780,7 +815,7 @@ func TestSyncAll_LocksPerVolume(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	volID := "vol-locktest"
 	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
@@ -814,7 +849,7 @@ func TestSyncAll_PromotesDirtyViaGeneration(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	volID := "vol-direct-write"
 	fb.subvolumes["volumes/"+volID] = true
@@ -879,7 +914,7 @@ func TestSyncOne_StallDetection(t *testing.T) {
 	fb := &stallingBtrfs{fakeBtrfs: newFakeBtrfs()}
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	volID := "vol-stall"
 	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
@@ -915,7 +950,7 @@ func TestDiscoverVolumes_CleanViaGeneration(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	// Simulate a volume and its layer snapshot on disk (left by previous pod's drain).
 	fb.subvolumes["volumes/vol-clean"] = true
@@ -956,7 +991,7 @@ func TestDiscoverVolumes_DirtyViaGeneration(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	// Volume modified after snapshot — generation is higher.
 	fb.subvolumes["volumes/vol-dirty"] = true
@@ -982,7 +1017,7 @@ func TestDiscoverVolumes_DirtyNoSnapshot(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	// Volume exists but no layer snapshot — must be dirty.
 	fb.subvolumes["volumes/vol-new"] = true
@@ -1006,7 +1041,7 @@ func TestDrainAll_PreservesLayerSnapshots(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	volID := "vol-drain-keep"
 	fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
@@ -1058,7 +1093,7 @@ func TestDiscoverVolumes_MixedCleanAndDirty(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 
 	// 3 clean volumes, 2 dirty, 1 new (no snapshot).
 	for i := 0; i < 3; i++ {
@@ -1282,7 +1317,7 @@ func TestSyncAll_PeriodicDiscovery(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 15*time.Second)
 
 	ctx := context.Background()
 
@@ -1324,7 +1359,7 @@ func TestDrainAll_DiscoverBeforeSnapshot(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 15*time.Second)
 
 	// Put a volume on "disk" that isn't tracked.
 	fb.mu.Lock()
@@ -1357,7 +1392,7 @@ func TestDrainAll_DiscoverBeforeSnapshot(t *testing.T) {
 
 // TestCleanupStaging_NilCAS verifies cleanupStaging is a no-op with nil CAS.
 func TestCleanupStaging_NilCAS(t *testing.T) {
-	d := newDaemonWithInterfaces(newFakeBtrfs(), nil, nil, 15*time.Second)
+	d := newDaemonWithInterfaces(newFakeBtrfs(), nil, nil, nil, 15*time.Second)
 	// Should not panic.
 	d.cleanupStaging(context.Background())
 }
@@ -1372,7 +1407,7 @@ func TestUntrackVolume_WaitsForInflightSync(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 15*time.Second)
 
 	volID := "vol-concurrent"
 	fb.mu.Lock()
@@ -1424,7 +1459,7 @@ func TestDiscoverVolumes_SkipsTombstoned(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 15*time.Second)
 
 	// Volume exists on disk.
 	fb.mu.Lock()
@@ -1479,7 +1514,7 @@ func TestDiscoverVolumes_TombstonedAndNormal(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 15*time.Second)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 15*time.Second)
 
 	// Normal volume on disk.
 	fb.mu.Lock()
@@ -1563,7 +1598,7 @@ func TestSyncOne_ConsolidationAtInterval(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 	d.consolidationInterval = 3 // consolidate every 3 snapshots
 	d.consolidationRetention = 10
 
@@ -1632,7 +1667,7 @@ func TestSyncOne_ConsolidationBlobsKept(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 	d.consolidationInterval = 2
 	d.consolidationRetention = 2 // retention is set but pruning is a no-op
 
@@ -1714,7 +1749,7 @@ func TestSyncOne_ConsolidationSnapPath(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 	d.consolidationInterval = 1 // every snapshot is a consolidation
 
 	volID := "vol-path"
@@ -1842,7 +1877,7 @@ func TestSyncOne_IncrementalKeepsConsolidationOnDisk(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
 	ft := newFakeTemplate()
-	d := newDaemonWithInterfaces(fb, fc, ft, 1*time.Hour)
+	d := newDaemonWithInterfaces(fb, fc, newFakeHub(fc), ft, 1*time.Hour)
 	d.consolidationInterval = 100 // won't trigger
 
 	volID := "vol-keep-consol"

@@ -49,6 +49,7 @@ const discoverInterval = 5
 type Daemon struct {
 	btrfs    btrfsOps
 	cas      casOps
+	hub      HubOps // Hub client for manifest writes (single-writer model)
 	tmplMgr  templateOps
 	interval time.Duration // safety-net periodic sync interval
 	mu       sync.Mutex
@@ -78,6 +79,12 @@ type DaemonConfig struct {
 	// ConsolidationRetention is the number of consolidation blobs to keep.
 	// Older consolidations have their blobs pruned from CAS. 0 = keep all.
 	ConsolidationRetention int
+
+	// Hub is the HubOps implementation for manifest writes (single-writer model).
+	// In node mode: volumehub.NewHubClient (gRPC to Hub pod).
+	// In all mode: NewLocalHubOps (direct CAS writes, same process).
+	// Created by the driver, not the daemon.
+	Hub HubOps
 }
 
 // DefaultDaemonConfig returns sensible defaults for production.
@@ -112,6 +119,9 @@ func NewDaemonWithConfig(bm *btrfs.Manager, casStore *cas.Store, tmplMgr *templa
 	if casStore != nil {
 		d.cas = casStore
 	}
+	if cfg.Hub != nil {
+		d.hub = cfg.Hub
+	}
 	if tmplMgr != nil {
 		d.tmplMgr = tmplMgr
 	}
@@ -120,10 +130,11 @@ func NewDaemonWithConfig(bm *btrfs.Manager, casStore *cas.Store, tmplMgr *templa
 
 // newDaemonWithInterfaces creates a Daemon with pre-built interface
 // implementations. Used by tests to inject fakes.
-func newDaemonWithInterfaces(b btrfsOps, c casOps, t templateOps, interval time.Duration) *Daemon {
+func newDaemonWithInterfaces(b btrfsOps, c casOps, h HubOps, t templateOps, interval time.Duration) *Daemon {
 	return &Daemon{
 		btrfs:                  b,
 		cas:                    c,
+		hub:                    h,
 		tmplMgr:                t,
 		interval:               interval,
 		consolidationInterval:  50,
@@ -292,8 +303,10 @@ func (d *Daemon) discoverVolumes(ctx context.Context) {
 			_ = d.btrfs.DeleteSubvolume(cleanupCtx, synthPath)
 		}
 		// Remove the tombstone now that local cleanup is done.
-		if err := d.cas.DeleteTombstone(cleanupCtx, vid); err != nil {
-			klog.Warningf("discoverVolumes: failed to remove tombstone for %s: %v", vid, err)
+		if d.hub != nil {
+			if err := d.hub.DeleteTombstone(cleanupCtx, vid); err != nil {
+				klog.Warningf("discoverVolumes: failed to remove tombstone for %s: %v", vid, err)
+			}
 		}
 		cancel()
 	}
@@ -936,12 +949,15 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 			return fmt.Errorf("snapshot template to volume: %w", err)
 		}
 		// Save old HEAD as a branch before moving (like git auto-stash).
+		branchName := ""
 		if manifest.Head != "" && manifest.Head != targetHash {
-			branchName := fmt.Sprintf("pre-restore-%s", time.Now().UTC().Format("20060102-150405"))
-			manifest.SaveBranch(branchName, manifest.Head)
+			branchName = fmt.Sprintf("pre-restore-%s", time.Now().UTC().Format("20060102-150405"))
 		}
-		manifest.SetHead(targetHash)
-		_ = d.cas.PutManifest(ctx, manifest)
+		if d.hub != nil {
+			if _, _, err := d.hub.SetManifestHead(ctx, volumeID, targetHash, branchName); err != nil {
+				klog.Warningf("RestoreToSnapshot: hub SetManifestHead: %v", err)
+			}
+		}
 
 		d.mu.Lock()
 		if tv, ok := d.tracked[volumeID]; ok {
@@ -998,13 +1014,14 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 
 	// Move HEAD to target (like git checkout). Save old HEAD as a branch
 	// so the timeline is preserved and can be restored later.
+	branchName := ""
 	if manifest.Head != "" && manifest.Head != targetHash {
-		branchName := fmt.Sprintf("pre-restore-%s", time.Now().UTC().Format("20060102-150405"))
-		manifest.SaveBranch(branchName, manifest.Head)
+		branchName = fmt.Sprintf("pre-restore-%s", time.Now().UTC().Format("20060102-150405"))
 	}
-	manifest.SetHead(targetHash)
-	if err := d.cas.PutManifest(ctx, manifest); err != nil {
-		return fmt.Errorf("save manifest: %w", err)
+	if d.hub != nil {
+		if _, _, err := d.hub.SetManifestHead(ctx, volumeID, targetHash, branchName); err != nil {
+			return fmt.Errorf("hub set manifest head: %w", err)
+		}
 	}
 
 	latestConsolHash := ""
@@ -1046,9 +1063,11 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 // DeleteVolume cleans up the manifest and local layer snapshots for a volume.
 // Blob cleanup happens via GC (blobs may be shared across volumes).
 func (d *Daemon) DeleteVolume(ctx context.Context, volumeID string) error {
-	// Delete manifest from CAS.
-	if err := d.cas.DeleteManifest(ctx, volumeID); err != nil {
-		klog.Warningf("DeleteVolume: failed to delete manifest for %s: %v", volumeID, err)
+	// Delete manifest via Hub.
+	if d.hub != nil {
+		if err := d.hub.DeleteVolumeManifest(ctx, volumeID); err != nil {
+			klog.Warningf("DeleteVolume: hub delete manifest for %s: %v", volumeID, err)
+		}
 	}
 
 	// Delete all local layer snapshots for this volume.
@@ -1352,19 +1371,24 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 		return "", "", fmt.Errorf("put blob: %w", err)
 	}
 
-	// 4. Update manifest with new snapshot.
-	manifest.AppendSnapshot(cas.Snapshot{
+	// 4. Update manifest with new snapshot via Hub.
+	snapshot := cas.Snapshot{
 		Hash:          hash,
 		Parent:        parentHash,
 		Role:          role,
 		Label:         label,
 		Consolidation: isConsolidation,
 		TS:            time.Now().UTC().Format(time.RFC3339),
-	})
+	}
 
-	if err := d.cas.PutManifest(ctx, manifest); err != nil {
-		_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
-		return "", "", fmt.Errorf("put manifest: %w", err)
+	if d.hub != nil {
+		if _, hubErr := d.hub.AppendSnapshot(ctx, tv.volumeID, snapshot); hubErr != nil {
+			_ = d.btrfs.DeleteSubvolume(ctx, pendingPath)
+			return "", "", fmt.Errorf("hub append snapshot: %w", hubErr)
+		}
+	} else {
+		// Fallback: no Hub configured (should not happen in production).
+		klog.Warningf("syncOne %s: no Hub configured, snapshot %s not recorded in manifest", tv.volumeID, cas.ShortHash(hash))
 	}
 
 	// 5. Rotate layer snapshots on disk.
