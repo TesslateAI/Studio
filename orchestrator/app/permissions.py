@@ -114,6 +114,11 @@ class Permission(StrEnum):
     AUDIT_VIEW = "audit.view"
     AUDIT_EXPORT = "audit.export"
 
+    # Public API
+    MARKETPLACE_READ = "marketplace.read"
+    MODELS_PROXY = "models.proxy"
+    USAGE_READ = "usage.read"
+
 
 # ---------------------------------------------------------------------------
 # Role → Permission mapping
@@ -158,6 +163,9 @@ _VIEWER_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.CHANNEL_VIEW,
         Permission.MCP_VIEW,
         Permission.AGENT_VIEW,
+        Permission.MARKETPLACE_READ,
+        Permission.MODELS_PROXY,
+        Permission.USAGE_READ,
     }
 )
 
@@ -244,6 +252,10 @@ SCOPE_LABELS: dict[str, dict[str, str]] = {
     # Audit
     Permission.AUDIT_VIEW: {"label": "Audit Log — View", "category": "Audit"},
     Permission.AUDIT_EXPORT: {"label": "Audit Log — Export", "category": "Audit"},
+    # Public API
+    Permission.MARKETPLACE_READ: {"label": "Marketplace — Read catalog", "category": "Marketplace"},
+    Permission.MODELS_PROXY: {"label": "Models — Proxy completions", "category": "Models"},
+    Permission.USAGE_READ: {"label": "Usage — View credits & usage", "category": "Usage"},
 }
 
 
