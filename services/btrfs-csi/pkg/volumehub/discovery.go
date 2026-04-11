@@ -225,7 +225,11 @@ func (r *NodeResolver) watchLoop(ctx context.Context, onNodeChange func()) {
 
 		// Watch from the listed resourceVersion.
 		if err := r.doWatch(ctx, rv, onNodeChange); err != nil {
-			klog.Warningf("NodeResolver: watch disconnected: %v (re-listing)", err)
+			klog.Warningf("NodeResolver: watch disconnected: %v (retry in %v)", err, backoff)
+			if !sleepCtx(ctx, backoff) {
+				return
+			}
+			backoff = min(backoff*2, maxBackoff)
 		}
 	}
 }

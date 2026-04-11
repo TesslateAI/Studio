@@ -2,8 +2,11 @@ package volumehub
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/lease"
 )
 
 // ---------------------------------------------------------------------------
@@ -21,6 +24,16 @@ type NodeRegistry struct {
 	templateNodes map[string]map[string]struct{} // templateName -> set of nodeNames
 }
 
+// volumeLease tracks an exclusive lease on a volume. All volume lifecycle
+// operations (sync, restore, delete, migrate) must acquire a lease before
+// proceeding. This eliminates races between the sync daemon's per-volume
+// locks and the Hub's manifest locks by providing a single coordination point.
+type volumeLease struct {
+	holder    string    // "{nodeName}:{operation}:{nonce}" or "hub::{operation}:{nonce}"
+	expiresAt time.Time // TTL-based expiry; renewed by heartbeat while operation runs
+	revoked   bool      // set by delete preemption; holder checks via RenewLease
+}
+
 type volumeEntry struct {
 	volumeID       string
 	ownerNode      string
@@ -31,6 +44,7 @@ type volumeEntry struct {
 	templateName   string // template used to create the volume
 	templateHash   string // base blob hash
 	latestHash     string // latest layer hash (from manifest)
+	lease          *volumeLease
 }
 
 // NewNodeRegistry creates a new in-memory NodeRegistry.
@@ -321,6 +335,192 @@ func (r *NodeRegistry) FindEvictableCaches(gracePeriod time.Duration) []Evictabl
 		}
 	}
 	return result
+}
+
+// ---------------------------------------------------------------------------
+// Volume leases
+// ---------------------------------------------------------------------------
+
+// AcquireLease attempts to acquire an exclusive lease on the volume.
+// Returns (true, "") on success, (false, currentHolder) if already held.
+// Expired leases are treated as free.
+func (r *NodeRegistry) AcquireLease(volumeID, holder string, ttl time.Duration) (ok bool, currentHolder string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ve, exists := r.volumes[volumeID]
+	if !exists {
+		return false, ""
+	}
+	now := time.Now()
+
+	if ve.lease != nil && now.Before(ve.lease.expiresAt) && !ve.lease.revoked {
+		return false, ve.lease.holder
+	}
+
+	ve.lease = &volumeLease{
+		holder:    holder,
+		expiresAt: now.Add(ttl),
+	}
+	return true, ""
+}
+
+// ReleaseLease releases a lease only if the holder matches.
+// Returns true if the lease was released.
+func (r *NodeRegistry) ReleaseLease(volumeID, holder string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ve, ok := r.volumes[volumeID]
+	if !ok || ve.lease == nil {
+		return false
+	}
+	if ve.lease.holder != holder {
+		return false
+	}
+	ve.lease = nil
+	return true
+}
+
+// RenewLease extends the TTL of an existing lease. Returns renewed=true on
+// success, revoked=true if the lease was revoked (holder should abort).
+// Returns renewed=false if the holder doesn't match or the lease expired.
+func (r *NodeRegistry) RenewLease(volumeID, holder string, ttl time.Duration) (renewed bool, revoked bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ve, ok := r.volumes[volumeID]
+	if !ok || ve.lease == nil || ve.lease.holder != holder {
+		return false, false
+	}
+	if ve.lease.revoked {
+		return false, true
+	}
+	ve.lease.expiresAt = time.Now().Add(ttl)
+	return true, false
+}
+
+// RevokeLease marks an existing lease as revoked. The holder's renewal
+// goroutine will detect this and stop renewing, letting the lease expire.
+// Returns the holder that was revoked, or "" if no active lease.
+func (r *NodeRegistry) RevokeLease(volumeID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ve, ok := r.volumes[volumeID]
+	if !ok || ve.lease == nil {
+		return ""
+	}
+	if time.Now().After(ve.lease.expiresAt) {
+		ve.lease = nil
+		return ""
+	}
+	ve.lease.revoked = true
+	return ve.lease.holder
+}
+
+// ForceReleaseLease unconditionally clears the lease regardless of holder.
+// Used after delete preemption timeout.
+func (r *NodeRegistry) ForceReleaseLease(volumeID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if ve, ok := r.volumes[volumeID]; ok {
+		ve.lease = nil
+	}
+}
+
+// IsLeased returns whether the volume has an active (non-expired) lease.
+func (r *NodeRegistry) IsLeased(volumeID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ve, ok := r.volumes[volumeID]
+	if !ok || ve.lease == nil {
+		return false
+	}
+	return time.Now().Before(ve.lease.expiresAt)
+}
+
+// BatchAcquireLease atomically acquires leases for multiple volumes.
+// Each request is independent — partial success is possible.
+func (r *NodeRegistry) BatchAcquireLease(requests []lease.BatchReq) []lease.BatchResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	results := make([]lease.BatchResult, len(requests))
+
+	for i, req := range requests {
+		results[i].VolumeID = req.VolumeID
+
+		ve, exists := r.volumes[req.VolumeID]
+		if !exists {
+			results[i].Acquired = false
+			continue
+		}
+
+		if ve.lease != nil && now.Before(ve.lease.expiresAt) && !ve.lease.revoked {
+			results[i].Acquired = false
+			results[i].CurrentHolder = ve.lease.holder
+			continue
+		}
+
+		ve.lease = &volumeLease{
+			holder:    req.Holder,
+			expiresAt: now.Add(req.TTL),
+		}
+		results[i].Acquired = true
+	}
+
+	return results
+}
+
+// ReapExpiredLeases scans all volumes and clears expired leases.
+// Returns the number of leases cleared.
+func (r *NodeRegistry) ReapExpiredLeases() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	cleared := 0
+	for _, ve := range r.volumes {
+		if ve.lease != nil && now.After(ve.lease.expiresAt) {
+			ve.lease = nil
+			cleared++
+		}
+	}
+	return cleared
+}
+
+// ForceReleaseDeadNodeLeases clears all leases held by nodes not in the
+// live set. The holder format is "{nodeName}:{operation}:{nonce}" — the
+// node name is extracted from the first segment. Hub-held leases
+// (holder starts with "hub::") are never force-released by this method.
+func (r *NodeRegistry) ForceReleaseDeadNodeLeases(liveNodes map[string]bool) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	cleared := 0
+	for _, ve := range r.volumes {
+		if ve.lease == nil {
+			continue
+		}
+		// Extract node name from holder "{nodeName}:{op}:{nonce}".
+		nodeName := ve.lease.holder
+		if idx := strings.IndexByte(nodeName, ':'); idx > 0 {
+			nodeName = nodeName[:idx]
+		}
+		// Skip Hub-held leases.
+		if nodeName == "hub" {
+			continue
+		}
+		if !liveNodes[nodeName] {
+			ve.lease = nil
+			cleared++
+		}
+	}
+	return cleared
 }
 
 // ---------------------------------------------------------------------------

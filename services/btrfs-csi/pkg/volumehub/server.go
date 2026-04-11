@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/lease"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/nodeops"
 )
 
@@ -71,10 +72,6 @@ type Server struct {
 	mu       sync.Mutex
 	inflight map[string]*inflightRestore
 
-	// Per-volume write locks for manifest mutations (AppendSnapshot, SetManifestHead).
-	volMu    sync.Mutex
-	volLocks map[string]*sync.Mutex
-
 	// registryWarmed is set after the first successful RebuildRegistry.
 	// RPCs that hit an empty owner use this to decide whether to attempt
 	// a rebuild before returning NOT_FOUND.
@@ -90,8 +87,7 @@ func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClien
 		resolveAddr: resolveAddr,
 		liveNodes:   liveNodes,
 		resWatcher:  resWatcher,
-		inflight:    make(map[string]*inflightRestore),
-		volLocks:    make(map[string]*sync.Mutex),
+		inflight: make(map[string]*inflightRestore),
 	}
 }
 
@@ -101,6 +97,23 @@ func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClien
 // in real time via WebSocket.
 func (s *Server) SetOrchestratorURL(url string) {
 	s.orchestratorURL = url
+}
+
+// cleanupSourceAfterTransfer deletes the stale volume copy on the source node
+// after a successful peer transfer. This ensures only one copy exists on disk,
+// preventing RebuildRegistry from picking the wrong copy after a Hub restart.
+// Best-effort: failures are logged but don't affect the transfer result.
+func (s *Server) cleanupSourceAfterTransfer(ctx context.Context, sourceClient *nodeops.Client, volumeID, sourceNode string) {
+	volPath := fmt.Sprintf("volumes/%s", volumeID)
+
+	if err := sourceClient.UntrackVolume(ctx, volumeID); err != nil {
+		klog.Warningf("EnsureCached: cleanup untrack %s on %s: %v", volumeID, sourceNode, err)
+	}
+	if err := sourceClient.DeleteSubvolume(ctx, volPath); err != nil {
+		klog.Warningf("EnsureCached: cleanup delete %s on %s: %v", volPath, sourceNode, err)
+	}
+	s.registry.RemoveCached(volumeID, sourceNode)
+	klog.V(2).Infof("EnsureCached: cleaned up stale copy of %s on %s", volumeID, sourceNode)
 }
 
 // notifyOrchestrator sends a fire-and-forget volume event to the orchestrator.
@@ -310,6 +323,49 @@ type (
 		NodeName string `json:"node_name"`
 	}
 
+	// Volume lease RPCs
+	AcquireVolumeLeaseRequest struct {
+		VolumeID  string `json:"volume_id"`
+		Holder    string `json:"holder"`
+		TTLMillis int64  `json:"ttl_millis"`
+	}
+	AcquireVolumeLeaseResponse struct {
+		Acquired      bool   `json:"acquired"`
+		CurrentHolder string `json:"current_holder,omitempty"`
+	}
+
+	ReleaseVolumeLeaseRequest struct {
+		VolumeID string `json:"volume_id"`
+		Holder   string `json:"holder"`
+	}
+
+	RenewVolumeLeaseRequest struct {
+		VolumeID  string `json:"volume_id"`
+		Holder    string `json:"holder"`
+		TTLMillis int64  `json:"ttl_millis"`
+	}
+	RenewVolumeLeaseResponse struct {
+		Renewed bool `json:"renewed"`
+		Revoked bool `json:"revoked"`
+	}
+
+	BatchAcquireLeaseRequest struct {
+		Leases []LeaseRequestItem `json:"leases"`
+	}
+	LeaseRequestItem struct {
+		VolumeID  string `json:"volume_id"`
+		Holder    string `json:"holder"`
+		TTLMillis int64  `json:"ttl_millis"`
+	}
+	BatchAcquireLeaseResponse struct {
+		Results []LeaseResultItem `json:"results"`
+	}
+	LeaseResultItem struct {
+		VolumeID      string `json:"volume_id"`
+		Acquired      bool   `json:"acquired"`
+		CurrentHolder string `json:"current_holder,omitempty"`
+	}
+
 	Empty struct{}
 )
 
@@ -344,6 +400,10 @@ func registerVolumeHubServer(srv *grpc.Server, s *Server) {
 			{MethodName: "SetManifestHead", Handler: s.handleSetManifestHead},
 			{MethodName: "DeleteVolumeManifest", Handler: s.handleDeleteVolumeManifest},
 			{MethodName: "DeleteTombstone", Handler: s.handleDeleteTombstoneRPC},
+			{MethodName: "AcquireVolumeLease", Handler: s.handleAcquireVolumeLease},
+			{MethodName: "ReleaseVolumeLease", Handler: s.handleReleaseVolumeLease},
+			{MethodName: "RenewVolumeLease", Handler: s.handleRenewVolumeLease},
+			{MethodName: "BatchAcquireLease", Handler: s.handleBatchAcquireLease},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -468,8 +528,29 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		}
 	}
 
-	// 3. Get cached nodes from registry, filter to live-only.
-	//    Proactively clean stale entries.
+	// 3. Owner-first: if the owner is live, in the candidate set, and has
+	//    the subvolume on disk — return it immediately.
+	volPath := fmt.Sprintf("volumes/%s", req.VolumeID)
+	ownerNode := s.registry.GetOwner(req.VolumeID)
+	if ownerNode != "" {
+		if _, alive := liveSet[ownerNode]; alive {
+			if _, candidate := candidateSet[ownerNode]; candidate {
+				if !s.registry.IsEvicting(req.VolumeID, ownerNode) {
+					client, cErr := s.nodeClient(ownerNode)
+					if cErr == nil {
+						exists, vErr := client.SubvolumeExists(ctx, volPath)
+						client.Close()
+						if vErr == nil && exists {
+							klog.V(2).Infof("EnsureCached: owner fast path — volume %s on %s", req.VolumeID, ownerNode)
+							return &EnsureCachedResponse{NodeName: ownerNode}, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Collect live cached nodes and determine the best source for transfer.
 	cachedNodes := s.registry.GetCachedNodes(req.VolumeID)
 	var liveCached []string
 	for _, n := range cachedNodes {
@@ -481,39 +562,40 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		}
 	}
 
-	// 4. Fast path: if any live cached node is in the candidate set, verify
-	//    the subvolume actually exists on disk before returning. This catches
-	//    stale registry entries (e.g. volume deleted while node was live).
-	volPath := fmt.Sprintf("volumes/%s", req.VolumeID)
-	for _, n := range liveCached {
-		if _, ok := candidateSet[n]; !ok {
-			continue
+	// 4a. If the owner is DEAD but a cached copy exists on a candidate,
+	//     use it — the owner's writes were already lost with the node.
+	ownerAlive := false
+	if ownerNode != "" {
+		if _, alive := liveSet[ownerNode]; alive {
+			ownerAlive = true
 		}
-		// Skip nodes where the volume is being evicted — the subvolume
-		// may exist momentarily but will be deleted.
-		if s.registry.IsEvicting(req.VolumeID, n) {
-			klog.V(2).Infof("EnsureCached: skipping %s for volume %s — eviction in progress", n, req.VolumeID)
-			continue
+	}
+	if !ownerAlive {
+		for _, n := range liveCached {
+			if _, ok := candidateSet[n]; !ok {
+				continue
+			}
+			if s.registry.IsEvicting(req.VolumeID, n) {
+				continue
+			}
+			client, cErr := s.nodeClient(n)
+			if cErr != nil {
+				s.registry.RemoveCached(req.VolumeID, n)
+				continue
+			}
+			exists, vErr := client.SubvolumeExists(ctx, volPath)
+			client.Close()
+			if vErr != nil || !exists {
+				s.registry.RemoveCached(req.VolumeID, n)
+				continue
+			}
+			s.registry.SetOwner(req.VolumeID, n)
+			klog.Infof("EnsureCached: volume %s ownership → %s (owner %s was dead)", req.VolumeID, n, ownerNode)
+			return &EnsureCachedResponse{NodeName: n}, nil
 		}
-		// Quick verification via NodeOps SubvolumeExists (~5ms).
-		client, cErr := s.nodeClient(n)
-		if cErr != nil {
-			klog.Warningf("EnsureCached: fast path verify — cannot connect to %s: %v, evicting", n, cErr)
-			s.registry.RemoveCached(req.VolumeID, n)
-			continue
-		}
-		exists, vErr := client.SubvolumeExists(ctx, volPath)
-		client.Close()
-		if vErr != nil || !exists {
-			klog.Infof("EnsureCached: volume %s not on disk at %s (exists=%v, err=%v) — evicting stale cache entry", req.VolumeID, n, exists, vErr)
-			s.registry.RemoveCached(req.VolumeID, n)
-			continue
-		}
-		klog.V(2).Infof("EnsureCached: fast path — volume %s verified on candidate %s", req.VolumeID, n)
-		return &EnsureCachedResponse{NodeName: n}, nil
 	}
 
-	// Re-check liveCached after evictions — some may have been removed above.
+	// Re-check liveCached after evictions.
 	liveCached = nil
 	for _, n := range s.registry.GetCachedNodes(req.VolumeID) {
 		if _, alive := liveSet[n]; alive {
@@ -523,22 +605,62 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 
 	targetNode := s.pickBestCandidate(candidateSet)
 
-	// 5. Volume cached on a live non-candidate node → peer transfer.
-	if len(liveCached) > 0 {
+	// 5. Owner is alive but not a candidate → peer transfer from owner.
+	//    This is the migration path. The peer transfer goes through the
+	//    actor on the source node, which syncs dirty data and serializes
+	//    with FileOps writes before snapshotting.
+	//    NEVER use a stale cached copy when the owner is alive — it may
+	//    not have the latest writes.
+	//    After successful transfer, delete the stale copy on the source
+	//    to eliminate ambiguity on future Hub restarts.
+	if ownerAlive && ownerNode != "" {
+		sourceClient, err := s.nodeClient(ownerNode)
+		if err != nil {
+			klog.Warningf("EnsureCached: owner %s unavailable (%v), trying CAS restore", ownerNode, err)
+		} else {
+			targetAddr := s.resolveAddr(targetNode)
+			if targetAddr == "" {
+				sourceClient.Close()
+				klog.Warningf("EnsureCached: cannot resolve address for target %s, trying CAS restore", targetNode)
+			} else if err := sourceClient.SendVolumeTo(ctx, req.VolumeID, targetAddr); err != nil {
+				sourceClient.Close()
+				klog.Warningf("EnsureCached: peer transfer from owner %s to %s failed: %v, trying CAS restore", ownerNode, targetNode, err)
+			} else {
+				s.registry.SetCached(req.VolumeID, targetNode)
+				s.registry.SetOwner(req.VolumeID, targetNode)
+
+				// Clean up source: delete stale copy so only the target
+				// has the volume on disk. This prevents RebuildRegistry
+				// from picking the wrong copy after a Hub restart.
+				s.cleanupSourceAfterTransfer(ctx, sourceClient, req.VolumeID, ownerNode)
+				sourceClient.Close()
+
+				klog.Infof("EnsureCached: peer-transferred volume %s from owner %s to %s (ownership transferred)", req.VolumeID, ownerNode, targetNode)
+				s.notifyOrchestrator(req.VolumeID, "ready")
+				return &EnsureCachedResponse{NodeName: targetNode}, nil
+			}
+		}
+	} else if len(liveCached) > 0 {
 		sourceNode := liveCached[0]
 		sourceClient, err := s.nodeClient(sourceNode)
 		if err != nil {
 			klog.Warningf("EnsureCached: source %s unavailable (%v), trying CAS restore", sourceNode, err)
 		} else {
-			defer sourceClient.Close()
 			targetAddr := s.resolveAddr(targetNode)
 			if targetAddr == "" {
+				sourceClient.Close()
 				klog.Warningf("EnsureCached: cannot resolve address for target %s, trying CAS restore", targetNode)
 			} else if err := sourceClient.SendVolumeTo(ctx, req.VolumeID, targetAddr); err != nil {
+				sourceClient.Close()
 				klog.Warningf("EnsureCached: peer transfer from %s to %s failed: %v, trying CAS restore", sourceNode, targetNode, err)
 			} else {
 				s.registry.SetCached(req.VolumeID, targetNode)
-				klog.Infof("EnsureCached: peer-transferred volume %s from %s to %s", req.VolumeID, sourceNode, targetNode)
+				s.registry.SetOwner(req.VolumeID, targetNode)
+
+				s.cleanupSourceAfterTransfer(ctx, sourceClient, req.VolumeID, sourceNode)
+				sourceClient.Close()
+
+				klog.Infof("EnsureCached: peer-transferred volume %s from %s to %s (ownership transferred)", req.VolumeID, sourceNode, targetNode)
 				s.notifyOrchestrator(req.VolumeID, "ready")
 				return &EnsureCachedResponse{NodeName: targetNode}, nil
 			}
@@ -601,7 +723,8 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		}
 
 		s.registry.SetCached(req.VolumeID, targetNode)
-		klog.Infof("EnsureCached: restored volume %s from CAS on %s (background)", req.VolumeID, targetNode)
+		s.registry.SetOwner(req.VolumeID, targetNode)
+		klog.Infof("EnsureCached: restored volume %s from CAS on %s (background, ownership transferred)", req.VolumeID, targetNode)
 
 		s.mu.Lock()
 		entry.node = targetNode
@@ -855,36 +978,43 @@ func (s *Server) handleResolveVolume(_ interface{}, ctx context.Context, dec fun
 		return &ResolveVolumeResponse{State: "restoring"}, nil
 	}
 
-	// 2. Call EnsureCached internally with a 15s budget.
-	internalCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	ecDec := func(v interface{}) error {
-		b, _ := json.Marshal(EnsureCachedRequest{VolumeID: req.VolumeID})
-		return json.Unmarshal(b, v)
-	}
-	resp, err := s.handleEnsureCached(nil, internalCtx, ecDec, nil)
+	// 2. Pure read-only owner lookup. Returns the registered owner's
+	//    address without checking liveness. If the owner's CSI pod is
+	//    temporarily restarting, the gRPC call will fail at the client
+	//    with a connection error — that's the correct behavior (caller
+	//    retries). We do NOT check liveNodes here because:
+	//    - A CSI pod restart removes the node from Endpoints instantly
+	//      but the data is fine and the pod comes back in seconds.
+	//    - Returning "unavailable" would trigger EnsureCached recovery
+	//      which would move ownership to a stale copy.
+	//    - The caller's gRPC timeout + retry handles transient failures.
+	ownerNode, err := s.resolveOwner(ctx, req.VolumeID)
 	if err != nil {
-		st, ok := status.FromError(err)
-		if ok && st.Code() == codes.DeadlineExceeded {
-			return &ResolveVolumeResponse{State: "restoring"}, nil
-		}
-		klog.Warningf("ResolveVolume: EnsureCached failed for %s: %v", req.VolumeID, err)
+		klog.V(2).Infof("ResolveVolume: no owner for %s — returning unavailable", req.VolumeID)
 		return &ResolveVolumeResponse{State: "unavailable"}, nil
 	}
 
-	// 3. Build addresses from the returned node name.
-	ecResp := resp.(*EnsureCachedResponse)
-	nodeopsAddr := s.resolveAddr(ecResp.NodeName)
+	// 3. Build addresses from the owner node.
+	nodeopsAddr := s.resolveAddr(ownerNode)
+	if nodeopsAddr == "" {
+		// Owner exists in registry but its CSI pod is not in Endpoints
+		// (restarting or temporarily unreachable). Return "owner_unreachable"
+		// so the orchestrator can distinguish "no data" (unavailable) from
+		// "data exists but node is temporarily down" (retry, don't recover).
+		klog.V(2).Infof("ResolveVolume: owner %s for %s not in endpoints — returning owner_unreachable", ownerNode, req.VolumeID)
+		return &ResolveVolumeResponse{
+			NodeName: ownerNode,
+			State:    "owner_unreachable",
+		}, nil
+	}
+
 	fileopsAddr := ""
-	if nodeopsAddr != "" {
-		if idx := strings.LastIndex(nodeopsAddr, ":"); idx > 0 {
-			fileopsAddr = nodeopsAddr[:idx] + ":9742"
-		}
+	if idx := strings.LastIndex(nodeopsAddr, ":"); idx > 0 {
+		fileopsAddr = nodeopsAddr[:idx] + ":9742"
 	}
 
 	return &ResolveVolumeResponse{
-		NodeName:       ecResp.NodeName,
+		NodeName:       ownerNode,
 		FileopsAddress: fileopsAddr,
 		NodeopsAddress: nodeopsAddr,
 		State:          "cached",
@@ -1046,6 +1176,27 @@ func (s *Server) tryCreateOnNode(ctx context.Context, volumeID, template, target
 // Returns an error only if the tombstone write fails — the caller should retry.
 // Node-side cleanup errors are logged as warnings but do not fail the operation.
 func (s *Server) DeleteVolumeFromNode(ctx context.Context, volumeID string) error {
+	// Preempt any existing lease — delete should not be blocked by a long sync.
+	if revokedHolder := s.registry.RevokeLease(volumeID); revokedHolder != "" {
+		klog.Infof("DeleteVolume %s: revoked lease held by %s, waiting for release", volumeID, revokedHolder)
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if !s.registry.IsLeased(volumeID) {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		// Force-clear if still held (holder crashed or didn't notice revocation).
+		s.registry.ForceReleaseLease(volumeID)
+	}
+	// Acquire our own lease for the deletion.
+	release, leaseErr := s.acquireLeaseOrFail(volumeID, "delete", 60*time.Second)
+	if leaseErr != nil {
+		klog.Warningf("DeleteVolume %s: failed to acquire lease after preemption: %v — proceeding anyway", volumeID, leaseErr)
+	} else {
+		defer release()
+	}
+
 	// Step 1: Write tombstone to S3 FIRST. This is the durable intent record.
 	// Even if the Hub crashes after this point, every node's discoverVolumes
 	// will see the tombstone and clean up locally.
@@ -1200,6 +1351,12 @@ func (s *Server) LiveNodes() []string {
 	return s.liveNodes()
 }
 
+// RegistryWarmed returns true if RebuildRegistry has successfully completed
+// at least once with live nodes (i.e. the registry has real data, not empty).
+func (s *Server) RegistryWarmed() bool {
+	return s.registryWarmed.Load()
+}
+
 // ---------------------------------------------------------------------------
 // Discovery and registry rebuild
 // ---------------------------------------------------------------------------
@@ -1218,15 +1375,52 @@ func (s *Server) DiscoverNodes(resolver *NodeResolver) error {
 	return nil
 }
 
+// rebuildNodeState holds one node's state for a volume during RebuildRegistry.
+type rebuildNodeState struct {
+	onDisk   bool
+	tracked  bool
+	dirty    bool
+	headHash string
+}
+
+// rebuildVolumeInfo holds per-node state gathered during RebuildRegistry's
+// collection phase. Ownership is resolved after all nodes are queried.
+type rebuildVolumeInfo struct {
+	nodes        map[string]*rebuildNodeState // node name → state
+	templateHash string
+}
+
 // RebuildRegistry queries all live CSI nodes to rebuild the Hub's in-memory
-// state. Called on startup to recover from restarts. Uses live nodes from the
-// resolver — never the registry — to avoid querying stale/dead nodes.
+// state. Called on startup and on K8s Endpoints watch events.
+//
+// Ownership rules (applied after collecting state from all nodes):
+//  1. If the current owner is alive and among the queried nodes, keep it.
+//     RebuildRegistry must not undo ownership transfers made by EnsureCached.
+//  2. If no owner is known, pick a node that has it on disk. Prefer the node
+//     whose sync daemon tracks it (more likely to have recent data).
+//  3. If the current owner is dead (not in live nodes), transfer ownership to
+//     a live node that has it on disk, or failing that, a live tracker.
+//
+// Cached status is set for every node that has the subvolume on disk,
+// regardless of ownership.
 func (s *Server) RebuildRegistry(ctx context.Context) error {
 	nodes := s.liveNodes()
 	if len(nodes) == 0 {
 		klog.Info("RebuildRegistry: no live nodes, skipping")
 		return nil
 	}
+	liveSet := make(map[string]struct{}, len(nodes))
+	for _, n := range nodes {
+		liveSet[n] = struct{}{}
+	}
+
+	// Phase 1: Collect state from all nodes without mutating ownership.
+	// volumes maps volume_id -> collected info across all nodes.
+	volumes := make(map[string]*rebuildVolumeInfo)
+	// queriedNodes tracks which nodes successfully responded to GetSyncState.
+	// Used in phase 2 to avoid ownership changes when the current owner
+	// was unreachable (CSI pod restarting).
+	queriedNodes := make(map[string]struct{})
 
 	klog.Infof("RebuildRegistry: querying %d nodes", len(nodes))
 	for _, nodeName := range nodes {
@@ -1236,8 +1430,7 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 			continue
 		}
 
-		// List subvolumes first to build the set of physically-present volumes.
-		// Only volumes that exist on disk should be marked as cached.
+		// List subvolumes on disk.
 		diskVolumes := make(map[string]struct{})
 		subs, err := client.ListSubvolumes(ctx, "volumes/")
 		if err != nil {
@@ -1245,38 +1438,56 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 		} else {
 			for _, sub := range subs {
 				volID := strings.TrimPrefix(sub.Path, "volumes/")
-				if volID != "" && volID != sub.Path {
-					diskVolumes[volID] = struct{}{}
-					s.registry.RegisterVolume(volID)
-					s.registry.SetCached(volID, nodeName)
-					if s.registry.GetOwner(volID) == "" {
-						s.registry.SetOwner(volID, nodeName)
-					}
+				if volID == "" || volID == sub.Path {
+					continue
 				}
+				diskVolumes[volID] = struct{}{}
+				info, ok := volumes[volID]
+				if !ok {
+					info = &rebuildVolumeInfo{nodes: make(map[string]*rebuildNodeState)}
+					volumes[volID] = info
+				}
+				ns, ok := info.nodes[nodeName]
+				if !ok {
+					ns = &rebuildNodeState{}
+					info.nodes[nodeName] = ns
+				}
+				ns.onDisk = true
+				// Mark cached — safe to do immediately, doesn't affect ownership.
+				s.registry.RegisterVolume(volID)
+				s.registry.SetCached(volID, nodeName)
 			}
 		}
 
-		// Get sync state for template context and ownership, but only mark
-		// cached if the subvolume physically exists on disk. A tracked volume
-		// with no subvolume means the data was deleted — don't lie about it.
+		// Get sync state (tracked volumes).
 		states, err := client.GetSyncState(ctx)
 		if err != nil {
 			klog.Warningf("RebuildRegistry: GetSyncState on %s: %v", nodeName, err)
 			client.Close()
 			continue
 		}
+		queriedNodes[nodeName] = struct{}{}
 		for _, st := range states {
+			info, ok := volumes[st.VolumeID]
+			if !ok {
+				info = &rebuildVolumeInfo{nodes: make(map[string]*rebuildNodeState)}
+				volumes[st.VolumeID] = info
+			}
+			ns, ok := info.nodes[nodeName]
+			if !ok {
+				ns = &rebuildNodeState{}
+				info.nodes[nodeName] = ns
+			}
+			ns.tracked = true
+			ns.dirty = st.Dirty
+			ns.headHash = st.HeadHash
 			s.registry.RegisterVolume(st.VolumeID)
-			if _, onDisk := diskVolumes[st.VolumeID]; onDisk {
-				s.registry.SetOwner(st.VolumeID, nodeName)
-				s.registry.SetCached(st.VolumeID, nodeName)
-			} else {
-				klog.Infof("RebuildRegistry: volume %s tracked on %s but subvolume missing — not marking cached", st.VolumeID, nodeName)
-				// Still set owner for sync/metadata purposes, just don't claim cached.
-				s.registry.SetOwner(st.VolumeID, nodeName)
+
+			if _, onDisk := diskVolumes[st.VolumeID]; !onDisk {
+				klog.V(2).Infof("RebuildRegistry: volume %s tracked on %s but subvolume missing", st.VolumeID, nodeName)
 			}
 			if st.TemplateHash != "" {
-				s.registry.SetVolumeTemplate(st.VolumeID, "", st.TemplateHash)
+				info.templateHash = st.TemplateHash
 			}
 		}
 
@@ -1294,7 +1505,92 @@ func (s *Server) RebuildRegistry(ctx context.Context) error {
 		}
 
 		client.Close()
-		klog.V(2).Infof("RebuildRegistry: processed node %s (%d volumes)", nodeName, len(states))
+		klog.V(2).Infof("RebuildRegistry: processed node %s (%d tracked volumes)", nodeName, len(states))
+	}
+
+	// Phase 2: Resolve ownership for unowned volumes.
+	//
+	// Priority order:
+	//   1. Dirty node — has unsynced writes, definitively the latest.
+	//   2. Node whose HEAD matches the S3 manifest HEAD — has the
+	//      latest synced state. Stale cached copies have older HEADs.
+	//   3. Any node with the volume on disk (fallback).
+	//
+	// Volumes that already have an owner are never reassigned.
+	// Ownership changes during normal operation go through CreateVolume,
+	// EnsureCached, and DeleteVolume exclusively.
+	for volID, info := range volumes {
+		if info.templateHash != "" {
+			s.registry.SetVolumeTemplate(volID, "", info.templateHash)
+		}
+
+		// Skip if owner is already set.
+		if s.registry.GetOwner(volID) != "" {
+			continue
+		}
+
+		// Classify nodes.
+		var dirtyNodes []string
+		var onDiskNodes []string
+		for node, ns := range info.nodes {
+			if ns.onDisk {
+				onDiskNodes = append(onDiskNodes, node)
+			}
+			if ns.dirty && ns.onDisk {
+				dirtyNodes = append(dirtyNodes, node)
+			}
+		}
+
+		var bestNode string
+		reason := ""
+
+		// 1. Dirty node wins — has unsynced writes beyond any synced state.
+		if len(dirtyNodes) == 1 {
+			bestNode = dirtyNodes[0]
+			reason = "dirty"
+		} else if len(dirtyNodes) > 1 {
+			bestNode = dirtyNodes[0]
+			for _, node := range dirtyNodes[1:] {
+				if node < bestNode {
+					bestNode = node
+				}
+			}
+			reason = fmt.Sprintf("dirty (split-brain, %d nodes)", len(dirtyNodes))
+		}
+
+		// 2. No dirty node — compare HEAD hashes against S3 manifest.
+		if bestNode == "" && len(onDiskNodes) > 0 && s.cas != nil {
+			manifest, mErr := s.cas.GetManifest(ctx, volID)
+			if mErr == nil {
+				s3Head := manifest.LatestHash()
+				if s3Head != "" {
+					for _, node := range onDiskNodes {
+						ns := info.nodes[node]
+						if ns.headHash == s3Head {
+							bestNode = node
+							reason = fmt.Sprintf("head=%s matches manifest", cas.ShortHash(s3Head))
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// 3. Fallback — only pick if there's exactly one on-disk node
+		//    (unambiguous). With multiple on-disk nodes and no dirty/head
+		//    signal, we can't tell which is authoritative. Leave unowned
+		//    and let the next EnsureCached call resolve it on demand.
+		if bestNode == "" && len(onDiskNodes) == 1 {
+			bestNode = onDiskNodes[0]
+			reason = "sole on-disk copy"
+		} else if bestNode == "" && len(onDiskNodes) > 1 {
+			klog.Infof("RebuildRegistry: volume %s on %d nodes, no dirty/head signal — deferring to EnsureCached", volID, len(onDiskNodes))
+		}
+
+		if bestNode != "" {
+			klog.Infof("RebuildRegistry: volume %s → %s (%s)", volID, bestNode, reason)
+			s.registry.SetOwner(volID, bestNode)
+		}
 	}
 
 	s.registryWarmed.Store(true)
@@ -1319,6 +1615,12 @@ func (s *Server) handleTransferOwnership(_ interface{}, _ context.Context, dec f
 	if req.NewNode == "" {
 		return nil, status.Error(codes.InvalidArgument, "new_node is required")
 	}
+
+	release, leaseErr := s.acquireLeaseOrFail(req.VolumeID, "transfer-ownership", 30*time.Second)
+	if leaseErr != nil {
+		return nil, leaseErr
+	}
+	defer release()
 
 	// Validate the volume is cached on the new node
 	if !s.registry.IsCached(req.VolumeID, req.NewNode) {
@@ -1357,6 +1659,13 @@ func (s *Server) handleForkVolume(_ interface{}, ctx context.Context, dec func(i
 // on the same node (btrfs CoW clone — instant, zero copy). The new volume
 // gets its own manifest with the source's latest hash as its base.
 func (s *Server) ForkVolumeOnNode(ctx context.Context, sourceVolumeID string) (string, string, error) {
+	// Lease the source volume — fork reads its state via btrfs snapshot.
+	release, leaseErr := s.acquireLeaseOrFail(sourceVolumeID, "fork", 60*time.Second)
+	if leaseErr != nil {
+		return "", "", fmt.Errorf("acquire lease on source %s: %v", sourceVolumeID, leaseErr)
+	}
+	defer release()
+
 	ownerNode := s.registry.GetOwner(sourceVolumeID)
 	if ownerNode == "" {
 		return "", "", fmt.Errorf("no owner for source volume %q", sourceVolumeID)
@@ -1402,20 +1711,57 @@ func (s *Server) ForkVolumeOnNode(ctx context.Context, sourceVolumeID string) (s
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-// manifestLock returns a per-volume mutex for serializing manifest writes.
-func (s *Server) manifestLock(volumeID string) *sync.Mutex {
-	s.volMu.Lock()
-	defer s.volMu.Unlock()
-	mu, ok := s.volLocks[volumeID]
+// acquireLeaseOrFail acquires a Hub-side lease for an internal operation.
+// Returns a release function that must be called when done. For Hub-initiated
+// operations (not forwarded from a node that already holds a lease).
+func (s *Server) acquireLeaseOrFail(volumeID, operation string, ttl time.Duration) (func(), error) {
+	holder := fmt.Sprintf("hub::%s::%d", operation, time.Now().UnixNano())
+	ok, current := s.registry.AcquireLease(volumeID, holder, ttl)
 	if !ok {
-		mu = &sync.Mutex{}
-		s.volLocks[volumeID] = mu
+		return nil, status.Errorf(codes.Aborted,
+			"volume %s is leased by %s", volumeID, current)
 	}
-	return mu
+	return func() { s.registry.ReleaseLease(volumeID, holder) }, nil
+}
+
+// StartBackground starts background goroutines (lease reaper). Must be called
+// after the gRPC server is started.
+func (s *Server) StartBackground(ctx context.Context) {
+	go s.leaseReaper(ctx)
+}
+
+// leaseReaper periodically expires stale leases and force-releases leases
+// held by dead nodes using the live node resolver.
+func (s *Server) leaseReaper(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if n := s.registry.ReapExpiredLeases(); n > 0 {
+				klog.V(2).Infof("LeaseReaper: cleared %d expired leases", n)
+			}
+			if s.liveNodes != nil {
+				liveSet := make(map[string]bool)
+				for _, n := range s.liveNodes() {
+					liveSet[n] = true
+				}
+				if n := s.registry.ForceReleaseDeadNodeLeases(liveSet); n > 0 {
+					klog.Infof("LeaseReaper: force-released %d leases from dead nodes", n)
+				}
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
 // Manifest-write RPCs (Hub = single writer for all coordination state)
+//
+// Callers are expected to hold a volume lease before calling these RPCs.
+// The lease provides serialization — no additional per-volume mutex needed.
+// A safety-net warning is logged if no lease is held.
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleAppendSnapshot(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -1430,9 +1776,9 @@ func (s *Server) handleAppendSnapshot(_ interface{}, ctx context.Context, dec fu
 		return nil, status.Error(codes.FailedPrecondition, "CAS store not configured")
 	}
 
-	vl := s.manifestLock(req.VolumeID)
-	vl.Lock()
-	defer vl.Unlock()
+	if !s.registry.IsLeased(req.VolumeID) {
+		klog.Warningf("AppendSnapshot called without lease for volume %s — caller should acquire lease first", req.VolumeID)
+	}
 
 	manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
 	if err != nil {
@@ -1457,9 +1803,9 @@ func (s *Server) handleSetManifestHead(_ interface{}, ctx context.Context, dec f
 		return nil, status.Error(codes.FailedPrecondition, "CAS store not configured")
 	}
 
-	vl := s.manifestLock(req.VolumeID)
-	vl.Lock()
-	defer vl.Unlock()
+	if !s.registry.IsLeased(req.VolumeID) {
+		klog.Warningf("SetManifestHead called without lease for volume %s — caller should acquire lease first", req.VolumeID)
+	}
 
 	manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
 	if err != nil {
@@ -1509,6 +1855,93 @@ func (s *Server) handleDeleteTombstoneRPC(_ interface{}, ctx context.Context, de
 		return nil, status.Errorf(codes.Internal, "delete tombstone: %v", err)
 	}
 	return &Empty{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Volume lease RPCs
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleAcquireVolumeLease(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req AcquireVolumeLeaseRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Holder == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and holder are required")
+	}
+	if req.TTLMillis <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "ttl_millis must be positive")
+	}
+
+	ttl := time.Duration(req.TTLMillis) * time.Millisecond
+	acquired, currentHolder := s.registry.AcquireLease(req.VolumeID, req.Holder, ttl)
+	return &AcquireVolumeLeaseResponse{
+		Acquired:      acquired,
+		CurrentHolder: currentHolder,
+	}, nil
+}
+
+func (s *Server) handleReleaseVolumeLease(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req ReleaseVolumeLeaseRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Holder == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and holder are required")
+	}
+
+	s.registry.ReleaseLease(req.VolumeID, req.Holder)
+	return &Empty{}, nil
+}
+
+func (s *Server) handleRenewVolumeLease(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req RenewVolumeLeaseRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Holder == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and holder are required")
+	}
+	if req.TTLMillis <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "ttl_millis must be positive")
+	}
+
+	ttl := time.Duration(req.TTLMillis) * time.Millisecond
+	renewed, revoked := s.registry.RenewLease(req.VolumeID, req.Holder, ttl)
+	return &RenewVolumeLeaseResponse{
+		Renewed: renewed,
+		Revoked: revoked,
+	}, nil
+}
+
+func (s *Server) handleBatchAcquireLease(_ interface{}, _ context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req BatchAcquireLeaseRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+
+	batchReqs := make([]lease.BatchReq, len(req.Leases))
+	for i, l := range req.Leases {
+		if l.VolumeID == "" || l.Holder == "" || l.TTLMillis <= 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "lease[%d]: volume_id, holder, and positive ttl_millis required", i)
+		}
+		batchReqs[i] = lease.BatchReq{
+			VolumeID: l.VolumeID,
+			Holder:   l.Holder,
+			TTL:      time.Duration(l.TTLMillis) * time.Millisecond,
+		}
+	}
+
+	results := s.registry.BatchAcquireLease(batchReqs)
+	items := make([]LeaseResultItem, len(results))
+	for i, r := range results {
+		items[i] = LeaseResultItem{
+			VolumeID:      r.VolumeID,
+			Acquired:      r.Acquired,
+			CurrentHolder: r.CurrentHolder,
+		}
+	}
+	return &BatchAcquireLeaseResponse{Results: items}, nil
 }
 
 // generateVolumeID creates a volume ID in the format "vol-{12 hex chars}".

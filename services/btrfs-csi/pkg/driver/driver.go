@@ -242,6 +242,7 @@ func (d *Driver) runNode(ctx context.Context) error {
 			SafetyInterval:         d.syncInterval,
 			ConsolidationInterval:  d.consolidationInterval,
 			ConsolidationRetention: d.consolidationRetention,
+			NodeID:                 d.nodeID,
 		}
 		// Hub client for manifest writes (single-writer model).
 		// "all" mode: Hub runs in-process → use direct CAS adapter.
@@ -265,6 +266,14 @@ func (d *Driver) runNode(ctx context.Context) error {
 
 	// Start nodeops gRPC server for controller delegation.
 	d.nodeOpsSrv = nodeops.NewServer(d.btrfs, d.syncer, d.tmplMgr, d.casStore)
+
+	// Wire the peer transfer send function into the sync daemon so the
+	// actor can send volumes to other nodes via the nodeops server's
+	// gRPC streaming infrastructure.
+	if d.syncer != nil {
+		d.syncer.SetSendVolumeFn(d.nodeOpsSrv.SendSubvolumeTo)
+	}
+
 	go func() {
 		addr := fmt.Sprintf(":%d", d.nodeOpsPort)
 		if err := d.nodeOpsSrv.Start(addr, nil); err != nil {
@@ -437,12 +446,18 @@ func (d *Driver) runHub(ctx context.Context) error {
 	// Watch K8s Endpoints for CSI node pod changes (~1s latency vs 30s polling).
 	// The watch loop's first iteration lists current state and calls onNodeChange,
 	// which handles initial discovery — no separate startup goroutine needed.
+	//
+	// RebuildRegistry runs on each callback to discover new volumes and update
+	// cache tracking. Ownership is only set for volumes with no current owner
+	// (cold start recovery). Volumes that already have an owner are never
+	// reassigned by RebuildRegistry — ownership changes go through
+	// CreateVolume, EnsureCached, and DeleteVolume exclusively.
 	resolver.StartWatch(ctx, func() {
 		if discoverErr := hubSrv.DiscoverNodes(resolver); discoverErr != nil {
 			klog.Warningf("DiscoverNodes after watch event: %v", discoverErr)
 		}
 		if rebuildErr := hubSrv.RebuildRegistry(ctx); rebuildErr != nil {
-			klog.Warningf("RebuildRegistry after watch event: %v", rebuildErr)
+			klog.Warningf("RebuildRegistry: %v", rebuildErr)
 		}
 	})
 
@@ -457,6 +472,7 @@ func (d *Driver) runHub(ctx context.Context) error {
 			klog.Errorf("VolumeHub gRPC server failed: %v", err)
 		}
 	}()
+	hubSrv.StartBackground(ctx) // lease reaper + dead node cleanup
 	klog.Infof("VolumeHub gRPC server on :%d", d.hubGRPCPort)
 
 	// Start CSI Controller gRPC on unix socket (for csi-provisioner/snapshotter sidecars).
@@ -730,6 +746,8 @@ func (l *localNodeOps) GetSyncState(_ context.Context) ([]nodeops.TrackedVolumeS
 			VolumeID:     s.VolumeID,
 			TemplateHash: s.TemplateHash,
 			LastSyncAt:   s.LastSyncAt,
+			Dirty:        s.Dirty,
+			HeadHash:     s.HeadHash,
 		}
 	}
 	return result, nil

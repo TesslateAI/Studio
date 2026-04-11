@@ -41,6 +41,70 @@ type trackedVolume struct {
 // retrying every cycle.
 var errVolumeGone = errors.New("volume subvolume gone")
 
+// ---------------------------------------------------------------------------
+// Per-volume actor model
+// ---------------------------------------------------------------------------
+
+// opType distinguishes the kind of work submitted to a volume actor.
+type opType int
+
+const (
+	opSync            opType = iota // background periodic sync (from syncAll)
+	opSyncUser                      // user-initiated sync (SyncVolume RPC)
+	opCreateSnapshot                // CreateSnapshot RPC
+	opRestoreVolume                 // RestoreVolume RPC
+	opRestoreToSnapshot             // RestoreToSnapshot RPC
+	opUntrack                       // UntrackVolume lifecycle event
+	opDrain                         // DrainAll final sync
+	opSendVolumeTo                  // peer transfer (sync + snapshot + send)
+	opNoop                          // no-op for testing/barrier
+)
+
+// opPriority controls queue ordering inside the actor.
+type opPriority int
+
+const (
+	priorityUser       opPriority = iota // user-initiated ops
+	priorityDrain                        // drain (above background, below user in buffer)
+	priorityBackground                   // periodic syncAll
+)
+
+// opRequest is a unit of work submitted to a volume actor.
+type opRequest struct {
+	op         opType
+	priority   opPriority
+	ctx        context.Context
+	label      string         // for opCreateSnapshot
+	targetHash string         // for opRestoreToSnapshot
+	targetAddr string         // for opSendVolumeTo
+	resultCh   chan<- opResult // actor sends exactly once
+}
+
+// opResult is the outcome of a single operation.
+type opResult struct {
+	hash string // blob hash (meaningful for opCreateSnapshot)
+	err  error
+}
+
+// volumeActor owns serialized operations for one volume. All operations
+// on a volume flow through the actor's channels — the single goroutine
+// IS the serialization, replacing per-volume mutexes.
+type volumeActor struct {
+	volumeID string
+	daemon   *Daemon
+
+	// Two channels: user-initiated ops have priority over background syncs.
+	userCh chan opRequest // buffered(8): user-initiated + drain ops
+	bgCh   chan opRequest // buffered(1): background sync (coalesced)
+
+	// Lifecycle
+	stopCh chan struct{} // closed on shutdown
+	doneCh chan struct{} // closed when run() exits
+
+	// Dirty tracking — written by MarkDirty (any goroutine), read by syncAll.
+	dirty atomic.Bool
+}
+
 // discoverInterval is the number of syncAll cycles between periodic
 // discoverVolumes runs. With a 15s sync interval this means re-discovery
 // every ~75s — fast enough to catch service volumes created by the Hub.
@@ -52,16 +116,22 @@ const discoverInterval = 5
 type Daemon struct {
 	btrfs    btrfsOps
 	cas      casOps
-	hub      HubOps // Hub client for manifest writes (single-writer model)
+	hub      HubOps // Hub client for manifest writes + volume leases
 	tmplMgr  templateOps
+	nodeID   string        // node identity for lease holder naming
 	interval time.Duration // safety-net periodic sync interval
 	mu       sync.Mutex
 	tracked  map[string]*trackedVolume
-	syncLocks   sync.Mutex                  // guards volLocks
-	volLocks    map[string]*sync.Mutex       // per-volume sync serialization
+	actors   map[string]*volumeActor // per-volume actor goroutines
 	discoverCycle atomic.Int32               // counts syncAll cycles for periodic discovery
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
+
+	// SendVolumeFn is the callback for peer transfer networking. Set by the
+	// nodeops server after construction. The daemon handles sync + snapshot
+	// serialization; this function handles the actual gRPC streaming send.
+	// Signature: func(ctx, snapshotPath, volumeID, targetAddr) error
+	sendVolumeFn func(ctx context.Context, snapPath, volumeID, targetAddr string) error
 
 	// Consolidation config.
 	consolidationInterval  int // create consolidation every N snapshots (0 = disabled)
@@ -83,11 +153,16 @@ type DaemonConfig struct {
 	// Older consolidations have their blobs pruned from CAS. 0 = keep all.
 	ConsolidationRetention int
 
-	// Hub is the HubOps implementation for manifest writes (single-writer model).
+	// Hub is the HubOps implementation for manifest writes and volume leases.
 	// In node mode: volumehub.NewHubClient (gRPC to Hub pod).
 	// In all mode: NewLocalHubOps (direct CAS writes, same process).
 	// Created by the driver, not the daemon.
 	Hub HubOps
+
+	// NodeID identifies this node for lease holder naming. Typically the
+	// Kubernetes node name. Used to generate lease holders like
+	// "{nodeID}:{operation}:{nonce}".
+	NodeID string
 }
 
 // DefaultDaemonConfig returns sensible defaults for production.
@@ -112,8 +187,9 @@ func NewDaemonWithConfig(bm *btrfs.Manager, casStore *cas.Store, tmplMgr *templa
 		interval:               cfg.SafetyInterval,
 		consolidationInterval:  cfg.ConsolidationInterval,
 		consolidationRetention: cfg.ConsolidationRetention,
+		nodeID:                 cfg.NodeID,
 		tracked:                make(map[string]*trackedVolume),
-		volLocks:               make(map[string]*sync.Mutex),
+		actors:                 make(map[string]*volumeActor),
 		stopCh:                 make(chan struct{}),
 	}
 	if bm != nil {
@@ -143,7 +219,7 @@ func newDaemonWithInterfaces(b btrfsOps, c casOps, h HubOps, t templateOps, inte
 		consolidationInterval:  50,
 		consolidationRetention: 3,
 		tracked:                make(map[string]*trackedVolume),
-		volLocks:               make(map[string]*sync.Mutex),
+		actors:                 make(map[string]*volumeActor),
 		stopCh:                 make(chan struct{}),
 	}
 }
@@ -407,13 +483,34 @@ func (d *Daemon) cleanupStaging(ctx context.Context) {
 	}
 }
 
-// Stop signals the daemon to stop and waits for the sync loop to finish.
+// Stop signals the daemon to stop and waits for the sync loop and all
+// volume actors to finish.
 func (d *Daemon) Stop() {
 	select {
 	case <-d.stopCh:
 	default:
 		close(d.stopCh)
 	}
+
+	// Stop all actors.
+	d.mu.Lock()
+	actors := make([]*volumeActor, 0, len(d.actors))
+	for _, a := range d.actors {
+		actors = append(actors, a)
+	}
+	d.mu.Unlock()
+
+	for _, a := range actors {
+		select {
+		case <-a.stopCh:
+		default:
+			close(a.stopCh)
+		}
+	}
+	for _, a := range actors {
+		<-a.doneCh
+	}
+
 	d.wg.Wait()
 	klog.Info("Sync daemon stopped")
 }
@@ -424,82 +521,78 @@ func (d *Daemon) Stop() {
 // already in S3 from the last successful sync.
 func (d *Daemon) DrainAll(ctx context.Context) error {
 	// Re-discover volumes from disk before snapshotting the tracked map.
-	// This catches service volumes and any volumes created after the last
-	// periodic discovery but before the drain signal arrived.
 	d.discoverVolumes(ctx)
 
 	d.mu.Lock()
-	type drainItem struct {
-		volumeID     string
-		templateName string
-		templateHash string
-	}
-	var items []drainItem
+	var dirtyActors []*volumeActor
 	skipped := 0
-	for _, tv := range d.tracked {
-		if !tv.dirty {
-			skipped++
-			continue
+	for vid, actor := range d.actors {
+		if actor.dirty.Load() {
+			dirtyActors = append(dirtyActors, actor)
+		} else {
+			// Also check canonical dirty flag in tracked state.
+			if tv, ok := d.tracked[vid]; ok && tv.dirty {
+				dirtyActors = append(dirtyActors, actor)
+			} else {
+				skipped++
+			}
 		}
-		items = append(items, drainItem{
-			volumeID:     tv.volumeID,
-			templateName: tv.templateName,
-			templateHash: tv.templateHash,
-		})
 	}
-	total := len(d.tracked)
+	total := len(d.actors)
 	d.mu.Unlock()
 
-	klog.Infof("Drain: %d dirty volumes to sync in parallel (max 3), %d clean (skipped), %d total", len(items), skipped, total)
+	klog.Infof("Drain: %d dirty volumes to sync in parallel (max 3), %d clean (skipped), %d total",
+		len(dirtyActors), skipped, total)
 
-	// Early exit if already cancelled.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	// Parallel drain: sync up to 3 dirty volumes concurrently.
-	// Per-volume locking inside SyncVolume prevents two goroutines from
-	// syncing the same volume. Different volumes are fully independent.
+	// Submit drain ops to all dirty actors via errgroup.
 	g, gctx := errgroup.WithContext(ctx)
-	sem := make(chan struct{}, 3) // concurrency cap
-	var synced sync.Map
+	g.SetLimit(3) // concurrency cap
+	var synced atomic.Int32
 
-	for _, item := range items {
-		item := item // capture loop var
+	for _, actor := range dirtyActors {
+		actor := actor
 		g.Go(func() error {
+			resultCh := make(chan opResult, 1)
+			req := opRequest{
+				op:       opDrain,
+				priority: priorityDrain,
+				ctx:      gctx,
+				resultCh: resultCh,
+			}
 			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
+			case actor.userCh <- req:
 			case <-gctx.Done():
 				return gctx.Err()
 			}
-
-			if err := d.SyncVolume(gctx, item.volumeID); err != nil {
-				if gctx.Err() != nil {
-					return gctx.Err() // propagate cancellation
+			select {
+			case res := <-resultCh:
+				if res.err != nil {
+					if gctx.Err() != nil {
+						return gctx.Err()
+					}
+					klog.Errorf("Drain: failed to sync %s: %v", actor.volumeID, res.err)
+					return nil // non-cancel error: continue draining others
 				}
-				klog.Errorf("Drain: failed to sync %s: %v", item.volumeID, err)
-				return nil // non-cancel error: continue draining others
+				// Remove from tracked map but KEEP the layer snapshot on disk.
+				d.mu.Lock()
+				delete(d.tracked, actor.volumeID)
+				d.mu.Unlock()
+				synced.Add(1)
+				return nil
+			case <-gctx.Done():
+				return gctx.Err()
 			}
-			// Remove from tracked map but KEEP the layer snapshot on disk.
-			// The next pod's discoverVolumes needs the snapshot to compare
-			// generations and detect clean volumes (avoids thundering herd
-			// re-sync of all volumes after every rolling restart).
-			d.mu.Lock()
-			delete(d.tracked, item.volumeID)
-			d.mu.Unlock()
-			synced.Store(item.volumeID, true)
-			return nil
 		})
 	}
 
 	err := g.Wait()
+	klog.Infof("Drain: synced %d/%d dirty volumes (syncer remains active for late RPCs)",
+		synced.Load(), len(dirtyActors))
 
-	syncedCount := 0
-	synced.Range(func(_, _ interface{}) bool { syncedCount++; return true })
-	klog.Infof("Drain: synced %d/%d dirty volumes (syncer remains active for late RPCs)", syncedCount, len(items))
-
-	// If context was cancelled, surface the cancellation error.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -507,6 +600,7 @@ func (d *Daemon) DrainAll(ctx context.Context) error {
 }
 
 // TrackVolume registers a volume for periodic CAS sync with its template context.
+// Creates a per-volume actor goroutine that serializes all operations.
 func (d *Daemon) TrackVolume(volumeID, templateName, templateHash string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -520,6 +614,19 @@ func (d *Daemon) TrackVolume(volumeID, templateName, templateHash string) {
 		templateHash: templateHash,
 		dirty:        true, // new volumes always need initial sync
 	}
+
+	actor := &volumeActor{
+		volumeID: volumeID,
+		daemon:   d,
+		userCh:   make(chan opRequest, 8),
+		bgCh:     make(chan opRequest, 1),
+		stopCh:   make(chan struct{}),
+		doneCh:   make(chan struct{}),
+	}
+	actor.dirty.Store(true)
+	d.actors[volumeID] = actor
+	go actor.run()
+
 	klog.V(2).Infof("Tracking volume %s for CAS sync (template=%s, base=%s)",
 		volumeID, templateName, cas.ShortHash(templateHash))
 }
@@ -591,125 +698,175 @@ func (d *Daemon) autoTrackWithManifest(ctx context.Context, volumeID string) {
 // goroutine; no-op if the volume isn't tracked.
 func (d *Daemon) MarkDirty(volumeID string) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if tv, ok := d.tracked[volumeID]; ok {
 		tv.dirty = true
+	}
+	actor := d.actors[volumeID]
+	d.mu.Unlock()
+	if actor != nil {
+		actor.dirty.Store(true)
 	}
 }
 
 // UntrackVolume removes a volume from sync tracking and cleans up the last
-// layer snapshot if one exists. Acquires the per-volume lock first to wait
-// for any inflight SyncVolume/CreateSnapshot/RestoreToSnapshot to finish,
-// preventing a race where the layer snapshot is deleted while syncOne is
-// using it as a btrfs send parent.
+// layer snapshot if one exists. The untrack operation is submitted to the
+// volume's actor to wait for any inflight operations to finish first.
 func (d *Daemon) UntrackVolume(volumeID string) {
-	// Lock ordering: per-volume lock → d.mu (same as SyncVolume, syncAll).
-	vl := d.volumeLock(volumeID)
-	vl.Lock()
-	defer vl.Unlock()
-
 	d.mu.Lock()
-	tv, exists := d.tracked[volumeID]
-	if !exists {
+	actor, ok := d.actors[volumeID]
+	d.mu.Unlock()
+	if !ok {
+		// No actor — maybe never tracked or already untracked.
+		d.mu.Lock()
+		delete(d.tracked, volumeID)
 		d.mu.Unlock()
 		return
 	}
-	lastSnapPath := tv.lastSnapPath
-	delete(d.tracked, volumeID)
+
+	// Submit untrack op through the actor to wait for inflight ops.
+	resultCh := make(chan opResult, 1)
+	req := opRequest{
+		op:       opUntrack,
+		priority: priorityUser,
+		ctx:      context.Background(),
+		resultCh: resultCh,
+	}
+
+	select {
+	case actor.userCh <- req:
+	case <-actor.stopCh:
+		// Already stopping — do inline cleanup.
+	}
+
+	// Wait for untrack to complete.
+	select {
+	case <-resultCh:
+	case <-actor.doneCh:
+	}
+
+	// Remove actor from map.
+	d.mu.Lock()
+	delete(d.actors, volumeID)
 	d.mu.Unlock()
 
-	// Safe to delete — no sync is running on this volume.
-	if lastSnapPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if d.btrfs.SubvolumeExists(ctx, lastSnapPath) {
-			if err := d.btrfs.DeleteSubvolume(ctx, lastSnapPath); err != nil {
-				klog.Warningf("Failed to cleanup layer snapshot %s: %v", lastSnapPath, err)
-			}
-		}
-	}
 	klog.V(2).Infof("Untracked volume %s from CAS sync", volumeID)
 }
 
-// TrackedVolumeState reports the sync state for a tracked volume.
-type TrackedVolumeState struct {
-	VolumeID     string `json:"volume_id"`
-	TemplateHash string `json:"template_hash,omitempty"`
-	LastSyncAt   string `json:"last_sync_at,omitempty"`
-	Dirty        bool   `json:"dirty"`
-}
+// ---------------------------------------------------------------------------
+// Volume actor goroutine and dispatch
+// ---------------------------------------------------------------------------
 
-// GetTrackedState returns the current sync state for all tracked volumes.
-// Used by the Hub to rebuild its registry on startup.
-func (d *Daemon) GetTrackedState() []TrackedVolumeState {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	states := make([]TrackedVolumeState, 0, len(d.tracked))
-	for _, tv := range d.tracked {
-		s := TrackedVolumeState{
-			VolumeID:     tv.volumeID,
-			TemplateHash: tv.templateHash,
-			Dirty:        tv.dirty,
+// run is the actor's main loop. It processes operations one at a time,
+// always preferring user-initiated ops over background syncs.
+func (a *volumeActor) run() {
+	defer close(a.doneCh)
+	for {
+		// Priority drain: always prefer userCh over bgCh.
+		select {
+		case req := <-a.userCh:
+			a.dispatch(req)
+			continue
+		default:
 		}
-		if !tv.lastSyncAt.IsZero() {
-			s.LastSyncAt = tv.lastSyncAt.UTC().Format(time.RFC3339)
+		// No user ops pending — wait for any event.
+		select {
+		case req := <-a.userCh:
+			a.dispatch(req)
+		case req := <-a.bgCh:
+			a.dispatch(req)
+		case <-a.stopCh:
+			a.drainRemaining()
+			return
 		}
-		states = append(states, s)
 	}
-	return states
 }
 
-// volumeLock returns the per-volume mutex, creating it if needed.
-// This serializes sync/snapshot operations on the same volume to prevent
-// manifest read-modify-write races.
-func (d *Daemon) volumeLock(volumeID string) *sync.Mutex {
-	d.syncLocks.Lock()
-	defer d.syncLocks.Unlock()
-	lk, ok := d.volLocks[volumeID]
-	if !ok {
-		lk = &sync.Mutex{}
-		d.volLocks[volumeID] = lk
+// drainRemaining processes any pending user ops before the actor exits.
+func (a *volumeActor) drainRemaining() {
+	for {
+		select {
+		case req := <-a.userCh:
+			a.dispatch(req)
+		default:
+			return
+		}
 	}
-	return lk
 }
 
-// SyncVolume performs an immediate sync of a single volume to CAS.
-func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
-	// Per-volume lock serializes with concurrent CreateSnapshot/RestoreToSnapshot.
-	vl := d.volumeLock(volumeID)
-	vl.Lock()
-	defer vl.Unlock()
+// dispatch routes an operation to the appropriate handler and sends the result.
+func (a *volumeActor) dispatch(req opRequest) {
+	// Check if caller already gave up.
+	if req.ctx.Err() != nil {
+		select {
+		case req.resultCh <- opResult{err: req.ctx.Err()}:
+		default:
+		}
+		return
+	}
 
-	d.mu.Lock()
-	tv, exists := d.tracked[volumeID]
+	var result opResult
+	switch req.op {
+	case opSync:
+		result.err = a.doSync(req.ctx, false) // background: fail-fast lease
+	case opSyncUser:
+		result.err = a.doSync(req.ctx, true) // user: wait for lease
+	case opDrain:
+		result.err = a.doSync(req.ctx, true) // drain: wait for lease
+	case opCreateSnapshot:
+		result.hash, result.err = a.doCreateSnapshot(req.ctx, req.label)
+	case opRestoreVolume:
+		result.err = a.doRestoreVolume(req.ctx)
+	case opRestoreToSnapshot:
+		result.err = a.doRestoreToSnapshot(req.ctx, req.targetHash)
+	case opUntrack:
+		result.err = a.doUntrack(req.ctx)
+	case opSendVolumeTo:
+		result.err = a.doSendVolumeTo(req.ctx, req.targetAddr)
+	case opNoop:
+		// No-op — used as a barrier to wait for prior ops to complete.
+	}
+
+	select {
+	case req.resultCh <- result:
+	default:
+	}
+}
+
+// doSync performs a CAS sync within the actor goroutine.
+func (a *volumeActor) doSync(ctx context.Context, waitLease bool) error {
+	release, err := a.daemon.doAcquireHubLease(ctx, a.volumeID, "sync", waitLease)
+	if err != nil {
+		return fmt.Errorf("acquire lease: %w", err)
+	}
+	defer release()
+
+	a.daemon.mu.Lock()
+	tv, exists := a.daemon.tracked[a.volumeID]
 	if !exists {
-		d.mu.Unlock()
-		// Volume exists on disk (Hub routed the RPC here) but isn't tracked.
-		// This happens after cross-node migration via EnsureCached or after
-		// CSI restart if discoverVolumes missed it. Auto-track it.
-		volPath := fmt.Sprintf("volumes/%s", volumeID)
-		if !d.btrfs.SubvolumeExists(ctx, volPath) {
-			return fmt.Errorf("volume %q is not tracked and subvolume missing", volumeID)
+		a.daemon.mu.Unlock()
+		// Auto-track if volume exists on disk.
+		volPath := fmt.Sprintf("volumes/%s", a.volumeID)
+		if !a.daemon.btrfs.SubvolumeExists(ctx, volPath) {
+			return fmt.Errorf("volume %q is not tracked and subvolume missing", a.volumeID)
 		}
-		d.autoTrackWithManifest(ctx, volumeID)
-		d.mu.Lock()
-		tv = d.tracked[volumeID]
+		a.daemon.autoTrackWithManifest(ctx, a.volumeID)
+		a.daemon.mu.Lock()
+		tv = a.daemon.tracked[a.volumeID]
 		if tv == nil {
-			d.mu.Unlock()
-			return fmt.Errorf("volume %q failed to auto-track", volumeID)
+			a.daemon.mu.Unlock()
+			return fmt.Errorf("volume %q failed to auto-track", a.volumeID)
 		}
 	}
 	tvCopy := *tv
-	d.mu.Unlock()
+	a.daemon.mu.Unlock()
 
-	hash, newSnapPath, err := d.syncOne(ctx, &tvCopy, "sync", "")
+	hash, newSnapPath, err := a.daemon.syncOne(ctx, &tvCopy, "sync", "")
 	if err != nil {
 		return err
 	}
 
-	d.mu.Lock()
-	if tv, ok := d.tracked[volumeID]; ok {
+	a.daemon.mu.Lock()
+	if tv, ok := a.daemon.tracked[a.volumeID]; ok {
 		tv.lastLayerHash = hash
 		tv.lastSnapPath = newSnapPath
 		tv.lastSyncAt = time.Now()
@@ -719,33 +876,36 @@ func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
 		tv.lastConsolidationHash = tvCopy.lastConsolidationHash
 		tv.dirty = false
 	}
-	d.mu.Unlock()
+	a.daemon.mu.Unlock()
+
+	a.dirty.Store(false)
 	return nil
 }
 
-// CreateSnapshot creates a labeled snapshot layer and returns the blob hash.
-func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (string, error) {
-	// Per-volume lock serializes with concurrent SyncVolume/RestoreToSnapshot.
-	vl := d.volumeLock(volumeID)
-	vl.Lock()
-	defer vl.Unlock()
+// doCreateSnapshot creates a labeled checkpoint within the actor goroutine.
+func (a *volumeActor) doCreateSnapshot(ctx context.Context, label string) (string, error) {
+	release, err := a.daemon.doAcquireHubLease(ctx, a.volumeID, "checkpoint", true)
+	if err != nil {
+		return "", fmt.Errorf("acquire lease: %w", err)
+	}
+	defer release()
 
-	d.mu.Lock()
-	tv, exists := d.tracked[volumeID]
+	a.daemon.mu.Lock()
+	tv, exists := a.daemon.tracked[a.volumeID]
 	if !exists {
-		d.mu.Unlock()
-		return "", fmt.Errorf("volume %q is not tracked for sync", volumeID)
+		a.daemon.mu.Unlock()
+		return "", fmt.Errorf("volume %q is not tracked for sync", a.volumeID)
 	}
 	tvCopy := *tv
-	d.mu.Unlock()
+	a.daemon.mu.Unlock()
 
-	hash, newSnapPath, err := d.syncOne(ctx, &tvCopy, "checkpoint", label)
+	hash, newSnapPath, err := a.daemon.syncOne(ctx, &tvCopy, "checkpoint", label)
 	if err != nil {
 		return "", err
 	}
 
-	d.mu.Lock()
-	if tv, ok := d.tracked[volumeID]; ok {
+	a.daemon.mu.Lock()
+	if tv, ok := a.daemon.tracked[a.volumeID]; ok {
 		tv.lastLayerHash = hash
 		tv.lastSnapPath = newSnapPath
 		tv.lastSyncAt = time.Now()
@@ -754,30 +914,30 @@ func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (st
 		tv.lastConsolidationPath = tvCopy.lastConsolidationPath
 		tv.lastConsolidationHash = tvCopy.lastConsolidationHash
 	}
-	d.mu.Unlock()
+	a.daemon.mu.Unlock()
 	return hash, nil
 }
 
-// RestoreVolume restores a volume from CAS by replaying the incremental
-// snapshot chain. The chain is: template → consolidations → incrementals.
-// Only the minimum set of snapshots needed to reconstruct the latest state
-// is downloaded.
-func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
+// doRestoreVolume restores a volume from CAS within the actor goroutine.
+func (a *volumeActor) doRestoreVolume(ctx context.Context) error {
+	d := a.daemon
+	volumeID := a.volumeID
+
 	if d.cas == nil {
 		return fmt.Errorf("CAS store not configured, cannot restore volume %q", volumeID)
 	}
 
-	// Acquire per-volume lock to serialize with concurrent SyncVolume/CreateSnapshot.
-	vl := d.volumeLock(volumeID)
-	vl.Lock()
-	defer vl.Unlock()
+	release, err := d.doAcquireHubLease(ctx, volumeID, "restore", true)
+	if err != nil {
+		return fmt.Errorf("acquire lease: %w", err)
+	}
+	defer release()
 
 	manifest, err := d.cas.GetManifest(ctx, volumeID)
 	if err != nil {
 		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
 	}
 
-	// Ensure base template exists locally (if volume was created from a template).
 	if manifest.Base != "" && manifest.TemplateName != "" {
 		if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
 			return fmt.Errorf("ensure base template %s: %w", manifest.TemplateName, err)
@@ -787,7 +947,6 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	volumePath := fmt.Sprintf("volumes/%s", volumeID)
 
 	if len(manifest.Snapshots) == 0 {
-		// No snapshots — restore from template directly.
 		if manifest.TemplateName == "" {
 			return fmt.Errorf("no layers and no base template for volume %s", volumeID)
 		}
@@ -804,11 +963,8 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		return nil
 	}
 
-	// Build the restore chain for the HEAD snapshot.
 	chain := manifest.BuildRestoreChain(manifest.Head)
 
-	// Prefetch all needed blobs concurrently, then apply sequentially.
-	// This changes O(N * (download + receive)) → O(max(download)) + O(N * receive).
 	prefetched, pfErr := d.prefetchBlobs(ctx, manifest, chain, volumeID)
 	if pfErr != nil {
 		return fmt.Errorf("prefetch blobs for %s: %w", volumeID, pfErr)
@@ -819,7 +975,6 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	for _, snapHash := range chain {
 		snap := manifest.Snapshots[snapHash]
 		layerPath := fmt.Sprintf("layers/%s@%s", volumeID, cas.ShortHash(snapHash))
-
 		if !d.btrfs.SubvolumeExists(ctx, layerPath) {
 			parentPath, pErr := d.ensureParentLayer(ctx, manifest, chain, snapHash, volumeID)
 			if pErr != nil {
@@ -842,7 +997,6 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		return fmt.Errorf("empty restore chain for volume %s", volumeID)
 	}
 
-	// Create writable volume from the final received snapshot.
 	if d.btrfs.SubvolumeExists(ctx, volumePath) {
 		if err := d.btrfs.DeleteSubvolume(ctx, volumePath); err != nil {
 			return fmt.Errorf("delete existing volume %s: %w", volumeID, err)
@@ -852,21 +1006,12 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 		return fmt.Errorf("snapshot to volume %s: %w", volumeID, err)
 	}
 
-	// Intermediate layers are kept on disk as warm cache. They are small
-	// (incremental diffs, typically KB-low MB) and avoiding re-downloads on
-	// subsequent restores is worth the disk space. Disk-pressure GC handles
-	// cleanup when space is actually needed.
-
 	latestSnap := manifest.Snapshots[manifest.Head]
 	latestConsolHash := ""
 	if consol := manifest.LatestConsolidation(); consol != nil {
 		latestConsolHash = consol.Hash
 	}
 
-	// Update tracked state. If the volume isn't tracked yet (e.g., just
-	// migrated to this node via EnsureCached), track it now so that
-	// subsequent syncs have correct lastLayerHash/lastSnapPath and don't
-	// produce broken manifest entries.
 	d.TrackVolume(volumeID, manifest.TemplateName, manifest.Base)
 
 	latestHash := manifest.LatestHash()
@@ -884,25 +1029,27 @@ func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
 	}
 	d.mu.Unlock()
 
+	a.dirty.Store(false)
 	klog.Infof("Restored volume %s from CAS (%d snapshots in chain)", volumeID, len(chain))
 	return nil
 }
 
-// RestoreToSnapshot restores a volume to a specific snapshot hash. The current
-// state is saved as a "pre-restore" layer first as an undo point. The
-// incremental chain is replayed from the nearest consolidation/template.
-func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash string) error {
-	// Per-volume lock serializes with concurrent SyncVolume/CreateSnapshot.
-	vl := d.volumeLock(volumeID)
-	vl.Lock()
-	defer vl.Unlock()
+// doRestoreToSnapshot restores a volume to a specific snapshot within the actor.
+func (a *volumeActor) doRestoreToSnapshot(ctx context.Context, targetHash string) error {
+	d := a.daemon
+	volumeID := a.volumeID
+
+	release, err := d.doAcquireHubLease(ctx, volumeID, "restore-snapshot", true)
+	if err != nil {
+		return fmt.Errorf("acquire lease: %w", err)
+	}
+	defer release()
 
 	// Save current state as an undo point before restoring.
 	d.mu.Lock()
 	tv, exists := d.tracked[volumeID]
 	if !exists {
 		d.mu.Unlock()
-		// Auto-track if volume exists on disk (same as SyncVolume).
 		volPath := fmt.Sprintf("volumes/%s", volumeID)
 		if !d.btrfs.SubvolumeExists(ctx, volPath) {
 			return fmt.Errorf("volume %q is not tracked and subvolume missing", volumeID)
@@ -918,8 +1065,6 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 	tvCopy := *tv
 	d.mu.Unlock()
 
-	// Only save undo point if volume has been modified since last sync.
-	// Skipping this when clean saves 5-15s (btrfs snapshot + send + S3 upload + Hub RPC).
 	needUndo := tvCopy.dirty
 	if !needUndo && tvCopy.lastSnapPath != "" {
 		volGen, volErr := d.btrfs.GetGeneration(ctx, "volumes/"+volumeID)
@@ -945,7 +1090,6 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		klog.V(2).Infof("RestoreToSnapshot: skipping undo point for %s (volume clean)", volumeID)
 	}
 
-	// Re-read manifest (may have been modified by the undo-point sync above).
 	manifest, err := d.cas.GetManifest(ctx, volumeID)
 	if err != nil {
 		return fmt.Errorf("get manifest for %s: %w", volumeID, err)
@@ -968,7 +1112,6 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		if err := d.btrfs.SnapshotSubvolume(ctx, tmplPath, volumePath, false); err != nil {
 			return fmt.Errorf("snapshot template to volume: %w", err)
 		}
-		// Save old HEAD as a branch before moving (like git auto-stash).
 		branchName := ""
 		if manifest.Head != "" && manifest.Head != targetHash {
 			branchName = fmt.Sprintf("pre-restore-%s", time.Now().UTC().Format("20060102-150405"))
@@ -978,31 +1121,26 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 				klog.Warningf("RestoreToSnapshot: hub SetManifestHead: %v", err)
 			}
 		}
-
 		d.mu.Lock()
 		if tv, ok := d.tracked[volumeID]; ok {
 			tv.lastLayerHash = targetHash
 			tv.lastSnapPath = tmplPath
 		}
 		d.mu.Unlock()
-
 		klog.Infof("Restored volume %s to template base", volumeID)
 		return nil
 	}
 
-	// Verify target hash exists in manifest.
 	if _, ok := manifest.Snapshots[targetHash]; !ok {
 		return fmt.Errorf("target hash %s not found in manifest for volume %s", targetHash, volumeID)
 	}
 
-	// Ensure template exists for chain replay.
 	if manifest.Base != "" && manifest.TemplateName != "" {
 		if err := d.tmplMgr.EnsureTemplateByHash(ctx, manifest.TemplateName, manifest.Base); err != nil {
 			return fmt.Errorf("ensure base template: %w", err)
 		}
 	}
 
-	// Build and replay the restore chain with parallel prefetch.
 	chain := manifest.BuildRestoreChain(targetHash)
 
 	prefetched, pfErr := d.prefetchBlobs(ctx, manifest, chain, volumeID)
@@ -1037,7 +1175,6 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		return fmt.Errorf("empty restore chain for volume %s target %s", volumeID, targetHash)
 	}
 
-	// Replace volume with writable snapshot of the target.
 	if d.btrfs.SubvolumeExists(ctx, volumePath) {
 		_ = d.btrfs.DeleteSubvolume(ctx, volumePath)
 	}
@@ -1045,8 +1182,6 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		return fmt.Errorf("snapshot target to volume: %w", err)
 	}
 
-	// Move HEAD to target (like git checkout). Save old HEAD as a branch
-	// so the timeline is preserved and can be restored later.
 	branchName := ""
 	if manifest.Head != "" && manifest.Head != targetHash {
 		branchName = fmt.Sprintf("pre-restore-%s", time.Now().UTC().Format("20060102-150405"))
@@ -1062,10 +1197,6 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 		latestConsolHash = consol.Hash
 	}
 
-	// Intermediate layers are kept on disk as warm cache — avoiding
-	// re-downloads on subsequent restores is worth the disk space.
-
-	// Update tracked state.
 	d.mu.Lock()
 	if tv, ok := d.tracked[volumeID]; ok {
 		tv.lastLayerHash = targetHash
@@ -1080,6 +1211,382 @@ func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash str
 
 	klog.Infof("Restored volume %s to snapshot %s (%d in chain)", volumeID, cas.ShortHash(targetHash), len(chain))
 	return nil
+}
+
+// doUntrack removes the volume from tracking and cleans up layer snapshots.
+func (a *volumeActor) doUntrack(ctx context.Context) error {
+	a.daemon.mu.Lock()
+	tv, exists := a.daemon.tracked[a.volumeID]
+	if !exists {
+		a.daemon.mu.Unlock()
+		return nil
+	}
+	lastSnapPath := tv.lastSnapPath
+	delete(a.daemon.tracked, a.volumeID)
+	a.daemon.mu.Unlock()
+
+	if lastSnapPath != "" {
+		cleanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if a.daemon.btrfs.SubvolumeExists(cleanCtx, lastSnapPath) {
+			if err := a.daemon.btrfs.DeleteSubvolume(cleanCtx, lastSnapPath); err != nil {
+				klog.Warningf("Failed to cleanup layer snapshot %s: %v", lastSnapPath, err)
+			}
+		}
+	}
+
+	// Signal actor to stop after this op completes.
+	select {
+	case <-a.stopCh:
+	default:
+		close(a.stopCh)
+	}
+	return nil
+}
+
+// doSendVolumeTo syncs and transfers a volume within the actor goroutine.
+// The actor serializes this with all other operations (including FileOps
+// dirty-mark checks via syncOne). The flow:
+//  1. syncOne() — captures ALL current writes into a CAS snapshot + layer
+//  2. Snapshot the live volume for transfer (after sync, this is consistent)
+//  3. btrfs send the snapshot to the target via the sendFn callback
+//
+// Because the actor processes ops sequentially, no FileOps writes can land
+// between the sync and the transfer snapshot — they queue behind this op.
+// The sendFn callback is provided by the nodeops server (which has the gRPC
+// streaming infrastructure to send to the target).
+func (a *volumeActor) doSendVolumeTo(ctx context.Context, targetAddr string) error {
+	d := a.daemon
+	volumeID := a.volumeID
+
+	// Step 1: Sync to CAS first (captures latest FileOps writes).
+	// This goes through the normal sync path — hub lease, syncOne, etc.
+	release, err := d.doAcquireHubLease(ctx, volumeID, "peer-transfer", true)
+	if err != nil {
+		return fmt.Errorf("acquire lease for peer transfer: %w", err)
+	}
+	defer release()
+
+	d.mu.Lock()
+	tv, exists := d.tracked[volumeID]
+	if !exists {
+		d.mu.Unlock()
+		volPath := fmt.Sprintf("volumes/%s", volumeID)
+		if !d.btrfs.SubvolumeExists(ctx, volPath) {
+			return fmt.Errorf("volume %q not tracked and subvolume missing", volumeID)
+		}
+		d.autoTrackWithManifest(ctx, volumeID)
+		d.mu.Lock()
+		tv = d.tracked[volumeID]
+		if tv == nil {
+			d.mu.Unlock()
+			return fmt.Errorf("volume %q failed to auto-track", volumeID)
+		}
+	}
+	tvCopy := *tv
+	d.mu.Unlock()
+
+	if tvCopy.dirty {
+		hash, newSnapPath, syncErr := d.syncOne(ctx, &tvCopy, "sync", "")
+		if syncErr != nil {
+			klog.Warningf("doSendVolumeTo: pre-transfer sync failed for %s: %v (continuing with current state)", volumeID, syncErr)
+		} else {
+			d.mu.Lock()
+			if tv, ok := d.tracked[volumeID]; ok {
+				tv.lastLayerHash = hash
+				tv.lastSnapPath = newSnapPath
+				tv.lastSyncAt = time.Now()
+				tv.templateName = tvCopy.templateName
+				tv.templateHash = tvCopy.templateHash
+				tv.lastConsolidationPath = tvCopy.lastConsolidationPath
+				tv.lastConsolidationHash = tvCopy.lastConsolidationHash
+				tv.dirty = false
+			}
+			d.mu.Unlock()
+			a.dirty.Store(false)
+		}
+	}
+
+	// Step 2: Snapshot the live volume for transfer. At this point the
+	// actor is holding the operation slot — no other sync/snapshot/restore
+	// can run, and any FileOps writes that landed after our sync will be
+	// captured in this snapshot.
+	volumePath := fmt.Sprintf("volumes/%s", volumeID)
+	snapPath := fmt.Sprintf("snapshots/%s@transfer", volumeID)
+
+	if d.btrfs.SubvolumeExists(ctx, snapPath) {
+		_ = d.btrfs.DeleteSubvolume(ctx, snapPath)
+	}
+	if err := d.btrfs.SnapshotSubvolume(ctx, volumePath, snapPath, true); err != nil {
+		return fmt.Errorf("snapshot for transfer: %w", err)
+	}
+	defer func() {
+		_ = d.btrfs.DeleteSubvolume(context.Background(), snapPath)
+	}()
+
+	// Step 3: Send to target. We call sendVolumeFn which is set by the
+	// nodeops server — it has the gRPC streaming infrastructure.
+	if d.sendVolumeFn == nil {
+		return fmt.Errorf("sendVolumeFn not configured — cannot peer transfer")
+	}
+	if err := d.sendVolumeFn(ctx, snapPath, volumeID, targetAddr); err != nil {
+		return fmt.Errorf("send volume to %s: %w", targetAddr, err)
+	}
+
+	klog.Infof("SendVolumeTo (via actor): volume %s sent to %s", volumeID, targetAddr)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Daemon submit helpers
+// ---------------------------------------------------------------------------
+
+// submit sends an op to the volume actor and blocks until completion or ctx cancellation.
+type submitOpts struct {
+	label      string
+	targetHash string
+	targetAddr string
+}
+
+func (d *Daemon) submit(ctx context.Context, volumeID string, op opType, prio opPriority, opts submitOpts) (string, error) {
+	d.mu.Lock()
+	actor, ok := d.actors[volumeID]
+	d.mu.Unlock()
+	if !ok {
+		return "", fmt.Errorf("volume %q has no actor (not tracked)", volumeID)
+	}
+
+	resultCh := make(chan opResult, 1)
+	req := opRequest{
+		op:         op,
+		priority:   prio,
+		ctx:        ctx,
+		label:      opts.label,
+		targetHash: opts.targetHash,
+		targetAddr: opts.targetAddr,
+		resultCh:   resultCh,
+	}
+
+	ch := actor.userCh
+	if prio == priorityBackground {
+		ch = actor.bgCh
+	}
+
+	select {
+	case ch <- req:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-actor.stopCh:
+		return "", fmt.Errorf("volume %q actor stopped", volumeID)
+	}
+
+	select {
+	case res := <-resultCh:
+		return res.hash, res.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// submitBackground sends a background sync to the volume actor. Non-blocking:
+// if the background channel is already full, the sync is coalesced.
+func (d *Daemon) submitBackground(volumeID string) {
+	d.mu.Lock()
+	actor, ok := d.actors[volumeID]
+	d.mu.Unlock()
+	if !ok {
+		return
+	}
+	req := opRequest{
+		op:       opSync,
+		priority: priorityBackground,
+		ctx:      context.Background(),
+		resultCh: make(chan opResult, 1), // nobody reads — prevents actor block
+	}
+	select {
+	case actor.bgCh <- req: // queued
+	default: // coalesced — sync already pending
+	}
+}
+
+// TrackedVolumeState reports the sync state for a tracked volume.
+type TrackedVolumeState struct {
+	VolumeID     string `json:"volume_id"`
+	TemplateHash string `json:"template_hash,omitempty"`
+	LastSyncAt   string `json:"last_sync_at,omitempty"`
+	Dirty        bool   `json:"dirty"`
+	HeadHash     string `json:"head_hash,omitempty"` // CAS manifest HEAD — last synced layer hash
+}
+
+// GetTrackedState returns the current sync state for all tracked volumes.
+// Used by the Hub to rebuild its registry on startup.
+func (d *Daemon) GetTrackedState() []TrackedVolumeState {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	states := make([]TrackedVolumeState, 0, len(d.tracked))
+	for _, tv := range d.tracked {
+		s := TrackedVolumeState{
+			VolumeID:     tv.volumeID,
+			TemplateHash: tv.templateHash,
+			Dirty:        tv.dirty,
+			HeadHash:     tv.lastLayerHash,
+		}
+		if !tv.lastSyncAt.IsZero() {
+			s.LastSyncAt = tv.lastSyncAt.UTC().Format(time.RFC3339)
+		}
+		states = append(states, s)
+	}
+	return states
+}
+
+// leaseBaseTTL is the initial and renewal TTL for Hub volume leases.
+// The actual lease lifetime is unbounded — the renewal goroutine extends
+// it every leaseRenewInterval while the operation is running.
+const leaseBaseTTL = 30 * time.Second
+
+// leaseRenewInterval is how often the lease renewal goroutine extends the TTL.
+const leaseRenewInterval = 10 * time.Second
+
+// leaseRetryInterval is the polling interval when waiting for a held lease
+// to become available. Used by doAcquireHubLease with wait=true.
+const leaseRetryInterval = 500 * time.Millisecond
+
+func (d *Daemon) doAcquireHubLease(ctx context.Context, volumeID, operation string, wait bool) (func(), error) {
+	if d.hub == nil {
+		return func() {}, nil
+	}
+
+	nodeID := d.nodeID
+	if nodeID == "" {
+		nodeID = "unknown"
+	}
+	holder := fmt.Sprintf("%s:%s:%d", nodeID, operation, time.Now().UnixNano())
+
+	acquired, current, err := d.hub.AcquireVolumeLease(ctx, volumeID, holder, leaseBaseTTL)
+	if err != nil {
+		return nil, fmt.Errorf("lease RPC for %s: %w", volumeID, err)
+	}
+
+	if !acquired && wait {
+		// Retry until available or context cancelled. The holder's lease
+		// will either be released normally, expire via TTL, or be reaped
+		// by the Hub's dead-node detector.
+		klog.V(2).Infof("acquireHubLease: volume %s held by %s, waiting (op=%s)", volumeID, current, operation)
+		ticker := time.NewTicker(leaseRetryInterval)
+		defer ticker.Stop()
+		for !acquired {
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("lease wait for %s cancelled: %w", volumeID, ctx.Err())
+			case <-ticker.C:
+				acquired, current, err = d.hub.AcquireVolumeLease(ctx, volumeID, holder, leaseBaseTTL)
+				if err != nil {
+					return nil, fmt.Errorf("lease RPC for %s: %w", volumeID, err)
+				}
+			}
+		}
+	} else if !acquired {
+		return nil, fmt.Errorf("volume %s is leased by %s", volumeID, current)
+	}
+
+	// Background renewal goroutine — extends lease every 10s.
+	renewCtx, renewCancel := context.WithCancel(context.Background())
+	go func() {
+		ticker := time.NewTicker(leaseRenewInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewCtx.Done():
+				return
+			case <-ticker.C:
+				renewed, revoked, rErr := d.hub.RenewVolumeLease(renewCtx, volumeID, holder, leaseBaseTTL)
+				if rErr != nil || !renewed || revoked {
+					return
+				}
+			}
+		}
+	}()
+
+	release := func() {
+		renewCancel()
+		rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = d.hub.ReleaseVolumeLease(rctx, volumeID, holder)
+	}
+	return release, nil
+}
+
+// SyncVolume performs an immediate sync of a single volume to CAS.
+// The operation is submitted to the volume's actor for serialization.
+// If the volume isn't tracked yet, the actor's doSync will auto-track it.
+func (d *Daemon) SyncVolume(ctx context.Context, volumeID string) error {
+	d.mu.Lock()
+	_, hasActor := d.actors[volumeID]
+	d.mu.Unlock()
+	if !hasActor {
+		// Volume exists on disk but isn't tracked (e.g. cross-node migration).
+		// Auto-track so the actor exists; doSync will do full auto-track from manifest.
+		d.TrackVolume(volumeID, "", "")
+	}
+	_, err := d.submit(ctx, volumeID, opSyncUser, priorityUser, submitOpts{})
+	return err
+}
+
+// CreateSnapshot creates a labeled snapshot layer and returns the blob hash.
+// The operation is submitted to the volume's actor for serialization.
+func (d *Daemon) CreateSnapshot(ctx context.Context, volumeID, label string) (string, error) {
+	return d.submit(ctx, volumeID, opCreateSnapshot, priorityUser, submitOpts{label: label})
+}
+
+// RestoreVolume restores a volume from CAS by replaying the incremental
+// snapshot chain. The operation is submitted to the volume's actor.
+// If the volume isn't tracked yet, it is auto-tracked first.
+func (d *Daemon) RestoreVolume(ctx context.Context, volumeID string) error {
+	d.mu.Lock()
+	_, hasActor := d.actors[volumeID]
+	d.mu.Unlock()
+	if !hasActor {
+		// Volume not tracked — auto-track so the actor exists.
+		d.TrackVolume(volumeID, "", "")
+	}
+	_, err := d.submit(ctx, volumeID, opRestoreVolume, priorityUser, submitOpts{})
+	return err
+}
+
+// RestoreToSnapshot restores a volume to a specific snapshot hash.
+// The operation is submitted to the volume's actor for serialization.
+// If the volume isn't tracked yet, the actor's doRestoreToSnapshot will auto-track it.
+func (d *Daemon) RestoreToSnapshot(ctx context.Context, volumeID, targetHash string) error {
+	d.mu.Lock()
+	_, hasActor := d.actors[volumeID]
+	d.mu.Unlock()
+	if !hasActor {
+		d.TrackVolume(volumeID, "", "")
+	}
+	_, err := d.submit(ctx, volumeID, opRestoreToSnapshot, priorityUser, submitOpts{targetHash: targetHash})
+	return err
+}
+
+// SendVolumeTo performs a peer transfer through the volume's actor. The actor
+// syncs any dirty data, snapshots the volume, and sends it to the target node.
+// Because the operation runs inside the actor, no FileOps writes can interleave
+// with the snapshot — preventing data loss during migration.
+func (d *Daemon) SendVolumeTo(ctx context.Context, volumeID, targetAddr string) error {
+	d.mu.Lock()
+	_, hasActor := d.actors[volumeID]
+	d.mu.Unlock()
+	if !hasActor {
+		d.TrackVolume(volumeID, "", "")
+	}
+	_, err := d.submit(ctx, volumeID, opSendVolumeTo, priorityUser, submitOpts{targetAddr: targetAddr})
+	return err
+}
+
+// SetSendVolumeFn sets the callback for peer transfer networking. Called by
+// the driver after the nodeops server is created to wire the two together.
+func (d *Daemon) SetSendVolumeFn(fn func(ctx context.Context, snapPath, volumeID, targetAddr string) error) {
+	d.sendVolumeFn = fn
 }
 
 // DeleteVolume cleans up the manifest and local layer snapshots for a volume.
@@ -1128,138 +1635,76 @@ func (d *Daemon) SyncAll(ctx context.Context) error {
 	return d.syncAll(ctx)
 }
 
-// syncAll iterates over all tracked volumes and syncs dirty ones.
-// Volumes marked clean are verified via btrfs generation comparison —
-// if the volume's generation advanced past its layer snapshot, it was
-// modified by a process outside FileOps (e.g. compute pod) and needs
-// syncing despite the dirty flag being false.
+// syncAll iterates over all tracked volumes and submits background syncs
+// for dirty ones to their respective actors. Volumes marked clean are
+// verified via btrfs generation comparison — if the volume's generation
+// advanced past its layer snapshot, it was modified by a process outside
+// FileOps (e.g. compute pod) and needs syncing.
 func (d *Daemon) syncAll(ctx context.Context) error {
 	// Periodic re-discovery: scan disk for untracked volumes every Nth cycle.
-	// This catches service volumes created by the Hub and any volumes that
-	// appeared after the initial startup discovery. Atomic counter because
-	// SyncAll is exported and could be called concurrently with the ticker.
 	if d.discoverCycle.Add(1) >= int32(discoverInterval) {
 		d.discoverCycle.Store(0)
 		d.discoverVolumes(ctx)
 		d.cleanupStaging(ctx)
 	}
 
-	// Snapshot tracked state under lock (fast).
-	type candidate struct {
-		tv           trackedVolume
-		needGenCheck bool // clean volume with a layer snapshot — verify via generation
+	// Collect dirty actors (lock-free read of atomic dirty flag).
+	// Also collect clean volumes with layer snapshots for generation check.
+	type genCheckInfo struct {
+		volumeID     string
+		lastSnapPath string
 	}
+	var dirtyVols []string
+	var genChecks []genCheckInfo
+
 	d.mu.Lock()
-	candidates := make([]candidate, 0, len(d.tracked))
-	for _, tv := range d.tracked {
-		c := candidate{tv: *tv}
-		if !tv.dirty && tv.lastSnapPath != "" {
-			c.needGenCheck = true
+	for vid, actor := range d.actors {
+		if actor.dirty.Load() {
+			dirtyVols = append(dirtyVols, vid)
+		} else if tv, ok := d.tracked[vid]; ok && tv.lastSnapPath != "" {
+			genChecks = append(genChecks, genCheckInfo{vid, tv.lastSnapPath})
 		}
-		candidates = append(candidates, c)
 	}
 	d.mu.Unlock()
 
 	// Generation check for clean volumes — outside the lock since
 	// GetGeneration runs a btrfs subprocess (~1ms each).
-	for i := range candidates {
-		c := &candidates[i]
-		if !c.needGenCheck {
-			continue
-		}
-		volGen, volErr := d.btrfs.GetGeneration(ctx, "volumes/"+c.tv.volumeID)
-		snapGen, snapErr := d.btrfs.GetGeneration(ctx, c.tv.lastSnapPath)
+	for _, gc := range genChecks {
+		volGen, volErr := d.btrfs.GetGeneration(ctx, "volumes/"+gc.volumeID)
+		snapGen, snapErr := d.btrfs.GetGeneration(ctx, gc.lastSnapPath)
 		if volErr == nil && snapErr == nil && volGen > snapGen {
 			klog.V(2).Infof("syncAll: %s promoted to dirty (vol gen %d > snap gen %d, direct write detected)",
-				c.tv.volumeID, volGen, snapGen)
-			c.tv.dirty = true
-			// Also update the tracked map so DrainAll sees it.
+				gc.volumeID, volGen, snapGen)
 			d.mu.Lock()
-			if tv, ok := d.tracked[c.tv.volumeID]; ok {
+			if actor, ok := d.actors[gc.volumeID]; ok {
+				actor.dirty.Store(true)
+			}
+			if tv, ok := d.tracked[gc.volumeID]; ok {
 				tv.dirty = true
 			}
 			d.mu.Unlock()
+			dirtyVols = append(dirtyVols, gc.volumeID)
 		}
 	}
 
-	// Build final sync list.
-	type syncItem struct {
-		tv trackedVolume
-	}
-	items := make([]syncItem, 0, len(candidates))
-	skipped := 0
-	for _, c := range candidates {
-		if !c.tv.dirty {
-			skipped++
-			continue
-		}
-		items = append(items, syncItem{tv: c.tv})
-	}
-
-
-	if len(items) == 0 {
-		if skipped > 0 {
-			klog.V(5).Infof("No dirty volumes to sync (%d clean, skipped)", skipped)
+	if len(dirtyVols) == 0 {
+		total := len(genChecks)
+		if total > 0 {
+			klog.V(5).Infof("No dirty volumes to sync (%d clean, skipped)", total)
 		} else {
 			klog.V(5).Info("No volumes to sync")
 		}
 		return nil
 	}
 
-	klog.V(4).Infof("Starting CAS sync cycle for %d dirty volumes (%d clean, skipped)", len(items), skipped)
-	var firstErr error
-	for _, item := range items {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	klog.V(4).Infof("Starting CAS sync cycle: submitting %d dirty volumes to actors", len(dirtyVols))
 
-		// Per-volume lock serializes with concurrent SyncVolume/CreateSnapshot RPCs.
-		// Hold vl across both syncOne AND the write-back to prevent a concurrent
-		// SyncVolume/CreateSnapshot from reading stale consolidation state.
-		vl := d.volumeLock(item.tv.volumeID)
-		vl.Lock()
-		hash, newSnapPath, err := d.syncOne(ctx, &item.tv, "sync", "")
-
-		if err != nil {
-			vl.Unlock() // release before UntrackVolume (which acquires vl)
-			if errors.Is(err, errVolumeGone) {
-				klog.Warningf("Volume %s subvolume gone — auto-untracking", item.tv.volumeID)
-				d.UntrackVolume(item.tv.volumeID)
-				continue
-			}
-			klog.Errorf("CAS sync failed for volume %s: %v", item.tv.volumeID, err)
-			metrics.SyncFailures.Inc()
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-
-		d.mu.Lock()
-		if tv, ok := d.tracked[item.tv.volumeID]; ok {
-			tv.lastLayerHash = hash
-			tv.lastSnapPath = newSnapPath
-			tv.lastSyncAt = time.Now()
-			tv.templateName = item.tv.templateName
-			tv.templateHash = item.tv.templateHash
-			tv.lastConsolidationPath = item.tv.lastConsolidationPath
-			tv.lastConsolidationHash = item.tv.lastConsolidationHash
-			tv.dirty = false
-		}
-		d.mu.Unlock()
-		vl.Unlock()
-		metrics.SyncLag.WithLabelValues(item.tv.volumeID).Set(0)
-
-		// Update qgroup metrics if quotas are enabled.
-		if excl, limit, qErr := d.btrfs.GetQgroupUsage(ctx, "volumes/"+item.tv.volumeID); qErr == nil {
-			metrics.QgroupUsageBytes.WithLabelValues(item.tv.volumeID).Set(float64(excl))
-			metrics.QgroupLimitBytes.WithLabelValues(item.tv.volumeID).Set(float64(limit))
-		}
+	// Submit background sync to each dirty actor. Non-blocking, coalesced.
+	for _, vid := range dirtyVols {
+		d.submitBackground(vid)
 	}
 
-	return firstErr
+	return nil
 }
 
 // syncOne performs the CAS sync algorithm for a single volume:

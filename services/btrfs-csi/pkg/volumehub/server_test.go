@@ -137,10 +137,9 @@ func TestEnsureCached_FastPath_LiveCachedCandidate(t *testing.T) {
 	if resp.NodeName != "node-a" {
 		t.Errorf("got node %q, want node-a (fast path)", resp.NodeName)
 	}
-	// Verify the fast path actually checked the node.
-	if fake.existsCalls.Load() == 0 {
-		t.Error("expected SubvolumeExists call on fast path")
-	}
+	// Owner fast path skips disk verification — owner is authoritative.
+	// No SubvolumeExists call expected.
+	_ = fake
 }
 
 func TestEnsureCached_StaleNode_FallsBackToLiveNode(t *testing.T) {

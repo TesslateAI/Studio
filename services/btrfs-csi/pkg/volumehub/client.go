@@ -3,12 +3,14 @@ package volumehub
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/lease"
 )
 
 // HubClient wraps a gRPC connection to the VolumeHub for manifest-write RPCs.
@@ -109,4 +111,63 @@ func (c *HubClient) DeleteVolumeManifest(ctx context.Context, volumeID string) e
 // DeleteTombstone calls the Hub to remove a volume's tombstone.
 func (c *HubClient) DeleteTombstone(ctx context.Context, volumeID string) error {
 	return c.invoke(ctx, "DeleteTombstone", &DeleteTombstoneRequest{VolumeID: volumeID}, &Empty{})
+}
+
+// --- Lease RPC methods (satisfy sync.HubOps interface) ---
+
+// AcquireVolumeLease attempts to acquire an exclusive lease on a volume.
+func (c *HubClient) AcquireVolumeLease(ctx context.Context, volumeID, holder string, ttl time.Duration) (bool, string, error) {
+	var resp AcquireVolumeLeaseResponse
+	err := c.invoke(ctx, "AcquireVolumeLease", &AcquireVolumeLeaseRequest{
+		VolumeID:  volumeID,
+		Holder:    holder,
+		TTLMillis: ttl.Milliseconds(),
+	}, &resp)
+	return resp.Acquired, resp.CurrentHolder, err
+}
+
+// ReleaseVolumeLease releases a previously acquired lease.
+func (c *HubClient) ReleaseVolumeLease(ctx context.Context, volumeID, holder string) error {
+	return c.invoke(ctx, "ReleaseVolumeLease", &ReleaseVolumeLeaseRequest{
+		VolumeID: volumeID,
+		Holder:   holder,
+	}, &Empty{})
+}
+
+// RenewVolumeLease extends the TTL of a held lease. Returns revoked=true if
+// the lease was revoked (holder should abort).
+func (c *HubClient) RenewVolumeLease(ctx context.Context, volumeID, holder string, ttl time.Duration) (bool, bool, error) {
+	var resp RenewVolumeLeaseResponse
+	err := c.invoke(ctx, "RenewVolumeLease", &RenewVolumeLeaseRequest{
+		VolumeID:  volumeID,
+		Holder:    holder,
+		TTLMillis: ttl.Milliseconds(),
+	}, &resp)
+	return resp.Renewed, resp.Revoked, err
+}
+
+// BatchAcquireLease acquires leases for multiple volumes atomically.
+func (c *HubClient) BatchAcquireLease(ctx context.Context, requests []lease.BatchReq) ([]lease.BatchResult, error) {
+	items := make([]LeaseRequestItem, len(requests))
+	for i, r := range requests {
+		items[i] = LeaseRequestItem{
+			VolumeID:  r.VolumeID,
+			Holder:    r.Holder,
+			TTLMillis: r.TTL.Milliseconds(),
+		}
+	}
+	var resp BatchAcquireLeaseResponse
+	err := c.invoke(ctx, "BatchAcquireLease", &BatchAcquireLeaseRequest{Leases: items}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]lease.BatchResult, len(resp.Results))
+	for i, r := range resp.Results {
+		results[i] = lease.BatchResult{
+			VolumeID:      r.VolumeID,
+			Acquired:      r.Acquired,
+			CurrentHolder: r.CurrentHolder,
+		}
+	}
+	return results, nil
 }

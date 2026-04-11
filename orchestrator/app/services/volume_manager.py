@@ -34,6 +34,12 @@ class VolumeUnavailableError(Exception):
     pass
 
 
+class VolumeOwnerUnreachableError(Exception):
+    """Volume owner exists but its CSI pod is temporarily unreachable. Retry."""
+
+    pass
+
+
 class VolumeManager:
     """Thin client — all volume intelligence is in the Hub."""
 
@@ -161,11 +167,12 @@ class VolumeManager:
         """Non-blocking volume resolution via Hub.
 
         Returns dict with ``node_name``, ``fileops_address``,
-        ``nodeops_address``, ``state`` (cached/restoring/unavailable).
+        ``nodeops_address``, ``state`` (cached/restoring/unavailable/owner_unreachable).
 
         Raises:
             VolumeRestoringError: If volume is being restored from S3.
-            VolumeUnavailableError: If restore failed or no CAS data.
+            VolumeOwnerUnreachableError: If owner exists but CSI pod is temporarily down.
+            VolumeUnavailableError: If no owner or restore failed.
         """
         resp = await self._hub.resolve_volume(volume_id)
         state = resp.get("state", "unavailable")
@@ -175,6 +182,9 @@ class VolumeManager:
 
         if state == "restoring":
             raise VolumeRestoringError(volume_id)
+
+        if state == "owner_unreachable":
+            raise VolumeOwnerUnreachableError(volume_id)
 
         raise VolumeUnavailableError(volume_id)
 

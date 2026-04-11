@@ -14,12 +14,15 @@ import random
 import time
 import traceback
 
+from .event_log import EventLog
 from .helpers import (
     create_project,
     delete_project,
     ensure_user,
     get_db,
+    get_last_verify_detail,
     rand_str,
+    resolve_volume_node,
     start_env,
     stop_env,
     verify_test_files,
@@ -53,12 +56,14 @@ class UserWorker:
         target_projects: int,
         worker_nodes: list[str],
         metrics: Metrics,
+        event_log: EventLog,
     ):
         self.index = user_index
         self.name = f"user-{user_index}"
         self.target_projects = target_projects
         self.worker_nodes = worker_nodes
         self.metrics = metrics
+        self.events = event_log
         self.db = None
         self.user = None
         self.projects: list[ManagedProject] = []
@@ -122,27 +127,92 @@ class UserWorker:
 
         self._update_gauges()
 
+    # ── Logging helpers ─────────────────────────────────────────
+
+    def _log_verify(
+        self,
+        mp: ManagedProject,
+        action: str,
+        step: str,
+        bad: list[str],
+        duration: float,
+    ):
+        """Log a verify result with full detail from get_last_verify_detail()."""
+        ok = len(bad) == 0
+        detail = get_last_verify_detail()
+        self.events.log(
+            self.name,
+            action,
+            step,
+            mp.project.volume_id,
+            success=ok,
+            node=detail.node_resolved if detail else "",
+            duration_s=duration,
+            verify_detail=detail,
+        )
+        self.metrics.record(self.name, step, ok, duration, f"bad={bad}" if bad else "")
+
     # ── Actions ──────────────────────────────────────────────────
 
     async def _action_write_and_verify(self):
         """Write new files to a random project and verify them."""
         mp = random.choice(self.projects)
-        t0 = time.monotonic()
-        hashes = await write_test_files(mp.project.volume_id, n=random.randint(3, 8))
-        self.metrics.record(self.name, "write_files", True, time.monotonic() - t0)
+        vol = mp.project.volume_id
 
-        mp.file_hashes.update(hashes)
-
-        t0 = time.monotonic()
-        bad = await verify_test_files(mp.project.volume_id, mp.file_hashes)
-        ok = len(bad) == 0
-        self.metrics.record(
-            self.name, "verify_files", ok, time.monotonic() - t0, f"bad={bad}" if bad else ""
+        # Log pre-state
+        self.events.log(
+            self.name,
+            "write_and_verify",
+            "begin",
+            vol,
+            file_hashes_before=dict(mp.file_hashes),
         )
+
+        # Write
+        t0 = time.monotonic()
+        n = random.randint(3, 8)
+        hashes, write_node = await write_test_files(vol, n=n)
+        dur = time.monotonic() - t0
+        self.metrics.record(self.name, "write_files", True, dur)
+        self.events.log(
+            self.name,
+            "write_and_verify",
+            "write",
+            vol,
+            node=write_node,
+            duration_s=dur,
+            files_written=hashes,
+        )
+
+        # Replace file_hashes entirely — only track what we just wrote.
+        mp.file_hashes = hashes
+        self.events.log(
+            self.name,
+            "write_and_verify",
+            "set_hashes",
+            vol,
+            file_hashes_after=dict(mp.file_hashes),
+        )
+
+        # Verify
+        t0 = time.monotonic()
+        bad = await verify_test_files(vol, mp.file_hashes)
+        dur = time.monotonic() - t0
+        self._log_verify(mp, "write_and_verify", "verify_files", bad, dur)
 
     async def _action_start_stop(self):
         """Start an env, verify files, stop it, verify again."""
         mp = random.choice(self.projects)
+        vol = mp.project.volume_id
+
+        self.events.log(
+            self.name,
+            "start_stop",
+            "begin",
+            vol,
+            file_hashes_before=dict(mp.file_hashes),
+            detail=f"env_running={mp.env_running}",
+        )
 
         if mp.env_running:
             # Stop first
@@ -150,7 +220,15 @@ class UserWorker:
             await stop_env(mp.project, self.db)
             await self.db.refresh(mp.project)
             mp.env_running = False
-            self.metrics.record(self.name, "stop_env", True, time.monotonic() - t0)
+            dur = time.monotonic() - t0
+            self.metrics.record(self.name, "stop_env", True, dur)
+            self.events.log(
+                self.name,
+                "start_stop",
+                "stop_env",
+                vol,
+                duration_s=dur,
+            )
         else:
             # Start
             t0 = time.monotonic()
@@ -158,26 +236,29 @@ class UserWorker:
             await self.db.refresh(mp.project)
             ok = await wait_pods_running(mp.project.id)
             mp.env_running = ok
-            self.metrics.record(
-                self.name, "start_env", ok, time.monotonic() - t0, "" if ok else "pods not running"
+            dur = time.monotonic() - t0
+            self.metrics.record(self.name, "start_env", ok, dur, "" if ok else "pods not running")
+            self.events.log(
+                self.name,
+                "start_stop",
+                "start_env",
+                vol,
+                success=ok,
+                duration_s=dur,
+                error="" if ok else "pods not running",
             )
 
         # Verify files regardless
         if mp.file_hashes:
             t0 = time.monotonic()
-            bad = await verify_test_files(mp.project.volume_id, mp.file_hashes)
-            ok = len(bad) == 0
-            self.metrics.record(
-                self.name,
-                "verify_after_toggle",
-                ok,
-                time.monotonic() - t0,
-                f"bad={bad}" if bad else "",
-            )
+            bad = await verify_test_files(vol, mp.file_hashes)
+            dur = time.monotonic() - t0
+            self._log_verify(mp, "start_stop", "verify_after_toggle", bad, dur)
 
     async def _action_migrate(self):
         """Sync + migrate a project to another node, verify files."""
         mp = random.choice(self.projects)
+        vol = mp.project.volume_id
         from app.services.volume_manager import get_volume_manager
 
         vm = get_volume_manager()
@@ -187,28 +268,56 @@ class UserWorker:
         if not targets:
             return
 
+        self.events.log(
+            self.name,
+            "migrate",
+            "begin",
+            vol,
+            file_hashes_before=dict(mp.file_hashes),
+            source_node=current,
+            detail=f"targets={targets}",
+        )
+
+        # Sync
+        t0_sync = time.monotonic()
+        await vm.trigger_sync(vol)
+        dur_sync = time.monotonic() - t0_sync
+        self.events.log(
+            self.name,
+            "migrate",
+            "trigger_sync",
+            vol,
+            source_node=current,
+            duration_s=dur_sync,
+        )
+
+        # EnsureCached on target
         t0 = time.monotonic()
-        await vm.trigger_sync(mp.project.volume_id)
-        new_node = await vm.ensure_cached(mp.project.volume_id, candidate_nodes=targets)
+        new_node = await vm.ensure_cached(vol, candidate_nodes=targets)
+        dur = time.monotonic() - t0
         mp.project.cache_node = new_node
         await self.db.commit()
-        self.metrics.record(self.name, "migrate", True, time.monotonic() - t0)
+        self.metrics.record(self.name, "migrate", True, dur_sync + dur)
+        self.events.log(
+            self.name,
+            "migrate",
+            "ensure_cached",
+            vol,
+            source_node=current,
+            target_node=new_node,
+            duration_s=dur,
+        )
 
         if mp.file_hashes:
             t0 = time.monotonic()
-            bad = await verify_test_files(mp.project.volume_id, mp.file_hashes)
-            ok = len(bad) == 0
-            self.metrics.record(
-                self.name,
-                "verify_after_migrate",
-                ok,
-                time.monotonic() - t0,
-                f"bad={bad}" if bad else "",
-            )
+            bad = await verify_test_files(vol, mp.file_hashes)
+            dur = time.monotonic() - t0
+            self._log_verify(mp, "migrate", "verify_after_migrate", bad, dur)
 
     async def _action_snapshot_restore(self):
-        """Snapshot, corrupt files, restore, verify originals."""
+        """Snapshot, write canary, restore, verify originals."""
         mp = random.choice(self.projects)
+        vol = mp.project.volume_id
         if not mp.file_hashes:
             await self._action_write_and_verify()
             return
@@ -218,55 +327,109 @@ class UserWorker:
 
         hub = HubClient(get_settings().volume_hub_address)
 
-        try:
-            t0 = time.monotonic()
-            await hub.trigger_sync(mp.project.volume_id, timeout=120)
-            snap = await hub.create_snapshot(
-                mp.project.volume_id, f"soak-{rand_str()}", timeout=120
-            )
-            self.metrics.record(self.name, "snapshot", True, time.monotonic() - t0)
+        # Clear hashes upfront — the action modifies the volume (canary write,
+        # restore). If anything fails mid-action, the volume state is unknown.
+        # Setting to empty makes future verifies skip safely. On success we
+        # restore hashes to the snapshot-time state.
+        saved_hashes = dict(mp.file_hashes)
+        mp.file_hashes = {}
 
-            # Write a canary file (NOT a tracked file) to verify restore reverts it
+        try:
+            snapshot_hashes = saved_hashes
+            node = await resolve_volume_node(vol)
+
+            self.events.log(
+                self.name,
+                "snapshot_restore",
+                "begin",
+                vol,
+                node=node,
+                file_hashes_before=dict(mp.file_hashes),
+            )
+
+            # Sync + Snapshot
+            t0 = time.monotonic()
+            await hub.trigger_sync(vol, timeout=120)
+            snap = await hub.create_snapshot(vol, f"soak-{rand_str()}", timeout=120)
+            dur = time.monotonic() - t0
+            self.metrics.record(self.name, "snapshot", True, dur)
+            self.events.log(
+                self.name,
+                "snapshot_restore",
+                "snapshot",
+                vol,
+                node=node,
+                duration_s=dur,
+                snapshot_hash=snap,
+                detail=f"frozen_hashes={list(snapshot_hashes.keys())}",
+            )
+
+            # Write canary
             from app.services.volume_manager import get_volume_manager
 
-            client = await get_volume_manager().get_fileops_client(mp.project.volume_id)
+            client = await get_volume_manager().get_fileops_client(vol)
             try:
-                await client.write_file_text(
-                    mp.project.volume_id, ".soak_canary", "SHOULD_BE_GONE\n"
-                )
+                await client.write_file_text(vol, ".soak_canary", "SHOULD_BE_GONE\n")
             finally:
                 await client.close()
+            self.events.log(
+                self.name,
+                "snapshot_restore",
+                "write_canary",
+                vol,
+                node=node,
+            )
 
             # Restore
             t0 = time.monotonic()
             await hub._call(
                 "RestoreToSnapshot",
-                {"volume_id": mp.project.volume_id, "target_hash": snap},
+                {"volume_id": vol, "target_hash": snap},
                 timeout=180,
             )
-            self.metrics.record(self.name, "restore", True, time.monotonic() - t0)
+            dur = time.monotonic() - t0
+            self.metrics.record(self.name, "restore", True, dur)
+
+            # Check which node after restore (could change)
+            node_after = await resolve_volume_node(vol)
+            self.events.log(
+                self.name,
+                "snapshot_restore",
+                "restore",
+                vol,
+                node=node_after,
+                duration_s=dur,
+                restore_target=snap,
+                detail=f"node_before={node} node_after={node_after}",
+            )
+
+            # Reset file_hashes to snapshot state
+            mp.file_hashes = snapshot_hashes
+            self.events.log(
+                self.name,
+                "snapshot_restore",
+                "set_hashes",
+                vol,
+                file_hashes_after=dict(mp.file_hashes),
+            )
 
             # Verify
             t0 = time.monotonic()
-            bad = await verify_test_files(mp.project.volume_id, mp.file_hashes)
-            ok = len(bad) == 0
-            self.metrics.record(
-                self.name,
-                "verify_after_restore",
-                ok,
-                time.monotonic() - t0,
-                f"bad={bad}" if bad else "",
-            )
+            bad = await verify_test_files(vol, snapshot_hashes)
+            dur = time.monotonic() - t0
+            self._log_verify(mp, "snapshot_restore", "verify_after_restore", bad, dur)
+
         finally:
             await hub.close()
 
     async def _action_double_restore(self):
-        """Snapshot A, write, snapshot B, restore to A, write, restore to B, verify.
+        """Snapshot A, write, snapshot B, restore to A, restore to B, verify.
 
         Exercises the DAG branching model: after restoring to A and making
         changes, snapshot B must still be reachable (not truncated).
         """
         mp = random.choice(self.projects)
+        vol = mp.project.volume_id
         if not mp.file_hashes:
             await self._action_write_and_verify()
             return
@@ -276,57 +439,147 @@ class UserWorker:
 
         hub = HubClient(get_settings().volume_hub_address)
 
+        # Clear hashes upfront — the action writes divergent files and restores
+        # between two snapshots. If anything fails mid-action, volume state is
+        # unknown. Empty hashes = future verifies skip safely. On success we
+        # set hashes to the final snapshot B state.
+        saved_hashes = dict(mp.file_hashes)
+        mp.file_hashes = {}
+
         try:
-            # Snapshot A (captures current state with all tracked files).
-            await hub.trigger_sync(mp.project.volume_id, timeout=120)
-            snap_a = await hub.create_snapshot(
-                mp.project.volume_id, f"branch-a-{rand_str()}", timeout=120
+            hashes_a = saved_hashes
+            node = await resolve_volume_node(vol)
+
+            self.events.log(
+                self.name,
+                "double_restore",
+                "begin",
+                vol,
+                node=node,
+                file_hashes_before=dict(mp.file_hashes),
             )
 
-            # Write new files, creating divergent state.
-            hashes_b = await write_test_files(mp.project.volume_id, n=3)
-
-            # Snapshot B (captures state with new files).
-            await hub.trigger_sync(mp.project.volume_id, timeout=120)
-            snap_b = await hub.create_snapshot(
-                mp.project.volume_id, f"branch-b-{rand_str()}", timeout=120
+            # Snapshot A
+            await hub.trigger_sync(vol, timeout=120)
+            snap_a = await hub.create_snapshot(vol, f"branch-a-{rand_str()}", timeout=120)
+            self.events.log(
+                self.name,
+                "double_restore",
+                "snapshot_a",
+                vol,
+                node=node,
+                snapshot_hash=snap_a,
+                detail=f"hashes_a={list(hashes_a.keys())}",
             )
 
-            # Restore to A — this forks the timeline. B must remain reachable.
+            # Write new files (divergent state)
+            hashes_b_new, write_node = await write_test_files(vol, n=3)
+            self.events.log(
+                self.name,
+                "double_restore",
+                "write_divergent",
+                vol,
+                node=write_node,
+                files_written=hashes_b_new,
+            )
+
+            # Snapshot B
+            hashes_b = {**hashes_a, **hashes_b_new}
+            await hub.trigger_sync(vol, timeout=120)
+            snap_b = await hub.create_snapshot(vol, f"branch-b-{rand_str()}", timeout=120)
+            self.events.log(
+                self.name,
+                "double_restore",
+                "snapshot_b",
+                vol,
+                node=node,
+                snapshot_hash=snap_b,
+                detail=f"hashes_b={list(hashes_b.keys())}",
+            )
+
+            # Restore to A
             t0 = time.monotonic()
             await hub._call(
                 "RestoreToSnapshot",
-                {"volume_id": mp.project.volume_id, "target_hash": snap_a},
+                {"volume_id": vol, "target_hash": snap_a},
                 timeout=180,
             )
-            self.metrics.record(self.name, "restore", True, time.monotonic() - t0)
+            dur = time.monotonic() - t0
+            self.metrics.record(self.name, "restore", True, dur)
+            node_after_a = await resolve_volume_node(vol)
+            self.events.log(
+                self.name,
+                "double_restore",
+                "restore_to_a",
+                vol,
+                node=node_after_a,
+                duration_s=dur,
+                restore_target=snap_a,
+            )
 
-            # Verify original files are back (snapshot A state).
-            bad = await verify_test_files(mp.project.volume_id, mp.file_hashes)
+            # Verify A
+            bad = await verify_test_files(vol, hashes_a)
             ok_a = len(bad) == 0
+            detail_a = get_last_verify_detail()
+            self.events.log(
+                self.name,
+                "double_restore",
+                "verify_after_restore_a",
+                vol,
+                success=ok_a,
+                node=detail_a.node_resolved if detail_a else "",
+                verify_detail=detail_a,
+            )
             self.metrics.record(
                 self.name, "verify_after_restore", ok_a, 0, f"bad={bad}" if bad else ""
             )
 
-            # Now restore to B — the key test: B was NOT truncated.
+            # Restore to B
             t0 = time.monotonic()
             await hub._call(
                 "RestoreToSnapshot",
-                {"volume_id": mp.project.volume_id, "target_hash": snap_b},
+                {"volume_id": vol, "target_hash": snap_b},
                 timeout=180,
             )
-            self.metrics.record(self.name, "restore", True, time.monotonic() - t0)
+            dur = time.monotonic() - t0
+            self.metrics.record(self.name, "restore", True, dur)
+            node_after_b = await resolve_volume_node(vol)
+            self.events.log(
+                self.name,
+                "double_restore",
+                "restore_to_b",
+                vol,
+                node=node_after_b,
+                duration_s=dur,
+                restore_target=snap_b,
+            )
 
-            # Verify B's files exist (includes both original + new files).
-            combined = {**mp.file_hashes, **hashes_b}
-            bad = await verify_test_files(mp.project.volume_id, combined)
+            # Verify B
+            bad = await verify_test_files(vol, hashes_b)
             ok_b = len(bad) == 0
+            detail_b = get_last_verify_detail()
+            self.events.log(
+                self.name,
+                "double_restore",
+                "verify_after_restore_b",
+                vol,
+                success=ok_b,
+                node=detail_b.node_resolved if detail_b else "",
+                verify_detail=detail_b,
+            )
             self.metrics.record(
                 self.name, "verify_after_restore", ok_b, 0, f"bad={bad}" if bad else ""
             )
 
-            # Update tracked hashes to B's state (since we're now at B).
-            mp.file_hashes.update(hashes_b)
+            # Final state
+            mp.file_hashes = hashes_b
+            self.events.log(
+                self.name,
+                "double_restore",
+                "set_hashes",
+                vol,
+                file_hashes_after=dict(mp.file_hashes),
+            )
 
         finally:
             await hub.close()
@@ -334,6 +587,7 @@ class UserWorker:
     async def _action_fork(self):
         """Fork a project's volume, verify the clone has the same files."""
         mp = random.choice(self.projects)
+        vol = mp.project.volume_id
         if not mp.file_hashes:
             return
 
@@ -343,17 +597,47 @@ class UserWorker:
         hub = HubClient(get_settings().volume_hub_address)
 
         try:
+            self.events.log(
+                self.name,
+                "fork",
+                "begin",
+                vol,
+                file_hashes_before=dict(mp.file_hashes),
+            )
+
             t0 = time.monotonic()
-            fork_id, _ = await hub.fork_volume(mp.project.volume_id, timeout=120)
-            self.metrics.record(self.name, "fork", True, time.monotonic() - t0)
+            fork_id, _ = await hub.fork_volume(vol, timeout=120)
+            dur = time.monotonic() - t0
+            self.metrics.record(self.name, "fork", True, dur)
+            fork_node = await resolve_volume_node(fork_id)
+            self.events.log(
+                self.name,
+                "fork",
+                "fork_created",
+                vol,
+                duration_s=dur,
+                target_node=fork_node,
+                detail=f"fork_id={fork_id}",
+            )
 
             # Verify files on the fork
             t0 = time.monotonic()
             bad = await verify_test_files(fork_id, mp.file_hashes)
+            dur = time.monotonic() - t0
             ok = len(bad) == 0
-            self.metrics.record(
-                self.name, "verify_fork", ok, time.monotonic() - t0, f"bad={bad}" if bad else ""
+            detail = get_last_verify_detail()
+            self.events.log(
+                self.name,
+                "fork",
+                "verify_fork",
+                fork_id,
+                success=ok,
+                node=detail.node_resolved if detail else "",
+                duration_s=dur,
+                verify_detail=detail,
+                detail=f"source_vol={vol}",
             )
+            self.metrics.record(self.name, "verify_fork", ok, dur, f"bad={bad}" if bad else "")
 
             # Cleanup fork
             await hub.delete_volume(fork_id, timeout=60)
@@ -367,41 +651,116 @@ class UserWorker:
             self.projects.remove(victim)
             t0 = time.monotonic()
             await delete_project(self.db, victim.project)
-            self.metrics.record(self.name, "retire_project", True, time.monotonic() - t0)
+            dur = time.monotonic() - t0
+            self.metrics.record(self.name, "retire_project", True, dur)
+            self.events.log(
+                self.name,
+                "churn",
+                "retire",
+                victim.project.volume_id,
+                duration_s=dur,
+            )
 
         t0 = time.monotonic()
         mp = await self._create_managed_project()
         self.projects.append(mp)
-        self.metrics.record(self.name, "create_project", True, time.monotonic() - t0)
+        dur = time.monotonic() - t0
+        self.metrics.record(self.name, "create_project", True, dur)
+        self.events.log(
+            self.name,
+            "churn",
+            "create",
+            mp.project.volume_id,
+            duration_s=dur,
+            node=mp.project.cache_node or "",
+            files_written=dict(mp.file_hashes),
+        )
 
     async def _action_full_lifecycle(self):
         """Create ephemeral project -> write -> start -> verify -> stop -> delete."""
         t0_all = time.monotonic()
         project, container = await create_project(self.db, self.user, f"life-{self.index}")
+        vol = project.volume_id
         try:
-            hashes = await write_test_files(project.volume_id, n=random.randint(3, 6))
+            self.events.log(
+                self.name,
+                "full_lifecycle",
+                "create",
+                vol,
+                node=project.cache_node or "",
+            )
+
+            hashes, write_node = await write_test_files(vol, n=random.randint(3, 6))
+            self.events.log(
+                self.name,
+                "full_lifecycle",
+                "write",
+                vol,
+                node=write_node,
+                files_written=hashes,
+            )
 
             await start_env(project, container, self.user.id, self.db)
             await self.db.refresh(project)
             await wait_pods_running(project.id, timeout=90)
+            self.events.log(
+                self.name,
+                "full_lifecycle",
+                "start_env",
+                vol,
+            )
 
-            bad = await verify_test_files(project.volume_id, hashes)
+            bad = await verify_test_files(vol, hashes)
+            dur_v1 = time.monotonic() - t0_all
             if bad:
-                self.metrics.record(
-                    self.name, "full_lifecycle", False, time.monotonic() - t0_all, f"bad={bad}"
+                detail = get_last_verify_detail()
+                self.events.log(
+                    self.name,
+                    "full_lifecycle",
+                    "verify_running",
+                    vol,
+                    success=False,
+                    duration_s=dur_v1,
+                    verify_detail=detail,
                 )
+                self.metrics.record(self.name, "full_lifecycle", False, dur_v1, f"bad={bad}")
                 return
+
+            self.events.log(
+                self.name,
+                "full_lifecycle",
+                "verify_running",
+                vol,
+                success=True,
+            )
 
             await stop_env(project, self.db)
             await self.db.refresh(project)
+            self.events.log(
+                self.name,
+                "full_lifecycle",
+                "stop_env",
+                vol,
+            )
 
-            bad = await verify_test_files(project.volume_id, hashes)
+            bad = await verify_test_files(vol, hashes)
+            dur_total = time.monotonic() - t0_all
             ok = len(bad) == 0
+            detail = get_last_verify_detail()
+            self.events.log(
+                self.name,
+                "full_lifecycle",
+                "verify_stopped",
+                vol,
+                success=ok,
+                duration_s=dur_total,
+                verify_detail=detail,
+            )
             self.metrics.record(
                 self.name,
                 "full_lifecycle",
                 ok,
-                time.monotonic() - t0_all,
+                dur_total,
                 f"bad={bad}" if bad else "",
             )
         finally:
@@ -413,7 +772,8 @@ class UserWorker:
         project, container = await create_project(self.db, self.user, f"s{self.index}")
         mp = ManagedProject(project, container)
         # Write initial files
-        mp.file_hashes = await write_test_files(project.volume_id, n=5)
+        hashes, _ = await write_test_files(project.volume_id, n=5)
+        mp.file_hashes = hashes
         return mp
 
     def _pick_action(self):

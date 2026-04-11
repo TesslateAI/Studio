@@ -15,6 +15,7 @@ import logging
 import random
 import time
 
+from .event_log import EventLog
 from .metrics import Metrics
 
 logger = logging.getLogger("soak.chaos")
@@ -29,11 +30,13 @@ class ChaosAgent:
         metrics: Metrics,
         interval_seconds: int = 600,
         enabled: bool = True,
+        event_log: EventLog | None = None,
     ):
         self.worker_nodes = worker_nodes
         self.metrics = metrics
         self.interval = interval_seconds
         self.enabled = enabled
+        self.events = event_log
         self._cordoned: str | None = None
 
     async def run(self, deadline: float | None = None, max_cycles: int | None = None):
@@ -67,13 +70,31 @@ class ChaosAgent:
                 t0 = time.monotonic()
                 try:
                     await action()
-                    self.metrics.record("chaos", action_name, True, time.monotonic() - t0)
-                    logger.info("[chaos] %s OK (%.1fs)", action_name, time.monotonic() - t0)
+                    dur = time.monotonic() - t0
+                    self.metrics.record("chaos", action_name, True, dur)
+                    logger.info("[chaos] %s OK (%.1fs)", action_name, dur)
+                    if self.events:
+                        self.events.log(
+                            "chaos",
+                            action_name,
+                            "complete",
+                            "",
+                            duration_s=dur,
+                        )
                 except Exception as e:
-                    self.metrics.record(
-                        "chaos", action_name, False, time.monotonic() - t0, str(e)[:120]
-                    )
+                    dur = time.monotonic() - t0
+                    self.metrics.record("chaos", action_name, False, dur, str(e)[:120])
                     logger.warning("[chaos] %s FAIL: %s", action_name, e)
+                    if self.events:
+                        self.events.log(
+                            "chaos",
+                            action_name,
+                            "fail",
+                            "",
+                            success=False,
+                            duration_s=dur,
+                            error=str(e)[:120],
+                        )
         except asyncio.CancelledError:
             pass
         finally:
@@ -93,6 +114,15 @@ class ChaosAgent:
 
         if self._cordoned:
             await self._uncordon(self._cordoned)
+            logger.info("[chaos] Uncordoned %s", self._cordoned)
+            if self.events:
+                self.events.log(
+                    "chaos",
+                    "cordon_uncordon",
+                    "uncordon",
+                    "",
+                    detail=f"node={self._cordoned}",
+                )
             self._cordoned = None
             return
 
@@ -100,20 +130,40 @@ class ChaosAgent:
         v1.patch_node(victim, {"spec": {"unschedulable": True}})
         self._cordoned = victim
         logger.info("[chaos] Cordoned %s — will uncordon in ~30s", victim)
+        if self.events:
+            self.events.log(
+                "chaos",
+                "cordon_uncordon",
+                "cordon",
+                "",
+                detail=f"node={victim}",
+            )
 
         await asyncio.sleep(30)
 
         await self._uncordon(victim)
+        if self.events:
+            self.events.log(
+                "chaos",
+                "cordon_uncordon",
+                "uncordon",
+                "",
+                detail=f"node={victim}",
+            )
         self._cordoned = None
 
     async def _chaos_restart_csi(self):
         """Rollout restart the CSI DaemonSet and wait for recovery."""
+        if self.events:
+            self.events.log("chaos", "restart_csi", "begin", "")
         await self._rollout_restart_daemonset("tesslate-btrfs-csi-node", "kube-system")
         await self._wait_daemonset_ready("tesslate-btrfs-csi-node", "kube-system")
         await asyncio.sleep(10)  # Let Hub rediscover nodes
 
     async def _chaos_restart_hub(self):
         """Rollout restart the Volume Hub and wait for recovery."""
+        if self.events:
+            self.events.log("chaos", "restart_hub", "begin", "")
         await self._rollout_restart_deployment("tesslate-volume-hub", "kube-system")
         await self._wait_deployment_ready("tesslate-volume-hub", "kube-system")
 

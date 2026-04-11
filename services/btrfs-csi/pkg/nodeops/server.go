@@ -531,6 +531,8 @@ func (s *Server) handleGetSyncState(_ interface{}, _ context.Context, dec func(i
 			VolumeID:     st.VolumeID,
 			TemplateHash: st.TemplateHash,
 			LastSyncAt:   st.LastSyncAt,
+			Dirty:        st.Dirty,
+			HeadHash:     st.HeadHash,
 		}
 	}
 	return &GetSyncStateResponse{Volumes: result}, nil
@@ -682,6 +684,17 @@ func (s *Server) handleSendVolumeTo(_ interface{}, ctx context.Context, dec func
 		return nil, status.Error(codes.InvalidArgument, "volume_id and target_addr required")
 	}
 
+	// Route through the sync daemon's actor if available. The actor
+	// serializes this with FileOps writes — the snapshot is taken while
+	// the actor holds the volume exclusively, preventing data loss.
+	if s.syncer != nil {
+		if err := s.syncer.SendVolumeTo(ctx, req.VolumeID, req.TargetAddr); err != nil {
+			return nil, status.Errorf(codes.Internal, "send volume %s to %s: %v", req.VolumeID, req.TargetAddr, err)
+		}
+		return &Empty{}, nil
+	}
+
+	// Fallback (no syncer): direct snapshot + send (legacy path).
 	snapPath := fmt.Sprintf("snapshots/%s@transfer", req.VolumeID)
 	volumePath := fmt.Sprintf("volumes/%s", req.VolumeID)
 
@@ -689,12 +702,10 @@ func (s *Server) handleSendVolumeTo(_ interface{}, ctx context.Context, dec func
 		return nil, status.Errorf(codes.NotFound, "volume %q not found", req.VolumeID)
 	}
 
-	// Clean up any stale transfer snapshot.
 	if s.btrfs.SubvolumeExists(ctx, snapPath) {
 		_ = s.btrfs.DeleteSubvolume(ctx, snapPath)
 	}
 
-	// Create read-only snapshot for transfer.
 	if err := s.btrfs.SnapshotSubvolume(ctx, volumePath, snapPath, true); err != nil {
 		return nil, status.Errorf(codes.Internal, "snapshot for transfer: %v", err)
 	}
@@ -732,6 +743,12 @@ func (s *Server) handleSendTemplateTo(_ interface{}, ctx context.Context, dec fu
 
 	klog.Infof("SendTemplateTo: sent template %s to %s", req.TemplateName, req.TargetAddr)
 	return &Empty{}, nil
+}
+
+// SendSubvolumeTo streams a btrfs send to the target node. Exported so the
+// sync daemon's actor can call it for peer transfers serialized with FileOps.
+func (s *Server) SendSubvolumeTo(ctx context.Context, subvolPath, identifier, targetAddr string) error {
+	return s.sendSubvolumeTo(ctx, subvolPath, identifier, targetAddr, "")
 }
 
 // sendSubvolumeTo streams a btrfs send | zstd to the target node's ReceiveVolumeStream RPC.

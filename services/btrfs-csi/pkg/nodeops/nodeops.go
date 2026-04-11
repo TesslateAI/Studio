@@ -100,6 +100,8 @@ type TrackedVolumeState struct {
 	VolumeID     string `json:"volume_id"`
 	TemplateHash string `json:"template_hash,omitempty"`
 	LastSyncAt   string `json:"last_sync_at,omitempty"` // ISO 8601 or empty
+	Dirty        bool   `json:"dirty"`                  // has unsynced writes
+	HeadHash     string `json:"head_hash,omitempty"`    // CAS manifest HEAD — last synced layer hash
 }
 
 // VolumeMetadata holds CAS metadata for a volume, derived from its manifest.

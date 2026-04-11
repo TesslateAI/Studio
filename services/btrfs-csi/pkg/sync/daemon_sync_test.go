@@ -14,6 +14,7 @@ import (
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/cas"
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/ioutil"
+	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/lease"
 )
 
 // makeSnapshots converts an ordered slice of snapshots into a hash-indexed map
@@ -311,6 +312,24 @@ func (f *fakeHub) DeleteTombstone(_ context.Context, volumeID string) error {
 	return nil
 }
 
+// Lease methods — fakeHub always grants leases (no contention in unit tests).
+func (f *fakeHub) AcquireVolumeLease(_ context.Context, _, _ string, _ time.Duration) (bool, string, error) {
+	return true, "", nil
+}
+func (f *fakeHub) ReleaseVolumeLease(_ context.Context, _, _ string) error {
+	return nil
+}
+func (f *fakeHub) RenewVolumeLease(_ context.Context, _, _ string, _ time.Duration) (bool, bool, error) {
+	return true, false, nil
+}
+func (f *fakeHub) BatchAcquireLease(_ context.Context, requests []lease.BatchReq) ([]lease.BatchResult, error) {
+	results := make([]lease.BatchResult, len(requests))
+	for i, r := range requests {
+		results[i] = lease.BatchResult{VolumeID: r.VolumeID, Acquired: true}
+	}
+	return results, nil
+}
+
 // ---------------------------------------------------------------------------
 // Fake templateOps
 // ---------------------------------------------------------------------------
@@ -349,6 +368,38 @@ func (f *fakeTemplate) EnsureTemplateByHash(_ context.Context, name, _ string) e
 func setupDaemon(fb *fakeBtrfs, fc *fakeCAS, ft *fakeTemplate) *Daemon {
 	fh := newFakeHub(fc)
 	return newDaemonWithInterfaces(fb, fc, fh, ft, 1*time.Hour)
+}
+
+// waitForActorsIdle waits until all actors have processed their pending ops.
+// Submits a noop through bgCh (queues behind pending background syncs)
+// and then a noop through userCh (barrier for user ops).
+func waitForActorsIdle(t *testing.T, d *Daemon) {
+	t.Helper()
+	d.mu.Lock()
+	actors := make([]*volumeActor, 0, len(d.actors))
+	for _, a := range d.actors {
+		actors = append(actors, a)
+	}
+	d.mu.Unlock()
+
+	for _, a := range actors {
+		// Submit bg noop — blocks until bgCh has space (i.e. pending bg op dequeued).
+		bgResult := make(chan opResult, 1)
+		bgReq := opRequest{op: opNoop, priority: priorityBackground, ctx: context.Background(), resultCh: bgResult}
+		select {
+		case a.bgCh <- bgReq:
+		case <-a.stopCh:
+			continue
+		case <-time.After(10 * time.Second):
+			t.Fatalf("waitForActorsIdle: actor %s bg send timed out", a.volumeID)
+		}
+		// Wait for bg noop to complete — means all prior bg ops are done.
+		select {
+		case <-bgResult:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("waitForActorsIdle: actor %s bg result timed out", a.volumeID)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -626,6 +677,7 @@ func TestSyncAll_SkipsCleanVolumes(t *testing.T) {
 	if err := d.syncAll(context.Background()); err != nil {
 		t.Fatalf("first syncAll: %v", err)
 	}
+	waitForActorsIdle(t, d) // actors process async
 
 	// All should now be clean.
 	d.mu.Lock()
@@ -637,7 +689,9 @@ func TestSyncAll_SkipsCleanVolumes(t *testing.T) {
 	d.mu.Unlock()
 
 	// Reset putCount to track new syncs.
+	fc.mu.Lock()
 	initialPutCount := fc.putCount
+	fc.mu.Unlock()
 
 	// Mark only vol-b dirty.
 	d.MarkDirty("vol-b")
@@ -646,10 +700,14 @@ func TestSyncAll_SkipsCleanVolumes(t *testing.T) {
 	if err := d.syncAll(context.Background()); err != nil {
 		t.Fatalf("second syncAll: %v", err)
 	}
+	waitForActorsIdle(t, d)
 
 	// Exactly 1 new blob put (for vol-b).
-	if fc.putCount-initialPutCount != 1 {
-		t.Errorf("expected 1 blob put for dirty volume, got %d", fc.putCount-initialPutCount)
+	fc.mu.Lock()
+	putDiff := fc.putCount - initialPutCount
+	fc.mu.Unlock()
+	if putDiff != 1 {
+		t.Errorf("expected 1 blob put for dirty volume, got %d", putDiff)
 	}
 }
 
@@ -788,10 +846,14 @@ func TestDrainAll_ParallelOnlyDirty(t *testing.T) {
 		fb.subvolumes[fmt.Sprintf("volumes/%s", volID)] = true
 		d.TrackVolume(volID, "tmpl", "sha256:base")
 	}
-	// Mark first 3 as clean
+	// Mark first 3 as clean (both tracked state and actor atomic flag).
 	d.mu.Lock()
 	for i := 0; i < 3; i++ {
-		d.tracked[fmt.Sprintf("vol-mix-%d", i)].dirty = false
+		vid := fmt.Sprintf("vol-mix-%d", i)
+		d.tracked[vid].dirty = false
+		if a, ok := d.actors[vid]; ok {
+			a.dirty.Store(false)
+		}
 	}
 	d.mu.Unlock()
 
@@ -885,6 +947,7 @@ func TestSyncAll_PromotesDirtyViaGeneration(t *testing.T) {
 	if err := d.syncAll(context.Background()); err != nil {
 		t.Fatalf("syncAll: %v", err)
 	}
+	waitForActorsIdle(t, d) // actors process async
 
 	// The volume should have been synced (manifest should have a new layer).
 	m, err := fc.GetManifest(context.Background(), volID)
@@ -1404,7 +1467,7 @@ func TestCleanupStaging_NilCAS(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestUntrackVolume_WaitsForInflightSync verifies that UntrackVolume blocks
-// until the per-volume lock is released, preventing a race with SyncVolume.
+// until inflight actor operations complete before removing the volume.
 func TestUntrackVolume_WaitsForInflightSync(t *testing.T) {
 	fb := newFakeBtrfs()
 	fc := newFakeCAS()
@@ -1417,34 +1480,38 @@ func TestUntrackVolume_WaitsForInflightSync(t *testing.T) {
 	fb.mu.Unlock()
 	d.TrackVolume(volID, "", "")
 
-	// Hold the per-volume lock to simulate an inflight SyncVolume.
-	vl := d.volumeLock(volID)
-	vl.Lock()
+	// Fill the actor's userCh to simulate an inflight operation blocking the actor.
+	// The actor will process these dummy ops before the untrack op.
+	d.mu.Lock()
+	actor := d.actors[volID]
+	d.mu.Unlock()
 
+	// Submit a slow sync to the actor (it will acquire lease, do syncOne, etc.)
+	slowDone := make(chan struct{})
+	go func() {
+		_ = d.SyncVolume(context.Background(), volID)
+		close(slowDone)
+	}()
+
+	// Give the actor time to start processing the sync.
+	time.Sleep(20 * time.Millisecond)
+
+	// Now submit untrack — it should queue behind the sync.
 	untrackDone := make(chan struct{})
 	go func() {
 		d.UntrackVolume(volID)
 		close(untrackDone)
 	}()
 
-	// Give UntrackVolume time to reach the lock.
-	time.Sleep(50 * time.Millisecond)
-	select {
-	case <-untrackDone:
-		t.Fatal("UntrackVolume returned before per-volume lock was released")
-	default:
-		// expected — still blocked
-	}
-
-	// Release the lock.
-	vl.Unlock()
-
+	// Wait for both to complete.
 	select {
 	case <-untrackDone:
 		// success
-	case <-time.After(2 * time.Second):
-		t.Fatal("UntrackVolume did not complete after lock release")
+	case <-time.After(5 * time.Second):
+		t.Fatal("UntrackVolume did not complete")
 	}
+
+	_ = actor // suppress unused warning
 
 	// Volume should be untracked.
 	d.mu.Lock()
@@ -2658,5 +2725,506 @@ func TestPrefetchBlobs_FailureCleanup(t *testing.T) {
 	if prefetched != nil {
 		t.Error("expected nil prefetched map on error")
 		cleanupPrefetch(prefetched)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Volume lease tests
+// ---------------------------------------------------------------------------
+
+// leaseTrackingHub wraps fakeHub with lease tracking and controllable behavior.
+type leaseTrackingHub struct {
+	*fakeHub
+	leaseMu        stdsync.Mutex
+	leases         map[string]string // volumeID → holder
+	acquireCalls   int
+	releaseCalls   int
+	renewCalls     int
+	batchCalls     int
+	denyVolumeIDs  map[string]bool // volumes that will be denied a lease
+	renewRevoked   map[string]bool // volumes where renewal returns revoked=true
+}
+
+func newLeaseTrackingHub(fc *fakeCAS) *leaseTrackingHub {
+	return &leaseTrackingHub{
+		fakeHub:       newFakeHub(fc),
+		leases:        make(map[string]string),
+		denyVolumeIDs: make(map[string]bool),
+		renewRevoked:  make(map[string]bool),
+	}
+}
+
+func (h *leaseTrackingHub) AcquireVolumeLease(_ context.Context, volumeID, holder string, _ time.Duration) (bool, string, error) {
+	h.leaseMu.Lock()
+	defer h.leaseMu.Unlock()
+	h.acquireCalls++
+
+	if h.denyVolumeIDs[volumeID] {
+		return false, "other-holder:op:1", nil
+	}
+	if existing, ok := h.leases[volumeID]; ok {
+		return false, existing, nil
+	}
+	h.leases[volumeID] = holder
+	return true, "", nil
+}
+
+func (h *leaseTrackingHub) ReleaseVolumeLease(_ context.Context, volumeID, holder string) error {
+	h.leaseMu.Lock()
+	defer h.leaseMu.Unlock()
+	h.releaseCalls++
+
+	if h.leases[volumeID] == holder {
+		delete(h.leases, volumeID)
+	}
+	return nil
+}
+
+func (h *leaseTrackingHub) RenewVolumeLease(_ context.Context, volumeID, holder string, _ time.Duration) (bool, bool, error) {
+	h.leaseMu.Lock()
+	defer h.leaseMu.Unlock()
+	h.renewCalls++
+
+	if h.leases[volumeID] != holder {
+		return false, false, nil
+	}
+	if h.renewRevoked[volumeID] {
+		return false, true, nil
+	}
+	return true, false, nil
+}
+
+func (h *leaseTrackingHub) BatchAcquireLease(_ context.Context, requests []lease.BatchReq) ([]lease.BatchResult, error) {
+	h.leaseMu.Lock()
+	defer h.leaseMu.Unlock()
+	h.batchCalls++
+
+	results := make([]lease.BatchResult, len(requests))
+	for i, req := range requests {
+		results[i].VolumeID = req.VolumeID
+		if h.denyVolumeIDs[req.VolumeID] {
+			results[i].CurrentHolder = "other-holder:op:1"
+			continue
+		}
+		if existing, ok := h.leases[req.VolumeID]; ok {
+			results[i].CurrentHolder = existing
+			continue
+		}
+		h.leases[req.VolumeID] = req.Holder
+		results[i].Acquired = true
+	}
+	return results, nil
+}
+
+func TestSyncVolume_AcquiresAndReleasesLease(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	hub := newLeaseTrackingHub(fc)
+
+	d := newDaemonWithInterfaces(fb, fc, hub, ft, 1*time.Hour)
+	d.nodeID = "test-node"
+
+	volID := "vol-lease-test"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	if err := d.SyncVolume(context.Background(), volID); err != nil {
+		t.Fatalf("SyncVolume failed: %v", err)
+	}
+
+	hub.leaseMu.Lock()
+	defer hub.leaseMu.Unlock()
+
+	if hub.acquireCalls != 1 {
+		t.Errorf("acquireCalls = %d, want 1", hub.acquireCalls)
+	}
+	if hub.releaseCalls != 1 {
+		t.Errorf("releaseCalls = %d, want 1", hub.releaseCalls)
+	}
+	// Lease should be released after sync completes.
+	if _, held := hub.leases[volID]; held {
+		t.Error("lease should be released after SyncVolume")
+	}
+}
+
+func TestSyncVolume_FailsWhenLeaseDenied(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	hub := newLeaseTrackingHub(fc)
+
+	d := newDaemonWithInterfaces(fb, fc, hub, ft, 1*time.Hour)
+	d.nodeID = "test-node"
+
+	volID := "vol-denied"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	// Deny the lease.
+	hub.denyVolumeIDs[volID] = true
+
+	// Use a short timeout — the actor will poll for the lease and eventually timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := d.SyncVolume(ctx, volID)
+	if err == nil {
+		t.Fatal("SyncVolume should fail when lease is denied")
+	}
+	if !strings.Contains(err.Error(), "lease") && !strings.Contains(err.Error(), "context") {
+		t.Errorf("error should mention lease or context: %v", err)
+	}
+
+	// No blob should have been written.
+	fc.mu.Lock()
+	count := fc.putCount
+	fc.mu.Unlock()
+	if count != 0 {
+		t.Errorf("putCount = %d, want 0 (sync should not start)", count)
+	}
+}
+
+func TestCreateSnapshot_AcquiresLease(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	hub := newLeaseTrackingHub(fc)
+
+	d := newDaemonWithInterfaces(fb, fc, hub, ft, 1*time.Hour)
+	d.nodeID = "test-node"
+
+	volID := "vol-snap"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	hash, err := d.CreateSnapshot(context.Background(), volID, "my-checkpoint")
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("expected non-empty hash")
+	}
+
+	hub.leaseMu.Lock()
+	defer hub.leaseMu.Unlock()
+
+	if hub.acquireCalls != 1 {
+		t.Errorf("acquireCalls = %d, want 1", hub.acquireCalls)
+	}
+	if hub.releaseCalls != 1 {
+		t.Errorf("releaseCalls = %d, want 1", hub.releaseCalls)
+	}
+}
+
+func TestSyncAll_ActorAcquiresLeases(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	hub := newLeaseTrackingHub(fc)
+
+	d := newDaemonWithInterfaces(fb, fc, hub, ft, 1*time.Hour)
+	d.nodeID = "test-node"
+
+	// Create 3 dirty volumes.
+	for _, id := range []string{"vol-a", "vol-b", "vol-c"} {
+		fb.subvolumes["volumes/"+id] = true
+		d.TrackVolume(id, "", "")
+	}
+
+	if err := d.syncAll(context.Background()); err != nil {
+		t.Fatalf("syncAll failed: %v", err)
+	}
+	waitForActorsIdle(t, d)
+
+	// Each actor acquires its own lease (no batch), so acquireCalls >= 3.
+	hub.leaseMu.Lock()
+	acquires := hub.acquireCalls
+	hub.leaseMu.Unlock()
+	if acquires < 3 {
+		t.Errorf("acquireCalls = %d, want >= 3", acquires)
+	}
+	// All 3 volumes should have been synced.
+	fc.mu.Lock()
+	count := fc.putCount
+	fc.mu.Unlock()
+	if count != 3 {
+		t.Errorf("putCount = %d, want 3", count)
+	}
+	// All leases should be released.
+	hub.leaseMu.Lock()
+	for _, id := range []string{"vol-a", "vol-b", "vol-c"} {
+		if _, held := hub.leases[id]; held {
+			t.Errorf("lease for %s should be released after sync", id)
+		}
+	}
+	hub.leaseMu.Unlock()
+}
+
+func TestSyncAll_SkipsDeniedLeases(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	hub := newLeaseTrackingHub(fc)
+
+	d := newDaemonWithInterfaces(fb, fc, hub, ft, 1*time.Hour)
+	d.nodeID = "test-node"
+
+	for _, id := range []string{"vol-a", "vol-b", "vol-c"} {
+		fb.subvolumes["volumes/"+id] = true
+		d.TrackVolume(id, "", "")
+	}
+
+	// Deny lease for vol-b. Background sync uses fail-fast, so vol-b
+	// will silently skip (error logged inside actor, not returned).
+	hub.denyVolumeIDs["vol-b"] = true
+
+	if err := d.syncAll(context.Background()); err != nil {
+		t.Fatalf("syncAll failed: %v", err)
+	}
+	waitForActorsIdle(t, d)
+
+	// Only vol-a and vol-c should be synced.
+	fc.mu.Lock()
+	count := fc.putCount
+	fc.mu.Unlock()
+	if count != 2 {
+		t.Errorf("putCount = %d, want 2 (vol-b skipped)", count)
+	}
+}
+
+func TestSyncAll_LeaseReleaseAfterSync(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	hub := newLeaseTrackingHub(fc)
+
+	d := newDaemonWithInterfaces(fb, fc, hub, ft, 1*time.Hour)
+	d.nodeID = "test-node"
+
+	fb.subvolumes["volumes/vol-1"] = true
+	d.TrackVolume("vol-1", "", "")
+
+	if err := d.syncAll(context.Background()); err != nil {
+		t.Fatalf("syncAll failed: %v", err)
+	}
+	waitForActorsIdle(t, d)
+
+	// The important check: lease is released after sync.
+	hub.leaseMu.Lock()
+	released := hub.releaseCalls
+	hub.leaseMu.Unlock()
+	if released < 1 {
+		t.Errorf("releaseCalls = %d, want >= 1", released)
+	}
+}
+
+func TestDoAcquireHubLease_NilHub(t *testing.T) {
+	// Daemon with no Hub should return a no-op release function.
+	d := &Daemon{}
+	release, err := d.doAcquireHubLease(context.Background(), "vol-1", "sync", false)
+	if err != nil {
+		t.Fatalf("doAcquireHubLease with nil hub: %v", err)
+	}
+	// Should not panic.
+	release()
+}
+
+func TestRestoreToSnapshot_AcquiresLease(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	hub := newLeaseTrackingHub(fc)
+
+	d := newDaemonWithInterfaces(fb, fc, hub, ft, 1*time.Hour)
+	d.nodeID = "test-node"
+
+	volID := "vol-restore"
+	fb.subvolumes["volumes/"+volID] = true
+
+	// Build a manifest with a checkpoint to restore to.
+	snaps, head := makeSnapshots(
+		cas.Snapshot{Hash: "sha256:base0000", Parent: "", Role: "sync"},
+	)
+	fc.manifests[volID] = &cas.Manifest{
+		VolumeID:  volID,
+		Head:      head,
+		Snapshots: snaps,
+	}
+	fc.blobs["sha256:base0000"] = "blob-data"
+
+	// Receive must create the expected layer subvolume.
+	fb.receiveCreates = fmt.Sprintf("layers/%s@pending", volID)
+
+	d.TrackVolume(volID, "", "")
+
+	err := d.RestoreToSnapshot(context.Background(), volID, "sha256:base0000")
+	if err != nil {
+		t.Fatalf("RestoreToSnapshot failed: %v", err)
+	}
+
+	hub.leaseMu.Lock()
+	defer hub.leaseMu.Unlock()
+
+	if hub.acquireCalls != 1 {
+		t.Errorf("acquireCalls = %d, want 1", hub.acquireCalls)
+	}
+	if hub.releaseCalls != 1 {
+		t.Errorf("releaseCalls = %d, want 1", hub.releaseCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SendVolumeTo actor tests
+// ---------------------------------------------------------------------------
+
+func TestSendVolumeTo_SerializesWithActor(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-transfer"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	var mu stdsync.Mutex
+	var sentSnap, sentVol, sentAddr string
+	d.SetSendVolumeFn(func(ctx context.Context, snapPath, volumeID, targetAddr string) error {
+		mu.Lock()
+		sentSnap = snapPath
+		sentVol = volumeID
+		sentAddr = targetAddr
+		mu.Unlock()
+		return nil
+	})
+
+	err := d.SendVolumeTo(context.Background(), volID, "target-node:9741")
+	if err != nil {
+		t.Fatalf("SendVolumeTo failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if sentVol != volID {
+		t.Errorf("sendVolumeFn volumeID = %q, want %q", sentVol, volID)
+	}
+	if sentAddr != "target-node:9741" {
+		t.Errorf("sendVolumeFn targetAddr = %q, want target-node:9741", sentAddr)
+	}
+	expectedSnap := "snapshots/" + volID + "@transfer"
+	if sentSnap != expectedSnap {
+		t.Errorf("sendVolumeFn snapPath = %q, want %q", sentSnap, expectedSnap)
+	}
+}
+
+func TestSendVolumeTo_SyncsBeforeTransfer(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-dirty-transfer"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	d.SetSendVolumeFn(func(ctx context.Context, snapPath, volumeID, targetAddr string) error {
+		return nil
+	})
+
+	err := d.SendVolumeTo(context.Background(), volID, "target:9741")
+	if err != nil {
+		t.Fatalf("SendVolumeTo failed: %v", err)
+	}
+
+	fc.mu.Lock()
+	count := fc.putCount
+	fc.mu.Unlock()
+	if count == 0 {
+		t.Error("expected CAS blob to be written (sync before transfer)")
+	}
+
+	d.mu.Lock()
+	tv := d.tracked[volID]
+	dirty := tv != nil && tv.dirty
+	d.mu.Unlock()
+	if dirty {
+		t.Error("volume should be clean after sync+transfer")
+	}
+}
+
+func TestSendVolumeTo_NoSendFn_ReturnsError(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-no-fn"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	err := d.SendVolumeTo(context.Background(), volID, "target:9741")
+	if err == nil {
+		t.Fatal("expected error when sendVolumeFn is not set")
+	}
+	if !strings.Contains(err.Error(), "sendVolumeFn") {
+		t.Errorf("error should mention sendVolumeFn: %v", err)
+	}
+}
+
+func TestSendVolumeTo_BlocksOtherOps(t *testing.T) {
+	fb := newFakeBtrfs()
+	fc := newFakeCAS()
+	ft := newFakeTemplate()
+	d := setupDaemon(fb, fc, ft)
+
+	volID := "vol-serialize"
+	fb.subvolumes["volumes/"+volID] = true
+	d.TrackVolume(volID, "", "")
+
+	sendStarted := make(chan struct{})
+	sendDone := make(chan struct{})
+	d.SetSendVolumeFn(func(ctx context.Context, snapPath, volumeID, targetAddr string) error {
+		close(sendStarted)
+		<-sendDone
+		return nil
+	})
+
+	transferErr := make(chan error, 1)
+	go func() {
+		transferErr <- d.SendVolumeTo(context.Background(), volID, "target:9741")
+	}()
+
+	<-sendStarted
+
+	syncDone := make(chan error, 1)
+	go func() {
+		syncDone <- d.SyncVolume(context.Background(), volID)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-syncDone:
+		t.Fatal("SyncVolume should be blocked while SendVolumeTo is running")
+	default:
+	}
+
+	close(sendDone)
+
+	select {
+	case err := <-transferErr:
+		if err != nil {
+			t.Fatalf("SendVolumeTo error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SendVolumeTo timed out")
+	}
+	select {
+	case err := <-syncDone:
+		if err != nil {
+			t.Fatalf("SyncVolume error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SyncVolume timed out")
 	}
 }

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import logging
 import os
 import random
 import string
 import time
 import uuid
+
+from .event_log import FileResult, VerifyDetail
+
+logger = logging.getLogger("soak.helpers")
 
 _models_loaded = False
 
@@ -148,11 +153,28 @@ async def delete_project(db, project):
 # ── File I/O via FileOps ───────────────────────────────────────────
 
 
-async def write_test_files(volume_id: str, n: int = 5) -> dict[str, str]:
-    """Write n unique files to a volume. Returns {path: content_hash}."""
+async def resolve_volume_node(volume_id: str) -> str:
+    """Return the node name that the Hub resolves this volume to."""
+    from app.services.volume_manager import get_volume_manager
+
+    try:
+        resp = await get_volume_manager().resolve_volume(volume_id)
+        return resp.get("node_name", "unknown")
+    except Exception:
+        return "resolve_failed"
+
+
+async def write_test_files(volume_id: str, n: int = 5) -> tuple[dict[str, str], str]:
+    """Write n unique files to a volume.
+
+    Returns (hashes, node) where hashes is {path: content_hash} and node
+    is the node the writes were routed to.
+    """
     from app.services.volume_manager import get_volume_manager
 
     vm = get_volume_manager()
+    resp = await vm.resolve_volume(volume_id)
+    node = resp.get("node_name", "unknown")
     client = await vm.get_fileops_client(volume_id)
     hashes: dict[str, str] = {}
     try:
@@ -167,7 +189,7 @@ async def write_test_files(volume_id: str, n: int = 5) -> dict[str, str]:
             hashes[path] = content_hash(content)
     finally:
         await client.close()
-    return hashes
+    return hashes, node
 
 
 async def verify_test_files(volume_id: str, expected: dict[str, str]) -> list[str]:
@@ -177,33 +199,115 @@ async def verify_test_files(volume_id: str, expected: dict[str, str]) -> list[st
     disruptions during chaos events.
     """
     for attempt in range(2):
-        bad = await _verify_once(volume_id, expected)
-        if not bad or attempt == 1:
-            return bad
+        detail = await _verify_once_detailed(volume_id, expected)
+        if detail.bad_count == 0 or attempt == 1:
+            # Stash detail on the function for caller to retrieve
+            verify_test_files._last_detail = detail  # type: ignore[attr-defined]
+            return detail.bad_paths
         await asyncio.sleep(3)
-    return bad
+    verify_test_files._last_detail = detail  # type: ignore[attr-defined]
+    return detail.bad_paths
 
 
-async def _verify_once(volume_id: str, expected: dict[str, str]) -> list[str]:
+def get_last_verify_detail() -> VerifyDetail | None:
+    """Retrieve the VerifyDetail from the most recent verify_test_files call."""
+    return getattr(verify_test_files, "_last_detail", None)
+
+
+async def _verify_once_detailed(volume_id: str, expected: dict[str, str]) -> VerifyDetail:
+    """Verify files and return rich per-file results."""
     from app.services.volume_manager import get_volume_manager
 
     vm = get_volume_manager()
+
+    # Resolve which node we'll read from
+    node = "unknown"
+    try:
+        resp = await vm.resolve_volume(volume_id)
+        node = resp.get("node_name", "unknown")
+    except Exception as e:
+        return VerifyDetail(
+            volume_id=volume_id,
+            node_resolved="resolve_failed",
+            connect_failed=True,
+            connect_error=f"resolve: {type(e).__name__}: {e}",
+            bad_count=len(expected),
+            files=[
+                FileResult(
+                    path=p,
+                    status="connect_error",
+                    expected_hash=h,
+                    error=f"resolve: {type(e).__name__}: {e}",
+                )
+                for p, h in expected.items()
+            ],
+        )
+
     try:
         client = await vm.get_fileops_client(volume_id)
-    except Exception:
-        return list(expected.keys())  # can't connect — report all as bad
-    bad: list[str] = []
+    except Exception as e:
+        err_msg = f"connect: {type(e).__name__}: {e}"
+        return VerifyDetail(
+            volume_id=volume_id,
+            node_resolved=node,
+            connect_failed=True,
+            connect_error=err_msg,
+            bad_count=len(expected),
+            files=[
+                FileResult(path=p, status="connect_error", expected_hash=h, error=err_msg)
+                for p, h in expected.items()
+            ],
+        )
+
+    results: list[FileResult] = []
+    ok_count = 0
+    bad_count = 0
     try:
-        for path, exp in expected.items():
+        for path, exp_hash in expected.items():
             try:
                 text = await client.read_file_text(volume_id, path)
-                if content_hash(text) != exp:
-                    bad.append(path)
-            except Exception:
-                bad.append(path)
+                actual = content_hash(text)
+                if actual == exp_hash:
+                    results.append(
+                        FileResult(
+                            path=path,
+                            status="ok",
+                            expected_hash=exp_hash,
+                            actual_hash=actual,
+                        )
+                    )
+                    ok_count += 1
+                else:
+                    results.append(
+                        FileResult(
+                            path=path,
+                            status="mismatch",
+                            expected_hash=exp_hash,
+                            actual_hash=actual,
+                            actual_preview=text[:120],
+                        )
+                    )
+                    bad_count += 1
+            except Exception as e:
+                results.append(
+                    FileResult(
+                        path=path,
+                        status="read_error",
+                        expected_hash=exp_hash,
+                        error=f"{type(e).__name__}: {e}",
+                    )
+                )
+                bad_count += 1
     finally:
         await client.close()
-    return bad
+
+    return VerifyDetail(
+        volume_id=volume_id,
+        node_resolved=node,
+        files=results,
+        ok_count=ok_count,
+        bad_count=bad_count,
+    )
 
 
 # ── Environment lifecycle ──────────────────────────────────────────

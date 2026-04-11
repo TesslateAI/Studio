@@ -13,6 +13,7 @@ Architecture:
   - Each user owns 2-4 projects that persist across cycles
   - Projects churn: old ones retire, new ones join
   - Shared metrics dashboard printed periodically
+  - JSONL event log captures every operation for failure replay
 
 Usage (inside a backend pod or soak-test Job):
     python3 -u -m tests.soak.run                         # 4 hours, 6 users
@@ -31,6 +32,7 @@ import sys
 import time
 
 from .chaos_agent import ChaosAgent
+from .event_log import EventLog
 from .helpers import ensure_models, get_worker_nodes
 from .metrics import Metrics
 from .user_worker import UserWorker
@@ -53,6 +55,7 @@ async def run(
 ):
     ensure_models()
     metrics = Metrics()
+    event_log = EventLog()
     workers_nodes = await get_worker_nodes()
 
     if len(workers_nodes) < 2:
@@ -78,6 +81,7 @@ async def run(
             target_projects=projects_per_user,
             worker_nodes=workers_nodes,
             metrics=metrics,
+            event_log=event_log,
         )
         user_workers.append(uw)
 
@@ -87,6 +91,7 @@ async def run(
         metrics=metrics,
         interval_seconds=chaos_interval,
         enabled=chaos_enabled,
+        event_log=event_log,
     )
 
     # Dashboard printer
@@ -135,6 +140,11 @@ async def run(
                 await uw.teardown()
 
     metrics.dashboard()
+
+    # Dump comprehensive failure report
+    event_log.dump_report()
+    event_log.close()
+
     logger.info(
         "SOAK TEST COMPLETE — %d passed, %d failed",
         metrics.passed,
