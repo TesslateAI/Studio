@@ -33,8 +33,8 @@ export const STATUS_MAP: Record<EnvironmentStatus, StatusConfig> = {
     spin: true,
   },
   files_ready: {
-    label: 'Files ready',
-    tooltip: 'Files are ready. Start the environment for preview and terminal.',
+    label: 'Ready to start',
+    tooltip: 'Project is set up. Start the environment for live preview and terminal.',
     className: 'bg-cyan-500/10 border-cyan-500/20',
     textColor: 'text-cyan-400',
     dotColor: 'bg-cyan-400',

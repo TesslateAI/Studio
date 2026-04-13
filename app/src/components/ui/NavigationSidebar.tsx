@@ -384,7 +384,7 @@ export function NavigationSidebar({
           <>
             <div className="fixed inset-0 z-40" onClick={() => { setShowUserDropdown(false); setShowCreateTeam(false); setNewTeamName(''); }} />
             <div
-              className="fixed w-56 bg-[var(--surface)] border rounded-[var(--radius-medium)] z-50 overflow-hidden"
+              className="fixed w-56 max-h-[70vh] bg-[var(--surface)] border rounded-[var(--radius-medium)] z-50 overflow-y-auto overflow-x-hidden"
               style={{
                 borderWidth: 'var(--border-width)',
                 borderColor: 'var(--border-hover)',

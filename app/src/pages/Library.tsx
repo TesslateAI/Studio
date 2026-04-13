@@ -223,7 +223,7 @@ export default function Library() {
         await loadLibraryAgents();
         setLoading(false);
       } else if (activeTab === 'bases') {
-        await loadCreatedBases();
+        await loadBases();
         setLoading(false);
       } else if (activeTab === 'skills') {
         await loadSkills();
@@ -281,9 +281,9 @@ export default function Library() {
     }
   };
 
-  const loadCreatedBases = async () => {
+  const loadBases = async () => {
     try {
-      const data = await marketplaceApi.getMyCreatedBases();
+      const data = await marketplaceApi.getUserBases();
       setBases(data.bases || []);
     } catch (error) {
       console.error('Failed to load bases:', error);
@@ -356,7 +356,7 @@ export default function Library() {
     try {
       await marketplaceApi.setBaseVisibility(base.id, newVisibility);
       toast.success(`Base is now ${newVisibility}`);
-      loadCreatedBases();
+      loadBases();
     } catch (error) {
       console.error('Failed to toggle visibility:', error);
       toast.error('Failed to change visibility');
@@ -367,7 +367,7 @@ export default function Library() {
     try {
       await marketplaceApi.deleteBase(base.id);
       toast.success('Base deleted');
-      loadCreatedBases();
+      loadBases();
     } catch (error) {
       console.error('Failed to delete base:', error);
       toast.error('Failed to delete base');
@@ -489,16 +489,7 @@ export default function Library() {
           <BasesPage
             bases={bases}
             loading={loading}
-            onSubmit={() => {
-              setEditingBase(null);
-              setShowSubmitBaseModal(true);
-            }}
-            onEdit={(base) => {
-              setEditingBase(base);
-              setShowSubmitBaseModal(true);
-            }}
-            onToggleVisibility={handleToggleBaseVisibility}
-            onDelete={handleDeleteBase}
+            onBrowse={() => navigate('/marketplace/browse/base')}
           />
         )}
 
@@ -578,7 +569,7 @@ export default function Library() {
           setShowSubmitBaseModal(false);
           setEditingBase(null);
         }}
-        onSuccess={loadCreatedBases}
+        onSuccess={loadBases}
         editBase={editingBase}
       />
 

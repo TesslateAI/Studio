@@ -58,16 +58,18 @@ const sortLabels: Record<SortField, string> = {
 interface BasesPageProps {
   bases: LibraryBase[];
   loading: boolean;
-  onSubmit: () => void;
-  onEdit: (base: LibraryBase) => void;
-  onToggleVisibility: (base: LibraryBase) => void;
-  onDelete: (base: LibraryBase) => void;
+  onBrowse: () => void;
+  onSubmit?: () => void;
+  onEdit?: (base: LibraryBase) => void;
+  onToggleVisibility?: (base: LibraryBase) => void;
+  onDelete?: (base: LibraryBase) => void;
 }
 
 // ─── Main BasesPage component ───────────────────────────────────────
 export default function BasesPage({
   bases,
   loading,
+  onBrowse,
   onSubmit,
   onEdit,
   onToggleVisibility,
@@ -155,6 +157,7 @@ export default function BasesPage({
   // ─── Counts ──────────────────────────────────────────────────────
   const publicCount = bases.filter((b) => b.visibility === 'public').length;
   const privateCount = bases.filter((b) => b.visibility === 'private').length;
+  const hasVisibilityData = publicCount > 0 || privateCount > 0;
 
   // ─── Render ──────────────────────────────────────────────────────
   return (
@@ -166,12 +169,16 @@ export default function BasesPage({
           <button onClick={() => setFilterStatus('all')} className={`btn ${filterStatus === 'all' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}>
             All bases <span className="text-[10px] opacity-50 ml-0.5">{bases.length}</span>
           </button>
-          <button onClick={() => setFilterStatus('public')} className={`btn ${filterStatus === 'public' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}>
-            Public <span className="text-[10px] opacity-50 ml-0.5">{publicCount}</span>
-          </button>
-          <button onClick={() => setFilterStatus('private')} className={`btn ${filterStatus === 'private' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}>
-            Private <span className="text-[10px] opacity-50 ml-0.5">{privateCount}</span>
-          </button>
+          {hasVisibilityData && (
+            <>
+              <button onClick={() => setFilterStatus('public')} className={`btn ${filterStatus === 'public' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}>
+                Public <span className="text-[10px] opacity-50 ml-0.5">{publicCount}</span>
+              </button>
+              <button onClick={() => setFilterStatus('private')} className={`btn ${filterStatus === 'private' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}>
+                Private <span className="text-[10px] opacity-50 ml-0.5">{privateCount}</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Right: Search, Sort, Display, Divider, Submit Base */}
@@ -238,10 +245,10 @@ export default function BasesPage({
 
           <div className="w-px h-[22px] bg-[var(--border)] mx-0.5" />
 
-          {/* Submit Base */}
-          <button onClick={onSubmit} className="btn btn-filled">
+          {/* Browse Marketplace */}
+          <button onClick={onBrowse} className="btn btn-filled">
             <Plus size={16} weight="bold" />
-            <span className="hidden sm:inline">Submit Base</span>
+            <span className="hidden sm:inline">Browse Bases</span>
           </button>
         </div>
       </div>
@@ -258,15 +265,14 @@ export default function BasesPage({
                 </div>
                 <h3 className="text-xs font-semibold text-[var(--text)] mb-2">No bases yet</h3>
                 <p className="text-[11px] text-[var(--text-muted)] max-w-sm mx-auto mb-6">
-                  Submit your first base template by providing a git repository URL. Share your project
-                  templates with the community or keep them private.
+                  Browse the marketplace to find project templates and add them to your library.
                 </p>
                 <button
-                  onClick={onSubmit}
+                  onClick={onBrowse}
                   className="btn btn-filled"
                 >
                   <Plus size={14} />
-                  Submit Your First Base
+                  Browse Marketplace
                 </button>
               </div>
             ) : filtered.length === 0 ? (
@@ -287,9 +293,9 @@ export default function BasesPage({
                   <BaseCard
                     key={base.id}
                     base={base}
-                    onEdit={() => onEdit(base)}
-                    onToggleVisibility={() => onToggleVisibility(base)}
-                    onDelete={() => handleDelete(base)}
+                    onEdit={onEdit ? () => onEdit(base) : undefined}
+                    onToggleVisibility={onToggleVisibility ? () => onToggleVisibility(base) : undefined}
+                    onDelete={onDelete ? () => handleDelete(base) : undefined}
                   />
                 ))}
               </motion.div>
@@ -299,9 +305,9 @@ export default function BasesPage({
                   <BaseListRow
                     key={base.id}
                     base={base}
-                    onEdit={() => onEdit(base)}
-                    onToggleVisibility={() => onToggleVisibility(base)}
-                    onDelete={() => handleDelete(base)}
+                    onEdit={onEdit ? () => onEdit(base) : undefined}
+                    onToggleVisibility={onToggleVisibility ? () => onToggleVisibility(base) : undefined}
+                    onDelete={onDelete ? () => onDelete(base) : undefined}
                   />
                 ))}
               </div>
@@ -336,14 +342,14 @@ function BaseListRow({
   onDelete,
 }: {
   base: LibraryBase;
-  onEdit: () => void;
-  onToggleVisibility: () => void;
-  onDelete: () => void;
+  onEdit?: () => void;
+  onToggleVisibility?: () => void;
+  onDelete?: () => void;
 }) {
   return (
     <div
       onClick={onEdit}
-      className="group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors hover:bg-[var(--surface-hover)] border border-transparent"
+      className={`group flex items-center gap-3 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--surface-hover)] border border-transparent ${onEdit ? 'cursor-pointer' : ''}`}
     >
       {/* Icon */}
       <div className="w-7 h-7 rounded-lg bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center shrink-0">
@@ -363,16 +369,6 @@ function BaseListRow({
         {base.category}
       </span>
 
-      {/* Visibility badge */}
-      <span className={`hidden sm:flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border shrink-0 ${
-        base.visibility === 'public'
-          ? 'text-[var(--text-subtle)] border-[var(--border)] bg-[var(--surface)]'
-          : 'text-[var(--text-subtle)] border-[var(--border)] bg-[var(--surface)]'
-      }`}>
-        {base.visibility === 'public' ? <Globe size={10} /> : <LockKey size={10} />}
-        {base.visibility === 'public' ? 'Public' : 'Private'}
-      </span>
-
       {/* Tech stack inline */}
       {base.tech_stack && base.tech_stack.length > 0 && (
         <div className="hidden md:flex items-center gap-1">
@@ -387,23 +383,33 @@ function BaseListRow({
         </div>
       )}
 
-      {/* Actions — visible on hover */}
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
-        <button onClick={onToggleVisibility} className="btn btn-sm">
-          {base.visibility === 'public' ? <Eye size={12} /> : <EyeSlash size={12} />}
-        </button>
-        <button onClick={onEdit} className="btn btn-sm">
-          <Pencil size={12} />
-        </button>
-        <button onClick={onDelete} className="btn btn-sm btn-danger">
-          <Trash size={12} />
-        </button>
-      </div>
+      {/* Actions — visible on hover, only for creator view */}
+      {(onToggleVisibility || onEdit || onDelete) && (
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
+          {onToggleVisibility && (
+            <button onClick={onToggleVisibility} className="btn btn-sm">
+              {base.visibility === 'public' ? <Eye size={12} /> : <EyeSlash size={12} />}
+            </button>
+          )}
+          {onEdit && (
+            <button onClick={onEdit} className="btn btn-sm">
+              <Pencil size={12} />
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={onDelete} className="btn btn-sm btn-danger">
+              <Trash size={12} />
+            </button>
+          )}
+        </div>
+      )}
 
-      {/* Settings gear (always visible) */}
-      <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="shrink-0 p-1 rounded-md hover:bg-[var(--surface)] transition-colors">
-        <Gear size={14} className="text-[var(--text-subtle)]" />
-      </button>
+      {/* Settings gear (only for creator view) */}
+      {onEdit && (
+        <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="shrink-0 p-1 rounded-md hover:bg-[var(--surface)] transition-colors">
+          <Gear size={14} className="text-[var(--text-subtle)]" />
+        </button>
+      )}
     </div>
   );
 }
@@ -416,9 +422,9 @@ function BaseCard({
   onDelete,
 }: {
   base: LibraryBase;
-  onEdit: () => void;
-  onToggleVisibility: () => void;
-  onDelete: () => void;
+  onEdit?: () => void;
+  onToggleVisibility?: () => void;
+  onDelete?: () => void;
 }) {
   return (
     <motion.div
@@ -426,7 +432,7 @@ function BaseCard({
       initial="initial"
       animate="animate"
       onClick={onEdit}
-      className="group relative flex flex-col cursor-pointer bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-all duration-200 hover:-translate-y-0.5"
+      className={`group relative flex flex-col bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-all duration-200 hover:-translate-y-0.5 ${onEdit ? 'cursor-pointer' : ''}`}
     >
       <div className="p-4 flex flex-col h-full">
         {/* Top row: icon + title + category */}
@@ -492,37 +498,45 @@ function BaseCard({
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1 mt-3 pt-3 border-t border-[var(--border)] opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={onToggleVisibility}
-            aria-label={
-              base.visibility === 'public'
-                ? `Make ${base.name} private`
-                : `Make ${base.name} public`
-            }
-            className="btn btn-sm"
-          >
-            {base.visibility === 'public' ? <Eye size={12} /> : <EyeSlash size={12} />}
-            {base.visibility === 'public' ? 'Public' : 'Private'}
-          </button>
-          <button
-            onClick={onEdit}
-            aria-label={`Edit ${base.name}`}
-            className="btn btn-sm"
-          >
-            <Pencil size={12} />
-            Edit
-          </button>
-          <div className="flex-1" />
-          <button
-            onClick={onDelete}
-            aria-label={`Delete ${base.name}`}
-            className="btn btn-icon btn-sm btn-danger"
-          >
-            <Trash size={12} />
-          </button>
-        </div>
+        {/* Actions — only shown for creator view */}
+        {(onToggleVisibility || onEdit || onDelete) && (
+          <div className="flex items-center gap-1 mt-3 pt-3 border-t border-[var(--border)] opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+            {onToggleVisibility && (
+              <button
+                onClick={onToggleVisibility}
+                aria-label={
+                  base.visibility === 'public'
+                    ? `Make ${base.name} private`
+                    : `Make ${base.name} public`
+                }
+                className="btn btn-sm"
+              >
+                {base.visibility === 'public' ? <Eye size={12} /> : <EyeSlash size={12} />}
+                {base.visibility === 'public' ? 'Public' : 'Private'}
+              </button>
+            )}
+            {onEdit && (
+              <button
+                onClick={onEdit}
+                aria-label={`Edit ${base.name}`}
+                className="btn btn-sm"
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
+            )}
+            <div className="flex-1" />
+            {onDelete && (
+              <button
+                onClick={onDelete}
+                aria-label={`Delete ${base.name}`}
+                className="btn btn-icon btn-sm btn-danger"
+              >
+                <Trash size={12} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </motion.div>
   );
