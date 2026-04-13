@@ -24,7 +24,6 @@ import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import {
   MobileMenu,
 } from '../components/ui';
-import { SubmitBaseModal } from '../components/modals';
 import {
   type CustomProvider,
 } from '../components/settings/CustomProviderComponents';
@@ -145,8 +144,6 @@ export default function Library() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [byokEnabled, setByokEnabled] = useState<boolean | null>(null);
-  const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
-  const [editingBase, setEditingBase] = useState<LibraryBase | null>(null);
   const [skills, setSkills] = useState<LibrarySkill[]>([]);
   const [mcpServers, setMcpServers] = useState<InstalledMcpServer[]>([]);
   const logout = () => {
@@ -351,29 +348,6 @@ export default function Library() {
     }
   };
 
-  const handleToggleBaseVisibility = async (base: LibraryBase) => {
-    const newVisibility = base.visibility === 'public' ? 'private' : 'public';
-    try {
-      await marketplaceApi.setBaseVisibility(base.id, newVisibility);
-      toast.success(`Base is now ${newVisibility}`);
-      loadBases();
-    } catch (error) {
-      console.error('Failed to toggle visibility:', error);
-      toast.error('Failed to change visibility');
-    }
-  };
-
-  const handleDeleteBase = async (base: LibraryBase) => {
-    try {
-      await marketplaceApi.deleteBase(base.id);
-      toast.success('Base deleted');
-      loadBases();
-    } catch (error) {
-      console.error('Failed to delete base:', error);
-      toast.error('Failed to delete base');
-    }
-  };
-
   const loadApiKeys = async () => {
     try {
       const data = await secretsApi.listApiKeys();
@@ -561,17 +535,6 @@ export default function Library() {
           />
         )}
       </div>
-
-      {/* Submit/Edit Base Modal */}
-      <SubmitBaseModal
-        isOpen={showSubmitBaseModal}
-        onClose={() => {
-          setShowSubmitBaseModal(false);
-          setEditingBase(null);
-        }}
-        onSuccess={loadBases}
-        editBase={editingBase}
-      />
 
     </>
   );

@@ -59,7 +59,6 @@ interface BasesPageProps {
   bases: LibraryBase[];
   loading: boolean;
   onBrowse: () => void;
-  onSubmit?: () => void;
   onEdit?: (base: LibraryBase) => void;
   onToggleVisibility?: (base: LibraryBase) => void;
   onDelete?: (base: LibraryBase) => void;
@@ -70,7 +69,6 @@ export default function BasesPage({
   bases,
   loading,
   onBrowse,
-  onSubmit,
   onEdit,
   onToggleVisibility,
   onDelete,
