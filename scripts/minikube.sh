@@ -172,12 +172,22 @@ build_and_load() {
     info "Building $img (cached)..."
   fi
 
-  docker build $cache_flag -t "$img" -f "$dockerfile" "$context"
+  # --load ensures the image lands in the local Docker image store even when
+  # the daemon uses the containerd snapshotter (Docker Desktop / modern Docker).
+  # Without it, buildx puts the image only in the build cache and
+  # `docker save` / `minikube image load` can't find it.
+  docker buildx build --load $cache_flag -t "$img" -f "$dockerfile" "$context"
 
-  # Always remove the old image inside minikube before loading to prevent
+  # Remove the old image from ALL minikube nodes before loading to prevent
   # stale cached layers from being served instead of the new build.
+  # `minikube image load` distributes to all nodes, but stale tags on
+  # worker nodes can cause pods to run the old image.
   info "Loading $img into minikube..."
-  minikube -p "$PROFILE" ssh -- docker rmi -f "$img" 2>/dev/null || true
+  local nodes
+  nodes=$(minikube -p "$PROFILE" node list 2>/dev/null | awk '{print $1}')
+  for node in $nodes; do
+    minikube -p "$PROFILE" ssh -n "$node" -- docker rmi -f "$img" 2>/dev/null || true
+  done
   minikube -p "$PROFILE" image load "$img"
   success "$img built and loaded"
 }

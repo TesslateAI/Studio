@@ -1,6 +1,8 @@
-import { ArrowsClockwise, Warning, ChatCircleDots } from '@phosphor-icons/react';
+import { useState } from 'react';
+import { ArrowsClockwise, Warning, ChatCircleDots, FirstAid } from '@phosphor-icons/react';
 import { PulsingGridSpinner } from './PulsingGridSpinner';
 import { StartupLogViewer } from './StartupLogViewer';
+import { volumeApi } from '../lib/api';
 
 interface ContainerLoadingOverlayProps {
   phase: string;
@@ -8,6 +10,7 @@ interface ContainerLoadingOverlayProps {
   message: string;
   logs: string[];
   error?: string;
+  projectSlug?: string;
   onRetry?: () => void;
   onAskAgent?: (message: string) => void;
   containerPort?: number;
@@ -19,10 +22,15 @@ export function ContainerLoadingOverlay({
   message,
   logs,
   error,
+  projectSlug,
   onRetry,
   onAskAgent,
   containerPort = 3000,
 }: ContainerLoadingOverlayProps) {
+  // Volume recovery state — must be before any early returns (React hooks rules)
+  const [recovering, setRecovering] = useState(false);
+  const [recoverResult, setRecoverResult] = useState<string | null>(null);
+
   // Health check timeout — container is alive but dev server isn't responding
   const isHealthCheckTimeout = error?.startsWith('HEALTH_CHECK_TIMEOUT:');
 
@@ -68,6 +76,32 @@ export function ContainerLoadingOverlay({
   }
 
   // Actual task failure error state
+  const isVolumeError =
+    error &&
+    (error.toLowerCase().includes('storage') ||
+      error.toLowerCase().includes('volume') ||
+      error.toLowerCase().includes('unavailable') ||
+      error.toLowerCase().includes('unreachable'));
+
+  const handleRecover = async () => {
+    if (!projectSlug) return;
+    setRecovering(true);
+    setRecoverResult(null);
+    try {
+      const result = await volumeApi.recover(projectSlug);
+      setRecoverResult(`Recovered to node ${result.node}. Retrying start...`);
+      // Auto-retry after successful recovery
+      setTimeout(() => {
+        onRetry?.();
+        setRecovering(false);
+        setRecoverResult(null);
+      }, 1500);
+    } catch (err) {
+      setRecoverResult(`Recovery failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setRecovering(false);
+    }
+  };
+
   if (error) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center bg-[var(--bg)] p-6">
@@ -77,15 +111,30 @@ export function ContainerLoadingOverlay({
           </div>
           <h3 className="text-lg font-semibold text-[var(--text)]">Container Failed to Start</h3>
           <p className="text-[var(--text)]/60 text-sm">{error}</p>
-          {onRetry && (
-            <button
-              onClick={onRetry}
-              className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary)]/80 transition-colors"
-            >
-              <ArrowsClockwise size={18} />
-              Retry
-            </button>
-          )}
+
+          {recoverResult && <p className="text-[var(--text)]/70 text-sm">{recoverResult}</p>}
+
+          <div className="flex items-center gap-3">
+            {isVolumeError && projectSlug && (
+              <button
+                onClick={handleRecover}
+                disabled={recovering}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-500 transition-colors disabled:opacity-50"
+              >
+                <FirstAid size={18} />
+                {recovering ? 'Recovering...' : 'Recover Storage'}
+              </button>
+            )}
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary)]/80 transition-colors"
+              >
+                <ArrowsClockwise size={18} />
+                Retry
+              </button>
+            )}
+          </div>
 
           {/* Show logs on error for debugging */}
           {logs.length > 0 && (

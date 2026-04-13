@@ -1860,9 +1860,17 @@ func (d *Daemon) syncOne(ctx context.Context, tv *trackedVolume, role, label str
 	}
 
 	// 4. Update manifest with new snapshot via Hub.
+	// Prev always points to the chronologically previous snapshot (for timeline
+	// display). Parent may skip intermediates for consolidation snapshots.
+	// For non-consolidation snapshots, Prev == Parent.
+	prevHash := tv.lastLayerHash
+	if prevHash == "" {
+		prevHash = tv.templateHash
+	}
 	snapshot := cas.Snapshot{
 		Hash:          hash,
 		Parent:        parentHash,
+		Prev:          prevHash,
 		Role:          role,
 		Label:         label,
 		Consolidation: isConsolidation,

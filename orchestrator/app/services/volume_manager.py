@@ -160,6 +160,103 @@ class VolumeManager:
         return service_volume_id
 
     # ------------------------------------------------------------------
+    # CAS Snapshots
+    # ------------------------------------------------------------------
+
+    async def create_snapshot(self, volume_id: str, label: str = "") -> str:
+        """Create a CAS checkpoint snapshot. Returns the blob hash."""
+        hash_val = await self._hub.create_snapshot(volume_id, label=label)
+        logger.info(
+            "[VOLUME] Snapshot created: volume=%s hash=%s label=%s", volume_id, hash_val[:16], label
+        )
+        return hash_val
+
+    async def list_snapshots(self, volume_id: str) -> list[dict]:
+        """List CAS checkpoint snapshots (excludes sync/consolidation layers)."""
+        return await self._hub.list_snapshots(volume_id)
+
+    async def get_manifest_graph(self, volume_id: str) -> dict:
+        """Return the full manifest DAG (head, branches, all snapshots)."""
+        return await self._hub.get_manifest_graph(volume_id)
+
+    async def create_branch(self, volume_id: str, name: str, hash: str) -> None:
+        """Save a named branch pointer on the volume's manifest."""
+        await self._hub.create_branch(volume_id, name, hash)
+        logger.info("[VOLUME] Branch '%s' created at %s for volume %s", name, hash[:16], volume_id)
+
+    async def restore_to_snapshot(self, volume_id: str, target_hash: str) -> None:
+        """Restore volume to a specific CAS snapshot hash."""
+        await self._hub.restore_to_snapshot(volume_id, target_hash)
+        logger.info("[VOLUME] Restored volume %s to %s", volume_id, target_hash[:16])
+
+    # ------------------------------------------------------------------
+    # Recovery (shared by auto-recovery and user-prompted restore)
+    # ------------------------------------------------------------------
+
+    async def recover_volume(
+        self,
+        volume_id: str,
+        target_hash: str | None = None,
+        candidate_nodes: list[str] | None = None,
+    ) -> dict:
+        """Recover a volume to a live node, optionally restoring to a snapshot.
+
+        Shared logic for:
+        - Auto-recovery (target_hash=None → restore to HEAD / latest sync)
+        - Snapshot restore (target_hash=<hash> → revert to that CAS checkpoint)
+
+        Steps:
+            1. ensure_cached — place volume on a live node (peer-transfer or CAS restore)
+            2. If target_hash: RestoreToSnapshot — revert to specific point
+            3. Verify FileOps is reachable
+
+        Returns:
+            {"node_name": str, "restored_hash": str | None, "action": str}
+
+        Raises:
+            NodeResourcesExhausted, VolumeUnavailableError, etc. from underlying calls.
+        """
+        # Step 1: ensure volume is on a live node
+        node_name = await self.ensure_cached(
+            volume_id,
+            candidate_nodes=candidate_nodes,
+        )
+
+        action = "relocated"
+        restored_hash = None
+
+        # Step 2: optionally revert to a specific CAS snapshot
+        if target_hash:
+            await self._hub.restore_to_snapshot(volume_id, target_hash)
+            restored_hash = target_hash
+            action = "restored_to_snapshot"
+
+        # Step 3: verify FileOps is reachable (light probe)
+        try:
+            client = await self.get_fileops_client(volume_id)
+            async with client:
+                await client.list_dir(volume_id, "/")
+        except Exception as verify_err:
+            logger.warning(
+                "[VOLUME] Recovery verify failed for %s on %s: %s",
+                volume_id,
+                node_name,
+                verify_err,
+            )
+            # Recovery placed the volume but FileOps isn't ready yet —
+            # don't fail the whole recovery, the next FileOps call will
+            # retry via the normal _fileops_call path.
+
+        logger.info(
+            "[VOLUME] Recovery complete: volume=%s node=%s action=%s hash=%s",
+            volume_id,
+            node_name,
+            action,
+            restored_hash[:16] if restored_hash else "HEAD",
+        )
+        return {"node_name": node_name, "restored_hash": restored_hash, "action": action}
+
+    # ------------------------------------------------------------------
     # Volume routing (Hub as single source of truth)
     # ------------------------------------------------------------------
 

@@ -2762,56 +2762,110 @@ export const feedbackApi = {
 };
 
 // =============================================================================
-// Project Snapshots API (Timeline - EBS VolumeSnapshots)
+// Project Snapshots API (CAS checkpoints via btrfs Hub)
 // =============================================================================
 
 export interface Snapshot {
-  id: string;
-  project_id: string | null;
-  snapshot_name: string;
-  snapshot_type: 'hibernation' | 'manual';
-  status: 'pending' | 'ready' | 'error' | 'deleted';
-  label: string | null;
-  volume_size_bytes: number | null;
-  created_at: string;
-  ready_at: string | null;
+  hash: string;
+  parent: string;
+  prev: string; // chronologically previous snapshot (unlike parent which skips for consolidations)
+  role: string;
+  label: string;
+  ts: string; // ISO timestamp
+  consolidation?: boolean;
+}
+
+export interface TimelineBranch {
+  name: string;
+  display_name: string;
+  hash: string; // tip hash
+  is_current: boolean;
+  checkpoint_count: number;
+}
+
+export interface TimelineGraphResponse {
+  head: string;
+  branches: TimelineBranch[];
+  snapshots: Snapshot[];
 }
 
 export interface SnapshotListResponse {
   snapshots: Snapshot[];
-  total_count: number;
-  max_snapshots: number;
+  volume_id: string;
 }
 
-export interface RestoreSnapshotResponse {
+export interface SnapshotCreateResponse {
+  hash: string;
+  label: string;
+  volume_id: string;
+}
+
+export interface SnapshotRestoreResponse {
   success: boolean;
   message: string;
-  snapshot_id: string;
-  restored_from: string;
+  restored_hash: string;
+  node: string;
 }
 
 export const snapshotsApi = {
-  // List all snapshots for a project (Timeline)
   list: async (projectId: string): Promise<SnapshotListResponse> => {
     const response = await api.get(`/api/projects/${projectId}/snapshots/`);
     return response.data;
   },
 
-  // Get a specific snapshot
-  get: async (projectId: string, snapshotId: string): Promise<Snapshot> => {
-    const response = await api.get(`/api/projects/${projectId}/snapshots/${snapshotId}`);
-    return response.data;
-  },
-
-  // Create a manual snapshot
-  create: async (projectId: string, label?: string): Promise<Snapshot> => {
+  create: async (projectId: string, label?: string): Promise<SnapshotCreateResponse> => {
     const response = await api.post(`/api/projects/${projectId}/snapshots/`, { label });
     return response.data;
   },
 
-  // Restore from a specific snapshot
-  restore: async (projectId: string, snapshotId: string): Promise<RestoreSnapshotResponse> => {
-    const response = await api.post(`/api/projects/${projectId}/snapshots/${snapshotId}/restore`);
+  restore: async (projectId: string, snapshotHash: string): Promise<SnapshotRestoreResponse> => {
+    const response = await api.post(`/api/projects/${projectId}/snapshots/${snapshotHash}/restore`);
+    return response.data;
+  },
+
+  graph: async (projectId: string): Promise<TimelineGraphResponse> => {
+    const response = await api.get(`/api/projects/${projectId}/snapshots/graph`);
+    return response.data;
+  },
+
+  createBranch: async (
+    projectId: string,
+    name: string
+  ): Promise<{ name: string; display_name: string }> => {
+    const response = await api.post(`/api/projects/${projectId}/snapshots/branches`, { name });
+    return response.data;
+  },
+};
+
+// ------------------------------------------------------------------
+// Volume Health & Recovery
+// ------------------------------------------------------------------
+
+export interface VolumeStatus {
+  status: 'healthy' | 'restoring' | 'unreachable' | 'unavailable' | 'no_volume';
+  node?: string;
+  volume_id?: string;
+  message?: string;
+  recoverable?: boolean;
+}
+
+export interface VolumeRecoverResponse {
+  status: string;
+  node: string;
+  action: string;
+  restored_hash: string | null;
+}
+
+export const volumeApi = {
+  status: async (projectSlug: string): Promise<VolumeStatus> => {
+    const response = await api.get(`/api/projects/${projectSlug}/volume/status`);
+    return response.data;
+  },
+
+  recover: async (projectSlug: string, targetHash?: string): Promise<VolumeRecoverResponse> => {
+    const response = await api.post(`/api/projects/${projectSlug}/volume/recover`, {
+      ...(targetHash ? { target_hash: targetHash } : {}),
+    });
     return response.data;
   },
 };

@@ -80,6 +80,31 @@ type DeleteTombstoneRequest struct {
 	VolumeID string `json:"volume_id"`
 }
 
+// GetManifestGraphRequest is the request for the GetManifestGraph RPC.
+type GetManifestGraphRequest struct {
+	VolumeID string `json:"volume_id"`
+}
+
+// GetManifestGraphResponse is the response for the GetManifestGraph RPC.
+type GetManifestGraphResponse struct {
+	Head      string            `json:"head"`
+	Branches  map[string]string `json:"branches"`  // name → hash
+	Snapshots []cas.Snapshot    `json:"snapshots"`  // ALL snapshots in the DAG
+}
+
+// CreateBranchRequest is the request for the CreateBranch RPC.
+type CreateBranchRequest struct {
+	VolumeID string `json:"volume_id"`
+	Name     string `json:"name"`
+	Hash     string `json:"hash"` // snapshot hash to point the branch at
+}
+
+// CreateBranchResponse is the response for the CreateBranch RPC.
+type CreateBranchResponse struct {
+	Name string `json:"name"`
+	Hash string `json:"hash"`
+}
+
 // --- RPC methods (satisfy sync.HubOps interface) ---
 
 // AppendSnapshot calls the Hub to append a snapshot to the manifest DAG.
@@ -111,6 +136,25 @@ func (c *HubClient) DeleteVolumeManifest(ctx context.Context, volumeID string) e
 // DeleteTombstone calls the Hub to remove a volume's tombstone.
 func (c *HubClient) DeleteTombstone(ctx context.Context, volumeID string) error {
 	return c.invoke(ctx, "DeleteTombstone", &DeleteTombstoneRequest{VolumeID: volumeID}, &Empty{})
+}
+
+// GetManifestGraph returns the full manifest DAG for a volume.
+func (c *HubClient) GetManifestGraph(ctx context.Context, volumeID string) (*GetManifestGraphResponse, error) {
+	var resp GetManifestGraphResponse
+	err := c.invoke(ctx, "GetManifestGraph", &GetManifestGraphRequest{VolumeID: volumeID}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateBranch saves a named branch pointer on the volume's manifest.
+func (c *HubClient) CreateBranch(ctx context.Context, volumeID, name, hash string) error {
+	return c.invoke(ctx, "CreateBranch", &CreateBranchRequest{
+		VolumeID: volumeID,
+		Name:     name,
+		Hash:     hash,
+	}, &CreateBranchResponse{})
 }
 
 // --- Lease RPC methods (satisfy sync.HubOps interface) ---

@@ -37,6 +37,7 @@ type Manifest struct {
 type Snapshot struct {
 	Hash          string `json:"hash"`
 	Parent        string `json:"parent"`
+	Prev          string `json:"prev,omitempty"`           // always the chronologically previous snapshot (for timeline display; unlike Parent which skips for consolidations)
 	Role          string `json:"role"`                    // "sync" | "checkpoint"
 	Label         string `json:"label,omitempty"`
 	Consolidation bool   `json:"consolidation,omitempty"` // true = parent is previous consolidation, not previous snapshot

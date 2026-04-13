@@ -392,6 +392,8 @@ func registerVolumeHubServer(srv *grpc.Server, s *Server) {
 			{MethodName: "CreateServiceVolume", Handler: s.handleCreateServiceVolume},
 			{MethodName: "CreateSnapshot", Handler: s.handleCreateSnapshot},
 			{MethodName: "ListSnapshots", Handler: s.handleListSnapshots},
+			{MethodName: "GetManifestGraph", Handler: s.handleGetManifestGraph},
+			{MethodName: "CreateBranch", Handler: s.handleCreateBranch},
 			{MethodName: "RestoreToSnapshot", Handler: s.handleRestoreToSnapshot},
 			{MethodName: "ResolveVolume", Handler: s.handleResolveVolume},
 			{MethodName: "TransferOwnership", Handler: s.handleTransferOwnership},
@@ -929,6 +931,75 @@ func (s *Server) handleListSnapshots(_ interface{}, ctx context.Context, dec fun
 	snapshots := manifest.ListCheckpoints()
 
 	return &ListSnapshotsResponse{Snapshots: snapshots}, nil
+}
+
+func (s *Server) handleGetManifestGraph(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req GetManifestGraphRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
+	}
+	if s.cas == nil {
+		return nil, status.Error(codes.FailedPrecondition, "CAS store not available")
+	}
+
+	manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get manifest for %s: %v", req.VolumeID, err)
+	}
+
+	// Collect all snapshots from the hash-indexed map.
+	// Backfill Prev from Parent for snapshots created before the Prev field existed.
+	snapshots := make([]cas.Snapshot, 0, len(manifest.Snapshots))
+	for _, snap := range manifest.Snapshots {
+		if snap.Prev == "" {
+			snap.Prev = snap.Parent
+		}
+		snapshots = append(snapshots, snap)
+	}
+
+	branches := manifest.Branches
+	if branches == nil {
+		branches = make(map[string]string)
+	}
+
+	return &GetManifestGraphResponse{
+		Head:      manifest.Head,
+		Branches:  branches,
+		Snapshots: snapshots,
+	}, nil
+}
+
+func (s *Server) handleCreateBranch(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req CreateBranchRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	if req.VolumeID == "" || req.Name == "" || req.Hash == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id, name, and hash are required")
+	}
+	if s.cas == nil {
+		return nil, status.Error(codes.FailedPrecondition, "CAS store not available")
+	}
+
+	manifest, err := s.cas.GetManifest(ctx, req.VolumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get manifest for %s: %v", req.VolumeID, err)
+	}
+
+	// Verify the target hash exists in the manifest.
+	if manifest.GetSnapshot(req.Hash) == nil {
+		return nil, status.Errorf(codes.NotFound, "snapshot %s not found in manifest", req.Hash)
+	}
+
+	manifest.SaveBranch(req.Name, req.Hash)
+	if err := s.cas.PutManifest(ctx, manifest); err != nil {
+		return nil, status.Errorf(codes.Internal, "put manifest: %v", err)
+	}
+
+	return &CreateBranchResponse{Name: req.Name, Hash: req.Hash}, nil
 }
 
 func (s *Server) handleRestoreToSnapshot(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {

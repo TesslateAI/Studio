@@ -1025,6 +1025,125 @@ async def get_dev_server_url(
         ) from e
 
 
+# =============================================================================
+# Volume Health & Recovery
+# =============================================================================
+
+
+@router.get("/{project_slug}/volume/status")
+async def get_volume_status(
+    project_slug: str,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check current volume health — cached, restoring, unavailable, unreachable.
+
+    Used by the frontend to show recovery options when a project's
+    storage is in an error state.
+    """
+    from ..services.volume_manager import (
+        VolumeOwnerUnreachableError,
+        VolumeRestoringError,
+        VolumeUnavailableError,
+        get_volume_manager,
+    )
+
+    project = await get_project_by_slug(db, project_slug, current_user)
+
+    if not project.volume_id:
+        return {"status": "no_volume", "message": "Project has no volume"}
+
+    vm = get_volume_manager()
+    try:
+        resp = await vm.resolve_volume(project.volume_id)
+        return {
+            "status": "healthy",
+            "node": resp.get("node_name", ""),
+            "volume_id": project.volume_id,
+        }
+    except VolumeRestoringError:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "restoring",
+                "volume_id": project.volume_id,
+                "message": "Volume is being restored from backup",
+                "recoverable": True,
+            },
+        )
+    except VolumeOwnerUnreachableError:
+        return {
+            "status": "unreachable",
+            "volume_id": project.volume_id,
+            "message": "Volume node is temporarily unreachable",
+            "recoverable": True,
+        }
+    except VolumeUnavailableError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unavailable",
+                "volume_id": project.volume_id,
+                "message": "Volume is unavailable",
+                "recoverable": True,
+            },
+        )
+
+
+@router.post("/{project_slug}/volume/recover")
+async def recover_volume(
+    project_slug: str,
+    request: Request,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recover a project volume to a live node.
+
+    Optionally restore to a specific CAS snapshot (target_hash).
+    Without target_hash, recovers to the latest synced state (HEAD).
+
+    This endpoint is used by:
+    - "Recover Now" button (no target_hash)
+    - "Restore to Snapshot" button (with target_hash from Timeline)
+    """
+    from ..services.hub_client import NodeResourcesExhausted
+    from ..services.volume_manager import get_volume_manager
+
+    project = await get_project_by_slug(db, project_slug, current_user)
+
+    if not project.volume_id:
+        raise HTTPException(status_code=404, detail="Project has no volume")
+
+    body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
+    target_hash = body.get("target_hash")
+
+    vm = get_volume_manager()
+    try:
+        result = await vm.recover_volume(
+            project.volume_id,
+            target_hash=target_hash,
+        )
+    except NodeResourcesExhausted as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="No nodes available with enough resources for recovery",
+        ) from exc
+    except Exception as e:
+        logger.error("[VOLUME] Recovery failed for %s: %s", project.volume_id, e)
+        raise HTTPException(status_code=503, detail=f"Recovery failed: {e}") from e
+
+    # Update project's cache_node
+    project.cache_node = result["node_name"]
+    await db.commit()
+
+    return {
+        "status": "recovered",
+        "node": result["node_name"],
+        "action": result["action"],
+        "restored_hash": result.get("restored_hash"),
+    }
+
+
 @router.get("/{project_slug}/container-status")
 async def get_container_status(
     project_slug: str,
@@ -1380,21 +1499,34 @@ async def create_project_directory(
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a directory inside the user's dev container."""
+    """Create a directory in the project volume via FileOps.
+
+    Works without a running compute pod — writes directly to the btrfs
+    volume through the CSI driver's FileOps gRPC service.
+    """
     project = await get_project_by_slug(db, project_slug, current_user, Permission.FILE_WRITE)
     dir_path = _validate_file_path(body.dir_path)
 
     try:
-        from ..services.orchestration import get_orchestrator
+        from ..services.orchestration import is_kubernetes_mode
 
-        orchestrator = get_orchestrator()
+        if is_kubernetes_mode() and project.volume_id:
+            from ..services.volume_manager import get_volume_manager
 
-        await orchestrator.execute_command(
-            user_id=current_user.id,
-            project_id=project.id,
-            container_name=None,
-            command=["mkdir", "-p", "--", f"/app/{dir_path}"],
-        )
+            vm = get_volume_manager()
+            client = await vm.get_fileops_client(project.volume_id)
+            async with client:
+                await client.mkdir_all(project.volume_id, f"/{dir_path}")
+        else:
+            from ..services.orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+            await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                command=["mkdir", "-p", "--", f"/app/{dir_path}"],
+            )
 
         logger.info(f"[FILE] Created directory {dir_path}")
         return {"message": "Directory created", "dir_path": dir_path}

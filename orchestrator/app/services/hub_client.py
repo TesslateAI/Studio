@@ -441,6 +441,69 @@ class HubClient:
         )
         return snapshots
 
+    async def restore_to_snapshot(
+        self,
+        volume_id: str,
+        target_hash: str,
+        *,
+        timeout: float = 300.0,
+    ) -> None:
+        """Restore a volume to a specific CAS snapshot.
+
+        The Hub delegates to the volume's owner node which replays
+        layers from CAS up to target_hash.
+
+        Args:
+            volume_id: Volume to restore.
+            target_hash: CAS blob hash of the target snapshot.
+            timeout: gRPC deadline in seconds.
+        """
+        await self._call(
+            "RestoreToSnapshot",
+            {"volume_id": volume_id, "target_hash": target_hash},
+            timeout=timeout,
+        )
+        logger.info(
+            "RestoreToSnapshot succeeded: volume_id=%s target_hash=%s",
+            volume_id,
+            target_hash[:16] if target_hash else "",
+        )
+
+    async def get_manifest_graph(
+        self,
+        volume_id: str,
+        *,
+        timeout: float = 30.0,
+    ) -> dict:
+        """Return the full manifest DAG for a volume.
+
+        Returns a dict with ``head`` (current hash), ``branches``
+        (name→hash map), and ``snapshots`` (list of all snapshots
+        in the DAG, not just HEAD-reachable checkpoints).
+        """
+        try:
+            resp = await self._call("GetManifestGraph", {"volume_id": volume_id}, timeout=timeout)
+        except grpc.aio.AioRpcError as e:
+            if e.code() in (grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INTERNAL):
+                return {"head": "", "branches": {}, "snapshots": []}
+            raise
+        return resp
+
+    async def create_branch(
+        self,
+        volume_id: str,
+        name: str,
+        hash: str,
+        *,
+        timeout: float = 30.0,
+    ) -> None:
+        """Save a named branch pointer on the volume's manifest."""
+        await self._call(
+            "CreateBranch",
+            {"volume_id": volume_id, "name": name, "hash": hash},
+            timeout=timeout,
+        )
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------

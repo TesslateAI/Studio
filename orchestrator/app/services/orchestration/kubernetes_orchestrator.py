@@ -199,19 +199,47 @@ class KubernetesOrchestrator(BaseOrchestrator):
         return await get_volume_manager().get_fileops_client(volume_id)
 
     async def _fileops_call(self, volume_id: str, fn, *args, **kwargs):
-        """Execute a FileOps RPC with automatic volume-miss recovery.
+        """Execute a FileOps RPC with automatic recovery.
 
-        If the FileOps server returns FAILED_PRECONDITION (volume subvolume
-        missing from disk), re-resolve through the Hub — which triggers a
-        CAS restore — then retry the call once with a fresh client.
+        Recovery layers:
+        1. Owner unreachable/unavailable → recover_volume (relocate via Hub)
+        2. FAILED_PRECONDITION (volume missing from disk) → re-resolve via Hub
+        3. Still FAILED_PRECONDITION after retry → VolumeRestoringError
 
-        This gives every file operation the same guarantee: either you get
-        your data, or you get a clear VolumeRestoringError/VolumeUnavailableError.
+        Every file operation gets the same guarantee: either you get your
+        data, or you get a clear VolumeRestoringError/VolumeUnavailableError.
         """
-        from ..volume_manager import get_volume_manager
+        from ..volume_manager import (
+            VolumeOwnerUnreachableError,
+            VolumeUnavailableError,
+            get_volume_manager,
+        )
 
         vm = get_volume_manager()
-        client = await vm.get_fileops_client(volume_id)
+
+        # Layer 1: auto-recover when owner node is dead/unreachable
+        try:
+            client = await vm.get_fileops_client(volume_id)
+        except (VolumeOwnerUnreachableError, VolumeUnavailableError) as e:
+            logger.warning(
+                "[K8S] Volume %s owner unavailable (%s) — attempting auto-recovery",
+                volume_id,
+                type(e).__name__,
+            )
+            try:
+                result = await vm.recover_volume(volume_id)
+                logger.info(
+                    "[K8S] Volume %s auto-recovered to node %s",
+                    volume_id,
+                    result["node_name"],
+                )
+                await self._update_project_cache_node(volume_id, result["node_name"])
+                client = await vm.get_fileops_client(volume_id)
+            except Exception as recovery_err:
+                logger.error("[K8S] Volume %s auto-recovery failed: %s", volume_id, recovery_err)
+                raise VolumeUnavailableError(volume_id) from recovery_err
+
+        # Layer 2: FAILED_PRECONDITION recovery (volume subvolume missing from disk)
         try:
             async with client:
                 return await fn(client, *args, **kwargs)
@@ -222,22 +250,37 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 "[K8S] FileOps volume missing (FAILED_PRECONDITION) for %s — re-resolving via Hub",
                 volume_id,
             )
+
         # Re-resolve triggers CAS restore in the Hub if volume is gone.
-        # This will raise VolumeRestoringError or VolumeUnavailableError
-        # if the volume can't be made ready immediately.
         retry_client = await vm.get_fileops_client(volume_id)
         try:
             async with retry_client:
                 return await fn(retry_client, *args, **kwargs)
         except grpc.aio.AioRpcError as retry_err:
             if retry_err.code() == grpc.StatusCode.FAILED_PRECONDITION:
-                # Volume still not on disk — restore is in progress.
                 logger.info(
                     "[K8S] FileOps volume %s still restoring after re-resolve — signaling restoring",
                     volume_id,
                 )
                 raise VolumeRestoringError(volume_id) from retry_err
             raise
+
+    async def _update_project_cache_node(self, volume_id: str, node_name: str) -> None:
+        """Update project.cache_node after volume relocation (fire-and-forget)."""
+        from sqlalchemy import select as sa_select
+
+        from ...database import AsyncSessionLocal
+        from ...models import Project
+
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(sa_select(Project).where(Project.volume_id == volume_id))
+                project = result.scalar_one_or_none()
+                if project:
+                    project.cache_node = node_name
+                    await db.commit()
+        except Exception:
+            logger.debug("[K8S] Failed to update cache_node for volume %s", volume_id)
 
     async def _get_project_volume_info(self, project_id: UUID) -> tuple[str | None, str | None]:
         """Look up volume_id from DB.
@@ -261,16 +304,22 @@ class KubernetesOrchestrator(BaseOrchestrator):
     def _build_volume_path(file_path: str, subdir: str | None = None) -> str:
         """Build a normalized path for FileOps (relative to volume root).
 
-        Same containment logic as _build_pod_path but without the /app prefix.
-        Volume root IS the /app equivalent. Uses an absolute anchor for
-        robust relative_to() checking — mirrors _build_pod_path's approach.
+        The btrfs volume root is the container filesystem root. Paths like
+        ``/app/src/file.tsx`` map to ``<pool>/volumes/<vol>/app/src/file.tsx``
+        on the CSI node. FileOps accepts paths relative to the volume root,
+        so this method strips leading slashes and normalizes.
+
+        Returns a path like ``app/src/file.tsx`` (no leading slash).
         """
         anchor = PurePosixPath("/vol")
         base = anchor
         if subdir and subdir != ".":
-            base = base / subdir
+            # Strip leading / so PurePosixPath join works correctly:
+            # PurePosixPath("/vol") / "/app" would give "/app" (wrong),
+            # PurePosixPath("/vol") / "app" gives "/vol/app" (correct).
+            base = base / subdir.lstrip("/")
 
-        normalized = PurePosixPath(os.path.normpath(str(base / file_path)))
+        normalized = PurePosixPath(os.path.normpath(str(base / file_path.lstrip("/"))))
 
         # Containment: must still be under /vol
         try:

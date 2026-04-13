@@ -123,7 +123,9 @@ function CodeEditor({
   }, []);
 
   // Auto-collapse sidebar on mobile
-  useEffect(() => { if (isMobile) setIsSidebarCollapsed(true); }, [isMobile]);
+  useEffect(() => {
+    if (isMobile) setIsSidebarCollapsed(true);
+  }, [isMobile]);
 
   // Mobile explorer overlay
   const [mobileExplorerOpen, setMobileExplorerOpen] = useState(false);
@@ -133,7 +135,9 @@ function CodeEditor({
   const saveRef = useRef<() => void>(() => {});
   const closeTabRef = useRef<(path: string) => void>(() => {});
   const selectedFileRef = useRef<string | null>(null);
-  useEffect(() => { selectedFileRef.current = selectedFile; }, [selectedFile]);
+  useEffect(() => {
+    selectedFileRef.current = selectedFile;
+  }, [selectedFile]);
 
   // Lazy-loaded content cache: path → server content (baseline for dirty tracking)
   const localContentRef = useRef<Map<string, string>>(new Map());
@@ -143,18 +147,37 @@ function CodeEditor({
   const getLanguage = (fileName: string): string => {
     const ext = fileName.split('.').pop()?.toLowerCase();
     switch (ext) {
-      case 'js': case 'jsx': return 'javascript';
-      case 'ts': case 'tsx': return 'typescript';
-      case 'html': return 'html';
-      case 'css': case 'scss': case 'less': return 'css';
-      case 'json': return 'json';
-      case 'md': return 'markdown';
-      case 'py': return 'python';
-      case 'yml': case 'yaml': return 'yaml';
-      case 'sh': case 'bash': return 'shell';
-      case 'sql': return 'sql';
-      case 'xml': case 'svg': return 'xml';
-      default: return 'plaintext';
+      case 'js':
+      case 'jsx':
+        return 'javascript';
+      case 'ts':
+      case 'tsx':
+        return 'typescript';
+      case 'html':
+        return 'html';
+      case 'css':
+      case 'scss':
+      case 'less':
+        return 'css';
+      case 'json':
+        return 'json';
+      case 'md':
+        return 'markdown';
+      case 'py':
+        return 'python';
+      case 'yml':
+      case 'yaml':
+        return 'yaml';
+      case 'sh':
+      case 'bash':
+        return 'shell';
+      case 'sql':
+        return 'sql';
+      case 'xml':
+      case 'svg':
+        return 'xml';
+      default:
+        return 'plaintext';
     }
   };
 
@@ -163,13 +186,17 @@ function CodeEditor({
   const getFileIcon = (fileName: string, size = 14) => {
     const ext = fileName.split('.').pop()?.toLowerCase();
     switch (ext) {
-      case 'js': case 'jsx':
+      case 'js':
+      case 'jsx':
         return <Code size={size} className="text-yellow-500 shrink-0" />;
-      case 'ts': case 'tsx':
+      case 'ts':
+      case 'tsx':
         return <Code size={size} className="text-blue-400 shrink-0" />;
       case 'html':
         return <File size={size} className="text-orange-400 shrink-0" />;
-      case 'css': case 'scss': case 'less':
+      case 'css':
+      case 'scss':
+      case 'less':
         return <File size={size} className="text-blue-400 shrink-0" />;
       case 'json':
         return <File size={size} className="text-yellow-300 shrink-0" />;
@@ -177,9 +204,13 @@ function CodeEditor({
         return <File size={size} className="text-[var(--text-muted)] shrink-0" />;
       case 'py':
         return <Code size={size} className="text-green-400 shrink-0" />;
-      case 'yml': case 'yaml':
+      case 'yml':
+      case 'yaml':
         return <File size={size} className="text-red-400 shrink-0" />;
-      case 'svg': case 'png': case 'jpg': case 'gif':
+      case 'svg':
+      case 'png':
+      case 'jpg':
+      case 'gif':
         return <File size={size} className="text-purple-400 shrink-0" />;
       default:
         return <File size={size} className="text-[var(--text-subtle)] shrink-0" />;
@@ -201,12 +232,16 @@ function CodeEditor({
     // Bind Ctrl+S / Cmd+S to save (uses ref to avoid stale closure)
     monacoEditor.addCommand(
       2048 | 49, // CtrlCmd = 2048, KeyS = 49
-      () => { saveRef.current(); }
+      () => {
+        saveRef.current();
+      }
     );
     // Bind Ctrl+W / Cmd+W to close tab
     monacoEditor.addCommand(
       2048 | 53, // CtrlCmd = 2048, KeyW = 53
-      () => { if (selectedFileRef.current) closeTabRef.current(selectedFileRef.current); }
+      () => {
+        if (selectedFileRef.current) closeTabRef.current(selectedFileRef.current);
+      }
     );
   }, []);
 
@@ -220,7 +255,7 @@ function CodeEditor({
       onFileUpdate(selectedFile, buffer);
       // Update baseline so the buffer is now "clean"
       localContentRef.current.set(selectedFile, buffer);
-      setDirtyBuffers(prev => {
+      setDirtyBuffers((prev) => {
         const next = new Map(prev);
         next.delete(selectedFile);
         return next;
@@ -229,7 +264,9 @@ function CodeEditor({
   }, [readOnly, selectedFile, dirtyBuffers, onFileUpdate]);
 
   // Keep ref current for Monaco command binding (avoids stale closure)
-  useEffect(() => { saveRef.current = saveCurrentFile; }, [saveCurrentFile]);
+  useEffect(() => {
+    saveRef.current = saveCurrentFile;
+  }, [saveCurrentFile]);
 
   const saveAllFiles = useCallback(() => {
     dirtyBuffers.forEach((content, path) => {
@@ -267,13 +304,13 @@ function CodeEditor({
       const original = localContentRef.current.get(selectedFile);
       if (value === original) {
         // Content matches saved version — mark clean
-        setDirtyBuffers(prev => {
+        setDirtyBuffers((prev) => {
           const next = new Map(prev);
           next.delete(selectedFile);
           return next;
         });
       } else {
-        setDirtyBuffers(prev => new Map(prev).set(selectedFile, value));
+        setDirtyBuffers((prev) => new Map(prev).set(selectedFile, value));
       }
     }
   };
@@ -289,39 +326,44 @@ function CodeEditor({
     setSelectedFile(path);
     setSelectedDir(null);
     setMobileExplorerOpen(false);
-    setOpenTabs(prev => {
-      if (prev.some(t => t.path === path)) return prev;
+    setOpenTabs((prev) => {
+      if (prev.some((t) => t.path === path)) return prev;
       const name = path.split('/').pop() || path;
       return [...prev, { path, name }];
     });
   }, []);
 
-  const closeTab = useCallback((path: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    // If dirty, save before closing
-    const buffer = dirtyBuffers.get(path);
-    if (buffer !== undefined) {
-      onFileUpdate(path, buffer);
-      localContentRef.current.set(path, buffer);
-      setDirtyBuffers(prev => {
-        const next = new Map(prev);
-        next.delete(path);
+  const closeTab = useCallback(
+    (path: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      // If dirty, save before closing
+      const buffer = dirtyBuffers.get(path);
+      if (buffer !== undefined) {
+        onFileUpdate(path, buffer);
+        localContentRef.current.set(path, buffer);
+        setDirtyBuffers((prev) => {
+          const next = new Map(prev);
+          next.delete(path);
+          return next;
+        });
+      }
+      setOpenTabs((prev) => {
+        const next = prev.filter((t) => t.path !== path);
+        if (selectedFile === path) {
+          const idx = prev.findIndex((t) => t.path === path);
+          const newSelected = next[Math.min(idx, next.length - 1)]?.path || null;
+          setSelectedFile(newSelected);
+        }
         return next;
       });
-    }
-    setOpenTabs(prev => {
-      const next = prev.filter(t => t.path !== path);
-      if (selectedFile === path) {
-        const idx = prev.findIndex(t => t.path === path);
-        const newSelected = next[Math.min(idx, next.length - 1)]?.path || null;
-        setSelectedFile(newSelected);
-      }
-      return next;
-    });
-  }, [selectedFile, dirtyBuffers, onFileUpdate]);
+    },
+    [selectedFile, dirtyBuffers, onFileUpdate]
+  );
 
   // Keep ref current for keyboard shortcut (avoids stale closure)
-  useEffect(() => { closeTabRef.current = (p) => closeTab(p); }, [closeTab]);
+  useEffect(() => {
+    closeTabRef.current = (p) => closeTab(p);
+  }, [closeTab]);
 
   // ── External file opening (for Design view) ──────────────────────
   useEffect(() => {
@@ -370,7 +412,7 @@ function CodeEditor({
     };
   }, [selectedFile, slug, containerDir]);
 
-  // Invalidate content cache when files are updated externally (e.g. Save Config)
+  // Invalidate content cache when files are updated externally (e.g. Save Config, snapshot restore)
   useEffect(() => {
     const unsubscribe = fileEvents.on((detail) => {
       if (detail.type === 'file-updated' && detail.filePath) {
@@ -382,6 +424,21 @@ function CodeEditor({
             .getFileContent(slug, detail.filePath, containerDir)
             .then((res) => {
               localContentRef.current.set(detail.filePath!, res.content);
+              setLoadingContent(false);
+            })
+            .catch(() => setLoadingContent(false));
+        }
+      }
+      if (detail.type === 'files-changed') {
+        // Full cache invalidation (e.g. after snapshot restore — all files may have changed)
+        localContentRef.current.clear();
+        setDirtyBuffers(new Map());
+        if (selectedFileRef.current) {
+          setLoadingContent(true);
+          projectsApi
+            .getFileContent(slug, selectedFileRef.current, containerDir)
+            .then((res) => {
+              localContentRef.current.set(selectedFileRef.current!, res.content);
               setLoadingContent(false);
             })
             .catch(() => setLoadingContent(false));
@@ -417,7 +474,9 @@ function CodeEditor({
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeContextMenu();
     };
-    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeContextMenu(); };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeContextMenu();
+    };
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
     return () => {
@@ -461,10 +520,15 @@ function CodeEditor({
           else if (selectedFile?.startsWith(current.originalPath + '/'))
             setSelectedFile(newPath + selectedFile.substring(current.originalPath.length));
           // Update tab
-          setOpenTabs(prev => prev.map(t =>
-            t.path === current.originalPath ? { path: newPath, name: trimmed } :
-            t.path.startsWith(current.originalPath! + '/') ? { ...t, path: newPath + t.path.substring(current.originalPath!.length) } : t
-          ));
+          setOpenTabs((prev) =>
+            prev.map((t) =>
+              t.path === current.originalPath
+                ? { path: newPath, name: trimmed }
+                : t.path.startsWith(current.originalPath! + '/')
+                  ? { ...t, path: newPath + t.path.substring(current.originalPath!.length) }
+                  : t
+            )
+          );
         }
       } else if (current.kind === 'file') {
         const fullPath = current.parentPath ? `${current.parentPath}/${trimmed}` : trimmed;
@@ -479,45 +543,67 @@ function CodeEditor({
 
   // ── Context menu actions ──────────────────────────────────────────
 
-  const startNewFile = useCallback((parentPath: string) => {
-    closeContextMenu();
-    if (parentPath) setExpandedDirs(prev => new Set([...prev, parentPath]));
-    setInlineInput({ parentPath, kind: 'file' });
-  }, [closeContextMenu]);
+  const startNewFile = useCallback(
+    (parentPath: string) => {
+      closeContextMenu();
+      if (parentPath) setExpandedDirs((prev) => new Set([...prev, parentPath]));
+      setInlineInput({ parentPath, kind: 'file' });
+    },
+    [closeContextMenu]
+  );
 
-  const startNewFolder = useCallback((parentPath: string) => {
-    closeContextMenu();
-    if (parentPath) setExpandedDirs(prev => new Set([...prev, parentPath]));
-    setInlineInput({ parentPath, kind: 'folder' });
-  }, [closeContextMenu]);
+  const startNewFolder = useCallback(
+    (parentPath: string) => {
+      closeContextMenu();
+      if (parentPath) setExpandedDirs((prev) => new Set([...prev, parentPath]));
+      setInlineInput({ parentPath, kind: 'folder' });
+    },
+    [closeContextMenu]
+  );
 
-  const startRename = useCallback((node: FileNode) => {
-    closeContextMenu();
-    const parentPath = node.path.includes('/')
-      ? node.path.substring(0, node.path.lastIndexOf('/'))
-      : '';
-    setInlineInput({ parentPath, kind: 'rename', initialValue: node.name, originalPath: node.path });
-  }, [closeContextMenu]);
+  const startRename = useCallback(
+    (node: FileNode) => {
+      closeContextMenu();
+      const parentPath = node.path.includes('/')
+        ? node.path.substring(0, node.path.lastIndexOf('/'))
+        : '';
+      setInlineInput({
+        parentPath,
+        kind: 'rename',
+        initialValue: node.name,
+        originalPath: node.path,
+      });
+    },
+    [closeContextMenu]
+  );
 
-  const confirmDelete = useCallback((node: FileNode) => {
-    closeContextMenu();
-    setDeleteConfirm(node);
-  }, [closeContextMenu]);
+  const confirmDelete = useCallback(
+    (node: FileNode) => {
+      closeContextMenu();
+      setDeleteConfirm(node);
+    },
+    [closeContextMenu]
+  );
 
   const executeDelete = useCallback(() => {
     if (!deleteConfirm) return;
     onFileDelete?.(deleteConfirm.path, deleteConfirm.isDirectory);
-    if (selectedFile === deleteConfirm.path ||
-        (deleteConfirm.isDirectory && selectedFile?.startsWith(deleteConfirm.path + '/'))) {
+    if (
+      selectedFile === deleteConfirm.path ||
+      (deleteConfirm.isDirectory && selectedFile?.startsWith(deleteConfirm.path + '/'))
+    ) {
       setSelectedFile(null);
     }
     // Remove from tabs
-    setOpenTabs(prev => prev.filter(t =>
-      t.path !== deleteConfirm.path &&
-      !(deleteConfirm.isDirectory && t.path.startsWith(deleteConfirm.path + '/'))
-    ));
+    setOpenTabs((prev) =>
+      prev.filter(
+        (t) =>
+          t.path !== deleteConfirm.path &&
+          !(deleteConfirm.isDirectory && t.path.startsWith(deleteConfirm.path + '/'))
+      )
+    );
     // Clean dirty buffers
-    setDirtyBuffers(prev => {
+    setDirtyBuffers((prev) => {
       const next = new Map(prev);
       next.delete(deleteConfirm.path);
       if (deleteConfirm.isDirectory) {
@@ -538,13 +624,18 @@ function CodeEditor({
 
   const renderInlineInput = (depth: number) => {
     if (!inlineInput) return null;
-    const icon = inlineInput.kind === 'folder'
-      ? <Folder size={14} className="mr-1.5 text-[var(--text-muted)] shrink-0" />
-      : inlineInput.kind === 'rename' ? null
-      : <File size={14} className="mr-1.5 text-[var(--text-subtle)] shrink-0" />;
+    const icon =
+      inlineInput.kind === 'folder' ? (
+        <Folder size={14} className="mr-1.5 text-[var(--text-muted)] shrink-0" />
+      ) : inlineInput.kind === 'rename' ? null : (
+        <File size={14} className="mr-1.5 text-[var(--text-subtle)] shrink-0" />
+      );
 
     return (
-      <div className={`flex items-center ${isMobile ? 'h-9' : 'h-[22px]'} px-2`} style={{ paddingLeft: `${depth * 12 + 16}px` }}>
+      <div
+        className={`flex items-center ${isMobile ? 'h-9' : 'h-[22px]'} px-2`}
+        style={{ paddingLeft: `${depth * 12 + 16}px` }}
+      >
         {inlineInput.kind !== 'rename' && <div className="w-4 mr-1" />}
         {icon}
         <input
@@ -567,7 +658,8 @@ function CodeEditor({
     const items: React.ReactNode[] = [];
 
     nodes.forEach((node) => {
-      const isBeingRenamed = inlineInput?.kind === 'rename' && inlineInput.originalPath === node.path;
+      const isBeingRenamed =
+        inlineInput?.kind === 'rename' && inlineInput.originalPath === node.path;
       const isActive = selectedFile === node.path;
       const isDirSelected = selectedDir === node.path;
       const isDirty = !node.isDirectory && isFileDirty(node.path);
@@ -575,7 +667,10 @@ function CodeEditor({
       items.push(
         <div key={node.path} className="select-none">
           {isBeingRenamed ? (
-            <div className={`flex items-center ${isMobile ? 'h-9' : 'h-[22px]'} px-2`} style={{ paddingLeft: `${depth * 12 + 16}px` }}>
+            <div
+              className={`flex items-center ${isMobile ? 'h-9' : 'h-[22px]'} px-2`}
+              style={{ paddingLeft: `${depth * 12 + 16}px` }}
+            >
               {node.isDirectory ? (
                 <>
                   <ChevronRight size={12} className="mr-1 text-[var(--text-subtle)] shrink-0" />
@@ -644,8 +739,10 @@ function CodeEditor({
 
           {node.isDirectory && expandedDirs.has(node.path) && (
             <>
-              {inlineInput && inlineInput.kind !== 'rename' &&
-                inlineInput.parentPath === node.path && renderInlineInput(depth + 1)}
+              {inlineInput &&
+                inlineInput.kind !== 'rename' &&
+                inlineInput.parentPath === node.path &&
+                renderInlineInput(depth + 1)}
               {node.children && renderFileTree(node.children, depth + 1)}
             </>
           )}
@@ -669,8 +766,10 @@ function CodeEditor({
 
   // ── Determine target directory for toolbar new file/folder ────────
 
-  const targetDir = selectedDir ||
-    (selectedFile?.includes('/') ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : '') || '';
+  const targetDir =
+    selectedDir ||
+    (selectedFile?.includes('/') ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : '') ||
+    '';
 
   return (
     <div className="h-full flex bg-[var(--bg)] overflow-hidden">
@@ -687,11 +786,15 @@ function CodeEditor({
         className={`bg-[var(--bg)] border-r border-[var(--border)] overflow-hidden flex flex-col transition-all duration-200 ${
           isMobile
             ? `fixed top-0 left-0 h-full z-50 w-64 ${mobileExplorerOpen ? 'translate-x-0' : '-translate-x-full'}`
-            : isSidebarCollapsed ? 'w-0 border-0' : 'w-56'
+            : isSidebarCollapsed
+              ? 'w-0 border-0'
+              : 'w-56'
         }`}
       >
         {/* Explorer header */}
-        <div className={`${isMobile ? 'h-10' : 'h-8'} flex items-center justify-between px-3 shrink-0`}>
+        <div
+          className={`${isMobile ? 'h-10' : 'h-8'} flex items-center justify-between px-3 shrink-0`}
+        >
           <div className="flex items-center gap-2">
             {isMobile && (
               <button
@@ -701,7 +804,9 @@ function CodeEditor({
                 <X size={14} />
               </button>
             )}
-            <span className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wider">Explorer</span>
+            <span className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+              Explorer
+            </span>
           </div>
           <div className="flex items-center gap-0.5">
             <button
@@ -756,13 +861,17 @@ function CodeEditor({
         <div
           className="flex-1 py-0.5 overflow-y-auto scrollbar-none"
           key={fileTreeProp.length}
-          onClick={(e) => { if (e.target === e.currentTarget) setSelectedDir(null); }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedDir(null);
+          }}
           onContextMenu={(e) => handleContextMenu(e, null)}
         >
           {displayTree.length > 0 ? (
             <>
-              {inlineInput && inlineInput.kind !== 'rename' &&
-                inlineInput.parentPath === '' && renderInlineInput(0)}
+              {inlineInput &&
+                inlineInput.kind !== 'rename' &&
+                inlineInput.parentPath === '' &&
+                renderInlineInput(0)}
               {renderFileTree(displayTree)}
             </>
           ) : isFilesSyncing ? (
@@ -778,12 +887,16 @@ function CodeEditor({
             </div>
           ) : (
             <>
-              {inlineInput && inlineInput.kind !== 'rename' &&
-                inlineInput.parentPath === '' && renderInlineInput(0)}
+              {inlineInput &&
+                inlineInput.kind !== 'rename' &&
+                inlineInput.parentPath === '' &&
+                renderInlineInput(0)}
               <div className="px-4 py-6 text-center">
                 <Code size={20} className="mx-auto mb-2 text-[var(--text-subtle)]" />
                 <p className="text-xs text-[var(--text-muted)]">No files yet</p>
-                <p className="text-[10px] text-[var(--text-subtle)] mt-0.5">Files appear as you build</p>
+                <p className="text-[10px] text-[var(--text-subtle)] mt-0.5">
+                  Files appear as you build
+                </p>
               </div>
             </>
           )}
@@ -793,7 +906,9 @@ function CodeEditor({
       {/* ── Editor area ────────────────────────────────────────────── */}
       <div className="flex-1 bg-[var(--bg)] overflow-hidden flex flex-col min-w-0">
         {/* Tab bar */}
-        <div className={`${isMobile ? 'h-[40px]' : 'h-[35px]'} bg-[var(--bg)] border-b border-[var(--border)] flex items-end shrink-0`}>
+        <div
+          className={`${isMobile ? 'h-[40px]' : 'h-[35px]'} bg-[var(--bg)] border-b border-[var(--border)] flex items-end shrink-0`}
+        >
           {/* Sidebar toggle */}
           {showSidebar !== false && (
             <button
@@ -807,7 +922,7 @@ function CodeEditor({
 
           {/* Tabs */}
           <div className="flex-1 flex items-end overflow-x-auto scrollbar-none min-w-0">
-            {openTabs.map(tab => {
+            {openTabs.map((tab) => {
               const isActive = selectedFile === tab.path;
               const isDirty = isFileDirty(tab.path);
               return (
@@ -834,7 +949,9 @@ function CodeEditor({
                     className={`shrink-0 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] ${isMobile ? 'p-1' : 'p-0.5'} transition-colors ${
                       isMobile
                         ? '' // Always visible on mobile
-                        : isDirty ? 'hidden group-hover:block' : 'invisible group-hover:visible'
+                        : isDirty
+                          ? 'hidden group-hover:block'
+                          : 'invisible group-hover:visible'
                     }`}
                   >
                     <X size={isMobile ? 14 : 12} className="text-[var(--text-subtle)]" />
@@ -859,8 +976,14 @@ function CodeEditor({
 
         {/* Breadcrumb bar + save button */}
         {selectedFile && (
-          <div className={`${isMobile ? 'h-[34px]' : 'h-[26px]'} bg-[var(--bg)] border-b border-[var(--border)] flex items-center px-3 shrink-0 gap-2`}>
-            <span className={`${isMobile ? 'text-xs' : 'text-[11px]'} text-[var(--text-subtle)] truncate flex-1`}>{selectedFile}</span>
+          <div
+            className={`${isMobile ? 'h-[34px]' : 'h-[26px]'} bg-[var(--bg)] border-b border-[var(--border)] flex items-center px-3 shrink-0 gap-2`}
+          >
+            <span
+              className={`${isMobile ? 'text-xs' : 'text-[11px]'} text-[var(--text-subtle)] truncate flex-1`}
+            >
+              {selectedFile}
+            </span>
             {isFileDirty(selectedFile) && (
               <button
                 onClick={saveCurrentFile}
@@ -944,7 +1067,9 @@ function CodeEditor({
                 {fileTreeProp.length > 0 ? 'Select a file to edit' : 'No files yet'}
               </p>
               <p className="text-[10px] text-[var(--text-subtle)] mt-1">
-                {fileTreeProp.length > 0 ? 'Choose from the explorer' : 'Chat with your agent to generate code'}
+                {fileTreeProp.length > 0
+                  ? 'Choose from the explorer'
+                  : 'Chat with your agent to generate code'}
               </p>
             </div>
           </div>
@@ -956,7 +1081,8 @@ function CodeEditor({
             {selectedFile && (
               <>
                 <span className="text-[10px] text-[var(--text-subtle)]">
-                  {getLanguage(selectedFile).charAt(0).toUpperCase() + getLanguage(selectedFile).slice(1)}
+                  {getLanguage(selectedFile).charAt(0).toUpperCase() +
+                    getLanguage(selectedFile).slice(1)}
                 </span>
                 {!isMobile && selectedFileContent !== undefined && (
                   <span className="text-[10px] text-[var(--text-subtle)]">

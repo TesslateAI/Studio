@@ -20,6 +20,7 @@ import {
   LockSimple,
   DeviceMobile,
   PencilRuler,
+  Clock,
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -31,6 +32,7 @@ import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
 import { BrowserPreview } from '../components/BrowserPreview';
 import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
+import { TimelinePanel } from '../components/panels/TimelinePanel';
 import { NoComputePlaceholder } from '../components/NoComputePlaceholder';
 import { useContainerStartup } from '../hooks/useContainerStartup';
 import { useFileTree } from '../hooks/useFileTree';
@@ -64,6 +66,7 @@ import { getFeatures, type ComputeTier } from '../types/project';
 import { getEnvironmentStatus } from '../components/ui/environmentStatus';
 import { EnvironmentStatusBadge } from '../components/ui/EnvironmentStatusBadge';
 import IdleWarningBanner from '../components/IdleWarningBanner';
+import { VolumeHealthBanner } from '../components/VolumeHealthBanner';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -824,6 +827,7 @@ export default function ProjectPage() {
         message={containerStartup.message}
         logs={containerStartup.logs}
         error={containerStartup.error || undefined}
+        projectSlug={slug}
         onRetry={containerStartup.retry}
         onAskAgent={handleAskAgent}
         containerPort={(container?.internal_port as number) || 3000}
@@ -1173,6 +1177,12 @@ export default function ProjectPage() {
   ];
 
   const panelItems = [
+    {
+      icon: <Clock size={16} />,
+      title: 'Volume & Snapshots',
+      onClick: () => togglePanel('timeline'),
+      active: activePanel === 'timeline',
+    },
     {
       icon: <BookOpen size={16} />,
       title: 'Notes',
@@ -1567,6 +1577,18 @@ export default function ProjectPage() {
         />
       )}
 
+      {/* Volume Health Banner — shows when volume is degraded, with recover controls */}
+      {slug && project?.volume_id && (
+        <VolumeHealthBanner
+          projectSlug={slug}
+          pollInterval={30000}
+          onRecovered={() => {
+            loadFileTree();
+            loadFilesWithRetry();
+          }}
+        />
+      )}
+
       {/* Mobile Warning */}
       <MobileWarning />
 
@@ -1877,6 +1899,25 @@ export default function ProjectPage() {
       </div>
 
       {/* Floating Panels */}
+      <FloatingPanel
+        title="Volume & Snapshots"
+        icon={<Clock size={20} />}
+        isOpen={activePanel === 'timeline'}
+        onClose={() => setActivePanel(null)}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
+        defaultSize={{ width: 380, height: 600 }}
+      >
+        <TimelinePanel
+          projectId={project?.id}
+          projectSlug={slug!}
+          projectStatus={project?.environment_status || 'stopped'}
+          onRestored={() => {
+            loadFilesWithRetry();
+            fileEvents.emit('files-changed');
+          }}
+        />
+      </FloatingPanel>
+
       <FloatingPanel
         title="GitHub Sync"
         icon={<GitBranch size={20} />}
