@@ -72,7 +72,14 @@ import { VolumeHealthBanner } from '../components/VolumeHealthBanner';
 // Types
 // ---------------------------------------------------------------------------
 
-type ProjectViewType = 'architecture' | 'preview' | 'code' | 'design' | 'kanban' | 'assets' | 'terminal';
+type ProjectViewType =
+  | 'architecture'
+  | 'preview'
+  | 'code'
+  | 'design'
+  | 'kanban'
+  | 'assets'
+  | 'terminal';
 type PanelType = 'github' | 'notes' | 'settings' | null;
 
 const VIEW_LABELS: Record<ProjectViewType, string> = {
@@ -1447,6 +1454,7 @@ export default function ProjectPage() {
         projectId={project?.id}
         slug={slug!}
         fileTree={fileTree}
+        containerDir={containerDir}
         onFileUpdate={handleFileUpdate}
         onFileCreate={handleFileCreate}
         onFileDelete={handleFileDelete}
@@ -1480,8 +1488,12 @@ export default function ProjectPage() {
         <div className="w-full h-full flex items-center justify-center">
           <div className="text-center p-6">
             <LockSimple size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
-            <p className="text-[var(--text-subtle)] text-sm font-medium">Terminal access is restricted</p>
-            <p className="text-[var(--text-subtle)] text-xs mt-1 opacity-60">Viewers cannot access the terminal</p>
+            <p className="text-[var(--text-subtle)] text-sm font-medium">
+              Terminal access is restricted
+            </p>
+            <p className="text-[var(--text-subtle)] text-xs mt-1 opacity-60">
+              Viewers cannot access the terminal
+            </p>
           </div>
         </div>
       )}
@@ -1513,8 +1525,12 @@ export default function ProjectPage() {
         <div className="h-full flex items-center justify-center">
           <div className="text-center px-6">
             <PencilRuler size={28} className="mx-auto mb-3 text-[var(--text-subtle)]" />
-            <p className="text-xs text-[var(--text-muted)]">Start your environment to use the Design view</p>
-            <p className="text-[10px] text-[var(--text-subtle)] mt-1">The visual builder requires a running dev server</p>
+            <p className="text-xs text-[var(--text-muted)]">
+              Start your environment to use the Design view
+            </p>
+            <p className="text-[10px] text-[var(--text-subtle)] mt-1">
+              The visual builder requires a running dev server
+            </p>
           </div>
         </div>
       )}
@@ -1576,7 +1592,9 @@ export default function ProjectPage() {
       {/* Always visible: Deploy Button with Dropdown */}
       <div className="relative">
         <button
-          onClick={canDeploy ? () => setShowDeploymentsDropdown(!showDeploymentsDropdown) : undefined}
+          onClick={
+            canDeploy ? () => setShowDeploymentsDropdown(!showDeploymentsDropdown) : undefined
+          }
           className="btn btn-filled"
           style={!canDeploy ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
           title={!canDeploy ? 'Deployment restricted for viewers' : undefined}
@@ -1690,7 +1708,16 @@ export default function ProjectPage() {
                   )}
                 </button>
               ) : (
-                <Tooltip key={index} content={item.restricted ? `${item.title} ${item.disabled ? '(Locked)' : '(View only)'}` : item.title} side="right" delay={200}>
+                <Tooltip
+                  key={index}
+                  content={
+                    item.restricted
+                      ? `${item.title} ${item.disabled ? '(Locked)' : '(View only)'}`
+                      : item.title
+                  }
+                  side="right"
+                  delay={200}
+                >
                   <button
                     onClick={item.disabled ? undefined : item.onClick}
                     className={navButtonClassCollapsed(item.active || false)}
@@ -1725,7 +1752,12 @@ export default function ProjectPage() {
                   )}
                 </button>
               ) : (
-                <Tooltip key={index} content={item.restricted ? `${item.title} (Locked)` : item.title} side="right" delay={200}>
+                <Tooltip
+                  key={index}
+                  content={item.restricted ? `${item.title} (Locked)` : item.title}
+                  side="right"
+                  delay={200}
+                >
                   <button
                     onClick={item.disabled ? undefined : item.onClick}
                     className={navButtonClassCollapsed(item.active)}
@@ -1790,7 +1822,9 @@ export default function ProjectPage() {
         <div className="flex-1 flex overflow-hidden bg-[var(--bg)]">
           {/* Desktop layout */}
           <div className="hidden md:flex w-full h-full">
-            {(chatPosition === 'left' || chatPosition === 'right') && agents.length > 0 && activeView !== 'design' ? (
+            {(chatPosition === 'left' || chatPosition === 'right') &&
+            agents.length > 0 &&
+            activeView !== 'design' ? (
               <PanelGroup orientation="horizontal">
                 {/* LEFT DOCKED CHAT */}
                 {chatPosition === 'left' && (
@@ -1865,6 +1899,7 @@ export default function ProjectPage() {
                 projectId={project?.id}
                 slug={slug!}
                 fileTree={fileTree}
+                containerDir={containerDir}
                 onFileUpdate={handleFileUpdate}
                 onFileCreate={handleFileCreate}
                 onFileDelete={handleFileDelete}
@@ -1896,7 +1931,9 @@ export default function ProjectPage() {
                 <div className="w-full h-full flex items-center justify-center">
                   <div className="text-center p-6">
                     <LockSimple size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
-                    <p className="text-[var(--text-subtle)] text-sm">Terminal access is restricted</p>
+                    <p className="text-[var(--text-subtle)] text-sm">
+                      Terminal access is restricted
+                    </p>
                   </div>
                 </div>
               )}
