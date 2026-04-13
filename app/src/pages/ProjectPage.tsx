@@ -677,15 +677,14 @@ export default function ProjectPage() {
             return;
           }
 
-          // Hibernation
+          // Hibernation — show start button instead of redirecting
           if (
             containerStatus?.status === 'hibernated' ||
             status?.environment_status === 'hibernated'
           ) {
-            toast('This project has been hibernated. Redirecting to projects...', {
-              duration: 3000,
-            });
-            navigate('/dashboard');
+            containerStartup.reset();
+            setNeedsContainerStart(false);
+            setDevServerUrl(null);
             return;
           }
 
@@ -1089,6 +1088,44 @@ export default function ProjectPage() {
   useEffect(() => {
     if (devServerUrl) setCurrentPreviewUrl(devServerUrl);
   }, [devServerUrl]);
+
+  // Health poll — detect pod death after container is ready.
+  // If health fails twice in a row, clear the preview and re-enter loadContainer.
+  useEffect(() => {
+    if (!devServerUrl || !slug || !currentContainerIdRef.current) return;
+    if (containerStartup.isLoading) return; // Don't poll during startup
+
+    let failCount = 0;
+    const id = setInterval(async () => {
+      try {
+        const result = await projectsApi.checkContainerHealth(slug, currentContainerIdRef.current!);
+        if (result.healthy) {
+          failCount = 0;
+        } else {
+          failCount++;
+          if (failCount >= 2) {
+            clearInterval(id);
+            console.log('[health-poll] Container unhealthy — re-entering startup flow');
+            setDevServerUrl(null);
+            containerStartup.reset();
+            setNeedsContainerStart(false);
+            loadContainer();
+          }
+        }
+      } catch {
+        failCount++;
+        if (failCount >= 2) {
+          clearInterval(id);
+          setDevServerUrl(null);
+          containerStartup.reset();
+          setNeedsContainerStart(false);
+          loadContainer();
+        }
+      }
+    }, 15000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devServerUrl, slug, containerStartup.isLoading]);
 
   // Refresh file tree when switching to code view
   useEffect(() => {
@@ -1914,6 +1951,11 @@ export default function ProjectPage() {
           onRestored={() => {
             loadFilesWithRetry();
             fileEvents.emit('files-changed');
+            // Re-enter startup flow — pod was bounced, need to wait for new pod
+            setDevServerUrl(null);
+            containerStartup.reset();
+            setNeedsContainerStart(false);
+            loadContainer();
           }}
         />
       </FloatingPanel>
