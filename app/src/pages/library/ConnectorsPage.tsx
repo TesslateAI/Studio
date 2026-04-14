@@ -4,7 +4,6 @@ import {
   Plugs,
   Key,
   TestTube,
-  Info,
   Trash,
   Plus,
   Wrench,
@@ -533,7 +532,7 @@ function McpServerCard({
     }
   };
 
-  const handleDiscover = async () => {
+  const _handleDiscover = async () => {
     if (discoveryResult) {
       setShowDetails(!showDetails);
       return;
@@ -593,91 +592,131 @@ function McpServerCard({
       animate="animate"
       role="article"
       aria-label={`${server.server_name || server.server_slug || 'Connector'} connector`}
-      className="group relative flex flex-col bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-colors p-4"
+      className={`
+        group relative flex flex-col
+        bg-[var(--surface-hover)] rounded-[var(--radius)] border
+        transition-all duration-200
+        hover:-translate-y-0.5
+        border-[var(--border)] hover:border-[var(--border-hover)]
+        ${!server.is_active ? 'opacity-45' : ''}
+      `}
     >
-      {/* Header: provider icon + title.
-          Prefer the marketplace agent's avatar_url (Linear/GitHub/Notion
-          favicons); fall back to the generic plug glyph for custom or
-          legacy connectors that don't carry one. */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-8 h-8 rounded-lg bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)] overflow-hidden">
+      <div className="p-4 flex flex-col h-full">
+        {/* Top row: provider icon + name + status dot + Permissions Gear */}
+        <div className="flex items-center gap-3 mb-3">
           {server.icon_url ? (
             <img
               src={server.icon_url}
               alt=""
-              className="w-5 h-5 object-contain"
+              className="w-8 h-8 rounded-lg object-cover border border-[var(--border)] shrink-0 bg-white"
               onError={(e) => {
-                // If the favicon 404s, fall back to the plug glyph rather
-                // than showing a broken image.
                 (e.currentTarget as HTMLImageElement).style.display = 'none';
               }}
             />
           ) : (
-            <Plugs size={16} weight="duotone" />
+            <div className="w-8 h-8 rounded-lg bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0">
+              <Plugs size={16} weight="duotone" className="text-[var(--text-muted)]" />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-[var(--text)] truncate">
+                {server.server_name || server.server_slug || 'Connector'}
+              </span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${server.is_active ? 'bg-[var(--status-success)]' : 'bg-[var(--text-subtle)]'}`}
+              />
+            </span>
+            <span className="text-[11px] text-[var(--text-subtle)] block truncate">
+              {server.server_slug}
+            </span>
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenPerms();
+            }}
+            className="shrink-0 p-1 rounded-md hover:bg-[var(--surface)] transition-colors"
+            aria-label="Tool permissions"
+            title="Tool permissions"
+          >
+            <Gear
+              size={14}
+              className="text-[var(--text-subtle)] group-hover:text-[var(--text-muted)] transition-colors"
+            />
+          </button>
+        </div>
+
+        {/* Description / capability summary */}
+        <p className="text-[11px] leading-relaxed text-[var(--text-muted)] line-clamp-2 mb-3 min-h-[28px]">
+          {server.is_oauth
+            ? 'OAuth connector — your account is linked.'
+            : 'Connector exposes tools, resources, and prompts to your agents.'}
+        </p>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Metadata row — monochrome, quiet */}
+        <div className="flex items-center gap-2 text-[10px] text-[var(--text-subtle)]">
+          <span>{server.is_oauth ? 'OAuth' : 'Static'}</span>
+          {server.scope_level && (
+            <>
+              <span className="opacity-30">·</span>
+              <span>{server.scope_level === 'project' ? 'Project' : 'Account'}</span>
+            </>
+          )}
+          {(server.disabled_tools?.length ?? 0) > 0 && (
+            <>
+              <span className="opacity-30">·</span>
+              <span>{server.disabled_tools!.length} hidden</span>
+            </>
           )}
         </div>
-        <div className="flex-1 min-w-0">
-          <span className="text-xs font-semibold text-[var(--text)] truncate block">
-            {server.server_name || server.server_slug || 'Connector'}
-          </span>
-          <span className="text-[11px] text-[var(--text-subtle)] block truncate font-mono">
-            {server.server_slug}
-          </span>
-        </div>
-      </div>
 
-      {/* Status badge */}
-      <div className="flex items-center gap-1.5 mb-3">
-        <span
-          className={`w-1.5 h-1.5 rounded-full shrink-0 ${server.is_active ? 'bg-[var(--status-success)]' : 'bg-[var(--text-subtle)]'}`}
-        />
-        <span className="text-[10px] text-[var(--text-subtle)]">
-          {server.is_active ? 'Active' : 'Inactive'}
-        </span>
-      </div>
-
-      {/* Actions bar.
-          flex-wrap so 5–6 buttons (Test / Credentials / Details / Permissions
-          / Reconnect / Uninstall) drop to a second row instead of clipping.
-          Uninstall stays last via order-last so it visually anchors the
-          right side regardless of wrap. */}
-      <div className="flex flex-wrap items-center gap-1 mb-3">
-        <button onClick={() => handleTestConnection()} disabled={testingId} className="btn btn-sm">
-          <TestTube size={13} />
-          {testingId ? 'Testing...' : 'Test'}
-        </button>
-        {hasEnvVars && (
-          <button onClick={() => setShowCredentials(!showCredentials)} className="btn btn-sm">
-            <Key size={13} />
-            Credentials
-          </button>
-        )}
-        <button onClick={handleDiscover} className="btn btn-sm">
-          <Info size={13} />
-          Details
-        </button>
-        <button onClick={handleOpenPerms} className="btn btn-sm">
-          <Gear size={13} />
-          Permissions
-        </button>
-        {server.is_oauth && (
-          <button
-            onClick={handleReconnect}
-            disabled={reconnecting}
-            className="btn btn-sm"
-          >
-            <Plugs size={13} />
-            {reconnecting ? 'Reconnecting...' : 'Reconnect'}
-          </button>
-        )}
-        <button
-          onClick={handleUninstall}
-          disabled={uninstalling}
-          className="btn btn-sm btn-danger order-last ml-auto"
+        {/* Actions row */}
+        <div
+          className="flex items-center gap-1 mt-3 pt-3 border-t border-[var(--border)]"
+          onClick={(e) => e.stopPropagation()}
         >
-          <Trash size={13} />
-          {uninstalling ? 'Removing...' : 'Uninstall'}
-        </button>
+          {server.is_oauth ? (
+            <button
+              onClick={handleReconnect}
+              disabled={reconnecting}
+              className="btn btn-sm"
+            >
+              <Plugs size={12} />
+              {reconnecting ? 'Reconnecting…' : 'Reconnect'}
+            </button>
+          ) : hasEnvVars ? (
+            <button
+              onClick={() => setShowCredentials(!showCredentials)}
+              className="btn btn-sm"
+            >
+              <Key size={12} />
+              Credentials
+            </button>
+          ) : (
+            <button
+              onClick={() => handleTestConnection()}
+              disabled={testingId}
+              className="btn btn-sm"
+            >
+              <TestTube size={12} />
+              {testingId ? 'Testing…' : 'Test'}
+            </button>
+          )}
+          <div className="flex-1" />
+          <button
+            onClick={handleUninstall}
+            disabled={uninstalling}
+            className="btn btn-icon btn-sm btn-danger"
+            aria-label="Uninstall connector"
+            title="Uninstall"
+          >
+            <Trash size={12} />
+          </button>
+        </div>
       </div>
 
       {permsOpen && (
