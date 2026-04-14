@@ -14,6 +14,7 @@ See `CLAUDE.md` in this directory for conventions and how to add a new public ro
 from __future__ import annotations
 
 from .agents import router as agents_router
+from .k8s_projects import router as k8s_projects_router
 from .marketplace import router as marketplace_router
 from .marketplace_install import router as marketplace_install_router
 from .models import router as models_router
@@ -25,6 +26,7 @@ public_routers = [
     agents_router,
     marketplace_install_router,
     projects_sync_router,
+    k8s_projects_router,
 ]
 
 __all__ = ["public_routers"]
