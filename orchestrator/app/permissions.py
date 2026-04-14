@@ -102,9 +102,15 @@ class Permission(StrEnum):
     CHANNEL_VIEW = "channel.view"
     CHANNEL_MANAGE = "channel.manage"
 
-    # MCP
+    # MCP (legacy — kept for backward compat with older callers)
     MCP_VIEW = "mcp.view"
     MCP_MANAGE = "mcp.manage"
+
+    # Connectors (issue #307 — user-identity-bound MCP connectors).
+    # Install scope is user-first; project-scope overrides require PROJECT_EDIT
+    # on the target project. No team-scope install is offered.
+    CONNECTORS_MANAGE_USER = "connectors.manage_user"
+    CONNECTORS_MANAGE_PROJECT = "connectors.manage_project"
 
     # Agent
     AGENT_VIEW = "agent.view"
@@ -170,6 +176,10 @@ _VIEWER_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.CREDENTIALS_VIEW,
         Permission.CHANNEL_VIEW,
         Permission.MCP_VIEW,
+        # Viewers may install connectors for their own personal use. They
+        # cannot touch projects they only view (PROJECT_EDIT gate still applies
+        # to project-scope overrides).
+        Permission.CONNECTORS_MANAGE_USER,
         Permission.AGENT_VIEW,
         Permission.MARKETPLACE_READ,
         Permission.MODELS_PROXY,

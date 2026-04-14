@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -1471,10 +1471,22 @@ class ChannelMessageResponse(BaseModel):
 
 
 class McpInstallRequest(BaseModel):
-    """Install an MCP server from marketplace."""
+    """Install an MCP (Connector) server from the marketplace.
+
+    Scope semantics (issue #307):
+    - ``scope_level="user"`` (default) — install lands on the caller's account
+      with ``team_id=NULL`` and follows them across every team they belong to.
+    - ``scope_level="project"`` — per-user override pinned to a project;
+      requires ``project_id`` and PROJECT_EDIT on the target project.
+    - ``scope_level="team"`` is **not accepted** — OAuth connectors are bound
+      to a single user's identity and cannot be shared. The install endpoint
+      rejects this value with 400.
+    """
 
     marketplace_agent_id: UUID
     credentials: dict[str, Any] | None = None  # API keys etc, will be encrypted
+    scope_level: Literal["user", "project"] = "user"
+    project_id: UUID | None = None
 
 
 class McpConfigUpdate(BaseModel):
@@ -1498,15 +1510,20 @@ class McpConfigUpdate(BaseModel):
 
 
 class McpConfigResponse(BaseModel):
-    """Response for an installed MCP server."""
+    """Response for an installed MCP (Connector) server."""
 
     id: UUID
-    marketplace_agent_id: UUID
+    marketplace_agent_id: UUID | None = None  # None for custom (BYO) connectors
     server_name: str | None = None
     server_slug: str | None = None
     enabled_capabilities: list[str] | None = None
     is_active: bool
     env_vars: list[str] | None = None
+    # Scoping + connector metadata (issue #307).
+    scope_level: str | None = None
+    project_id: UUID | None = None
+    is_oauth: bool = False
+    disabled_tools: list[str] | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
