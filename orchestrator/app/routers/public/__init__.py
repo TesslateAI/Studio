@@ -17,12 +17,14 @@ from .agents import router as agents_router
 from .marketplace import router as marketplace_router
 from .marketplace_install import router as marketplace_install_router
 from .models import router as models_router
+from .projects_sync import router as projects_sync_router
 
 public_routers = [
     marketplace_router,
     models_router,
     agents_router,
     marketplace_install_router,
+    projects_sync_router,
 ]
 
 __all__ = ["public_routers"]

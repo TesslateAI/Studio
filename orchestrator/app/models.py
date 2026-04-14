@@ -170,10 +170,16 @@ class ProjectSnapshot(Base):
     volume_size_bytes = Column(BigInteger, nullable=True)  # Size of the volume at snapshot time
 
     # Snapshot metadata
-    snapshot_type = Column(String(50), default="hibernation", nullable=False)  # hibernation, manual
+    snapshot_type = Column(String(50), default="hibernation", nullable=False)  # hibernation, manual, sync
     status = Column(String(50), default="pending", nullable=False)  # pending, ready, error, deleted
     label = Column(String(255), nullable=True)  # User-provided label for manual snapshots
     is_latest = Column(Boolean, default=False, nullable=False)  # Track latest snapshot per project
+
+    # Desktop sync (snapshot_type="sync" rows). Hash manifest of {path: sha256}
+    # plus the CAS key for the uploaded zip. Null for K8s volume snapshots.
+    sync_manifest = Column(JSON, nullable=True)
+    sync_blob_key = Column(String(255), nullable=True)
+    sync_size_bytes = Column(BigInteger, nullable=True)
 
     # Soft delete support (for project deletion recovery)
     is_soft_deleted = Column(Boolean, default=False, nullable=False)
