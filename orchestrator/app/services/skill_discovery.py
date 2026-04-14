@@ -75,10 +75,16 @@ async def discover_skills(
                 continue
             skills.append(s)
 
-    # Source C: Project file-based skills from container
-    if container_name and project_id:
-        file_skills = await _discover_file_skills(user_id, project_id, container_name)
-        skills.extend(file_skills)
+    # Source C: Project file-based skills (local FS or container)
+    if project_id:
+        from .orchestration import is_local_mode
+
+        if is_local_mode():
+            file_skills = await _discover_file_skills_local(project_id, db)
+            skills.extend(file_skills)
+        elif container_name:
+            file_skills = await _discover_file_skills(user_id, project_id, container_name)
+            skills.extend(file_skills)
 
     if skills:
         logger.info(
@@ -165,6 +171,88 @@ async def _discover_db_skills(
     except Exception as e:
         logger.warning(f"Failed to discover DB skills: {e}")
         return []
+
+
+async def _discover_file_skills_local(
+    project_id: str, db: AsyncSession
+) -> list[SkillCatalogEntry]:
+    """Discover SKILL.md files from the project's on-disk root and the
+    shared ``$TESSLATE_STUDIO_HOME/skills/`` tree on desktop.
+
+    Reads the filesystem directly — no docker/kubectl shell-out needed when
+    both the project and the agent run in-process.
+    """
+    from pathlib import Path
+
+    from ..models import Project
+    from .orchestration.local import _get_project_root
+
+    try:
+        project = await db.get(Project, UUID(project_id))
+        if project is None:
+            return []
+
+        roots: list[Path] = []
+        project_root = _get_project_root(project)
+        if project_root.exists():
+            roots.append(project_root / ".agents" / "skills")
+
+        try:
+            from ..config import get_settings
+            from .desktop_paths import ensure_studio_home
+
+            settings = get_settings()
+            if settings.deployment_mode.lower() == "desktop":
+                home = ensure_studio_home(settings.tesslate_studio_home or None)
+                roots.append(home / "skills")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Skill discovery: studio-home lookup failed: %s", exc)
+
+        skills: list[SkillCatalogEntry] = []
+        for root in roots:
+            if not root.exists() or not root.is_dir():
+                continue
+            for skill_md in root.rglob("SKILL.md"):
+                try:
+                    depth = len(skill_md.relative_to(root).parents)
+                    if depth > 4:
+                        continue
+                    entry = _parse_skill_frontmatter_local(skill_md)
+                    if entry:
+                        skills.append(entry)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug("Skill discovery: skip %s (%s)", skill_md, exc)
+        return skills
+    except Exception as e:
+        logger.debug(f"Failed to discover local file skills: {e}")
+        return []
+
+
+def _parse_skill_frontmatter_local(path) -> SkillCatalogEntry | None:
+    """Parse YAML frontmatter from a SKILL.md on local disk."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            head = fh.read(4096)
+        if not head.startswith("---"):
+            return None
+        end = head.find("---", 3)
+        if end == -1:
+            return None
+        fm = yaml.safe_load(head[3:end].strip())
+        if not isinstance(fm, dict):
+            return None
+        name = fm.get("name")
+        if not name:
+            return None
+        return SkillCatalogEntry(
+            name=name,
+            description=fm.get("description", ""),
+            source="file",
+            file_path=str(path),
+        )
+    except Exception as exc:
+        logger.debug("Failed to parse local skill frontmatter %s: %s", path, exc)
+        return None
 
 
 async def _discover_file_skills(

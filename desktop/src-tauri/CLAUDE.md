@@ -5,6 +5,14 @@ Owns the desktop process lifecycle: main window, system tray, Python sidecar
 supervision, deep-link auth callback, Stronghold token storage, and the
 auto-updater.
 
+## Setup
+New to the stack? Read
+[/docs/desktop/development.md](../../docs/desktop/development.md) for the
+toolchain install (rustup, `cargo tauri`, Linux GTK/WebKit sysdeps) and the
+one-command `cargo tauri dev` workflow. Running `cargo run` directly skips
+vite and you'll see "Could not connect to localhost" — use the `tauri dev`
+harness or `../scripts/dev.sh`.
+
 ## Key files
 - `Cargo.toml` — Rust deps (tauri v2 + plugins).
 - `tauri.conf.json` — app config, `externalBin` sidecar declaration.

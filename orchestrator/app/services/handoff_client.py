@@ -54,9 +54,7 @@ async def push(session: AsyncSession, *, ticket_id: uuid.UUID) -> HandoffBundle:
     from .git_diff import git_diff_for_project
 
     result = await session.execute(
-        select(AgentTask)
-        .options(selectinload(AgentTask.project))
-        .where(AgentTask.id == ticket_id)
+        select(AgentTask).options(selectinload(AgentTask.project)).where(AgentTask.id == ticket_id)
     )
     ticket = result.scalar_one_or_none()
     if ticket is None:
@@ -64,20 +62,40 @@ async def push(session: AsyncSession, *, ticket_id: uuid.UUID) -> HandoffBundle:
 
     diff = await git_diff_for_project(ticket.project) if ticket.project is not None else ""
     skill_bindings = await _load_skill_bindings(session, ticket)
+    trajectory = await _load_trajectory(session, ticket)
 
     return HandoffBundle(
         ticket_id=str(ticket.id),
         title=ticket.title,
         goal_ancestry=list(ticket.goal_ancestry or []),
-        trajectory_events=[],
+        trajectory_events=trajectory,
         diff=diff,
         skill_bindings=skill_bindings,
     )
 
 
-async def _load_skill_bindings(
-    session: AsyncSession, ticket: AgentTask
-) -> list[dict[str, Any]]:
+async def _load_trajectory(session: AsyncSession, ticket: AgentTask) -> list[dict[str, Any]]:
+    """Return the ordered trajectory events for the ticket's source message.
+
+    Empty list when the ticket has no `message_id` set or the lookup fails.
+    Trajectory is advisory metadata — never blocks the handoff.
+    """
+    message_id = getattr(ticket, "message_id", None)
+    if message_id is None:
+        return []
+    from ..models import AgentStep
+
+    stmt = (
+        select(AgentStep).where(AgentStep.message_id == message_id).order_by(AgentStep.step_index)
+    )
+    try:
+        rows = (await session.execute(stmt)).scalars().all()
+    except Exception:
+        return []
+    return [{"step_index": r.step_index, "data": r.step_data} for r in rows]
+
+
+async def _load_skill_bindings(session: AsyncSession, ticket: AgentTask) -> list[dict[str, Any]]:
     """Return active skill-assignment rows for the ticket's assignee agent.
 
     Empty list when the ticket has no assignee, the agent has no skills
@@ -99,10 +117,7 @@ async def _load_skill_bindings(
         rows = (await session.execute(stmt)).all()
     except Exception:
         return []
-    return [
-        {"skill_id": str(row[0].skill_id), "slug": row[1], "name": row[2]}
-        for row in rows
-    ]
+    return [{"skill_id": str(row[0].skill_id), "slug": row[1], "name": row[2]} for row in rows]
 
 
 async def pull(

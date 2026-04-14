@@ -58,6 +58,11 @@ class GitManager:
         Raises:
             RuntimeError: If command execution fails or git returns non-zero exit code
         """
+        from .orchestration import is_local_mode
+
+        if is_local_mode():
+            return await self._execute_git_local(git_args, timeout)
+
         # Both Docker and Kubernetes now mount to /app
         project_path = "/app"
 
@@ -120,6 +125,69 @@ class GitManager:
         except Exception as e:
             logger.error(f"[GIT] Failed to execute git command: {git_args[0]}", exc_info=True)
             raise RuntimeError(f"Git command failed: {str(e)}") from e
+
+    async def _execute_git_local(self, git_args: list[str], timeout: int) -> str:
+        """Run a git subprocess directly against the on-disk project root.
+
+        Local/desktop runtime doesn't have a shared volume or exec'able
+        container — the project lives at ``$TESSLATE_STUDIO_HOME/projects/
+        <slug>-<id>/``, so we invoke git there with the caller's identity.
+        """
+        import asyncio
+
+        from ..database import AsyncSessionLocal
+        from ..models import Project
+        from .orchestration.local import _get_project_root
+
+        async with AsyncSessionLocal() as db:
+            project = await db.get(Project, UUID(str(self.project_id)))
+
+        if project is None:
+            raise RuntimeError(f"[GIT] Local project not found: {self.project_id}")
+
+        project_path = _get_project_root(project)
+        if not project_path.exists():
+            raise RuntimeError(f"[GIT] Local project path does not exist: {project_path}")
+
+        cmd = [
+            "git",
+            "-c",
+            f"safe.directory={project_path}",
+            "-c",
+            f"user.name={self.user_name}",
+            "-c",
+            f"user.email={self.user_email}",
+            *git_args,
+        ]
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(project_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except TimeoutError as exc:
+            process.kill()
+            raise RuntimeError(f"[GIT] git {git_args[0]} timed out after {timeout}s") from exc
+
+        out = (stdout or b"").decode("utf-8", errors="replace")
+        err = (stderr or b"").decode("utf-8", errors="replace")
+        output = (out + err).strip()
+
+        if process.returncode != 0:
+            logger.warning(
+                "[GIT] git %s exited %s: %s",
+                git_args[0],
+                process.returncode,
+                output[:200],
+            )
+            raise RuntimeError(
+                f"Git command 'git {git_args[0]}' failed (exit code {process.returncode}): {output}"
+            )
+
+        return out.strip()
 
     async def initialize_repository(
         self, remote_url: str | None = None, default_branch: str = "main"

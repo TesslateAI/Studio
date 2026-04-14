@@ -673,11 +673,19 @@ class AgentTask(Base):
         GUID(), ForeignKey("agent_tasks.id", ondelete="SET NULL"), nullable=True
     )
     goal_ancestry = Column(JSON, nullable=True)
-    status = Column(String(32), nullable=False, default="queued", server_default="queued", index=True)
+    status = Column(
+        String(32), nullable=False, default="queued", server_default="queued", index=True
+    )
     requires_approval_for = Column(JSON, nullable=True)
     # No FK — marketplace agents may be deleted without cascading ticket loss.
     assignee_agent_id = Column(GUID(), nullable=True)
     title = Column(String(512), nullable=True)
+    # Optional link to the chat message that spawned this ticket. Trajectory
+    # rows in `agent_steps` are message-scoped, so this lets handoff bundles
+    # and the unified workspace pull per-ticket trajectory history.
+    message_id = Column(
+        GUID(), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -702,9 +710,7 @@ class Directory(Base):
     __tablename__ = "directories"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     path = Column(String(1024), nullable=False)
     runtime = Column(String(16), nullable=True)
     project_id = Column(
@@ -714,9 +720,7 @@ class Directory(Base):
     last_opened_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "path", name="uq_directories_user_path"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "path", name="uq_directories_user_path"),)
 
     project = relationship("Project")
     tickets = relationship(
@@ -731,9 +735,7 @@ class AgentTaskDirectory(Base):
 
     __tablename__ = "agent_task_directories"
 
-    ticket_id = Column(
-        GUID(), ForeignKey("agent_tasks.id", ondelete="CASCADE"), primary_key=True
-    )
+    ticket_id = Column(GUID(), ForeignKey("agent_tasks.id", ondelete="CASCADE"), primary_key=True)
     directory_id = Column(
         GUID(), ForeignKey("directories.id", ondelete="CASCADE"), primary_key=True
     )

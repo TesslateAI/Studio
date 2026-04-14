@@ -913,24 +913,24 @@ async def get_project_files(
 
     settings = get_settings()
 
-    # Check if this is a Docker project - use shared projects volume
-    if from_volume and settings.deployment_mode == "docker":
+    # Check if this project has a host-reachable filesystem path (docker shared
+    # volume, or desktop $TESSLATE_STUDIO_HOME). K8s projects go through
+    # orchestrator FileOps in the next branch.
+    from ..services.project_fs import get_project_fs_path, read_all_files
+
+    fs_path = get_project_fs_path(project) if from_volume else None
+    if fs_path is not None:
         try:
-            from ..services.orchestration import get_orchestrator
-
-            orchestrator = get_orchestrator()
-
             subdir_log = f"/{container_dir}" if container_dir else ""
             logger.info(
-                f"[FILES] Reading files from shared projects volume: /projects/{project.slug}{subdir_log}"
+                f"[FILES] Reading files from project filesystem: {fs_path}{subdir_log}"
             )
 
-            # Get files with content from shared volume (direct filesystem access)
-            volume_files = await orchestrator.get_files_with_content(
-                project.slug,  # Uses /projects/{slug}/ directory
+            volume_files = await read_all_files(
+                fs_path,
                 max_files=200,
-                max_file_size=100000,  # 100KB per file
-                subdir=container_dir,  # Container subdirectory (files appear as root)
+                max_file_size=100_000,
+                subdir=container_dir,
             )
 
             if volume_files:
@@ -1836,15 +1836,37 @@ async def _perform_project_deletion(
 
         task.update_progress(70, 100, "Deleting project files...")
 
-        # 4. Delete project files from shared volume (Docker mode only - K8s uses PVCs)
+        # 4. Delete project files — shared volume (docker) or on-disk project
+        # directory (desktop). K8s owns files in per-project PVCs so cleanup
+        # happens in the namespace-delete branch below.
         settings = get_settings()
+        from ..services.project_fs import get_project_fs_path
+
+        fs_path = get_project_fs_path(project) if project else None
         if settings.deployment_mode == "docker" and project:
-            # Delete project directory from shared volume via orchestrator
             try:
                 await orchestrator.delete_project_directory(project.slug)
                 logger.info(f"[DELETE] Deleted project directory: /projects/{project.slug}")
             except Exception as e:
                 logger.warning(f"[DELETE] Failed to delete project directory: {e}")
+
+        elif fs_path is not None and fs_path.exists():
+            # Desktop: direct filesystem cleanup.
+            import shutil
+
+            try:
+                await asyncio.to_thread(shutil.rmtree, fs_path)
+                logger.info(f"[DELETE] Deleted desktop project directory: {fs_path}")
+            except Exception as e:
+                logger.warning(f"[DELETE] Failed to delete desktop project dir {fs_path}: {e}")
+            # Drop the cached per-project root so a future project reusing the
+            # id (unlikely) or slug doesn't hit a stale mapping.
+            try:
+                from ..services.orchestration.local import _invalidate_project_root_cache
+
+                _invalidate_project_root_cache(project.id if project else None)
+            except Exception:
+                pass
 
         else:
             # Kubernetes mode: Delete K8s resources and soft-delete snapshots
@@ -1953,10 +1975,12 @@ async def get_setup_config(
 
     config_data = None
 
-    if settings.deployment_mode == "docker":
-        # Docker: read from filesystem
-        project_path = f"/projects/{project.slug}"
-        config_data = read_tesslate_config(project_path)
+    from ..services.project_fs import get_project_fs_path
+
+    fs_path = get_project_fs_path(project)
+    if fs_path is not None:
+        # Host-reachable filesystem (docker volume mount or desktop home).
+        config_data = read_tesslate_config(str(fs_path))
     else:
         # K8s: read from PVC via orchestrator
         from ..services.orchestration import get_orchestrator
@@ -2092,10 +2116,12 @@ async def sync_config_to_file(
 
     config = await build_config_from_db(db, project.id)
 
-    # Write to filesystem (Docker) or FileOps (K8s)
-    if settings.deployment_mode == "docker":
-        project_path = f"/projects/{project.slug}"
-        write_tesslate_config(project_path, config)
+    # Write to filesystem (host-reachable) or FileOps (K8s)
+    from ..services.project_fs import get_project_fs_path
+
+    fs_path = get_project_fs_path(project)
+    if fs_path is not None:
+        write_tesslate_config(str(fs_path), config)
     else:
         from ..services.orchestration import get_orchestrator
 
@@ -2177,9 +2203,11 @@ async def analyze_project(
     }
     COMMON_SUBDIRS = ["", "frontend", "backend", "client", "server", "api", "web", "app", "src"]
 
-    if settings.deployment_mode == "docker":
-        project_path = f"/projects/{project.slug}"
-        # Walk directory for file tree
+    from ..services.project_fs import get_project_fs_path
+
+    fs_path = get_project_fs_path(project)
+    if fs_path is not None:
+        project_path = str(fs_path)
         try:
             walk_results = await walk_directory_async(project_path, exclude_dirs=list(SKIP_DIRS))
             for root, _dirs, files in walk_results:

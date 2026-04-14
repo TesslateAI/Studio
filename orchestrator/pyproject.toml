@@ -32,6 +32,8 @@ dependencies = [
     "asyncpg>=0.29.0",
     "email-validator>=2.2.0",
     "aiohttp>=3.9.0",
+    # SQLite async driver for desktop mode
+    "aiosqlite>=0.21.0",
     "kubernetes>=28.1.0",
     "docker>=7.0.0",
     "nanoid>=2.0.0",
@@ -78,7 +80,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "aiosqlite>=0.21.0",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pytest-cov>=6.0.0",

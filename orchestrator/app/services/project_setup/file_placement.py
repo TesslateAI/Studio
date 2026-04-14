@@ -52,8 +52,52 @@ async def place_files(
     """
     if deployment_mode == "docker":
         return await _place_docker(source_path, config, project_slug, task, write_config)
-    else:
-        return await _place_kubernetes(source_path, config, project_slug, task, write_config)
+    if deployment_mode == "desktop":
+        return await _place_desktop(source_path, config, project_slug, task, write_config)
+    return await _place_kubernetes(source_path, config, project_slug, task, write_config)
+
+
+async def _place_desktop(
+    source_path: str,
+    config: TesslateProjectConfig,
+    project_slug: str,
+    task=None,
+    write_config: bool = True,
+) -> PlacedFiles:
+    """Copy source files into ``$TESSLATE_STUDIO_HOME/projects/<slug>/``.
+
+    Desktop runs under the user's own UID, so the Docker-mode chown to
+    1000:1000 is skipped — owner already matches. Skips the same set of
+    generated/dependency dirs (SKIP_DIRS) as Docker mode.
+    """
+    from ...services.desktop_paths import ensure_studio_home
+
+    studio_home = ensure_studio_home(None)
+    project_path = str(studio_home / "projects" / project_slug)
+    os.makedirs(project_path, exist_ok=True)
+
+    if task:
+        task.update_progress(60, 100, "Copying files to project directory...")
+
+    for item in os.listdir(source_path):
+        if item in SKIP_DIRS:
+            continue
+        src = os.path.join(source_path, item)
+        dst = os.path.join(project_path, item)
+        if os.path.isdir(src):
+            await asyncio.to_thread(shutil.copytree, src, dst, dirs_exist_ok=True)
+        else:
+            await asyncio.to_thread(shutil.copy2, src, dst)
+
+    if write_config:
+        write_tesslate_config(project_path, config)
+
+    logger.info(f"[PLACEMENT] Copied files to desktop project dir: {project_path}")
+
+    if task:
+        task.update_progress(80, 100, "Files placed in project directory")
+
+    return PlacedFiles(project_path=project_path)
 
 
 async def _place_docker(

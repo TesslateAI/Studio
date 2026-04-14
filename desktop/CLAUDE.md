@@ -6,6 +6,11 @@ as a native desktop app on macOS, Windows, and Linux. The orchestrator runs
 as a PyInstaller-frozen **sidecar** process, launched and supervised by the
 Tauri host. UI is the same React app (`app/`) served over loopback.
 
+## First time here?
+Read [/docs/desktop/development.md](../docs/desktop/development.md) —
+toolchain, sidecar build, `cargo tauri dev`, troubleshooting. `scripts/dev.sh`
+is the single-command wrapper once the toolchain is installed.
+
 ## Key files
 - `src-tauri/` — Rust Tauri host (window, tray, sidecar supervision, deep-link auth).
 - `sidecar/` — Python orchestrator packaging (PyInstaller specs, entrypoint).

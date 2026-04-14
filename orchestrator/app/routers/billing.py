@@ -625,7 +625,10 @@ async def get_credits_balance(
 
     # Calculate effective signup bonus (zero if expired)
     bonus = team.signup_bonus_credits or 0
-    if team.signup_bonus_expires_at and datetime.now(UTC) > team.signup_bonus_expires_at:
+    from ..database import ensure_aware
+
+    expires_at = ensure_aware(team.signup_bonus_expires_at)
+    if expires_at and datetime.now(UTC) > expires_at:
         bonus = 0
 
     total = daily + bundled + bonus + purchased

@@ -5,7 +5,9 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:tray:default",
     "shell:allow-open",
+    "shell:allow-spawn",
     "dialog:default",
     "fs:default",
     "notification:default",

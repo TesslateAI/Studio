@@ -274,22 +274,26 @@ class CheckpointManager:
     # ================================================================== #
 
     async def _exec(self, script: str, timeout: int = 10) -> tuple[str, int]:
-        """Run a shell script in the project container.
+        """Run a shell script in the project workdir.
 
-        In Docker mode, runs ``docker exec --user 0`` (root) to handle
-        files written by the orchestrator with root ownership.  In K8s
-        mode, delegates to the orchestrator (pods run as root).
+        Scripts are authored against ``/app`` (the container/pod workdir);
+        ``/app`` is rewritten to the real host filesystem root on desktop
+        and to the docker shared-volume path when falling back outside a
+        container. Kubernetes keeps the literal ``/app`` — pods mount the
+        project volume there.
 
         Returns ``(output, exit_code)``.  Never raises — returns
         ``("", -1)`` if the container exec itself fails.
         """
-        from .orchestration import is_docker_mode
+        from .orchestration import is_docker_mode, is_local_mode
 
         full_script = f"({script}) 2>&1; printf '\\n{_EXIT_SENTINEL}%d\\n' $?"
 
         try:
             if is_docker_mode():
                 raw = await self._docker_exec(full_script, timeout)
+            elif is_local_mode():
+                raw = await self._local_exec(full_script, timeout)
             else:
                 from .orchestration import get_orchestrator
 
@@ -377,6 +381,44 @@ class CheckpointManager:
         # orchestrator process (which has root access and git installed).
         project_path = f"/projects/{project.slug}"
         local_script = full_script.replace("/app", project_path)
+
+        process = await asyncio.create_subprocess_exec(
+            "/bin/sh",
+            "-c",
+            local_script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        return stdout.decode() + stderr.decode()
+
+    async def _local_exec(self, full_script: str, timeout: int) -> str:
+        """Desktop/local-mode checkpoint exec.
+
+        Scripts are authored against ``/app``; rewrite it to the real
+        on-disk project root (``$TESSLATE_STUDIO_HOME/projects/<slug>-<id>``)
+        and run git as the calling user — no docker / kubectl in scope.
+        """
+        import asyncio
+
+        from sqlalchemy import select
+
+        from ..database import AsyncSessionLocal
+        from ..models import Project
+        from .project_fs import get_project_fs_path
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Project).where(Project.id == UUID(self.project_id)))
+            project = result.scalar_one_or_none()
+
+        if project is None:
+            raise RuntimeError(f"Project {self.project_id} not found")
+
+        fs_path = get_project_fs_path(project)
+        if fs_path is None:
+            raise RuntimeError(f"Project {self.project_id} has no host filesystem path")
+
+        local_script = full_script.replace("/app", str(fs_path))
 
         process = await asyncio.create_subprocess_exec(
             "/bin/sh",

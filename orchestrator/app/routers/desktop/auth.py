@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from ...config import get_settings
 from ...models import User
 from ...services import token_store
-from ...users import current_active_user
+from ...services.desktop_auth import desktop_loopback_or_session
 
 router = APIRouter()
 
@@ -20,7 +20,7 @@ class CloudTokenBody(BaseModel):
 
 
 @router.get("/auth/status")
-async def auth_status(_user: User = Depends(current_active_user)) -> dict[str, Any]:
+async def auth_status(_user: User = Depends(desktop_loopback_or_session)) -> dict[str, Any]:
     """Cheap, network-free pairing probe."""
     return {
         "paired": token_store.is_paired(),
@@ -31,7 +31,7 @@ async def auth_status(_user: User = Depends(current_active_user)) -> dict[str, A
 @router.post("/auth/token")
 async def set_auth_token(
     body: CloudTokenBody,
-    _user: User = Depends(current_active_user),
+    _user: User = Depends(desktop_loopback_or_session),
 ) -> dict[str, Any]:
     """Persist a cloud bearer token (called by the Tauri deep-link handler)."""
     token_store.set_cloud_token(body.token)
@@ -39,7 +39,7 @@ async def set_auth_token(
 
 
 @router.delete("/auth/token")
-async def clear_auth_token(_user: User = Depends(current_active_user)) -> dict[str, Any]:
+async def clear_auth_token(_user: User = Depends(desktop_loopback_or_session)) -> dict[str, Any]:
     """Forget the cloud bearer token (desktop logout)."""
     token_store.clear_cloud_token()
     return {"paired": False}

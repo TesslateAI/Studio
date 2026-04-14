@@ -1,4 +1,5 @@
 // First-run bootstrap.
 //
-// Creates `$TESSLATE_STUDIO_HOME` tree, copies bundled marketplace seeds
-// and default skills, initializes SQLite.
+// Intentionally a no-op: the Python sidecar calls `ensure_studio_home`
+// itself (see `orchestrator/app/services/desktop_paths.py`), so the Rust
+// host has nothing to do here until we bundle additional host-side assets.

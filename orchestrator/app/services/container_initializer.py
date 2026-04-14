@@ -25,7 +25,12 @@ from sqlalchemy.orm import selectinload
 from ..database import AsyncSessionLocal
 from ..models import Container, MarketplaceBase, Project
 from ..services.base_cache_manager import get_base_cache_manager
-from ..services.orchestration import get_orchestrator, is_docker_mode
+from ..services.orchestration import (
+    DeploymentMode,
+    OrchestratorFactory,
+    get_orchestrator,
+    is_docker_mode,
+)
 from .secret_manager_env import build_env_overrides
 
 logger = logging.getLogger(__name__)
@@ -55,8 +60,6 @@ async def initialize_container_async(
     db = AsyncSessionLocal()
 
     try:
-        orchestrator = get_orchestrator()
-
         # Get container and project
         container = await db.get(Container, container_id)
         project = await db.get(Project, project_id)
@@ -66,8 +69,21 @@ async def initialize_container_async(
             task.update_progress(0, 100, "Container or project not found")
             raise ValueError("Container or project not found")
 
+        orchestrator = OrchestratorFactory.resolve_for_project(project)
+
         logger.info(f"[CONTAINER-INIT] Starting initialization for container {container_id}")
         task.update_progress(10, 100, "Initializing container...")
+
+        # Local/desktop runtime: files land in $TESSLATE_STUDIO_HOME/projects/<slug>/
+        # at project-create time via file_placement._place_desktop, and containers
+        # are host subprocesses — there's no shared volume to seed. Short-circuit
+        # before probing methods the LocalOrchestrator doesn't expose.
+        if orchestrator.deployment_mode == DeploymentMode.LOCAL:
+            task.update_progress(100, 100, "Container initialized (local runtime)")
+            logger.info(
+                "[CONTAINER-INIT] ✅ Local runtime: files placed at project create, nothing to copy"
+            )
+            return
 
         # Step 1: Ensure project directory exists in shared volume
         task.update_progress(20, 100, "Ensuring project directory exists...")

@@ -132,9 +132,7 @@ async def deduct_credits(
                 )
                 credit_source = result.scalar_one()
             else:
-                result = await db.execute(
-                    select(User).where(User.id == user_id).with_for_update()
-                )
+                result = await db.execute(select(User).where(User.id == user_id).with_for_update())
                 credit_source = result.scalar_one()
 
             if not byok and cost_total > 0:
@@ -159,10 +157,10 @@ async def deduct_credits(
                 # 3. Signup bonus credits (if not expired)
                 bonus = credit_source.signup_bonus_credits or 0
                 if bonus > 0 and remaining > 0:
-                    expired = (
-                        credit_source.signup_bonus_expires_at
-                        and datetime.now(UTC) > credit_source.signup_bonus_expires_at
-                    )
+                    from ..database import ensure_aware
+
+                    _expires = ensure_aware(credit_source.signup_bonus_expires_at)
+                    expired = bool(_expires and datetime.now(UTC) > _expires)
                     if not expired:
                         take = min(bonus, remaining)
                         credit_source.signup_bonus_credits = bonus - take

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database import get_db
 from ...models import AgentTask, Project, User
-from ...users import current_active_user
+from ...services.desktop_auth import desktop_loopback_or_session
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ _RUNNING_AGENT_LIMIT = 25
 
 
 @router.get("/runtime-probe")
-async def runtime_probe(user: User = Depends(current_active_user)) -> dict[str, Any]:
+async def runtime_probe(user: User = Depends(desktop_loopback_or_session)) -> dict[str, Any]:
     from . import _collect_runtimes
 
     return await _collect_runtimes(user)
@@ -76,7 +76,7 @@ async def _running_agents(db: AsyncSession, user: User) -> list[dict[str, Any]]:
 
 @router.get("/tray-state")
 async def tray_state(
-    user: User = Depends(current_active_user),
+    user: User = Depends(desktop_loopback_or_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     from . import _collect_runtimes

@@ -44,6 +44,22 @@ from .deployment_mode import DeploymentMode
 
 logger = logging.getLogger(__name__)
 
+# Cache of project_id → on-disk root under DEPLOYMENT_MODE=desktop. Populated
+# via DB lookup when callers don't supply a project_slug. Safe to cache because
+# a project's slug is immutable for the lifetime of the row.
+_PROJECT_ROOT_CACHE: dict[UUID, Path] = {}
+_PROJECT_ROOT_LOCK: asyncio.Lock = asyncio.Lock()
+
+
+def _invalidate_project_root_cache(project_id: UUID | None = None) -> None:
+    """Drop cached project-root resolutions — call this on project deletion
+    or slug rename. Clears the whole cache if ``project_id`` is None."""
+    if project_id is None:
+        _PROJECT_ROOT_CACHE.clear()
+    else:
+        _PROJECT_ROOT_CACHE.pop(project_id, None)
+
+
 # Directories to skip when walking the filesystem in list_tree.
 EXCLUDED_TREE_DIRS: frozenset[str] = frozenset(
     {
@@ -582,13 +598,77 @@ class LocalOrchestrator(BaseOrchestrator):
     @property
     def root(self) -> Path:
         """
-        Return a fresh view of the project root.
+        Return a fresh view of the default project root.
 
         Re-reads the environment on every access so tests can swap the
         root via ``monkeypatch.setenv("PROJECT_ROOT", ...)`` without
         recreating the orchestrator instance.
+
+        Under ``DEPLOYMENT_MODE=desktop`` each project lives in its own
+        directory; this property returns the legacy single-project root
+        and is the fallback used when no project identifier is available.
+        File operations should go through :meth:`_resolve_project_root`
+        so per-project paths are honored.
         """
         return _get_project_root()
+
+    async def _resolve_project_root(
+        self,
+        project_id: UUID | None,
+        project_slug: str | None = None,
+    ) -> Path:
+        """Resolve the on-disk root for a specific project.
+
+        Desktop shells host many projects at
+        ``$TESSLATE_STUDIO_HOME/projects/<slug>-<id>/``; other modes
+        (local benchmark / tests) share the single ``PROJECT_ROOT`` tree.
+
+        Resolution order:
+
+        1. ``project_slug`` + ``project_id`` and desktop mode → direct build.
+        2. ``project_id`` alone and desktop mode → DB lookup (cached).
+        3. Everything else → :pyattr:`root`.
+
+        Failures fall back to :pyattr:`root` so file ops don't raise on
+        transient DB issues — callers surface the resulting no-op.
+        """
+        if project_id is None:
+            return self.root
+
+        from ...config import get_settings
+
+        settings = get_settings()
+        if settings.deployment_mode.lower() != "desktop":
+            return self.root
+
+        if project_slug:
+            from ..desktop_paths import ensure_studio_home
+
+            home = ensure_studio_home(settings.tesslate_studio_home or None)
+            return (home / "projects" / f"{project_slug}-{project_id}").resolve()
+
+        cached = _PROJECT_ROOT_CACHE.get(project_id)
+        if cached is not None:
+            return cached
+
+        async with _PROJECT_ROOT_LOCK:
+            cached = _PROJECT_ROOT_CACHE.get(project_id)
+            if cached is not None:
+                return cached
+            try:
+                from ...database import AsyncSessionLocal
+                from ...models import Project
+
+                async with AsyncSessionLocal() as db:
+                    project = await db.get(Project, project_id)
+                if project is None:
+                    return self.root
+                resolved = _get_project_root(project)
+                _PROJECT_ROOT_CACHE[project_id] = resolved
+                return resolved
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("[LOCAL] project root lookup failed for %s: %s", project_id, exc)
+                return self.root
 
     # =========================================================================
     # PROJECT LIFECYCLE (no-ops)
@@ -709,7 +789,7 @@ class LocalOrchestrator(BaseOrchestrator):
             The file contents as a string, or ``None`` if the path does not
             exist, points at a directory, or escapes the project root.
         """
-        root = self.root
+        root = await self._resolve_project_root(project_id, project_slug)
         try:
             target = _safe_resolve(root, file_path, subdir)
         except PermissionError as exc:
@@ -757,7 +837,7 @@ class LocalOrchestrator(BaseOrchestrator):
             True on success, False if the path is rejected or an OS error
             occurs.
         """
-        root = self.root
+        root = await self._resolve_project_root(project_id, project_slug)
         try:
             # _safe_resolve calls .resolve() which requires the file to exist
             # for full symlink verification; for write we validate against
@@ -842,7 +922,7 @@ class LocalOrchestrator(BaseOrchestrator):
             True if the file was removed successfully, False if the file
             did not exist or the path was rejected.
         """
-        root = self.root
+        root = await self._resolve_project_root(project_id)
         try:
             target = _safe_resolve(root, file_path, None)
         except PermissionError as exc:
@@ -880,7 +960,7 @@ class LocalOrchestrator(BaseOrchestrator):
             ``"directory"``), ``size``, and ``path`` (relative to root).
             Sorted by name.
         """
-        root = self.root
+        root = await self._resolve_project_root(project_id)
         try:
             target = _safe_resolve(root, directory or ".", None)
         except PermissionError as exc:
@@ -934,7 +1014,7 @@ class LocalOrchestrator(BaseOrchestrator):
             List of dicts with ``path`` (relative to root), ``name``,
             ``is_dir``, ``size``, ``mod_time``.
         """
-        root = self.root
+        root = await self._resolve_project_root(project_id)
         try:
             walk_root = _safe_resolve(root, None, subdir) if subdir else root
         except PermissionError as exc:
@@ -1187,7 +1267,7 @@ class LocalOrchestrator(BaseOrchestrator):
         if not command:
             raise RuntimeError("[LOCAL] execute_command: empty command")
 
-        root = self.root
+        root = await self._resolve_project_root(project_id)
         try:
             cwd = _safe_resolve(root, working_dir, None) if working_dir else root
         except PermissionError as exc:
