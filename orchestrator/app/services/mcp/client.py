@@ -119,7 +119,12 @@ async def connect_mcp(
                 yield session
         case "sse":
             async with _connect_sse(
-                server_config, credentials, settings, session_kwargs
+                server_config,
+                credentials,
+                settings,
+                session_kwargs,
+                user_mcp_config_id=user_mcp_config_id,
+                db=db,
             ) as session:
                 yield session
         case _:
@@ -400,8 +405,16 @@ async def _connect_sse(
     credentials: dict[str, Any],
     settings: Any,
     session_kwargs: dict[str, Any],
+    *,
+    user_mcp_config_id: Any | None = None,
+    db: Any | None = None,
 ):
-    """Establish an SSE MCP connection (legacy transport)."""
+    """Establish an SSE MCP connection.
+
+    Mirrors the streamable-http OAuth branch — providers like Atlassian use
+    SSE + OAuth 2.1 and need the SDK's ``OAuthClientProvider`` attached so
+    refresh-on-401 persists new tokens via :class:`PostgresTokenStorage`.
+    """
     if not _SSE_AVAILABLE:
         raise ImportError(
             "SSE transport requires the 'sse' extra of the mcp package. "
@@ -410,20 +423,89 @@ async def _connect_sse(
 
     url: str = config["url"]
     timeout = settings.mcp_tool_timeout
-    headers = _build_auth_headers(config, credentials)
+    auth_type = config.get("auth_type", "none")
 
-    logger.info("Connecting to MCP server via SSE: %s", url)
+    logger.info("Connecting to MCP server via SSE: %s (auth=%s)", url, auth_type)
+
+    auth = None
+    headers: dict[str, str] = {}
+    if auth_type == "oauth":
+        if user_mcp_config_id is None or db is None:
+            raise ValueError(
+                "OAuth MCP connection requires user_mcp_config_id and db; "
+                "pass them through connect_mcp(...)"
+            )
+        from uuid import UUID as _UUID
+
+        from mcp.client.auth import OAuthClientProvider
+        from mcp.shared.auth import OAuthClientMetadata
+
+        from .oauth_flow import ReauthRequired
+        from .oauth_storage import PostgresTokenStorage
+
+        config_uuid = (
+            user_mcp_config_id
+            if isinstance(user_mcp_config_id, _UUID)
+            else _UUID(str(user_mcp_config_id))
+        )
+        oauth_storage = PostgresTokenStorage(db, config_uuid)
+        tokens = await oauth_storage.get_tokens()
+        if tokens is None:
+            raise ReauthRequired(
+                server_url=url,
+                config_id=config_uuid,
+                message="No stored OAuth tokens — reconnect required",
+            )
+        stored_client = await oauth_storage.get_client_info()
+        token_auth_method = (
+            stored_client.token_endpoint_auth_method if stored_client else "client_secret_basic"
+        )
+        stored_redirects = (
+            list(stored_client.redirect_uris) if stored_client and stored_client.redirect_uris
+            else ["https://unused.local/mcp-runtime"]
+        )
+
+        async def _raise_reauth_redirect(_: str) -> None:
+            raise ReauthRequired(server_url=url, config_id=config_uuid)
+
+        async def _raise_reauth_callback() -> tuple[str, str | None]:
+            raise ReauthRequired(server_url=url, config_id=config_uuid)
+
+        client_metadata = OAuthClientMetadata(
+            redirect_uris=stored_redirects,
+            token_endpoint_auth_method=token_auth_method,
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+            client_name="Tesslate Studio (runtime)",
+        )
+        auth = OAuthClientProvider(
+            server_url=url,
+            client_metadata=client_metadata,
+            storage=oauth_storage,
+            redirect_handler=_raise_reauth_redirect,
+            callback_handler=_raise_reauth_callback,
+        )
+    else:
+        headers = _build_auth_headers(config, credentials)
 
     sse_kwargs: dict[str, Any] = {"url": url}
     if headers:
         sse_kwargs["headers"] = headers
     if timeout:
         sse_kwargs["timeout"] = timeout
+    if auth is not None:
+        sse_kwargs["auth"] = auth
 
-    async with (
-        sse_client(**sse_kwargs) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream, **session_kwargs) as session,
-    ):
-        await session.initialize()
-        logger.info("MCP SSE session initialised for %s", url)
-        yield session
+    try:
+        async with (
+            sse_client(**sse_kwargs) as (read_stream, write_stream),
+            ClientSession(read_stream, write_stream, **session_kwargs) as session,
+        ):
+            await session.initialize()
+            logger.info("MCP SSE session initialised for %s", url)
+            yield session
+    except BaseExceptionGroup as eg:
+        non_cancelled = eg.subgroup(lambda e: not isinstance(e, asyncio.CancelledError))
+        if non_cancelled:
+            raise non_cancelled from eg
+        logger.debug("Suppressed benign SSE TaskGroup cleanup errors for %s", url)

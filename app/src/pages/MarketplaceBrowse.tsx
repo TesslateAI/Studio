@@ -394,6 +394,17 @@ export default function MarketplaceBrowse() {
     }
 
     try {
+      // Connectors (#307): install adds to Library at user scope only.
+      // OAuth authorization is deferred to Library → Connectors → Connect
+      // so users review the connector in their library before going through
+      // the provider login flow.
+      if (item.item_type === 'mcp_server') {
+        await marketplaceApi.installMcpServer(item.id, undefined, { scope_level: 'user' });
+        toast.success(`${item.name} added to your library — open Library → Connectors to connect.`);
+        setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, is_purchased: true } : i)));
+        return;
+      }
+
       const data =
         item.item_type === 'theme'
           ? await marketplaceApi.addThemeToLibrary(item.id)
@@ -401,9 +412,7 @@ export default function MarketplaceBrowse() {
             ? await marketplaceApi.purchaseBase(item.id)
             : item.item_type === 'skill'
               ? await marketplaceApi.purchaseSkill(item.id)
-              : item.item_type === 'mcp_server'
-                ? await marketplaceApi.installMcpServer(item.id)
-                : await marketplaceApi.purchaseAgent(item.id);
+              : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;

@@ -114,6 +114,7 @@ async def start_oauth(
 
     marketplace_agent_id: UUID | None = None
     server_url: str
+    endpoint_overrides: dict | None = None
 
     if body.marketplace_agent_slug:
         try:
@@ -121,6 +122,7 @@ async def start_oauth(
         except OAuthFlowError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         marketplace_agent_id = agent.id
+        endpoint_overrides = (agent.config or {}).get("oauth_endpoints")
     elif body.server_url:
         server_url = str(body.server_url)
     else:
@@ -145,6 +147,7 @@ async def start_oauth(
             byo_client_id=body.byo_client_id,
             byo_client_secret=body.byo_client_secret,
             scope=body.scope,
+            endpoint_overrides=endpoint_overrides,
         )
     except OAuthFlowError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -228,10 +231,13 @@ def _callback_html(
 ) -> HTMLResponse:
     """Render a tiny HTML page that postMessages the status and closes itself."""
     settings = get_settings()
-    # Never fall through to "*" — that would leak the payload (incl. config_id)
-    # to any opener. If frontend_origin is unset we omit postMessage entirely
-    # and rely on the /status polling fallback.
-    origin = getattr(settings, "frontend_origin", "") or ""
+    # frontend_origin may be a comma-separated list (e.g. the dev default
+    # "http://localhost,http://localhost:5173"). The callback script picks
+    # the entry that matches the opener's document.referrer so popup auth
+    # works across both Vite dev server (:5173) and Traefik-proxied frontend
+    # (:80). Never falls back to "*" — the payload includes config_id.
+    raw = getattr(settings, "frontend_origin", "") or ""
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
     payload: dict[str, Any] = {"type": "mcp-oauth", "status": status_}
     if config_id:
         payload["config_id"] = config_id
@@ -242,7 +248,7 @@ def _callback_html(
         message or ("Connected!" if status_ == "success" else "Failed")
     )
     payload_js = _safe_json_js(payload)
-    origin_js = _safe_json_js(origin) if origin else '""'
+    origins_js = _safe_json_js(origins)
     body = f"""
 <!DOCTYPE html>
 <html>
@@ -256,7 +262,13 @@ def _callback_html(
   <script>
     (function() {{
       var payload = {payload_js};
-      var targetOrigin = {origin_js};
+      var origins = {origins_js};
+      // Pick the configured origin that matches the opener page.
+      var refOrigin = "";
+      try {{
+        if (document.referrer) refOrigin = new URL(document.referrer).origin;
+      }} catch (e) {{ /* ignore */ }}
+      var targetOrigin = origins.indexOf(refOrigin) >= 0 ? refOrigin : (origins[0] || "");
       try {{
         if (window.opener && targetOrigin) {{
           window.opener.postMessage(payload, targetOrigin);

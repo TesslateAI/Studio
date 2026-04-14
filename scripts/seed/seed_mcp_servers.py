@@ -310,6 +310,14 @@ MCP_SERVERS = [
             "auth_type": "oauth",
             "registration_method": "platform_app",
             "scopes": ["repo", "read:user", "read:org"],
+            # GitHub doesn't publish RFC 8414 discovery docs, so the flow
+            # needs the endpoints directly. These are the well-known
+            # GitHub OAuth URLs.
+            "oauth_endpoints": {
+                "authorization_server": "https://github.com",
+                "authorization_endpoint": "https://github.com/login/oauth/authorize",
+                "token_endpoint": "https://github.com/login/oauth/access_token",
+            },
             "env_vars": [],
             "capabilities": ["tools"],
         },
@@ -361,7 +369,9 @@ MCP_SERVERS = [
         "item_type": "mcp_server",
         "category": "productivity",
         "config": {
-            "transport": "streamable-http",
+            # Atlassian's endpoint uses the Server-Sent Events transport;
+            # the path literally ends in /sse.
+            "transport": "sse",
             "url": "https://mcp.atlassian.com/v1/sse",
             "auth_type": "oauth",
             "registration_method": "dcr",

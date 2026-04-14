@@ -32,7 +32,6 @@ import {
 } from '../components/marketplace';
 import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
-import { runOAuthPopup } from '../components/connectors/ConnectorOAuthPopup';
 import { isCanceledError } from '../lib/utils';
 import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateMarketplaceStructuredData } from '../components/SEO';
@@ -405,38 +404,13 @@ export default function Marketplace() {
     }
 
     try {
-      // Connectors (MCP servers) branch on their auth type. OAuth connectors
-      // trigger the popup flow so the user authenticates directly with the
-      // provider; static-auth ones use the existing install endpoint. Both
-      // paths land in Library → Connectors for configuration (#307).
+      // Connectors (MCP servers) install straight into the Library at user
+      // scope. OAuth authorization happens later via Library → Connectors →
+      // Connect, so the user can review the connector before sending them
+      // through a provider login flow.
       if (item.item_type === 'mcp_server') {
-        const cfg = (item as unknown as { config?: Record<string, unknown> }).config || {};
-        if (cfg.auth_type === 'oauth') {
-          const registrationMethod =
-            (cfg.registration_method as 'dcr' | 'byo' | 'platform_app' | undefined) || 'dcr';
-          const { authorize_url, flow_id } = await marketplaceApi.startMcpOAuth({
-            marketplace_agent_slug: item.slug,
-            registration_method: registrationMethod,
-            scope_level: 'user',
-          });
-          const result = await runOAuthPopup(
-            authorize_url,
-            flow_id,
-            marketplaceApi.getMcpOAuthStatus,
-          );
-          if (result.status === 'success') {
-            toast.success(`Connected ${item.name} — manage it in Library → Connectors`);
-            setItems((prev) =>
-              prev.map((i) => (i.id === item.id ? { ...i, is_purchased: true } : i)),
-            );
-          } else {
-            toast.error(result.message || 'Connection failed');
-          }
-          return;
-        }
-        // Static-auth connector — install at user scope (always).
         await marketplaceApi.installMcpServer(item.id, undefined, { scope_level: 'user' });
-        toast.success(`${item.name} added to your library!`);
+        toast.success(`${item.name} added to your library — open Library → Connectors to connect.`);
         setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, is_purchased: true } : i)));
         return;
       }

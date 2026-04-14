@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ComponentType } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Tooltip } from './Tooltip';
 import { HelpMenu } from './HelpMenu';
@@ -120,16 +121,88 @@ export function NavigationSidebar({
   });
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(() => activePage === 'library');
+  // Library flyout (#307 follow-up) — replaces the old inline collapsible.
+  // Anchored to the Library button via getBoundingClientRect so it survives
+  // the sidebar's overflow:hidden parent.
+  const [libraryFlyout, setLibraryFlyout] = useState<{
+    open: boolean;
+    top: number;
+    left: number;
+  }>({ open: false, top: 0, left: 0 });
+  const libraryButtonRef = useRef<HTMLDivElement>(null);
+  const libraryFlyoutRef = useRef<HTMLDivElement>(null);
+  const libraryCloseTimer = useRef<number | null>(null);
+
+  const cancelLibraryClose = useCallback(() => {
+    if (libraryCloseTimer.current !== null) {
+      window.clearTimeout(libraryCloseTimer.current);
+      libraryCloseTimer.current = null;
+    }
+  }, []);
+
+  const openLibraryFlyout = useCallback(() => {
+    cancelLibraryClose();
+    const rect = libraryButtonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setLibraryFlyout({
+      open: true,
+      top: rect.top,
+      // 6px gap between sidebar edge and flyout to match the floating-panel feel.
+      left: rect.right + 6,
+    });
+  }, [cancelLibraryClose]);
+
+  const scheduleLibraryClose = useCallback(() => {
+    cancelLibraryClose();
+    libraryCloseTimer.current = window.setTimeout(() => {
+      setLibraryFlyout((s) => ({ ...s, open: false }));
+    }, 180);
+  }, [cancelLibraryClose]);
+
+  // Close on outside click / Escape.
+  useEffect(() => {
+    if (!libraryFlyout.open) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (
+        libraryButtonRef.current?.contains(t) ||
+        libraryFlyoutRef.current?.contains(t)
+      ) {
+        return;
+      }
+      setLibraryFlyout((s) => ({ ...s, open: false }));
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLibraryFlyout((s) => ({ ...s, open: false }));
+    };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [libraryFlyout.open]);
+
+  // Reposition on window resize / scroll while open so the flyout
+  // doesn't drift off the Library button.
+  useEffect(() => {
+    if (!libraryFlyout.open) return;
+    const reposition = () => {
+      const rect = libraryButtonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setLibraryFlyout((s) => ({ ...s, top: rect.top, left: rect.right + 6 }));
+    };
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [libraryFlyout.open]);
   const [recentOpen, setRecentOpen] = useState(true);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Auto-expand Library dropdown when navigating to library
-  useEffect(() => {
-    if (activePage === 'library') setLibraryOpen(true);
-  }, [activePage]);
 
   // Derive active library tab from URL
   const activeLibraryTab =
@@ -686,59 +759,36 @@ export function NavigationSidebar({
               </button>
             </Tooltip>
 
-            {/* Library — collapsible dropdown */}
-            {!isExpanded ? (
-              <Tooltip content="Library" shortcut={`${modKey} L`} side="right" delay={200}>
+            {/* Library — flyout (#307 follow-up). Hover OR click opens a
+                popover anchored to the right of the sidebar listing all
+                library tabs; the sidebar itself never expands inline. */}
+            <div
+              ref={libraryButtonRef}
+              onMouseEnter={openLibraryFlyout}
+              onMouseLeave={scheduleLibraryClose}
+            >
+              {!isExpanded ? (
+                <Tooltip content="Library" shortcut={`${modKey} L`} side="right" delay={200}>
+                  <button
+                    onClick={openLibraryFlyout}
+                    className={navButtonClassCollapsed(activePage === 'library')}
+                  >
+                    <BookOpen size={16} className={iconClass(activePage === 'library')} />
+                  </button>
+                </Tooltip>
+              ) : (
                 <button
-                  onClick={() => {
-                    setIsExpanded(true);
-                    setLibraryOpen(true);
-                  }}
-                  className={navButtonClassCollapsed(activePage === 'library')}
-                >
-                  <BookOpen size={16} className={iconClass(activePage === 'library')} />
-                </button>
-              </Tooltip>
-            ) : (
-              <>
-                <button
-                  onClick={() => setLibraryOpen(!libraryOpen)}
+                  onClick={openLibraryFlyout}
                   className={navButtonClass(activePage === 'library')}
                 >
                   <BookOpen
                     size={16}
                     className={`flex-shrink-0 ${iconClass(activePage === 'library')}`}
                   />
-                  <span
-                    className={`${labelClass(activePage === 'library')} flex items-center gap-1`}
-                  >
-                    Library
-                    <ChevronDown
-                      size={10}
-                      className={`transition-transform duration-200 text-[var(--text-subtle)] ${
-                        libraryOpen ? '' : '-rotate-90'
-                      }`}
-                    />
-                  </span>
+                  <span className={labelClass(activePage === 'library')}>Library</span>
                 </button>
-
-                {/* Library sub-items */}
-                {libraryOpen && (
-                  <div className="flex flex-col gap-0.5 mt-0.5">
-                    {LIBRARY_ITEMS.map(({ key, label, icon: Icon }) => (
-                      <button
-                        key={key}
-                        onClick={() => navigate(`/library?tab=${key}`)}
-                        className={subItemClass(activeLibraryTab === key)}
-                      >
-                        <Icon size={14} className={subItemIconClass(activeLibraryTab === key)} />
-                        <span className={subItemLabelClass(activeLibraryTab === key)}>{label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+              )}
+            </div>
 
             {/* Feedback and Docs moved to HelpMenu (sidebar "?" button) */}
 
@@ -884,6 +934,58 @@ export function NavigationSidebar({
         open={showShortcutsModal}
         onClose={() => setShowShortcutsModal(false)}
       />
+
+      {/* Library flyout — rendered via portal into document.body so it
+          escapes the sidebar's animated motion.div (which sets a transform
+          and traps even position:fixed children inside its containing
+          block, then clips them with overflow-x-hidden).
+          Entry animation is a gentle fade+slide (~220ms) so the popover
+          doesn't snap in. */}
+      {libraryFlyout.open &&
+        createPortal(
+          <motion.div
+            ref={libraryFlyoutRef}
+            onMouseEnter={cancelLibraryClose}
+            onMouseLeave={scheduleLibraryClose}
+            initial={{ opacity: 0, x: -6 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            style={{
+              position: 'fixed',
+              top: libraryFlyout.top,
+              left: libraryFlyout.left,
+            }}
+            className="z-50 w-56 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg"
+          >
+            <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
+              Library
+            </div>
+            {LIBRARY_ITEMS.map(({ key, label, icon: Icon }) => {
+              const isActive = activeLibraryTab === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => {
+                    navigate(`/library?tab=${key}`);
+                    setLibraryFlyout((s) => ({ ...s, open: false }));
+                  }}
+                  className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-small)] text-xs transition-colors ${
+                    isActive
+                      ? 'bg-[var(--surface-hover)] text-[var(--text)]'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  <Icon
+                    size={14}
+                    className={isActive ? 'text-[var(--text)]' : 'text-[var(--text-subtle)]'}
+                  />
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+            })}
+          </motion.div>,
+          document.body,
+        )}
     </motion.div>
   );
 }

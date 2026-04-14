@@ -604,8 +604,11 @@ class Settings(BaseSettings):
     # Public base URL used to build /api/mcp/oauth/callback. Falls back to the
     # request URL scheme+host if empty (dev convenience).
     public_base_url: str = ""
-    # Frontend origin that popups postMessage back to on callback completion.
-    frontend_origin: str = "http://localhost:5173"
+    # Frontend origin(s) that popups postMessage back to on callback completion.
+    # Comma-separated; the callback HTML picks the first one that matches the
+    # opener's document.referrer, else the first one in the list. Dev stacks
+    # usually serve the frontend via Traefik on http://localhost, not :5173.
+    frontend_origin: str = "http://localhost,http://localhost:5173"
 
     # Tesslate-owned OAuth apps for providers that don't advertise DCR
     # (GitHub Copilot MCP, Slack, etc.). Populated from env.

@@ -5169,6 +5169,12 @@ async def get_marketplace_mcp_servers(
                 "tags": mcp_server.tags or [],
                 "is_featured": mcp_server.is_featured,
                 "is_purchased": mcp_server.id in purchased_mcp_server_ids,
+                # #307: surface the connector config so the Marketplace
+                # install button knows whether to run the OAuth popup or
+                # the static-credential flow.
+                "config": mcp_server.config or {},
+                "auth_type": (mcp_server.config or {}).get("auth_type", "none"),
+                "registration_method": (mcp_server.config or {}).get("registration_method"),
                 "creator_type": creator_type,
                 "creator_name": creator_name,
                 "creator_username": creator_username,

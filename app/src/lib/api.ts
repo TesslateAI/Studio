@@ -1598,6 +1598,13 @@ export const marketplaceApi = {
     await api.delete(`/api/mcp/installed/${configId}/assign/${agentId}`);
   },
 
+  // Returns the agent ids that have this connector currently assigned —
+  // used by the Library 'Add to Agent' multi-toggle dropdown.
+  getConnectorAgents: async (configId: string) => {
+    const response = await api.get(`/api/mcp/installed/${configId}/agents`);
+    return response.data as string[];
+  },
+
   getAgentMcpServers: async (agentId: string) => {
     const response = await api.get(`/api/mcp/agent/${agentId}/servers`);
     return response.data;
@@ -1685,6 +1692,13 @@ export const marketplaceApi = {
   reconnectMcp: async (configId: string) => {
     const response = await api.post(`/api/mcp/installed/${configId}/reconnect`);
     return response.data as { authorize_url: string; flow_id: string };
+  },
+
+  // Sign out of a connector — clears stored tokens/creds but keeps the
+  // install + tool permissions + agent assignments so the user can
+  // reconnect without re-attaching everything.
+  disconnectMcp: async (configId: string) => {
+    await api.post(`/api/mcp/installed/${configId}/disconnect`);
   },
 
   getSkillDetails: async (slug: string) => {

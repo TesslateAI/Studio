@@ -233,7 +233,11 @@ export default function Library() {
         await loadSkills();
         setLoading(false);
       } else if (activeTab === 'mcp_servers') {
-        await loadMcpServers();
+        // Connectors page needs the agent list to populate the
+        // "Add to Agent" dropdown — load both in parallel so the dropdown
+        // works on first open without a manual round-trip through the
+        // Agents tab.
+        await Promise.all([loadMcpServers(), loadLibraryAgents()]);
         setLoading(false);
       } else if (activeTab === 'themes') {
         await loadLibraryThemes();

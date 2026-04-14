@@ -148,6 +148,7 @@ async def start_oauth_flow(
     byo_client_id: str | None = None,
     byo_client_secret: str | None = None,
     scope: str | None = None,
+    endpoint_overrides: dict | None = None,
 ) -> StartResult:
     """Discover AS metadata, register client (per method), return authorize URL.
 
@@ -163,18 +164,31 @@ async def start_oauth_flow(
     server_url = _canonicalize_resource(server_url)
 
     # -------------------- 1. Discover PRM / AS metadata -------------------
-    async with httpx.AsyncClient(timeout=20) as http:
-        prm = await _discover_protected_resource(http, server_url)
-        auth_server_url = _pick_auth_server(prm, server_url)
-        as_metadata = await _discover_authorization_server(http, auth_server_url)
+    # If the caller supplies explicit endpoint overrides (e.g. GitHub's
+    # platform_app config — GitHub doesn't publish RFC 8414 discovery docs),
+    # skip the network discovery entirely and use them directly.
+    overrides = endpoint_overrides or {}
+    override_authorize = overrides.get("authorization_endpoint")
+    override_token = overrides.get("token_endpoint")
+    override_registration = overrides.get("registration_endpoint")
 
-    authorize_endpoint = str(as_metadata.authorization_endpoint)
-    token_endpoint = str(as_metadata.token_endpoint)
-    registration_endpoint = (
-        str(as_metadata.registration_endpoint)
-        if as_metadata.registration_endpoint
-        else None
-    )
+    if override_authorize and override_token:
+        auth_server_url = overrides.get("authorization_server", server_url)
+        authorize_endpoint = str(override_authorize)
+        token_endpoint = str(override_token)
+        registration_endpoint = str(override_registration) if override_registration else None
+    else:
+        async with httpx.AsyncClient(timeout=20) as http:
+            prm = await _discover_protected_resource(http, server_url)
+            auth_server_url = _pick_auth_server(prm, server_url)
+            as_metadata = await _discover_authorization_server(http, auth_server_url)
+        authorize_endpoint = str(as_metadata.authorization_endpoint)
+        token_endpoint = str(as_metadata.token_endpoint)
+        registration_endpoint = (
+            str(as_metadata.registration_endpoint)
+            if as_metadata.registration_endpoint
+            else None
+        )
 
     # -------------------- 2. Resolve client_info -------------------------
     client_info: OAuthClientInformationFull
@@ -200,8 +214,15 @@ async def start_oauth_flow(
     elif registration_method == "platform_app":
         platform_app = _lookup_platform_app(settings, server_url)
         if not platform_app:
+            host = urlparse(server_url).hostname or server_url
             raise OAuthFlowError(
-                f"No platform OAuth app configured for server {server_url}"
+                "This connector uses a Tesslate-owned OAuth app which hasn't "
+                "been configured on this environment. Register an OAuth app "
+                f"with the provider ({host}), set the matching "
+                "MCP_OAUTH_APP_<PROVIDER>_CLIENT_ID and CLIENT_SECRET "
+                "environment variables, and restart the orchestrator. "
+                "Alternatively add the server as a custom connector with "
+                "your own client_id / client_secret."
             )
         client_info = _make_byo_client_info(
             client_id=platform_app["client_id"],

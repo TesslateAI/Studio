@@ -43,9 +43,27 @@ settings = get_settings()
 def _build_config_response(
     config: UserMcpConfig,
     agent: MarketplaceAgent | None = None,
+    *,
+    assigned_agent_ids: list[UUID] | None = None,
 ) -> McpConfigResponse:
-    """Build a McpConfigResponse from a UserMcpConfig row."""
+    """Build a McpConfigResponse from a UserMcpConfig row.
+
+    ``assigned_agent_ids`` is optional — bulk callers (the list endpoint)
+    pre-fetch the assignments in one query and pass them in here; one-off
+    callers that don't care about assignment state pass nothing.
+    """
     agent_config = (agent.config or {}) if agent else {}
+    is_oauth = agent_config.get("auth_type") == "oauth"
+
+    # is_connected: real credential availability, not the row's enabled flag.
+    # OAuth → tokens persisted on the paired McpOAuthConnection.
+    # Static  → encrypted credentials present on the row.
+    if is_oauth:
+        oauth_row = getattr(config, "oauth_connection", None)
+        is_connected = bool(oauth_row and getattr(oauth_row, "tokens_encrypted", ""))
+    else:
+        is_connected = bool(config.credentials)
+
     return McpConfigResponse(
         id=config.id,
         marketplace_agent_id=config.marketplace_agent_id,
@@ -56,8 +74,10 @@ def _build_config_response(
         env_vars=agent_config.get("env_vars"),
         scope_level=config.scope_level,
         project_id=config.project_id,
-        is_oauth=agent_config.get("auth_type") == "oauth",
+        is_oauth=is_oauth,
+        is_connected=is_connected,
         disabled_tools=config.disabled_tools,
+        assigned_agent_ids=assigned_agent_ids or [],
         icon=agent.icon if agent else None,
         icon_url=agent.avatar_url if agent else None,
         created_at=config.created_at,
@@ -142,33 +162,64 @@ async def _invalidate_mcp_cache(user_id: UUID, user_mcp_config_id: UUID) -> None
 async def _discover_server(
     agent: MarketplaceAgent,
     credentials: dict,
+    *,
+    user_mcp_config_id: UUID | None = None,
+    db: AsyncSession | None = None,
 ) -> McpDiscoverResponse:
-    """Connect to an MCP server and discover capabilities."""
+    """Connect to an MCP server and discover capabilities.
+
+    OAuth connectors require the install row id and an active DB session so
+    :func:`connect_mcp` can locate the stored OAuth tokens via
+    :class:`PostgresTokenStorage`. Static-auth connectors ignore both args.
+    """
     server_config = agent.config or {}
-    async with connect_mcp(server_config, credentials) as session:
-        tools_result = await session.list_tools()
-        resources_result = await session.list_resources()
-        prompts_result = await session.list_prompts()
-        resource_templates_result = await session.list_resource_templates()
+    async with connect_mcp(
+        server_config,
+        credentials,
+        user_mcp_config_id=user_mcp_config_id,
+        db=db,
+    ) as session:
+        # Each capability is optional per the MCP spec — Linear, for example,
+        # exposes tools but not resources or prompts. Wrap each call so a
+        # "method not supported" or schema-mismatch error on one capability
+        # doesn't poison the whole discover (which used to surface as
+        # "unhandled errors in a TaskGroup" → 502).
+        async def _safe_list(label: str, coro):
+            try:
+                return await coro
+            except Exception as exc:
+                logger.debug("MCP %s on %s skipped: %s", label, agent.slug, exc)
+                return None
+
+        tools_result = await _safe_list("list_tools", session.list_tools())
+        resources_result = await _safe_list("list_resources", session.list_resources())
+        prompts_result = await _safe_list("list_prompts", session.list_prompts())
+        resource_templates_result = await _safe_list(
+            "list_resource_templates", session.list_resource_templates()
+        )
 
         tools = [
             {"name": t.name, "description": t.description, "inputSchema": t.inputSchema}
-            for t in (tools_result.tools if tools_result.tools else [])
+            for t in (
+                getattr(tools_result, "tools", None) or []
+            )
         ]
         resources = [
             {"uri": str(r.uri), "name": r.name, "description": r.description}
-            for r in (resources_result.resources if resources_result.resources else [])
+            for r in (
+                getattr(resources_result, "resources", None) or []
+            )
         ]
         prompts = [
             {"name": p.name, "description": p.description}
-            for p in (prompts_result.prompts if prompts_result.prompts else [])
+            for p in (
+                getattr(prompts_result, "prompts", None) or []
+            )
         ]
         resource_templates = [
             {"uriTemplate": str(rt.uriTemplate), "name": rt.name, "description": rt.description}
             for rt in (
-                resource_templates_result.resourceTemplates
-                if resource_templates_result.resourceTemplates
-                else []
+                getattr(resource_templates_result, "resourceTemplates", None) or []
             )
         ]
 
@@ -300,17 +351,32 @@ async def install_mcp_server(
     await db.commit()
     await db.refresh(config)
 
-    # 7. Test connection (non-fatal).
-    try:
-        creds = body.credentials or {}
-        await _discover_server(agent, creds)
-        logger.info("MCP server %s connection verified for user %s", agent.slug, user.id)
-    except Exception as e:
-        logger.warning(
-            "MCP server %s connection test failed (non-fatal): %s",
-            agent.slug,
-            str(e),
-        )
+    # 7. Test connection (non-fatal). For OAuth connectors we skip this —
+    # the row is created without tokens (the user authorizes later from
+    # Library → Connectors) so a connect attempt would always raise
+    # ReauthRequired and pollute logs.
+    if (agent.config or {}).get("auth_type") != "oauth":
+        try:
+            creds = body.credentials or {}
+            await _discover_server(
+                agent,
+                creds,
+                user_mcp_config_id=config.id,
+                db=db,
+            )
+            logger.info("MCP server %s connection verified for user %s", agent.slug, user.id)
+        except Exception as e:
+            logger.warning(
+                "MCP server %s connection test failed (non-fatal): %s",
+                agent.slug,
+                str(e),
+            )
+
+    # Refresh the oauth_connection relationship before building the response.
+    # _build_config_response reads config.oauth_connection.tokens_encrypted to
+    # populate is_connected; without this refresh the lazy-load tries to issue
+    # async IO outside a greenlet → MissingGreenlet.
+    await db.refresh(config, ["oauth_connection"])
 
     return _build_config_response(config, agent)
 
@@ -342,8 +408,13 @@ async def list_installed_mcp_servers(
     else:
         ownership_filter = UserMcpConfig.user_id == user.id
 
+    from sqlalchemy.orm import selectinload as _selectin
+
     result = await db.execute(
         select(UserMcpConfig, MarketplaceAgent)
+        # Eager-load oauth_connection so _build_config_response can read
+        # tokens_encrypted without triggering async lazy-load (MissingGreenlet).
+        .options(_selectin(UserMcpConfig.oauth_connection))
         .outerjoin(MarketplaceAgent, UserMcpConfig.marketplace_agent_id == MarketplaceAgent.id)
         .where(
             ownership_filter,
@@ -352,7 +423,28 @@ async def list_installed_mcp_servers(
         .order_by(UserMcpConfig.created_at.desc())
     )
     rows = result.all()
-    return [_build_config_response(config, agent) for config, agent in rows]
+
+    # Bulk-fetch agent assignments for every config in one query so the
+    # Library card's "Add to Agent" button can render its count without a
+    # per-card round-trip (otherwise the state vanishes on refresh until
+    # the user opens each dropdown).
+    config_ids = [c.id for c, _ in rows]
+    assignments_by_config: dict[UUID, list[UUID]] = {cid: [] for cid in config_ids}
+    if config_ids:
+        assign_rows = await db.execute(
+            select(AgentMcpAssignment.mcp_config_id, AgentMcpAssignment.agent_id).where(
+                AgentMcpAssignment.mcp_config_id.in_(config_ids),
+                AgentMcpAssignment.user_id == user.id,
+                AgentMcpAssignment.enabled.is_(True),
+            )
+        )
+        for cfg_id, agent_id in assign_rows.fetchall():
+            assignments_by_config.setdefault(cfg_id, []).append(agent_id)
+
+    return [
+        _build_config_response(config, agent, assigned_agent_ids=assignments_by_config.get(config.id, []))
+        for config, agent in rows
+    ]
 
 
 @router.get("/installed/{config_id}", response_model=McpConfigResponse)
@@ -450,6 +542,8 @@ async def discover_mcp_server(
     db: AsyncSession = Depends(get_db),
 ):
     """Full re-discovery of an MCP server's capabilities (invalidates cache)."""
+    from ..services.mcp.oauth_flow import ReauthRequired
+
     config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
     agent = await _get_agent_for_config(config.marketplace_agent_id, db)
 
@@ -466,7 +560,23 @@ async def discover_mcp_server(
             ) from None
 
     try:
-        return await _discover_server(agent, credentials)
+        return await _discover_server(
+            agent,
+            credentials,
+            user_mcp_config_id=config.id,
+            db=db,
+        )
+    except ReauthRequired as e:
+        # OAuth connector that hasn't completed the authorize flow (or has
+        # an expired/revoked refresh token). Surface a 409 so the UI can
+        # render a "connect first" prompt instead of a generic 502.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Connector is not connected yet — complete the OAuth flow "
+                "from Library → Connectors first."
+            ),
+        ) from e
     except Exception as e:
         logger.error("MCP discover failed for config %s: %s", config_id, str(e))
         raise HTTPException(
@@ -478,6 +588,30 @@ async def discover_mcp_server(
 # ---------------------------------------------------------------------------
 # Agent-level MCP server assignment
 # ---------------------------------------------------------------------------
+
+
+@router.get("/installed/{config_id}/agents", response_model=list[UUID])
+async def list_connector_agents(
+    config_id: UUID,
+    user=Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the agent ids this connector is currently assigned to.
+
+    Used by the Library 'Add to Agent' dropdown to render checkmarks next to
+    agents the connector already serves so users can toggle multiple
+    assignments in one open.
+    """
+    # Verify ownership of the connector config first.
+    await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
+    result = await db.execute(
+        select(AgentMcpAssignment.agent_id).where(
+            AgentMcpAssignment.mcp_config_id == config_id,
+            AgentMcpAssignment.user_id == user.id,
+            AgentMcpAssignment.enabled.is_(True),
+        )
+    )
+    return [row[0] for row in result.fetchall()]
 
 
 @router.post("/installed/{config_id}/assign/{agent_id}", response_model=AgentMcpAssignmentResponse)
@@ -845,6 +979,37 @@ async def remove_project_override(
     await _invalidate_mcp_cache(user.id, config.id)
 
 
+@router.post("/installed/{config_id}/disconnect", status_code=204)
+async def disconnect_mcp_config(
+    config_id: UUID,
+    user=Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sign out of an OAuth connector — drop the stored tokens/client_info.
+
+    Unlike Uninstall, this keeps the ``UserMcpConfig`` row (and any per-tool
+    permissions / agent assignments) so the user can click Connect/Reconnect
+    later without re-attaching it to each agent. For static-auth connectors
+    we clear the encrypted credentials instead.
+    """
+    from ..models import McpOAuthConnection as _McpOAuthConnection
+
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
+
+    # Drop the OAuth row if there is one. CASCADE on user_mcp_config_id
+    # would handle this on uninstall, but we want the config row to stay.
+    await db.execute(
+        _McpOAuthConnection.__table__.delete().where(
+            _McpOAuthConnection.user_mcp_config_id == config.id
+        )
+    )
+    # For static-auth connectors, wipe the encrypted env-var blob too so
+    # the card flips to "Not connected" uniformly.
+    config.credentials = None
+    await db.commit()
+    await _invalidate_mcp_cache(user.id, config.id)
+
+
 @router.post("/installed/{config_id}/reconnect", response_model=ReconnectResponse)
 async def reconnect_mcp_config(
     config_id: UUID,
@@ -862,10 +1027,15 @@ async def reconnect_mcp_config(
     config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
 
     # Pull provider metadata from the original install.
+    endpoint_overrides: dict | None = None
     if config.marketplace_agent_id:
         agent = await _get_agent_for_config(config.marketplace_agent_id, db)
-        server_url = (agent.config or {}).get("url")
-        registration_method = (agent.config or {}).get("registration_method", "dcr")
+        agent_cfg = agent.config or {}
+        server_url = agent_cfg.get("url")
+        registration_method = agent_cfg.get("registration_method", "dcr")
+        # Providers that don't serve RFC 8414 discovery (e.g. GitHub's
+        # platform_app) can ship hardcoded endpoints in their catalog config.
+        endpoint_overrides = agent_cfg.get("oauth_endpoints")
     else:
         # Custom connector — get server_url from paired oauth_connection.
         oauth_row = config.oauth_connection
@@ -897,6 +1067,7 @@ async def reconnect_mcp_config(
             scope_level=config.scope_level,
             team_id=config.team_id,
             project_id=config.project_id,
+            endpoint_overrides=endpoint_overrides,
         )
     except OAuthFlowError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

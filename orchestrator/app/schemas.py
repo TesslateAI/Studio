@@ -1523,7 +1523,19 @@ class McpConfigResponse(BaseModel):
     scope_level: str | None = None
     project_id: UUID | None = None
     is_oauth: bool = False
+    # True when the connector actually has working credentials — OAuth tokens
+    # for OAuth servers, encrypted env vars for static-auth ones. Distinct
+    # from is_active (the row enabled flag): a row can be active but
+    # not-yet-connected (e.g. install completed but OAuth popup never
+    # finished). The Library card uses this for the green/grey dot and to
+    # decide whether to show "Connect" vs "Reconnect".
+    is_connected: bool = False
     disabled_tools: list[str] | None = None
+    # Agent ids this connector is currently assigned to (UUIDs serialized as
+    # strings). Populated by GET /api/mcp/installed so the Library card's
+    # "Add to Agent" button can render its count without a per-card extra
+    # round-trip.
+    assigned_agent_ids: list[UUID] = Field(default_factory=list)
     # Provider branding so the Library card can render the real logo
     # instead of a generic plug.
     icon: str | None = None  # Phosphor icon name (fallback when avatar_url missing)
