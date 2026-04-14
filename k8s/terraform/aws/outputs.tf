@@ -322,6 +322,6 @@ output "domain_configuration" {
     main_domain     = var.domain_name
     wildcard_domain = "*.${var.domain_name}"
     app_url         = "https://${var.domain_name}"
-    project_urls    = "https://<project>.<container>.${var.domain_name}"
+    project_urls    = "https://<project>-<container>.${var.domain_name}"
   }
 }
