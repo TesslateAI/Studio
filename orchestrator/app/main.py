@@ -31,6 +31,7 @@ from .routers import (
     deployment_oauth,
     deployment_targets,
     deployments,
+    desktop_pair,
     external_agent,
     feedback,
     gateway,
@@ -1131,6 +1132,8 @@ app.include_router(deployment_targets.router)  # Deployment target nodes in Reac
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)
+app.include_router(desktop_pair.session_router)  # /api/desktop - Session-auth pairing mint
+app.include_router(desktop_pair.public_router)   # /api/v1/desktop - tsk-auth pairing revoke
 from .routers.public import public_routers  # noqa: E402
 
 for _public_router in public_routers:

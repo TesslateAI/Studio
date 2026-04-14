@@ -1810,6 +1810,34 @@ class ExternalAPIKey(Base):
     user = relationship("User")
 
 
+class DeviceRegistration(Base):
+    """Desktop/device pairings backing a minted `ExternalAPIKey`."""
+
+    __tablename__ = "device_registrations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    api_key_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("external_api_keys.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    device_name = Column(String(200), nullable=False)
+    device_platform = Column(String(40), nullable=True)  # darwin/linux/win32
+    device_fingerprint = Column(String(128), nullable=True, index=True)
+    app_version = Column(String(40), nullable=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")
+    api_key = relationship("ExternalAPIKey")
+
+
 # ============================================================================
 # Channel & MCP System Models
 # ============================================================================

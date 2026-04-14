@@ -119,6 +119,14 @@ class Permission(StrEnum):
     MODELS_PROXY = "models.proxy"
     USAGE_READ = "usage.read"
 
+    # Desktop / External (public-api extensions)
+    DESKTOP_PAIR = "desktop.pair"
+    AGENTS_READ = "agents.read"
+    AGENTS_HANDOFF = "agents.handoff"
+    PROJECTS_SYNC = "projects.sync"
+    K8S_PROJECTS = "k8s.projects"
+    MARKETPLACE_INSTALL = "marketplace.install"
+
 
 # ---------------------------------------------------------------------------
 # Role → Permission mapping
@@ -166,6 +174,7 @@ _VIEWER_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.MARKETPLACE_READ,
         Permission.MODELS_PROXY,
         Permission.USAGE_READ,
+        Permission.AGENTS_READ,
     }
 )
 
@@ -256,6 +265,13 @@ SCOPE_LABELS: dict[str, dict[str, str]] = {
     Permission.MARKETPLACE_READ: {"label": "Marketplace — Read catalog", "category": "Marketplace"},
     Permission.MODELS_PROXY: {"label": "Models — Proxy completions", "category": "Models"},
     Permission.USAGE_READ: {"label": "Usage — View credits & usage", "category": "Usage"},
+    # Desktop / external extensions
+    Permission.DESKTOP_PAIR: {"label": "Desktop — Pair device", "category": "Desktop"},
+    Permission.AGENTS_READ: {"label": "Agents — List & inspect tasks", "category": "Agents"},
+    Permission.AGENTS_HANDOFF: {"label": "Agents — Handoff sessions", "category": "Agents"},
+    Permission.PROJECTS_SYNC: {"label": "Projects — Sync push/pull", "category": "Projects"},
+    Permission.K8S_PROJECTS: {"label": "K8s — Manage cloud projects", "category": "Kubernetes"},
+    Permission.MARKETPLACE_INSTALL: {"label": "Marketplace — Install items", "category": "Marketplace"},
 }
 
 
