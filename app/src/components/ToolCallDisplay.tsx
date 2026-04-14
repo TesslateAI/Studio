@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { type ToolCallDetail } from '../types/agent';
 import { AnsiLine } from '../lib/ansi';
+import { renderCitations } from './chat/CitationCard';
+import { ReauthBanner } from './chat/ReauthBanner';
 
 interface ToolCallDisplayProps {
   toolCall: ToolCallDetail;
@@ -82,6 +84,20 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   const { name, parameters, result } = toolCall;
   const hasResult = result !== undefined && result !== null;
   const success = result?.success ?? false;
+
+  // MCP OAuth extras forwarded by services/mcp/bridge.py — look for them at
+  // either the outer or nested level because the agent runner sometimes wraps
+  // output into `result.result` and sometimes leaves it flat.
+  const nested = (result?.result ?? {}) as Record<string, unknown>;
+  const mcpReauth =
+    (result as Record<string, unknown> | undefined)?._mcp_reauth_required ||
+    (nested as Record<string, unknown>)?._mcp_reauth_required;
+  const mcpStructured = (
+    ((result as Record<string, unknown> | undefined)?._mcp_structured as Record<string, unknown>) ||
+    (nested._mcp_structured as Record<string, unknown>)
+  ) as Record<string, unknown> | undefined;
+  const citation = mcpStructured?.citation as unknown;
+  const reauthInfo = (result || nested) as Record<string, unknown>;
 
   // Extract the main parameter to display (command, file_path, etc.)
   const mainParam =
@@ -218,8 +234,29 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         </details>
       )}
 
+      {/* MCP OAuth: ReauthBanner — tool hit a dead refresh token */}
+      {mcpReauth ? (
+        <div className="border-t border-current/10 px-3 py-2">
+          <ReauthBanner
+            info={{
+              serverSlug: reauthInfo.server_slug as string | null | undefined,
+              serverUrl: reauthInfo.server_url as string | null | undefined,
+              configId: reauthInfo.config_id as string | null | undefined,
+              message: reauthInfo.message as string | null | undefined,
+            }}
+          />
+        </div>
+      ) : null}
+
+      {/* MCP OAuth: Citation cards — from _mcp_structured.citation */}
+      {citation ? (
+        <div className="border-t border-current/10 px-3 py-2 space-y-2">
+          {renderCitations(citation)}
+        </div>
+      ) : null}
+
       {/* Primary Message */}
-      {output && (
+      {output && !mcpReauth && (
         <div className="border-t border-current/10">
           <div className="px-3 py-2 bg-[var(--text)]/5">
             <div

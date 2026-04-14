@@ -248,6 +248,122 @@ MCP_SERVERS = [
         "source_type": "open",
         "git_repo_url": "https://github.com/modelcontextprotocol/servers",
     },
+    # =========================================================================
+    # OAuth-capable remote MCP servers (issue #287) — no user credentials
+    # stored; tokens flow through services/mcp/oauth_flow + oauth_storage.
+    # =========================================================================
+    {
+        "name": "Linear",
+        "slug": "mcp-linear",
+        "description": "Search issues, create tickets, update status across your Linear workspace.",
+        "long_description": (
+            "Official Linear MCP server. Connect once with OAuth to let Tesslate agents "
+            "search and manage your Linear issues, projects, and cycles."
+        ),
+        "item_type": "mcp_server",
+        "category": "productivity",
+        "config": {
+            "transport": "streamable-http",
+            "url": "https://mcp.linear.app/mcp",
+            "auth_type": "oauth",
+            "registration_method": "dcr",
+            "env_vars": [],
+            "capabilities": ["tools", "resources"],
+        },
+        "features": ["list-issues", "create-issue", "update-status", "search"],
+        "tags": ["linear", "issues", "project-management", "oauth"],
+        "is_active": True,
+        "is_featured": True,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "Kanban",
+        "avatar_url": "https://linear.app/favicon.ico",
+        "source_type": "closed",
+    },
+    {
+        "name": "GitHub",
+        "slug": "mcp-github-oauth",
+        "description": "Read repos, manage issues and PRs, search code across your GitHub account.",
+        "long_description": (
+            "GitHub Copilot MCP server over OAuth. Uses the Tesslate-owned platform app "
+            "for registration — users just click Connect and approve scopes."
+        ),
+        "item_type": "mcp_server",
+        "category": "developer-tools",
+        "config": {
+            "transport": "streamable-http",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "auth_type": "oauth",
+            "registration_method": "platform_app",
+            "scopes": ["repo", "read:user", "read:org"],
+            "env_vars": [],
+            "capabilities": ["tools"],
+        },
+        "features": ["repo-read", "issues", "pull-requests", "code-search"],
+        "tags": ["github", "git", "oauth", "developer-tools"],
+        "is_active": True,
+        "is_featured": True,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "GithubLogo",
+        "avatar_url": "https://github.githubassets.com/favicons/favicon.svg",
+        "source_type": "closed",
+    },
+    {
+        "name": "Notion",
+        "slug": "mcp-notion",
+        "description": "Search pages, create documents, query databases across your Notion workspace.",
+        "long_description": (
+            "Official Notion MCP server. OAuth-only. DCR means no client registration "
+            "paperwork — users just connect and approve."
+        ),
+        "item_type": "mcp_server",
+        "category": "productivity",
+        "config": {
+            "transport": "streamable-http",
+            "url": "https://mcp.notion.com/mcp",
+            "auth_type": "oauth",
+            "registration_method": "dcr",
+            "env_vars": [],
+            "capabilities": ["tools", "resources"],
+        },
+        "features": ["search-pages", "create-document", "query-database"],
+        "tags": ["notion", "docs", "knowledge-base", "oauth"],
+        "is_active": True,
+        "is_featured": True,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "Notebook",
+        "avatar_url": "https://www.notion.so/images/favicon.ico",
+        "source_type": "closed",
+    },
+    {
+        "name": "Atlassian",
+        "slug": "mcp-atlassian",
+        "description": "Search and manage Jira issues and Confluence pages.",
+        "long_description": (
+            "Atlassian MCP server covering Jira + Confluence. OAuth 2.1 via DCR."
+        ),
+        "item_type": "mcp_server",
+        "category": "productivity",
+        "config": {
+            "transport": "streamable-http",
+            "url": "https://mcp.atlassian.com/v1/sse",
+            "auth_type": "oauth",
+            "registration_method": "dcr",
+            "env_vars": [],
+            "capabilities": ["tools"],
+        },
+        "features": ["jira-search", "jira-create", "confluence-search"],
+        "tags": ["atlassian", "jira", "confluence", "oauth"],
+        "is_active": True,
+        "is_featured": False,
+        "pricing_type": "free",
+        "price": 0,
+        "icon": "Stack",
+        "avatar_url": "https://www.atlassian.com/favicon.ico",
+        "source_type": "closed",
+    },
 ]
 
 
