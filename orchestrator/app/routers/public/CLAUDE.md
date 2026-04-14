@@ -41,7 +41,8 @@ External API surface authenticated via `tsk_` `ExternalAPIKey` tokens. Consumed 
 
 - Relative imports go up **three** levels from this package: `from ...models import ...`, not `from ..`. Easy to miss after moving a file from the flat `routers/` layout.
 - Response schemas for public endpoints should be stable — external clients pin to them. Prefer adding new fields over changing existing ones; deprecate before removing.
-- Rate limiting and audit logging are not yet centralized. When `_deps.py` is introduced, existing endpoints should migrate to it.
+- Rate limiting and audit logging live in `_deps.py`. Use `scoped(Permission.X)` as the primary dep, and call `audit_write(...)` from handlers that mutate state.
+- **Pydantic schemas stay inline in the router file** for now. We cannot create a top-level `schemas/` package because `orchestrator/app/schemas.py` already exists as a module. If a schema is shared across routers, put it in `schemas_public.py` (flat, matches existing `schemas_auth.py` / `schemas_team.py` convention).
 
 ## Related contexts
 
