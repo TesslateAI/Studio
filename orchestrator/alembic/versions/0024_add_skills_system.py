@@ -5,8 +5,8 @@ Revises: 0023
 Create Date: 2026-03-12
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0024_add_skills_system"

@@ -1,36 +1,43 @@
 import json
+
 import pytest
 
 pytestmark = pytest.mark.unit
 from app.services.base_config_parser import (
-    parse_tesslate_config,
-    write_tesslate_config,
-    read_tesslate_config,
-    serialize_config_to_json,
-    TesslateProjectConfig,
     AppConfig,
-    InfraConfig,
     ConnectionConfig,
     DeploymentConfig,
+    InfraConfig,
     PreviewConfig,
+    TesslateProjectConfig,
+    parse_tesslate_config,
+    read_tesslate_config,
+    serialize_config_to_json,
+    write_tesslate_config,
 )
 
 
 class TestParseNewConfigFields:
     def test_old_config_backwards_compatible(self):
         """Old configs with just apps/infrastructure/primaryApp still parse."""
-        config = parse_tesslate_config('{"apps": {"fe": {"start": "npm run dev"}}, "infrastructure": {}, "primaryApp": "fe"}')
+        config = parse_tesslate_config(
+            '{"apps": {"fe": {"start": "npm run dev"}}, "infrastructure": {}, "primaryApp": "fe"}'
+        )
         assert config.apps["fe"].start == "npm run dev"
         assert config.connections == []
         assert config.deployments == {}
         assert config.previews == {}
 
     def test_exports_on_apps(self):
-        config = parse_tesslate_config('{"apps": {"api": {"start": "npm start", "exports": {"API_URL": "http://${HOST}:${PORT}"}}}, "primaryApp": "api"}')
+        config = parse_tesslate_config(
+            '{"apps": {"api": {"start": "npm start", "exports": {"API_URL": "http://${HOST}:${PORT}"}}}, "primaryApp": "api"}'
+        )
         assert config.apps["api"].exports == {"API_URL": "http://${HOST}:${PORT}"}
 
     def test_exports_on_infrastructure(self):
-        config = parse_tesslate_config('{"apps": {}, "infrastructure": {"pg": {"image": "postgres:16", "port": 5432, "env": {"PG_USER": "x"}, "exports": {"DB_URL": "pg://${HOST}"}}}, "primaryApp": ""}')
+        config = parse_tesslate_config(
+            '{"apps": {}, "infrastructure": {"pg": {"image": "postgres:16", "port": 5432, "env": {"PG_USER": "x"}, "exports": {"DB_URL": "pg://${HOST}"}}}, "primaryApp": ""}'
+        )
         assert config.infrastructure["pg"].exports == {"DB_URL": "pg://${HOST}"}
         assert config.infrastructure["pg"].env == {"PG_USER": "x"}
 
@@ -78,33 +85,39 @@ class TestParseNewConfigFields:
         assert config.previews == {}
 
     def test_multiple_connections(self):
-        raw = json.dumps({
-            "apps": {"api": {"start": "npm start"}},
-            "infrastructure": {
-                "pg": {"image": "pg", "port": 5432},
-                "redis": {"image": "redis", "port": 6379},
-            },
-            "connections": [
-                {"from": "api", "to": "pg"},
-                {"from": "api", "to": "redis"},
-            ],
-            "primaryApp": "api",
-        })
+        raw = json.dumps(
+            {
+                "apps": {"api": {"start": "npm start"}},
+                "infrastructure": {
+                    "pg": {"image": "pg", "port": 5432},
+                    "redis": {"image": "redis", "port": 6379},
+                },
+                "connections": [
+                    {"from": "api", "to": "pg"},
+                    {"from": "api", "to": "redis"},
+                ],
+                "primaryApp": "api",
+            }
+        )
         config = parse_tesslate_config(raw)
         assert len(config.connections) == 2
         targets = {c.to_node for c in config.connections}
         assert targets == {"pg", "redis"}
 
     def test_app_without_exports_defaults_empty(self):
-        config = parse_tesslate_config('{"apps": {"fe": {"start": "npm start"}}, "primaryApp": "fe"}')
+        config = parse_tesslate_config(
+            '{"apps": {"fe": {"start": "npm start"}}, "primaryApp": "fe"}'
+        )
         assert config.apps["fe"].exports == {}
 
     def test_deployment_with_no_env(self):
-        raw = json.dumps({
-            "apps": {"fe": {"start": "npm start"}},
-            "deployments": {"prod": {"provider": "netlify", "targets": ["fe"]}},
-            "primaryApp": "fe",
-        })
+        raw = json.dumps(
+            {
+                "apps": {"fe": {"start": "npm start"}},
+                "deployments": {"prod": {"provider": "netlify", "targets": ["fe"]}},
+                "primaryApp": "fe",
+            }
+        )
         config = parse_tesslate_config(raw)
         assert config.deployments["prod"].env == {}
 
@@ -114,10 +127,27 @@ class TestWriteNewConfigFields:
         import tempfile
 
         config = TesslateProjectConfig()
-        config.apps["api"] = AppConfig(directory="server", port=8001, start="npm start", env={"KEY": "val"}, exports={"API_URL": "http://${HOST}:${PORT}"}, x=100, y=200)
-        config.infrastructure["pg"] = InfraConfig(image="postgres:16", port=5432, env={"PG_USER": "x"}, exports={"DB": "pg://${HOST}"}, x=300, y=400)
+        config.apps["api"] = AppConfig(
+            directory="server",
+            port=8001,
+            start="npm start",
+            env={"KEY": "val"},
+            exports={"API_URL": "http://${HOST}:${PORT}"},
+            x=100,
+            y=200,
+        )
+        config.infrastructure["pg"] = InfraConfig(
+            image="postgres:16",
+            port=5432,
+            env={"PG_USER": "x"},
+            exports={"DB": "pg://${HOST}"},
+            x=300,
+            y=400,
+        )
         config.connections = [ConnectionConfig(from_node="api", to_node="pg")]
-        config.deployments["prod"] = DeploymentConfig(provider="vercel", targets=["api"], env={"NODE_ENV": "production"}, x=500, y=-100)
+        config.deployments["prod"] = DeploymentConfig(
+            provider="vercel", targets=["api"], env={"NODE_ENV": "production"}, x=500, y=-100
+        )
         config.previews["p1"] = PreviewConfig(target="api", x=-100, y=50)
         config.primaryApp = "api"
 

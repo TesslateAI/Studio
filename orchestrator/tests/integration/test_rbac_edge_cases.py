@@ -19,7 +19,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
@@ -37,9 +36,7 @@ def _create_team_and_user_b(api_client_session, admin_client, team_prefix, role=
     assert resp.status_code in (200, 201), f"Team creation failed: {resp.text}"
 
     # Create invite link for the given role
-    link_resp = client_a.post(
-        f"/api/teams/{slug}/members/link", json={"role": role}
-    )
+    link_resp = client_a.post(f"/api/teams/{slug}/members/link", json={"role": role})
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     invite_token = link_resp.json()["token"]
 
@@ -151,12 +148,8 @@ def test_admin_can_leave_after_promoting_another(authenticated_client, api_clien
     user_b_id = user_b_member[0]["user_id"]
 
     # Promote User B to admin
-    promote_resp = client_a.patch(
-        f"/api/teams/{slug}/members/{user_b_id}", json={"role": "admin"}
-    )
-    assert promote_resp.status_code == 200, (
-        f"Promote failed: {promote_resp.text}"
-    )
+    promote_resp = client_a.patch(f"/api/teams/{slug}/members/{user_b_id}", json={"role": "admin"})
+    assert promote_resp.status_code == 200, f"Promote failed: {promote_resp.text}"
 
     # Now original admin should be able to leave
     leave_resp = client_a.post(f"/api/teams/{slug}/leave")
@@ -178,9 +171,7 @@ def test_invite_existing_member_rejected(authenticated_client, api_client_sessio
     client_a.post("/api/teams", json={"name": "Dup Invite Team", "slug": slug})
 
     # Create invite link
-    link_resp = client_a.post(
-        f"/api/teams/{slug}/members/link", json={"role": "editor"}
-    )
+    link_resp = client_a.post(f"/api/teams/{slug}/members/link", json={"role": "editor"})
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     invite_token = link_resp.json()["token"]
 
@@ -332,9 +323,7 @@ def test_removed_user_loses_project_access(
     user_b_id = [m for m in members if m["role"] == "editor"][0]["user_id"]
 
     remove_resp = client_a.delete(f"/api/teams/{slug}/members/{user_b_id}")
-    assert remove_resp.status_code in (200, 204), (
-        f"Remove member failed: {remove_resp.text}"
-    )
+    assert remove_resp.status_code in (200, 204), f"Remove member failed: {remove_resp.text}"
 
     # User B tries to access the project again — should be denied
     client_a.headers["Authorization"] = f"Bearer {token_b}"

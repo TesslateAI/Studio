@@ -18,7 +18,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
@@ -89,9 +88,7 @@ def test_audit_log_records_member_joined(authenticated_client, api_client_sessio
     client_a, _ = authenticated_client
     admin_token = api_client_session.headers.get("Authorization")
 
-    _, _, slug, _ = _create_team_and_user_b(
-        api_client_session, authenticated_client, "al-joined"
-    )
+    _, _, slug, _ = _create_team_and_user_b(api_client_session, authenticated_client, "al-joined")
 
     # Restore admin auth to read audit log (helper left User B's token on the shared session)
     api_client_session.headers["Authorization"] = admin_token
@@ -198,17 +195,13 @@ def test_audit_log_filter_by_resource_type(authenticated_client, api_client_sess
     client_a, _ = authenticated_client
     admin_token = api_client_session.headers.get("Authorization")
 
-    _, _, slug, _ = _create_team_and_user_b(
-        api_client_session, authenticated_client, "al-filt-rt"
-    )
+    _, _, slug, _ = _create_team_and_user_b(api_client_session, authenticated_client, "al-filt-rt")
 
     # Restore admin auth (helper left User B's token on the shared session)
     api_client_session.headers["Authorization"] = admin_token
 
     # Filter for team resource type
-    resp_team = client_a.get(
-        f"/api/teams/{slug}/audit-log", params={"resource_type": "team"}
-    )
+    resp_team = client_a.get(f"/api/teams/{slug}/audit-log", params={"resource_type": "team"})
     assert resp_team.status_code == 200
     logs_team = resp_team.json()
     for entry in logs_team:
@@ -307,9 +300,7 @@ def test_audit_log_export_admin_only(authenticated_client, api_client_session):
 
     # Viewer should be denied
     api_client_session.headers["Authorization"] = f"Bearer {token_c}"
-    viewer_resp = api_client_session.post(
-        f"/api/teams/{slug}/audit-log/export", json=export_body
-    )
+    viewer_resp = api_client_session.post(f"/api/teams/{slug}/audit-log/export", json=export_body)
     assert viewer_resp.status_code == 403, (
         f"Viewer export should be 403, got {viewer_resp.status_code}: {viewer_resp.text}"
     )

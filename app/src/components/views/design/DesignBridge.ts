@@ -35,6 +35,8 @@ export interface ElementData {
   };
   /** Runtime ID assigned by bridge (data-did attribute) */
   designId: string;
+  /** Stable source-file OID from `data-oid`, if the project has been indexed. */
+  oid: string | null;
 }
 
 // ── Message types from parent to iframe ─────────────────────────
@@ -302,7 +304,17 @@ export const BRIDGE_SCRIPT_CONTENT: string = [
 '      reactComponent: getReactComponentInfo(el),',
 '      framework: detectFramework(),',
 '      boxModel: extractBoxModel(computed),',
-'      designId: did',
+'      designId: did,',
+'      oid: (function() {',
+'        if (!el.getAttribute) return null;',
+'        var direct = el.getAttribute("data-oid");',
+'        if (direct) return direct;',
+'        if (el.closest) {',
+'          var anc = el.closest("[data-oid]");',
+'          return anc ? anc.getAttribute("data-oid") : null;',
+'        }',
+'        return null;',
+'      })()',
 '    };',
 '  }',
 '',
@@ -472,7 +484,8 @@ export const BRIDGE_SCRIPT_CONTENT: string = [
 '      showHighlight(r, true, data);',
 '      window.parent.postMessage({',
 '        type: "design:element-data",',
-'        data: data',
+'        data: data,',
+'        additive: !!(e.shiftKey || e.metaKey)',
 '      }, "*");',
 '',
 '      if (currentMode === "select" && data.reactComponent && data.reactComponent.sourceFile) {',

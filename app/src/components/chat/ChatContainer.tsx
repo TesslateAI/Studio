@@ -1829,7 +1829,7 @@ export function ChatContainer({
 
   // Get current session title for header
   const currentSessionTitle = useMemo(() => {
-    if (!currentChatId || sessions.length === 0) return 'Chat';
+    if (!currentChatId || sessions.length === 0) return 'Agents';
     const session = sessions.find((s) => s.id === currentChatId);
     return session?.title || 'Untitled';
   }, [currentChatId, sessions]);
@@ -1988,7 +1988,7 @@ export function ChatContainer({
             hover:scale-110
             ${isExpanded ? 'opacity-0 pointer-events-none scale-0' : 'opacity-100 scale-100'}
           `}
-            aria-label="Open chat"
+            aria-label="Open agents panel"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -2055,11 +2055,11 @@ export function ChatContainer({
         {/* Mobile header with close button - only shown when floating (not docked) */}
         {!isDocked && (
           <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-            <h3 className="text-xs font-semibold text-[var(--text)]">Chat</h3>
+            <h3 className="text-xs font-semibold text-[var(--text)]">Agents</h3>
             <button
               onClick={() => setIsExpanded(false)}
               className="btn btn-icon btn-sm"
-              aria-label="Close chat"
+              aria-label="Close agents panel"
             >
               <X size={16} />
             </button>
@@ -2073,7 +2073,7 @@ export function ChatContainer({
               ref={sessionsButtonRef}
               onClick={() => setShowSessionPopover((v) => !v)}
               className="relative flex items-center gap-1.5 rounded-full px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
-              aria-label="Chat sessions"
+              aria-label="Agent sessions"
             >
               <List size={16} />
               {sessions.length > 1 && (
@@ -2144,7 +2144,7 @@ export function ChatContainer({
             <button
               onClick={handleNewSession}
               className="btn btn-icon btn-sm"
-              aria-label="New chat session"
+              aria-label="New agent session"
             >
               <Plus size={14} />
             </button>

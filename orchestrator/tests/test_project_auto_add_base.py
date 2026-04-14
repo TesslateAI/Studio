@@ -6,7 +6,7 @@ with a base that is/isn't in their library.
 """
 
 import uuid
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 

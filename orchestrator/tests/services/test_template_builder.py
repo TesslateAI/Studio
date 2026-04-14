@@ -14,22 +14,19 @@ Tests cover:
 
 from __future__ import annotations
 
-import asyncio
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
 from app.models import MarketplaceBase, TemplateBuild
 from app.services.template_builder import (
-    CSI_PROVISIONER,
-    TemplateBuilderService,
     _PVC_BIND_POLL_INTERVAL,
     _PVC_BIND_TIMEOUT,
     _TEMPLATE_BUILD_USER_ID,
+    CSI_PROVISIONER,
+    TemplateBuilderService,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -119,8 +116,8 @@ class TestBuildTemplateHappyPath:
         with (
             patch(f"{_MOD}.get_settings", return_value=settings),
             patch(f"{_MOD}.get_k8s_client", return_value=k8s),
-            patch(f"{_MOD}.create_builder_network_policy") as mock_net,
-            patch(f"{_MOD}.create_template_builder_job") as mock_job,
+            patch(f"{_MOD}.create_builder_network_policy"),
+            patch(f"{_MOD}.create_template_builder_job"),
             patch(f"{_MOD}.NodeOpsClient", return_value=nodeops),
             patch(f"{_MOD}.asyncio.sleep", new_callable=AsyncMock),
             patch(f"{_MOD}.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread,
@@ -138,7 +135,7 @@ class TestBuildTemplateHappyPath:
             mock_to_thread.return_value = mock_pvc_obj
 
             svc = TemplateBuilderService()
-            build = await svc.build_template(base, db)
+            await svc.build_template(base, db)
 
         # Record added and committed
         db.add.assert_called_once()
@@ -267,7 +264,13 @@ class TestBuildTemplateHappyPath:
 
         # create_template_builder_job should have been called with git_branch="main"
         _, kwargs = mock_job.call_args
-        assert kwargs.get("git_branch", mock_job.call_args[0][3] if len(mock_job.call_args[0]) > 3 else None) == "main" or mock_job.call_args[1].get("git_branch") == "main"
+        assert (
+            kwargs.get(
+                "git_branch", mock_job.call_args[0][3] if len(mock_job.call_args[0]) > 3 else None
+            )
+            == "main"
+            or mock_job.call_args[1].get("git_branch") == "main"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -790,7 +793,7 @@ class TestGetRemoteHeadSha:
 
     async def test_returns_none_on_timeout(self):
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+        mock_proc.communicate = AsyncMock(side_effect=TimeoutError())
 
         with patch(f"{_MOD}.asyncio.create_subprocess_exec", return_value=mock_proc):
             result = await TemplateBuilderService._get_remote_head_sha(
@@ -841,9 +844,7 @@ class TestDeleteNamespaceBestEffort:
             side_effect=Exception("namespace already deleted"),
         ):
             # Should not raise
-            await TemplateBuilderService._delete_namespace_best_effort(
-                k8s, "tmpl-build-gone"
-            )
+            await TemplateBuilderService._delete_namespace_best_effort(k8s, "tmpl-build-gone")
 
 
 # ---------------------------------------------------------------------------
@@ -853,7 +854,7 @@ class TestDeleteNamespaceBestEffort:
 
 class TestConstants:
     def test_template_build_user_id_is_nil_uuid(self):
-        assert _TEMPLATE_BUILD_USER_ID == UUID("00000000-0000-0000-0000-000000000000")
+        assert UUID("00000000-0000-0000-0000-000000000000") == _TEMPLATE_BUILD_USER_ID
 
     def test_csi_provisioner_value(self):
         assert CSI_PROVISIONER == "btrfs.csi.tesslate.io"

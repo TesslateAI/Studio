@@ -3,9 +3,10 @@
 These tests use mock objects to simulate DB models without requiring a real database.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 pytestmark = pytest.mark.mocked
 
@@ -116,9 +117,9 @@ class TestBuildConfigFromDb:
         db.execute = AsyncMock(
             side_effect=[
                 _make_scalars_mock([backend]),  # containers
-                _make_scalars_mock([]),          # connections
-                _make_scalars_mock([]),          # deployment targets
-                _make_scalars_mock([]),          # previews
+                _make_scalars_mock([]),  # connections
+                _make_scalars_mock([]),  # deployment targets
+                _make_scalars_mock([]),  # previews
             ]
         )
 
@@ -194,7 +195,9 @@ class TestBuildConfigFromDb:
     async def test_connections_serialized(self):
         """ContainerConnection records become connections array with name references."""
         backend = _make_container(name="backend", container_type="base")
-        postgres = _make_container(name="postgres", container_type="service", service_slug="postgres")
+        postgres = _make_container(
+            name="postgres", container_type="service", service_slug="postgres"
+        )
 
         conn = _make_connection(
             source_container_id=backend.id,
@@ -357,7 +360,9 @@ class TestBuildConfigFromDb:
             config = await build_config_from_db(db, uuid4())
 
         assert config.apps["backend"].exports == {"API_URL": "http://${HOST}:${PORT}"}
-        assert config.infrastructure["postgres"].exports == {"DB_URL": "pg://${POSTGRES_USER}@${HOST}:${PORT}"}
+        assert config.infrastructure["postgres"].exports == {
+            "DB_URL": "pg://${POSTGRES_USER}@${HOST}:${PORT}"
+        }
 
     @pytest.mark.asyncio
     async def test_env_vars_decoded_from_base64(self):

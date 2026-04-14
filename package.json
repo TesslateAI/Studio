@@ -9,5 +9,8 @@
     "@commitlint/config-conventional": "^19.8.1",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.10"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
   }
 }

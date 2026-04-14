@@ -69,23 +69,25 @@ class MockFileSystem:
 @pytest.fixture
 def mock_fs():
     """Create a mock filesystem with some initial files."""
-    return MockFileSystem({
-        "src/App.css": "body {\n  background-color: white;\n  margin: 0;\n}\n",
-        "src/utils.ts": (
-            "export function formatDate(date: Date): string {\n"
-            "  return date.toLocaleDateString();\n"
-            "}\n"
-            "\n"
-            "export function formatCurrency(amount: number): string {\n"
-            "  return `$${amount.toFixed(2)}`;\n"
-            "}\n"
-            "\n"
-            "export function generateId(): string {\n"
-            "  return Math.random().toString(36).slice(2);\n"
-            "}\n"
-        ),
-        "backend/routes.py": "from fastapi import FastAPI\n\napp = FastAPI()\n\n# Routes\n",
-    })
+    return MockFileSystem(
+        {
+            "src/App.css": "body {\n  background-color: white;\n  margin: 0;\n}\n",
+            "src/utils.ts": (
+                "export function formatDate(date: Date): string {\n"
+                "  return date.toLocaleDateString();\n"
+                "}\n"
+                "\n"
+                "export function formatCurrency(amount: number): string {\n"
+                "  return `$${amount.toFixed(2)}`;\n"
+                "}\n"
+                "\n"
+                "export function generateId(): string {\n"
+                "  return Math.random().toString(36).slice(2);\n"
+                "}\n"
+            ),
+            "backend/routes.py": "from fastapi import FastAPI\n\napp = FastAPI()\n\n# Routes\n",
+        }
+    )
 
 
 class TestOracleScenarios:
@@ -101,7 +103,7 @@ class TestOracleScenarios:
         final_response = ""
 
         # Simulate agent loop: call model, handle tool calls, repeat
-        for turn_idx in range(len(scenario["turns"])):
+        for _turn_idx in range(len(scenario["turns"])):
             events = []
             async for event in adapter.chat_with_tools(messages=[], tools=[]):
                 events.append(event)
@@ -131,7 +133,7 @@ class TestOracleScenarios:
         tool_sequence = []
         final_response = ""
 
-        for turn_idx in range(len(scenario["turns"])):
+        for _turn_idx in range(len(scenario["turns"])):
             async for event in adapter.chat_with_tools(messages=[], tools=[]):
                 if event["type"] == "tool_calls_delta":
                     tc = event["tool_call"]["function"]
@@ -156,7 +158,7 @@ class TestOracleScenarios:
         tool_sequence = []
         final_response = ""
 
-        for turn_idx in range(len(scenario["turns"])):
+        for _turn_idx in range(len(scenario["turns"])):
             async for event in adapter.chat_with_tools(messages=[], tools=[]):
                 if event["type"] == "tool_calls_delta":
                     tc = event["tool_call"]["function"]
@@ -179,7 +181,7 @@ class TestOracleScenarios:
         tool_sequence = []
         final_response = ""
 
-        for turn_idx in range(len(scenario["turns"])):
+        for _turn_idx in range(len(scenario["turns"])):
             async for event in adapter.chat_with_tools(messages=[], tools=[]):
                 if event["type"] == "tool_calls_delta":
                     tc = event["tool_call"]["function"]
@@ -204,7 +206,7 @@ class TestOracleScenarios:
         tool_sequence = []
         final_response = ""
 
-        for turn_idx in range(len(scenario["turns"])):
+        for _turn_idx in range(len(scenario["turns"])):
             async for event in adapter.chat_with_tools(messages=[], tools=[]):
                 if event["type"] == "tool_calls_delta":
                     tc = event["tool_call"]["function"]
@@ -239,12 +241,14 @@ class TestOracleModelAdapter:
 
     @pytest.mark.asyncio
     async def test_turn_advancement(self):
-        adapter = OracleModelAdapter({
-            "turns": [
-                {"response_text": "First"},
-                {"response_text": "Second"},
-            ]
-        })
+        adapter = OracleModelAdapter(
+            {
+                "turns": [
+                    {"response_text": "First"},
+                    {"response_text": "Second"},
+                ]
+            }
+        )
         # First call
         events1 = [e async for e in adapter.chat_with_tools([], [])]
         assert any(e.get("content") == "First" for e in events1)
@@ -254,16 +258,21 @@ class TestOracleModelAdapter:
 
     @pytest.mark.asyncio
     async def test_tool_calls_yield_correctly(self):
-        adapter = OracleModelAdapter({
-            "turns": [
-                {
-                    "tool_calls": [
-                        {"name": "read_file", "parameters": {"file_path": "test.txt"}},
-                        {"name": "write_file", "parameters": {"file_path": "out.txt", "content": "hello"}},
-                    ]
-                }
-            ]
-        })
+        adapter = OracleModelAdapter(
+            {
+                "turns": [
+                    {
+                        "tool_calls": [
+                            {"name": "read_file", "parameters": {"file_path": "test.txt"}},
+                            {
+                                "name": "write_file",
+                                "parameters": {"file_path": "out.txt", "content": "hello"},
+                            },
+                        ]
+                    }
+                ]
+            }
+        )
         events = [e async for e in adapter.chat_with_tools([], [])]
         tool_events = [e for e in events if e["type"] == "tool_calls_delta"]
         assert len(tool_events) == 2

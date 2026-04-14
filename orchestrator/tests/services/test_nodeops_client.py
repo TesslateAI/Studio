@@ -14,10 +14,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ===========================================================================
 # Helpers
 # ===========================================================================
+
 
 def _make_mock_channel(response=None):
     """Create a mock grpc.aio channel whose unary_unary returns an AsyncMock callable.
@@ -39,6 +39,7 @@ def _make_mock_channel(response=None):
 # Serialization helpers
 # ===========================================================================
 
+
 class TestSerializationHelpers:
     """Tests for the module-level _serialize / _deserialize functions."""
 
@@ -48,6 +49,7 @@ class TestSerializationHelpers:
         result = _serialize({"volume_id": "vol-1", "template_name": "nextjs"})
         assert isinstance(result, bytes)
         import json
+
         assert json.loads(result) == {"volume_id": "vol-1", "template_name": "nextjs"}
 
     def test_serialize_empty_dict(self):
@@ -79,6 +81,7 @@ class TestSerializationHelpers:
 # Channel lifecycle
 # ===========================================================================
 
+
 @pytest.mark.unit
 class TestChannelLifecycle:
     """Channel creation, reuse, and teardown."""
@@ -89,7 +92,9 @@ class TestChannelLifecycle:
         from app.services.nodeops_client import NodeOpsClient
 
         mock_channel = MagicMock()
-        with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=mock_channel) as mock_create:
+        with patch(
+            "app.services.nodeops_client.grpc.aio.insecure_channel", return_value=mock_channel
+        ) as mock_create:
             client = NodeOpsClient("localhost:9741")
             channel = await client._ensure_channel()
 
@@ -102,7 +107,9 @@ class TestChannelLifecycle:
         from app.services.nodeops_client import NodeOpsClient
 
         mock_channel = MagicMock()
-        with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=mock_channel) as mock_create:
+        with patch(
+            "app.services.nodeops_client.grpc.aio.insecure_channel", return_value=mock_channel
+        ) as mock_create:
             client = NodeOpsClient("localhost:9741")
             ch1 = await client._ensure_channel()
             ch2 = await client._ensure_channel()
@@ -117,7 +124,9 @@ class TestChannelLifecycle:
 
         mock_channel = MagicMock()
         mock_channel.close = AsyncMock()
-        with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=mock_channel):
+        with patch(
+            "app.services.nodeops_client.grpc.aio.insecure_channel", return_value=mock_channel
+        ):
             client = NodeOpsClient("localhost:9741")
             await client._ensure_channel()
 
@@ -154,7 +163,9 @@ class TestChannelLifecycle:
         mock_channel.close = AsyncMock()
         mock_channel.unary_unary = MagicMock(return_value=AsyncMock(return_value={}))
 
-        with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=mock_channel):
+        with patch(
+            "app.services.nodeops_client.grpc.aio.insecure_channel", return_value=mock_channel
+        ):
             async with NodeOpsClient("localhost:9741") as client:
                 # Open the channel by making a call
                 await client._ensure_channel()
@@ -167,13 +178,14 @@ class TestChannelLifecycle:
 # RPC methods — void return
 # ===========================================================================
 
+
 @pytest.mark.unit
 class TestPromoteToTemplate:
     """Tests for promote_to_template RPC."""
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -223,7 +235,7 @@ class TestCreateSubvolume:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -245,7 +257,11 @@ class TestCreateSubvolume:
             client = NodeOpsClient("localhost:9741")
             await client.create_subvolume("proj-abc")
 
-        stub.assert_awaited_once_with({"name": "proj-abc", "uid": 1000, "gid": 1000}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"name": "proj-abc", "uid": 1000, "gid": 1000},
+            timeout=30.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
     @pytest.mark.asyncio
     async def test_custom_timeout(self):
@@ -256,7 +272,11 @@ class TestCreateSubvolume:
             client = NodeOpsClient("localhost:9741")
             await client.create_subvolume("proj-abc", timeout=10.0)
 
-        stub.assert_awaited_once_with({"name": "proj-abc", "uid": 1000, "gid": 1000}, timeout=10.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"name": "proj-abc", "uid": 1000, "gid": 1000},
+            timeout=10.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
 
 @pytest.mark.unit
@@ -265,7 +285,7 @@ class TestDeleteSubvolume:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -287,7 +307,11 @@ class TestDeleteSubvolume:
             client = NodeOpsClient("localhost:9741")
             await client.delete_subvolume("proj-old")
 
-        stub.assert_awaited_once_with({"name": "proj-old"}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"name": "proj-old"},
+            timeout=30.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
 
 @pytest.mark.unit
@@ -296,7 +320,7 @@ class TestSnapshotSubvolume:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -361,7 +385,7 @@ class TestTrackVolume:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -383,7 +407,11 @@ class TestTrackVolume:
             client = NodeOpsClient("localhost:9741")
             await client.track_volume("vol-123")
 
-        stub.assert_awaited_once_with({"volume_id": "vol-123"}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"volume_id": "vol-123"},
+            timeout=30.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
 
 @pytest.mark.unit
@@ -392,7 +420,7 @@ class TestUntrackVolume:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -414,7 +442,11 @@ class TestUntrackVolume:
             client = NodeOpsClient("localhost:9741")
             await client.untrack_volume("vol-123")
 
-        stub.assert_awaited_once_with({"volume_id": "vol-123"}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"volume_id": "vol-123"},
+            timeout=30.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
 
 @pytest.mark.unit
@@ -423,7 +455,7 @@ class TestEnsureTemplate:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -445,7 +477,9 @@ class TestEnsureTemplate:
             client = NodeOpsClient("localhost:9741")
             await client.ensure_template("nextjs")
 
-        stub.assert_awaited_once_with({"name": "nextjs"}, timeout=300.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"name": "nextjs"}, timeout=300.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
     @pytest.mark.asyncio
     async def test_custom_timeout(self):
@@ -456,7 +490,9 @@ class TestEnsureTemplate:
             client = NodeOpsClient("localhost:9741")
             await client.ensure_template("nextjs", timeout=120.0)
 
-        stub.assert_awaited_once_with({"name": "nextjs"}, timeout=120.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"name": "nextjs"}, timeout=120.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
 
 @pytest.mark.unit
@@ -465,7 +501,7 @@ class TestRestoreVolume:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -487,7 +523,11 @@ class TestRestoreVolume:
             client = NodeOpsClient("localhost:9741")
             await client.restore_volume("vol-restore")
 
-        stub.assert_awaited_once_with({"volume_id": "vol-restore"}, timeout=300.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"volume_id": "vol-restore"},
+            timeout=300.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
     @pytest.mark.asyncio
     async def test_custom_timeout(self):
@@ -498,7 +538,11 @@ class TestRestoreVolume:
             client = NodeOpsClient("localhost:9741")
             await client.restore_volume("vol-restore", timeout=60.0)
 
-        stub.assert_awaited_once_with({"volume_id": "vol-restore"}, timeout=60.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"volume_id": "vol-restore"},
+            timeout=60.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
 
 @pytest.mark.unit
@@ -507,7 +551,7 @@ class TestSyncVolume:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel()
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -529,12 +573,17 @@ class TestSyncVolume:
             client = NodeOpsClient("localhost:9741")
             await client.sync_volume("vol-sync")
 
-        stub.assert_awaited_once_with({"volume_id": "vol-sync"}, timeout=300.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"volume_id": "vol-sync"},
+            timeout=300.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
 
 # ===========================================================================
 # RPC methods — non-void return
 # ===========================================================================
+
 
 @pytest.mark.unit
 class TestSubvolumeExists:
@@ -542,7 +591,7 @@ class TestSubvolumeExists:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel(response={"exists": True})
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -565,7 +614,11 @@ class TestSubvolumeExists:
             result = await client.subvolume_exists("proj-abc")
 
         assert result is True
-        stub.assert_awaited_once_with({"name": "proj-abc"}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"name": "proj-abc"},
+            timeout=30.0,
+            metadata=(("content-type", "application/grpc+json"),),
+        )
 
     @pytest.mark.asyncio
     async def test_returns_false_when_not_exists(self):
@@ -597,7 +650,7 @@ class TestGetCapacity:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         response = {"total": 107374182400, "available": 53687091200}
         channel, stub = _make_mock_channel(response=response)
@@ -622,7 +675,9 @@ class TestGetCapacity:
             result = await client.get_capacity()
 
         assert result == {"total": 107374182400, "available": 53687091200}
-        stub.assert_awaited_once_with({}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
     @pytest.mark.asyncio
     async def test_sends_empty_request(self):
@@ -634,7 +689,9 @@ class TestGetCapacity:
             client = NodeOpsClient("localhost:9741")
             await client.get_capacity()
 
-        stub.assert_awaited_once_with({}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
     @pytest.mark.asyncio
     async def test_custom_timeout(self):
@@ -645,7 +702,9 @@ class TestGetCapacity:
             client = NodeOpsClient("localhost:9741")
             await client.get_capacity(timeout=5.0)
 
-        stub.assert_awaited_once_with({}, timeout=5.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {}, timeout=5.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
 
 @pytest.mark.unit
@@ -654,7 +713,7 @@ class TestListSubvolumes:
 
     @pytest.mark.asyncio
     async def test_calls_correct_grpc_path(self):
-        from app.services.nodeops_client import NodeOpsClient, _serialize, _deserialize
+        from app.services.nodeops_client import NodeOpsClient, _deserialize, _serialize
 
         channel, stub = _make_mock_channel(response={"subvolumes": []})
         with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel):
@@ -692,7 +751,9 @@ class TestListSubvolumes:
             client = NodeOpsClient("localhost:9741")
             await client.list_subvolumes("proj-")
 
-        stub.assert_awaited_once_with({"prefix": "proj-"}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"prefix": "proj-"}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
     @pytest.mark.asyncio
     async def test_default_prefix_is_empty_string(self):
@@ -703,7 +764,9 @@ class TestListSubvolumes:
             client = NodeOpsClient("localhost:9741")
             await client.list_subvolumes()
 
-        stub.assert_awaited_once_with({"prefix": ""}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),))
+        stub.assert_awaited_once_with(
+            {"prefix": ""}, timeout=30.0, metadata=(("content-type", "application/grpc+json"),)
+        )
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_key_missing(self):
@@ -722,6 +785,7 @@ class TestListSubvolumes:
 # Cross-cutting: channel reuse across different RPC calls
 # ===========================================================================
 
+
 @pytest.mark.unit
 class TestChannelReuse:
     """Verify that multiple RPC calls share the same channel."""
@@ -732,7 +796,9 @@ class TestChannelReuse:
         from app.services.nodeops_client import NodeOpsClient
 
         channel, stub = _make_mock_channel(response={"exists": True})
-        with patch("app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel) as mock_create:
+        with patch(
+            "app.services.nodeops_client.grpc.aio.insecure_channel", return_value=channel
+        ) as mock_create:
             client = NodeOpsClient("localhost:9741")
 
             await client.create_subvolume("proj-1")

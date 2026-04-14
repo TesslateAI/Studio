@@ -27,7 +27,6 @@ import {
 import { MobileMenu } from '../components/ui';
 import {
   AgentCard,
-  FeaturedCard,
   SkeletonCard,
   type MarketplaceItem,
 } from '../components/marketplace';
@@ -689,9 +688,10 @@ export default function Marketplace() {
               <>
                 <section className="mb-10">
                   <div className="h-4 w-32 rounded bg-[var(--surface-hover)] mb-5 animate-pulse" />
-                  <div className="space-y-3">
-                    <SkeletonCard variant="featured" />
-                    <SkeletonCard variant="featured" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <SkeletonCard key={i} />
+                    ))}
                   </div>
                 </section>
                 <section>
@@ -719,9 +719,9 @@ export default function Marketplace() {
                         See All →
                       </button>
                     </div>
-                    <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {featuredItems.slice(0, 3).map((item) => (
-                        <FeaturedCard
+                        <AgentCard
                           key={item.id}
                           item={item}
                           onInstall={handleInstall}

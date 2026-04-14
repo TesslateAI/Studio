@@ -9,14 +9,14 @@ Covers:
 - prepare_provider_credentials delegation to _build_provider_credentials
 """
 
-import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
 from uuid import uuid4
+
+import pytest
 
 pytestmark = pytest.mark.mocked
 
-import sys
 import os
+import sys
 
 # Ensure orchestrator is in path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -34,25 +34,6 @@ class TestProviderRegistration:
         """All 22 provider classes can be imported from providers __init__."""
         from app.services.deployment.providers import (
             CloudflareWorkersProvider,
-            VercelProvider,
-            NetlifyProvider,
-            HerokuProvider,
-            KoyebProvider,
-            ZeaburProvider,
-            SurgeProvider,
-            DenoDeployProvider,
-            FirebaseHostingProvider,
-            RailwayProvider,
-            RenderProvider,
-            NorthflankProvider,
-            GitHubPagesProvider,
-            AWSContainerProvider,
-            GCPContainerProvider,
-            AzureContainerProvider,
-            DigitalOceanContainerProvider,
-            FlyProvider,
-            DockerHubExportProvider,
-            GHCRExportProvider,
             DownloadExportProvider,
         )
 
@@ -71,11 +52,28 @@ class TestProviderRegistration:
         from app.services.deployment.manager import DeploymentManager
 
         expected_keys = {
-            "cloudflare", "vercel", "netlify", "heroku", "koyeb", "zeabur",
-            "surge", "deno-deploy", "firebase", "railway", "render",
-            "northflank", "github-pages", "digitalocean", "aws-apprunner",
-            "gcp-cloudrun", "azure-container-apps", "do-container", "fly",
-            "dockerhub", "ghcr", "download",
+            "cloudflare",
+            "vercel",
+            "netlify",
+            "heroku",
+            "koyeb",
+            "zeabur",
+            "surge",
+            "deno-deploy",
+            "firebase",
+            "railway",
+            "render",
+            "northflank",
+            "github-pages",
+            "digitalocean",
+            "aws-apprunner",
+            "gcp-cloudrun",
+            "azure-container-apps",
+            "do-container",
+            "fly",
+            "dockerhub",
+            "ghcr",
+            "download",
         }
         actual_keys = set(DeploymentManager._providers.keys())
         missing = expected_keys - actual_keys
@@ -157,8 +155,8 @@ class TestGuardCapabilities:
 
     def test_all_providers_have_capabilities(self):
         """Every provider in the manager has a PROVIDER_CAPABILITIES entry."""
-        from app.services.deployment.manager import DeploymentManager
         from app.services.deployment.guards import PROVIDER_CAPABILITIES
+        from app.services.deployment.manager import DeploymentManager
 
         for key in DeploymentManager._providers:
             assert key in PROVIDER_CAPABILITIES, (
@@ -170,9 +168,15 @@ class TestGuardCapabilities:
         from app.services.deployment.guards import PROVIDER_CAPABILITIES
 
         required_fields = {
-            "display_name", "types", "frameworks",
-            "supports_serverless", "supports_static", "supports_fullstack",
-            "deployment_mode", "icon", "color",
+            "display_name",
+            "types",
+            "frameworks",
+            "supports_serverless",
+            "supports_static",
+            "supports_fullstack",
+            "deployment_mode",
+            "icon",
+            "color",
         }
 
         for provider, capability in PROVIDER_CAPABILITIES.items():
@@ -455,7 +459,8 @@ class TestPrepareProviderCredentials:
         from app.routers.deployments import prepare_provider_credentials
 
         creds = prepare_provider_credentials(
-            "cloudflare", "my-token",
+            "cloudflare",
+            "my-token",
             {"account_id": "acc123", "dispatch_namespace": "ns1"},
         )
         assert creds["api_token"] == "my-token"
@@ -465,9 +470,7 @@ class TestPrepareProviderCredentials:
     def test_vercel_credentials(self):
         from app.routers.deployments import prepare_provider_credentials
 
-        creds = prepare_provider_credentials(
-            "vercel", "vercel-token", {"team_id": "team123"}
-        )
+        creds = prepare_provider_credentials("vercel", "vercel-token", {"team_id": "team123"})
         assert creds["token"] == "vercel-token"
         assert creds["team_id"] == "team123"
 
@@ -475,7 +478,8 @@ class TestPrepareProviderCredentials:
         from app.routers.deployments import prepare_provider_credentials
 
         creds = prepare_provider_credentials(
-            "aws-apprunner", "access-key-id",
+            "aws-apprunner",
+            "access-key-id",
             {"aws_secret_access_key": "secret", "aws_region": "eu-west-1"},
         )
         assert creds["aws_access_key_id"] == "access-key-id"
@@ -486,7 +490,8 @@ class TestPrepareProviderCredentials:
         from app.routers.deployments import prepare_provider_credentials
 
         creds = prepare_provider_credentials(
-            "gcp-cloudrun", '{"type":"service_account"}',
+            "gcp-cloudrun",
+            '{"type":"service_account"}',
             {"gcp_region": "us-central1"},
         )
         assert creds["service_account_json"] == '{"type":"service_account"}'
@@ -503,9 +508,7 @@ class TestPrepareProviderCredentials:
             "registry_name": "reg1",
             "azure_region": "eastus",
         }
-        creds = prepare_provider_credentials(
-            "azure-container-apps", "client-secret", meta
-        )
+        creds = prepare_provider_credentials("azure-container-apps", "client-secret", meta)
         assert creds["client_secret"] == "client-secret"
         assert creds["tenant_id"] == "t1"
         assert creds["registry_name"] == "reg1"
@@ -519,18 +522,14 @@ class TestPrepareProviderCredentials:
     def test_dockerhub_credentials(self):
         from app.routers.deployments import prepare_provider_credentials
 
-        creds = prepare_provider_credentials(
-            "dockerhub", "pat-token", {"account_name": "myuser"}
-        )
+        creds = prepare_provider_credentials("dockerhub", "pat-token", {"account_name": "myuser"})
         assert creds["username"] == "myuser"
         assert creds["token"] == "pat-token"
 
     def test_ghcr_credentials(self):
         from app.routers.deployments import prepare_provider_credentials
 
-        creds = prepare_provider_credentials(
-            "ghcr", "ghp_token", {"account_name": "ghuser"}
-        )
+        creds = prepare_provider_credentials("ghcr", "ghp_token", {"account_name": "ghuser"})
         assert creds["username"] == "ghuser"
         assert creds["token"] == "ghp_token"
 
@@ -562,9 +561,7 @@ class TestPrepareProviderCredentials:
     def test_fly_credentials(self):
         from app.routers.deployments import prepare_provider_credentials
 
-        creds = prepare_provider_credentials(
-            "fly", "fly-token", {"org_slug": "my-org"}
-        )
+        creds = prepare_provider_credentials("fly", "fly-token", {"org_slug": "my-org"})
         assert creds["api_token"] == "fly-token"
         assert creds["org_slug"] == "my-org"
 
@@ -572,7 +569,8 @@ class TestPrepareProviderCredentials:
         from app.routers.deployments import prepare_provider_credentials
 
         creds = prepare_provider_credentials(
-            "firebase", '{"type":"service_account"}',
+            "firebase",
+            '{"type":"service_account"}',
             {"site_id": "my-site"},
         )
         assert creds["service_account_json"] == '{"type":"service_account"}'
@@ -590,9 +588,7 @@ class TestPrepareProviderCredentials:
     def test_deno_deploy_credentials(self):
         from app.routers.deployments import prepare_provider_credentials
 
-        creds = prepare_provider_credentials(
-            "deno-deploy", "deno-token", {"org_id": "org123"}
-        )
+        creds = prepare_provider_credentials("deno-deploy", "deno-token", {"org_id": "org123"})
         assert creds["token"] == "deno-token"
         assert creds["org_id"] == "org123"
 
@@ -600,7 +596,8 @@ class TestPrepareProviderCredentials:
         from app.routers.deployments import prepare_provider_credentials
 
         creds = prepare_provider_credentials(
-            "do-container", "do-token",
+            "do-container",
+            "do-token",
             {"registry_name": "my-registry"},
         )
         assert creds["api_token"] == "do-token"
@@ -611,9 +608,7 @@ class TestPrepareProviderCredentials:
 
         # digitalocean (source mode) is mapped to do-container provider class
         # but uses the same credential key as do-container or a generic token
-        creds = prepare_provider_credentials(
-            "digitalocean", "do-token", {"registry_name": "reg"}
-        )
+        creds = prepare_provider_credentials("digitalocean", "do-token", {"registry_name": "reg"})
         assert creds["token"] == "do-token"
 
 
@@ -655,32 +650,41 @@ class TestBaseContainerDeploymentProvider:
 
     @pytest.mark.asyncio
     async def test_deploy_raises_not_implemented(self):
-        from app.services.deployment.container_base import BaseContainerDeploymentProvider
         from app.services.deployment.base import DeploymentConfig
+        from app.services.deployment.container_base import BaseContainerDeploymentProvider
 
         class TestProvider(BaseContainerDeploymentProvider):
             def validate_credentials(self):
                 pass
+
             async def test_credentials(self):
                 return {}
+
             async def push_image(self, image_ref):
                 return image_ref
+
             async def deploy_image(self, config):
                 pass
+
             async def get_deployment_status(self, deployment_id):
                 return {}
+
             async def delete_deployment(self, deployment_id):
                 return True
+
             async def get_deployment_logs(self, deployment_id):
                 return []
 
         provider = TestProvider({})
         with pytest.raises(NotImplementedError):
-            await provider.deploy([], DeploymentConfig(
-                project_id="test",
-                project_name="test",
-                framework="vite",
-            ))
+            await provider.deploy(
+                [],
+                DeploymentConfig(
+                    project_id="test",
+                    project_name="test",
+                    framework="vite",
+                ),
+            )
 
 
 # =============================================================================
@@ -693,17 +697,15 @@ class TestDownloadExportProvider:
 
     @pytest.mark.asyncio
     async def test_deploy_creates_zip(self):
-        from app.services.deployment.providers.download_export import DownloadExportProvider
         from app.services.deployment.base import DeploymentConfig, DeploymentFile
+        from app.services.deployment.providers.download_export import DownloadExportProvider
 
         provider = DownloadExportProvider({})
         files = [
             DeploymentFile(path="index.html", content=b"<h1>Hello</h1>"),
             DeploymentFile(path="style.css", content=b"body { color: red; }"),
         ]
-        config = DeploymentConfig(
-            project_id="test", project_name="test-app", framework="vite"
-        )
+        config = DeploymentConfig(project_id="test", project_name="test-app", framework="vite")
 
         result = await provider.deploy(files, config)
         assert result.success is True
@@ -712,13 +714,11 @@ class TestDownloadExportProvider:
 
     @pytest.mark.asyncio
     async def test_deploy_empty_files_fails(self):
-        from app.services.deployment.providers.download_export import DownloadExportProvider
         from app.services.deployment.base import DeploymentConfig
+        from app.services.deployment.providers.download_export import DownloadExportProvider
 
         provider = DownloadExportProvider({})
-        config = DeploymentConfig(
-            project_id="test", project_name="test-app", framework="vite"
-        )
+        config = DeploymentConfig(project_id="test", project_name="test-app", framework="vite")
 
         result = await provider.deploy([], config)
         assert result.success is False

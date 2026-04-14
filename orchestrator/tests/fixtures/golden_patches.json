@@ -46,7 +46,7 @@
       "replace": "function foo() {\n  return 2;\n}",
       "expected": {
         "success": true,
-        "match_method_contains": "trimmed"
+        "match_method_contains": "flexible"
       }
     },
     {
@@ -57,7 +57,7 @@
       "replace": "const x = 10;\nconst y = 20;",
       "expected": {
         "success": true,
-        "match_method_contains": "normalized"
+        "match_method_contains": "flexible"
       }
     }
   ],

@@ -37,9 +37,9 @@ export function PublicOnlyRoute({ children }: { children: ReactNode }) {
     return null;
   }
 
-  // Authenticated - redirect to saved destination or dashboard
+  // Authenticated - redirect to saved destination or home
   if (isAuthenticated) {
-    const from = (location.state as { from?: string })?.from || '/chat';
+    const from = (location.state as { from?: string })?.from || '/home';
     return <Navigate to={from} replace />;
   }
 

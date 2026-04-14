@@ -71,7 +71,7 @@ export function ChatMessageList({
 
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-3 sm:px-4 py-3 sm:py-4 space-y-3">
+      <div className="w-full px-3 sm:px-4 py-3 sm:py-4 space-y-3">
         {messages.map((msg) => {
           if (msg.type === 'approval_request') {
             return (

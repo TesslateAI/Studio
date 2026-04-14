@@ -16,7 +16,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
@@ -166,9 +165,7 @@ def test_agent_library_shared_within_team(authenticated_client, api_client_sessi
     assert resp.status_code == 200, f"Purchase failed: {resp.text}"
 
     # Create invite link
-    link_resp = client_a.post(
-        f"/api/teams/{team_slug}/members/link", json={"role": "editor"}
-    )
+    link_resp = client_a.post(f"/api/teams/{team_slug}/members/link", json={"role": "editor"})
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     invite_token = link_resp.json()["token"]
 
@@ -203,7 +200,7 @@ def test_remove_agent_scoped_to_team(authenticated_client):
     agent_id, _ = agent_info
 
     # Create team, switch, purchase
-    team_slug = _create_team_and_switch(client, "rm-scope")
+    _create_team_and_switch(client, "rm-scope")
     resp = client.post(f"/api/marketplace/agents/{agent_id}/purchase")
     assert resp.status_code == 200, f"Purchase failed: {resp.text}"
     assert agent_id in _my_agent_ids(client)
@@ -311,7 +308,9 @@ def test_skill_install_on_agent_scoped_to_team(authenticated_client):
     personal_skills_resp = client.get(f"/api/marketplace/agents/{agent_id}/skills")
     assert personal_skills_resp.status_code == 200
     personal_data = personal_skills_resp.json()
-    personal_list = personal_data.get("skills", []) if isinstance(personal_data, dict) else personal_data
+    personal_list = (
+        personal_data.get("skills", []) if isinstance(personal_data, dict) else personal_data
+    )
     personal_skill_ids = [str(s["id"]) for s in personal_list]
     assert str(skill_id) not in personal_skill_ids
 

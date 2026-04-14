@@ -7,18 +7,18 @@ Covers:
 - Seed function upsert logic (create + update)
 - MarketplaceAgent item_type is 'deployment_target'
 """
+
 import pytest
 
 pytestmark = pytest.mark.unit
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.seeds.deployment_targets import DEPLOYMENT_TARGETS
 from app.services.deployment.guards import PROVIDER_CAPABILITIES
-
 
 # =============================================================================
 # Deployment Target Seed Data Tests
@@ -30,9 +30,7 @@ class TestDeploymentTargetSeedData:
 
     def test_all_providers_have_seed_entries(self):
         """Every provider in PROVIDER_CAPABILITIES has a matching seed entry."""
-        seed_provider_keys = {
-            t["config"]["provider_key"] for t in DEPLOYMENT_TARGETS
-        }
+        seed_provider_keys = {t["config"]["provider_key"] for t in DEPLOYMENT_TARGETS}
         for provider_key in PROVIDER_CAPABILITIES:
             assert provider_key in seed_provider_keys, (
                 f"Provider '{provider_key}' is in PROVIDER_CAPABILITIES but "
@@ -59,33 +57,37 @@ class TestDeploymentTargetSeedData:
     def test_all_entries_have_required_fields(self):
         """Every seed entry has all required MarketplaceAgent fields."""
         required_fields = {
-            "name", "slug", "description", "category", "item_type",
-            "icon", "pricing_type", "is_active", "is_published",
-            "tags", "features", "config",
+            "name",
+            "slug",
+            "description",
+            "category",
+            "item_type",
+            "icon",
+            "pricing_type",
+            "is_active",
+            "is_published",
+            "tags",
+            "features",
+            "config",
         }
         for target in DEPLOYMENT_TARGETS:
             missing = required_fields - set(target.keys())
-            assert not missing, (
-                f"Seed entry '{target['slug']}' is missing fields: {missing}"
-            )
+            assert not missing, f"Seed entry '{target['slug']}' is missing fields: {missing}"
 
     def test_config_has_provider_key_and_brand_color(self):
         """Every seed entry config contains provider_key, deployment_mode, and brand_color."""
         for target in DEPLOYMENT_TARGETS:
             config = target["config"]
-            assert "provider_key" in config, (
-                f"'{target['slug']}' config missing 'provider_key'"
-            )
+            assert "provider_key" in config, f"'{target['slug']}' config missing 'provider_key'"
             assert "deployment_mode" in config, (
                 f"'{target['slug']}' config missing 'deployment_mode'"
             )
-            assert "brand_color" in config, (
-                f"'{target['slug']}' config missing 'brand_color'"
-            )
+            assert "brand_color" in config, f"'{target['slug']}' config missing 'brand_color'"
 
     def test_brand_colors_are_valid_hex(self):
         """All brand_color values are valid hex color codes."""
         import re
+
         hex_pattern = re.compile(r"^#[0-9A-Fa-f]{6}$")
         for target in DEPLOYMENT_TARGETS:
             color = target["config"]["brand_color"]
@@ -119,8 +121,7 @@ class TestDeploymentTargetSeedData:
         """Every seed entry has category='deployment'."""
         for target in DEPLOYMENT_TARGETS:
             assert target["category"] == "deployment", (
-                f"'{target['slug']}' has category='{target['category']}' "
-                f"instead of 'deployment'"
+                f"'{target['slug']}' has category='{target['category']}' instead of 'deployment'"
             )
 
     def test_all_entries_are_free(self):
@@ -139,24 +140,22 @@ class TestDeploymentTargetSeedData:
     def test_tags_contain_deployment(self):
         """All entries have 'deployment' in their tags."""
         for target in DEPLOYMENT_TARGETS:
-            assert "deployment" in target["tags"], (
-                f"'{target['slug']}' is missing 'deployment' tag"
-            )
+            assert "deployment" in target["tags"], f"'{target['slug']}' is missing 'deployment' tag"
 
     def test_featured_providers_are_marked(self):
         """Key providers (Vercel, Netlify, Cloudflare, AWS, GCP, Azure, Fly) are featured."""
-        featured_slugs = {
-            t["slug"] for t in DEPLOYMENT_TARGETS if t.get("is_featured")
-        }
+        featured_slugs = {t["slug"] for t in DEPLOYMENT_TARGETS if t.get("is_featured")}
         expected_featured = {
-            "deploy-vercel", "deploy-netlify", "deploy-cloudflare",
-            "deploy-aws-apprunner", "deploy-gcp-cloudrun",
-            "deploy-azure-container-apps", "deploy-fly",
+            "deploy-vercel",
+            "deploy-netlify",
+            "deploy-cloudflare",
+            "deploy-aws-apprunner",
+            "deploy-gcp-cloudrun",
+            "deploy-azure-container-apps",
+            "deploy-fly",
         }
         for slug in expected_featured:
-            assert slug in featured_slugs, (
-                f"Expected '{slug}' to be featured but it is not"
-            )
+            assert slug in featured_slugs, f"Expected '{slug}' to be featured but it is not"
 
     def test_container_providers_in_seed(self):
         """All container-mode providers are present."""

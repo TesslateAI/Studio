@@ -13,7 +13,7 @@ export default function Login() {
   const location = useLocation();
   const { refreshUserTheme } = useTheme();
   const { checkAuth } = useAuth();
-  const redirectTo = (location.state as { from?: string })?.from || '/dashboard';
+  const redirectTo = (location.state as { from?: string })?.from || '/home';
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -384,7 +384,7 @@ export default function Login() {
                   Don't have an account?{' '}
                   <Link
                     to="/register"
-                    state={{ from: redirectTo !== '/dashboard' ? redirectTo : undefined }}
+                    state={{ from: redirectTo !== '/home' ? redirectTo : undefined }}
                     className="text-black hover:text-gray-700 font-semibold transition-colors underline"
                   >
                     Sign up

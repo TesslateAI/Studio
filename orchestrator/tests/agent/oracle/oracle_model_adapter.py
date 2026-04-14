@@ -7,7 +7,7 @@ Each scenario specifies the exact sequence of model responses the agent should r
 
 import json
 import logging
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 

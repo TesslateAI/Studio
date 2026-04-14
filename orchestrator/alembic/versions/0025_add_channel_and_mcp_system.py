@@ -5,8 +5,8 @@ Revises: 0024_add_skills_system
 Create Date: 2026-03-12
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers
@@ -79,12 +79,8 @@ def upgrade() -> None:
             sa.Column("content", sa.Text, nullable=False),
             sa.Column("platform_message_id", sa.String(255), nullable=True),
             sa.Column("task_id", sa.String, nullable=True),
-            sa.Column(
-                "status", sa.String(20), nullable=False, server_default="delivered"
-            ),
-            sa.Column(
-                "created_at", sa.DateTime, server_default=sa.func.now(), index=True
-            ),
+            sa.Column("status", sa.String(20), nullable=False, server_default="delivered"),
+            sa.Column("created_at", sa.DateTime, server_default=sa.func.now(), index=True),
         )
 
     if not _table_exists("user_mcp_configs"):

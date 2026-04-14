@@ -12,53 +12,98 @@ pytestmark = pytest.mark.unit
 
 from app.services.deployment.container_base import BaseContainerDeploymentProvider
 from app.services.deployment.manager import DeploymentManager
+from app.services.deployment.providers.aws_container import AWSContainerProvider
+from app.services.deployment.providers.azure_container import AzureContainerProvider
+from app.services.deployment.providers.deno_deploy import DenoDeployProvider
+from app.services.deployment.providers.do_container import DigitalOceanContainerProvider
+from app.services.deployment.providers.dockerhub_export import DockerHubExportProvider
+from app.services.deployment.providers.download_export import DownloadExportProvider
+from app.services.deployment.providers.firebase import FirebaseHostingProvider
+from app.services.deployment.providers.fly import FlyProvider
+from app.services.deployment.providers.gcp_container import GCPContainerProvider
+from app.services.deployment.providers.ghcr_export import GHCRExportProvider
+from app.services.deployment.providers.github_pages import GitHubPagesProvider
 from app.services.deployment.providers.heroku import HerokuProvider
 from app.services.deployment.providers.koyeb import KoyebProvider
-from app.services.deployment.providers.zeabur import ZeaburProvider
-from app.services.deployment.providers.surge import SurgeProvider
-from app.services.deployment.providers.deno_deploy import DenoDeployProvider
-from app.services.deployment.providers.firebase import FirebaseHostingProvider
+from app.services.deployment.providers.northflank import NorthflankProvider
 from app.services.deployment.providers.railway import RailwayProvider
 from app.services.deployment.providers.render import RenderProvider
-from app.services.deployment.providers.northflank import NorthflankProvider
-from app.services.deployment.providers.github_pages import GitHubPagesProvider
-from app.services.deployment.providers.aws_container import AWSContainerProvider
-from app.services.deployment.providers.gcp_container import GCPContainerProvider
-from app.services.deployment.providers.azure_container import AzureContainerProvider
-from app.services.deployment.providers.do_container import DigitalOceanContainerProvider
-from app.services.deployment.providers.fly import FlyProvider
-from app.services.deployment.providers.dockerhub_export import DockerHubExportProvider
-from app.services.deployment.providers.ghcr_export import GHCRExportProvider
-from app.services.deployment.providers.download_export import DownloadExportProvider
-
+from app.services.deployment.providers.surge import SurgeProvider
+from app.services.deployment.providers.zeabur import ZeaburProvider
 
 # All 23 provider keys expected in _providers (includes digitalocean alias)
 ALL_PROVIDER_KEYS = [
-    "cloudflare", "vercel", "netlify",
-    "heroku", "koyeb", "zeabur", "surge", "deno-deploy", "firebase",
-    "railway", "render", "northflank", "github-pages", "digitalocean",
-    "aws-apprunner", "gcp-cloudrun", "azure-container-apps", "do-container", "fly",
-    "dockerhub", "ghcr", "download",
+    "cloudflare",
+    "vercel",
+    "netlify",
+    "heroku",
+    "koyeb",
+    "zeabur",
+    "surge",
+    "deno-deploy",
+    "firebase",
+    "railway",
+    "render",
+    "northflank",
+    "github-pages",
+    "digitalocean",
+    "aws-apprunner",
+    "gcp-cloudrun",
+    "azure-container-apps",
+    "do-container",
+    "fly",
+    "dockerhub",
+    "ghcr",
+    "download",
 ]
 
 CONTAINER_PROVIDERS = [
-    "aws-apprunner", "gcp-cloudrun", "azure-container-apps",
-    "do-container", "fly", "dockerhub", "ghcr",
+    "aws-apprunner",
+    "gcp-cloudrun",
+    "azure-container-apps",
+    "do-container",
+    "fly",
+    "dockerhub",
+    "ghcr",
 ]
 
 EXPORT_PROVIDERS = ["dockerhub", "ghcr", "download"]
 
 NON_CONTAINER_PROVIDERS = [
-    "cloudflare", "vercel", "netlify", "heroku", "koyeb", "zeabur",
-    "surge", "deno-deploy", "firebase", "railway", "render",
-    "northflank", "github-pages",
+    "cloudflare",
+    "vercel",
+    "netlify",
+    "heroku",
+    "koyeb",
+    "zeabur",
+    "surge",
+    "deno-deploy",
+    "firebase",
+    "railway",
+    "render",
+    "northflank",
+    "github-pages",
 ]
 
 NON_EXPORT_PROVIDERS = [
-    "cloudflare", "vercel", "netlify", "heroku", "koyeb", "zeabur",
-    "surge", "deno-deploy", "firebase", "railway", "render",
-    "northflank", "github-pages", "aws-apprunner", "gcp-cloudrun",
-    "azure-container-apps", "do-container", "fly",
+    "cloudflare",
+    "vercel",
+    "netlify",
+    "heroku",
+    "koyeb",
+    "zeabur",
+    "surge",
+    "deno-deploy",
+    "firebase",
+    "railway",
+    "render",
+    "northflank",
+    "github-pages",
+    "aws-apprunner",
+    "gcp-cloudrun",
+    "azure-container-apps",
+    "do-container",
+    "fly",
 ]
 
 
@@ -196,14 +241,16 @@ class TestGetProviderReturnsCorrectClass:
         assert isinstance(provider, DenoDeployProvider)
 
     def test_firebase(self):
-        sa = json.dumps({
-            "client_email": "x@y.com",
-            "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        })
-        provider = DeploymentManager.get_provider("firebase", {
-            "service_account_json": sa, "site_id": "s"
-        })
+        sa = json.dumps(
+            {
+                "client_email": "x@y.com",
+                "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
+        provider = DeploymentManager.get_provider(
+            "firebase", {"service_account_json": sa, "site_id": "s"}
+        )
         assert isinstance(provider, FirebaseHostingProvider)
 
     def test_railway(self):
@@ -223,38 +270,50 @@ class TestGetProviderReturnsCorrectClass:
         assert isinstance(provider, GitHubPagesProvider)
 
     def test_aws_apprunner(self):
-        provider = DeploymentManager.get_provider("aws-apprunner", {
-            "aws_access_key_id": "AK",
-            "aws_secret_access_key": "SK",
-            "aws_region": "us-east-1",
-        })
+        provider = DeploymentManager.get_provider(
+            "aws-apprunner",
+            {
+                "aws_access_key_id": "AK",
+                "aws_secret_access_key": "SK",
+                "aws_region": "us-east-1",
+            },
+        )
         assert isinstance(provider, AWSContainerProvider)
 
     def test_gcp_cloudrun(self):
-        sa = json.dumps({
-            "client_email": "x@y.com",
-            "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----",
-            "project_id": "proj",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        })
-        provider = DeploymentManager.get_provider("gcp-cloudrun", {
-            "service_account_json": sa, "gcp_region": "us-central1"
-        })
+        sa = json.dumps(
+            {
+                "client_email": "x@y.com",
+                "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----",
+                "project_id": "proj",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
+        provider = DeploymentManager.get_provider(
+            "gcp-cloudrun", {"service_account_json": sa, "gcp_region": "us-central1"}
+        )
         assert isinstance(provider, GCPContainerProvider)
 
     def test_azure_container_apps(self):
-        provider = DeploymentManager.get_provider("azure-container-apps", {
-            "tenant_id": "t", "client_id": "c", "client_secret": "s",
-            "subscription_id": "sub", "resource_group": "rg",
-            "registry_name": "reg", "azure_region": "eastus",
-            "container_app_environment_id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.App/managedEnvironments/env",
-        })
+        provider = DeploymentManager.get_provider(
+            "azure-container-apps",
+            {
+                "tenant_id": "t",
+                "client_id": "c",
+                "client_secret": "s",
+                "subscription_id": "sub",
+                "resource_group": "rg",
+                "registry_name": "reg",
+                "azure_region": "eastus",
+                "container_app_environment_id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.App/managedEnvironments/env",
+            },
+        )
         assert isinstance(provider, AzureContainerProvider)
 
     def test_do_container(self):
-        provider = DeploymentManager.get_provider("do-container", {
-            "api_token": "t", "registry_name": "r"
-        })
+        provider = DeploymentManager.get_provider(
+            "do-container", {"api_token": "t", "registry_name": "r"}
+        )
         assert isinstance(provider, DigitalOceanContainerProvider)
 
     def test_fly(self):
@@ -262,15 +321,11 @@ class TestGetProviderReturnsCorrectClass:
         assert isinstance(provider, FlyProvider)
 
     def test_dockerhub(self):
-        provider = DeploymentManager.get_provider("dockerhub", {
-            "username": "u", "token": "t"
-        })
+        provider = DeploymentManager.get_provider("dockerhub", {"username": "u", "token": "t"})
         assert isinstance(provider, DockerHubExportProvider)
 
     def test_ghcr(self):
-        provider = DeploymentManager.get_provider("ghcr", {
-            "username": "u", "token": "t"
-        })
+        provider = DeploymentManager.get_provider("ghcr", {"username": "u", "token": "t"})
         assert isinstance(provider, GHCRExportProvider)
 
     def test_download(self):
@@ -299,15 +354,19 @@ class TestGetProviderReturnsCorrectClass:
 class TestContainerProviderSubclass:
     """Verify container-push providers extend BaseContainerDeploymentProvider."""
 
-    @pytest.mark.parametrize("key,creds", [
-        ("aws-apprunner", {
-            "aws_access_key_id": "A", "aws_secret_access_key": "S", "aws_region": "us-east-1"
-        }),
-        ("do-container", {"api_token": "t", "registry_name": "r"}),
-        ("fly", {"api_token": "t"}),
-        ("dockerhub", {"username": "u", "token": "t"}),
-        ("ghcr", {"username": "u", "token": "t"}),
-    ])
+    @pytest.mark.parametrize(
+        "key,creds",
+        [
+            (
+                "aws-apprunner",
+                {"aws_access_key_id": "A", "aws_secret_access_key": "S", "aws_region": "us-east-1"},
+            ),
+            ("do-container", {"api_token": "t", "registry_name": "r"}),
+            ("fly", {"api_token": "t"}),
+            ("dockerhub", {"username": "u", "token": "t"}),
+            ("ghcr", {"username": "u", "token": "t"}),
+        ],
+    )
     def test_is_container_base_subclass(self, key, creds):
         provider = DeploymentManager.get_provider(key, creds)
         assert isinstance(provider, BaseContainerDeploymentProvider)

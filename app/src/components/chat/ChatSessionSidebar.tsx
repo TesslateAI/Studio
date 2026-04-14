@@ -114,7 +114,7 @@ export function ChatSessionSidebar({
         <button
           onClick={onNewSession}
           className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
-          aria-label="New chat"
+          aria-label="New session"
         >
           <SquarePen size={14} />
         </button>

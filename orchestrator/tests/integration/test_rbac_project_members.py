@@ -16,7 +16,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -204,9 +203,7 @@ def test_remove_project_member(
     assert add_resp.status_code in (200, 201)
 
     # Remove
-    del_resp = client_a.delete(
-        f"/api/teams/{team_slug}/projects/{proj_slug}/members/{user_b_id}"
-    )
+    del_resp = client_a.delete(f"/api/teams/{team_slug}/projects/{proj_slug}/members/{user_b_id}")
     assert del_resp.status_code == 204, f"Remove member failed: {del_resp.text}"
 
     # User B my-role should fall back to team role (viewer) if project visibility is "team",

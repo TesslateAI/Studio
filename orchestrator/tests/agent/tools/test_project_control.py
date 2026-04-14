@@ -10,7 +10,6 @@ Patch paths use the SOURCE module (not the importing module) because
 project_control.py uses lazy imports inside functions.
 """
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
@@ -165,9 +164,7 @@ class TestProjectControlValidation:
 
     @pytest.mark.asyncio
     async def test_unknown_action(self, project_control_context):
-        result = await project_control_executor(
-            {"action": "explode"}, project_control_context
-        )
+        result = await project_control_executor({"action": "explode"}, project_control_context)
         assert result["success"] is False
         assert "Unknown action" in result["message"]
 
@@ -198,9 +195,7 @@ class TestProjectControlValidation:
 
     @pytest.mark.asyncio
     async def test_container_name_required_for_health(self, project_control_context):
-        result = await project_control_executor(
-            {"action": "health_check"}, project_control_context
-        )
+        result = await project_control_executor({"action": "health_check"}, project_control_context)
         assert result["success"] is False
         assert "container_name" in result["message"]
 
@@ -216,9 +211,7 @@ class TestStatusAction:
 
     @pytest.mark.asyncio
     async def test_status_no_containers(self, project_control_context):
-        project_control_context["db"].execute = AsyncMock(
-            return_value=_mock_scalars_all([])
-        )
+        project_control_context["db"].execute = AsyncMock(return_value=_mock_scalars_all([]))
 
         mock_orch = Mock()
         mock_orch.get_project_status = AsyncMock(
@@ -226,17 +219,13 @@ class TestStatusAction:
         )
 
         with patch(_ORCH_GET, return_value=mock_orch):
-            result = await project_control_executor(
-                {"action": "status"}, project_control_context
-            )
+            result = await project_control_executor({"action": "status"}, project_control_context)
 
         assert result["success"] is True
         assert result["containers"] == []
 
     @pytest.mark.asyncio
-    async def test_status_with_containers(
-        self, project_control_context, container_a, container_b
-    ):
+    async def test_status_with_containers(self, project_control_context, container_a, container_b):
         project_control_context["db"].execute = AsyncMock(
             return_value=_mock_scalars_all([container_a, container_b])
         )
@@ -261,9 +250,7 @@ class TestStatusAction:
         )
 
         with patch(_ORCH_GET, return_value=mock_orch):
-            result = await project_control_executor(
-                {"action": "status"}, project_control_context
-            )
+            result = await project_control_executor({"action": "status"}, project_control_context)
 
         assert result["success"] is True
         assert len(result["containers"]) == 2
@@ -317,15 +304,11 @@ class TestRestartContainerAction:
 
         mock_orch = Mock()
         mock_orch.stop_container = AsyncMock()
-        mock_orch.start_container = AsyncMock(
-            return_value={"url": "http://frontend.localhost"}
-        )
+        mock_orch.start_container = AsyncMock(return_value={"url": "http://frontend.localhost"})
         mock_orch.get_project_status = AsyncMock(
             return_value={
                 "status": "active",
-                "containers": {
-                    "root": {"container_id": str(container_a.id), "running": True}
-                },
+                "containers": {"root": {"container_id": str(container_a.id), "running": True}},
             }
         )
 
@@ -363,9 +346,7 @@ class TestRestartAllAction:
             ]
         )
 
-        result = await project_control_executor(
-            {"action": "restart_all"}, project_control_context
-        )
+        result = await project_control_executor({"action": "restart_all"}, project_control_context)
 
         assert result["success"] is False
         assert "No containers" in result["message"]
@@ -525,9 +506,7 @@ class TestContainerLogsAction:
         )
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(b"Server started on port 3000\n", b"")
-        )
+        mock_proc.communicate = AsyncMock(return_value=(b"Server started on port 3000\n", b""))
 
         with (
             patch(_ORCH_IS_K8S, return_value=False),
@@ -643,9 +622,7 @@ class TestHealthCheckAction:
         assert result["status_code"] == 500
 
     @pytest.mark.asyncio
-    async def test_health_check_connection_refused(
-        self, project_control_context, container_a
-    ):
+    async def test_health_check_connection_refused(self, project_control_context, container_a):
         import httpx
 
         project_control_context["db"].execute = AsyncMock(
@@ -653,9 +630,7 @@ class TestHealthCheckAction:
         )
 
         mock_client = AsyncMock()
-        mock_client.get = AsyncMock(
-            side_effect=httpx.ConnectError("Connection refused")
-        )
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 

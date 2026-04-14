@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback } from 'react';
-import { Crosshair, Plus, Type, Move } from 'lucide-react';
+import { Crosshair, Plus, Type, Move, Undo2, Redo2, Loader2 } from 'lucide-react';
 import { ArrowsClockwise, DeviceMobile } from '@phosphor-icons/react';
 import { InsertPalette } from './InsertPalette';
 import type { FileTreeEntry } from '../../../utils/buildFileTree';
@@ -40,6 +40,14 @@ interface DesignToolbarProps {
   onRefresh: () => void;
   onInsert: (snippet: string) => void;
   fileTree: FileTreeEntry[];
+  canUndo?: boolean;
+  canRedo?: boolean;
+  flushing?: boolean;
+  persistError?: string | null;
+  indexLoaded?: boolean;
+  indexLoading?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 export function DesignToolbar({
@@ -53,6 +61,14 @@ export function DesignToolbar({
   onRefresh,
   onInsert,
   fileTree,
+  canUndo = false,
+  canRedo = false,
+  flushing = false,
+  persistError = null,
+  indexLoaded = false,
+  indexLoading = false,
+  onUndo,
+  onRedo,
 }: DesignToolbarProps) {
   const [insertOpen, setInsertOpen] = useState(false);
   const insertBtnRef = useRef<HTMLButtonElement>(null);
@@ -188,6 +204,59 @@ export function DesignToolbar({
 
         {/* Right section */}
         <div className="flex items-center gap-1">
+          {/* Persistence status */}
+          {persistError ? (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded text-red-400 border border-red-500/30 mr-1"
+              title={persistError}
+            >
+              Save failed
+            </span>
+          ) : indexLoading && !indexLoaded ? (
+            <span
+              className="text-[10px] text-[var(--text-subtle)] mr-1 flex items-center gap-1"
+              title="Injecting data-oid attributes into source files"
+            >
+              <Loader2 size={10} className="animate-spin" />
+              Indexing
+            </span>
+          ) : flushing ? (
+            <Loader2 size={12} className="text-[var(--text-subtle)] animate-spin mr-1" />
+          ) : indexLoaded ? (
+            <span
+              className="text-[10px] text-[var(--text-subtle)] mr-1"
+              title="Edits persist to source"
+            >
+              Saved
+            </span>
+          ) : null}
+
+          {/* Undo / Redo */}
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo (⌘Z)"
+            className={`p-1 rounded transition-colors ${
+              canUndo
+                ? 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                : 'text-[var(--text-subtle)]/40 cursor-not-allowed'
+            }`}
+          >
+            <Undo2 size={14} />
+          </button>
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo (⌘⇧Z)"
+            className={`p-1 rounded transition-colors ${
+              canRedo
+                ? 'text-[var(--text-muted)] hover:text-[var(--text)]'
+                : 'text-[var(--text-subtle)]/40 cursor-not-allowed'
+            }`}
+          >
+            <Redo2 size={14} />
+          </button>
+
           <button
             onClick={onRefresh}
             title="Refresh preview"

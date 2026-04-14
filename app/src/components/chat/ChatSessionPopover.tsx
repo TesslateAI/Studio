@@ -158,7 +158,7 @@ export function ChatSessionPopover({
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search chats..."
+                  placeholder="Search sessions..."
                   className="w-full pl-8 pr-8 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)] transition-colors"
                 />
                 {search && (

@@ -18,7 +18,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -97,13 +96,11 @@ def test_credits_scoped_to_active_team(authenticated_client, api_client_session)
     # Get credits for personal team
     resp_personal = client.get("/api/billing/credits")
     assert resp_personal.status_code == 200
-    credits_personal = resp_personal.json()
+    resp_personal.json()
 
     # Create a second (non-personal) team
     slug = f"billing-test-{uuid4().hex[:8]}"
-    create_resp = client.post(
-        "/api/teams", json={"name": "Billing Test Team", "slug": slug}
-    )
+    create_resp = client.post("/api/teams", json={"name": "Billing Test Team", "slug": slug})
     assert create_resp.status_code in (200, 201), f"Team create failed: {create_resp.text}"
 
     # Switch to the new team
@@ -167,9 +164,7 @@ def test_admin_can_subscribe(authenticated_client):
         json={"tier": "pro", "billing_interval": "monthly"},
     )
     # The key assertion: admin is not denied by RBAC
-    assert resp.status_code != 403, (
-        f"Admin should not be forbidden from subscribing: {resp.text}"
-    )
+    assert resp.status_code != 403, f"Admin should not be forbidden from subscribing: {resp.text}"
 
 
 @pytest.mark.integration
@@ -281,9 +276,7 @@ def test_new_team_inherits_free_tier(authenticated_client):
     client, _ = authenticated_client
 
     slug = f"newtier-{uuid4().hex[:8]}"
-    create_resp = client.post(
-        "/api/teams", json={"name": "New Tier Team", "slug": slug}
-    )
+    create_resp = client.post("/api/teams", json={"name": "New Tier Team", "slug": slug})
     assert create_resp.status_code in (200, 201), f"Team create failed: {create_resp.text}"
 
     # Switch to the new team

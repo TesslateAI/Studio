@@ -40,8 +40,9 @@ export function DashboardLayout() {
   }, [fromLogin]);
 
   // Determine active page based on current path
-  const getActivePage = (): 'chat' | 'dashboard' | 'marketplace' | 'library' | 'feedback' => {
+  const getActivePage = (): 'home' | 'chat' | 'dashboard' | 'marketplace' | 'library' | 'feedback' => {
     const path = location.pathname;
+    if (path.includes('/home')) return 'home';
     if (path.includes('/chat')) return 'chat';
     if (path.includes('/marketplace')) return 'marketplace';
     if (path.includes('/library')) return 'library';

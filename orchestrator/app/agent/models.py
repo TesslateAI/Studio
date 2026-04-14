@@ -12,6 +12,7 @@ Supported:
 """
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -22,6 +23,52 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Environment variable names for DB-less standalone mode
+# =============================================================================
+# When create_model_adapter / get_llm_client are called without a DB session
+# (e.g. from CLI tools, benchmark harnesses, or other standalone contexts),
+# provider API keys are resolved from environment variables instead of the
+# per-user UserAPIKey table. This mapping is the single source of truth for
+# which env var holds which provider's credential.
+BYOK_PROVIDER_ENV_VARS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "fireworks": "FIREWORKS_API_KEY",
+    "nano-gpt": "NANO_GPT_API_KEY",
+    "z-ai": "Z_AI_API_KEY",
+}
+
+# Env vars for the LiteLLM proxy path (used when the model has no BYOK prefix
+# or uses the explicit "builtin/" prefix).
+LITELLM_API_KEY_ENV_VAR = "LITELLM_MASTER_KEY"
+LITELLM_API_BASE_ENV_VAR = "LITELLM_API_BASE"
+
+
+class MissingApiKeyError(ValueError):
+    """
+    Raised by the DB-less model adapter path when a provider's API key
+    environment variable is not set.
+
+    Subclasses :class:`ValueError` so that existing callers that catch
+    ``ValueError`` (the historical error type for the DB-backed path)
+    continue to work without modification, but standalone / benchmark
+    callers can catch this specific type to give a precise diagnostic.
+
+    The :attr:`env_var` attribute exposes the name of the missing env var
+    so callers can surface actionable "please export X" messages without
+    scraping the string.
+    """
+
+    def __init__(self, env_var: str, message: str) -> None:
+        super().__init__(message)
+        self.env_var = env_var
+
 
 # =============================================================================
 # Built-in Model Prefix
@@ -235,7 +282,185 @@ async def get_user_api_key(
     }
 
 
-async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> AsyncOpenAI:
+# Bare-name routing hints for the DB-less path. When a caller provides a
+# model name with no routing prefix (e.g. "gpt-4o" or "claude-3-5-sonnet"),
+# we infer the provider from these prefixes before falling back to the
+# LiteLLM proxy. This matches the behavior benchmark harnesses expect:
+# "gpt-4o" should go direct to OpenAI when OPENAI_API_KEY is present,
+# rather than silently requiring a LiteLLM proxy to be running.
+_BARE_NAME_OPENAI_PREFIXES: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
+_BARE_NAME_ANTHROPIC_PREFIXES: tuple[str, ...] = ("claude-",)
+
+
+def _build_provider_client(provider_slug: str, model_name: str) -> AsyncOpenAI:
+    """
+    Construct an ``AsyncOpenAI`` client for a specific built-in provider,
+    reading credentials from environment variables.
+
+    The provider's base URL is taken from :data:`BUILTIN_PROVIDERS` unless
+    an override env var ``<PROVIDER>_API_BASE`` is set (e.g.
+    ``OPENAI_API_BASE``), which lets benchmark harnesses point at private
+    proxies without patching code.
+
+    Raises:
+        MissingApiKeyError: If the env var for ``provider_slug`` is unset.
+        ValueError: If ``provider_slug`` is not a known built-in provider.
+    """
+    provider_config = BUILTIN_PROVIDERS.get(provider_slug)
+    if not provider_config:
+        raise ValueError(
+            f"Unknown provider '{provider_slug}'. "
+            f"Known providers: {', '.join(sorted(BUILTIN_PROVIDERS.keys()))}."
+        )
+    env_var = BYOK_PROVIDER_ENV_VARS.get(provider_slug)
+    if not env_var:
+        raise ValueError(
+            f"No environment variable mapping configured for provider "
+            f"'{provider_slug}'. Add an entry to BYOK_PROVIDER_ENV_VARS."
+        )
+    api_key = os.environ.get(env_var)
+    if not api_key:
+        raise MissingApiKeyError(
+            env_var,
+            f"{provider_config['name']} model '{model_name}' requires the "
+            f"{env_var} environment variable to be set for standalone "
+            f"(DB-less) operation.",
+        )
+    base_url = (
+        os.environ.get(f"{env_var.removesuffix('_API_KEY')}_API_BASE")
+        or provider_config["base_url"]
+    )
+    logger.info("DB-less: using %s API for model: %s", provider_config["name"], model_name)
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        default_headers=provider_config.get("default_headers", {}),
+    )
+
+
+def _resolve_bare_name_provider(model_name: str) -> str | None:
+    """
+    Infer a provider slug from a prefix-less model name.
+
+    - ``gpt-*``, ``o1-*``, ``o3-*``, ``o4-*`` → ``"openai"``
+    - ``claude-*`` → ``"anthropic"`` if ``ANTHROPIC_API_KEY`` is set,
+      else ``"openrouter"`` if ``OPENROUTER_API_KEY`` is set, else
+      ``None`` (fall through to LiteLLM proxy).
+
+    Returns ``None`` when no rule matches, so the caller falls back to
+    the LiteLLM proxy path. The fallback order for Claude models is
+    deliberate and deterministic so tests and benchmark harnesses see
+    the same routing regardless of env-var insertion order.
+    """
+    lowered = model_name.lower()
+    if any(lowered.startswith(p) for p in _BARE_NAME_OPENAI_PREFIXES):
+        return "openai"
+    if any(lowered.startswith(p) for p in _BARE_NAME_ANTHROPIC_PREFIXES):
+        if os.environ.get(BYOK_PROVIDER_ENV_VARS["anthropic"]):
+            return "anthropic"
+        if os.environ.get(BYOK_PROVIDER_ENV_VARS["openrouter"]):
+            return "openrouter"
+    return None
+
+
+def _build_dbless_llm_client(model_name: str) -> AsyncOpenAI:
+    """
+    Construct an ``AsyncOpenAI`` client from environment variables for
+    standalone (DB-less) use.
+
+    Resolution rules:
+
+    - ``custom/<slug>/<model>`` is rejected — custom providers require a
+      DB lookup to resolve ``base_url`` and ``api_key``.
+    - ``<provider>/<model>`` where ``<provider>`` is a known built-in
+      provider routes directly to that provider's public API, keyed by
+      the provider's env var from :data:`BYOK_PROVIDER_ENV_VARS`.
+    - ``builtin/<model>`` routes to the LiteLLM proxy, keyed by
+      ``LITELLM_MASTER_KEY`` and based at ``LITELLM_API_BASE``.
+    - A bare model name with no prefix routes to the provider inferred
+      by :func:`_resolve_bare_name_provider` (OpenAI for ``gpt-*``,
+      Anthropic/OpenRouter for ``claude-*``). If no rule matches, it
+      falls back to the LiteLLM proxy.
+
+    Raises:
+        MissingApiKeyError: If the required env var for the resolved
+            provider is missing. The ``env_var`` attribute names the
+            variable that must be set.
+        ValueError: If the model references an unknown provider prefix
+            or a ``custom/`` prefix (these are non-recoverable in the
+            standalone path).
+    """
+    from ..config import get_settings
+
+    settings = get_settings()
+
+    # Custom provider prefix has no meaning without a DB lookup — there is no
+    # UserProvider table to resolve the base_url / api_key from.
+    if model_name.startswith(CUSTOM_PREFIX):
+        raise ValueError(
+            f"Custom provider models ({CUSTOM_PREFIX}...) require a database session. "
+            f"Use a built-in provider prefix or the LiteLLM proxy path instead."
+        )
+
+    # builtin/ prefix → LiteLLM proxy (short-circuit so builtin/gpt-4o does
+    # NOT get re-routed to OpenAI direct by the bare-name heuristic below).
+    if model_name.startswith(BUILTIN_PREFIX):
+        return _build_litellm_client(model_name[len(BUILTIN_PREFIX) :], settings)
+
+    # BYOK provider prefix (e.g. "openai/gpt-4o-mini")
+    if "/" in model_name:
+        provider_slug = model_name.split("/", 1)[0]
+        if provider_slug in BUILTIN_PROVIDERS:
+            return _build_provider_client(provider_slug, model_name)
+        # Unknown prefix — in DB-less mode there is no UserCustomModel fallback.
+        raise ValueError(
+            f"Unknown provider prefix '{provider_slug}' in model '{model_name}'. "
+            f"Known providers: {', '.join(sorted(BUILTIN_PROVIDERS.keys()))}."
+        )
+
+    # Bare model name — try to infer a provider before falling back to LiteLLM.
+    inferred = _resolve_bare_name_provider(model_name)
+    if inferred is not None:
+        logger.debug("DB-less: bare model %r inferred as provider %r", model_name, inferred)
+        return _build_provider_client(inferred, model_name)
+
+    # Fall-through: LiteLLM proxy.
+    return _build_litellm_client(model_name, settings)
+
+
+def _build_litellm_client(model_name: str, settings: Any) -> AsyncOpenAI:
+    """
+    Build an ``AsyncOpenAI`` client aimed at the LiteLLM proxy using env
+    vars, falling back to ``settings.litellm_*`` when the env vars are
+    unset (so the orchestrator's existing configuration still works for
+    DB-less callers running inside the pod).
+    """
+    api_key = os.environ.get(LITELLM_API_KEY_ENV_VAR) or settings.litellm_master_key
+    if not api_key:
+        raise MissingApiKeyError(
+            LITELLM_API_KEY_ENV_VAR,
+            f"LiteLLM proxy model '{model_name}' requires the "
+            f"{LITELLM_API_KEY_ENV_VAR} environment variable to be set "
+            f"for standalone (DB-less) operation.",
+        )
+    base_url = os.environ.get(LITELLM_API_BASE_ENV_VAR) or settings.litellm_api_base
+    if not base_url:
+        raise MissingApiKeyError(
+            LITELLM_API_BASE_ENV_VAR,
+            f"LiteLLM proxy model '{model_name}' requires the "
+            f"{LITELLM_API_BASE_ENV_VAR} environment variable (or "
+            f"settings.litellm_api_base) to be set for standalone "
+            f"(DB-less) operation.",
+        )
+    logger.info("DB-less: using LiteLLM proxy for model: %s", model_name)
+    return AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=1)
+
+
+async def get_llm_client(
+    user_id: UUID | None,
+    model_name: str,
+    db: AsyncSession | None,
+) -> AsyncOpenAI:
     """
     Get configured LLM client for a user and model.
 
@@ -246,10 +471,15 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
 
     Supported BYOK providers are derived from BUILTIN_PROVIDERS (see top of file).
 
+    When ``db`` is ``None`` (standalone / benchmark contexts), API keys are
+    resolved from environment variables via :data:`BYOK_PROVIDER_ENV_VARS`
+    and :data:`LITELLM_API_KEY_ENV_VAR` instead of the database. ``user_id``
+    is ignored in that path.
+
     Args:
-        user_id: The user ID
+        user_id: The user ID. May be ``None`` when ``db`` is also ``None``.
         model_name: The model identifier (e.g., "builtin/gpt-4o", "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
-        db: Database session
+        db: Database session, or ``None`` for standalone env-var resolution.
 
     Returns:
         Configured AsyncOpenAI client ready to use
@@ -257,10 +487,16 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
     Raises:
         ValueError: If user not found, provider not found, or API key not configured
     """
+    if db is None:
+        return _build_dbless_llm_client(model_name)
+
     from ..config import get_settings
     from ..models import User, UserProvider
 
     settings = get_settings()
+
+    if user_id is None:
+        raise ValueError("user_id is required when a database session is provided")
 
     # Get user
     result = await db.execute(select(User).where(User.id == user_id))
@@ -709,7 +945,11 @@ class OpenAIAdapter(ModelAdapter):
 
 
 async def create_model_adapter(
-    model_name: str, user_id: UUID, db: AsyncSession, provider: str | None = None, **kwargs
+    model_name: str,
+    user_id: UUID | None = None,
+    db: AsyncSession | None = None,
+    provider: str | None = None,
+    **kwargs,
 ) -> ModelAdapter:
     """
     Factory function to create the appropriate model adapter.
@@ -717,29 +957,81 @@ async def create_model_adapter(
     Uses get_llm_client() to handle model routing (OpenRouter vs LiteLLM).
     Auto-detects provider from model name if not specified.
 
+    Two modes of operation:
+
+    1. **DB-backed** (``db`` is a live ``AsyncSession``): API keys are
+       resolved from the user's ``UserAPIKey`` records. ``user_id`` is
+       required. Behavior is unchanged from previous releases — this
+       branch is the default path for the orchestrator request/chat flow.
+    2. **Standalone / DB-less** (``db is None``): API keys are resolved
+       from environment variables. See :data:`BYOK_PROVIDER_ENV_VARS`
+       for the provider → env-var mapping and :data:`LITELLM_API_KEY_ENV_VAR`
+       / :data:`LITELLM_API_BASE_ENV_VAR` for the LiteLLM proxy path.
+       ``user_id`` is optional and ignored in this path. This branch is
+       selected by passing ``db=None`` (no separate flag) so existing
+       callers are unaffected. It is intended for standalone CLI tools,
+       benchmark harnesses, and other contexts that do not have
+       database connectivity.
+
+    In the standalone path, bare model names are routed by prefix:
+
+    - ``gpt-*``, ``o1-*``, ``o3-*``, ``o4-*`` → OpenAI direct
+      (``OPENAI_API_KEY``).
+    - ``claude-*`` → Anthropic direct if ``ANTHROPIC_API_KEY`` is set,
+      otherwise OpenRouter if ``OPENROUTER_API_KEY`` is set, otherwise
+      the LiteLLM proxy.
+    - Anything else falls through to the LiteLLM proxy.
+
     Args:
-        model_name: Model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
-        user_id: User ID for fetching API keys
-        db: Database session
-        provider: Force specific provider ("openai", "anthropic", etc.)
-        **kwargs: Additional adapter parameters (temperature, max_tokens, etc.)
+        model_name: Model identifier (e.g., "gpt-4o",
+            "openrouter/anthropic/claude-3.5-sonnet", "builtin/claude-opus-4.6").
+        user_id: User ID for fetching API keys (required when ``db`` is
+            set; ignored when ``db`` is ``None``).
+        db: Database session, or ``None`` for env-var resolution.
+        provider: Force specific provider ("openai", "anthropic", etc.).
+            When ``db`` is ``None`` the provider defaults to ``"openai"``
+            regardless of the model prefix, because every supported
+            standalone provider exposes an OpenAI-compatible endpoint.
+        **kwargs: Additional adapter parameters (temperature, max_tokens,
+            thinking_effort, etc.). These flow through to the underlying
+            :class:`OpenAIAdapter` unchanged.
 
     Returns:
-        ModelAdapter instance
+        ModelAdapter instance.
+
+    Raises:
+        MissingApiKeyError: In the standalone path, when the required
+            provider env var is unset. The ``env_var`` attribute names
+            the variable to export.
+        ValueError: For non-recoverable routing errors (unknown provider
+            prefix, ``custom/`` prefix without a DB session, etc.).
 
     Examples:
-        # OpenAI GPT-4 (via LiteLLM)
-        adapter = await create_model_adapter("gpt-4o", user_id=1, db=db)
+        # OpenAI GPT-4 (via LiteLLM, DB-backed)
+        adapter = await create_model_adapter("gpt-4o", user_id=uid, db=db)
 
         # OpenRouter model (uses user's OpenRouter key)
-        adapter = await create_model_adapter("openrouter/anthropic/claude-3.5-sonnet", user_id=1, db=db)
+        adapter = await create_model_adapter("openrouter/anthropic/claude-3.5-sonnet", user_id=uid, db=db)
 
-        # Cerebras via LiteLLM
-        adapter = await create_model_adapter("cerebras/llama3.1-8b", user_id=1, db=db)
+        # Standalone/benchmark — reads OPENAI_API_KEY from the environment
+        adapter = await create_model_adapter("openai/gpt-4o-mini", db=None)
+
+        # Standalone bare name — routes to OpenAI direct via OPENAI_API_KEY
+        adapter = await create_model_adapter("gpt-4o", db=None)
     """
-    # Auto-detect API type from model prefix using the provider registry
+    # Auto-detect API type from model prefix using the provider registry.
+    #
+    # Standalone / DB-less path (db is None): we always use the OpenAI
+    # chat.completions client because every public provider we route to
+    # exposes an OpenAI-compatible endpoint (including Anthropic's
+    # ``/v1/`` beta surface). This lets benchmark harnesses pass
+    # ``anthropic/claude-3-5-sonnet`` without also having to pass
+    # ``provider="openai"`` to dodge the ``api_type: "anthropic"`` entry
+    # in BUILTIN_PROVIDERS.
     if not provider:
-        if "/" in model_name:
+        if db is None:
+            provider = "openai"
+        elif "/" in model_name:
             slug = model_name.split("/", 1)[0]
             cfg = BUILTIN_PROVIDERS.get(slug)
             provider = cfg["api_type"] if cfg else "openai"

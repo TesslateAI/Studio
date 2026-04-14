@@ -22,6 +22,10 @@ class ToolCategory(Enum):
     PROJECT = "project_management"
     BUILD = "build_operations"
     WEB = "web_operations"
+    NAV_OPS = "navigation_operations"
+    MEMORY_OPS = "memory_operations"
+    GIT_OPS = "git_operations"
+    DELEGATION_OPS = "delegation_operations"
     VIEW_GRAPH = "graph_view_tools"  # Tools only available in graph/architecture view
 
 
@@ -318,22 +322,41 @@ def get_tool_registry() -> ToolRegistry:
 
 def _register_all_tools(registry: ToolRegistry):
     """Register all essential tools from modular structure."""
+    from .delegation_ops import register_delegation_ops_tools
     from .file_ops import register_all_file_tools
+    from .git_ops import register_git_ops_tools
+    from .memory_ops import register_memory_ops_tools
+    from .nav_ops import register_nav_ops_tools
     from .planning_ops import register_all_planning_tools
     from .project_ops import register_all_project_tools
     from .shell_ops import register_all_shell_tools
     from .skill_ops import register_all_skill_tools
     from .web_ops import register_all_web_tools
 
-    # Register essential tools (use bash_exec for file listing, globbing, grepping)
-    register_all_file_tools(registry)  # 4 tools: read_file, write_file, patch_file, multi_edit
-    register_all_shell_tools(registry)  # 4 tools: bash_exec, shell_open, shell_exec, shell_close
-    register_all_project_tools(registry)  # 1 tool: get_project_info
-    register_all_planning_tools(registry)  # 2 tools: todo_read, todo_write
-    register_all_web_tools(registry)  # 3 tools: web_fetch, web_search, send_message
-    register_all_skill_tools(registry)  # 1 tool: load_skill
+    # File ops: read_file, write_file, read_many_files, patch_file, multi_edit,
+    # apply_patch, file_undo, view_image
+    register_all_file_tools(registry)
+    # Shell ops: bash_exec (PTY in local), shell_open/close, shell_exec, write_stdin,
+    # list_background_processes, read_background_output, python_repl
+    register_all_shell_tools(registry)
+    # Nav ops: glob, grep, list_dir
+    register_nav_ops_tools(registry)
+    # Git ops: git_log, git_blame, git_status, git_diff
+    register_git_ops_tools(registry)
+    # Memory ops: memory_read, memory_write
+    register_memory_ops_tools(registry)
+    # Project ops: get_project_info, project_control, kanban, etc.
+    register_all_project_tools(registry)
+    # Planning ops: todo_read, todo_write, save_plan, structured update_plan
+    register_all_planning_tools(registry)
+    # Delegation ops: task, wait_agent, send_message_to_agent, close_agent, list_agents
+    register_delegation_ops_tools(registry)
+    # Web ops: web_fetch, web_search, send_message
+    register_all_web_tools(registry)
+    # Skill ops: load_skill
+    register_all_skill_tools(registry)
 
-    logger.info(f"Registered {len(registry._tools)} essential tools total")
+    logger.info(f"Registered {len(registry._tools)} tools total")
 
 
 def create_scoped_tool_registry(

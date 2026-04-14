@@ -31,6 +31,7 @@ from .routers import (
     deployment_oauth,
     deployment_targets,
     deployments,
+    design,
     desktop_pair,
     external_agent,
     feedback,
@@ -1129,6 +1130,7 @@ app.include_router(deployments.router)
 app.include_router(deployment_credentials.router)
 app.include_router(deployment_oauth.router)
 app.include_router(deployment_targets.router)  # Deployment target nodes in React Flow
+app.include_router(design.router)  # /api/projects/{slug}/design/* — OID indexing & AST write-back
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)

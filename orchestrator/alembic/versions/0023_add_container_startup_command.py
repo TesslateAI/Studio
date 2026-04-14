@@ -5,8 +5,8 @@ Revises: 0022
 Create Date: 2026-03-12
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0023_container_start_cmd"
 down_revision = "0022_message_updated_at"

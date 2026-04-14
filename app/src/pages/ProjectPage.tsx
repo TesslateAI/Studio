@@ -3,8 +3,6 @@ import { useParams, useNavigate, useSearchParams, useLocation } from 'react-rout
 import { useHotkeys } from 'react-hotkeys-hook';
 import {
   ArrowLeft,
-  CaretLeft,
-  CaretRight,
   Monitor,
   Code,
   GitBranch,
@@ -13,14 +11,15 @@ import {
   Storefront,
   Gear,
   Rocket,
-  ArrowsClockwise,
   Kanban,
   Terminal,
   TreeStructure,
   LockSimple,
-  DeviceMobile,
   PencilRuler,
   Clock,
+  SidebarSimple,
+  Chat,
+  Plus,
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -28,14 +27,15 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { NavigationSidebar } from '../components/ui/NavigationSidebar';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { ChatContainer } from '../components/chat/ChatContainer';
-import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
-import { BrowserPreview } from '../components/BrowserPreview';
 import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
 import { TimelinePanel } from '../components/panels/TimelinePanel';
 import { NoComputePlaceholder } from '../components/NoComputePlaceholder';
 import { useContainerStartup } from '../hooks/useContainerStartup';
 import { useFileTree } from '../hooks/useFileTree';
+import { useToolDock, type ToolType, type TabInstance } from '../hooks/useToolDock';
+import { ToolTabsPanel, type TabRenderer } from '../components/project/ToolTabsPanel';
+import { PreviewPane } from '../components/project/PreviewPane';
 import {
   GitHubPanel,
   NotesPanel,
@@ -48,7 +48,7 @@ import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
 import { ContainerSelector, PROJECT_ROOT_ID } from '../components/ContainerSelector';
-import { PreviewPortPicker, type PreviewableContainer } from '../components/PreviewPortPicker';
+import { type PreviewableContainer } from '../components/PreviewPortPicker';
 import {
   ArchitectureView,
   type ArchitectureViewHandle,
@@ -72,35 +72,17 @@ import { VolumeHealthBanner } from '../components/VolumeHealthBanner';
 // Types
 // ---------------------------------------------------------------------------
 
-type ProjectViewType =
-  | 'architecture'
-  | 'preview'
-  | 'code'
-  | 'design'
-  | 'kanban'
-  | 'assets'
-  | 'terminal';
 type PanelType = 'github' | 'notes' | 'settings' | null;
 
-const VIEW_LABELS: Record<ProjectViewType, string> = {
+const TOOL_LABELS: Record<ToolType, string> = {
   architecture: 'Architecture',
-  preview: 'Builder',
+  preview: 'Preview',
   code: 'Code',
   design: 'Design',
   kanban: 'Kanban',
   assets: 'Assets',
   terminal: 'Terminal',
 };
-
-const VALID_VIEWS: ProjectViewType[] = [
-  'architecture',
-  'preview',
-  'code',
-  'design',
-  'kanban',
-  'assets',
-  'terminal',
-];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -150,19 +132,35 @@ export default function ProjectPage() {
     return localStorage.getItem(`tesslate-agent-${slug}`);
   });
 
-  // View state — route-based initial value
-  const [activeView, setActiveView] = useState<ProjectViewType>(() => {
-    if (isBuilderPath) return 'preview';
-    const saved = localStorage.getItem(`tesslate-view-${slug}`);
-    if (saved && VALID_VIEWS.includes(saved as ProjectViewType)) {
-      return saved as ProjectViewType;
-    }
-    return 'preview';
+  // Tool dock (tabs only — preview is a regular tab in this model).
+  const dock = useToolDock(slug);
+  const activeTabType: ToolType | null = useMemo(() => {
+    const active = dock.state.tabs.find((t) => t.id === dock.state.activeTabId);
+    return active?.type ?? null;
+  }, [dock.state]);
+
+  // Chat pane visibility — collapsible so the dock can take the full canvas.
+  // Persisted globally so the preference survives project switches.
+  const [isChatVisible, setIsChatVisible] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const saved = window.localStorage.getItem('tesslate-chat-visible');
+    return saved === null ? true : saved === 'true';
   });
 
-  // Lazy mount flags
-  const [archMounted, setArchMounted] = useState(false);
-  const [kanbanMounted, setKanbanMounted] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('tesslate-chat-visible', String(isChatVisible));
+  }, [isChatVisible]);
+
+  const toggleChatVisible = useCallback(() => {
+    setIsChatVisible((v) => {
+      const next = !v;
+      // Hiding chat with an empty dock would leave a blank canvas —
+      // auto-open a Preview tab so there is always content.
+      if (!next && !dock.isOpen) dock.openTool('preview');
+      return next;
+    });
+  }, [dock]);
 
   // Architecture ref + state for top bar
   const archRef = useRef<ArchitectureViewHandle>(null);
@@ -172,8 +170,6 @@ export default function ProjectPage() {
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
-  const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
-  const [viewportMode, setViewportMode] = useState<'desktop' | 'mobile'>('desktop');
   const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(() => {
     const saved = localStorage.getItem('navigationSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
@@ -181,7 +177,6 @@ export default function ProjectPage() {
   const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
-  const [_chatExpanded, setChatExpanded] = useState(false);
 
   // Preview port picker
   const [previewableContainers, setPreviewableContainers] = useState<PreviewableContainer[]>([]);
@@ -298,7 +293,6 @@ export default function ProjectPage() {
       return;
     }
 
-    // Root view = start all containers (whole environment)
     if ((container.id as string) === PROJECT_ROOT_ID) {
       toast.loading('Starting environment...', { id: 'container-start' });
       try {
@@ -357,6 +351,21 @@ export default function ProjectPage() {
 
   const handleAskAgent = useCallback((message: string) => {
     setPrefillChatMessage(message);
+  }, []);
+
+  // Selection-aware chat: DesignView dispatches `tesslate:design-ask-ai`
+  // when the user asks the AI about the currently selected element.
+  // We forward it as a chat prefill so the user can type their question
+  // after the element reference.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ prefill?: string }>).detail;
+      if (detail?.prefill) {
+        setPrefillChatMessage(detail.prefill);
+      }
+    };
+    window.addEventListener('tesslate:design-ask-ai', handler);
+    return () => window.removeEventListener('tesslate:design-ask-ai', handler);
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -509,17 +518,6 @@ export default function ProjectPage() {
     }
   };
 
-  const loadSettings = async () => {
-    if (!slug) return;
-    try {
-      const data = await projectsApi.getSettings(slug);
-      const settings = data.settings || {};
-      setPreviewMode(settings.preview_mode || 'normal');
-    } catch (error) {
-      console.error('Failed to load settings:', error);
-    }
-  };
-
   const loadAgents = async () => {
     try {
       const libraryData = await marketplaceApi.getMyAgents();
@@ -602,8 +600,6 @@ export default function ProjectPage() {
     try {
       const freshProject = await projectsApi.get(slug);
 
-      // Provisioning — files/containers aren't ready yet. Show the badge,
-      // skip container logic entirely, and let loadProject handle file display.
       if (freshProject.environment_status === 'provisioning') {
         setEnvironmentProvisioning(true);
         setNeedsContainerStart(false);
@@ -619,7 +615,6 @@ export default function ProjectPage() {
         return;
       }
 
-      // Project Root mode
       if (containerId === PROJECT_ROOT_ID) {
         setContainer({ id: PROJECT_ROOT_ID, name: 'Project Root', status: 'running' });
         localStorage.setItem(`tesslate-container-${slug}`, PROJECT_ROOT_ID);
@@ -653,11 +648,6 @@ export default function ProjectPage() {
           const containerStatus =
             status?.containers?.[dirKey!] ?? status?.containers?.[nameKey!] ?? null;
 
-          console.log('[loadContainer] status response:', JSON.stringify(status));
-          console.log('[loadContainer] dirKey:', dirKey, 'nameKey:', nameKey);
-          console.log('[loadContainer] containerStatus:', JSON.stringify(containerStatus));
-
-          // Build previewable containers
           const statusContainers = status?.containers ?? null;
           const previewable = buildPreviewableContainers(
             allContainers,
@@ -666,7 +656,6 @@ export default function ProjectPage() {
           );
           setPreviewableContainers(previewable);
 
-          // Setup failed — redirect to dashboard, user should delete and recreate
           if (freshProject.environment_status === 'setup_failed') {
             toast.error('This project failed to set up. Please delete it and create a new one.', {
               duration: 5000,
@@ -675,7 +664,6 @@ export default function ProjectPage() {
             return;
           }
 
-          // Stopping state
           if (
             status?.environment_status === 'stopping' ||
             freshProject.environment_status === 'stopping'
@@ -695,9 +683,7 @@ export default function ProjectPage() {
             return;
           }
 
-          // Fast path: already running
           if (containerStatus?.running && containerStatus?.url) {
-            console.log('[loadContainer] FAST PATH: container running at', containerStatus.url);
             containerStartup.reset();
             setNeedsContainerStart(false);
             setDevServerUrl(containerStatus.url);
@@ -708,7 +694,6 @@ export default function ProjectPage() {
             return;
           }
 
-          // Fallback: any running container with a URL
           if (
             status?.status === 'running' ||
             status?.status === 'partial' ||
@@ -719,10 +704,6 @@ export default function ProjectPage() {
               (c: Record<string, unknown>) => c.running && c.url
             ) as Record<string, unknown> | undefined;
             if (fallback) {
-              console.log(
-                '[loadContainer] FAST PATH (fallback): found running container at',
-                fallback.url
-              );
               containerStartup.reset();
               setNeedsContainerStart(false);
               setDevServerUrl(fallback.url as string);
@@ -733,31 +714,21 @@ export default function ProjectPage() {
               return;
             }
           }
-
-          console.log('[loadContainer] SLOW PATH: container not detected as running');
         } catch (statusError) {
           console.warn('Failed to check container status, will attempt start:', statusError);
         }
 
-        // Don't interfere with in-progress startup
         if (needsContainerStart && containerStartup.isLoading) return;
 
         const liveComputeState = status?.compute_state as string | undefined;
         const effectiveComputeTier =
           liveComputeState ?? (freshProject.compute_tier as string) ?? 'none';
         if (effectiveComputeTier !== 'environment') {
-          console.log(
-            '[loadContainer] compute state',
-            effectiveComputeTier,
-            '-- skipping container start'
-          );
           containerStartup.reset();
           setNeedsContainerStart(false);
           return;
         }
 
-        // Container not running - start via hook
-        console.log('[loadContainer] Starting container via startup hook');
         const containerIdToStart = foundContainer.id as string;
         currentContainerIdRef.current = containerIdToStart;
         setNeedsContainerStart(true);
@@ -772,7 +743,7 @@ export default function ProjectPage() {
   // Preview helpers
   // ---------------------------------------------------------------------------
 
-  const refreshPreview = () => {
+  const refreshPreview = useCallback(() => {
     if (devServerUrlWithAuth) {
       const iframe = iframeRef.current;
       if (iframe) {
@@ -781,21 +752,21 @@ export default function ProjectPage() {
         iframe.src = url.toString();
       }
     }
-  };
+  }, [devServerUrlWithAuth]);
 
-  const navigateBack = () => {
+  const navigateBack = useCallback(() => {
     const iframe = iframeRef.current;
     if (iframe && iframe.contentWindow) {
       iframe.contentWindow.postMessage({ type: 'navigate', direction: 'back' }, '*');
     }
-  };
+  }, []);
 
-  const navigateForward = () => {
+  const navigateForward = useCallback(() => {
     const iframe = iframeRef.current;
     if (iframe && iframe.contentWindow) {
       iframe.contentWindow.postMessage({ type: 'navigate', direction: 'forward' }, '*');
     }
-  };
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Derived state
@@ -842,26 +813,6 @@ export default function ProjectPage() {
 
   const codeEditorOverlay = hasFiles ? undefined : (loadingOverlay ?? undefined);
 
-  // ---------------------------------------------------------------------------
-  // Persist view choice
-  // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    if (slug) localStorage.setItem(`tesslate-view-${slug}`, activeView);
-  }, [activeView, slug]);
-
-  // ---------------------------------------------------------------------------
-  // Lazy mount
-  // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    if (activeView === 'architecture') setArchMounted(true);
-  }, [activeView]);
-
-  useEffect(() => {
-    if (activeView === 'kanban' && !kanbanMounted) setKanbanMounted(true);
-  }, [activeView, kanbanMounted]);
-
   // Architecture state for top bar rendering (updated via callback from ArchitectureView)
   const handleArchStateChange = useCallback(
     (state: { configDirty: boolean; isRunning: boolean }) => {
@@ -894,6 +845,31 @@ export default function ProjectPage() {
   }, [slug, isEnvironmentRunning]);
 
   // ---------------------------------------------------------------------------
+  // Dock / tool helpers
+  // ---------------------------------------------------------------------------
+
+  const isDesktop =
+    typeof window !== 'undefined' ? window.innerWidth >= 768 : true;
+
+  const openToolAndShowDock = useCallback(
+    (tool: ToolType, options?: { forceNew?: boolean }) => {
+      if (options?.forceNew) dock.openToolNew(tool);
+      else dock.openTool(tool);
+    },
+    [dock]
+  );
+
+  // If builder deep-link was used, open Preview by default on first load
+  const builderBootedRef = useRef(false);
+  useEffect(() => {
+    if (!isBuilderPath || builderBootedRef.current) return;
+    builderBootedRef.current = true;
+    if (dock.state.tabs.length === 0) {
+      dock.openTool('preview');
+    }
+  }, [isBuilderPath, dock]);
+
+  // ---------------------------------------------------------------------------
   // Keyboard shortcuts
   // ---------------------------------------------------------------------------
 
@@ -901,7 +877,7 @@ export default function ProjectPage() {
     'mod+1',
     (e) => {
       e.preventDefault();
-      setActiveView('architecture');
+      openToolAndShowDock('architecture');
     },
     { enableOnFormTags: false }
   );
@@ -909,7 +885,7 @@ export default function ProjectPage() {
     'mod+2',
     (e) => {
       e.preventDefault();
-      setActiveView('preview');
+      openToolAndShowDock('preview');
     },
     { enableOnFormTags: false }
   );
@@ -917,7 +893,7 @@ export default function ProjectPage() {
     'mod+3',
     (e) => {
       e.preventDefault();
-      setActiveView('code');
+      openToolAndShowDock('code');
     },
     { enableOnFormTags: false }
   );
@@ -925,7 +901,7 @@ export default function ProjectPage() {
     'mod+4',
     (e) => {
       e.preventDefault();
-      setActiveView('kanban');
+      openToolAndShowDock('design');
     },
     { enableOnFormTags: false }
   );
@@ -933,7 +909,7 @@ export default function ProjectPage() {
     'mod+5',
     (e) => {
       e.preventDefault();
-      setActiveView('assets');
+      openToolAndShowDock('kanban');
     },
     { enableOnFormTags: false }
   );
@@ -941,7 +917,16 @@ export default function ProjectPage() {
     'mod+6',
     (e) => {
       e.preventDefault();
-      setActiveView('terminal');
+      openToolAndShowDock('assets');
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+7',
+    (e) => {
+      e.preventDefault();
+      if (!canAccessTerminal) return;
+      openToolAndShowDock('terminal');
     },
     { enableOnFormTags: false }
   );
@@ -949,7 +934,15 @@ export default function ProjectPage() {
     'mod+r',
     (e) => {
       e.preventDefault();
-      if (activeView === 'preview') refreshPreview();
+      if (dock.hasType('preview')) refreshPreview();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+b',
+    (e) => {
+      e.preventDefault();
+      toggleChatVisible();
     },
     { enableOnFormTags: false }
   );
@@ -1005,18 +998,15 @@ export default function ProjectPage() {
   // Effects
   // ---------------------------------------------------------------------------
 
-  // Mount effect — load project data
   useEffect(() => {
     if (slug) {
       loadProject();
       loadDevServerUrl();
-      loadSettings();
       loadAgents();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  // Provisioning poll — re-check every 3s until status transitions
   useEffect(() => {
     if (!environmentProvisioning || !slug) return;
     const interval = setInterval(async () => {
@@ -1035,7 +1025,6 @@ export default function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [environmentProvisioning, slug]);
 
-  // Container change effect — restore from localStorage, load container
   useEffect(() => {
     if (slug) {
       if (!containerId) {
@@ -1050,7 +1039,6 @@ export default function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [containerId, slug]);
 
-  // Container dir change effect — reload files for non-v2 projects
   useEffect(() => {
     if (container) {
       if (project?.volume_id) return;
@@ -1060,14 +1048,12 @@ export default function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [container, project?.volume_id]);
 
-  // Cleanup
   useEffect(() => {
     return () => {
       if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
     };
   }, []);
 
-  // PostMessage listener for iframe URL changes
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'url-change') {
@@ -1091,7 +1077,6 @@ export default function ProjectPage() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  // Sync devServerUrl -> currentPreviewUrl
   useEffect(() => {
     if (devServerUrl) setCurrentPreviewUrl(devServerUrl);
   }, [devServerUrl]);
@@ -1134,15 +1119,18 @@ export default function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devServerUrl, slug, containerStartup.isLoading]);
 
-  // Refresh file tree when switching to code view
+  // Refresh file tree when the code or design tab becomes active
   useEffect(() => {
-    if ((activeView === 'code' || activeView === 'design') && slug) loadFileTree();
+    if ((activeTabType === 'code' || activeTabType === 'design') && slug) loadFileTree();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, slug]);
+  }, [activeTabType, slug]);
 
   // Register command handlers for CommandPalette
   useCommandHandlers({
-    switchView: (view: ViewType) => setActiveView(view as ProjectViewType),
+    switchView: (view: ViewType) => {
+      // Preview is a pinned pane, others are tabs — dock.openTool handles both
+      dock.openTool(view);
+    },
     togglePanel: (panel) => togglePanel(panel as PanelType),
     refreshPreview,
   });
@@ -1160,65 +1148,85 @@ export default function ProjectPage() {
   }
 
   // ---------------------------------------------------------------------------
-  // Sidebar items
+  // Top bar — tool buttons
   // ---------------------------------------------------------------------------
 
-  const leftSidebarItems = [
+  const toolButtonDefs: Array<{
+    id: ToolType;
+    icon: React.ReactElement;
+    hotkey: string;
+    disabled?: boolean;
+    restricted?: boolean;
+  }> = [
+    { id: 'architecture', icon: <TreeStructure size={14} weight="bold" />, hotkey: '⌘1' },
+    { id: 'preview', icon: <Monitor size={14} weight="bold" />, hotkey: '⌘2' },
+    { id: 'code', icon: <Code size={14} weight="bold" />, hotkey: '⌘3' },
+    { id: 'design', icon: <PencilRuler size={14} weight="bold" />, hotkey: '⌘4' },
+    { id: 'kanban', icon: <Kanban size={14} weight="bold" />, hotkey: '⌘5', restricted: !canEditKanban },
+    { id: 'assets', icon: <Image size={14} weight="bold" />, hotkey: '⌘6', restricted: !canEditAssets },
     {
-      icon: <TreeStructure size={18} />,
-      title: 'Architecture',
-      onClick: () => setActiveView('architecture'),
-      active: activeView === 'architecture',
-      disabled: false,
-      restricted: false,
-    },
-    {
-      icon: <Monitor size={18} />,
-      title: 'Preview',
-      onClick: () => setActiveView('preview'),
-      active: activeView === 'preview',
-      disabled: false,
-      restricted: false,
-    },
-    {
-      icon: <Code size={18} />,
-      title: 'Code',
-      onClick: () => setActiveView('code'),
-      active: activeView === 'code',
-      disabled: false,
-      restricted: false,
-    },
-    {
-      icon: <PencilRuler size={18} />,
-      title: 'Design',
-      onClick: () => setActiveView('design'),
-      active: activeView === 'design',
-    },
-    {
-      icon: <Kanban size={18} />,
-      title: 'Kanban Board',
-      onClick: () => setActiveView('kanban'),
-      active: activeView === 'kanban',
-      disabled: false,
-      restricted: !canEditKanban,
-    },
-    {
-      icon: <Image size={18} />,
-      title: 'Assets',
-      onClick: () => setActiveView('assets'),
-      active: activeView === 'assets',
-      disabled: false,
-      restricted: !canEditAssets,
-    },
-    {
-      icon: <Terminal size={18} />,
-      title: 'Terminal',
-      onClick: canAccessTerminal ? () => setActiveView('terminal') : undefined,
-      active: activeView === 'terminal',
+      id: 'terminal',
+      icon: <Terminal size={14} weight="bold" />,
+      hotkey: '⌘7',
       disabled: !canAccessTerminal,
       restricted: !canAccessTerminal,
     },
   ];
+
+  const handleToolButtonClick = (id: ToolType, e: React.MouseEvent) => {
+    // ⇧-click always creates a new tab instance; a plain click focuses the
+    // first existing tab of that type (or creates one if none).
+    openToolAndShowDock(id, { forceNew: e.shiftKey });
+  };
+
+  const renderToolButtons = () => (
+    <div className="flex items-center gap-0.5 border-l border-r border-[var(--border)] px-1 mx-1">
+      {toolButtonDefs.map((def) => {
+        const active = dock.isActiveType(def.id);
+        const count = dock.countOf(def.id);
+        const label = TOOL_LABELS[def.id];
+        return (
+          <Tooltip
+            key={def.id}
+            content={`${label} ${def.hotkey} · shift-click for new`}
+            side="bottom"
+            delay={200}
+          >
+            <button
+              onClick={def.disabled ? undefined : (e) => handleToolButtonClick(def.id, e)}
+              className={`relative h-7 w-7 flex items-center justify-center rounded-[var(--radius-small)] transition-colors ${
+                active
+                  ? 'bg-[var(--surface-hover)] text-[var(--primary)]'
+                  : count > 0
+                    ? 'text-[var(--text)] hover:bg-[var(--surface-hover)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]'
+              }`}
+              style={def.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+              aria-pressed={active}
+              aria-label={label}
+            >
+              {def.icon}
+              {count > 1 && (
+                <span className="absolute -top-0.5 -right-0.5 text-[9px] font-semibold leading-none px-1 py-[1px] rounded bg-[var(--primary)]/15 text-[var(--primary)]">
+                  {count}
+                </span>
+              )}
+              {def.restricted && !def.disabled && (
+                <LockSimple
+                  size={9}
+                  className="absolute -bottom-0.5 -right-0.5 text-[var(--text-subtle)]"
+                />
+              )}
+            </button>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+
+  // ---------------------------------------------------------------------------
+  // Sidebar items (panels only — view toggles moved to top bar)
+  // ---------------------------------------------------------------------------
 
   const panelItems = [
     {
@@ -1253,21 +1261,97 @@ export default function ProjectPage() {
     },
   ];
 
-  // MobileMenu expects a flat items array
-  const mobileRightItems = [
-    ...panelItems,
-    {
-      icon: <Storefront size={18} />,
-      title: 'Agents',
-      onClick: () => window.open('/marketplace', '_blank'),
-    },
-  ];
+  // Mobile drawer builder section — renders tool buttons + panel toggles inside
+  // the shared NavigationSidebar drawer. Clicking anything opens/toggles its
+  // target and dismisses the drawer so the user lands on the content immediately.
+  const closeMobileDrawer = () => window.dispatchEvent(new Event('closeMobileMenu'));
+
+  const mobileBuilderSection: NonNullable<
+    React.ComponentProps<typeof NavigationSidebar>['builderSection']
+  > = ({ navButtonClass, iconClass, labelClass, inactiveIconClass, inactiveLabelClass }) => (
+    <>
+      {/* Back to projects */}
+      <button
+        onClick={() => {
+          closeMobileDrawer();
+          navigate('/dashboard');
+        }}
+        className={navButtonClass(false)}
+      >
+        <ArrowLeft size={16} className={inactiveIconClass} />
+        <span className={`${inactiveLabelClass} truncate`}>{project?.name || 'Project'}</span>
+      </button>
+
+      <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
+
+      <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-subtle)]">
+        Views
+      </div>
+
+      {toolButtonDefs.map((def) => {
+        const active = dock.isActiveType(def.id);
+        return (
+          <button
+            key={def.id}
+            onClick={
+              def.disabled
+                ? undefined
+                : () => {
+                    closeMobileDrawer();
+                    openToolAndShowDock(def.id);
+                  }
+            }
+            className={navButtonClass(active)}
+            style={def.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+          >
+            {React.cloneElement(def.icon, { className: iconClass(active), size: 16 })}
+            <span className={labelClass(active)}>{TOOL_LABELS[def.id]}</span>
+            {def.restricted && (
+              <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
+                locked
+              </span>
+            )}
+          </button>
+        );
+      })}
+
+      <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
+
+      <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-subtle)]">
+        Panels
+      </div>
+
+      {panelItems.map((item, index) => (
+        <button
+          key={index}
+          onClick={
+            item.disabled || !item.onClick
+              ? undefined
+              : () => {
+                  closeMobileDrawer();
+                  item.onClick!();
+                }
+          }
+          className={navButtonClass(item.active)}
+          style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+        >
+          {React.cloneElement(item.icon, { className: iconClass(item.active) })}
+          <span className={labelClass(item.active)}>{item.title}</span>
+          {item.restricted && (
+            <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
+              locked
+            </span>
+          )}
+        </button>
+      ))}
+    </>
+  );
 
   // ---------------------------------------------------------------------------
-  // Chat props (shared across docked/floating instances)
+  // Chat props
   // ---------------------------------------------------------------------------
 
-  const chatViewContext = activeView === 'architecture' ? 'graph' : 'builder';
+  const chatViewContext = activeTabType === 'architecture' ? 'graph' : 'builder';
 
   const chatProps = {
     projectId: project?.id,
@@ -1287,7 +1371,6 @@ export default function ProjectPage() {
     onEnvironmentStopping: handleEnvironmentStopping,
     onEnvironmentStopped: handleEnvironmentStopped,
     onVolumeReady: () => {
-      // Refresh project state when the Hub reports the volume is ready.
       if (slug) {
         projectsApi
           .get(slug)
@@ -1299,157 +1382,66 @@ export default function ProjectPage() {
   } as const;
 
   // ---------------------------------------------------------------------------
-  // Render helpers — content views (shared between docked/center/mobile layouts)
+  // Tab renderers (keep-alive managed inside ToolTabsPanel)
+  //
+  // Each renderer receives the TabInstance + its 0-based index within its
+  // type, so multiple tabs of the same type can scope their own state.
+  // Only the FIRST preview tab owns the shared iframeRef (used by
+  // refreshPreview/navigateBack etc). Additional preview tabs get their own
+  // iframes but the shared controls continue to target the primary one.
   // ---------------------------------------------------------------------------
 
-  const renderArchitectureView = () =>
-    archMounted && (
-      <div className={`w-full h-full ${activeView === 'architecture' ? 'flex' : 'hidden'}`}>
-        <ArchitectureView
-          ref={archRef}
-          slug={slug!}
-          projectId={project?.id as string}
-          isActive={activeView === 'architecture'}
-          onContainersChanged={() => {
-            if (slug)
-              projectsApi
-                .getContainers(slug)
-                .then(setContainers)
-                .catch(() => {});
-          }}
-          onNavigateToContainer={(id) => {
-            setActiveView('preview');
-            navigate(`/project/${slug}?container=${id}`);
-          }}
-          onStateChange={handleArchStateChange}
-          readOnly={isViewer}
-        />
-      </div>
-    );
+  const selectedPreviewContainerId =
+    containerId || (container?.id as string) || null;
 
-  const renderPreviewView = () => (
-    <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-      {noPreview
-        ? previewPlaceholder
-        : (loadingOverlay ??
-          (devServerUrl ? (
-            previewMode === 'browser-tabs' ? (
-              <BrowserPreview
-                devServerUrl={devServerUrl}
-                devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
-                currentPreviewUrl={currentPreviewUrl}
-                onNavigateBack={navigateBack}
-                onNavigateForward={navigateForward}
-                onRefresh={refreshPreview}
-                onUrlChange={setCurrentPreviewUrl}
-                containerStatus={containerStartup.status}
-                startupPhase={containerStartup.phase}
-                startupProgress={containerStartup.progress}
-                startupMessage={containerStartup.message}
-                startupLogs={containerStartup.logs}
-                startupError={containerStartup.error || undefined}
-                onRetryStart={containerStartup.retry}
-                previewableContainers={previewableContainers}
-                selectedPreviewContainerId={containerId || (container?.id as string)}
-                onPreviewContainerSwitch={handlePreviewContainerSwitch}
-              />
-            ) : (
-              <>
-                <div className="h-10 bg-[var(--surface)] border-b border-[var(--border)] px-2 flex items-center gap-1.5 flex-shrink-0">
-                  <div className="flex items-center gap-0.5">
-                    <button onClick={navigateBack} className="btn btn-icon btn-sm" title="Go back">
-                      <CaretLeft size={14} weight="bold" />
-                    </button>
-                    <button
-                      onClick={navigateForward}
-                      className="btn btn-icon btn-sm"
-                      title="Go forward"
-                    >
-                      <CaretRight size={14} weight="bold" />
-                    </button>
-                  </div>
-                  <div className="hidden md:flex flex-1 items-center gap-1.5 h-7 bg-[var(--bg)] border border-[var(--border)] rounded-full px-3 min-w-0">
-                    <LockSimple
-                      size={11}
-                      weight="bold"
-                      className="text-[var(--text-subtle)] flex-shrink-0"
-                    />
-                    <span className="text-[11px] text-[var(--text-muted)] font-mono truncate">
-                      {currentPreviewUrl || devServerUrl}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-0.5 ml-auto">
-                    <PreviewPortPicker
-                      containers={previewableContainers}
-                      selectedContainerId={containerId || (container?.id as string)}
-                      onSelect={handlePreviewContainerSwitch}
-                    />
-                    <button
-                      onClick={refreshPreview}
-                      className="btn btn-icon btn-sm"
-                      title="Refresh"
-                    >
-                      <ArrowsClockwise size={14} />
-                    </button>
-                    <button
-                      onClick={() =>
-                        setViewportMode(viewportMode === 'desktop' ? 'mobile' : 'desktop')
-                      }
-                      className={`btn btn-icon btn-sm ${viewportMode === 'mobile' ? 'btn-active text-[var(--primary)]' : ''}`}
-                      title={
-                        viewportMode === 'desktop'
-                          ? 'Switch to mobile view'
-                          : 'Switch to desktop view'
-                      }
-                    >
-                      {viewportMode === 'desktop' ? (
-                        <DeviceMobile size={14} />
-                      ) : (
-                        <Monitor size={14} />
-                      )}
-                    </button>
-                  </div>
-                </div>
-                <div
-                  className={`flex-1 relative overflow-auto ${viewportMode === 'mobile' ? 'bg-[var(--bg)] flex items-center justify-center' : 'bg-white'}`}
-                  style={{ height: 'calc(100% - 40px)' }}
-                  onMouseEnter={() => {
-                    isPointerOverPreviewRef.current = true;
-                  }}
-                  onMouseLeave={() => {
-                    isPointerOverPreviewRef.current = false;
-                  }}
-                >
-                  <div
-                    className={
-                      viewportMode === 'mobile'
-                        ? 'w-[375px] h-[667px] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden flex-shrink-0 bg-white'
-                        : 'w-full h-full'
-                    }
-                  >
-                    <iframe
-                      ref={iframeRef}
-                      id="preview-iframe"
-                      src={devServerUrlWithAuth || devServerUrl}
-                      className="w-full h-full"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                    />
-                  </div>
-                </div>
-              </>
-            )
-          ) : (
-            <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-              <LoadingSpinner message="Loading project..." size={60} />
-            </div>
-          )))}
-    </div>
-  );
-
-  const renderCodeView = () => (
-    <div
-      className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
-    >
+  const tabRenderers: Partial<Record<ToolType, TabRenderer>> = {
+    architecture: (_tab: TabInstance, _idx: number) => (
+      <ArchitectureView
+        ref={archRef}
+        slug={slug!}
+        projectId={project?.id as string}
+        isActive={activeTabType === 'architecture'}
+        onContainersChanged={() => {
+          if (slug)
+            projectsApi
+              .getContainers(slug)
+              .then(setContainers)
+              .catch(() => {});
+        }}
+        onNavigateToContainer={(id) => {
+          dock.openTool('preview');
+          navigate(`/project/${slug}?container=${id}`);
+        }}
+        onStateChange={handleArchStateChange}
+        readOnly={isViewer}
+      />
+    ),
+    preview: (_tab: TabInstance, idx: number) => (
+      <PreviewPane
+        // First instance owns the shared iframeRef; others get their own
+        // element via null ref so refreshPreview still works predictably.
+        ref={idx === 0 ? iframeRef : null}
+        devServerUrl={devServerUrl}
+        devServerUrlWithAuth={devServerUrlWithAuth}
+        currentPreviewUrl={currentPreviewUrl}
+        previewableContainers={previewableContainers}
+        selectedPreviewContainerId={selectedPreviewContainerId}
+        onPreviewContainerSwitch={handlePreviewContainerSwitch}
+        onRefresh={refreshPreview}
+        onNavigateBack={navigateBack}
+        onNavigateForward={navigateForward}
+        onPointerEnter={() => {
+          isPointerOverPreviewRef.current = true;
+        }}
+        onPointerLeave={() => {
+          isPointerOverPreviewRef.current = false;
+        }}
+        placeholder={noPreview ? previewPlaceholder : undefined}
+        overlay={loadingOverlay ?? undefined}
+        showClose={false}
+      />
+    ),
+    code: (_tab: TabInstance, _idx: number) => (
       <CodeEditor
         projectId={project?.id}
         slug={slug!}
@@ -1464,47 +1456,9 @@ export default function ProjectPage() {
         startupOverlay={codeEditorOverlay}
         readOnly={!canEditAssets}
       />
-    </div>
-  );
-
-  const renderKanbanView = () =>
-    kanbanMounted && project?.id ? (
-      <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-        <KanbanPanel projectId={project.id as string} readOnly={!canEditKanban} />
-      </div>
-    ) : null;
-
-  const renderAssetsView = () => (
-    <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
-      <AssetsPanel projectSlug={slug!} readOnly={!canEditAssets} />
-    </div>
-  );
-
-  const renderTerminalView = () => (
-    <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-      {canAccessTerminal ? (
-        <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <div className="text-center p-6">
-            <LockSimple size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
-            <p className="text-[var(--text-subtle)] text-sm font-medium">
-              Terminal access is restricted
-            </p>
-            <p className="text-[var(--text-subtle)] text-xs mt-1 opacity-60">
-              Viewers cannot access the terminal
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderDesignView = () => (
-    <div
-      className={`w-full h-full ${activeView === 'design' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
-    >
-      {project?.id && devServerUrl ? (
+    ),
+    design: (_tab: TabInstance, _idx: number) =>
+      project?.id && devServerUrl ? (
         <DesignView
           slug={slug!}
           projectId={project.id as number}
@@ -1517,7 +1471,6 @@ export default function ProjectPage() {
           onFileRename={handleFileRename}
           onDirectoryCreate={handleDirectoryCreate}
           isFilesSyncing={!filesInitiallyLoaded && fileTree.length === 0}
-          chatProps={chatProps}
           containerDir={containerDir}
           onRefreshPreview={refreshPreview}
         />
@@ -1533,21 +1486,35 @@ export default function ProjectPage() {
             </p>
           </div>
         </div>
-      )}
-    </div>
-  );
-
-  const renderContentViews = () => (
-    <>
-      {renderArchitectureView()}
-      {renderPreviewView()}
-      {renderCodeView()}
-      {renderDesignView()}
-      {renderKanbanView()}
-      {renderAssetsView()}
-      {renderTerminalView()}
-    </>
-  );
+      ),
+    kanban: (_tab: TabInstance, _idx: number) =>
+      project?.id ? (
+        <KanbanPanel projectId={project.id as string} readOnly={!canEditKanban} />
+      ) : null,
+    assets: (_tab: TabInstance, _idx: number) => (
+      <AssetsPanel projectSlug={slug!} readOnly={!canEditAssets} />
+    ),
+    terminal: (tab: TabInstance, _idx: number) =>
+      canAccessTerminal ? (
+        <TerminalPanel
+          projectId={slug!}
+          projectUuid={project?.id as string}
+          instanceId={tab.id}
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <div className="text-center p-6">
+            <LockSimple size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
+            <p className="text-[var(--text-subtle)] text-sm font-medium">
+              Terminal access is restricted
+            </p>
+            <p className="text-[var(--text-subtle)] text-xs mt-1 opacity-60">
+              Viewers cannot access the terminal
+            </p>
+          </div>
+        </div>
+      ),
+  };
 
   // ---------------------------------------------------------------------------
   // Top bar — right side actions
@@ -1556,7 +1523,7 @@ export default function ProjectPage() {
   const renderTopBarActions = () => (
     <div className="flex items-center gap-[2px]">
       {/* Architecture-only: Save/Load Config */}
-      {activeView === 'architecture' && !isViewer && (
+      {activeTabType === 'architecture' && !isViewer && (
         <>
           <button
             onClick={() => archRef.current?.saveConfig()}
@@ -1571,6 +1538,33 @@ export default function ProjectPage() {
         </>
       )}
 
+      {/* Tool buttons — VS Code style activity bar, inline */}
+      <div className="hidden md:flex">{renderToolButtons()}</div>
+
+      {/* Chat visibility toggle — VS Code Cmd+B style */}
+      <Tooltip
+        content={`${isChatVisible ? 'Hide' : 'Show'} chat  ⌘B`}
+        side="bottom"
+        delay={200}
+      >
+        <button
+          onClick={toggleChatVisible}
+          className={`hidden md:flex h-7 px-2 items-center gap-1.5 rounded-[var(--radius-small)] text-[11px] font-medium transition-colors ${
+            isChatVisible
+              ? 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]'
+              : 'bg-[var(--surface-hover)] text-[var(--primary)]'
+          }`}
+          aria-pressed={!isChatVisible}
+          aria-label={isChatVisible ? 'Hide chat' : 'Show chat'}
+        >
+          {isChatVisible ? (
+            <SidebarSimple size={14} weight="bold" />
+          ) : (
+            <Chat size={14} weight="bold" />
+          )}
+        </button>
+      </Tooltip>
+
       {/* Always visible: Start/Stop All */}
       <button
         onClick={can('container.start_stop') ? handleStartStopAll : undefined}
@@ -1580,7 +1574,6 @@ export default function ProjectPage() {
         {isEnvironmentRunning ? 'Stop All' : 'Start All'}
       </button>
 
-      {/* Always visible: Environment Status Badge */}
       {environmentStatus && (
         <div className="hidden md:flex">
           <EnvironmentStatusBadge status={environmentStatus} showTooltip />
@@ -1589,7 +1582,6 @@ export default function ProjectPage() {
 
       <div className="w-px h-[22px] bg-[var(--border)] mx-0.5 hidden md:block" />
 
-      {/* Always visible: Deploy Button with Dropdown */}
       <div className="relative">
         <button
           onClick={
@@ -1618,12 +1610,135 @@ export default function ProjectPage() {
   );
 
   // ---------------------------------------------------------------------------
+  // Main layout helpers
+  // ---------------------------------------------------------------------------
+
+  const dockOpen = dock.isOpen;
+  const chatIsFloating = chatPosition === 'center';
+  const chatOnLeft = chatPosition === 'left';
+  const hasAgents = agents.length > 0;
+
+  const renderDockedChatPane = () => (
+    <ChatContainer {...chatProps} isDocked={true} />
+  );
+
+  const activeDockTabType = dock.state.tabs.find(
+    (t) => t.id === dock.state.activeTabId
+  )?.type;
+  const dockExtraHeader =
+    activeDockTabType === 'terminal' ? (
+      <Tooltip content="New terminal" side="bottom" delay={200}>
+        <button
+          onClick={() => dock.openToolNew('terminal')}
+          className="flex items-center justify-center h-6 w-6 rounded-[var(--radius-small)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
+          aria-label="New terminal"
+        >
+          <Plus size={12} weight="bold" />
+        </button>
+      </Tooltip>
+    ) : undefined;
+
+  const renderDockContainer = () => (
+    <ToolTabsPanel
+      tabs={dock.state.tabs}
+      activeTabId={dock.state.activeTabId}
+      onFocus={dock.focusTab}
+      onClose={dock.closeTab}
+      renderers={tabRenderers}
+      extraHeader={dockExtraHeader}
+    />
+  );
+
+  // Desktop: chat + dock horizontal split (when both visible docked) or
+  // whichever is alone. Floating chat (center) renders the dock full-width
+  // in the main canvas and the chat lives in a separate fixed-position layer.
+  const renderDesktopContent = () => {
+    if (!hasAgents) {
+      return <div className="w-full h-full" />;
+    }
+
+    // Floating chat mode: main canvas is dock-only. If the dock is closed,
+    // render an empty canvas — the floating chat overlays everything.
+    if (chatIsFloating) {
+      return (
+        <div className="w-full h-full">
+          {dockOpen ? renderDockContainer() : <div className="w-full h-full bg-[var(--bg)]" />}
+        </div>
+      );
+    }
+
+    // Chat hidden — dock takes the full canvas.
+    if (!isChatVisible && dockOpen) {
+      return <div className="w-full h-full">{renderDockContainer()}</div>;
+    }
+
+    // Dock closed (or chat hidden with nothing to show) — chat takes full canvas.
+    if (!dockOpen) {
+      return (
+        <div className="w-full h-full flex bg-[var(--bg-dark)]">
+          {renderDockedChatPane()}
+        </div>
+      );
+    }
+
+    // Both visible — split. Chat gets a generous default + a hard 33% floor so
+    // it never collapses into a sliver when the browser preview is opened.
+    return (
+      <PanelGroup orientation="horizontal">
+        {chatOnLeft ? (
+          <>
+            <Panel
+              id="chat-left"
+              defaultSize="50"
+              minSize="15"
+              maxSize="85"
+              className="bg-[var(--bg-dark)] overflow-hidden"
+            >
+              {renderDockedChatPane()}
+            </Panel>
+            <PanelResizeHandle className="w-1.5 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
+            <Panel id="dock-right" defaultSize="50" minSize="15" className="overflow-hidden">
+              {renderDockContainer()}
+            </Panel>
+          </>
+        ) : (
+          <>
+            <Panel id="dock-left" defaultSize="50" minSize="15" className="overflow-hidden">
+              {renderDockContainer()}
+            </Panel>
+            <PanelResizeHandle className="w-1.5 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
+            <Panel
+              id="chat-right"
+              defaultSize="50"
+              minSize="15"
+              maxSize="85"
+              className="bg-[var(--bg-dark)] overflow-hidden"
+            >
+              {renderDockedChatPane()}
+            </Panel>
+          </>
+        )}
+      </PanelGroup>
+    );
+  };
+
+  // Mobile: dock is always the primary view; chat floats on top via a button
+  // (mirrors desktop's chatPosition === 'center' treatment).
+  const renderMobileContent = () => {
+    if (!hasAgents) return <div className="w-full h-full" />;
+    return (
+      <div className="w-full h-full">
+        {dockOpen ? renderDockContainer() : <div className="w-full h-full bg-[var(--bg)]" />}
+      </div>
+    );
+  };
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
   return (
     <div className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]">
-      {/* Idle Warning Banner */}
       {idleWarningMinutes !== null && slug && (
         <IdleWarningBanner
           minutesLeft={idleWarningMinutes}
@@ -1647,10 +1762,9 @@ export default function ProjectPage() {
       {/* Mobile Warning */}
       <MobileWarning />
 
-      {/* Mobile Menu */}
-      <MobileMenu leftItems={leftSidebarItems} rightItems={mobileRightItems} />
+      <MobileMenu activePage="builder" builderSection={mobileBuilderSection} />
 
-      {/* Navigation Sidebar */}
+      {/* Navigation Sidebar — no view toggles, just project title + panel toggles */}
       <NavigationSidebar
         activePage="builder"
         onExpandedChange={setIsLeftSidebarExpanded}
@@ -1660,8 +1774,6 @@ export default function ProjectPage() {
           navButtonClassCollapsed,
           iconClass,
           labelClass,
-          _inactiveNavButton,
-          _inactiveNavButtonCollapsed,
           inactiveIconClass,
           inactiveLabelClass,
         }) => (
@@ -1687,54 +1799,7 @@ export default function ProjectPage() {
 
             <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
 
-            {/* View Toggles */}
-            {leftSidebarItems.map((item, index) =>
-              isExpanded ? (
-                <button
-                  key={index}
-                  onClick={item.disabled ? undefined : item.onClick}
-                  className={navButtonClass(item.active || false)}
-                  style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-                >
-                  {React.cloneElement(item.icon, {
-                    size: 16,
-                    className: iconClass(item.active || false),
-                  })}
-                  <span className={labelClass(item.active || false)}>{item.title}</span>
-                  {item.restricted && (
-                    <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
-                      {item.disabled ? 'locked' : 'view'}
-                    </span>
-                  )}
-                </button>
-              ) : (
-                <Tooltip
-                  key={index}
-                  content={
-                    item.restricted
-                      ? `${item.title} ${item.disabled ? '(Locked)' : '(View only)'}`
-                      : item.title
-                  }
-                  side="right"
-                  delay={200}
-                >
-                  <button
-                    onClick={item.disabled ? undefined : item.onClick}
-                    className={navButtonClassCollapsed(item.active || false)}
-                    style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-                  >
-                    {React.cloneElement(item.icon, {
-                      size: 16,
-                      className: iconClass(item.active || false),
-                    })}
-                  </button>
-                </Tooltip>
-              )
-            )}
-
-            <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
-
-            {/* Panel Toggles */}
+            {/* Panel Toggles — Notes/GitHub/Settings */}
             {panelItems.map((item, index) =>
               isExpanded ? (
                 <button
@@ -1772,13 +1837,12 @@ export default function ProjectPage() {
         )}
       />
 
-      {/* Main Content Area */}
+      {/* Main Content Area — flush to the NavigationSidebar on desktop,
+          symmetric margin on mobile (where the sidebar is hidden). */}
       <div
-        className="flex-1 flex flex-col overflow-hidden"
+        className="flex-1 flex flex-col overflow-hidden m-[var(--app-margin)] md:ml-0"
         style={{
           borderRadius: 'var(--radius)',
-          margin: 'var(--app-margin)',
-          marginLeft: '0',
           border: 'var(--border-width) solid var(--border)',
           backgroundColor: 'var(--bg)',
         }}
@@ -1789,16 +1853,23 @@ export default function ProjectPage() {
           style={{ paddingLeft: '7px', paddingRight: '10px' }}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
+            {/* Mobile-only hamburger — opens the mobile drawer with tools + panels */}
+            <button
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
+              aria-label="Open menu"
+            >
+              <SidebarSimple size={14} weight="bold" />
+            </button>
             <Breadcrumbs
               items={[
                 { label: 'Projects', href: '/dashboard' },
                 { label: project.name as string, href: `/project/${slug}` },
-                { label: VIEW_LABELS[activeView] },
+                { label: activeTabType ? TOOL_LABELS[activeTabType] : 'Agents' },
               ]}
             />
 
-            {/* Container Selector — visible for all views except architecture */}
-            {activeView !== 'architecture' && containers.length > 0 && (
+            {activeTabType && activeTabType !== 'architecture' && containers.length > 0 && (
               <div className="hidden md:flex items-center border-l border-[var(--border)] pl-2">
                 <ContainerSelector
                   containers={containers.map((c) => ({
@@ -1809,7 +1880,7 @@ export default function ProjectPage() {
                   }))}
                   currentContainerId={containerId || (container?.id as string)}
                   onChange={(id) => navigate(`/project/${slug}?container=${id}`)}
-                  onOpenArchitecture={() => setActiveView('architecture')}
+                  onOpenArchitecture={() => dock.openTool('architecture')}
                 />
               </div>
             )}
@@ -1820,155 +1891,8 @@ export default function ProjectPage() {
 
         {/* Main View Container */}
         <div className="flex-1 flex overflow-hidden bg-[var(--bg)]">
-          {/* Desktop layout */}
-          <div className="hidden md:flex w-full h-full">
-            {(chatPosition === 'left' || chatPosition === 'right') &&
-            agents.length > 0 &&
-            activeView !== 'design' ? (
-              <PanelGroup orientation="horizontal">
-                {/* LEFT DOCKED CHAT */}
-                {chatPosition === 'left' && (
-                  <>
-                    <Panel
-                      id="chat-left"
-                      defaultSize="30"
-                      minSize="20"
-                      maxSize="50"
-                      className="bg-[var(--bg-dark)] overflow-hidden"
-                    >
-                      <ChatContainer {...chatProps} isDocked={true} />
-                    </Panel>
-                    <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
-                  </>
-                )}
-
-                {/* MAIN CONTENT PANEL */}
-                <Panel id="content" minSize="30" className="overflow-hidden">
-                  {renderContentViews()}
-                </Panel>
-
-                {/* RIGHT DOCKED CHAT */}
-                {chatPosition === 'right' && (
-                  <>
-                    <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
-                    <Panel
-                      id="chat-right"
-                      defaultSize="30"
-                      minSize="20"
-                      maxSize="50"
-                      className="bg-[var(--bg-dark)] overflow-hidden"
-                    >
-                      <ChatContainer {...chatProps} isDocked={true} />
-                    </Panel>
-                  </>
-                )}
-              </PanelGroup>
-            ) : (
-              /* CENTER MODE: No PanelGroup wrapper */
-              <div className="w-full h-full overflow-hidden">{renderContentViews()}</div>
-            )}
-          </div>
-
-          {/* Mobile layout */}
-          <div className="md:hidden w-full h-full overflow-hidden">
-            {/* Mobile preview — simplified (no browser toolbar) */}
-            <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-              {noPreview
-                ? previewPlaceholder
-                : (loadingOverlay ??
-                  (devServerUrl ? (
-                    <div className="w-full h-full bg-white">
-                      <iframe
-                        src={devServerUrlWithAuth || devServerUrl}
-                        className="w-full h-full"
-                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                      />
-                    </div>
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-                      <LoadingSpinner message="Loading project..." size={60} />
-                    </div>
-                  )))}
-            </div>
-
-            {/* Mobile code view */}
-            <div
-              className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
-            >
-              <CodeEditor
-                projectId={project?.id}
-                slug={slug!}
-                fileTree={fileTree}
-                containerDir={containerDir}
-                onFileUpdate={handleFileUpdate}
-                onFileCreate={handleFileCreate}
-                onFileDelete={handleFileDelete}
-                onFileRename={handleFileRename}
-                onDirectoryCreate={handleDirectoryCreate}
-                isFilesSyncing={!filesInitiallyLoaded && fileTree.length === 0}
-                startupOverlay={codeEditorOverlay}
-                readOnly={!canEditAssets}
-              />
-            </div>
-
-            {/* Mobile kanban */}
-            {kanbanMounted && project?.id && (
-              <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-                <KanbanPanel projectId={project.id as string} readOnly={!canEditKanban} />
-              </div>
-            )}
-
-            {/* Mobile assets */}
-            <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
-              <AssetsPanel projectSlug={slug!} readOnly={!canEditAssets} />
-            </div>
-
-            {/* Mobile terminal */}
-            <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-              {canAccessTerminal ? (
-                <TerminalPanel projectId={slug!} projectUuid={project?.id as string} />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <div className="text-center p-6">
-                    <LockSimple size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
-                    <p className="text-[var(--text-subtle)] text-sm">
-                      Terminal access is restricted
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Mobile architecture (no architecture on mobile — placeholder) */}
-            <div
-              className={`w-full h-full ${activeView === 'architecture' ? 'flex' : 'hidden'} items-center justify-center`}
-            >
-              <div className="text-center p-6">
-                <TreeStructure size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
-                <p className="text-[var(--text-subtle)] text-sm">
-                  Architecture view is best experienced on desktop.
-                </p>
-                <button onClick={() => setActiveView('preview')} className="mt-3 btn btn-filled">
-                  Switch to Preview
-                </button>
-              </div>
-            </div>
-
-            {/* Mobile design (no design on mobile — placeholder) */}
-            <div
-              className={`w-full h-full ${activeView === 'design' ? 'flex' : 'hidden'} items-center justify-center`}
-            >
-              <div className="text-center p-6">
-                <PencilRuler size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
-                <p className="text-[var(--text-subtle)] text-sm">
-                  Design view is best experienced on desktop.
-                </p>
-                <button onClick={() => setActiveView('preview')} className="mt-3 btn btn-filled">
-                  Switch to Preview
-                </button>
-              </div>
-            </div>
-          </div>
+          <div className="hidden md:flex w-full h-full">{renderDesktopContent()}</div>
+          <div className="md:hidden w-full h-full">{renderMobileContent()}</div>
         </div>
       </div>
 
@@ -2028,12 +1952,11 @@ export default function ProjectPage() {
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
 
-      {/* FLOATING CHAT — mobile always, desktop only when center mode */}
-      {/* Hidden when Design view is active (it has its own built-in AI tab) */}
-      {agents.length > 0 && activeView !== 'design' && (
-        <div className={chatPosition !== 'center' ? 'md:hidden' : ''}>
-          <ChatContainer {...chatProps} onExpandedChange={setChatExpanded} />
-        </div>
+      {/* Floating chat — always on mobile; desktop only when chatPosition === 'center'.
+          JS-gated (not CSS) so exactly one ChatContainer mounts at a time and
+          left/right docked chat doesn't get cloned into an offscreen instance. */}
+      {hasAgents && isChatVisible && (!isDesktop || chatIsFloating) && (
+        <ChatContainer {...chatProps} isDocked={false} />
       )}
 
       {/* No Agents Empty State */}
@@ -2071,7 +1994,6 @@ export default function ProjectPage() {
         </div>
       )}
 
-      {/* Deployment Modal */}
       {showDeployModal && (
         <DeploymentModal
           projectSlug={slug!}

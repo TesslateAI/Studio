@@ -299,7 +299,7 @@ export default function Chat() {
     };
   }, [isExecuting, stopExecution]);
 
-  const sessionTitle = currentSession?.title || 'Chat';
+  const sessionTitle = currentSession?.title || 'Agents';
   const isLanding = messages.length === 0 && !isExecuting && !isLoadingHistory;
 
   return (

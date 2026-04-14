@@ -1,6 +1,6 @@
 # Research repos
 research/
-
+terminal_bench/
 # Python
 __pycache__/
 *.py[cod]
@@ -204,3 +204,6 @@ nul
 # Code Analysis Output
 analysis-output/
 /.playwright-mcp
+
+# Terminal Paste Image folder
+.cp-images/

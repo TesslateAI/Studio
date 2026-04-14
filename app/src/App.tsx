@@ -16,6 +16,7 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
+import Home from './pages/Home';
 import ProjectPage from './pages/ProjectPage';
 import ProjectSetup from './pages/ProjectSetup';
 import Marketplace from './pages/Marketplace';
@@ -300,6 +301,7 @@ function AppContent() {
             </PrivateRoute>
           }
         >
+          <Route path="/home" element={<Home />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/marketplace/success" element={<MarketplaceSuccess />} />

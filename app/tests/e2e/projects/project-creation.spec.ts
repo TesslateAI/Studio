@@ -29,22 +29,17 @@ test.describe('Project Creation', () => {
 
     await newProjectButton.click();
 
-    // CreateProjectModal uses custom div structure (no role="dialog")
-    // Scope all modal interactions to the overlay to avoid matching Dashboard elements
-    const modalOverlay = page.locator('.fixed.inset-0');
-    const modalHeading = modalOverlay.locator('h2:has-text("Create New Project")');
-    await expect(modalHeading).toBeVisible({ timeout: 5000 });
+    // CreateProjectModal uses role="dialog" with aria-labelledby="create-workspace-title"
+    const modalOverlay = page.locator('[role="dialog"][aria-modal="true"]');
+    await expect(modalOverlay).toBeVisible({ timeout: 5000 });
 
-    // Fill in project name using actual input selectors (scoped to modal)
+    // Fill in project name using aria-label selector (scoped to modal)
     const projectName = `E2E Test Project ${Date.now()}`;
-    const nameInput = modalOverlay
-      .locator('#projectName, input[name="name"], input[placeholder*="name" i]')
-      .first();
+    const nameInput = modalOverlay.locator('input[aria-label="Folder name"]');
     await nameInput.fill(projectName);
 
-    // Click create button scoped to modal (avoids matching Dashboard "Create New Project" card)
-    // Button is disabled when no template is selected - CI may not have seeded templates
-    const createButton = modalOverlay.locator('button:has-text("Create Project")');
+    // Click create button scoped to modal; disabled until a template is selected
+    const createButton = modalOverlay.locator('button:has-text("Create")').last();
     if (!(await createButton.isEnabled({ timeout: 5000 }).catch(() => false))) {
       test.skip(true, 'Create button not enabled - no templates available in CI');
       return;
@@ -81,21 +76,18 @@ test.describe('Project Creation', () => {
 
     await newProjectButton.click();
 
-    // Scope to modal overlay
-    const modalOverlay = page.locator('.fixed.inset-0');
-    const modalHeading = modalOverlay.locator('h2:has-text("Create New Project")');
-    if (!(await modalHeading.isVisible({ timeout: 5000 }).catch(() => false))) {
+    // Scope to modal dialog
+    const modalOverlay = page.locator('[role="dialog"][aria-modal="true"]');
+    if (!(await modalOverlay.isVisible({ timeout: 5000 }).catch(() => false))) {
       test.skip(true, 'Create project modal did not open');
       return;
     }
 
-    const nameInput = modalOverlay
-      .locator('#projectName, input[name="name"], input[placeholder*="name" i]')
-      .first();
+    const nameInput = modalOverlay.locator('input[aria-label="Folder name"]');
     await nameInput.fill(`UI Test Project ${Date.now()}`);
 
     // Create button scoped to modal - disabled if no templates seeded
-    const createButton = modalOverlay.locator('button:has-text("Create Project")');
+    const createButton = modalOverlay.locator('button:has-text("Create")').last();
     if (!(await createButton.isEnabled({ timeout: 5000 }).catch(() => false))) {
       test.skip(true, 'Create button not enabled - no templates available in CI');
       return;

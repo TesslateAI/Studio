@@ -27,7 +27,6 @@ import httpx
 from app.services.deployment.base import DeploymentConfig, DeploymentFile, DeploymentResult
 from app.services.deployment.container_base import (
     BaseContainerDeploymentProvider,
-    ContainerDeployConfig,
 )
 from app.services.deployment.providers.utils import (
     create_source_tarball,
@@ -120,9 +119,7 @@ class TestPollUntilTerminal:
     async def test_timeout_raises(self):
         check_fn = AsyncMock(return_value={"status": "BUILDING"})
         with pytest.raises(TimeoutError):
-            await poll_until_terminal(
-                check_fn, terminal_states={"DONE"}, interval=0, timeout=0
-            )
+            await poll_until_terminal(check_fn, terminal_states={"DONE"}, interval=0, timeout=0)
 
 
 class TestGraphqlRequest:
@@ -152,9 +149,7 @@ class TestGraphqlRequest:
         mock_client.post.return_value = mock_response
 
         with pytest.raises(ValueError, match="GraphQL errors"):
-            await graphql_request(
-                mock_client, "https://api.example.com/graphql", "{ me { id } }"
-            )
+            await graphql_request(mock_client, "https://api.example.com/graphql", "{ me { id } }")
 
 
 # ============================================================================
@@ -165,11 +160,13 @@ class TestGraphqlRequest:
 class TestHerokuProvider:
     def test_validate_missing_creds(self):
         from app.services.deployment.providers.heroku import HerokuProvider
+
         with pytest.raises(ValueError, match="api_key"):
             HerokuProvider(credentials={})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.heroku import HerokuProvider
+
         provider = HerokuProvider(credentials={"api_key": "test-key"})
         assert provider.credentials["api_key"] == "test-key"
 
@@ -177,11 +174,13 @@ class TestHerokuProvider:
 class TestKoyebProvider:
     def test_validate_missing_creds(self):
         from app.services.deployment.providers.koyeb import KoyebProvider
+
         with pytest.raises(ValueError, match="api_token"):
             KoyebProvider(credentials={})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.koyeb import KoyebProvider
+
         provider = KoyebProvider(credentials={"api_token": "test-token"})
         assert provider.credentials["api_token"] == "test-token"
 
@@ -189,11 +188,13 @@ class TestKoyebProvider:
 class TestZeaburProvider:
     def test_validate_missing_creds(self):
         from app.services.deployment.providers.zeabur import ZeaburProvider
+
         with pytest.raises(ValueError, match="api_key"):
             ZeaburProvider(credentials={})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.zeabur import ZeaburProvider
+
         provider = ZeaburProvider(credentials={"api_key": "test-key"})
         assert provider.credentials["api_key"] == "test-key"
 
@@ -201,16 +202,19 @@ class TestZeaburProvider:
 class TestSurgeProvider:
     def test_validate_missing_email(self):
         from app.services.deployment.providers.surge import SurgeProvider
+
         with pytest.raises(ValueError):
             SurgeProvider(credentials={"token": "t"})
 
     def test_validate_missing_token(self):
         from app.services.deployment.providers.surge import SurgeProvider
+
         with pytest.raises(ValueError):
             SurgeProvider(credentials={"email": "e@e.com"})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.surge import SurgeProvider
+
         provider = SurgeProvider(credentials={"email": "e@e.com", "token": "t"})
         assert provider.credentials["email"] == "e@e.com"
 
@@ -218,16 +222,19 @@ class TestSurgeProvider:
 class TestDenoDeployProvider:
     def test_validate_missing_token(self):
         from app.services.deployment.providers.deno_deploy import DenoDeployProvider
+
         with pytest.raises(ValueError):
             DenoDeployProvider(credentials={"org_id": "o"})
 
     def test_validate_missing_org_id(self):
         from app.services.deployment.providers.deno_deploy import DenoDeployProvider
+
         with pytest.raises(ValueError):
             DenoDeployProvider(credentials={"token": "t"})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.deno_deploy import DenoDeployProvider
+
         provider = DenoDeployProvider(credentials={"token": "t", "org_id": "o"})
         assert provider.credentials["org_id"] == "o"
 
@@ -235,24 +242,29 @@ class TestDenoDeployProvider:
 class TestFirebaseHostingProvider:
     def test_validate_missing_sa_json(self):
         from app.services.deployment.providers.firebase import FirebaseHostingProvider
+
         with pytest.raises(ValueError):
             FirebaseHostingProvider(credentials={"site_id": "s"})
 
     def test_validate_missing_site_id(self):
         from app.services.deployment.providers.firebase import FirebaseHostingProvider
+
         with pytest.raises(ValueError):
             FirebaseHostingProvider(credentials={"service_account_json": "{}"})
 
     def test_validate_valid_creds(self):
         import json
+
         from app.services.deployment.providers.firebase import FirebaseHostingProvider
 
-        sa_json = json.dumps({
-            "client_email": "test@test.iam.gserviceaccount.com",
-            "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n",
-            "project_id": "test-project",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        })
+        sa_json = json.dumps(
+            {
+                "client_email": "test@test.iam.gserviceaccount.com",
+                "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n",
+                "project_id": "test-project",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
         provider = FirebaseHostingProvider(
             credentials={"service_account_json": sa_json, "site_id": "my-site"}
         )
@@ -267,11 +279,13 @@ class TestFirebaseHostingProvider:
 class TestRailwayProvider:
     def test_validate_missing_creds(self):
         from app.services.deployment.providers.railway import RailwayProvider
+
         with pytest.raises(ValueError, match="token"):
             RailwayProvider(credentials={})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.railway import RailwayProvider
+
         provider = RailwayProvider(credentials={"token": "test-token"})
         assert provider.credentials["token"] == "test-token"
 
@@ -279,11 +293,13 @@ class TestRailwayProvider:
 class TestRenderProvider:
     def test_validate_missing_creds(self):
         from app.services.deployment.providers.render import RenderProvider
+
         with pytest.raises(ValueError, match="api_key"):
             RenderProvider(credentials={})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.render import RenderProvider
+
         provider = RenderProvider(credentials={"api_key": "test-key"})
         assert provider.credentials["api_key"] == "test-key"
 
@@ -291,11 +307,13 @@ class TestRenderProvider:
 class TestNorthflankProvider:
     def test_validate_missing_creds(self):
         from app.services.deployment.providers.northflank import NorthflankProvider
+
         with pytest.raises(ValueError, match="api_token"):
             NorthflankProvider(credentials={})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.northflank import NorthflankProvider
+
         provider = NorthflankProvider(credentials={"api_token": "test-token"})
         assert provider.credentials["api_token"] == "test-token"
 
@@ -303,11 +321,13 @@ class TestNorthflankProvider:
 class TestGitHubPagesProvider:
     def test_validate_missing_creds(self):
         from app.services.deployment.providers.github_pages import GitHubPagesProvider
+
         with pytest.raises(ValueError, match="token"):
             GitHubPagesProvider(credentials={})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.github_pages import GitHubPagesProvider
+
         provider = GitHubPagesProvider(credentials={"token": "ghp_test"})
         assert provider.credentials["token"] == "ghp_test"
 
@@ -320,11 +340,13 @@ class TestGitHubPagesProvider:
 class TestAWSContainerProvider:
     def test_validate_missing_access_key(self):
         from app.services.deployment.providers.aws_container import AWSContainerProvider
+
         with pytest.raises(ValueError):
             AWSContainerProvider(credentials={"aws_secret_access_key": "s", "aws_region": "r"})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.aws_container import AWSContainerProvider
+
         provider = AWSContainerProvider(
             credentials={
                 "aws_access_key_id": "AKID",
@@ -338,19 +360,23 @@ class TestAWSContainerProvider:
 class TestGCPContainerProvider:
     def test_validate_missing_sa_json(self):
         from app.services.deployment.providers.gcp_container import GCPContainerProvider
+
         with pytest.raises(ValueError):
             GCPContainerProvider(credentials={"gcp_region": "us-central1"})
 
     def test_validate_valid_creds(self):
         import json
+
         from app.services.deployment.providers.gcp_container import GCPContainerProvider
 
-        sa_json = json.dumps({
-            "client_email": "test@test.iam.gserviceaccount.com",
-            "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n",
-            "project_id": "test-project",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        })
+        sa_json = json.dumps(
+            {
+                "client_email": "test@test.iam.gserviceaccount.com",
+                "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n",
+                "project_id": "test-project",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
         provider = GCPContainerProvider(
             credentials={"service_account_json": sa_json, "gcp_region": "us-central1"}
         )
@@ -360,16 +386,22 @@ class TestGCPContainerProvider:
 class TestAzureContainerProvider:
     def test_validate_missing_tenant(self):
         from app.services.deployment.providers.azure_container import AzureContainerProvider
+
         with pytest.raises(ValueError):
             AzureContainerProvider(credentials={"client_id": "x"})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.azure_container import AzureContainerProvider
+
         provider = AzureContainerProvider(
             credentials={
-                "tenant_id": "t", "client_id": "c", "client_secret": "s",
-                "subscription_id": "sub", "resource_group": "rg",
-                "registry_name": "acr", "azure_region": "eastus",
+                "tenant_id": "t",
+                "client_id": "c",
+                "client_secret": "s",
+                "subscription_id": "sub",
+                "resource_group": "rg",
+                "registry_name": "acr",
+                "azure_region": "eastus",
                 "container_app_environment_id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.App/managedEnvironments/env",
             }
         )
@@ -379,11 +411,13 @@ class TestAzureContainerProvider:
 class TestDigitalOceanContainerProvider:
     def test_validate_missing_token(self):
         from app.services.deployment.providers.do_container import DigitalOceanContainerProvider
+
         with pytest.raises(ValueError):
             DigitalOceanContainerProvider(credentials={"registry_name": "r"})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.do_container import DigitalOceanContainerProvider
+
         provider = DigitalOceanContainerProvider(
             credentials={"api_token": "t", "registry_name": "r"}
         )
@@ -393,11 +427,13 @@ class TestDigitalOceanContainerProvider:
 class TestFlyProvider:
     def test_validate_missing_creds(self):
         from app.services.deployment.providers.fly import FlyProvider
+
         with pytest.raises(ValueError, match="api_token"):
             FlyProvider(credentials={})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.fly import FlyProvider
+
         provider = FlyProvider(credentials={"api_token": "test-token"})
         assert provider.credentials["api_token"] == "test-token"
 
@@ -410,11 +446,13 @@ class TestFlyProvider:
 class TestDockerHubExportProvider:
     def test_validate_missing_username(self):
         from app.services.deployment.providers.dockerhub_export import DockerHubExportProvider
+
         with pytest.raises(ValueError):
             DockerHubExportProvider(credentials={"token": "t"})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.dockerhub_export import DockerHubExportProvider
+
         provider = DockerHubExportProvider(credentials={"username": "user", "token": "pat"})
         assert provider.credentials["username"] == "user"
 
@@ -422,11 +460,13 @@ class TestDockerHubExportProvider:
 class TestGHCRExportProvider:
     def test_validate_missing_username(self):
         from app.services.deployment.providers.ghcr_export import GHCRExportProvider
+
         with pytest.raises(ValueError):
             GHCRExportProvider(credentials={"token": "t"})
 
     def test_validate_valid_creds(self):
         from app.services.deployment.providers.ghcr_export import GHCRExportProvider
+
         provider = GHCRExportProvider(credentials={"username": "user", "token": "ghp_xxx"})
         assert provider.credentials["username"] == "user"
 
@@ -434,12 +474,14 @@ class TestGHCRExportProvider:
 class TestDownloadExportProvider:
     def test_validate_no_creds_needed(self):
         from app.services.deployment.providers.download_export import DownloadExportProvider
+
         provider = DownloadExportProvider(credentials={})
         assert provider is not None
 
     @pytest.mark.asyncio
     async def test_deploy_creates_zip(self):
         from app.services.deployment.providers.download_export import DownloadExportProvider
+
         provider = DownloadExportProvider(credentials={})
         files = [
             DeploymentFile(path="index.html", content=b"<html>test</html>"),
@@ -613,9 +655,7 @@ class TestRenderTestCredentials:
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
             mock_instance.get = AsyncMock(
-                return_value=_mock_response(
-                    json_data=[{"owner": {"name": "Alice", "id": "o1"}}]
-                )
+                return_value=_mock_response(json_data=[{"owner": {"name": "Alice", "id": "o1"}}])
             )
             result = await provider.test_credentials()
             assert result["valid"] is True
@@ -647,9 +687,7 @@ class TestNorthflankTestCredentials:
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
             mock_instance.get = AsyncMock(
-                return_value=_mock_response(
-                    json_data={"data": {"name": "Bob", "id": "uid"}}
-                )
+                return_value=_mock_response(json_data={"data": {"name": "Bob", "id": "uid"}})
             )
             result = await provider.test_credentials()
             assert result["valid"] is True
@@ -661,7 +699,9 @@ class TestDigitalOceanContainerTestCredentials:
     async def test_success(self):
         from app.services.deployment.providers.do_container import DigitalOceanContainerProvider
 
-        provider = DigitalOceanContainerProvider(credentials={"api_token": "tok", "registry_name": "r"})
+        provider = DigitalOceanContainerProvider(
+            credentials={"api_token": "tok", "registry_name": "r"}
+        )
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
             mock_instance.get = AsyncMock(
@@ -677,7 +717,9 @@ class TestDigitalOceanContainerTestCredentials:
     async def test_401_raises(self):
         from app.services.deployment.providers.do_container import DigitalOceanContainerProvider
 
-        provider = DigitalOceanContainerProvider(credentials={"api_token": "bad", "registry_name": "r"})
+        provider = DigitalOceanContainerProvider(
+            credentials={"api_token": "bad", "registry_name": "r"}
+        )
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
             mock_resp = MagicMock()
@@ -699,9 +741,7 @@ class TestFlyTestCredentials:
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
             mock_instance.get = AsyncMock(
-                return_value=_mock_response(
-                    json_data=[{"organization": {"name": "personal"}}]
-                )
+                return_value=_mock_response(json_data=[{"organization": {"name": "personal"}}])
             )
             result = await provider.test_credentials()
             assert result["valid"] is True
@@ -714,7 +754,9 @@ class TestDockerHubTestCredentials:
         from app.services.deployment.providers.dockerhub_export import DockerHubExportProvider
 
         provider = DockerHubExportProvider(credentials={"username": "user", "token": "tok"})
-        with patch("app.services.deployment.providers.dockerhub_export.httpx.AsyncClient") as mock_client:
+        with patch(
+            "app.services.deployment.providers.dockerhub_export.httpx.AsyncClient"
+        ) as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
             # First call: _get_hub_jwt (POST login), second call: GET user profile
             mock_instance.post = AsyncMock(
@@ -732,7 +774,9 @@ class TestDockerHubTestCredentials:
         from app.services.deployment.providers.dockerhub_export import DockerHubExportProvider
 
         provider = DockerHubExportProvider(credentials={"username": "user", "token": "bad"})
-        with patch("app.services.deployment.providers.dockerhub_export.httpx.AsyncClient") as mock_client:
+        with patch(
+            "app.services.deployment.providers.dockerhub_export.httpx.AsyncClient"
+        ) as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
             # _get_hub_jwt POST returns 401
             mock_instance.post = AsyncMock(
@@ -831,11 +875,13 @@ class TestAWSContainerTestCredentials:
     async def test_success(self):
         from app.services.deployment.providers.aws_container import AWSContainerProvider
 
-        provider = AWSContainerProvider(credentials={
-            "aws_access_key_id": "AKID",
-            "aws_secret_access_key": "secret",
-            "aws_region": "us-east-1",
-        })
+        provider = AWSContainerProvider(
+            credentials={
+                "aws_access_key_id": "AKID",
+                "aws_secret_access_key": "secret",
+                "aws_region": "us-east-1",
+            }
+        )
         mock_sts = MagicMock()
         mock_sts.get_caller_identity.return_value = {
             "Account": "123456",
@@ -874,12 +920,14 @@ class TestHerokuDeploy:
 
             mock_instance.post.side_effect = [
                 _mock_response(json_data={"id": "app-id-1"}),
-                _mock_response(json_data={
-                    "source_blob": {
-                        "put_url": "https://s3.example.com/upload",
-                        "get_url": "https://s3.example.com/source.tar.gz",
+                _mock_response(
+                    json_data={
+                        "source_blob": {
+                            "put_url": "https://s3.example.com/upload",
+                            "get_url": "https://s3.example.com/source.tar.gz",
+                        }
                     }
-                }),
+                ),
                 _mock_response(json_data={"id": "build-1"}),
             ]
             mock_instance.put.return_value = _mock_response()
@@ -945,8 +993,6 @@ class TestBaseContainerDeploymentProviderDeploy:
 
         provider = StubContainerProvider({})
         files = [DeploymentFile(path="a.txt", content=b"hello")]
-        config = DeploymentConfig(
-            project_id="test-123", project_name="Test", framework="vite"
-        )
+        config = DeploymentConfig(project_id="test-123", project_name="Test", framework="vite")
         with pytest.raises(NotImplementedError, match="Container providers use push_image"):
             await provider.deploy(files, config)

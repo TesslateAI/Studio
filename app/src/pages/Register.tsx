@@ -16,7 +16,7 @@ export default function Register() {
   // Check state (from PrivateRoute/cross-links), then ?redirect= query param (from MarketplaceDetail), then default
   const redirectTo = (location.state as { from?: string })?.from
     || searchParams.get('redirect')
-    || '/dashboard';
+    || '/home';
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -428,7 +428,7 @@ export default function Register() {
                   Already have an account?{' '}
                   <Link
                     to="/login"
-                    state={{ from: redirectTo !== '/dashboard' ? redirectTo : undefined }}
+                    state={{ from: redirectTo !== '/home' ? redirectTo : undefined }}
                     className="text-black hover:text-gray-700 font-semibold transition-colors underline"
                   >
                     Sign in

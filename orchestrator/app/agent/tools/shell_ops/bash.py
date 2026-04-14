@@ -1,13 +1,19 @@
 """
 Bash Convenience Tool
 
-One-shot command execution for volume-first projects.
-Returns immediately when the command exits — no PTY session, no sleep.
+Executes shell commands for the agent. Behavior depends on deployment mode:
 
-Tier 1 (ephemeral): ComputeManager ephemeral pods for quick commands.
-Tier 2 (environment): kubectl exec into running dev containers.
+- **Local mode**: spawns the command under a PTY (so curses/TUI binaries,
+  color output, and interactive tools behave naturally). Supports
+  ``yield_time_ms`` soft yield, ``idle_timeout_ms`` idle-kill,
+  ``is_background=True`` fire-and-forget, and output-token truncation.
+- **Docker mode**: delegates to the orchestrator's ``execute_command``
+  (asyncio subprocess into the container).
+- **Kubernetes mode**: Tier 1 (ephemeral) or Tier 2 (environment) exec
+  into the user's dev pod, unchanged from the pre-upgrade implementation.
 """
 
+import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -16,6 +22,11 @@ from ..output_formatter import error_output, strip_ansi_codes, success_output
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
+
+# One token is roughly four bytes of English text; the tool truncates the
+# accumulated PTY output at ``max_output_tokens * _BYTES_PER_TOKEN`` bytes.
+_BYTES_PER_TOKEN = 4
+_TRUNCATION_MARKER = "\n[truncated]\n"
 
 
 def _has_volume_hints(context: dict[str, Any]) -> bool:
@@ -380,35 +391,327 @@ async def _run_docker(context: dict[str, Any], command: str, timeout: int) -> di
         )
 
 
+def _resolve_run_id(context: dict[str, Any]) -> str | None:
+    """Extract the invocation identifier from the tool-call context."""
+    for key in ("run_id", "chat_id", "task_id", "message_id"):
+        value = context.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _truncate_output(text: str, max_output_tokens: int) -> tuple[str, bool]:
+    """Truncate ``text`` to at most ``max_output_tokens * 4`` bytes."""
+    if max_output_tokens <= 0:
+        return text, False
+    budget = max_output_tokens * _BYTES_PER_TOKEN
+    encoded = text.encode("utf-8", errors="replace")
+    if len(encoded) <= budget:
+        return text, False
+    # Keep the tail — most shell tools emit the interesting bit last.
+    tail = encoded[-budget:]
+    try:
+        decoded = tail.decode("utf-8", errors="replace")
+    except UnicodeDecodeError:
+        decoded = tail.decode("latin-1", errors="replace")
+    return _TRUNCATION_MARKER + decoded, True
+
+
+async def _run_local_pty(
+    context: dict[str, Any],
+    command: str,
+    timeout: int,
+    yield_time_ms: int,
+    max_output_tokens: int,
+    is_background: bool,
+    idle_timeout_ms: int,
+) -> dict[str, Any]:
+    """Execute ``command`` in local mode under a dedicated PTY session."""
+    import os
+    import signal
+    import time
+
+    from ....services.orchestration.local import PTY_SESSIONS
+
+    run_id = _resolve_run_id(context)
+    cwd = context.get("cwd") or os.environ.get("PROJECT_ROOT") or os.getcwd()
+
+    try:
+        session_id = PTY_SESSIONS.create(command, cwd=cwd, run_id=run_id)
+    except FileNotFoundError as exc:
+        return error_output(
+            message=f"Failed to spawn PTY session: {exc}",
+            suggestion="Verify the shell is installed and accessible",
+            details={"command": command, "tier": "local"},
+        )
+    except OSError as exc:
+        return error_output(
+            message=f"Failed to spawn PTY session: {exc}",
+            suggestion="Check that /dev/ptmx is available and writable",
+            details={"command": command, "tier": "local"},
+        )
+
+    snapshot = PTY_SESSIONS.status(session_id)
+
+    if is_background:
+        logger.info(
+            "[BASH-LOCAL] Background PTY session %s spawned pid=%s cmd=%r",
+            session_id,
+            snapshot.get("pid"),
+            command,
+        )
+        return success_output(
+            message=f"Started background PTY session {session_id}",
+            session_id=session_id,
+            details={
+                "command": command,
+                "pid": snapshot.get("pid"),
+                "status": "running",
+                "tier": "local",
+                "is_background": True,
+            },
+        )
+
+    # Foreground: drain until exit / timeout / yield / idle.
+    hard_deadline_ms = max(1, int(timeout)) * 1000
+    yield_ms = max(0, int(yield_time_ms))
+    max_duration_ms = hard_deadline_ms if yield_ms == 0 else min(hard_deadline_ms, yield_ms)
+
+    output_bytes = bytearray()
+    start = time.monotonic()
+    truncated = False
+
+    max_bytes_budget = max_output_tokens * _BYTES_PER_TOKEN if max_output_tokens > 0 else None
+
+    try:
+        while True:
+            remaining_ms = hard_deadline_ms - int((time.monotonic() - start) * 1000)
+            if remaining_ms <= 0:
+                # Hard timeout — kill the process group.
+                logger.warning(
+                    "[BASH-LOCAL] Command timed out after %ss: %s",
+                    timeout,
+                    command[:100],
+                )
+                entry_pgid = None
+                try:
+                    entry_pgid = PTY_SESSIONS._sessions[session_id].get("pgid")  # noqa: SLF001
+                except KeyError:
+                    entry_pgid = None
+                if entry_pgid:
+                    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                        os.killpg(entry_pgid, signal.SIGTERM)
+                    import asyncio as _asyncio
+
+                    await _asyncio.sleep(2.0)
+                    try:
+                        if PTY_SESSIONS._sessions[session_id]["pty"].isalive():  # noqa: SLF001
+                            os.killpg(entry_pgid, signal.SIGKILL)
+                    except (KeyError, ProcessLookupError, PermissionError, OSError):
+                        pass
+
+                # Capture whatever is left, then close.
+                tail = PTY_SESSIONS.read(session_id, max_bytes=65536)
+                if tail:
+                    output_bytes.extend(tail)
+                PTY_SESSIONS.close(session_id)
+
+                text = output_bytes.decode("utf-8", errors="replace")
+                clean = strip_ansi_codes(text)
+                clean, trunc_now = _truncate_output(clean, max_output_tokens)
+                return error_output(
+                    message=f"Command timed out after {timeout}s: {command}",
+                    suggestion=(
+                        "Increase the timeout, use is_background=True, or split the "
+                        "command into smaller steps"
+                    ),
+                    details={
+                        "command": command,
+                        "timeout": timeout,
+                        "output": clean,
+                        "truncated": truncated or trunc_now,
+                        "exit_code": 124,
+                        "session_id": session_id,
+                        "tier": "local",
+                    },
+                )
+
+            drain_budget_ms = min(max_duration_ms, remaining_ms)
+            chunk = await PTY_SESSIONS.drain(
+                session_id=session_id,
+                max_duration_ms=drain_budget_ms,
+                idle_timeout_ms=idle_timeout_ms,
+                max_bytes=max_bytes_budget,
+                wait_for_exit=True,
+            )
+            if chunk:
+                output_bytes.extend(chunk)
+
+            status_snapshot = PTY_SESSIONS.status(session_id)
+            if status_snapshot["status"] == "exited":
+                # Final flush.
+                tail = PTY_SESSIONS.read(session_id, max_bytes=65536)
+                if tail:
+                    output_bytes.extend(tail)
+                exit_code = status_snapshot.get("exit_code")
+                PTY_SESSIONS.close(session_id)
+
+                text = output_bytes.decode("utf-8", errors="replace")
+                clean = strip_ansi_codes(text)
+                clean, trunc_now = _truncate_output(clean, max_output_tokens)
+                truncated = truncated or trunc_now
+
+                logger.info(
+                    "[BASH-LOCAL] Command completed exit=%s output_length=%d",
+                    exit_code,
+                    len(clean),
+                )
+
+                details = {
+                    "command": command,
+                    "exit_code": exit_code if exit_code is not None else 0,
+                    "output": clean,
+                    "status": "exited",
+                    "truncated": truncated,
+                    "session_id": session_id,
+                    "tier": "local",
+                }
+
+                if exit_code not in (None, 0):
+                    return error_output(
+                        message=f"Command failed (exit code {exit_code}): {command}",
+                        suggestion="Check the output for errors",
+                        details=details,
+                    )
+                return success_output(
+                    message=f"Executed '{command}'",
+                    output=clean,
+                    details=details,
+                )
+
+            if max_bytes_budget is not None and len(output_bytes) >= max_bytes_budget:
+                # Budget hit — mark truncated, kill the process, return early.
+                truncated = True
+                entry_pgid = None
+                try:
+                    entry_pgid = PTY_SESSIONS._sessions[session_id].get("pgid")  # noqa: SLF001
+                except KeyError:
+                    entry_pgid = None
+                if entry_pgid:
+                    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                        os.killpg(entry_pgid, signal.SIGTERM)
+                PTY_SESSIONS.close(session_id)
+
+                text = output_bytes.decode("utf-8", errors="replace")
+                clean = strip_ansi_codes(text)
+                clean, _ = _truncate_output(clean, max_output_tokens)
+                return success_output(
+                    message=f"Executed '{command}' (output truncated at budget)",
+                    output=clean,
+                    details={
+                        "command": command,
+                        "exit_code": None,
+                        "status": "truncated",
+                        "truncated": True,
+                        "session_id": session_id,
+                        "tier": "local",
+                    },
+                )
+
+            # If the yield window has elapsed without an exit, return a
+            # partial snapshot so the agent can decide whether to continue.
+            if yield_ms > 0 and int((time.monotonic() - start) * 1000) >= yield_ms:
+                text = output_bytes.decode("utf-8", errors="replace")
+                clean = strip_ansi_codes(text)
+                clean, trunc_now = _truncate_output(clean, max_output_tokens)
+                truncated = truncated or trunc_now
+                logger.info(
+                    "[BASH-LOCAL] Yield after %dms, session %s still running",
+                    yield_ms,
+                    session_id,
+                )
+                return success_output(
+                    message=f"Yielded after {yield_ms}ms; session {session_id} still running",
+                    output=clean,
+                    details={
+                        "command": command,
+                        "exit_code": None,
+                        "status": "running",
+                        "truncated": truncated,
+                        "session_id": session_id,
+                        "tier": "local",
+                    },
+                )
+    except Exception as exc:
+        logger.error("[BASH-LOCAL] Execution error for %r: %s", command, exc, exc_info=True)
+        with contextlib.suppress(Exception):
+            PTY_SESSIONS.close(session_id)
+        return error_output(
+            message=f"Command execution failed: {exc}",
+            suggestion="Inspect the traceback and retry",
+            details={"command": command, "error": str(exc), "tier": "local"},
+        )
+
+
 async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
-    Execute a single command via the orchestrator's one-shot execute_command.
+    Execute a single command.
 
-    Uses asyncio subprocess (Docker) or K8s exec API (Kubernetes) — both return
-    immediately on process exit with stdout+stderr combined. No PTY, no sleep.
+    In **local** mode, the command runs under a dedicated PTY session and
+    supports background/yield/idle/truncation semantics. In **docker** and
+    **kubernetes** modes the call is delegated to the matching orchestrator
+    path unchanged.
 
     Args:
         params: {
-            command: str,      # Command to execute
-            timeout: int       # Max seconds to wait (default: 120)
+            command: str,
+            timeout: int = 120,
+            yield_time_ms: int = 10000,
+            max_output_tokens: int = 16384,
+            is_background: bool = False,
+            idle_timeout_ms: int = 0,
         }
-        context: {user_id: UUID, project_id: str, db: AsyncSession, container_name: str?}
-
-    Returns:
-        Dict with command output and exit code info
+        context: {user_id, project_id, db, container_name?, chat_id?, run_id?, ...}
     """
     command = params.get("command")
     timeout = int(params.get("timeout", 120))
+    yield_time_ms = int(params.get("yield_time_ms", 10000))
+    max_output_tokens = int(params.get("max_output_tokens", 16384))
+    is_background = bool(params.get("is_background", False))
+    idle_timeout_ms = int(params.get("idle_timeout_ms", 0))
 
     if not command:
         raise ValueError("command parameter is required")
 
-    logger.info(f"[BASH] Executing (one-shot): {command[:100]}...")
+    logger.info(f"[BASH] Executing: {command[:100]}... (bg={is_background})")
 
-    # Docker mode: delegate to orchestrator.execute_command
     from ....config import get_settings
 
     settings = get_settings()
+    mode = getattr(settings, "deployment_mode", None)
+
+    # Local mode: PTY-backed execution with the upgraded feature set.
+    if mode == "local":
+        return await _run_local_pty(
+            context=context,
+            command=command,
+            timeout=timeout,
+            yield_time_ms=yield_time_ms,
+            max_output_tokens=max_output_tokens,
+            is_background=is_background,
+            idle_timeout_ms=idle_timeout_ms,
+        )
+
+    # Non-local modes do not support background spawning via this tool —
+    # the caller should use shell_open / shell_exec for persistent
+    # sessions in containerized deployments.
+    if is_background:
+        return error_output(
+            message="is_background=True is only supported in local deployment mode",
+            suggestion="Use shell_open + shell_exec for persistent sessions in Docker/K8s mode",
+            details={"command": command},
+        )
+
     if settings.is_docker_mode:
         return await _run_docker(context, command, timeout)
 
@@ -431,7 +734,12 @@ def register_bash_tools(registry):
     registry.register(
         Tool(
             name="bash_exec",
-            description="Execute a bash/sh command and return its output. The command runs to completion and returns stdout+stderr. For interactive sessions, use shell_open + shell_exec instead.",
+            description=(
+                "Execute a bash/sh command and return its output. In local mode the "
+                "command runs under a PTY, supports soft yielding via yield_time_ms, "
+                "idle detection via idle_timeout_ms, background spawning via "
+                "is_background=True, and output truncation via max_output_tokens."
+            ),
             category=ToolCategory.SHELL,
             parameters={
                 "type": "object",
@@ -442,8 +750,46 @@ def register_bash_tools(registry):
                     },
                     "timeout": {
                         "type": "integer",
-                        "description": "Maximum seconds to wait for the command to finish (default: 120)",
+                        "description": "Hard timeout in seconds — the process group is killed when it elapses (default: 120)",
                         "default": 120,
+                    },
+                    "yield_time_ms": {
+                        "type": "integer",
+                        "description": (
+                            "Soft yield window in milliseconds. If the command is still "
+                            "running after this window elapses, bash_exec returns a partial "
+                            "snapshot with status=running and the session_id so the agent "
+                            "can poll or send stdin. 0 disables soft yield. Default: 10000."
+                        ),
+                        "default": 10000,
+                    },
+                    "max_output_tokens": {
+                        "type": "integer",
+                        "description": (
+                            "Approximate output budget in model tokens (4 bytes/token). "
+                            "Output beyond this is truncated with a [truncated] marker. "
+                            "Default: 16384."
+                        ),
+                        "default": 16384,
+                    },
+                    "is_background": {
+                        "type": "boolean",
+                        "description": (
+                            "When true, spawn the command as a detached PTY session and "
+                            "return immediately with the session_id. Use "
+                            "list_background_processes and read_background_output to "
+                            "inspect it later. Local mode only."
+                        ),
+                        "default": False,
+                    },
+                    "idle_timeout_ms": {
+                        "type": "integer",
+                        "description": (
+                            "Idle output timeout in milliseconds. When >0 and no new output "
+                            "arrives for this long, bash_exec yields a partial snapshot. "
+                            "0 disables the idle timeout. Default: 0."
+                        ),
+                        "default": 0,
                     },
                 },
                 "required": ["command"],
@@ -452,6 +798,8 @@ def register_bash_tools(registry):
             examples=[
                 '{"tool_name": "bash_exec", "parameters": {"command": "npm install"}}',
                 '{"tool_name": "bash_exec", "parameters": {"command": "ls -la", "timeout": 30}}',
+                '{"tool_name": "bash_exec", "parameters": {"command": "npm run dev", "is_background": true}}',
+                '{"tool_name": "bash_exec", "parameters": {"command": "pytest -x", "yield_time_ms": 5000, "idle_timeout_ms": 2000}}',
             ],
         )
     )

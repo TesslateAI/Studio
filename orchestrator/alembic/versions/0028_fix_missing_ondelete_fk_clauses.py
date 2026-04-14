@@ -9,8 +9,8 @@ Revises: 0027_agent_git_repo
 Create Date: 2026-03-13
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers
 revision = "0028_fix_fk_ondelete"
@@ -22,11 +22,39 @@ depends_on = None
 # confdeltype: 'a' = NO ACTION, 'r' = RESTRICT, 'c' = CASCADE, 'n' = SET NULL, 'd' = SET DEFAULT
 FK_FIXES = [
     ("channel_configs", "channel_configs_user_id_fkey", "user_id", "users", "CASCADE", "c"),
-    ("channel_configs", "channel_configs_project_id_fkey", "project_id", "projects", "SET NULL", "n"),
-    ("channel_configs", "channel_configs_default_agent_id_fkey", "default_agent_id", "marketplace_agents", "SET NULL", "n"),
-    ("channel_messages", "channel_messages_channel_config_id_fkey", "channel_config_id", "channel_configs", "CASCADE", "c"),
+    (
+        "channel_configs",
+        "channel_configs_project_id_fkey",
+        "project_id",
+        "projects",
+        "SET NULL",
+        "n",
+    ),
+    (
+        "channel_configs",
+        "channel_configs_default_agent_id_fkey",
+        "default_agent_id",
+        "marketplace_agents",
+        "SET NULL",
+        "n",
+    ),
+    (
+        "channel_messages",
+        "channel_messages_channel_config_id_fkey",
+        "channel_config_id",
+        "channel_configs",
+        "CASCADE",
+        "c",
+    ),
     ("user_mcp_configs", "user_mcp_configs_user_id_fkey", "user_id", "users", "CASCADE", "c"),
-    ("user_mcp_configs", "user_mcp_configs_marketplace_agent_id_fkey", "marketplace_agent_id", "marketplace_agents", "SET NULL", "n"),
+    (
+        "user_mcp_configs",
+        "user_mcp_configs_marketplace_agent_id_fkey",
+        "marketplace_agent_id",
+        "marketplace_agents",
+        "SET NULL",
+        "n",
+    ),
 ]
 
 
@@ -35,9 +63,7 @@ def upgrade() -> None:
     for table, constraint, column, referred, ondelete, expected_type in FK_FIXES:
         # Check if FK already has the correct ondelete behavior
         result = conn.execute(
-            sa.text(
-                "SELECT confdeltype FROM pg_constraint WHERE conname = :name"
-            ),
+            sa.text("SELECT confdeltype FROM pg_constraint WHERE conname = :name"),
             {"name": constraint},
         )
         row = result.fetchone()
@@ -46,13 +72,23 @@ def upgrade() -> None:
         if not row:
             # Constraint doesn't exist at all — just create it
             op.create_foreign_key(
-                constraint, table, referred, [column], ["id"], ondelete=ondelete,
+                constraint,
+                table,
+                referred,
+                [column],
+                ["id"],
+                ondelete=ondelete,
             )
         else:
             # Constraint exists but with wrong ondelete — recreate it
             op.drop_constraint(constraint, table, type_="foreignkey")
             op.create_foreign_key(
-                constraint, table, referred, [column], ["id"], ondelete=ondelete,
+                constraint,
+                table,
+                referred,
+                [column],
+                ["id"],
+                ondelete=ondelete,
             )
 
 
@@ -60,5 +96,9 @@ def downgrade() -> None:
     for table, constraint, column, referred, _ondelete, _expected in FK_FIXES:
         op.drop_constraint(constraint, table, type_="foreignkey")
         op.create_foreign_key(
-            constraint, table, referred, [column], ["id"],
+            constraint,
+            table,
+            referred,
+            [column],
+            ["id"],
         )

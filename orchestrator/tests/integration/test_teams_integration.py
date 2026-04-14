@@ -17,7 +17,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ── Personal Team Auto-Creation ─────────────────────────────────────────
 
 
@@ -211,9 +210,7 @@ def test_get_invite_details_public(authenticated_client):
 
     client.post("/api/teams", json={"name": "Public Team", "slug": slug})
 
-    link_resp = client.post(
-        f"/api/teams/{slug}/members/link", json={"role": "editor"}
-    )
+    link_resp = client.post(f"/api/teams/{slug}/members/link", json={"role": "editor"})
     token = link_resp.json()["token"]
 
     # Save and clear auth
@@ -242,9 +239,7 @@ def test_accept_invite_link(authenticated_client, api_client_session):
     client_a.post("/api/teams", json={"name": "Accept Team", "slug": slug})
 
     # Create invite link (client_a has Bearer auth)
-    link_resp = client_a.post(
-        f"/api/teams/{slug}/members/link", json={"role": "editor"}
-    )
+    link_resp = client_a.post(f"/api/teams/{slug}/members/link", json={"role": "editor"})
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     link_data = link_resp.json()
     invite_token = link_data.get("token")
@@ -361,9 +356,7 @@ def test_audit_log_records_member_invite(authenticated_client):
 
 
 @pytest.mark.integration
-def test_projects_filtered_by_team(
-    authenticated_client, default_base_id, mock_orchestrator
-):
+def test_projects_filtered_by_team(authenticated_client, default_base_id, mock_orchestrator):
     """Projects should be filtered by the user's active team."""
     client, user_data = authenticated_client
 
@@ -398,7 +391,6 @@ def _create_team_and_user_b(api_client_session, admin_client, team_prefix, role=
 
     admin_client: authenticated (client, user_data) tuple for the team creator.
     """
-    from httpx._client import Client  # noqa: only used for type hint clarity
 
     client_a, _ = admin_client
     slug = f"{team_prefix}-{uuid4().hex[:8]}"
@@ -407,9 +399,7 @@ def _create_team_and_user_b(api_client_session, admin_client, team_prefix, role=
     assert resp.status_code in (200, 201), f"Team creation failed: {resp.text}"
 
     # Create invite link for the given role
-    link_resp = client_a.post(
-        f"/api/teams/{slug}/members/link", json={"role": role}
-    )
+    link_resp = client_a.post(f"/api/teams/{slug}/members/link", json={"role": role})
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     invite_token = link_resp.json()["token"]
 
@@ -538,9 +528,7 @@ def test_viewer_can_view_file_tree(
     # can return 200 (success), 404/502 (no container), or 500 (mock gap /
     # recursion limit). The assertion only needs to rule out 403 (permission
     # denied), which would be a regression for the viewer role.
-    assert resp.status_code != 403, (
-        f"Viewer should have PROJECT_VIEW for file tree: {resp.text}"
-    )
+    assert resp.status_code != 403, f"Viewer should have PROJECT_VIEW for file tree: {resp.text}"
 
 
 @pytest.mark.integration
@@ -764,16 +752,14 @@ def test_editor_can_save_files_and_start_containers(
 
     # Stop-all — should NOT be 403.
     resp = client_a.post(f"/api/projects/{proj_slug}/containers/stop-all")
-    assert resp.status_code != 403, (
-        f"Editor should have CONTAINER_START_STOP: {resp.text}"
-    )
+    assert resp.status_code != 403, f"Editor should have CONTAINER_START_STOP: {resp.text}"
 
 
 @pytest.mark.integration
 def test_viewer_cannot_invite_members(authenticated_client, api_client_session):
     """Viewer cannot create invitations (403)."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "vinvite", role="viewer"
@@ -791,7 +777,7 @@ def test_viewer_cannot_invite_members(authenticated_client, api_client_session):
 def test_viewer_cannot_change_team_settings(authenticated_client, api_client_session):
     """Viewer cannot PATCH team settings (403)."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "vsettings", role="viewer"
@@ -862,7 +848,7 @@ def test_editor_can_save_files(
 def test_editor_cannot_invite_members(authenticated_client, api_client_session):
     """Editor cannot create invitations (403)."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "einvite", role="editor"
@@ -880,7 +866,7 @@ def test_editor_cannot_invite_members(authenticated_client, api_client_session):
 def test_editor_cannot_change_team_settings(authenticated_client, api_client_session):
     """Editor cannot PATCH team settings (403)."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "esettings", role="editor"
@@ -895,7 +881,7 @@ def test_editor_cannot_change_team_settings(authenticated_client, api_client_ses
 def test_editor_cannot_export_audit_log(authenticated_client, api_client_session):
     """Editor cannot export audit log (403 — admin only)."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "eaudit", role="editor"
@@ -1093,7 +1079,7 @@ def test_editor_cannot_view_audit_log(authenticated_client, api_client_session):
 def test_viewer_cannot_export_audit_log(authenticated_client, api_client_session):
     """Viewer cannot export the audit log (403 — admin only)."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "vexport", role="viewer"
@@ -1119,12 +1105,10 @@ def test_admin_can_export_audit_log(authenticated_client):
 
 
 @pytest.mark.integration
-def test_viewer_cannot_create_project(
-    authenticated_client, api_client_session, default_base_id
-):
+def test_viewer_cannot_create_project(authenticated_client, api_client_session, default_base_id):
     """Viewer should not be able to create projects."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "vcreate", role="viewer"
@@ -1139,9 +1123,7 @@ def test_viewer_cannot_create_project(
         json={"name": "Viewer Project", "base_id": default_base_id},
     )
     # Viewer lacks project.create permission — expect 403
-    assert response.status_code == 403, (
-        f"Expected 403, got {response.status_code}: {response.text}"
-    )
+    assert response.status_code == 403, f"Expected 403, got {response.status_code}: {response.text}"
 
 
 @pytest.mark.integration
@@ -1193,7 +1175,7 @@ def test_viewer_cannot_send_chat(
 def test_editor_cannot_manage_billing(authenticated_client, api_client_session):
     """Editor should not be able to change subscription or manage billing."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "ebill", role="editor"
@@ -1242,9 +1224,7 @@ def test_audit_log_records_member_role_change(authenticated_client, api_client_s
     user_b_id = [m for m in members if m["role"] == "editor"][0]["user_id"]
 
     # Change role to viewer
-    client_a.patch(
-        f"/api/teams/{slug}/members/{user_b_id}", json={"role": "viewer"}
-    )
+    client_a.patch(f"/api/teams/{slug}/members/{user_b_id}", json={"role": "viewer"})
 
     # Check audit log
     logs = client_a.get(f"/api/teams/{slug}/audit-log").json()
@@ -1256,7 +1236,7 @@ def test_audit_log_records_member_role_change(authenticated_client, api_client_s
 def test_viewer_cannot_delete_team(authenticated_client, api_client_session):
     """Viewer should not be able to delete the team."""
     client_a, _ = authenticated_client
-    token_a = client_a.headers.get("Authorization")
+    client_a.headers.get("Authorization")
 
     _, _, slug, token_b = _create_team_and_user_b(
         api_client_session, authenticated_client, "vdelteam", role="viewer"
@@ -1264,6 +1244,4 @@ def test_viewer_cannot_delete_team(authenticated_client, api_client_session):
 
     client_a.headers["Authorization"] = f"Bearer {token_b}"
     response = client_a.delete(f"/api/teams/{slug}")
-    assert response.status_code == 403, (
-        f"Expected 403, got {response.status_code}: {response.text}"
-    )
+    assert response.status_code == 403, f"Expected 403, got {response.status_code}: {response.text}"

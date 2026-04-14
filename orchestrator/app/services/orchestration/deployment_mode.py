@@ -15,10 +15,13 @@ class DeploymentMode(StrEnum):
     Attributes:
         DOCKER: Local development using Docker Compose + Traefik
         KUBERNETES: Production deployment using Kubernetes + NGINX Ingress
+        LOCAL: Direct filesystem + subprocess execution on the host machine
+            (no container isolation — used for sandboxed benchmark environments)
     """
 
     DOCKER = "docker"
     KUBERNETES = "kubernetes"
+    LOCAL = "local"
 
     @classmethod
     def from_string(cls, value: str) -> "DeploymentMode":
@@ -26,7 +29,7 @@ class DeploymentMode(StrEnum):
         Convert a string to DeploymentMode enum.
 
         Args:
-            value: String value ("docker" or "kubernetes")
+            value: String value ("docker", "kubernetes", or "local")
 
         Returns:
             DeploymentMode enum value
@@ -50,6 +53,11 @@ class DeploymentMode(StrEnum):
     def is_kubernetes(self) -> bool:
         """Check if this is Kubernetes deployment mode."""
         return self == DeploymentMode.KUBERNETES
+
+    @property
+    def is_local(self) -> bool:
+        """Check if this is local (filesystem + subprocess) deployment mode."""
+        return self == DeploymentMode.LOCAL
 
     def __str__(self) -> str:
         return self.value

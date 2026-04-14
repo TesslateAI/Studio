@@ -1,13 +1,15 @@
-import React from 'react';
-import { ChatContainer } from '../../chat/ChatContainer';
+import { Sparkles } from 'lucide-react';
 import VisualTab from './VisualTab';
 import InspectorTab from './InspectorTab';
+import { askAIAboutElement } from './designStore';
 import type { ClassInfo, ElementInfo } from '../../../utils/classDetection';
 import type { ElementData } from './DesignBridge';
 
+export type InspectorTabId = 'visual' | 'inspector';
+
 interface InspectorPanelProps {
-  activeTab: 'visual' | 'inspector' | 'ai';
-  onTabChange: (tab: 'visual' | 'inspector' | 'ai') => void;
+  activeTab: InspectorTabId;
+  onTabChange: (tab: InspectorTabId) => void;
   // Visual tab
   cursorClasses: ClassInfo | null;
   editorRef: unknown;
@@ -18,14 +20,11 @@ interface InspectorPanelProps {
   onStyleUpdate?: (designId: string, property: string, value: string) => void;
   onStyleRemove?: (designId: string, property: string) => void;
   onClassUpdate?: (designId: string, classes: string[]) => void;
-  // AI tab
-  chatProps: Record<string, unknown>;
 }
 
-const TABS: { id: 'visual' | 'inspector' | 'ai'; label: string }[] = [
+const TABS: { id: InspectorTabId; label: string }[] = [
   { id: 'visual', label: 'VISUAL' },
   { id: 'inspector', label: 'INSPECTOR' },
-  { id: 'ai', label: 'AI' },
 ];
 
 export default function InspectorPanel({
@@ -38,7 +37,6 @@ export default function InspectorPanel({
   onStyleUpdate,
   onStyleRemove,
   onClassUpdate,
-  chatProps,
 }: InspectorPanelProps) {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[var(--bg)]">
@@ -60,6 +58,26 @@ export default function InspectorPanel({
             )}
           </button>
         ))}
+        <div className="flex-1" />
+        {selectedElement && (
+          <button
+            type="button"
+            onClick={() =>
+              askAIAboutElement({
+                oid: selectedElement.oid,
+                tagName: selectedElement.tagName,
+                classList: selectedElement.classList,
+                textContent: selectedElement.textContent,
+                reactComponent: selectedElement.reactComponent,
+              })
+            }
+            title="Ask AI about this element"
+            className="mr-1 flex items-center gap-1 px-2 h-6 text-[10px] font-medium uppercase tracking-wider rounded transition-colors text-[var(--primary)] hover:bg-[var(--primary)]/10"
+          >
+            <Sparkles size={11} />
+            Ask AI
+          </button>
+        )}
       </div>
 
       {/* Tab content */}
@@ -80,14 +98,6 @@ export default function InspectorPanel({
             onStyleUpdate={onStyleUpdate}
             onStyleRemove={onStyleRemove}
             onSwitchToVisual={() => onTabChange('visual')}
-          />
-        )}
-
-        {activeTab === 'ai' && (
-          <ChatContainer
-            {...(chatProps as React.ComponentProps<typeof ChatContainer>)}
-            isDocked={true}
-            viewContext="builder"
           />
         )}
       </div>

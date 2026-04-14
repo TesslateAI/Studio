@@ -6,18 +6,16 @@ and edge cases. Uses mocked DB sessions — no database required.
 """
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import app.models  # noqa: F401 — register all ORM models so mapper resolves cross-module relationships
-
 from app.permissions import (
     ROLE_PERMISSIONS,
     Permission,
     get_effective_project_role,
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -77,7 +75,7 @@ def _setup_db_for_role_test(
 
 class TestPermissionEnum:
     def test_admin_has_all_permissions(self):
-        assert ROLE_PERMISSIONS["admin"] == {p for p in Permission}
+        assert ROLE_PERMISSIONS["admin"] == set(Permission)
 
     def test_admin_count_matches_enum(self):
         assert len(ROLE_PERMISSIONS["admin"]) == len(Permission)
@@ -317,15 +315,26 @@ class TestDualScopeResolution:
 class TestTeamModel:
     def test_team_table_name(self):
         from app.models_team import Team
+
         assert Team.__tablename__ == "teams"
 
     def test_team_has_billing_fields(self):
         from app.models_team import Team
+
         billing_fields = [
-            "subscription_tier", "stripe_customer_id", "stripe_subscription_id",
-            "total_spend", "bundled_credits", "purchased_credits", "daily_credits",
-            "signup_bonus_credits", "signup_bonus_expires_at", "credits_reset_date",
-            "daily_credits_reset_date", "support_tier", "deployed_projects_count",
+            "subscription_tier",
+            "stripe_customer_id",
+            "stripe_subscription_id",
+            "total_spend",
+            "bundled_credits",
+            "purchased_credits",
+            "daily_credits",
+            "signup_bonus_credits",
+            "signup_bonus_expires_at",
+            "credits_reset_date",
+            "daily_credits_reset_date",
+            "support_tier",
+            "deployed_projects_count",
         ]
         for field in billing_fields:
             assert hasattr(Team, field), f"Team missing billing field: {field}"
@@ -334,18 +343,22 @@ class TestTeamModel:
 class TestMembershipModels:
     def test_team_membership_table(self):
         from app.models_team import TeamMembership
+
         assert TeamMembership.__tablename__ == "team_memberships"
 
     def test_project_membership_table(self):
         from app.models_team import ProjectMembership
+
         assert ProjectMembership.__tablename__ == "project_memberships"
 
     def test_invitation_table(self):
         from app.models_team import TeamInvitation
+
         assert TeamInvitation.__tablename__ == "team_invitations"
 
     def test_audit_log_table(self):
         from app.models_team import AuditLog
+
         assert AuditLog.__tablename__ == "audit_logs"
 
 
@@ -357,18 +370,23 @@ class TestAuditService:
     async def test_log_event_never_raises_on_error(self):
         """log_event should catch exceptions and not raise (non-blocking)."""
         from app.services.audit_service import log_event
+
         db = AsyncMock()
         db.add.side_effect = Exception("DB down")
 
         # Should NOT raise
         await log_event(
-            db=db, team_id=uuid.uuid4(), user_id=uuid.uuid4(),
-            action="test.action", resource_type="test",
+            db=db,
+            team_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            action="test.action",
+            resource_type="test",
         )
 
     @pytest.mark.asyncio
     async def test_cleanup_executes_delete(self):
         from app.services.audit_service import cleanup_expired_audit_logs
+
         db = AsyncMock()
         await cleanup_expired_audit_logs(db, retention_days=90)
         db.execute.assert_called_once()
@@ -377,6 +395,7 @@ class TestAuditService:
     @pytest.mark.asyncio
     async def test_cleanup_never_raises(self):
         from app.services.audit_service import cleanup_expired_audit_logs
+
         db = AsyncMock()
         db.execute.side_effect = Exception("DB error")
         await cleanup_expired_audit_logs(db)
@@ -389,6 +408,7 @@ class TestCreditServiceTeamBilling:
     @pytest.mark.asyncio
     async def test_check_credits_with_team(self):
         from app.services.credit_service import check_credits
+
         team = MagicMock()
         team.total_credits = 100
         user = MagicMock()
@@ -399,6 +419,7 @@ class TestCreditServiceTeamBilling:
     @pytest.mark.asyncio
     async def test_check_credits_team_no_credits(self):
         from app.services.credit_service import check_credits
+
         team = MagicMock()
         team.total_credits = 0
         user = MagicMock()
@@ -409,6 +430,7 @@ class TestCreditServiceTeamBilling:
     @pytest.mark.asyncio
     async def test_check_credits_byok_always_passes(self):
         from app.services.credit_service import check_credits
+
         team = MagicMock()
         team.total_credits = 0
         user = MagicMock()
@@ -417,6 +439,7 @@ class TestCreditServiceTeamBilling:
 
     def test_is_byok_model(self):
         from app.services.credit_service import is_byok_model
+
         assert is_byok_model("openai/gpt-4") is True
         assert is_byok_model("anthropic/claude-3") is True
         assert is_byok_model("tesslate/default") is False
@@ -428,53 +451,63 @@ class TestCreditServiceTeamBilling:
 class TestSchemaValidation:
     def test_team_create_valid(self):
         from app.schemas_team import TeamCreate
+
         tc = TeamCreate(name="My Team", slug="my-team")
         assert tc.name == "My Team"
 
     def test_team_create_rejects_empty_name(self):
         from app.schemas_team import TeamCreate
+
         with pytest.raises(Exception):
             TeamCreate(name="", slug="my-team")
 
     def test_team_create_rejects_invalid_slug(self):
         from app.schemas_team import TeamCreate
+
         with pytest.raises(Exception):
             TeamCreate(name="My Team", slug="INVALID SLUG!")
 
     def test_invite_email_valid(self):
         from app.schemas_team import InviteEmailRequest
+
         inv = InviteEmailRequest(email="test@example.com", role="editor")
         assert inv.role == "editor"
 
     def test_invite_email_rejects_invalid_role(self):
         from app.schemas_team import InviteEmailRequest
+
         with pytest.raises(Exception):
             InviteEmailRequest(email="test@example.com", role="superadmin")
 
     def test_member_update_valid_roles(self):
         from app.schemas_team import TeamMemberUpdate
+
         for role in ["admin", "editor", "viewer"]:
             tm = TeamMemberUpdate(role=role)
             assert tm.role == role
 
     def test_member_update_rejects_invalid_role(self):
         from app.schemas_team import TeamMemberUpdate
+
         with pytest.raises(Exception):
             TeamMemberUpdate(role="owner")
 
     def test_audit_log_filter_defaults(self):
         from app.schemas_team import AuditLogFilter
+
         f = AuditLogFilter()
         assert f.page == 1
         assert f.per_page == 50
 
     def test_project_member_add_valid(self):
         from app.schemas_team import ProjectMemberAdd
+
         pm = ProjectMemberAdd(user_id=uuid.uuid4(), role="editor")
         assert pm.role == "editor"
 
     def test_invite_link_request_defaults(self):
         from app.schemas_team import InviteLinkRequest
+
         ilr = InviteLinkRequest(role="viewer")
         assert ilr.expires_in_days == 30
         assert ilr.max_uses is None

@@ -73,6 +73,12 @@ class OrchestratorFactory:
             orchestrator = KubernetesOrchestrator()
             logger.info("[ORCHESTRATOR] Created Kubernetes orchestrator")
 
+        elif mode == DeploymentMode.LOCAL:
+            from .local import LocalOrchestrator
+
+            orchestrator = LocalOrchestrator()
+            logger.info("[ORCHESTRATOR] Created Local orchestrator")
+
         else:
             raise ValueError(f"Unsupported deployment mode: {mode}")
 
@@ -90,6 +96,11 @@ class OrchestratorFactory:
     def is_kubernetes_mode() -> bool:
         """Check if running in Kubernetes deployment mode."""
         return OrchestratorFactory.get_deployment_mode() == DeploymentMode.KUBERNETES
+
+    @staticmethod
+    def is_local_mode() -> bool:
+        """Check if running in local (filesystem + subprocess) deployment mode."""
+        return OrchestratorFactory.get_deployment_mode() == DeploymentMode.LOCAL
 
     @staticmethod
     def clear_cache() -> None:
@@ -146,6 +157,19 @@ def is_kubernetes_mode() -> bool:
         if is_kubernetes_mode():
     """
     return OrchestratorFactory.is_kubernetes_mode()
+
+
+def is_local_mode() -> bool:
+    """
+    Convenience function to check local (filesystem + subprocess) deployment mode.
+
+    Use this instead of:
+        if settings.deployment_mode == "local":
+
+    Use this:
+        if is_local_mode():
+    """
+    return OrchestratorFactory.is_local_mode()
 
 
 def get_deployment_mode() -> DeploymentMode:

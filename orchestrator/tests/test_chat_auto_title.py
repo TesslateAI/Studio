@@ -1,17 +1,20 @@
 """Tests for _auto_title_chat in worker.py."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+
+import pytest
 
 from app.worker import _auto_title_chat
 
 
 async def _mock_chat_generator(*chunks):
     """Create an async generator that yields chunks."""
+
     async def gen(*args, **kwargs):
         for c in chunks:
             yield c
+
     return gen
 
 

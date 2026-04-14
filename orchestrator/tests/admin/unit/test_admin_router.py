@@ -11,12 +11,11 @@ Tests cover:
 - Deployment Monitoring endpoints
 """
 
-import pytest
 from datetime import datetime, timedelta
+from unittest.mock import Mock
 from uuid import uuid4
-from unittest.mock import Mock, AsyncMock, MagicMock, patch
-from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession
+
+import pytest
 
 
 @pytest.fixture
@@ -121,6 +120,7 @@ def mock_credit_purchase():
 # User Management Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestUserManagement:
     """Test suite for User Management admin endpoints."""
@@ -133,13 +133,12 @@ class TestUserManagement:
 
         # Act & Assert - validate structure expectations
         assert len(users) == 25
-        assert all(hasattr(u, 'username') for u in users)
+        assert all(hasattr(u, "username") for u in users)
 
     @pytest.mark.asyncio
     async def test_suspend_user_creates_audit_log(self, mock_superuser, mock_regular_user):
         """Test that suspending a user creates an audit log entry."""
         # Arrange
-        reason = "Violation of terms of service"
 
         # Act - simulate suspension logic
         mock_regular_user.is_suspended = True
@@ -209,6 +208,7 @@ class TestUserManagement:
 # System Health Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestSystemHealth:
     """Test suite for System Health monitoring endpoints."""
@@ -217,62 +217,59 @@ class TestSystemHealth:
     async def test_health_summary_returns_all_metrics(self):
         """Test that health summary returns database, k8s, and service metrics."""
         # Arrange
-        expected_metrics = ['database', 'kubernetes', 'services', 'queues']
+        expected_metrics = ["database", "kubernetes", "services", "queues"]
 
         # Assert - structure validation
         assert len(expected_metrics) == 4
-        assert 'database' in expected_metrics
-        assert 'kubernetes' in expected_metrics
+        assert "database" in expected_metrics
+        assert "kubernetes" in expected_metrics
 
     @pytest.mark.asyncio
     async def test_health_check_database_connection(self):
         """Test database health check reports connection status."""
         # Arrange
         mock_db_status = {
-            'status': 'healthy',
-            'latency_ms': 5,
-            'connections_active': 10,
-            'connections_idle': 5
+            "status": "healthy",
+            "latency_ms": 5,
+            "connections_active": 10,
+            "connections_idle": 5,
         }
 
         # Assert
-        assert mock_db_status['status'] == 'healthy'
-        assert mock_db_status['latency_ms'] < 100
+        assert mock_db_status["status"] == "healthy"
+        assert mock_db_status["latency_ms"] < 100
 
     @pytest.mark.asyncio
     async def test_health_check_kubernetes_status(self):
         """Test Kubernetes health check reports cluster status."""
         # Arrange
         mock_k8s_status = {
-            'status': 'healthy',
-            'nodes_ready': 3,
-            'nodes_total': 3,
-            'pods_running': 25,
-            'pods_pending': 0
+            "status": "healthy",
+            "nodes_ready": 3,
+            "nodes_total": 3,
+            "pods_running": 25,
+            "pods_pending": 0,
         }
 
         # Assert
-        assert mock_k8s_status['status'] == 'healthy'
-        assert mock_k8s_status['nodes_ready'] == mock_k8s_status['nodes_total']
+        assert mock_k8s_status["status"] == "healthy"
+        assert mock_k8s_status["nodes_ready"] == mock_k8s_status["nodes_total"]
 
     @pytest.mark.asyncio
     async def test_health_degraded_when_service_down(self):
         """Test that health status is degraded when a service is unhealthy."""
         # Arrange
-        service_statuses = {
-            'backend': 'healthy',
-            'frontend': 'healthy',
-            'database': 'degraded'
-        }
+        service_statuses = {"backend": "healthy", "frontend": "healthy", "database": "degraded"}
 
         # Assert
-        overall_status = 'degraded' if 'degraded' in service_statuses.values() else 'healthy'
-        assert overall_status == 'degraded'
+        overall_status = "degraded" if "degraded" in service_statuses.values() else "healthy"
+        assert overall_status == "degraded"
 
 
 # ============================================================================
 # Token Analytics Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestTokenAnalytics:
@@ -283,27 +280,30 @@ class TestTokenAnalytics:
         """Test that token summary returns total usage and cost."""
         # Arrange
         mock_summary = {
-            'total_tokens': 1000000,
-            'total_cost': 50.00,
-            'input_tokens': 600000,
-            'output_tokens': 400000
+            "total_tokens": 1000000,
+            "total_cost": 50.00,
+            "input_tokens": 600000,
+            "output_tokens": 400000,
         }
 
         # Assert
-        assert mock_summary['total_tokens'] == mock_summary['input_tokens'] + mock_summary['output_tokens']
-        assert mock_summary['total_cost'] > 0
+        assert (
+            mock_summary["total_tokens"]
+            == mock_summary["input_tokens"] + mock_summary["output_tokens"]
+        )
+        assert mock_summary["total_cost"] > 0
 
     @pytest.mark.asyncio
     async def test_token_usage_by_model(self):
         """Test token usage breakdown by model."""
         # Arrange
         mock_by_model = {
-            'gpt-4': {'tokens': 500000, 'cost': 30.00},
-            'gpt-3.5-turbo': {'tokens': 500000, 'cost': 20.00}
+            "gpt-4": {"tokens": 500000, "cost": 30.00},
+            "gpt-3.5-turbo": {"tokens": 500000, "cost": 20.00},
         }
 
         # Assert
-        total_tokens = sum(m['tokens'] for m in mock_by_model.values())
+        total_tokens = sum(m["tokens"] for m in mock_by_model.values())
         assert total_tokens == 1000000
 
     @pytest.mark.asyncio
@@ -311,31 +311,32 @@ class TestTokenAnalytics:
         """Test token usage breakdown by user."""
         # Arrange
         mock_by_user = [
-            {'user_id': str(uuid4()), 'tokens': 100000, 'cost': 5.00},
-            {'user_id': str(uuid4()), 'tokens': 50000, 'cost': 2.50}
+            {"user_id": str(uuid4()), "tokens": 100000, "cost": 5.00},
+            {"user_id": str(uuid4()), "tokens": 50000, "cost": 2.50},
         ]
 
         # Assert
         assert len(mock_by_user) == 2
-        assert all(u['tokens'] > 0 for u in mock_by_user)
+        assert all(u["tokens"] > 0 for u in mock_by_user)
 
     @pytest.mark.asyncio
     async def test_token_usage_time_series(self):
         """Test token usage time series data."""
         # Arrange
         mock_time_series = [
-            {'date': '2025-01-01', 'tokens': 10000, 'cost': 0.50},
-            {'date': '2025-01-02', 'tokens': 15000, 'cost': 0.75}
+            {"date": "2025-01-01", "tokens": 10000, "cost": 0.50},
+            {"date": "2025-01-02", "tokens": 15000, "cost": 0.75},
         ]
 
         # Assert
         assert len(mock_time_series) == 2
-        assert all('date' in d and 'tokens' in d for d in mock_time_series)
+        assert all("date" in d and "tokens" in d for d in mock_time_series)
 
 
 # ============================================================================
 # Audit Log Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestAuditLogViewer:
@@ -385,10 +386,9 @@ class TestAuditLogViewer:
     async def test_export_audit_logs_csv(self, mock_audit_log):
         """Test exporting audit logs to CSV format."""
         # Arrange
-        logs = [mock_audit_log]
 
         # Assert - validate log has required fields for CSV export
-        required_fields = ['action_type', 'target_type', 'target_id', 'created_at']
+        required_fields = ["action_type", "target_type", "target_id", "created_at"]
         assert all(hasattr(mock_audit_log, field) for field in required_fields)
 
     @pytest.mark.asyncio
@@ -409,6 +409,7 @@ class TestAuditLogViewer:
 # ============================================================================
 # Project Administration Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestProjectAdministration:
@@ -488,7 +489,6 @@ class TestProjectAdministration:
     async def test_delete_project_creates_audit_log(self, mock_project, mock_superuser):
         """Test that deleting a project creates an audit log entry."""
         # Arrange
-        reason = "User requested deletion"
 
         # Assert - validate project has required fields for audit
         assert mock_project.id is not None
@@ -508,6 +508,7 @@ class TestProjectAdministration:
 # Billing Administration Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestBillingAdministration:
     """Test suite for Billing Administration endpoints."""
@@ -517,39 +518,34 @@ class TestBillingAdministration:
         """Test that billing overview returns revenue summary."""
         # Arrange
         mock_overview = {
-            'summary': {
-                'subscription_mrr_cents': 50000,
-                'credit_revenue_cents': 10000,
-                'marketplace_revenue_cents': 5000,
-                'total_revenue_cents': 65000
+            "summary": {
+                "subscription_mrr_cents": 50000,
+                "credit_revenue_cents": 10000,
+                "marketplace_revenue_cents": 5000,
+                "total_revenue_cents": 65000,
             }
         }
 
         # Assert
         total = (
-            mock_overview['summary']['subscription_mrr_cents'] +
-            mock_overview['summary']['credit_revenue_cents'] +
-            mock_overview['summary']['marketplace_revenue_cents']
+            mock_overview["summary"]["subscription_mrr_cents"]
+            + mock_overview["summary"]["credit_revenue_cents"]
+            + mock_overview["summary"]["marketplace_revenue_cents"]
         )
-        assert total == mock_overview['summary']['total_revenue_cents']
+        assert total == mock_overview["summary"]["total_revenue_cents"]
 
     @pytest.mark.asyncio
     async def test_billing_overview_includes_subscription_breakdown(self):
         """Test that billing overview includes subscription tier breakdown."""
         # Arrange
         mock_subscriptions = {
-            'by_tier': {
-                'free': 100,
-                'basic': 50,
-                'pro': 25,
-                'ultra': 5
-            },
-            'total_subscribers': 180
+            "by_tier": {"free": 100, "basic": 50, "pro": 25, "ultra": 5},
+            "total_subscribers": 180,
         }
 
         # Assert
-        total_from_tiers = sum(mock_subscriptions['by_tier'].values())
-        assert total_from_tiers == mock_subscriptions['total_subscribers']
+        total_from_tiers = sum(mock_subscriptions["by_tier"].values())
+        assert total_from_tiers == mock_subscriptions["total_subscribers"]
 
     @pytest.mark.asyncio
     async def test_list_credit_purchases_paginated(self, mock_credit_purchase):
@@ -587,7 +583,7 @@ class TestBillingAdministration:
     async def test_billing_period_filtering(self):
         """Test filtering billing data by period."""
         # Arrange
-        periods = ['7d', '30d', '90d']
+        periods = ["7d", "30d", "90d"]
 
         # Assert
         for period in periods:
@@ -598,6 +594,7 @@ class TestBillingAdministration:
 # ============================================================================
 # Deployment Monitoring Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestDeploymentMonitoring:
@@ -617,8 +614,8 @@ class TestDeploymentMonitoring:
     async def test_filter_deployments_by_provider(self, mock_deployment):
         """Test filtering deployments by provider."""
         # Arrange
-        providers = ['vercel', 'netlify', 'cloudflare']
-        mock_deployment.provider = 'vercel'
+        providers = ["vercel", "netlify", "cloudflare"]
+        mock_deployment.provider = "vercel"
 
         # Assert
         assert mock_deployment.provider in providers
@@ -627,8 +624,8 @@ class TestDeploymentMonitoring:
     async def test_filter_deployments_by_status(self, mock_deployment):
         """Test filtering deployments by status."""
         # Arrange
-        statuses = ['pending', 'building', 'success', 'failed']
-        mock_deployment.status = 'success'
+        statuses = ["pending", "building", "success", "failed"]
+        mock_deployment.status = "success"
 
         # Assert
         assert mock_deployment.status in statuses
@@ -638,14 +635,14 @@ class TestDeploymentMonitoring:
         """Test getting deployment stats broken down by provider."""
         # Arrange
         mock_stats = {
-            'vercel': {'total': 100, 'success': 95, 'failed': 5},
-            'netlify': {'total': 50, 'success': 48, 'failed': 2},
-            'cloudflare': {'total': 30, 'success': 28, 'failed': 2}
+            "vercel": {"total": 100, "success": 95, "failed": 5},
+            "netlify": {"total": 50, "success": 48, "failed": 2},
+            "cloudflare": {"total": 30, "success": 28, "failed": 2},
         }
 
         # Assert
-        for provider, stats in mock_stats.items():
-            assert stats['total'] == stats['success'] + stats['failed']
+        for _provider, stats in mock_stats.items():
+            assert stats["total"] == stats["success"] + stats["failed"]
 
     @pytest.mark.asyncio
     async def test_deployment_detail_includes_logs(self, mock_deployment):
@@ -673,18 +670,19 @@ class TestDeploymentMonitoring:
         """Test deployment timeline chart data."""
         # Arrange
         mock_timeline = [
-            {'date': '2025-01-01', 'deployments': 10, 'success': 9, 'failed': 1},
-            {'date': '2025-01-02', 'deployments': 15, 'success': 14, 'failed': 1}
+            {"date": "2025-01-01", "deployments": 10, "success": 9, "failed": 1},
+            {"date": "2025-01-02", "deployments": 15, "success": 14, "failed": 1},
         ]
 
         # Assert
         for day in mock_timeline:
-            assert day['deployments'] == day['success'] + day['failed']
+            assert day["deployments"] == day["success"] + day["failed"]
 
 
 # ============================================================================
 # Admin Action Audit Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestAdminActionAudit:
@@ -723,20 +721,20 @@ class TestAdminActionAudit:
         """Test that audit log action types follow naming convention."""
         # Arrange
         valid_action_types = [
-            'user.suspend',
-            'user.unsuspend',
-            'user.delete',
-            'user.credits_adjusted',
-            'project.hibernate',
-            'project.transfer',
-            'project.delete',
-            'k8s.pod.restart',
-            'k8s.namespace.delete'
+            "user.suspend",
+            "user.unsuspend",
+            "user.delete",
+            "user.credits_adjusted",
+            "project.hibernate",
+            "project.transfer",
+            "project.delete",
+            "k8s.pod.restart",
+            "k8s.namespace.delete",
         ]
 
         # Assert
         for action_type in valid_action_types:
-            parts = action_type.split('.')
+            parts = action_type.split(".")
             assert len(parts) >= 2
             assert all(len(part) > 0 for part in parts)
 
@@ -744,6 +742,7 @@ class TestAdminActionAudit:
 # ============================================================================
 # Authorization Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestAdminAuthorization:
@@ -774,6 +773,7 @@ class TestAdminAuthorization:
 # ============================================================================
 # Edge Cases and Error Handling Tests
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestAdminEdgeCases:
@@ -822,12 +822,12 @@ class TestAdminEdgeCases:
     async def test_invalid_period_defaults_to_30d(self):
         """Test that invalid period parameter defaults to 30 days."""
         # Arrange
-        valid_periods = ['7d', '30d', '90d']
-        invalid_period = '100d'
+        valid_periods = ["7d", "30d", "90d"]
+        invalid_period = "100d"
 
         # Assert
-        default_period = '30d' if invalid_period not in valid_periods else invalid_period
-        assert default_period == '30d'
+        default_period = "30d" if invalid_period not in valid_periods else invalid_period
+        assert default_period == "30d"
 
     @pytest.mark.asyncio
     async def test_pagination_with_negative_page_returns_page_1(self):

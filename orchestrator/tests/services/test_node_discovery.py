@@ -26,7 +26,6 @@ from app.services.node_discovery import (
     NodeDiscovery,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers for building mock Kubernetes pod objects
 # ---------------------------------------------------------------------------

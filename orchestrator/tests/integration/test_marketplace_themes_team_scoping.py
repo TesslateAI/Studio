@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -122,9 +121,7 @@ def test_theme_library_shared_within_team(authenticated_client, api_client_sessi
     assert add_resp.status_code in (200, 201), f"Theme add failed: {add_resp.text}"
 
     # User A creates invite link
-    link_resp = client_a.post(
-        f"/api/teams/{team_slug}/members/link", json={"role": "editor"}
-    )
+    link_resp = client_a.post(f"/api/teams/{team_slug}/members/link", json={"role": "editor"})
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     invite_token = link_resp.json().get("token")
     if not invite_token:
@@ -150,9 +147,7 @@ def test_theme_library_shared_within_team(authenticated_client, api_client_sessi
     api_client_session.headers["Authorization"] = f"Bearer {token_b}"
 
     # User B accepts invite
-    accept_resp = api_client_session.post(
-        f"/api/teams/invitations/{invite_token}/accept"
-    )
+    accept_resp = api_client_session.post(f"/api/teams/invitations/{invite_token}/accept")
     assert accept_resp.status_code == 200, f"Accept failed: {accept_resp.text}"
 
     # User B switches to the shared team
@@ -175,7 +170,7 @@ def test_theme_remove_scoped_to_team(authenticated_client):
     """Removing a theme in team context should remove it from that team's library."""
     client, _ = authenticated_client
 
-    team_slug = _create_team_and_switch(client, "thm-rm")
+    _create_team_and_switch(client, "thm-rm")
 
     theme_id = _get_non_default_theme(client)
     if not theme_id:
@@ -203,7 +198,7 @@ def test_theme_toggle_scoped_to_team(authenticated_client):
     """Toggling a theme in team context should reflect the correct enabled state."""
     client, _ = authenticated_client
 
-    team_slug = _create_team_and_switch(client, "thm-tgl")
+    _create_team_and_switch(client, "thm-tgl")
 
     theme_id = _get_non_default_theme(client)
     if not theme_id:
@@ -249,7 +244,7 @@ def test_theme_add_idempotent_within_team(authenticated_client):
     """Adding the same theme twice in the same team should succeed (re-activate)."""
     client, _ = authenticated_client
 
-    team_slug = _create_team_and_switch(client, "thm-idem")
+    _create_team_and_switch(client, "thm-idem")
 
     theme_id = _get_non_default_theme(client)
     if not theme_id:

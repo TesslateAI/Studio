@@ -698,6 +698,100 @@ export const projectsApi = {
   },
 };
 
+// ── Design view: OID indexing & AST code write-back ─────────────────────
+
+export interface DesignIndexEntry {
+  path: string;
+  tag_name: string;
+  start_line: number | null;
+  start_col: number | null;
+  end_line: number | null;
+  end_col: number | null;
+  component: string | null;
+  dynamic_type: 'array' | 'conditional' | null;
+}
+
+export interface DesignIndex {
+  [oid: string]: DesignIndexEntry;
+}
+
+export interface CodeDiffStructureChange {
+  type: 'insert';
+  location?: 'append' | 'prepend' | number;
+  element: {
+    tag_name: string;
+    classes?: string;
+    text?: string;
+    oid?: string;
+    attributes?: Record<string, string | number | boolean | null>;
+    self_closing?: boolean;
+  };
+}
+
+export interface CodeDiffRequest {
+  oid: string;
+  /** Generic JSX attributes (className, id, aria-*, data-*). */
+  attributes?: Record<string, string | number | boolean | null>;
+  /** When true, className is replaced wholesale instead of tailwind-merged. */
+  override_classes?: boolean;
+  /** CSS properties to merge into the element's `style={{...}}` prop.
+   *  Keys are CSS (kebab-case) and will be converted to JSX camelCase.
+   *  Empty/null values remove the key. */
+  style_patch?: Record<string, string | number | null>;
+  text_content?: string | null;
+  structure_changes?: CodeDiffStructureChange[];
+  /** Wrap this element in a new parent (group action). */
+  wrap_with?: {
+    tag_name: string;
+    classes?: string;
+    oid?: string;
+  };
+  remove?: boolean;
+}
+
+export const designApi = {
+  /**
+   * Scan the project source, inject data-oid attributes, and build the
+   * oid → metadata index. Idempotent. Should be called the first time a
+   * user opens the design view for a project.
+   */
+  indexProject: async (slug: string) => {
+    const response = await api.post(`/api/projects/${slug}/design/index`);
+    return response.data as {
+      index: DesignIndex;
+      file_count: number;
+      modified_count: number;
+      read_errors: string[];
+      file_errors: Array<{ path: string; error: string }>;
+    };
+  },
+
+  /**
+   * Return the cached design index. Fast — reads .tesslate/design-index.json.
+   */
+  getIndex: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}/design/index`);
+    return response.data as { index: DesignIndex };
+  },
+
+  /**
+   * Apply a batch of CodeDiffRequests to the project source. The server
+   * resolves each oid to its source file via the index, groups the
+   * requests per file, and runs the AST worker.
+   */
+  applyDiff: async (slug: string, requests: CodeDiffRequest[]) => {
+    const response = await api.post(`/api/projects/${slug}/design/apply-diff`, {
+      requests,
+    });
+    return response.data as {
+      modified: string[];
+      unknown_oids: string[];
+      read_errors: string[];
+      file_errors: Array<{ path: string; error: string }>;
+    };
+  },
+};
+
 export const chatApi = {
   create: async (projectId?: string) => {
     const response = await api.post('/api/chat/', { project_id: projectId });

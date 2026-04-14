@@ -2,12 +2,14 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from app.services.export_resolver import resolve_node_exports, build_env_from_connections
+from app.services.export_resolver import build_env_from_connections, resolve_node_exports
 
 
 class TestResolveNodeExports:
     def test_simple_interpolation(self):
-        exports = {"DATABASE_URL": "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${HOST}:${PORT}/${POSTGRES_DB}"}
+        exports = {
+            "DATABASE_URL": "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${HOST}:${PORT}/${POSTGRES_DB}"
+        }
         env = {"POSTGRES_USER": "postgres", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "app"}
         result = resolve_node_exports("postgres", exports, env, port=5432)
         assert result == {"DATABASE_URL": "postgresql://postgres:secret@postgres:5432/app"}
@@ -43,7 +45,9 @@ class TestResolveNodeExports:
     def test_env_can_override_host_and_port(self):
         """User env keys named HOST/PORT override the builtins."""
         exports = {"URL": "http://${HOST}:${PORT}"}
-        result = resolve_node_exports("backend", exports, {"HOST": "custom.host", "PORT": "9999"}, port=8001)
+        result = resolve_node_exports(
+            "backend", exports, {"HOST": "custom.host", "PORT": "9999"}, port=8001
+        )
         assert result == {"URL": "http://custom.host:9999"}
 
     def test_port_none_resolves_to_empty(self):
@@ -68,8 +72,16 @@ class TestResolveNodeExports:
 class TestBuildEnvFromConnections:
     def test_single_connection(self):
         nodes = {
-            "backend": {"env": {"SECRET": "x"}, "exports": {"API_URL": "http://${HOST}:${PORT}"}, "port": 8001},
-            "postgres": {"env": {"POSTGRES_USER": "pg"}, "exports": {"DB_URL": "pg://${POSTGRES_USER}@${HOST}:${PORT}"}, "port": 5432},
+            "backend": {
+                "env": {"SECRET": "x"},
+                "exports": {"API_URL": "http://${HOST}:${PORT}"},
+                "port": 8001,
+            },
+            "postgres": {
+                "env": {"POSTGRES_USER": "pg"},
+                "exports": {"DB_URL": "pg://${POSTGRES_USER}@${HOST}:${PORT}"},
+                "port": 5432,
+            },
         }
         connections = [{"from": "backend", "to": "postgres"}]
         result = build_env_from_connections("backend", nodes, connections)

@@ -68,6 +68,9 @@ dependencies = [
     "discord.py>=2.3.0",
     # Gateway: Slack Socket Mode
     "slack-sdk[socket-mode]>=3.27.0",
+    # Local orchestrator: interactive PTY sessions + gitignore parsing
+    "ptyprocess>=0.7.0",
+    "pathspec>=0.12.0",
 ]
 
 [project.optional-dependencies]
@@ -104,6 +107,16 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "B008",   # do not perform function calls in argument defaults (FastAPI Depends)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately set environment variables / monkey-patch sys.modules
+# before importing the system under test, and use broad context managers
+# to assert that arbitrary failure modes propagate.
+"tests/**/*.py" = [
+    "E402",   # module-level import not at top of file (env setup before import)
+    "B017",   # assertRaises(Exception) (broad pytest.raises in tests)
+    "SIM117", # nested with statements (readability in mock setup)
 ]
 
 [tool.ruff.lint.isort]

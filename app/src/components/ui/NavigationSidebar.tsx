@@ -1,27 +1,24 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ComponentType } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Tooltip } from './Tooltip';
 import { HelpMenu } from './HelpMenu';
 import { motion } from 'framer-motion';
 import {
+  Home,
   FolderOpen,
-  Store,
+  Boxes,
   BookOpen,
-  ChevronLeft,
-  ChevronRight,
+  PanelLeft,
   ChevronDown,
-  FileText,
-  MessageCircle,
   ArrowUp,
   Cpu,
   Palette,
   Zap,
   Plug,
   Rocket,
-  Package,
-  MessagesSquare,
   Clock,
 } from 'lucide-react';
+import { MoodyFace } from './MoodyFace';
 import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Plus } from '@phosphor-icons/react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
 import { billingApi, chatApi, projectsApi, teamsApi } from '../../lib/api';
@@ -33,6 +30,7 @@ import type { CreditBalanceResponse } from '../../types/billing';
 
 interface NavigationSidebarProps {
   activePage:
+    | 'home'
     | 'chat'
     | 'dashboard'
     | 'marketplace'
@@ -82,14 +80,25 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 // Library sub-items for dropdown
-const LIBRARY_ITEMS = [
-  { key: 'agents', label: 'Agents', icon: Package },
+// MoodyFace replaces the Agents icon — inherits color via currentColor,
+// blinks gently on desktop, and respects prefers-reduced-motion.
+type SidebarIconProps = { size?: number; className?: string };
+const AgentFaceIcon = ({ size, className }: SidebarIconProps) => (
+  <MoodyFace size={size ?? 14} className={className} animate />
+);
+
+const LIBRARY_ITEMS: Array<{
+  key: string;
+  label: string;
+  icon: ComponentType<SidebarIconProps>;
+}> = [
+  { key: 'agents', label: 'Agents', icon: AgentFaceIcon },
   { key: 'bases', label: 'Bases', icon: Rocket },
   { key: 'skills', label: 'Skills', icon: Zap },
   { key: 'mcp_servers', label: 'MCP Servers', icon: Plug },
   { key: 'models', label: 'Models', icon: Cpu },
   { key: 'themes', label: 'Themes', icon: Palette },
-] as const;
+];
 
 export function NavigationSidebar({
   activePage,
@@ -342,14 +351,29 @@ export function NavigationSidebar({
       }}
       className={`${forceVisible ? 'flex' : 'hidden md:flex'} flex-col h-screen bg-[var(--sidebar-bg)] overflow-x-hidden`}
     >
-      {/* Team Switcher — top-level context selector */}
-      <div ref={userDropdownRef} className="flex-shrink-0" style={{ padding: '6px 11px 4px' }}>
+      {/* Team Switcher + Collapse toggle — top row */}
+      <div
+        ref={userDropdownRef}
+        className={`flex-shrink-0 flex items-center gap-1 ${isExpanded ? '' : 'flex-col'}`}
+        style={{ padding: '6px 11px 4px' }}
+      >
+        <Tooltip
+          content={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          side="right"
+          delay={200}
+        >
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            aria-label={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--text-muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-text)] transition-colors"
+          >
+            <PanelLeft size={16} />
+          </button>
+        </Tooltip>
         <button
           onClick={() => setShowUserDropdown(!showUserDropdown)}
-          className={`relative flex items-center h-10 rounded-[var(--radius-medium)] transition-colors w-full ${isExpanded ? 'gap-2.5 pl-[7px] pr-[7px]' : 'justify-center'} ${
-            showUserDropdown
-              ? 'bg-[var(--sidebar-active)]'
-              : 'hover:bg-[var(--sidebar-hover)]'
+          className={`relative flex items-center h-10 rounded-[var(--radius-medium)] transition-colors ${isExpanded ? 'flex-1 min-w-0 gap-2.5 pl-[7px] pr-[7px]' : 'w-full justify-center'} ${
+            showUserDropdown ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
           }`}
           aria-label="Team menu"
         >
@@ -581,7 +605,28 @@ export function NavigationSidebar({
         {/* Standard Navigation Items — hidden in builder mode */}
         {activePage !== 'builder' && (
           <>
-            <Tooltip content={canChat ? 'Chat' : 'Chat (Restricted)'} shortcut={canChat ? `${modKey} J` : undefined} side="right" delay={200}>
+            <Tooltip content="Home" shortcut={`${modKey} H`} side="right" delay={200}>
+              <button
+                onClick={() => navigate('/home')}
+                className={
+                  isExpanded
+                    ? navButtonClass(activePage === 'home')
+                    : navButtonClassCollapsed(activePage === 'home')
+                }
+              >
+                <Home size={16} className={iconClass(activePage === 'home')} />
+                {isExpanded && (
+                  <span className={labelClass(activePage === 'home')}>Home</span>
+                )}
+              </button>
+            </Tooltip>
+
+            <Tooltip
+              content={canChat ? 'Agents' : 'Agents (Restricted)'}
+              shortcut={canChat ? `${modKey} J` : undefined}
+              side="right"
+              delay={200}
+            >
               <button
                 onClick={canChat ? () => navigate('/chat') : undefined}
                 className={
@@ -591,11 +636,19 @@ export function NavigationSidebar({
                 }
                 style={!canChat ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
               >
-                <MessagesSquare size={16} className={iconClass(activePage === 'chat')} />
+                <MoodyFace
+                  size={16}
+                  animate
+                  className={iconClass(activePage === 'chat')}
+                />
                 {isExpanded && (
                   <span className={`${labelClass(activePage === 'chat')} flex items-center gap-1`}>
-                    Chat
-                    {!canChat && <span className="text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-60">locked</span>}
+                    Agents
+                    {!canChat && (
+                      <span className="text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-60">
+                        locked
+                      </span>
+                    )}
                   </span>
                 )}
               </button>
@@ -626,7 +679,7 @@ export function NavigationSidebar({
                     : navButtonClassCollapsed(activePage === 'marketplace')
                 }
               >
-                <Store size={16} className={iconClass(activePage === 'marketplace')} />
+                <Boxes size={16} className={iconClass(activePage === 'marketplace')} />
                 {isExpanded && (
                   <span className={labelClass(activePage === 'marketplace')}>Marketplace</span>
                 )}
@@ -687,33 +740,7 @@ export function NavigationSidebar({
               </>
             )}
 
-            <Tooltip content="Feedback" side="right" delay={200}>
-              <button
-                onClick={() => navigate('/feedback')}
-                className={
-                  isExpanded
-                    ? navButtonClass(activePage === 'feedback')
-                    : navButtonClassCollapsed(activePage === 'feedback')
-                }
-              >
-                <MessageCircle size={16} className={iconClass(activePage === 'feedback')} />
-                {isExpanded && (
-                  <span className={labelClass(activePage === 'feedback')}>Feedback</span>
-                )}
-              </button>
-            </Tooltip>
-
-            <Tooltip content="Documentation" side="right" delay={200}>
-              <a
-                href="https://docs.tesslate.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className={isExpanded ? inactiveNavButton : inactiveNavButtonCollapsed}
-              >
-                <FileText size={16} className={inactiveIconClass} />
-                {isExpanded && <span className={inactiveLabelClass}>Documentation</span>}
-              </a>
-            </Tooltip>
+            {/* Feedback and Docs moved to HelpMenu (sidebar "?" button) */}
 
             {/* Recent — collapsible, mixed chats + projects */}
             {recentItems.length > 0 && (
@@ -842,20 +869,6 @@ export function NavigationSidebar({
           </button>
         )}
 
-        {/* Collapse/Expand Toggle */}
-        <Tooltip content={isExpanded ? 'Collapse' : 'Expand'} side="right" delay={200}>
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className={isExpanded ? inactiveNavButton : inactiveNavButtonCollapsed}
-          >
-            {isExpanded ? (
-              <ChevronLeft size={16} className={inactiveIconClass} />
-            ) : (
-              <ChevronRight size={16} className={inactiveIconClass} />
-            )}
-            {isExpanded && <span className={inactiveLabelClass}>Collapse</span>}
-          </button>
-        </Tooltip>
       </motion.div>
 
       {/* Help Menu */}

@@ -15,7 +15,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -128,9 +127,7 @@ def test_mcp_install_shared_within_team(authenticated_client, api_client_session
     config_id = _install_mcp(client_a, mcp_server_id)
 
     # User A creates invite link
-    link_resp = client_a.post(
-        f"/api/teams/{team_slug}/members/link", json={"role": "editor"}
-    )
+    link_resp = client_a.post(f"/api/teams/{team_slug}/members/link", json={"role": "editor"})
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     invite_token = link_resp.json().get("token")
     if not invite_token:
@@ -179,7 +176,7 @@ def test_mcp_uninstall_scoped_to_team(authenticated_client):
     if not mcp_server_id:
         pytest.skip("No MCP servers available in marketplace")
 
-    team_slug = _create_team_and_switch(client, "mcpuninst")
+    _create_team_and_switch(client, "mcpuninst")
 
     config_id = _install_mcp(client, mcp_server_id)
 
@@ -206,7 +203,7 @@ def test_mcp_get_single_install_scoped_to_team(authenticated_client):
     assert personal_slug, "User has no personal team"
 
     # Install in Team A
-    team_slug = _create_team_and_switch(client, "mcpget")
+    _create_team_and_switch(client, "mcpget")
     config_id = _install_mcp(client, mcp_server_id)
 
     # Accessible from Team A
@@ -238,7 +235,7 @@ def test_mcp_assign_to_agent_scoped_to_team(authenticated_client):
     assert personal_slug, "User has no personal team"
 
     # Create team and install MCP
-    team_slug = _create_team_and_switch(client, "mcpassign")
+    _create_team_and_switch(client, "mcpassign")
     config_id = _install_mcp(client, mcp_server_id)
 
     # Purchase agent in team context (non-fatal if already purchased or free)
@@ -280,7 +277,7 @@ def test_mcp_unassign_from_agent_scoped_to_team(authenticated_client):
         pytest.skip("No marketplace agents available for assignment test")
 
     # Create team, install, assign
-    team_slug = _create_team_and_switch(client, "mcpunassign")
+    _create_team_and_switch(client, "mcpunassign")
     config_id = _install_mcp(client, mcp_server_id)
 
     client.post(f"/api/marketplace/agents/{agent_id}/purchase")

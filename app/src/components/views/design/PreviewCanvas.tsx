@@ -5,21 +5,21 @@ import {
   isDesignBridgeMessage,
   sendDesignMessage,
 } from './DesignBridge';
+import { CanvasViewport } from './CanvasViewport';
 
 // ── Bridge status types ──────────────────────────────────────────
 type BridgeStatus = 'not-installed' | 'connecting' | 'ready' | 'unavailable';
 
 const BRIDGE_TIMEOUT_MS = 3000;
 const STATUS_PILL_FADE_MS = 2000;
-const _THROTTLE_INTERVAL_MS = 40;
+
+// Natural design-canvas size used when the user has selected "fit".
+// The canvas transform handles visual fit via zoom, so the frame itself
+// has a stable intrinsic size regardless of container dimensions.
+const FIT_CANVAS_WIDTH = 1440;
+const FIT_CANVAS_HEIGHT = 900;
 
 export type DesignMode = 'select' | 'text' | 'move';
-
-const _MODE_CURSORS: Record<DesignMode, string> = {
-  select: 'crosshair',
-  text: 'text',
-  move: 'grab',
-};
 
 interface PreviewCanvasProps {
   devServerUrl: string;
@@ -186,10 +186,13 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     '_r=1';
 
   // ── Viewport sizing ────────────────────────────────────────────
+  // Inside CanvasViewport the frame is a transformed 0×0 container, so
+  // we need explicit pixel dimensions. 'fit' resolves to a natural
+  // design-canvas size and users lean on zoom (keyboard 0) to refit.
   const containerStyle: React.CSSProperties =
     viewportWidth === 'fit'
-      ? { width: '100%', height: '100%' }
-      : { width: `${viewportWidth}px`, height: '100%', margin: '0 auto' };
+      ? { width: `${FIT_CANVAS_WIDTH}px`, height: `${FIT_CANVAS_HEIGHT}px` }
+      : { width: `${viewportWidth}px`, height: `${FIT_CANVAS_HEIGHT}px` };
 
   // ── Status indicator (bottom-left) ─────────────────────────────
   const renderStatusIndicator = () => {
@@ -302,76 +305,77 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
   return (
     <div className="relative w-full h-full bg-black overflow-hidden">
-      <div style={containerStyle} className="relative">
-        {/* Install bridge prompt — centered over preview when not installed */}
-        {bridgeStatus === 'not-installed' && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center">
-            <div
-              className="flex flex-col items-center gap-3 px-6 py-5 rounded-lg border"
-              style={{
-                background: 'var(--surface)',
-                borderColor: 'var(--border)',
-              }}
-            >
-              <p
-                className="text-sm font-medium"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                Design bridge is not installed in this project
-              </p>
-              <p
-                className="text-xs max-w-[280px] text-center"
-                style={{ color: 'var(--text-subtle)' }}
-              >
-                The design bridge enables element inspection, style editing, and
-                live preview interactions.
-              </p>
-              <button
-                type="button"
-                onClick={onInstallBridge}
-                className="px-4 py-1.5 rounded-md text-xs font-medium"
-                style={{
-                  background: 'var(--primary)',
-                  color: '#fff',
-                }}
-              >
-                Install Design Bridge
-              </button>
-            </div>
-          </div>
-        )}
+      <CanvasViewport>
+        <div style={containerStyle} className="relative">
+          <iframe
+            id="design-preview-iframe"
+            ref={iframeRef}
+            src={iframeSrc}
+            className="w-full h-full border-0"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            onLoad={handleIframeLoad}
+            title="Design Preview"
+          />
+          {/*
+            NO parent-side overlay. The bridge script inside the iframe handles all
+            interaction (hover, click, drag, text edit) via its own overlay element.
+            A parent overlay would block text editing focus and drag events from
+            reaching the iframe. The bridge communicates results back via postMessage.
+          */}
+        </div>
+      </CanvasViewport>
 
-        <iframe
-          id="design-preview-iframe"
-          ref={iframeRef}
-          src={iframeSrc}
-          className="w-full h-full border-0"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-          onLoad={handleIframeLoad}
-          title="Design Preview"
-        />
-
-        {/*
-          NO parent-side overlay. The bridge script inside the iframe handles all
-          interaction (hover, click, drag, text edit) via its own overlay element.
-          A parent overlay would block text editing focus and drag events from
-          reaching the iframe. The bridge communicates results back via postMessage.
-        */}
-
-        {/* Reconnecting pill when unavailable */}
-        {bridgeStatus === 'unavailable' && (
+      {/* Install bridge prompt — centered over preview (not canvas-transformed). */}
+      {bridgeStatus === 'not-installed' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div
-            className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-3 py-1 rounded-full text-[10px] backdrop-blur-sm border"
+            className="flex flex-col items-center gap-3 px-6 py-5 rounded-lg border pointer-events-auto"
             style={{
-              background: 'color-mix(in srgb, var(--surface, #1e1e1e) 85%, transparent)',
+              background: 'var(--surface)',
               borderColor: 'var(--border)',
-              color: 'var(--text-muted)',
             }}
           >
-            Reconnecting...
+            <p
+              className="text-sm font-medium"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Design bridge is not installed in this project
+            </p>
+            <p
+              className="text-xs max-w-[280px] text-center"
+              style={{ color: 'var(--text-subtle)' }}
+            >
+              The design bridge enables element inspection, style editing, and
+              live preview interactions.
+            </p>
+            <button
+              type="button"
+              onClick={onInstallBridge}
+              className="px-4 py-1.5 rounded-md text-xs font-medium"
+              style={{
+                background: 'var(--primary)',
+                color: '#fff',
+              }}
+            >
+              Install Design Bridge
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Reconnecting pill — stays in viewport space, not canvas space. */}
+      {bridgeStatus === 'unavailable' && (
+        <div
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-3 py-1 rounded-full text-[10px] backdrop-blur-sm border"
+          style={{
+            background: 'color-mix(in srgb, var(--surface, #1e1e1e) 85%, transparent)',
+            borderColor: 'var(--border)',
+            color: 'var(--text-muted)',
+          }}
+        >
+          Reconnecting...
+        </div>
+      )}
 
       {/* Status indicator (bottom-left corner) */}
       {renderStatusIndicator()}

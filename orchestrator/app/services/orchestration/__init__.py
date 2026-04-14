@@ -10,6 +10,7 @@ Architecture:
 - OrchestratorFactory: Creates the appropriate orchestrator based on config
 - DockerOrchestrator: Docker Compose implementation
 - KubernetesOrchestrator: Kubernetes implementation
+- LocalOrchestrator: Direct filesystem + subprocess implementation
 
 Usage:
     from app.services.orchestration import get_orchestrator, DeploymentMode
@@ -32,18 +33,26 @@ from .factory import (
     get_orchestrator,
     is_docker_mode,
     is_kubernetes_mode,
+    is_local_mode,
 )
+from .local import PTY_SESSIONS, LocalOrchestrator, PtySessionRegistry
 
 __all__ = [
     # Enums
     "DeploymentMode",
     # Base class
     "BaseOrchestrator",
+    # Concrete orchestrators (re-exported for direct instantiation in tests)
+    "LocalOrchestrator",
     # Factory
     "get_orchestrator",
     "OrchestratorFactory",
     # Convenience functions
     "is_docker_mode",
     "is_kubernetes_mode",
+    "is_local_mode",
     "get_deployment_mode",
+    # PTY session registry
+    "PtySessionRegistry",
+    "PTY_SESSIONS",
 ]

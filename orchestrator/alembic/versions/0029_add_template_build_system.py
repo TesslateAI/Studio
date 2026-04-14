@@ -10,8 +10,8 @@ Revises: 0028_fix_fk_ondelete
 Create Date: 2026-03-14
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers

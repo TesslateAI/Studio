@@ -16,7 +16,6 @@ from uuid import uuid4
 
 import pytest
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -94,9 +93,7 @@ def test_base_purchase_scoped_to_team(authenticated_client):
     my_bases_team = client.get("/api/marketplace/my-bases")
     assert my_bases_team.status_code == 200
     team_base_ids_again = [b["id"] for b in my_bases_team.json().get("bases", [])]
-    assert base_id in team_base_ids_again, (
-        "Base should still appear after switching back to team"
-    )
+    assert base_id in team_base_ids_again, "Base should still appear after switching back to team"
 
 
 @pytest.mark.integration
@@ -118,9 +115,7 @@ def test_base_library_shared_within_team(authenticated_client, api_client_sessio
     assert purchase_resp.status_code == 200, f"Purchase failed: {purchase_resp.text}"
 
     # User A creates an invite link
-    link_resp = client_a.post(
-        f"/api/teams/{team_slug}/members/link", json={"role": "editor"}
-    )
+    link_resp = client_a.post(f"/api/teams/{team_slug}/members/link", json={"role": "editor"})
     assert link_resp.status_code in (200, 201), f"Link creation failed: {link_resp.text}"
     invite_token = link_resp.json().get("token")
     if not invite_token:
@@ -144,9 +139,7 @@ def test_base_library_shared_within_team(authenticated_client, api_client_sessio
     api_client_session.headers["Authorization"] = f"Bearer {token_b}"
 
     # User B accepts the invite
-    accept_resp = api_client_session.post(
-        f"/api/teams/invitations/{invite_token}/accept"
-    )
+    accept_resp = api_client_session.post(f"/api/teams/invitations/{invite_token}/accept")
     assert accept_resp.status_code == 200, f"Invite accept failed: {accept_resp.text}"
 
     # User B switches to the team
@@ -157,9 +150,7 @@ def test_base_library_shared_within_team(authenticated_client, api_client_sessio
     my_bases_b = api_client_session.get("/api/marketplace/my-bases")
     assert my_bases_b.status_code == 200
     b_base_ids = [b["id"] for b in my_bases_b.json().get("bases", [])]
-    assert base_id in b_base_ids, (
-        "User B should see base purchased by User A in the shared team"
-    )
+    assert base_id in b_base_ids, "User B should see base purchased by User A in the shared team"
 
     # Restore User A's auth for fixture cleanup
     api_client_session.headers["Authorization"] = token_a
@@ -178,7 +169,7 @@ def test_my_items_scoped_to_team(authenticated_client):
         pytest.skip("No marketplace bases seeded — cannot test my-items scoping")
 
     # Create team and purchase base
-    team_slug = _create_team_and_switch(client, "items")
+    _create_team_and_switch(client, "items")
     purchase_resp = client.post(f"/api/marketplace/bases/{base_id}/purchase")
     assert purchase_resp.status_code == 200, f"Purchase failed: {purchase_resp.text}"
 
@@ -191,9 +182,7 @@ def test_my_items_scoped_to_team(authenticated_client):
     for key in ("bases", "items", "agents"):
         for item in items_data.get(key, []):
             team_item_ids.add(item.get("id") or item.get("base_id"))
-    assert base_id in team_item_ids, (
-        "Purchased base should appear in my-items for team context"
-    )
+    assert base_id in team_item_ids, "Purchased base should appear in my-items for team context"
 
     # Switch to personal team
     client.post(f"/api/teams/{personal_slug}/switch")
@@ -219,7 +208,7 @@ def test_base_purchase_idempotent_within_team(authenticated_client):
     if not base_id:
         pytest.skip("No marketplace bases seeded — cannot test idempotent purchase")
 
-    team_slug = _create_team_and_switch(client, "idem")
+    _create_team_and_switch(client, "idem")
 
     # First purchase
     resp1 = client.post(f"/api/marketplace/bases/{base_id}/purchase")
@@ -234,6 +223,4 @@ def test_base_purchase_idempotent_within_team(authenticated_client):
     assert my_bases.status_code == 200
     bases = my_bases.json().get("bases", [])
     matching = [b for b in bases if b["id"] == base_id]
-    assert len(matching) == 1, (
-        f"Expected exactly 1 entry for base {base_id}, got {len(matching)}"
-    )
+    assert len(matching) == 1, f"Expected exactly 1 entry for base {base_id}, got {len(matching)}"

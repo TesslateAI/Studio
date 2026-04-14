@@ -5,17 +5,17 @@ is used instead of the legacy template system. Also tests the fallback path.
 """
 
 import base64
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 pytestmark = pytest.mark.mocked
 from uuid import uuid4
 
 from app.services.secret_manager_env import (
+    _resolve_via_exports,
     build_env_overrides,
     get_injected_env_vars_for_container,
-    _resolve_via_exports,
 )
 
 
@@ -75,8 +75,12 @@ class TestResolveViaExports:
             name="postgres",
             container_name="proj-postgres",
             internal_port=5432,
-            environment_vars=_encode_env({"POSTGRES_USER": "pg", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "app"}),
-            exports={"DATABASE_URL": "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${HOST}:${PORT}/${POSTGRES_DB}"},
+            environment_vars=_encode_env(
+                {"POSTGRES_USER": "pg", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "app"}
+            ),
+            exports={
+                "DATABASE_URL": "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${HOST}:${PORT}/${POSTGRES_DB}"
+            },
         )
         result = _resolve_via_exports(container)
         assert result == {"DATABASE_URL": "postgresql://pg:secret@proj-postgres:5432/app"}
@@ -160,8 +164,12 @@ class TestBuildEnvOverridesWithExports:
             container_type="service",
             internal_port=5432,
             service_slug="postgres",
-            environment_vars=_encode_env({"POSTGRES_USER": "pg", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "app"}),
-            exports={"DB_URL": "pg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${HOST}:${PORT}/${POSTGRES_DB}"},
+            environment_vars=_encode_env(
+                {"POSTGRES_USER": "pg", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "app"}
+            ),
+            exports={
+                "DB_URL": "pg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${HOST}:${PORT}/${POSTGRES_DB}"
+            },
         )
 
         conn = _make_connection(
@@ -202,7 +210,9 @@ class TestBuildEnvOverridesWithExports:
 
         # Mock service definition with connection_template
         svc_def = MagicMock()
-        svc_def.connection_template = {"DATABASE_URL": "postgresql://pg:secret@{container_name}:{internal_port}/app"}
+        svc_def.connection_template = {
+            "DATABASE_URL": "postgresql://pg:secret@{container_name}:{internal_port}/app"
+        }
         svc_def.internal_port = 5432
         svc_def.environment_vars = {"POSTGRES_USER": "pg"}
         svc_def.slug = "postgres"
@@ -366,7 +376,9 @@ class TestGetInjectedEnvVarsWithExports:
         )
 
         svc_def = MagicMock()
-        svc_def.connection_template = {"DATABASE_URL": "postgresql://{container_name}:{internal_port}"}
+        svc_def.connection_template = {
+            "DATABASE_URL": "postgresql://{container_name}:{internal_port}"
+        }
         svc_def.internal_port = 5432
         svc_def.environment_vars = {}
         svc_def.slug = "postgres"

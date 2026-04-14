@@ -5,8 +5,8 @@ Revises: 0025_channels_mcp
 Create Date: 2026-03-12
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 # revision identifiers
