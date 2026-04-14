@@ -809,9 +809,14 @@ export default function Marketplace() {
                     )}
                   </div>
 
-                  {regularItems.length > 0 ? (
+                  {items.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {regularItems.map((item) => (
+                      {/* "All <Type>" should literally show every item — the
+                          Featured section above is a curated subset, not a
+                          deduper. With small catalogs (e.g. 4 connectors),
+                          the previous regularItems split left only 1 card
+                          here. */}
+                      {items.map((item) => (
                         <AgentCard
                           key={item.id}
                           item={item}
