@@ -38,7 +38,15 @@ def _get_personal_team_slug(client):
 
 
 def _get_marketplace_agent(client, item_type=None):
-    """Get first available free marketplace agent. Returns (id, slug) or None."""
+    """Get first available free marketplace agent NOT already in the user's library.
+
+    New users are auto-provisioned with some default agents (e.g. tesslate-agent)
+    in their personal team, so tests that rely on "purchase in team A, not visible
+    in team B" must pick an agent that wasn't already auto-added.
+
+    Returns (id, slug) or None.
+    """
+    owned = _my_agent_ids(client)
     params = {}
     if item_type:
         params["item_type"] = item_type
@@ -47,6 +55,8 @@ def _get_marketplace_agent(client, item_type=None):
         return None
     agents = resp.json().get("agents", [])
     for a in agents:
+        if a["id"] in owned:
+            continue
         if a.get("pricing_type") in ("free", None) or a.get("price", 0) == 0:
             return a["id"], a["slug"]
     return None
