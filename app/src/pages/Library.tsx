@@ -124,7 +124,7 @@ interface InstalledMcpServer {
 
 export default function Library() {
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, toggleTheme, themePresetId, setThemePreset } = useTheme();
   const { teamSwitchKey } = useTeam();
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -309,7 +309,18 @@ export default function Library() {
     try {
       const newState = !t.is_enabled;
       await marketplaceApi.toggleTheme(t.id, newState);
-      toast.success(`Theme ${newState ? 'enabled' : 'disabled'}`);
+
+      // If the user disabled the theme that's currently applied, fall back
+      // to the default for their current mode so the UI doesn't keep
+      // rendering a "disabled" theme.
+      if (!newState && themePresetId === t.id) {
+        const fallback = theme === 'dark' ? 'default-dark' : 'default-light';
+        await setThemePreset(fallback);
+        toast.success('Theme disabled — reverted to default');
+      } else {
+        toast.success(`Theme ${newState ? 'enabled' : 'disabled'}`);
+      }
+
       loadLibraryThemes();
     } catch (error) {
       console.error('Toggle failed:', error);
