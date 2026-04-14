@@ -21,6 +21,8 @@ import {
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { marketplaceApi } from '../../lib/api';
 import toast from 'react-hot-toast';
+import { runOAuthPopup } from '../../components/connectors/ConnectorOAuthPopup';
+import { ConnectorPermissionsDrawer, type ConnectorTool } from '../../components/connectors/ConnectorPermissionsDrawer';
 import { motion } from 'framer-motion';
 import { staggerContainer, staggerItem } from '../../components/cards';
 import type { LibraryAgent } from './types';
@@ -31,14 +33,19 @@ export interface InstalledMcpServer {
   server_name: string | null;
   server_slug: string | null;
   is_active: boolean;
-  marketplace_agent_id: string;
+  marketplace_agent_id: string | null;
   enabled_capabilities: string[] | null;
   env_vars: string[] | null;
   created_at: string;
   updated_at: string | null;
+  // Issue #307 — scoping + OAuth metadata emitted by McpConfigResponse.
+  scope_level?: string | null;
+  project_id?: string | null;
+  is_oauth?: boolean;
+  disabled_tools?: string[] | null;
 }
 
-interface McpServersPageProps {
+interface ConnectorsPageProps {
   servers: InstalledMcpServer[];
   agents: LibraryAgent[];
   loading: boolean;
@@ -65,14 +72,14 @@ interface DiscoveryResult {
   prompts?: { name: string; description: string }[];
 }
 
-// ─── Main McpServersPage component ──────────────────────────────────
-export default function McpServersPage({
+// ─── Main ConnectorsPage component (renamed from McpServersPage, #307) ─
+export default function ConnectorsPage({
   servers,
   agents,
   loading,
   onReload,
   onBrowse,
-}: McpServersPageProps) {
+}: ConnectorsPageProps) {
   const _navigate = useNavigate();
 
   // Local state
@@ -326,15 +333,15 @@ export default function McpServersPage({
                   <Plugs size={20} className="text-[var(--text-subtle)]" />
                 </div>
                 <h3 className="text-xs font-semibold text-[var(--text)] mb-2">
-                  No MCP servers yet
+                  No connectors yet
                 </h3>
                 <p className="text-[11px] text-[var(--text-muted)] max-w-sm mb-6">
-                  MCP servers connect your agents to external tools, APIs, and data sources. Browse
-                  the marketplace to find and install MCP servers.
+                  Connectors give your agents access to external tools, APIs, and data sources
+                  (Linear, GitHub, Notion, and more). Browse the marketplace to install one.
                 </p>
                 <button onClick={onBrowse} className="btn btn-filled">
                   <Plus size={16} />
-                  Browse MCP Servers Marketplace
+                  Browse Connectors Marketplace
                 </button>
               </div>
             ) : filtered.length === 0 ? (
@@ -395,7 +402,7 @@ function McpServerListRow({ server }: { server: InstalledMcpServer }) {
       <div className="flex-1 min-w-0">
         <span className="flex items-center gap-1.5">
           <span className="text-xs font-medium text-[var(--text)] truncate">
-            {server.server_name || server.server_slug || 'MCP Server'}
+            {server.server_name || server.server_slug || 'Connector'}
           </span>
           <span
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${server.is_active ? 'bg-[var(--status-success)]' : 'bg-[var(--text-subtle)]'}`}
@@ -437,7 +444,50 @@ function McpServerCard({
   const [discovering, setDiscovering] = useState(false);
   const [testingId, setTestingId] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [permsOpen, setPermsOpen] = useState(false);
+  const [permsTools, setPermsTools] = useState<ConnectorTool[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleReconnect = async () => {
+    setReconnecting(true);
+    try {
+      const { authorize_url, flow_id } = await marketplaceApi.reconnectMcp(server.id);
+      const result = await runOAuthPopup(
+        authorize_url,
+        flow_id,
+        marketplaceApi.getMcpOAuthStatus,
+      );
+      if (result.status === 'success') {
+        toast.success(`Reconnected ${server.server_name || 'connector'}`);
+        onReload();
+      } else {
+        toast.error(result.message || 'Reconnection failed');
+      }
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      toast.error(err.response?.data?.detail || err.message || 'Failed to reconnect');
+    } finally {
+      setReconnecting(false);
+    }
+  };
+
+  const handleOpenPerms = async () => {
+    try {
+      const discovery = (await marketplaceApi.discoverMcpServer(server.id)) as DiscoveryResult;
+      const slug = server.server_slug || server.server_name || 'connector';
+      const tools: ConnectorTool[] = (discovery?.tools || []).map((t) => ({
+        name: t.name,
+        description: t.description,
+        prefixedName: `mcp__${slug}__${t.name}`,
+      }));
+      setPermsTools(tools);
+      setPermsOpen(true);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to discover tools');
+    }
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -459,7 +509,7 @@ function McpServerCard({
       setShowDropdown(false);
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to assign MCP server');
+      toast.error(err.response?.data?.detail || 'Failed to assign connector');
     } finally {
       setAssigning(false);
     }
@@ -519,11 +569,11 @@ function McpServerCard({
     setUninstalling(true);
     try {
       await marketplaceApi.uninstallMcpServer(server.id);
-      toast.success('MCP server uninstalled');
+      toast.success('Connector removed');
       onReload();
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to uninstall MCP server');
+      toast.error(err.response?.data?.detail || 'Failed to remove connector');
     } finally {
       setUninstalling(false);
     }
@@ -538,7 +588,7 @@ function McpServerCard({
       initial="initial"
       animate="animate"
       role="article"
-      aria-label={`${server.server_name || server.server_slug || 'MCP'} MCP server`}
+      aria-label={`${server.server_name || server.server_slug || 'Connector'} connector`}
       className="group relative flex flex-col bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-colors p-4"
     >
       {/* Header: icon + title */}
@@ -548,7 +598,7 @@ function McpServerCard({
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-xs font-semibold text-[var(--text)] truncate block">
-            {server.server_name || server.server_slug || 'MCP Server'}
+            {server.server_name || server.server_slug || 'Connector'}
           </span>
           <span className="text-[11px] text-[var(--text-subtle)] block truncate font-mono">
             {server.server_slug}
@@ -582,6 +632,20 @@ function McpServerCard({
           <Info size={13} />
           Details
         </button>
+        <button onClick={handleOpenPerms} className="btn btn-sm">
+          <Gear size={13} />
+          Permissions
+        </button>
+        {server.is_oauth && (
+          <button
+            onClick={handleReconnect}
+            disabled={reconnecting}
+            className="btn btn-sm"
+          >
+            <Plugs size={13} />
+            {reconnecting ? 'Reconnecting...' : 'Reconnect'}
+          </button>
+        )}
         <button
           onClick={handleUninstall}
           disabled={uninstalling}
@@ -591,6 +655,18 @@ function McpServerCard({
           {uninstalling ? 'Removing...' : 'Uninstall'}
         </button>
       </div>
+
+      {permsOpen && (
+        <ConnectorPermissionsDrawer
+          open={permsOpen}
+          onClose={() => setPermsOpen(false)}
+          configId={server.id}
+          serverName={server.server_name || server.server_slug || 'Connector'}
+          tools={permsTools}
+          initiallyDisabled={server.disabled_tools || []}
+          onSaved={() => onReload()}
+        />
+      )}
 
       {/* Credentials section */}
       {showCredentials && hasEnvVars && (

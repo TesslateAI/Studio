@@ -15,7 +15,7 @@ import {
 import AgentsPage from './library/AgentsPage';
 import SkillsPage from './library/SkillsPage';
 import BasesPage from './library/BasesPage';
-import McpServersPage from './library/McpServersPage';
+import ConnectorsPage from './library/ConnectorsPage';
 import ModelsPage from './library/ModelsPage';
 import ThemesPage from './library/ThemesPage';
 import type { LibraryTheme } from './library/ThemesPage';
@@ -128,9 +128,16 @@ export default function Library() {
   const { teamSwitchKey } = useTeam();
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  // Normalize legacy "api-keys" tab to "models"
+  // Normalize legacy tab aliases.
+  // - "api-keys" was renamed to "models".
+  // - "connectors" is the new URL alias for "mcp_servers" (#307). Bookmarks
+  //   against either param keep working.
   const normalizedTab: TabType =
-    tabParam === 'api-keys' ? 'models' : (tabParam as TabType) || 'agents';
+    tabParam === 'api-keys'
+      ? 'models'
+      : tabParam === 'connectors'
+        ? 'mcp_servers'
+        : (tabParam as TabType) || 'agents';
   const [activeTab, setActiveTab] = useState<TabType>(normalizedTab);
 
   // Sync activeTab when URL search params change (e.g. sidebar navigation)
@@ -417,7 +424,9 @@ export default function Library() {
             </svg>
           </button>
           <h2 className="text-xs font-semibold text-[var(--text)] flex-1">
-            {activeTab === 'mcp_servers' ? 'MCP Servers' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+            {activeTab === 'mcp_servers'
+              ? 'Connectors'
+              : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
           </h2>
         </div>
       </div>
@@ -477,7 +486,7 @@ export default function Library() {
         )}
 
         {activeTab === 'mcp_servers' && (
-          <McpServersPage
+          <ConnectorsPage
             servers={mcpServers}
             agents={agents}
             loading={loading}
