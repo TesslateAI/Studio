@@ -17,11 +17,15 @@ class DeploymentMode(StrEnum):
         KUBERNETES: Production deployment using Kubernetes + NGINX Ingress
         LOCAL: Direct filesystem + subprocess execution on the host machine
             (no container isolation — used for sandboxed benchmark environments)
+        DESKTOP: Shell mode for the Tauri desktop client. Projects still resolve
+            per-project (local | docker | k8s-remote) via Project.runtime; this
+            value only marks the orchestrator-wide deployment shell.
     """
 
     DOCKER = "docker"
     KUBERNETES = "kubernetes"
     LOCAL = "local"
+    DESKTOP = "desktop"
 
     @classmethod
     def from_string(cls, value: str) -> "DeploymentMode":
@@ -58,6 +62,11 @@ class DeploymentMode(StrEnum):
     def is_local(self) -> bool:
         """Check if this is local (filesystem + subprocess) deployment mode."""
         return self == DeploymentMode.LOCAL
+
+    @property
+    def is_desktop(self) -> bool:
+        """Check if this is the desktop (Tauri shell) deployment mode."""
+        return self == DeploymentMode.DESKTOP
 
     def __str__(self) -> str:
         return self.value

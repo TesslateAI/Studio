@@ -11,6 +11,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
+from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
 revision: str = "0004_add_user_providers_table"
@@ -23,10 +24,10 @@ def upgrade() -> None:
     # Create user_providers table for custom BYOK providers
     op.create_table(
         "user_providers",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, index=True),
+        sa.Column("id", GUID(), primary_key=True, index=True),
         sa.Column(
             "user_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -46,7 +47,8 @@ def upgrade() -> None:
     )
 
     # Add unique constraint for user_id + slug combination
-    op.create_unique_constraint("uq_user_provider_slug", "user_providers", ["user_id", "slug"])
+    with op.batch_alter_table("user_providers") as batch_op:
+        batch_op.create_unique_constraint("uq_user_provider_slug", ["user_id", "slug"])
 
     # Add index for user_id for faster lookups
     op.create_index("ix_user_providers_user_id", "user_providers", ["user_id"])
@@ -54,5 +56,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_user_providers_user_id", table_name="user_providers")
-    op.drop_constraint("uq_user_provider_slug", "user_providers", type_="unique")
+    with op.batch_alter_table("user_providers") as batch_op:
+        batch_op.drop_constraint("uq_user_provider_slug", type_="unique")
     op.drop_table("user_providers")

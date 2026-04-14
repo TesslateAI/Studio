@@ -13,9 +13,8 @@ Adds:
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID
-
 # revision identifiers, used by Alembic.
 revision: str = "0019_add_deployment_targets"
 down_revision: str | Sequence[str] | None = "0018_add_deployment_provider"
@@ -33,10 +32,10 @@ def upgrade() -> None:
     if "deployment_targets" not in existing_tables:
         op.create_table(
             "deployment_targets",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True, index=True),
+            sa.Column("id", GUID(), primary_key=True, index=True),
             sa.Column(
                 "project_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("projects.id", ondelete="CASCADE"),
                 nullable=False,
                 index=True,
@@ -49,7 +48,7 @@ def upgrade() -> None:
             sa.Column("is_connected", sa.Boolean, default=False),
             sa.Column(
                 "credential_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("deployment_credentials.id", ondelete="SET NULL"),
                 nullable=True,
             ),
@@ -70,22 +69,22 @@ def upgrade() -> None:
     if "deployment_target_connections" not in existing_tables:
         op.create_table(
             "deployment_target_connections",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True, index=True),
+            sa.Column("id", GUID(), primary_key=True, index=True),
             sa.Column(
                 "project_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("projects.id", ondelete="CASCADE"),
                 nullable=False,
             ),
             sa.Column(
                 "container_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("containers.id", ondelete="CASCADE"),
                 nullable=False,
             ),
             sa.Column(
                 "deployment_target_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("deployment_targets.id", ondelete="CASCADE"),
                 nullable=False,
             ),
@@ -111,13 +110,16 @@ def upgrade() -> None:
     if "deployment_target_id" not in existing_deployment_columns:
         op.add_column(
             "deployments",
-            sa.Column(
-                "deployment_target_id",
-                UUID(as_uuid=True),
-                sa.ForeignKey("deployment_targets.id", ondelete="SET NULL"),
-                nullable=True,
-            ),
+            sa.Column("deployment_target_id", GUID(), nullable=True),
         )
+        with op.batch_alter_table("deployments") as batch_op:
+            batch_op.create_foreign_key(
+                "fk_deployments_deployment_target_id",
+                "deployment_targets",
+                ["deployment_target_id"],
+                ["id"],
+                ondelete="SET NULL",
+            )
         op.create_index(
             "ix_deployments_deployment_target_id",
             "deployments",
@@ -127,13 +129,16 @@ def upgrade() -> None:
     if "container_id" not in existing_deployment_columns:
         op.add_column(
             "deployments",
-            sa.Column(
-                "container_id",
-                UUID(as_uuid=True),
-                sa.ForeignKey("containers.id", ondelete="SET NULL"),
-                nullable=True,
-            ),
+            sa.Column("container_id", GUID(), nullable=True),
         )
+        with op.batch_alter_table("deployments") as batch_op:
+            batch_op.create_foreign_key(
+                "fk_deployments_container_id",
+                "containers",
+                ["container_id"],
+                ["id"],
+                ondelete="SET NULL",
+            )
         op.create_index(
             "ix_deployments_container_id",
             "deployments",

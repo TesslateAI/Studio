@@ -18,10 +18,10 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.types import JSON
+from app.types.guid import GUID
 
 from .database import Base
 
@@ -31,13 +31,13 @@ class Team(Base):
 
     __tablename__ = "teams"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String(100), nullable=False)
     slug = Column(String(100), unique=True, nullable=False, index=True)
     avatar_url = Column(Text, nullable=True)
     is_personal = Column(Boolean, nullable=False, default=False)
     created_by_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
     # Billing (moved from User)
@@ -96,13 +96,13 @@ class TeamMembership(Base):
 
     __tablename__ = "team_memberships"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(20), nullable=False)  # 'admin', 'editor', 'viewer'
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     invited_by_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     joined_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -122,14 +122,14 @@ class ProjectMembership(Base):
 
     __tablename__ = "project_memberships"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(20), nullable=False)  # 'admin', 'editor', 'viewer'
     granted_by_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -152,19 +152,19 @@ class TeamInvitation(Base):
 
     __tablename__ = "team_invitations"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     email = Column(String(255), nullable=False)
     role = Column(String(20), nullable=False)  # 'admin', 'editor', 'viewer'
     token = Column(String(64), unique=True, nullable=False, index=True)
     invite_type = Column(String(20), nullable=False, default="email")  # 'email', 'link'
     invited_by_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
     )
     expires_at = Column(DateTime(timezone=True), nullable=False)
     accepted_at = Column(DateTime(timezone=True), nullable=True)
     accepted_by_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     max_uses = Column(Integer, nullable=True)  # for link invites (null = unlimited)
@@ -183,17 +183,17 @@ class AuditLog(Base):
 
     __tablename__ = "audit_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
     )
     action = Column(String(100), nullable=False)  # e.g., 'member.invited', 'project.deleted'
     resource_type = Column(String(50), nullable=False)  # e.g., 'team', 'project', 'container'
-    resource_id = Column(UUID(as_uuid=True), nullable=True)
+    resource_id = Column(GUID(), nullable=True)
     details = Column(JSON, nullable=True)  # action-specific metadata
     ip_address = Column(String(45), nullable=True)  # IPv4 or IPv6
     user_agent = Column(String(500), nullable=True)

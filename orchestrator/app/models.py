@@ -18,9 +18,9 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from app.types.guid import GUID
 
 from .database import Base
 
@@ -40,14 +40,14 @@ from .models_kanban import (  # noqa: F401
 class Project(Base):
     __tablename__ = "projects"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     slug = Column(
         String, unique=True, index=True, nullable=False
     )  # URL-safe identifier (e.g., "my-awesome-app-k3x8n2")
     description = Column(Text)
-    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    owner_id = Column(GUID(), ForeignKey("users.id"), nullable=False)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     visibility = Column(
         String(20), nullable=False, default="team"
     )  # 'team' (all members see) or 'private' (explicit access only)
@@ -75,7 +75,7 @@ class Project(Base):
         DateTime(timezone=True), nullable=True
     )  # When environment was hibernated
     latest_snapshot_id = Column(
-        UUID(as_uuid=True), nullable=True
+        GUID(), nullable=True
     )  # Reference to most recent snapshot (for quick restore)
 
     # Template-based project creation (btrfs CSI snapshot)
@@ -163,14 +163,14 @@ class ProjectSnapshot(Base):
 
     __tablename__ = "project_snapshots"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("projects.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Kubernetes VolumeSnapshot references
     snapshot_name = Column(String(255), nullable=False, index=True)  # K8s VolumeSnapshot name
@@ -220,12 +220,12 @@ class Container(Base):
 
     __tablename__ = "containers"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     base_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_bases.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("marketplace_bases.id", ondelete="SET NULL"), nullable=True
     )  # NULL for custom containers
 
     # Container info
@@ -279,7 +279,7 @@ class Container(Base):
         String, nullable=True
     )  # For external services: the service URL (e.g., "https://xxx.supabase.co")
     credentials_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("deployment_credentials.id", ondelete="SET NULL"),
         nullable=True,
     )  # Link to stored credentials
@@ -354,15 +354,15 @@ class ContainerConnection(Base):
 
     __tablename__ = "container_connections"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     source_container_id = Column(
-        UUID(as_uuid=True), ForeignKey("containers.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("containers.id", ondelete="CASCADE"), nullable=False
     )
     target_container_id = Column(
-        UUID(as_uuid=True), ForeignKey("containers.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("containers.id", ondelete="CASCADE"), nullable=False
     )
 
     # Connection metadata (legacy field for backward compatibility)
@@ -397,12 +397,12 @@ class BrowserPreview(Base):
 
     __tablename__ = "browser_previews"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     connected_container_id = Column(
-        UUID(as_uuid=True), ForeignKey("containers.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("containers.id", ondelete="SET NULL"), nullable=True
     )
 
     # React Flow position
@@ -429,9 +429,9 @@ class DeploymentTarget(Base):
 
     __tablename__ = "deployment_targets"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -452,7 +452,7 @@ class DeploymentTarget(Base):
     # OAuth connection status
     is_connected = Column(Boolean, default=False)  # Whether OAuth is connected for this provider
     credential_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("deployment_credentials.id", ondelete="SET NULL"),
         nullable=True,
     )  # Link to stored credentials
@@ -484,15 +484,15 @@ class DeploymentTargetConnection(Base):
 
     __tablename__ = "deployment_target_connections"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     container_id = Column(
-        UUID(as_uuid=True), ForeignKey("containers.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("containers.id", ondelete="CASCADE"), nullable=False
     )
     deployment_target_id = Column(
-        UUID(as_uuid=True), ForeignKey("deployment_targets.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("deployment_targets.id", ondelete="CASCADE"), nullable=False
     )
 
     # Deployment settings for this container-target pair (overrides defaults)
@@ -519,9 +519,9 @@ class DeploymentTargetConnection(Base):
 class ProjectFile(Base):
     __tablename__ = "project_files"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     file_path = Column(String, nullable=False)
     content = Column(Text)
@@ -536,9 +536,9 @@ class ProjectAsset(Base):
 
     __tablename__ = "project_assets"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     filename = Column(String, nullable=False)
     directory = Column(String, nullable=False)  # e.g., "/public/images"
@@ -560,9 +560,9 @@ class ProjectAssetDirectory(Base):
 
     __tablename__ = "project_asset_directories"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     path = Column(String, nullable=False)  # e.g., "/public/images"
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -576,13 +576,13 @@ class ProjectAssetDirectory(Base):
 class Chat(Base):
     __tablename__ = "chats"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
     )
     title = Column(String(255), nullable=True)  # Optional session title
     origin = Column(String(20), default="browser")  # browser, slack, api, cli
@@ -598,7 +598,7 @@ class Chat(Base):
     platform_chat_id = Column(String(255), nullable=True)
     platform_thread_id = Column(String(255), nullable=True)
     channel_config_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("channel_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
@@ -615,8 +615,8 @@ class Chat(Base):
 class Message(Base):
     __tablename__ = "messages"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    chat_id = Column(UUID(as_uuid=True), ForeignKey("chats.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    chat_id = Column(GUID(), ForeignKey("chats.id", ondelete="CASCADE"), nullable=False)
     role = Column(String, nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
     message_metadata = Column(
@@ -643,15 +643,15 @@ class AgentStep(Base):
 
     __tablename__ = "agent_steps"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     message_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("messages.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     chat_id = Column(
-        UUID(as_uuid=True), nullable=False, index=True
+        GUID(), nullable=False, index=True
     )  # denormalized for fast queries
     step_index = Column(SmallInteger, nullable=False)
     step_data = Column(
@@ -667,10 +667,10 @@ class AgentCommandLog(Base):
 
     __tablename__ = "agent_command_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     command = Column(Text, nullable=False)
     working_dir = Column(String, default=".")
@@ -692,10 +692,10 @@ class PodAccessLog(Base):
 
     __tablename__ = "pod_access_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    expected_user_id = Column(UUID(as_uuid=True), nullable=False)  # User ID from URL/pod hostname
-    project_id = Column(UUID(as_uuid=True), nullable=True)  # Extracted from hostname if available
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id"), nullable=False)
+    expected_user_id = Column(GUID(), nullable=False)  # User ID from URL/pod hostname
+    project_id = Column(GUID(), nullable=True)  # Extracted from hostname if available
     success = Column(Boolean, nullable=False)  # True if access granted, False if denied
     request_uri = Column(String, nullable=True)  # Original request URI
     request_host = Column(String, nullable=True)  # Request hostname
@@ -712,11 +712,11 @@ class ShellSession(Base):
 
     __tablename__ = "shell_sessions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     session_id = Column(String, unique=True, index=True, nullable=False)  # UUID
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     container_name = Column(String, nullable=False)  # Docker container or K8s pod name
 
@@ -749,9 +749,9 @@ class GitHubCredential(Base):
 
     __tablename__ = "github_credentials"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
     )
 
     # OAuth tokens (encrypted)
@@ -779,8 +779,8 @@ class GitProviderCredential(Base):
 
     __tablename__ = "git_provider_credentials"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     provider = Column(String(20), nullable=False)  # 'github', 'gitlab', 'bitbucket'
 
     # OAuth tokens (encrypted)
@@ -812,14 +812,14 @@ class GitRepository(Base):
 
     __tablename__ = "git_repositories"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
     )
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     # Repository info
     repo_url = Column(String(500), nullable=False)
@@ -858,12 +858,12 @@ class DeploymentCredential(Base):
 
     __tablename__ = "deployment_credentials"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
     )  # NULL for user defaults, set for project overrides
     provider = Column(String(50), nullable=False)  # cloudflare, vercel, netlify, etc.
 
@@ -900,27 +900,27 @@ class Deployment(Base):
 
     __tablename__ = "deployments"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     provider = Column(String(50), nullable=False, index=True)  # cloudflare, vercel, netlify
 
     # Link to new deployment target system (nullable for backwards compatibility)
     deployment_target_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("deployment_targets.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
     container_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("containers.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
@@ -973,7 +973,7 @@ class MarketplaceAgent(Base):
 
     __tablename__ = "marketplace_agents"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, nullable=False, index=True)
     description = Column(Text, nullable=False)
@@ -997,10 +997,10 @@ class MarketplaceAgent(Base):
 
     # Forking (for open source agents)
     is_forkable = Column(Boolean, default=False)
-    parent_agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=True)
-    forked_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    parent_agent_id = Column(GUID(), ForeignKey("marketplace_agents.id"), nullable=True)
+    forked_by_user_id = Column(GUID(), ForeignKey("users.id"), nullable=True)
     created_by_user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+        GUID(), ForeignKey("users.id"), nullable=True
     )  # NULL = Tesslate-created
     config = Column(JSON, nullable=True)  # Editable configuration for forked agents
 
@@ -1073,16 +1073,16 @@ class AgentSkillAssignment(Base):
 
     __tablename__ = "agent_skill_assignments"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
     skill_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     enabled = Column(Boolean, default=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -1102,13 +1102,13 @@ class UserPurchasedAgent(Base):
 
     __tablename__ = "user_purchased_agents"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
     purchase_date = Column(DateTime(timezone=True), server_default=func.now())
     purchase_type = Column(String, nullable=False)  # free, purchased, subscription
@@ -1128,15 +1128,15 @@ class ProjectAgent(Base):
 
     __tablename__ = "project_agents"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )  # For validation
     enabled = Column(Boolean, default=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -1151,11 +1151,11 @@ class AgentReview(Base):
 
     __tablename__ = "agent_reviews"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     rating = Column(Integer, nullable=False)  # 1-5
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -1170,7 +1170,7 @@ class MarketplaceBase(Base):
 
     __tablename__ = "marketplace_bases"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, nullable=False, index=True)
     description = Column(Text, nullable=False)
@@ -1185,7 +1185,7 @@ class MarketplaceBase(Base):
     archive_path = Column(String(500), nullable=True)
     archive_size_bytes = Column(BigInteger, nullable=True)
     source_project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
 
     # Template metadata
@@ -1219,7 +1219,7 @@ class MarketplaceBase(Base):
 
     # User-submitted bases
     created_by_user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     visibility = Column(
         String, default="private", server_default="private"
@@ -1238,13 +1238,13 @@ class UserPurchasedBase(Base):
 
     __tablename__ = "user_purchased_bases"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     base_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_bases.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("marketplace_bases.id", ondelete="CASCADE"), nullable=False
     )
     purchase_date = Column(DateTime(timezone=True), server_default=func.now())
     purchase_type = Column(String, nullable=False)  # free, purchased, subscription
@@ -1261,11 +1261,11 @@ class BaseReview(Base):
 
     __tablename__ = "base_reviews"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     base_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_bases.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("marketplace_bases.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     rating = Column(Integer, nullable=False)  # 1-5
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -1290,7 +1290,7 @@ class WorkflowTemplate(Base):
 
     __tablename__ = "workflow_templates"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, nullable=False, index=True)
     description = Column(Text, nullable=False)
@@ -1347,10 +1347,10 @@ class UserAPIKey(Base):
 
     __tablename__ = "user_api_keys"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     provider = Column(String, nullable=False)  # openrouter, anthropic, openai, google, github, etc.
     auth_type = Column(
@@ -1379,10 +1379,10 @@ class UserCustomModel(Base):
 
     __tablename__ = "user_custom_models"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     model_id = Column(String, nullable=False)  # e.g., "openrouter/model-name"
     model_name = Column(String, nullable=False)  # Display name
@@ -1407,10 +1407,10 @@ class UserProvider(Base):
 
     __tablename__ = "user_providers"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     # Provider identification
@@ -1455,15 +1455,15 @@ class AgentCoInstall(Base):
 
     __tablename__ = "agent_co_installs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     agent_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("marketplace_agents.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     related_agent_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("marketplace_agents.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -1488,14 +1488,14 @@ class MarketplaceTransaction(Base):
 
     __tablename__ = "marketplace_transactions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
     creator_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )  # Agent creator
 
     # Transaction details
@@ -1532,10 +1532,10 @@ class CreditPurchase(Base):
 
     __tablename__ = "credit_purchases"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
     )  # Which team received credits
 
     # Purchase details
@@ -1560,16 +1560,16 @@ class UsageLog(Base):
 
     __tablename__ = "usage_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
     )  # Which team was billed
     agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
 
     # Usage details
@@ -1582,7 +1582,7 @@ class UsageLog(Base):
 
     # Agent creator revenue (if applicable)
     creator_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     creator_revenue = Column(Integer, default=0)  # Creator's 90% share in cents
     platform_revenue = Column(Integer, default=0)  # Platform's 10% share in cents
@@ -2379,7 +2379,7 @@ class Theme(Base):
     is_featured = Column(Boolean, default=False)
     is_published = Column(Boolean, default=True)
     created_by_user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     tags = Column(JSON, nullable=True)  # e.g. ["dark", "minimal", "neon"]
     category = Column(String(50), default="general")  # general / minimal / vibrant / professional
@@ -2406,10 +2406,10 @@ class UserLibraryTheme(Base):
         UniqueConstraint("user_id", "theme_id", "team_id", name="uq_user_library_theme_team"),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     theme_id = Column(String(100), ForeignKey("themes.id", ondelete="CASCADE"), nullable=False)
     added_date = Column(DateTime(timezone=True), server_default=func.now())
@@ -2432,8 +2432,8 @@ class FeedbackPost(Base):
 
     __tablename__ = "feedback_posts"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     type = Column(String, nullable=False)  # "bug" or "suggestion"
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=False)
@@ -2461,12 +2461,12 @@ class FeedbackUpvote(Base):
         {"schema": None},
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     feedback_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("feedback_posts.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -2483,10 +2483,10 @@ class FeedbackComment(Base):
 
     __tablename__ = "feedback_comments"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     feedback_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("feedback_posts.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -2505,9 +2505,9 @@ class EmailVerificationCode(Base):
 
     __tablename__ = "email_verification_codes"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     user_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -2534,7 +2534,7 @@ class HealthCheck(Base):
 
     __tablename__ = "health_checks"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     service_name = Column(String(50), nullable=False, index=True)
     status = Column(String(20), nullable=False)  # up, down, degraded
     response_time_ms = Column(Integer, nullable=True)
@@ -2553,13 +2553,13 @@ class AdminAction(Base):
 
     __tablename__ = "admin_actions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     admin_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     action_type = Column(String(100), nullable=False, index=True)
     target_type = Column(String(50), nullable=False)  # user, project, agent, etc.
-    target_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    target_id = Column(GUID(), nullable=False, index=True)
     reason = Column(Text, nullable=True)
     extra_data = Column(JSON, default={})  # Additional action details
     ip_address = Column(String(45), nullable=True)  # IPv4 or IPv6
@@ -2574,9 +2574,9 @@ class ExternalAPIKey(Base):
 
     __tablename__ = "external_api_keys"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     key_hash = Column(String(64), nullable=False, unique=True)  # SHA-256 hash of the key
     key_prefix = Column(String(12), nullable=False)  # "tsk_xxxx" visible prefix for identification
@@ -2596,12 +2596,12 @@ class DeviceRegistration(Base):
 
     __tablename__ = "device_registrations"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     api_key_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("external_api_keys.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
@@ -2629,12 +2629,12 @@ class ChannelConfig(Base):
 
     __tablename__ = "channel_configs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("projects.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
@@ -2644,7 +2644,7 @@ class ChannelConfig(Base):
     credentials = Column(Text, nullable=False)  # Fernet-encrypted JSON
     webhook_secret = Column(String(64), nullable=False)  # random secret for URL signing
     default_agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
     is_active = Column(Boolean, default=True)
     gateway_shard = Column(Integer, default=0)  # Shard assignment for gateway process
@@ -2662,9 +2662,9 @@ class ChannelMessage(Base):
 
     __tablename__ = "channel_messages"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     channel_config_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("channel_configs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -2708,15 +2708,15 @@ class UserMcpConfig(Base):
         ),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     marketplace_agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
     credentials = Column(Text, nullable=True)  # Fernet-encrypted JSON (API keys, tokens)
     enabled_capabilities = Column(JSON, default=["tools", "resources", "prompts"])
@@ -2765,16 +2765,16 @@ class AgentMcpAssignment(Base):
 
     __tablename__ = "agent_mcp_assignments"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     agent_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False
     )
     mcp_config_id = Column(
-        UUID(as_uuid=True), ForeignKey("user_mcp_configs.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("user_mcp_configs.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(
-        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
     enabled = Column(Boolean, default=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -2833,9 +2833,9 @@ class TemplateBuild(Base):
 
     __tablename__ = "template_builds"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     base_id = Column(
-        UUID(as_uuid=True), ForeignKey("marketplace_bases.id", ondelete="CASCADE"), nullable=True
+        GUID(), ForeignKey("marketplace_bases.id", ondelete="CASCADE"), nullable=True
     )
     base_slug = Column(String, nullable=False, index=True)
     git_commit_sha = Column(String(40), nullable=True)
@@ -2862,9 +2862,9 @@ class PlatformIdentity(Base):
 
     __tablename__ = "platform_identities"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
     platform = Column(String(20), nullable=False)
     platform_user_id = Column(String(255), nullable=False)
@@ -2887,15 +2887,15 @@ class AgentSchedule(Base):
 
     __tablename__ = "agent_schedules"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     user_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     agent_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("marketplace_agents.id", ondelete="SET NULL"),
         nullable=True,
     )
@@ -2910,7 +2910,7 @@ class AgentSchedule(Base):
     deliver = Column(String(100), default="origin")
     origin_platform = Column(String(20), nullable=True)
     origin_chat_id = Column(String(255), nullable=True)
-    origin_config_id = Column(UUID(as_uuid=True), nullable=True)
+    origin_config_id = Column(GUID(), nullable=True)
 
     # Lifecycle
     is_active = Column(Boolean, default=True)

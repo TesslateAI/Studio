@@ -21,20 +21,20 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        "users",
-        "avatar_url",
-        existing_type=sa.String(500),
-        type_=sa.Text(),
-        existing_nullable=True,
-    )
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.alter_column(
+            "avatar_url",
+            existing_type=sa.String(500),
+            type_=sa.Text(),
+            existing_nullable=True,
+        )
 
 
 def downgrade() -> None:
-    op.alter_column(
-        "users",
-        "avatar_url",
-        existing_type=sa.Text(),
-        type_=sa.String(500),
-        existing_nullable=True,
-    )
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.alter_column(
+            "avatar_url",
+            existing_type=sa.Text(),
+            type_=sa.String(500),
+            existing_nullable=True,
+        )

@@ -16,16 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        "marketplace_bases",
-        "visibility",
-        server_default="private",
-    )
+    with op.batch_alter_table("marketplace_bases") as batch_op:
+        batch_op.alter_column("visibility", server_default="private")
 
 
 def downgrade() -> None:
-    op.alter_column(
-        "marketplace_bases",
-        "visibility",
-        server_default="public",
-    )
+    with op.batch_alter_table("marketplace_bases") as batch_op:
+        batch_op.alter_column("visibility", server_default="public")

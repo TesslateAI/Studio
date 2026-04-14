@@ -6,9 +6,8 @@ Create Date: 2026-03-12
 """
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID
-
 # revision identifiers
 revision = "0026_add_agent_mcp_assignments"
 down_revision = "0025_channels_mcp"
@@ -17,37 +16,29 @@ depends_on = None
 
 
 def _table_exists(table: str) -> bool:
-    conn = op.get_bind()
-    result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name = :table AND table_schema = 'public'"
-        ),
-        {"table": table},
-    )
-    return result.fetchone() is not None
+    return table in sa.inspect(op.get_bind()).get_table_names()
 
 
 def upgrade() -> None:
     if not _table_exists("agent_mcp_assignments"):
         op.create_table(
             "agent_mcp_assignments",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True),
+            sa.Column("id", GUID(), primary_key=True),
             sa.Column(
                 "agent_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("marketplace_agents.id", ondelete="CASCADE"),
                 nullable=False,
             ),
             sa.Column(
                 "mcp_config_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("user_mcp_configs.id", ondelete="CASCADE"),
                 nullable=False,
             ),
             sa.Column(
                 "user_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("users.id", ondelete="CASCADE"),
                 nullable=False,
             ),

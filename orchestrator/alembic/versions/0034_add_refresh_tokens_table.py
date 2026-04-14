@@ -9,6 +9,7 @@ Create Date: 2026-03-26 13:24:16.277085
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -25,7 +26,7 @@ def upgrade() -> None:
         sa.Column("token", sa.String(64), primary_key=True),
         sa.Column(
             "user_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="cascade"),
             nullable=False,
             index=True,

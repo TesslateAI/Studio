@@ -12,9 +12,8 @@ This migration adds:
 """
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID
-
 # revision identifiers
 revision = "0021_agent_steps_sessions"
 down_revision = "0020_admin_panel_schema"
@@ -34,15 +33,15 @@ def upgrade() -> None:
     if "agent_steps" not in existing_tables:
         op.create_table(
             "agent_steps",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True, index=True),
+            sa.Column("id", GUID(), primary_key=True, index=True),
             sa.Column(
                 "message_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("messages.id", ondelete="CASCADE"),
                 nullable=False,
                 index=True,
             ),
-            sa.Column("chat_id", UUID(as_uuid=True), nullable=False, index=True),
+            sa.Column("chat_id", GUID(), nullable=False, index=True),
             sa.Column("step_index", sa.SmallInteger(), nullable=False),
             sa.Column("step_data", sa.JSON(), nullable=False),
             sa.Column(
@@ -93,10 +92,10 @@ def upgrade() -> None:
     if "external_api_keys" not in existing_tables:
         op.create_table(
             "external_api_keys",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True, index=True),
+            sa.Column("id", GUID(), primary_key=True, index=True),
             sa.Column(
                 "user_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("users.id", ondelete="CASCADE"),
                 nullable=False,
                 index=True,

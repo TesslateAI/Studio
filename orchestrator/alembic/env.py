@@ -68,11 +68,15 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Helper function to run migrations with a connection."""
+    # SQLite lacks ALTER TABLE for most column changes — batch mode
+    # emulates it via copy-and-swap. No-op on Postgres.
+    is_sqlite = connection.dialect.name == "sqlite"
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,  # Detect column type changes
         compare_server_default=True,  # Detect default value changes
+        render_as_batch=is_sqlite,
     )
 
     with context.begin_transaction():

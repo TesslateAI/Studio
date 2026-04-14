@@ -11,9 +11,8 @@ Create Date: 2026-03-14
 """
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID
-
 # revision identifiers
 revision = "0029_template_builds"
 down_revision = "0028_fix_fk_ondelete"
@@ -25,10 +24,10 @@ def upgrade() -> None:
     # 1. Create template_builds table
     op.create_table(
         "template_builds",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "base_id",
-            UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("marketplace_bases.id", ondelete="CASCADE"),
             nullable=True,
         ),

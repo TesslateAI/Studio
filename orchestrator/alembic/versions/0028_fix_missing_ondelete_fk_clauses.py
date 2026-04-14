@@ -60,6 +60,8 @@ FK_FIXES = [
 
 def upgrade() -> None:
     conn = op.get_bind()
+    if conn.dialect.name != "postgresql":
+        return
     for table, constraint, column, referred, ondelete, expected_type in FK_FIXES:
         # Check if FK already has the correct ondelete behavior
         result = conn.execute(
@@ -93,6 +95,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if op.get_bind().dialect.name != "postgresql":
+        return
     for table, constraint, column, referred, _ondelete, _expected in FK_FIXES:
         op.drop_constraint(constraint, table, type_="foreignkey")
         op.create_foreign_key(

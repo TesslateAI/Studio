@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Baseline capabilities for the Tesslate Studio desktop shell",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:default",
+    "fs:default",
+    "notification:default",
+    "deep-link:default",
+    "updater:default"
+  ]
+}

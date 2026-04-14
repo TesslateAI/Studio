@@ -6,6 +6,8 @@ terminal_bench/
 .tesslate/
 orchestrator/.tesslate/
 
+# Desktop PRD scratch / planning (local-only, never committed)
+desktop-todo/
 # Python
 __pycache__/
 *.py[cod]

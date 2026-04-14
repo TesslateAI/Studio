@@ -10,6 +10,7 @@ branch_labels = None
 depends_on = None
 
 import sqlalchemy as sa  # noqa: E402
+from app.types.guid import GUID
 from alembic import op  # noqa: E402
 
 _TABLES = [
@@ -24,11 +25,15 @@ _TABLES = [
 
 def upgrade() -> None:
     for table in _TABLES:
-        op.add_column(table, sa.Column("team_id", sa.UUID(as_uuid=True), nullable=True))
-        op.create_foreign_key(
-            f"fk_{table}_team_id", table, "teams", ["team_id"], ["id"], ondelete="SET NULL"
-        )
+        op.add_column(table, sa.Column("team_id", GUID(), nullable=True))
+        with op.batch_alter_table(table) as batch_op:
+            batch_op.create_foreign_key(
+                f"fk_{table}_team_id", "teams", ["team_id"], ["id"], ondelete="SET NULL"
+            )
         op.create_index(f"ix_{table}_team_id", table, ["team_id"])
+
+    if op.get_bind().dialect.name != "postgresql":
+        return
 
     # Backfill: set team_id = user.default_team_id for existing rows
     op.execute("""
@@ -60,5 +65,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     for table in reversed(_TABLES):
         op.drop_index(f"ix_{table}_team_id", table_name=table)
-        op.drop_constraint(f"fk_{table}_team_id", table, type_="foreignkey")
+        with op.batch_alter_table(table) as batch_op:
+            batch_op.drop_constraint(f"fk_{table}_team_id", type_="foreignkey")
         op.drop_column(table, "team_id")

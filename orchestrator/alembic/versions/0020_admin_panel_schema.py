@@ -12,9 +12,8 @@ This migration adds:
 """
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID
-
 # revision identifiers
 revision = "0020_admin_panel_schema"
 down_revision = "0019_add_deployment_targets"
@@ -47,15 +46,11 @@ def upgrade() -> None:
             sa.Column("suspended_reason", sa.Text(), nullable=True),
         )
     if "suspended_by_id" not in existing_user_columns:
-        op.add_column(
-            "users",
-            sa.Column(
-                "suspended_by_id",
-                UUID(as_uuid=True),
-                sa.ForeignKey("users.id", ondelete="SET NULL"),
-                nullable=True,
-            ),
-        )
+        op.add_column("users", sa.Column("suspended_by_id", GUID(), nullable=True))
+        with op.batch_alter_table("users") as batch_op:
+            batch_op.create_foreign_key(
+                "fk_users_suspended_by_id", "users", ["suspended_by_id"], ["id"], ondelete="SET NULL"
+            )
 
     # =========================================================================
     # 2. Add soft-delete fields to users table
@@ -76,15 +71,11 @@ def upgrade() -> None:
             sa.Column("deleted_reason", sa.Text(), nullable=True),
         )
     if "deleted_by_id" not in existing_user_columns:
-        op.add_column(
-            "users",
-            sa.Column(
-                "deleted_by_id",
-                UUID(as_uuid=True),
-                sa.ForeignKey("users.id", ondelete="SET NULL"),
-                nullable=True,
-            ),
-        )
+        op.add_column("users", sa.Column("deleted_by_id", GUID(), nullable=True))
+        with op.batch_alter_table("users") as batch_op:
+            batch_op.create_foreign_key(
+                "fk_users_deleted_by_id", "users", ["deleted_by_id"], ["id"], ondelete="SET NULL"
+            )
     if "scheduled_hard_delete_at" not in existing_user_columns:
         op.add_column(
             "users",
@@ -97,7 +88,7 @@ def upgrade() -> None:
     if "health_checks" not in existing_tables:
         op.create_table(
             "health_checks",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True, index=True),
+            sa.Column("id", GUID(), primary_key=True, index=True),
             sa.Column("service_name", sa.String(50), nullable=False, index=True),
             sa.Column("status", sa.String(20), nullable=False),  # up, down, degraded
             sa.Column("response_time_ms", sa.Integer(), nullable=True),
@@ -119,17 +110,17 @@ def upgrade() -> None:
     if "admin_actions" not in existing_tables:
         op.create_table(
             "admin_actions",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True, index=True),
+            sa.Column("id", GUID(), primary_key=True, index=True),
             sa.Column(
                 "admin_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("users.id", ondelete="SET NULL"),
                 nullable=True,
                 index=True,
             ),
             sa.Column("action_type", sa.String(100), nullable=False, index=True),
             sa.Column("target_type", sa.String(50), nullable=False),  # user, project, agent, etc.
-            sa.Column("target_id", UUID(as_uuid=True), nullable=False, index=True),
+            sa.Column("target_id", GUID(), nullable=False, index=True),
             sa.Column("reason", sa.Text(), nullable=True),
             sa.Column("extra_data", sa.JSON(), server_default="{}"),
             sa.Column("ip_address", sa.String(45), nullable=True),  # IPv4 or IPv6

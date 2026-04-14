@@ -19,20 +19,21 @@ depends_on = None
 import sqlalchemy as sa  # noqa: E402
 from alembic import op  # noqa: E402
 from sqlalchemy.dialects import postgresql  # noqa: E402
+from app.types.guid import GUID
 
 
 def upgrade() -> None:
     # ── 1. Create teams table ───────────────────────────────────────────
     op.create_table(
         "teams",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("slug", sa.String(100), unique=True, nullable=False, index=True),
         sa.Column("avatar_url", sa.Text, nullable=True),
         sa.Column("is_personal", sa.Boolean, nullable=False, server_default="false"),
         sa.Column(
             "created_by_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -62,16 +63,16 @@ def upgrade() -> None:
     # ── 2. Create team_memberships table ────────────────────────────────
     op.create_table(
         "team_memberships",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "team_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("teams.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "user_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -79,7 +80,7 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
         sa.Column(
             "invited_by_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -96,23 +97,23 @@ def upgrade() -> None:
     # ── 3. Create project_memberships table ─────────────────────────────
     op.create_table(
         "project_memberships",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "project_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("projects.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "user_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("role", sa.String(20), nullable=False),
         sa.Column(
             "granted_by_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -130,10 +131,10 @@ def upgrade() -> None:
     # ── 4. Create team_invitations table ────────────────────────────────
     op.create_table(
         "team_invitations",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "team_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("teams.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -143,7 +144,7 @@ def upgrade() -> None:
         sa.Column("invite_type", sa.String(20), nullable=False, server_default="email"),
         sa.Column(
             "invited_by_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=False,
         ),
@@ -151,7 +152,7 @@ def upgrade() -> None:
         sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "accepted_by_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -168,28 +169,28 @@ def upgrade() -> None:
     # ── 5. Create audit_logs table ──────────────────────────────────────
     op.create_table(
         "audit_logs",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "team_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("teams.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "project_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("projects.id", ondelete="SET NULL"),
             nullable=True,
         ),
         sa.Column(
             "user_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=False,
         ),
         sa.Column("action", sa.String(100), nullable=False),
         sa.Column("resource_type", sa.String(50), nullable=False),
-        sa.Column("resource_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("resource_id", GUID(), nullable=True),
         sa.Column("details", postgresql.JSON, nullable=True),
         sa.Column("ip_address", sa.String(45), nullable=True),
         sa.Column("user_agent", sa.String(500), nullable=True),
@@ -205,43 +206,49 @@ def upgrade() -> None:
     # ── 6. Add columns to existing tables ───────────────────────────────
 
     # projects: team_id (nullable initially) + visibility
-    op.add_column("projects", sa.Column("team_id", postgresql.UUID(as_uuid=True), nullable=True))
+    op.add_column("projects", sa.Column("team_id", GUID(), nullable=True))
     op.add_column(
         "projects", sa.Column("visibility", sa.String(20), nullable=False, server_default="team")
     )
-    op.create_foreign_key(
-        "fk_projects_team_id", "projects", "teams", ["team_id"], ["id"], ondelete="CASCADE"
-    )
+    with op.batch_alter_table("projects") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_projects_team_id", "teams", ["team_id"], ["id"], ondelete="CASCADE"
+        )
 
     # users: default_team_id
     op.add_column(
-        "users", sa.Column("default_team_id", postgresql.UUID(as_uuid=True), nullable=True)
+        "users", sa.Column("default_team_id", GUID(), nullable=True)
     )
-    op.create_foreign_key(
-        "fk_users_default_team", "users", "teams", ["default_team_id"], ["id"], ondelete="SET NULL"
-    )
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_users_default_team", "teams", ["default_team_id"], ["id"], ondelete="SET NULL"
+        )
 
     # usage_logs: team_id
-    op.add_column("usage_logs", sa.Column("team_id", postgresql.UUID(as_uuid=True), nullable=True))
-    op.create_foreign_key(
-        "fk_usage_logs_team_id", "usage_logs", "teams", ["team_id"], ["id"], ondelete="SET NULL"
-    )
+    op.add_column("usage_logs", sa.Column("team_id", GUID(), nullable=True))
+    with op.batch_alter_table("usage_logs") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_usage_logs_team_id", "teams", ["team_id"], ["id"], ondelete="SET NULL"
+        )
 
     # credit_purchases: team_id
     op.add_column(
-        "credit_purchases", sa.Column("team_id", postgresql.UUID(as_uuid=True), nullable=True)
+        "credit_purchases", sa.Column("team_id", GUID(), nullable=True)
     )
-    op.create_foreign_key(
-        "fk_credit_purchases_team_id",
-        "credit_purchases",
-        "teams",
-        ["team_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    with op.batch_alter_table("credit_purchases") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_credit_purchases_team_id",
+            "teams",
+            ["team_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
     # ── 7. Data migration: create personal teams for existing users ─────
     # Using raw SQL for bulk efficiency in migration context.
+    if op.get_bind().dialect.name != "postgresql":
+        op.create_index("ix_projects_team_id", "projects", ["team_id"])
+        return
     op.execute("""
         -- For each existing user, create a personal team with their billing data
         INSERT INTO teams (
@@ -325,10 +332,14 @@ def downgrade() -> None:
     op.drop_index("ix_projects_team_id", table_name="projects")
 
     # Drop foreign keys
-    op.drop_constraint("fk_credit_purchases_team_id", "credit_purchases", type_="foreignkey")
-    op.drop_constraint("fk_usage_logs_team_id", "usage_logs", type_="foreignkey")
-    op.drop_constraint("fk_users_default_team", "users", type_="foreignkey")
-    op.drop_constraint("fk_projects_team_id", "projects", type_="foreignkey")
+    with op.batch_alter_table("credit_purchases") as batch_op:
+        batch_op.drop_constraint("fk_credit_purchases_team_id", type_="foreignkey")
+    with op.batch_alter_table("usage_logs") as batch_op:
+        batch_op.drop_constraint("fk_usage_logs_team_id", type_="foreignkey")
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.drop_constraint("fk_users_default_team", type_="foreignkey")
+    with op.batch_alter_table("projects") as batch_op:
+        batch_op.drop_constraint("fk_projects_team_id", type_="foreignkey")
 
     # Drop added columns
     op.drop_column("credit_purchases", "team_id")

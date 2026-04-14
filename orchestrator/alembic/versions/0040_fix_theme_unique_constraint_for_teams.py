@@ -19,18 +19,18 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("uq_user_library_theme", "user_library_themes", type_="unique")
-    op.create_unique_constraint(
-        "uq_user_library_theme_team",
-        "user_library_themes",
-        ["user_id", "theme_id", "team_id"],
-    )
+    with op.batch_alter_table("user_library_themes") as batch_op:
+        batch_op.drop_constraint("uq_user_library_theme", type_="unique")
+        batch_op.create_unique_constraint(
+            "uq_user_library_theme_team",
+            ["user_id", "theme_id", "team_id"],
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_user_library_theme_team", "user_library_themes", type_="unique")
-    op.create_unique_constraint(
-        "uq_user_library_theme",
-        "user_library_themes",
-        ["user_id", "theme_id"],
-    )
+    with op.batch_alter_table("user_library_themes") as batch_op:
+        batch_op.drop_constraint("uq_user_library_theme_team", type_="unique")
+        batch_op.create_unique_constraint(
+            "uq_user_library_theme",
+            ["user_id", "theme_id"],
+        )

@@ -16,14 +16,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    conn = op.get_bind()
-    result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'marketplace_agents' AND column_name = 'git_repo_url'"
-        )
-    )
-    if not result.fetchone():
+    inspector = sa.inspect(op.get_bind())
+    existing = {c["name"] for c in inspector.get_columns("marketplace_agents")}
+    if "git_repo_url" not in existing:
         op.add_column(
             "marketplace_agents",
             sa.Column("git_repo_url", sa.String(500), nullable=True),

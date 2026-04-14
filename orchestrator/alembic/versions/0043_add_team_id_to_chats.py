@@ -7,6 +7,7 @@ Revises: 0042_legacy_scopes
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
 
 revision: str = "0043_chat_team_id"
@@ -16,9 +17,13 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column("chats", sa.Column("team_id", sa.UUID(as_uuid=True), nullable=True))
-    op.create_foreign_key("fk_chats_team_id", "chats", "teams", ["team_id"], ["id"], ondelete="SET NULL")
+    op.add_column("chats", sa.Column("team_id", GUID(), nullable=True))
+    with op.batch_alter_table("chats") as batch_op:
+        batch_op.create_foreign_key("fk_chats_team_id", "teams", ["team_id"], ["id"], ondelete="SET NULL")
     op.create_index("ix_chats_team_id", "chats", ["team_id"])
+
+    if op.get_bind().dialect.name != "postgresql":
+        return
 
     # Backfill: set team_id from the user's default_team_id
     op.execute("""
@@ -29,5 +34,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_chats_team_id", table_name="chats")
-    op.drop_constraint("fk_chats_team_id", "chats", type_="foreignkey")
+    with op.batch_alter_table("chats") as batch_op:
+        batch_op.drop_constraint("fk_chats_team_id", type_="foreignkey")
     op.drop_column("chats", "team_id")

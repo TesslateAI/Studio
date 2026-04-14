@@ -34,6 +34,9 @@ def upgrade() -> None:
         "users", sa.Column("credits_reset_date", sa.DateTime(timezone=True), nullable=True)
     )
 
+    if op.get_bind().dialect.name != "postgresql":
+        return
+
     # Migrate existing credits_balance to purchased_credits
     # Existing credits were all purchased (no bundled system before)
     op.execute("""

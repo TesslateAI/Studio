@@ -11,6 +11,7 @@ to support user-submitted project templates.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -24,13 +25,16 @@ def upgrade() -> None:
     """Add created_by_user_id and visibility columns to marketplace_bases."""
     op.add_column(
         "marketplace_bases",
-        sa.Column(
-            "created_by_user_id",
-            sa.UUID(as_uuid=True),
-            sa.ForeignKey("users.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
+        sa.Column("created_by_user_id", GUID(), nullable=True),
     )
+    with op.batch_alter_table("marketplace_bases") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_marketplace_bases_created_by_user_id",
+            "users",
+            ["created_by_user_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
     op.add_column(
         "marketplace_bases",
         sa.Column("visibility", sa.String(), nullable=True, server_default="public"),

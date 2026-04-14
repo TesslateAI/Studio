@@ -17,13 +17,9 @@ depends_on = None
 def upgrade():
     # Idempotent: skip if column already exists (may have been added outside migrations)
     conn = op.get_bind()
-    result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'containers' AND column_name = 'startup_command'"
-        )
-    )
-    if not result.fetchone():
+    inspector = sa.inspect(conn)
+    existing = {c["name"] for c in inspector.get_columns("containers")}
+    if "startup_command" not in existing:
         op.add_column("containers", sa.Column("startup_command", sa.String(), nullable=True))
 
 

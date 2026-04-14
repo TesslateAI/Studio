@@ -468,6 +468,7 @@ Each `CLAUDE.md` file contains:
 
 | Task | Start Here |
 |------|------------|
+| Desktop client (Tauri shell) | `docs/desktop/CLAUDE.md` |
 | Docker setup from scratch | `docs/guides/docker-setup.md` |
 | Database seeding | `docker-dev` skill |
 | Database migrations | `docs/guides/database-migrations.md` |

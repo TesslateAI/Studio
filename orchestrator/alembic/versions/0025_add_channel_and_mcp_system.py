@@ -6,9 +6,8 @@ Create Date: 2026-03-12
 """
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID
-
 # revision identifiers
 revision = "0025_channels_mcp"
 down_revision = "0024_add_skills_system"
@@ -17,32 +16,24 @@ depends_on = None
 
 
 def _table_exists(table: str) -> bool:
-    conn = op.get_bind()
-    result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name = :table AND table_schema = 'public'"
-        ),
-        {"table": table},
-    )
-    return result.fetchone() is not None
+    return table in sa.inspect(op.get_bind()).get_table_names()
 
 
 def upgrade() -> None:
     if not _table_exists("channel_configs"):
         op.create_table(
             "channel_configs",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True),
+            sa.Column("id", GUID(), primary_key=True),
             sa.Column(
                 "user_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("users.id"),
                 nullable=False,
                 index=True,
             ),
             sa.Column(
                 "project_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("projects.id"),
                 nullable=True,
                 index=True,
@@ -53,7 +44,7 @@ def upgrade() -> None:
             sa.Column("webhook_secret", sa.String(64), nullable=False),
             sa.Column(
                 "default_agent_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("marketplace_agents.id"),
                 nullable=True,
             ),
@@ -65,10 +56,10 @@ def upgrade() -> None:
     if not _table_exists("channel_messages"):
         op.create_table(
             "channel_messages",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True),
+            sa.Column("id", GUID(), primary_key=True),
             sa.Column(
                 "channel_config_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("channel_configs.id"),
                 nullable=False,
                 index=True,
@@ -86,17 +77,17 @@ def upgrade() -> None:
     if not _table_exists("user_mcp_configs"):
         op.create_table(
             "user_mcp_configs",
-            sa.Column("id", UUID(as_uuid=True), primary_key=True),
+            sa.Column("id", GUID(), primary_key=True),
             sa.Column(
                 "user_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("users.id"),
                 nullable=False,
                 index=True,
             ),
             sa.Column(
                 "marketplace_agent_id",
-                UUID(as_uuid=True),
+                GUID(),
                 sa.ForeignKey("marketplace_agents.id"),
                 nullable=False,
             ),

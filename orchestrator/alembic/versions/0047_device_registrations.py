@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
+from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
 revision: str = "0047_device_registrations"
@@ -22,16 +22,16 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.create_table(
         "device_registrations",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "user_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "api_key_id",
-            postgresql.UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("external_api_keys.id", ondelete="CASCADE"),
             nullable=False,
             unique=True,

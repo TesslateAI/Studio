@@ -63,14 +63,18 @@ class Settings(BaseSettings):
     # Base URL for dev containers - set via environment
     dev_server_base_url: str = ""
 
-    # Deployment mode: "docker" (local with Docker+Traefik) or "kubernetes" (K8s cluster)
+    # Deployment mode: "docker" | "kubernetes" | "local" | "desktop"
     # Use the orchestration module for type-safe access: from app.services.orchestration import is_docker_mode
     deployment_mode: str = "docker"
 
     # Deployment environment: determines which feature flag overlay to load.
-    # Values: "docker" (local docker-compose), "minikube", "beta", "production"
+    # Values: "docker" (local docker-compose), "minikube", "beta", "production", "desktop"
     # Falls back to defaults.yaml when the env file doesn't exist.
     deployment_env: str = "docker"
+
+    # Desktop: root directory for projects, cache, sqlite db, etc.
+    # Empty string → resolved per-OS at runtime via services.desktop_paths.resolve_studio_home().
+    tesslate_studio_home: str = ""
 
     @property
     def is_docker_mode(self) -> bool:
@@ -81,6 +85,11 @@ class Settings(BaseSettings):
     def is_kubernetes_mode(self) -> bool:
         """Check if running in Kubernetes deployment mode."""
         return self.deployment_mode.lower() == "kubernetes"
+
+    @property
+    def is_desktop_mode(self) -> bool:
+        """Check if running inside the Tauri desktop shell."""
+        return self.deployment_mode.lower() == "desktop"
 
     # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_level: str = "INFO"

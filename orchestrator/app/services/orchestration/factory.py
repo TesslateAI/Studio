@@ -54,6 +54,11 @@ class OrchestratorFactory:
         if mode is None:
             mode = OrchestratorFactory.get_deployment_mode()
 
+        # Desktop is a shell mode — projects resolve per-row via resolve_for_project.
+        # When no project context is available, fall back to LOCAL (the desktop default).
+        if mode == DeploymentMode.DESKTOP:
+            mode = DeploymentMode.LOCAL
+
         # Return cached instance if available
         if mode in _orchestrators:
             return _orchestrators[mode]
@@ -86,6 +91,43 @@ class OrchestratorFactory:
         _orchestrators[mode] = orchestrator
 
         return orchestrator
+
+    @staticmethod
+    def resolve_for_project(project: object) -> BaseOrchestrator:
+        """
+        Resolve the orchestrator for a specific project row.
+
+        Reads `project.runtime` (`local` | `docker` | `k8s`) and returns the
+        matching cached orchestrator. Projects without a runtime attribute
+        fall back to the deployment-wide mode; under `DEPLOYMENT_MODE=desktop`
+        the default is `local` so legacy rows still open in-process.
+
+        Values map as follows:
+          - "local"      → DeploymentMode.LOCAL
+          - "docker"     → DeploymentMode.DOCKER
+          - "k8s"        → DeploymentMode.KUBERNETES
+          - unset / None → deployment-wide default (with desktop → LOCAL)
+        """
+        runtime = getattr(project, "runtime", None)
+        if runtime is None:
+            mode = OrchestratorFactory.get_deployment_mode()
+            if mode == DeploymentMode.DESKTOP:
+                mode = DeploymentMode.LOCAL
+            return OrchestratorFactory.create_orchestrator(mode)
+
+        runtime_str = str(runtime).lower()
+        mapping = {
+            "local": DeploymentMode.LOCAL,
+            "docker": DeploymentMode.DOCKER,
+            "k8s": DeploymentMode.KUBERNETES,
+            "kubernetes": DeploymentMode.KUBERNETES,
+        }
+        target = mapping.get(runtime_str)
+        if target is None:
+            raise ValueError(
+                f"Unsupported Project.runtime: '{runtime}'. Expected one of: local, docker, k8s"
+            )
+        return OrchestratorFactory.create_orchestrator(target)
 
     @staticmethod
     def is_docker_mode() -> bool:

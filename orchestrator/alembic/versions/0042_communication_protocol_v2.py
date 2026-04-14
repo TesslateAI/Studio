@@ -6,9 +6,8 @@ Create Date: 2026-04-07
 """
 
 import sqlalchemy as sa
+from app.types.guid import GUID
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID
-
 revision = "0042_comm_proto_v2"
 down_revision = "0041_team_theme_preset"
 branch_labels = None
@@ -21,15 +20,11 @@ def upgrade() -> None:
     op.add_column("chats", sa.Column("platform", sa.String(20), nullable=True))
     op.add_column("chats", sa.Column("platform_chat_id", sa.String(255), nullable=True))
     op.add_column("chats", sa.Column("platform_thread_id", sa.String(255), nullable=True))
-    op.add_column(
-        "chats",
-        sa.Column(
-            "channel_config_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("channel_configs.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-    )
+    op.add_column("chats", sa.Column("channel_config_id", GUID(), nullable=True))
+    with op.batch_alter_table("chats") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_chats_channel_config_id", "channel_configs", ["channel_config_id"], ["id"], ondelete="SET NULL"
+        )
     op.add_column(
         "chats",
         sa.Column("last_active_at", sa.DateTime(timezone=True), nullable=True),
@@ -47,10 +42,10 @@ def upgrade() -> None:
     # --- PlatformIdentity ---
     op.create_table(
         "platform_identities",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "user_id",
-            UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=True,
         ),
@@ -73,22 +68,22 @@ def upgrade() -> None:
     # --- AgentSchedule ---
     op.create_table(
         "agent_schedules",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "user_id",
-            UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "project_id",
-            UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("projects.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "agent_id",
-            UUID(as_uuid=True),
+            GUID(),
             sa.ForeignKey("marketplace_agents.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -100,7 +95,7 @@ def upgrade() -> None:
         sa.Column("deliver", sa.String(100), server_default="origin"),
         sa.Column("origin_platform", sa.String(20), nullable=True),
         sa.Column("origin_chat_id", sa.String(255), nullable=True),
-        sa.Column("origin_config_id", UUID(as_uuid=True), nullable=True),
+        sa.Column("origin_config_id", GUID(), nullable=True),
         sa.Column("is_active", sa.Boolean(), default=True),
         sa.Column("repeat", sa.Integer(), nullable=True),
         sa.Column("runs_completed", sa.Integer(), server_default="0"),
