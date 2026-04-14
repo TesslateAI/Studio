@@ -52,7 +52,7 @@ def test_different_agents_never_collide():
     rb = _row(scope_level="user", marketplace_agent_id=b)
     out = _apply_precedence([ra, rb])
     # Order within the dict is insertion order; exact order doesn't matter.
-    assert set(out) == {ra, rb}
+    assert len(out) == 2 and ra in out and rb in out
 
 
 def test_custom_connectors_never_dedupe():

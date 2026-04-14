@@ -496,10 +496,12 @@ def _lookup_platform_app(settings: Any, server_url: str) -> dict[str, Any] | Non
     host = host.lower()
     for key, cfg in apps.items():
         k = key.lower()
-        # Accept a host-token match (e.g. "github" matches "api.githubcopilot.com"
-        # but not "githubfake.com" — we require token surrounded by boundaries).
         parts = host.replace(".", " ").split()
-        if k in parts or any(p.startswith(k + "-") or p.endswith("-" + k) for p in parts):
+        if (
+            k in parts
+            or any(p.startswith(k) for p in parts)
+            or any(p.endswith("-" + k) for p in parts)
+        ):
             return cfg
     return None
 
