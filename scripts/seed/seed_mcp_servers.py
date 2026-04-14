@@ -68,7 +68,11 @@ MCP_SERVERS = [
         ],
         "tags": ["documentation", "libraries", "code-examples", "developer-tools", "context"],
         "is_active": True,
-        "is_featured": True,
+        # Unpublished as part of #307 — only the four OAuth connectors from
+        # the original #287 catalog (Linear, GitHub, Notion, Atlassian) are
+        # user-facing. Pre-OAuth MCPs stay in the DB for backward compat.
+        "is_featured": False,
+        "is_published": False,
         "pricing_type": "free",
         "price": 0,
         "icon": "BookOpen",
@@ -147,6 +151,7 @@ MCP_SERVERS = [
         "tags": ["search", "web", "brave", "privacy", "api"],
         "is_active": True,
         "is_featured": False,
+        "is_published": False,  # Unpublished in #307 — see Context7 note.
         "pricing_type": "free",
         "price": 0,
         "icon": "Search",
@@ -180,6 +185,7 @@ MCP_SERVERS = [
         "tags": ["slack", "messaging", "communication", "team", "chat"],
         "is_active": True,
         "is_featured": False,
+        "is_published": False,  # Unpublished in #307 — see Context7 note.
         "pricing_type": "free",
         "price": 0,
         "icon": "MessageSquare",
@@ -214,6 +220,7 @@ MCP_SERVERS = [
         "tags": ["postgresql", "database", "sql", "data", "analytics"],
         "is_active": True,
         "is_featured": False,
+        "is_published": False,  # Unpublished in #307 — see Context7 note.
         "pricing_type": "free",
         "price": 0,
         "icon": "Database",
@@ -248,6 +255,7 @@ MCP_SERVERS = [
         "tags": ["filesystem", "files", "storage", "developer-tools"],
         "is_active": True,
         "is_featured": False,
+        "is_published": False,  # Unpublished in #307 — see Context7 note.
         "pricing_type": "free",
         "price": 0,
         "icon": "FolderOpen",
