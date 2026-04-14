@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal
-from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import select

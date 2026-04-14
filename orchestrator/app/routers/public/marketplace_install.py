@@ -185,7 +185,6 @@ async def ack_install(
     if agent_row is None and base_row is None:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    row = agent_row or base_row
     resource_type = "agent" if agent_row is not None else "base"
 
     await audit_write(

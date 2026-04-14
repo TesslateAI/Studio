@@ -19,8 +19,10 @@ operates identically regardless of `DEPLOYMENT_MODE`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -38,12 +40,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-import hashlib
-from datetime import UTC, datetime
-
 from ...database import AsyncSessionLocal, get_db
-from ...models import ExternalAPIKey
-from ...models import Container, ContainerConnection, User
+from ...models import Container, ContainerConnection, ExternalAPIKey, User
 from ...permissions import Permission, get_project_with_access
 from ...services.orchestration import get_orchestrator
 from ._deps import audit_write, scoped

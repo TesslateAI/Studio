@@ -21,14 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database import get_db
 from ...models import User
-from ..external_agent import _get_arq_pool
 from ...permissions import Permission, get_project_with_access
 from ...services.public.handoff_service import (
-    bundle_from_payload,
     build_enqueue_payload,
+    bundle_from_payload,
     serialize_task,
 )
 from ...services.task_manager import TaskStatus, get_task_manager
+from ..external_agent import _get_arq_pool
 from ._deps import audit_write, scoped
 
 logger = logging.getLogger(__name__)
