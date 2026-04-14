@@ -45,6 +45,7 @@ def _build_config_response(
     agent: MarketplaceAgent | None = None,
 ) -> McpConfigResponse:
     """Build a McpConfigResponse from a UserMcpConfig row."""
+    agent_config = (agent.config or {}) if agent else {}
     return McpConfigResponse(
         id=config.id,
         marketplace_agent_id=config.marketplace_agent_id,
@@ -52,7 +53,11 @@ def _build_config_response(
         server_slug=agent.slug if agent else None,
         enabled_capabilities=config.enabled_capabilities,
         is_active=config.is_active,
-        env_vars=(agent.config or {}).get("env_vars") if agent else None,
+        env_vars=agent_config.get("env_vars"),
+        scope_level=config.scope_level,
+        project_id=config.project_id,
+        is_oauth=agent_config.get("auth_type") == "oauth",
+        disabled_tools=config.disabled_tools,
         created_at=config.created_at,
         updated_at=config.updated_at,
     )
@@ -184,8 +189,24 @@ async def install_mcp_server(
     user=Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Install an MCP server from the marketplace."""
-    # Verify the marketplace item exists and is an MCP server
+    """Install an MCP (Connector) server from the marketplace.
+
+    Scope semantics (issue #307):
+    - Default scope is ``user`` — the install lands on the caller with
+      ``team_id=NULL`` and follows them across every team they belong to.
+    - ``scope_level="project"`` is a per-user override pinned to a project
+      and requires ``PROJECT_EDIT`` on the target project.
+    - ``scope_level="team"`` is rejected with 400 because OAuth identities
+      can't be shared across members (each user has their own tokens).
+
+    The write is delegated to :func:`services.mcp.oauth_flow._upsert_user_mcp_config`
+    so the static-credential and OAuth install paths converge on the same
+    uniqueness tuple ``(user, agent, scope_level, team_id, project_id)``.
+    """
+    from ..permissions import Permission, get_project_with_access
+    from ..services.mcp.oauth_flow import FlowState, _upsert_user_mcp_config
+
+    # 1. Verify the marketplace item exists and is an MCP server.
     agent = await _get_agent_for_config(body.marketplace_agent_id, db)
     if agent.item_type != "mcp_server":
         raise HTTPException(
@@ -193,18 +214,35 @@ async def install_mcp_server(
             detail="Marketplace item is not an MCP server",
         )
 
-    # Resolve active team for ownership scoping
-    team_id = user.default_team_id
+    # 2. Scope validation + RBAC.
+    if body.scope_level not in ("user", "project"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Unsupported scope_level. Connectors install at 'user' (default) or "
+                "'project' scope. Team-scope install is not supported because OAuth "
+                "identities cannot be shared across team members."
+            ),
+        )
+    project_id = None
+    if body.scope_level == "project":
+        if not body.project_id:
+            raise HTTPException(
+                status_code=400,
+                detail="project_id is required when scope_level='project'",
+            )
+        # Raises 403/404 itself if the user can't edit the project.
+        project, _role = await get_project_with_access(
+            db, str(body.project_id), user.id, Permission.PROJECT_EDIT
+        )
+        project_id = project.id
 
-    # Check per-user/team server limit
-    limit_filter = (
-        UserMcpConfig.team_id == team_id
-        if team_id
-        else UserMcpConfig.user_id == user.id
-    )
+    # 3. Per-user install ceiling (counted across active rows for this user only —
+    #    team_id is now always NULL on new rows so the limit is per-human, not
+    #    per-team-account).
     count_result = await db.execute(
         select(func.count()).where(
-            limit_filter,
+            UserMcpConfig.user_id == user.id,
             UserMcpConfig.is_active.is_(True),
         )
     )
@@ -212,31 +250,55 @@ async def install_mcp_server(
     if current_count >= settings.mcp_max_servers_per_user:
         raise HTTPException(
             status_code=400,
-            detail=f"Maximum of {settings.mcp_max_servers_per_user} MCP servers per user",
+            detail=f"Maximum of {settings.mcp_max_servers_per_user} connectors per user",
         )
 
-    # Encrypt credentials if provided
+    # 4. Encrypt credentials (static-auth connectors only; OAuth connectors
+    #    use services.mcp.oauth_flow).
     encrypted_creds = None
     if body.credentials:
         encrypted_creds = encrypt_credentials(body.credentials)
 
-    # Determine default capabilities from server config
-    server_config = agent.config or {}
-    default_capabilities = server_config.get("capabilities", ["tools", "resources", "prompts"])
-
-    config = UserMcpConfig(
-        user_id=user.id,
-        team_id=team_id,
-        marketplace_agent_id=body.marketplace_agent_id,
-        credentials=encrypted_creds,
-        enabled_capabilities=default_capabilities,
-        is_active=True,
+    # 5. Upsert via the shared helper so both install paths converge on the
+    #    same uniqueness tuple. We wrap args in a FlowState-compatible
+    #    dataclass shape — the helper only reads these fields.
+    flow = FlowState(
+        flow_id="static-install",
+        user_id=str(user.id),
+        server_url=(agent.config or {}).get("url") or f"internal://{agent.slug}",
+        auth_server_url="",
+        token_endpoint="",
+        registration_endpoint=None,
+        scope=None,
+        code_verifier="n/a",
+        code_challenge="n/a",
+        client_info={},
+        registration_method="dcr",  # unused for static install
+        marketplace_agent_id=str(body.marketplace_agent_id),
+        scope_level=body.scope_level,
+        team_id=None,  # never team-scoped on new installs
+        project_id=str(project_id) if project_id else None,
+        redirect_uri="",
+        resource="",
+        protocol_version=None,
     )
-    db.add(config)
+    config = await _upsert_user_mcp_config(db, flow=flow)
+
+    # 6. Apply static-auth fields (credentials + capabilities) — these aren't
+    #    set by the OAuth helper path.
+    server_config = agent.config or {}
+    default_capabilities = server_config.get(
+        "capabilities", ["tools", "resources", "prompts"]
+    )
+    if encrypted_creds is not None:
+        config.credentials = encrypted_creds
+    config.enabled_capabilities = default_capabilities
+    config.is_active = True
+
     await db.commit()
     await db.refresh(config)
 
-    # Test connection (non-fatal)
+    # 7. Test connection (non-fatal).
     try:
         creds = body.credentials or {}
         await _discover_server(agent, creds)
