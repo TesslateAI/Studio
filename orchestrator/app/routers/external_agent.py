@@ -46,7 +46,7 @@ from ..services.agent_context import (
 from ..users import current_active_user
 
 settings = get_settings()
-router = APIRouter(prefix="/api/external", tags=["external"])
+router = APIRouter(prefix="/api/external", tags=["external"], deprecated=True)
 logger = logging.getLogger(__name__)
 
 
