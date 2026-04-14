@@ -1524,6 +1524,10 @@ class McpConfigResponse(BaseModel):
     project_id: UUID | None = None
     is_oauth: bool = False
     disabled_tools: list[str] | None = None
+    # Provider branding so the Library card can render the real logo
+    # instead of a generic plug.
+    icon: str | None = None  # Phosphor icon name (fallback when avatar_url missing)
+    icon_url: str | None = None  # Provider favicon / avatar URL
     created_at: datetime
     updated_at: datetime | None = None
 

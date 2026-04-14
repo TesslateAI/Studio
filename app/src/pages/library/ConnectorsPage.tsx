@@ -43,6 +43,10 @@ export interface InstalledMcpServer {
   project_id?: string | null;
   is_oauth?: boolean;
   disabled_tools?: string[] | null;
+  // Provider branding (provider favicon / avatar) so the card shows the
+  // real logo instead of a generic plug.
+  icon?: string | null;
+  icon_url?: string | null;
 }
 
 interface ConnectorsPageProps {
@@ -591,10 +595,26 @@ function McpServerCard({
       aria-label={`${server.server_name || server.server_slug || 'Connector'} connector`}
       className="group relative flex flex-col bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-colors p-4"
     >
-      {/* Header: icon + title */}
+      {/* Header: provider icon + title.
+          Prefer the marketplace agent's avatar_url (Linear/GitHub/Notion
+          favicons); fall back to the generic plug glyph for custom or
+          legacy connectors that don't carry one. */}
       <div className="flex items-center gap-3 mb-3">
-        <div className="w-8 h-8 rounded-lg bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)]">
-          <Plugs size={16} weight="duotone" />
+        <div className="w-8 h-8 rounded-lg bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0 text-[var(--primary)] overflow-hidden">
+          {server.icon_url ? (
+            <img
+              src={server.icon_url}
+              alt=""
+              className="w-5 h-5 object-contain"
+              onError={(e) => {
+                // If the favicon 404s, fall back to the plug glyph rather
+                // than showing a broken image.
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          ) : (
+            <Plugs size={16} weight="duotone" />
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-xs font-semibold text-[var(--text)] truncate block">
@@ -616,8 +636,12 @@ function McpServerCard({
         </span>
       </div>
 
-      {/* Actions bar */}
-      <div className="flex items-center gap-1 mb-3">
+      {/* Actions bar.
+          flex-wrap so 5–6 buttons (Test / Credentials / Details / Permissions
+          / Reconnect / Uninstall) drop to a second row instead of clipping.
+          Uninstall stays last via order-last so it visually anchors the
+          right side regardless of wrap. */}
+      <div className="flex flex-wrap items-center gap-1 mb-3">
         <button onClick={() => handleTestConnection()} disabled={testingId} className="btn btn-sm">
           <TestTube size={13} />
           {testingId ? 'Testing...' : 'Test'}
@@ -649,7 +673,7 @@ function McpServerCard({
         <button
           onClick={handleUninstall}
           disabled={uninstalling}
-          className="btn btn-sm btn-danger ml-auto"
+          className="btn btn-sm btn-danger order-last ml-auto"
         >
           <Trash size={13} />
           {uninstalling ? 'Removing...' : 'Uninstall'}

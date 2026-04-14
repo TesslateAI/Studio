@@ -58,6 +58,8 @@ def _build_config_response(
         project_id=config.project_id,
         is_oauth=agent_config.get("auth_type") == "oauth",
         disabled_tools=config.disabled_tools,
+        icon=agent.icon if agent else None,
+        icon_url=agent.avatar_url if agent else None,
         created_at=config.created_at,
         updated_at=config.updated_at,
     )
