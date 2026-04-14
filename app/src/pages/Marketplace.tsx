@@ -449,8 +449,6 @@ export default function Marketplace() {
     return (b.downloads || b.usage_count || 0) - (a.downloads || a.usage_count || 0);
   });
   const featuredItems = sortedByRating.slice(0, 3);
-  const featuredIds = new Set(featuredItems.map((item) => item.id));
-  const regularItems = items.filter((item) => !featuredIds.has(item.id));
 
   // Check if any filters are active
   const hasActiveFilters = pricingFilter !== 'all' || searchQuery !== '';
