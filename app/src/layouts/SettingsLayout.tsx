@@ -7,6 +7,7 @@ const settingsTabs = [
   { label: 'Preferences', path: '/settings/preferences' },
   { label: 'Security', path: '/settings/security' },
   { label: 'Deployment', path: '/settings/deployment' },
+  { label: 'Connectors', path: '/settings/connectors' },
   { label: 'API Keys', path: '/settings/api-keys' },
 ];
 

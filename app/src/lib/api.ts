@@ -1614,6 +1614,73 @@ export const marketplaceApi = {
     return response.data;
   },
 
+  // MCP OAuth Connectors (issue #287) --------------------------------------
+  getMcpCatalog: async () => {
+    const response = await api.get('/api/mcp/catalog');
+    return response.data as Array<{
+      id: string;
+      slug: string;
+      name: string;
+      description: string;
+      icon?: string | null;
+      icon_url?: string | null;
+      category?: string | null;
+      config: Record<string, any>;
+    }>;
+  },
+
+  startMcpOAuth: async (body: {
+    marketplace_agent_slug?: string;
+    server_url?: string;
+    registration_method: 'dcr' | 'byo' | 'platform_app';
+    scope_level?: 'team' | 'user' | 'project';
+    team_id?: string;
+    project_id?: string;
+    byo_client_id?: string;
+    byo_client_secret?: string;
+    scope?: string;
+  }) => {
+    const response = await api.post('/api/mcp/oauth/start', body);
+    return response.data as { authorize_url: string; flow_id: string };
+  },
+
+  getMcpOAuthStatus: async (flowId: string) => {
+    const response = await api.get(`/api/mcp/oauth/status/${flowId}`);
+    return response.data as {
+      status: 'pending' | 'success' | 'error' | 'unknown';
+      config_id?: string | null;
+      error?: string | null;
+    };
+  },
+
+  updateMcpDisabledTools: async (configId: string, disabledTools: string[]) => {
+    const response = await api.patch(`/api/mcp/installed/${configId}/tools`, {
+      disabled_tools: disabledTools,
+    });
+    return response.data;
+  },
+
+  overrideMcpForProject: async (configId: string, projectId: string) => {
+    const response = await api.post(`/api/mcp/installed/${configId}/override`, {
+      project_id: projectId,
+    });
+    return response.data as {
+      id: string;
+      parent_config_id: string;
+      project_id: string;
+      scope_level: string;
+    };
+  },
+
+  removeProjectMcpOverride: async (configId: string) => {
+    await api.delete(`/api/mcp/installed/${configId}/override`);
+  },
+
+  reconnectMcp: async (configId: string) => {
+    const response = await api.post(`/api/mcp/installed/${configId}/reconnect`);
+    return response.data as { authorize_url: string; flow_id: string };
+  },
+
   getSkillDetails: async (slug: string) => {
     const response = await api.get(`/api/marketplace/skills/${slug}`);
     return response.data;
