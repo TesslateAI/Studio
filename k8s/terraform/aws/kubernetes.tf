@@ -150,6 +150,9 @@ resource "kubernetes_secret" "btrfs_csi_config" {
     STORAGE_BUCKET              = aws_s3_bucket.btrfs_snapshots.id
     RCLONE_S3_PROVIDER          = "AWS"
     RCLONE_S3_REGION            = var.aws_region
+    # Native minio-go S3 client (feat/unified-snapshots-system+) requires explicit endpoint.
+    # The old rclone path auto-resolved from region; the new native client does not.
+    RCLONE_S3_ENDPOINT          = "https://s3.${var.aws_region}.amazonaws.com"
     RCLONE_S3_ACCESS_KEY_ID     = ""  # Not needed with IRSA
     RCLONE_S3_SECRET_ACCESS_KEY = ""  # Not needed with IRSA
     RCLONE_S3_ENV_AUTH          = "true"

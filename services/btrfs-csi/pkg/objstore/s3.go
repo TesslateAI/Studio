@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"runtime/debug"
 	"strings"
 
@@ -48,6 +49,57 @@ type S3Storage struct {
 	sem    chan struct{} // bounds concurrent uploads + downloads
 }
 
+// buildS3Credentials selects the appropriate credentials provider for the
+// minio-go client. Precedence:
+//
+//  1. Static keys when both AccessKeyID and SecretAccessKey are set.
+//  2. AWS EKS IRSA (AssumeRoleWithWebIdentity) when AWS_WEB_IDENTITY_TOKEN_FILE
+//     and AWS_ROLE_ARN are present — common for service-account-bound IAM on EKS.
+//  3. IAM chain (env vars → shared file → EC2/ECS metadata) as a final fallback.
+//
+// Returns the provider plus a short source label for logging.
+func buildS3Credentials(cfg S3Config) (*credentials.Credentials, string, error) {
+	if cfg.AccessKeyID != "" && cfg.SecretAccessKey != "" {
+		return credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""), "static", nil
+	}
+
+	tokenFile := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+	roleARN := os.Getenv("AWS_ROLE_ARN")
+	if tokenFile != "" && roleARN != "" {
+		region := cfg.Region
+		if region == "" {
+			region = os.Getenv("AWS_REGION")
+		}
+		if region == "" {
+			region = "us-east-1"
+		}
+		stsEndpoint := fmt.Sprintf("https://sts.%s.amazonaws.com", region)
+
+		creds, err := credentials.NewSTSWebIdentity(
+			stsEndpoint,
+			func() (*credentials.WebIdentityToken, error) {
+				token, err := os.ReadFile(tokenFile)
+				if err != nil {
+					return nil, fmt.Errorf("read IRSA token %s: %w", tokenFile, err)
+				}
+				return &credentials.WebIdentityToken{Token: string(token)}, nil
+			},
+			func(s *credentials.STSWebIdentity) { s.RoleARN = roleARN },
+		)
+		if err != nil {
+			return nil, "", fmt.Errorf("create IRSA credentials: %w", err)
+		}
+		return creds, "irsa", nil
+	}
+
+	// Fallback chain: env vars, shared credentials file, EC2/ECS metadata.
+	return credentials.NewChainCredentials([]credentials.Provider{
+		&credentials.EnvAWS{},
+		&credentials.FileAWSCredentials{},
+		&credentials.IAM{},
+	}), "iam-chain", nil
+}
+
 // NewS3Storage creates a native S3 client backed by minio-go.
 func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 	if cfg.Endpoint == "" {
@@ -70,8 +122,13 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 		endpoint = after
 	}
 
+	creds, credsSource, err := buildS3Credentials(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
+		Creds:  creds,
 		Secure: cfg.UseSSL,
 		Region: cfg.Region,
 	})
@@ -79,8 +136,8 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 		return nil, fmt.Errorf("create S3 client for %s: %w", cfg.Endpoint, err)
 	}
 
-	klog.V(2).Infof("S3 native client connected to %s (bucket=%s, ssl=%v, maxOps=%d)",
-		cfg.Endpoint, cfg.Bucket, cfg.UseSSL, maxConcurrentUploads)
+	klog.V(2).Infof("S3 native client connected to %s (bucket=%s, ssl=%v, creds=%s, maxOps=%d)",
+		cfg.Endpoint, cfg.Bucket, cfg.UseSSL, credsSource, maxConcurrentUploads)
 
 	return &S3Storage{
 		client: client,

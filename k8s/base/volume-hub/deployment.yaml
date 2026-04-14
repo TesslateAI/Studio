@@ -29,6 +29,12 @@ spec:
       containers:
       - name: hub
         image: tesslate-btrfs-csi:latest
+        # Explicit Always: overlays change the tag from :latest to mutable
+        # tags like :beta, which default the pull policy to IfNotPresent and
+        # silently reuse stale cached digests after a push + rollout restart.
+        # See services/btrfs-csi/deploy/manifests/node.yaml (DaemonSet) for
+        # the same pattern on the CSI container.
+        imagePullPolicy: Always
         args:
         - "--mode=hub"
         - "--hub-grpc-port=9750"
