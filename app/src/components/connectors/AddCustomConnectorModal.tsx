@@ -8,7 +8,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  scopeLevel: 'team' | 'user' | 'project';
+  // Team-scope dropped in #307; the modal only exposes user/project.
+  scopeLevel: 'user' | 'project';
   teamId?: string;
   projectId?: string;
 }

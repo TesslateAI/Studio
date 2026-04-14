@@ -1639,8 +1639,8 @@ export const marketplaceApi = {
     marketplace_agent_slug?: string;
     server_url?: string;
     registration_method: 'dcr' | 'byo' | 'platform_app';
-    scope_level?: 'team' | 'user' | 'project';
-    team_id?: string;
+    // Team-scope install was dropped in #307 — the backend 400s "team".
+    scope_level?: 'user' | 'project';
     project_id?: string;
     byo_client_id?: string;
     byo_client_secret?: string;
