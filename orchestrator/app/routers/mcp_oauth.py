@@ -88,12 +88,29 @@ async def start_oauth(
 
     if body.registration_method not in ("dcr", "byo", "platform_app"):
         raise HTTPException(status_code=400, detail="invalid registration_method")
-    if body.scope_level not in ("team", "user", "project"):
-        raise HTTPException(status_code=400, detail="invalid scope_level")
-    if body.scope_level == "team" and not body.team_id:
-        raise HTTPException(status_code=400, detail="team_id required for team scope")
-    if body.scope_level == "project" and not body.project_id:
-        raise HTTPException(status_code=400, detail="project_id required for project scope")
+    if body.scope_level not in ("user", "project"):
+        # Team scope is intentionally unsupported — OAuth identities belong to
+        # individual users and can't be shared across team members. See
+        # issue #307 for the full rationale.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Unsupported scope_level. Connectors install at 'user' (default) "
+                "or 'project' scope. Team-scope install is not supported because "
+                "OAuth identities cannot be shared across team members."
+            ),
+        )
+    if body.scope_level == "project":
+        if not body.project_id:
+            raise HTTPException(
+                status_code=400, detail="project_id required for project scope"
+            )
+        # RBAC: caller must be able to edit the target project.
+        from ..permissions import Permission, get_project_with_access
+
+        await get_project_with_access(
+            db, str(body.project_id), user.id, Permission.PROJECT_EDIT
+        )
 
     marketplace_agent_id: UUID | None = None
     server_url: str
@@ -123,7 +140,7 @@ async def start_oauth(
             redirect_uri=redirect_uri,
             marketplace_agent_id=marketplace_agent_id,
             scope_level=body.scope_level,
-            team_id=body.team_id,
+            team_id=None,  # team-scope install dropped (#307)
             project_id=body.project_id,
             byo_client_id=body.byo_client_id,
             byo_client_secret=body.byo_client_secret,
