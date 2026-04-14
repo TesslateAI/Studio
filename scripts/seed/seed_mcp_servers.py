@@ -107,7 +107,13 @@ MCP_SERVERS = [
         ],
         "tags": ["github", "git", "version-control", "developer-tools", "ci-cd"],
         "is_active": True,
-        "is_featured": True,
+        # Unpublished in favour of `mcp-github-oauth` which uses the Tesslate
+        # platform OAuth app instead of a personal access token (#307). The
+        # row is kept so existing installs keep working — the agent resolves
+        # by UserMcpConfig row, not by is_published — but it no longer shows
+        # up in the Marketplace catalog.
+        "is_featured": False,
+        "is_published": False,
         "pricing_type": "free",
         "price": 0,
         "icon": "Github",
