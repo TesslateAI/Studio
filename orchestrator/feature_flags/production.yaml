@@ -2,3 +2,4 @@
 # Only list flags that differ from defaults.yaml
 
 two_fa: true
+enable_landing_page: false

@@ -8,6 +8,7 @@ import { ChatPositionProvider } from './contexts/ChatPositionContext';
 import { TeamProvider } from './contexts/TeamContext';
 import { CommandProvider } from './contexts/CommandContext';
 import { FeatureFlagProvider } from './contexts/FeatureFlagContext';
+import { useFeatureFlags } from './contexts/useFeatureFlag';
 import { DashboardLayout } from './components/DashboardLayout';
 import { PrivateRoute, PublicOnlyRoute } from './components/RouteGuards';
 import Landing from './pages/Landing';
@@ -58,6 +59,16 @@ import UserProfilePage from './pages/UserProfile';
 function CategoryRedirect() {
   const { category } = useParams();
   return <Navigate to={`/marketplace/browse/agent?category=${category}`} replace />;
+}
+
+function LandingRoute() {
+  const { flags, loading } = useFeatureFlags();
+  // While flags are loading, render the landing page to match the `true`
+  // default — avoids a redirect flicker for the common case.
+  if (!loading && flags.enable_landing_page === false) {
+    return <Navigate to="/login" replace />;
+  }
+  return <NewLandingPage />;
 }
 
 function AppContent() {
@@ -242,7 +253,7 @@ function AppContent() {
         )}
       </Toaster>
       <Routes>
-        <Route path="/" element={<NewLandingPage />} />
+        <Route path="/" element={<LandingRoute />} />
         <Route path="/landing-old" element={<Landing />} />
         <Route
           path="/login"

@@ -18,6 +18,11 @@
 # -- Authentication -----------------------------------------------------------
 two_fa: false
 
+# -- UI -----------------------------------------------------------------------
+# When false, GET "/" redirects straight to /login instead of rendering the
+# marketing landing page.
+enable_landing_page: true
+
 # -- Infrastructure -----------------------------------------------------------
 template_builder: true
 fileops_v2: true
@@ -36,3 +41,4 @@ agent_apply_patch: true
 public:
   - two_fa
   - template_builder
+  - enable_landing_page
