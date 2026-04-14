@@ -5036,15 +5036,19 @@ async def get_marketplace_mcp_servers(
     - Authenticated: Shows purchase status (is_purchased) for each MCP server
     - Unauthenticated: Shows catalog without purchase status
     """
-    # Base query – only active, published MCP servers
+    # Base query – only active, published MCP servers.
+    # NOTE: unlike other marketplace item types (which keep the
+    # "official-or-published" OR for backward compat), Connectors require
+    # is_published=True even for Tesslate-owned rows. This is what lets us
+    # unpublish the pre-OAuth MCPs (Brave / Slack stdio / Postgres / …) in
+    # #307 without deleting them.
     query = (
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
             MarketplaceAgent.item_type == "mcp_server",
-            (MarketplaceAgent.forked_by_user_id.is_(None))
-            | (MarketplaceAgent.is_published.is_(True)),
+            MarketplaceAgent.is_published.is_(True),
         )
     )
 
@@ -5199,7 +5203,7 @@ async def get_mcp_server_details(
     )
     mcp_server = result.scalar_one_or_none()
 
-    if not mcp_server or not mcp_server.is_active:
+    if not mcp_server or not mcp_server.is_active or not mcp_server.is_published:
         raise HTTPException(status_code=404, detail="MCP server not found")
 
     # Check purchase status, scoped to active team
