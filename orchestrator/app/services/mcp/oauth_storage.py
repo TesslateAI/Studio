@@ -96,8 +96,8 @@ class PostgresTokenStorage(TokenStorage):
         row = await self._load()
         if row is None:
             raise RuntimeError(
-                "PostgresTokenStorage.set_tokens called before set_client_info "
-                "for user_mcp_config_id=%s" % self._user_mcp_config_id
+                f"PostgresTokenStorage.set_tokens called before set_client_info "
+                f"for user_mcp_config_id={self._user_mcp_config_id}"
             )
         payload = _json_dump_model(tokens)
         row.tokens_encrypted = encrypt_credentials(payload)
@@ -116,9 +116,9 @@ class PostgresTokenStorage(TokenStorage):
             # etc. set. This branch is only reached if something invokes set_client_info
             # without a prior insert — we surface it clearly instead of silently NOOPing.
             raise RuntimeError(
-                "PostgresTokenStorage.set_client_info called but McpOAuthConnection row "
-                "does not exist for user_mcp_config_id=%s. Create it via "
-                "oauth_flow.complete_oauth_flow first." % self._user_mcp_config_id
+                f"PostgresTokenStorage.set_client_info called but McpOAuthConnection row "
+                f"does not exist for user_mcp_config_id={self._user_mcp_config_id}. "
+                f"Create it via oauth_flow.complete_oauth_flow first."
             )
         row.client_info_encrypted = encrypted
         await self._db.flush()

@@ -70,8 +70,9 @@ export function AddCustomConnectorModal({
       } else {
         toast.error(result.message || 'Connection failed');
       }
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to start OAuth flow');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to start OAuth flow';
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }

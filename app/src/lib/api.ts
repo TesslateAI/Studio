@@ -1625,7 +1625,7 @@ export const marketplaceApi = {
       icon?: string | null;
       icon_url?: string | null;
       category?: string | null;
-      config: Record<string, any>;
+      config: Record<string, unknown>;
     }>;
   },
 

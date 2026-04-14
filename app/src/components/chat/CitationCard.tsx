@@ -48,8 +48,16 @@ export function CitationCard({ citation }: { citation: CitationData }) {
   );
 }
 
-export function renderCitations(value: unknown): JSX.Element[] | null {
+export function Citations({ value }: { value: unknown }) {
   if (!value) return null;
-  const items: CitationData[] = Array.isArray(value) ? (value as CitationData[]) : [value as CitationData];
-  return items.map((c, i) => <CitationCard key={i} citation={c} />);
+  const items: CitationData[] = Array.isArray(value)
+    ? (value as CitationData[])
+    : [value as CitationData];
+  return (
+    <>
+      {items.map((c, i) => (
+        <CitationCard key={i} citation={c} />
+      ))}
+    </>
+  );
 }

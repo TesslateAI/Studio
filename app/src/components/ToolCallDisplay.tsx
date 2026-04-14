@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { type ToolCallDetail } from '../types/agent';
 import { AnsiLine } from '../lib/ansi';
-import { renderCitations } from './chat/CitationCard';
+import { Citations } from './chat/CitationCard';
 import { ReauthBanner } from './chat/ReauthBanner';
 
 interface ToolCallDisplayProps {
@@ -251,7 +251,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
       {/* MCP OAuth: Citation cards — from _mcp_structured.citation */}
       {citation ? (
         <div className="border-t border-current/10 px-3 py-2 space-y-2">
-          {renderCitations(citation)}
+          <Citations value={citation} />
         </div>
       ) : null}
 

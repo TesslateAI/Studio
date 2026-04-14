@@ -4,6 +4,7 @@ import { ArrowUUpLeft, GitBranch, Plug } from '@phosphor-icons/react';
 import { marketplaceApi } from '../../lib/api';
 import { LoadingSpinner } from '../PulsingGridSpinner';
 import { useTeam } from '../../contexts/TeamContext';
+import { apiErrorMessage } from './errorHelpers';
 
 interface InstalledConfig {
   id: string;
@@ -34,8 +35,8 @@ export function ProjectConnectorPanel({ projectId }: Props) {
     try {
       const list = await marketplaceApi.getInstalledMcpServers();
       setConfigs(list);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to load connectors');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to load connectors'));
     } finally {
       setLoading(false);
     }
@@ -51,8 +52,8 @@ export function ProjectConnectorPanel({ projectId }: Props) {
       await marketplaceApi.overrideMcpForProject(c.id, projectId);
       toast.success(`Override created for ${c.server_name || 'connector'}`);
       await load();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to override');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to override'));
     } finally {
       setWorking(null);
     }
@@ -67,8 +68,8 @@ export function ProjectConnectorPanel({ projectId }: Props) {
       await marketplaceApi.removeProjectMcpOverride(c.id);
       toast.success('Override removed');
       await load();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to remove override');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to remove override'));
     } finally {
       setWorking(null);
     }

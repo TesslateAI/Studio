@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { X, Warning } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import { marketplaceApi } from '../../lib/api';
+import { apiErrorMessage } from './errorHelpers';
 
 export interface ConnectorTool {
   /** Prefixed form, e.g. "mcp__github__list_repos" */
@@ -75,8 +76,8 @@ export function ConnectorPermissionsDrawer({
       toast.success('Permissions updated');
       onSaved(Array.from(disabled));
       onClose();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to update permissions');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to update permissions'));
     } finally {
       setSaving(false);
     }

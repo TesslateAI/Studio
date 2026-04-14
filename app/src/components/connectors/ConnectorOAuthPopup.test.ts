@@ -8,26 +8,34 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runOAuthPopup, type StatusPoller } from './ConnectorOAuthPopup';
 
+type MessageListener = (ev: MessageEvent) => void;
+
 describe('runOAuthPopup', () => {
   const originalOpen = window.open;
-  let listeners: Array<(ev: MessageEvent) => void> = [];
+  let listeners: MessageListener[] = [];
 
   beforeEach(() => {
     listeners = [];
     vi.useFakeTimers();
 
-    window.addEventListener = vi.fn((type: string, cb: any) => {
-      if (type === 'message') listeners.push(cb);
-    }) as any;
-    window.removeEventListener = vi.fn((type: string, cb: any) => {
-      if (type === 'message') listeners = listeners.filter((l) => l !== cb);
-    }) as any;
+    window.addEventListener = vi.fn(
+      (type: string, cb: EventListenerOrEventListenerObject) => {
+        if (type === 'message') listeners.push(cb as MessageListener);
+      },
+    ) as unknown as typeof window.addEventListener;
+    window.removeEventListener = vi.fn(
+      (type: string, cb: EventListenerOrEventListenerObject) => {
+        if (type === 'message') listeners = listeners.filter((l) => l !== cb);
+      },
+    ) as unknown as typeof window.removeEventListener;
 
-    (window as any).open = vi.fn(() => ({ closed: false, close: vi.fn() }));
+    (window as unknown as { open: typeof window.open }).open = vi.fn(
+      () => ({ closed: false, close: vi.fn() }) as unknown as Window,
+    );
   });
 
   afterEach(() => {
-    (window as any).open = originalOpen;
+    (window as unknown as { open: typeof window.open }).open = originalOpen;
     vi.useRealTimers();
   });
 

@@ -17,6 +17,7 @@ import {
   ConnectorPermissionsDrawer,
   type ConnectorTool,
 } from '../../components/connectors/ConnectorPermissionsDrawer';
+import { apiErrorMessage } from '../../components/connectors/errorHelpers';
 
 interface CatalogEntry {
   id: string;
@@ -26,7 +27,7 @@ interface CatalogEntry {
   icon?: string | null;
   icon_url?: string | null;
   category?: string | null;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
 }
 
 interface InstalledConfig {
@@ -68,8 +69,8 @@ export function ConnectorsPage() {
       ]);
       setCatalog(cat);
       setInstalled(inst);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to load connectors');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to load connectors'));
     } finally {
       setLoading(false);
     }
@@ -106,8 +107,8 @@ export function ConnectorsPage() {
       } else {
         toast.error(result.message || 'Connection failed');
       }
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to start OAuth flow');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to start OAuth flow'));
     } finally {
       setConnecting(null);
     }
@@ -127,8 +128,8 @@ export function ConnectorsPage() {
       } else {
         toast.error(result.message || 'Reconnection failed');
       }
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to reconnect');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to reconnect'));
     }
   };
 
@@ -138,8 +139,8 @@ export function ConnectorsPage() {
       await marketplaceApi.uninstallMcpServer(configId);
       toast.success(`Disconnected ${label}`);
       await load();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to disconnect');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to disconnect'));
     }
   };
 
@@ -156,8 +157,8 @@ export function ConnectorsPage() {
       setDrawerConfigId(config.id);
       setDrawerDisabled(config.disabled_tools || []);
       setDrawerOpen(true);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to discover tools');
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to discover tools'));
     }
   };
 
