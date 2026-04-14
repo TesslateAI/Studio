@@ -15,9 +15,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..auth_external import require_api_scope
-from ..database import get_db
-from ..models import (
+from ...auth_external import require_api_scope
+from ...database import get_db
+from ...models import (
     AgentMcpAssignment,
     AgentSkillAssignment,
     MarketplaceAgent,
@@ -28,7 +28,7 @@ from ..models import (
     UserPurchasedAgent,
     UserPurchasedBase,
 )
-from ..permissions import Permission
+from ...permissions import Permission
 from ._shared import add_cache_headers, apply_sort, ownership_filter, paginated_response
 
 logger = logging.getLogger(__name__)

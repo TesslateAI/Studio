@@ -1,9 +1,8 @@
 """
 Shared helpers for public-facing API routers.
 
-Extracted so multiple routers (public_marketplace, public_models, and
-eventually marketplace.py) can reuse ownership checks, cache headers,
-pagination, and sorting without duplication.
+Reused by every router in this package for ownership checks, cache
+headers, pagination, and sorting.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from typing import Any
 
 from fastapi import Response
 
-from ..models import User
+from ...models import User
 
 
 def add_cache_headers(response: Response, etag_source: str, max_age: int = 300) -> None:

@@ -11,13 +11,13 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..agent.models import BUILTIN_PROVIDERS, get_llm_client, resolve_model_name
-from ..auth_external import require_api_scope
-from ..database import get_db
-from ..models import UsageLog, User, UserAPIKey
-from ..permissions import Permission
-from ..services.credit_service import check_credits, deduct_credits
-from ..services.litellm_service import LiteLLMService
+from ...agent.models import BUILTIN_PROVIDERS, get_llm_client, resolve_model_name
+from ...auth_external import require_api_scope
+from ...database import get_db
+from ...models import UsageLog, User, UserAPIKey
+from ...permissions import Permission
+from ...services.credit_service import check_credits, deduct_credits
+from ...services.litellm_service import LiteLLMService
 from ._shared import add_cache_headers
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ async def _stream_response(
     # Fire-and-forget credit deduction with its own session (the request
     # session is already closed by the time the generator finishes).
     try:
-        from ..database import AsyncSessionLocal
+        from ...database import AsyncSessionLocal
 
         async with AsyncSessionLocal() as credit_db:
             await deduct_credits(
@@ -108,7 +108,7 @@ async def chat_completions(
     # Load team for credit checks when applicable.
     team = None
     if user.default_team_id:
-        from ..models_team import Team
+        from ...models_team import Team
 
         result = await db.execute(select(Team).where(Team.id == user.default_team_id))
         team = result.scalar_one_or_none()

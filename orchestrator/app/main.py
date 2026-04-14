@@ -43,8 +43,6 @@ from .routers import (
     mcp,
     mcp_server,
     projects,
-    public_marketplace,
-    public_models,
     referrals,
     schedules,
     secrets,
@@ -1133,10 +1131,10 @@ app.include_router(deployment_targets.router)  # Deployment target nodes in Reac
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)
-app.include_router(
-    public_marketplace.router
-)  # /api/public/marketplace - Public marketplace catalog
-app.include_router(public_models.router)  # /api/v1 - Public model proxy & usage
+from .routers.public import public_routers  # noqa: E402
+
+for _public_router in public_routers:
+    app.include_router(_public_router)
 app.include_router(channels.router, tags=["channels"])  # /api/channels - Messaging channels
 app.include_router(gateway.router, tags=["gateway"])  # /api/gateway - Gateway status + identity
 app.include_router(schedules.router, tags=["schedules"])  # /api/schedules - Cron schedules

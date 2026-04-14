@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 import app.models  # noqa: F401 — register all ORM models
-from app.routers.public_models import (
+from app.routers.public.models import (
     ChatCompletionRequest,
     _stream_response,
     chat_completions,
@@ -55,9 +55,9 @@ def _build_request(model="builtin/gpt-4o", stream=True, **kwargs):
 @pytest.mark.unit
 class TestChatCompletions:
     @pytest.mark.asyncio
-    @patch("app.routers.public_models.resolve_model_name", return_value="gpt-4o")
-    @patch("app.routers.public_models.get_llm_client")
-    @patch("app.routers.public_models.check_credits", return_value=(True, ""))
+    @patch("app.routers.public.models.resolve_model_name", return_value="gpt-4o")
+    @patch("app.routers.public.models.get_llm_client")
+    @patch("app.routers.public.models.check_credits", return_value=(True, ""))
     async def test_streaming_returns_streaming_response(
         self, mock_credits, mock_get_client, mock_resolve
     ):
@@ -75,10 +75,10 @@ class TestChatCompletions:
         assert isinstance(result, StreamingResponse)
 
     @pytest.mark.asyncio
-    @patch("app.routers.public_models.resolve_model_name", return_value="gpt-4o")
-    @patch("app.routers.public_models.get_llm_client")
-    @patch("app.routers.public_models.check_credits", return_value=(True, ""))
-    @patch("app.routers.public_models.deduct_credits", new_callable=AsyncMock)
+    @patch("app.routers.public.models.resolve_model_name", return_value="gpt-4o")
+    @patch("app.routers.public.models.get_llm_client")
+    @patch("app.routers.public.models.check_credits", return_value=(True, ""))
+    @patch("app.routers.public.models.deduct_credits", new_callable=AsyncMock)
     async def test_non_streaming_returns_dict(
         self, mock_deduct, mock_credits, mock_get_client, mock_resolve
     ):
@@ -99,7 +99,7 @@ class TestChatCompletions:
         assert "choices" in result
 
     @pytest.mark.asyncio
-    @patch("app.routers.public_models.check_credits", return_value=(False, "Insufficient credits"))
+    @patch("app.routers.public.models.check_credits", return_value=(False, "Insufficient credits"))
     async def test_credit_check_failure_402(self, mock_credits):
         mock_db = AsyncMock()
 
@@ -112,12 +112,12 @@ class TestChatCompletions:
         assert exc_info.value.status_code == 402
 
     @pytest.mark.asyncio
-    @patch("app.routers.public_models.resolve_model_name", return_value="bad-model")
+    @patch("app.routers.public.models.resolve_model_name", return_value="bad-model")
     @patch(
-        "app.routers.public_models.get_llm_client",
+        "app.routers.public.models.get_llm_client",
         side_effect=ValueError("Unknown model: bad-model"),
     )
-    @patch("app.routers.public_models.check_credits", return_value=(True, ""))
+    @patch("app.routers.public.models.check_credits", return_value=(True, ""))
     async def test_invalid_model_400(self, mock_credits, mock_get_client, mock_resolve):
         mock_db = AsyncMock()
 
@@ -130,10 +130,10 @@ class TestChatCompletions:
         assert exc_info.value.status_code == 400
 
     @pytest.mark.asyncio
-    @patch("app.routers.public_models.resolve_model_name", return_value="claude-sonnet")
-    @patch("app.routers.public_models.get_llm_client")
-    @patch("app.routers.public_models.check_credits", return_value=(True, ""))
-    @patch("app.routers.public_models.deduct_credits", new_callable=AsyncMock)
+    @patch("app.routers.public.models.resolve_model_name", return_value="claude-sonnet")
+    @patch("app.routers.public.models.get_llm_client")
+    @patch("app.routers.public.models.check_credits", return_value=(True, ""))
+    @patch("app.routers.public.models.deduct_credits", new_callable=AsyncMock)
     async def test_byok_skips_credit_check(
         self, mock_deduct, mock_credits, mock_get_client, mock_resolve
     ):
@@ -235,7 +235,7 @@ class TestStreamResponse:
 
         with (
             patch("app.database.AsyncSessionLocal", return_value=mock_session_ctx),
-            patch("app.routers.public_models.deduct_credits", mock_deduct),
+            patch("app.routers.public.models.deduct_credits", mock_deduct),
         ):
             chunks = []
             async for c in _stream_response(
@@ -258,7 +258,7 @@ class TestStreamResponse:
 class TestListModels:
     @pytest.mark.asyncio
     @patch(
-        "app.routers.public_models.BUILTIN_PROVIDERS",
+        "app.routers.public.models.BUILTIN_PROVIDERS",
         {
             "openai": {
                 "name": "OpenAI",
@@ -277,7 +277,7 @@ class TestListModels:
         response = MagicMock()
         response.headers = {}
 
-        with patch("app.routers.public_models.LiteLLMService") as MockLiteLLM:
+        with patch("app.routers.public.models.LiteLLMService") as MockLiteLLM:
             svc = AsyncMock()
             svc.get_available_models = AsyncMock(
                 return_value=[{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]
@@ -299,7 +299,7 @@ class TestListModels:
         assert result["providers"][0]["provider"] == "openai"
 
     @pytest.mark.asyncio
-    @patch("app.routers.public_models.BUILTIN_PROVIDERS", {})
+    @patch("app.routers.public.models.BUILTIN_PROVIDERS", {})
     async def test_list_models_litellm_failure(self):
         """Graceful degradation when LiteLLM is unreachable."""
         mock_db = AsyncMock()
@@ -311,7 +311,7 @@ class TestListModels:
         response = MagicMock()
         response.headers = {}
 
-        with patch("app.routers.public_models.LiteLLMService") as MockLiteLLM:
+        with patch("app.routers.public.models.LiteLLMService") as MockLiteLLM:
             svc = AsyncMock()
             svc.get_available_models = AsyncMock(side_effect=Exception("Connection refused"))
             MockLiteLLM.return_value = svc
@@ -329,7 +329,7 @@ class TestListModels:
 
     @pytest.mark.asyncio
     @patch(
-        "app.routers.public_models.BUILTIN_PROVIDERS",
+        "app.routers.public.models.BUILTIN_PROVIDERS",
         {
             "openai": {"name": "OpenAI", "description": "GPT", "website": "https://openai.com"},
             "anthropic": {
@@ -349,7 +349,7 @@ class TestListModels:
         response = MagicMock()
         response.headers = {}
 
-        with patch("app.routers.public_models.LiteLLMService") as MockLiteLLM:
+        with patch("app.routers.public.models.LiteLLMService") as MockLiteLLM:
             svc = AsyncMock()
             svc.get_available_models = AsyncMock(return_value=[])
             svc.get_model_info = AsyncMock(return_value=[])

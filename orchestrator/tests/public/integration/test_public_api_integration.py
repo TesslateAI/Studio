@@ -524,10 +524,10 @@ class TestThemes:
 
 
 class TestModelProxy:
-    @patch("app.routers.public_models.get_llm_client")
-    @patch("app.routers.public_models.check_credits", return_value=(True, ""))
-    @patch("app.routers.public_models.deduct_credits", return_value={})
-    @patch("app.routers.public_models.resolve_model_name", return_value="gpt-4o")
+    @patch("app.routers.public.models.get_llm_client")
+    @patch("app.routers.public.models.check_credits", return_value=(True, ""))
+    @patch("app.routers.public.models.deduct_credits", return_value={})
+    @patch("app.routers.public.models.resolve_model_name", return_value="gpt-4o")
     async def test_chat_completions_non_streaming_200(
         self, mock_resolve, mock_deduct, mock_credits, mock_llm, client
     ):
@@ -556,9 +556,9 @@ class TestModelProxy:
         assert body["object"] == "chat.completion"
         mock_deduct.assert_called_once()
 
-    @patch("app.routers.public_models.get_llm_client")
-    @patch("app.routers.public_models.check_credits", return_value=(True, ""))
-    @patch("app.routers.public_models.resolve_model_name", return_value="gpt-4o")
+    @patch("app.routers.public.models.get_llm_client")
+    @patch("app.routers.public.models.check_credits", return_value=(True, ""))
+    @patch("app.routers.public.models.resolve_model_name", return_value="gpt-4o")
     async def test_chat_completions_streaming_200(
         self, mock_resolve, mock_credits, mock_llm, client
     ):
@@ -588,8 +588,8 @@ class TestModelProxy:
         assert resp.status_code == 200
         assert "text/event-stream" in resp.headers.get("content-type", "")
 
-    @patch("app.routers.public_models.get_llm_client")
-    @patch("app.routers.public_models.check_credits", return_value=(False, "Insufficient credits"))
+    @patch("app.routers.public.models.get_llm_client")
+    @patch("app.routers.public.models.check_credits", return_value=(False, "Insufficient credits"))
     async def test_chat_completions_credit_failure_402(
         self, mock_credits, mock_llm, client, mock_database
     ):
@@ -606,8 +606,8 @@ class TestModelProxy:
         )
         assert resp.status_code == 402
 
-    @patch("app.routers.public_models.get_llm_client", side_effect=ValueError("Unknown model"))
-    @patch("app.routers.public_models.check_credits", return_value=(True, ""))
+    @patch("app.routers.public.models.get_llm_client", side_effect=ValueError("Unknown model"))
+    @patch("app.routers.public.models.check_credits", return_value=(True, ""))
     async def test_chat_completions_bad_model_400(
         self, mock_credits, mock_llm, client, mock_database
     ):
@@ -631,7 +631,7 @@ class TestModelProxy:
 
 
 class TestModelsEndpoint:
-    @patch("app.routers.public_models.LiteLLMService")
+    @patch("app.routers.public.models.LiteLLMService")
     async def test_list_models_200(self, mock_litellm_cls, client, mock_database):
         svc = AsyncMock()
         svc.get_available_models.return_value = [{"id": "gpt-4o"}]
@@ -655,7 +655,7 @@ class TestModelsEndpoint:
         assert body["object"] == "list"
         assert isinstance(body["data"], list)
 
-    @patch("app.routers.public_models.LiteLLMService")
+    @patch("app.routers.public.models.LiteLLMService")
     async def test_list_models_cache_header(self, mock_litellm_cls, client, mock_database):
         svc = AsyncMock()
         svc.get_available_models.return_value = []

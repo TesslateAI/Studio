@@ -8,12 +8,12 @@ import pytest
 from fastapi import HTTPException
 
 import app.models  # noqa: F401 — register all ORM models
-from app.routers._shared import (
+from app.routers.public._shared import (
     add_cache_headers,
     ownership_filter,
     paginated_response,
 )
-from app.routers.public_marketplace import (
+from app.routers.public.marketplace import (
     _agent_to_dict,
     _base_to_dict,
     _check_purchased,
