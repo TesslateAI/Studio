@@ -5101,22 +5101,32 @@ async def get_marketplace_mcp_servers(
     result = await db.execute(query)
     mcp_servers = result.scalars().all()
 
-    # Purchased MCP server ids (only if authenticated), scoped to active team
+    # Installed connector ids (only if authenticated). Connectors live in
+    # UserMcpConfig (not UserPurchasedAgent) and are user-scoped (#307), so
+    # we look up by user_id with the team_id row also accepted as a legacy
+    # fallback for pre-#307 installs.
     purchased_mcp_server_ids: list[UUID] = []
     if current_user:
+        from sqlalchemy import or_ as _or
+
+        from ..models import UserMcpConfig
+
         team_id = current_user.default_team_id
-        mcp_ownership = (
-            UserPurchasedAgent.team_id == team_id
-            if team_id
-            else UserPurchasedAgent.user_id == current_user.id
-        )
-        purchased_result = await db.execute(
-            select(UserPurchasedAgent.agent_id).where(
-                mcp_ownership,
-                UserPurchasedAgent.is_active,
+        if team_id is not None:
+            install_filter = _or(
+                UserMcpConfig.user_id == current_user.id,
+                UserMcpConfig.team_id == team_id,
+            )
+        else:
+            install_filter = UserMcpConfig.user_id == current_user.id
+        installed_result = await db.execute(
+            select(UserMcpConfig.marketplace_agent_id).where(
+                install_filter,
+                UserMcpConfig.is_active.is_(True),
+                UserMcpConfig.marketplace_agent_id.is_not(None),
             )
         )
-        purchased_mcp_server_ids = [row[0] for row in purchased_result.fetchall()]
+        purchased_mcp_server_ids = [row[0] for row in installed_result.fetchall()]
 
     response = []
     for mcp_server in mcp_servers:
@@ -5206,23 +5216,30 @@ async def get_mcp_server_details(
     if not mcp_server or not mcp_server.is_active or not mcp_server.is_published:
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    # Check purchase status, scoped to active team
+    # Connector install status — read from UserMcpConfig (not
+    # UserPurchasedAgent — connectors don't go through the purchase table).
     is_purchased = False
     if current_user:
+        from sqlalchemy import or_ as _or
+
+        from ..models import UserMcpConfig
+
         team_id = current_user.default_team_id
-        mcp_detail_ownership = (
-            UserPurchasedAgent.team_id == team_id
-            if team_id
-            else UserPurchasedAgent.user_id == current_user.id
-        )
-        purchased_result = await db.execute(
-            select(UserPurchasedAgent).where(
-                mcp_detail_ownership,
-                UserPurchasedAgent.agent_id == mcp_server.id,
-                UserPurchasedAgent.is_active,
+        if team_id is not None:
+            install_filter = _or(
+                UserMcpConfig.user_id == current_user.id,
+                UserMcpConfig.team_id == team_id,
+            )
+        else:
+            install_filter = UserMcpConfig.user_id == current_user.id
+        installed_result = await db.execute(
+            select(UserMcpConfig).where(
+                install_filter,
+                UserMcpConfig.marketplace_agent_id == mcp_server.id,
+                UserMcpConfig.is_active.is_(True),
             )
         )
-        is_purchased = purchased_result.scalar_one_or_none() is not None
+        is_purchased = installed_result.scalar_one_or_none() is not None
 
     creator_type = "official"
     creator_name = "Tesslate"

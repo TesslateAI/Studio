@@ -318,18 +318,31 @@ async def list_installed_mcp_servers(
     user=Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all active MCP server installations for the current user/team."""
-    # Resolve active team for ownership scoping
+    """List all active MCP (Connector) installations for the current user.
+
+    Connectors are user-identity-bound (#307), so the list is keyed off
+    ``user_id`` regardless of which team the user is currently viewing —
+    installs follow the user across every team they belong to. Legacy
+    team-scoped rows (created before #307) are also included when the
+    user is on the team they belong to so we don't hide existing data.
+
+    The MarketplaceAgent join is a LEFT OUTER so custom (BYO) connectors
+    that have no ``marketplace_agent_id`` still surface in the list.
+    """
+    from sqlalchemy import or_ as _or
+
     team_id = user.default_team_id
-    ownership_filter = (
-        UserMcpConfig.team_id == team_id
-        if team_id
-        else UserMcpConfig.user_id == user.id
-    )
+    if team_id is not None:
+        ownership_filter = _or(
+            UserMcpConfig.user_id == user.id,
+            UserMcpConfig.team_id == team_id,
+        )
+    else:
+        ownership_filter = UserMcpConfig.user_id == user.id
 
     result = await db.execute(
         select(UserMcpConfig, MarketplaceAgent)
-        .join(MarketplaceAgent, UserMcpConfig.marketplace_agent_id == MarketplaceAgent.id)
+        .outerjoin(MarketplaceAgent, UserMcpConfig.marketplace_agent_id == MarketplaceAgent.id)
         .where(
             ownership_filter,
             UserMcpConfig.is_active.is_(True),
