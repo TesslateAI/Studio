@@ -44,6 +44,7 @@ from .routers import (
     kanban,
     marketplace,
     mcp,
+    mcp_oauth,
     mcp_server,
     projects,
     referrals,
@@ -1145,6 +1146,7 @@ app.include_router(channels.router, tags=["channels"])  # /api/channels - Messag
 app.include_router(gateway.router, tags=["gateway"])  # /api/gateway - Gateway status + identity
 app.include_router(schedules.router, tags=["schedules"])  # /api/schedules - Cron schedules
 app.include_router(mcp.router, tags=["mcp"])  # /api/mcp - MCP server management
+app.include_router(mcp_oauth.router, tags=["mcp-oauth"])  # /api/mcp/oauth - OAuth connector flows
 app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoint
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])

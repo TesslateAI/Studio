@@ -1908,7 +1908,11 @@ class ChannelMessage(Base):
 
 
 class UserMcpConfig(Base):
-    """Per-user MCP server installations from marketplace."""
+    """Per-user MCP server installations from marketplace.
+
+    Supports three-tier scoping (team / user / project) with precedence
+    ``project > user > team`` resolved in ``services.mcp.scoping``.
+    """
 
     __tablename__ = "user_mcp_configs"
 
@@ -1925,12 +1929,38 @@ class UserMcpConfig(Base):
     credentials = Column(Text, nullable=True)  # Fernet-encrypted JSON (API keys, tokens)
     enabled_capabilities = Column(JSON, default=["tools", "resources", "prompts"])
     is_active = Column(Boolean, default=True)
+
+    # Scoping: "team" | "user" | "project". Precedence project > user > team.
+    scope_level = Column(String(16), nullable=False, default="user", server_default="user")
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # Prefixed tool names the user has explicitly disabled, e.g. ["github__delete_repo"].
+    disabled_tools = Column(JSON, nullable=True)
+    # When a user/team config is overridden at project scope, the project row
+    # references the source via this self-FK so the UI can show "Inherited from team".
+    parent_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("user_mcp_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # Relationships
     user = relationship("User", backref="mcp_configs")
     marketplace_agent = relationship("MarketplaceAgent", backref="mcp_installs")
+    project = relationship("Project", foreign_keys=[project_id])
+    oauth_connection = relationship(
+        "McpOAuthConnection",
+        uselist=False,
+        back_populates="user_mcp_config",
+        cascade="all, delete-orphan",
+    )
 
 
 class AgentMcpAssignment(Base):
@@ -1957,6 +1987,43 @@ class AgentMcpAssignment(Base):
     agent = relationship("MarketplaceAgent", foreign_keys=[agent_id])
     mcp_config = relationship("UserMcpConfig")
     user = relationship("User")
+
+
+class McpOAuthConnection(Base):
+    """OAuth 2.1 token + dynamic client registration storage for MCP connectors.
+
+    One row per OAuth-connected ``UserMcpConfig``. Tokens and client_info are
+    Fernet-encrypted JSON payloads using the channel encryption key (shared with
+    messaging channel credentials for operational simplicity).
+    """
+
+    __tablename__ = "mcp_oauth_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_mcp_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("user_mcp_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    server_url = Column(Text, nullable=False)
+    tokens_encrypted = Column(Text, nullable=False)          # Fernet(json(OAuthToken))
+    client_info_encrypted = Column(Text, nullable=False)     # Fernet(json(OAuthClientInformationFull))
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_refresh_at = Column(DateTime(timezone=True), nullable=True)
+    auth_server_url = Column(Text, nullable=True)
+    # "dcr" | "byo" | "platform_app"
+    registration_method = Column(String(32), nullable=False)
+    protocol_version = Column(String(16), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user_mcp_config = relationship("UserMcpConfig", back_populates="oauth_connection")
 
 
 # ============================================================================

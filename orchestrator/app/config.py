@@ -598,6 +598,44 @@ class Settings(BaseSettings):
     mcp_sampling_timeout: int = 30  # LLM call timeout for sampling (seconds)
     mcp_sampling_default_model: str = ""  # Default model for sampling (empty = use agent's model)
 
+    # ==========================================================================
+    # MCP OAuth Connector System (issue #287)
+    # ==========================================================================
+    # Public base URL used to build /api/mcp/oauth/callback. Falls back to the
+    # request URL scheme+host if empty (dev convenience).
+    public_base_url: str = ""
+    # Frontend origin that popups postMessage back to on callback completion.
+    frontend_origin: str = "http://localhost:5173"
+
+    # Tesslate-owned OAuth apps for providers that don't advertise DCR
+    # (GitHub Copilot MCP, Slack, etc.). Populated from env.
+    mcp_oauth_app_github_client_id: str = ""
+    mcp_oauth_app_github_client_secret: str = ""
+    mcp_oauth_app_slack_client_id: str = ""
+    mcp_oauth_app_slack_client_secret: str = ""
+
+    @property
+    def mcp_platform_oauth_apps(self) -> dict[str, dict[str, str]]:
+        """Resolve configured platform OAuth apps keyed by a host-matching token.
+
+        The key matches a substring of the MCP server URL when we look up the
+        app at flow-start time (e.g. ``github`` matches ``api.githubcopilot.com``).
+        """
+        out: dict[str, dict[str, str]] = {}
+        if self.mcp_oauth_app_github_client_id:
+            out["github"] = {
+                "client_id": self.mcp_oauth_app_github_client_id,
+                "client_secret": self.mcp_oauth_app_github_client_secret,
+                "auth_method": "client_secret_basic",
+            }
+        if self.mcp_oauth_app_slack_client_id:
+            out["slack"] = {
+                "client_id": self.mcp_oauth_app_slack_client_id,
+                "client_secret": self.mcp_oauth_app_slack_client_secret,
+                "auth_method": "client_secret_post",
+            }
+        return out
+
     class Config:
         # For Docker Compose: environment variables are passed directly
         # For native development: looks for .env in parent directory (project root)

@@ -63,6 +63,8 @@ async def connect_mcp(
     *,
     sampling_callback: Any | None = None,
     message_handler: Any | None = None,
+    user_mcp_config_id: Any | None = None,
+    db: Any | None = None,
 ):
     """Connect to an MCP server via any supported transport.
 
@@ -82,6 +84,13 @@ async def connect_mcp(
         Optional callback for MCP sampling/createMessage requests.
     message_handler:
         Optional handler for server notifications (tool list changes, etc.).
+    user_mcp_config_id:
+        UUID of the ``UserMcpConfig`` row — required when
+        ``server_config["auth_type"] == "oauth"`` so we can locate the
+        ``McpOAuthConnection`` in Postgres.
+    db:
+        Active :class:`sqlalchemy.ext.asyncio.AsyncSession` — required when
+        ``server_config["auth_type"] == "oauth"``.
     """
     transport = server_config.get("transport", "streamable-http")
     settings = get_settings()
@@ -100,7 +109,12 @@ async def connect_mcp(
                 yield session
         case "streamable-http":
             async with _connect_streamable_http(
-                server_config, credentials, settings, session_kwargs
+                server_config,
+                credentials,
+                settings,
+                session_kwargs,
+                user_mcp_config_id=user_mcp_config_id,
+                db=db,
             ) as session:
                 yield session
         case "sse":
@@ -259,17 +273,98 @@ async def _connect_streamable_http(
     credentials: dict[str, Any],
     settings: Any,
     session_kwargs: dict[str, Any],
+    *,
+    user_mcp_config_id: Any | None = None,
+    db: Any | None = None,
 ):
-    """Establish a Streamable HTTP MCP connection."""
+    """Establish a Streamable HTTP MCP connection.
+
+    When ``config["auth_type"] == "oauth"``, wires the MCP SDK's
+    :class:`OAuthClientProvider` onto the underlying ``httpx.AsyncClient`` so
+    refresh-on-401 persists new tokens via :class:`PostgresTokenStorage`.
+    Missing or un-refreshable tokens raise :class:`ReauthRequired`.
+    """
     url: str = config["url"]
     timeout = settings.mcp_tool_timeout
-    headers = _build_auth_headers(config, credentials)
+    auth_type = config.get("auth_type", "none")
 
-    logger.info("Connecting to MCP server via streamable-http: %s", url)
+    logger.info("Connecting to MCP server via streamable-http: %s (auth=%s)", url, auth_type)
 
     import httpx
 
-    http_client = httpx.AsyncClient(headers=headers or None, timeout=timeout)
+    auth = None
+    if auth_type == "oauth":
+        if user_mcp_config_id is None or db is None:
+            raise ValueError(
+                "OAuth MCP connection requires user_mcp_config_id and db; "
+                "pass them through connect_mcp(...)"
+            )
+
+        from uuid import UUID as _UUID
+
+        from mcp.client.auth import OAuthClientProvider
+        from mcp.shared.auth import OAuthClientMetadata
+
+        from .oauth_flow import ReauthRequired
+        from .oauth_storage import PostgresTokenStorage
+
+        # Coerce potential str → UUID; SQLAlchemy + asyncpg are strict about types.
+        config_uuid = user_mcp_config_id if isinstance(
+            user_mcp_config_id, _UUID
+        ) else _UUID(str(user_mcp_config_id))
+
+        oauth_storage = PostgresTokenStorage(db, config_uuid)
+        tokens = await oauth_storage.get_tokens()
+        if tokens is None:
+            raise ReauthRequired(
+                server_url=url,
+                config_id=config_uuid,
+                message="No stored OAuth tokens — reconnect required",
+            )
+
+        # Mirror the stored client's token-endpoint auth method so refresh
+        # doesn't silently downgrade to Basic when the client was registered
+        # with client_secret_post or `none`.
+        stored_client = await oauth_storage.get_client_info()
+        token_auth_method = (
+            stored_client.token_endpoint_auth_method if stored_client else "client_secret_basic"
+        )
+        stored_redirects = (
+            list(stored_client.redirect_uris) if stored_client and stored_client.redirect_uris
+            else ["https://unused.local/mcp-runtime"]
+        )
+
+        # Runtime redirect / callback handlers: if we ever get here at runtime
+        # the user needs to re-auth interactively via Settings → Connectors.
+        async def _raise_reauth_redirect(_: str) -> None:
+            raise ReauthRequired(server_url=url, config_id=config_uuid)
+
+        async def _raise_reauth_callback() -> tuple[str, str | None]:
+            raise ReauthRequired(server_url=url, config_id=config_uuid)
+
+        client_metadata = OAuthClientMetadata(
+            redirect_uris=stored_redirects,
+            token_endpoint_auth_method=token_auth_method,
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+            client_name="Tesslate Studio (runtime)",
+        )
+        auth = OAuthClientProvider(
+            server_url=url,
+            client_metadata=client_metadata,
+            storage=oauth_storage,
+            redirect_handler=_raise_reauth_redirect,
+            callback_handler=_raise_reauth_callback,
+        )
+        headers: dict[str, str] = {}
+    else:
+        headers = _build_auth_headers(config, credentials)
+
+    http_client = httpx.AsyncClient(
+        headers=headers or None,
+        timeout=timeout,
+        auth=auth,
+    )
 
     try:
         async with (
