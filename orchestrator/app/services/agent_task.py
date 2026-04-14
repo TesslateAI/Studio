@@ -33,6 +33,7 @@ class AgentTaskPayload:
     message: str  # User's message
     project_id: str = ""  # UUID string — empty for standalone chats
     project_slug: str = ""
+    team_id: str = ""  # UUID string — empty for user-scope/standalone chats
 
     # Agent configuration
     agent_id: str | None = None  # MarketplaceAgent ID (None = default agent)

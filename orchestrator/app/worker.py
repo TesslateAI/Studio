@@ -303,6 +303,8 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     user_id=payload.user_id,
                     db=db,
                     agent_id=str(agent_model.id),
+                    team_id=payload.team_id or None,
+                    project_id=payload.project_id or None,
                 )
                 mcp_tools = mcp_context.get("tools", [])
                 if mcp_tools and hasattr(agent_instance, "tools") and agent_instance.tools:

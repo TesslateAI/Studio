@@ -13,11 +13,14 @@ leakage.
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from typing import Any
 
 from ...agent.tools.output_formatter import error_output, success_output
 from ...agent.tools.registry import Tool, ToolCategory
+from ...database import AsyncSessionLocal
 from .client import connect_mcp
+from .oauth_flow import ReauthRequired
 from .security import sanitize_error
 
 logger = logging.getLogger(__name__)
@@ -209,6 +212,72 @@ def _get_mcp_config(
     return mcp_configs.get(server_slug)
 
 
+@asynccontextmanager
+async def _open_mcp_session(cfg: dict[str, Any]):
+    """Open a session for an MCP config, handling OAuth DB plumbing.
+
+    For OAuth connectors we open a fresh :class:`AsyncSession` scoped to this
+    tool invocation so the SDK's refresh-on-401 path can persist new tokens.
+    For static-auth connectors we pass ``db=None`` and the client's non-OAuth
+    branch runs exactly as before.
+    """
+    server = cfg["server"]
+    credentials = cfg.get("credentials") or {}
+    user_mcp_config_id = cfg.get("user_mcp_config_id")
+    auth_type = (server or {}).get("auth_type")
+
+    if auth_type == "oauth":
+        async with AsyncSessionLocal() as db:
+            try:
+                async with connect_mcp(
+                    server,
+                    credentials,
+                    user_mcp_config_id=user_mcp_config_id,
+                    db=db,
+                ) as session:
+                    yield session
+                # Persist refreshed tokens (written through PostgresTokenStorage).
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+    else:
+        async with connect_mcp(server, credentials) as session:
+            yield session
+
+
+def _reauth_output(exc: ReauthRequired, server_slug: str) -> dict[str, Any]:
+    """Return a structured tool result signalling re-auth is required.
+
+    The frontend's ``AgentStep`` detects ``_mcp_reauth_required`` and renders a
+    ReauthBanner linking back to Settings → Connectors.
+    """
+    return {
+        "_mcp_reauth_required": True,
+        "server_slug": server_slug,
+        "server_url": exc.server_url,
+        "config_id": str(exc.config_id) if exc.config_id else None,
+        "message": exc.message,
+        "status": "reauth_required",
+    }
+
+
+def _forward_structured(result: Any) -> dict[str, Any]:
+    """Forward ``_mcp_structured`` (incl. citation) and ``meta`` from the SDK result.
+
+    Safe-noop when neither is present. The frontend chat renderer detects
+    ``_mcp_structured.citation`` and renders a CitationCard.
+    """
+    extras: dict[str, Any] = {}
+    structured = getattr(result, "structuredContent", None)
+    if structured:
+        extras["_mcp_structured"] = structured
+    meta = getattr(result, "meta", None)
+    if meta:
+        extras["_mcp_meta"] = meta
+    return extras
+
+
 # ---------------------------------------------------------------------------
 # Executor factories (closures)
 # ---------------------------------------------------------------------------
@@ -230,22 +299,31 @@ def _make_tool_executor(server_slug: str, mcp_tool_name: str):
             )
 
         try:
-            async with connect_mcp(cfg["server"], cfg["credentials"]) as session:
+            async with _open_mcp_session(cfg) as session:
                 result = await session.call_tool(mcp_tool_name, params)
 
             output_text = _extract_tool_result_text(result)
+            structured = _forward_structured(result)
 
             if getattr(result, "isError", False):
-                return error_output(
-                    f"MCP tool '{mcp_tool_name}' returned an error.",
-                    details={"output": sanitize_error(output_text)},
-                )
+                return {
+                    **error_output(
+                        f"MCP tool '{mcp_tool_name}' returned an error.",
+                        details={"output": sanitize_error(output_text)},
+                    ),
+                    **structured,
+                }
 
-            return success_output(
-                f"MCP tool '{mcp_tool_name}' completed.",
-                details={"output": output_text},
-            )
+            return {
+                **success_output(
+                    f"MCP tool '{mcp_tool_name}' completed.",
+                    details={"output": output_text},
+                ),
+                **structured,
+            }
 
+        except ReauthRequired as exc:
+            return _reauth_output(exc, server_slug)
         except Exception as exc:
             logger.error(
                 "MCP tool call failed: server=%s tool=%s error=%s",
@@ -277,7 +355,7 @@ def _make_resource_executor(server_slug: str):
             )
 
         try:
-            async with connect_mcp(cfg["server"], cfg["credentials"]) as session:
+            async with _open_mcp_session(cfg) as session:
                 result = await session.read_resource(uri)
 
             texts: list[str] = []
@@ -292,6 +370,8 @@ def _make_resource_executor(server_slug: str):
                 details={"content": output_text},
             )
 
+        except ReauthRequired as exc:
+            return _reauth_output(exc, server_slug)
         except Exception as exc:
             logger.error(
                 "MCP resource read failed: server=%s uri=%s error=%s",
@@ -324,7 +404,7 @@ def _make_prompt_executor(server_slug: str):
             )
 
         try:
-            async with connect_mcp(cfg["server"], cfg["credentials"]) as session:
+            async with _open_mcp_session(cfg) as session:
                 result = await session.get_prompt(name, arguments)
 
             texts: list[str] = []
@@ -341,6 +421,8 @@ def _make_prompt_executor(server_slug: str):
                 details={"content": output_text},
             )
 
+        except ReauthRequired as exc:
+            return _reauth_output(exc, server_slug)
         except Exception as exc:
             logger.error(
                 "MCP prompt fetch failed: server=%s prompt=%s error=%s",

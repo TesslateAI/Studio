@@ -10,17 +10,17 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from ...config import get_settings
-from ...models import AgentMcpAssignment, MarketplaceAgent, UserMcpConfig
+from ...models import MarketplaceAgent, UserMcpConfig
 from ..cache_service import get_redis_client
 from ..channels.registry import decrypt_credentials
 from .bridge import bridge_mcp_prompts, bridge_mcp_resources, bridge_mcp_tools
 from .client import connect_mcp
+from .scoping import resolve_mcp_configs
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +39,17 @@ class McpManager:
         self,
         server_config: dict[str, Any],
         credentials: dict[str, Any],
+        *,
+        user_mcp_config_id: Any | None = None,
+        db: AsyncSession | None = None,
     ) -> dict[str, Any]:
         """Connect to an MCP server and discover all capabilities.
 
         Returns a dict with keys ``tools``, ``resources``, ``resource_templates``,
         and ``prompts`` -- each a JSON-serialisable list of schema dicts.
+
+        ``user_mcp_config_id`` + ``db`` are forwarded to :func:`connect_mcp` so
+        OAuth-backed connectors can locate their :class:`McpOAuthConnection`.
         """
         result: dict[str, Any] = {
             "tools": [],
@@ -52,7 +58,12 @@ class McpManager:
             "prompts": [],
         }
 
-        async with connect_mcp(server_config, credentials) as session:
+        async with connect_mcp(
+            server_config,
+            credentials,
+            user_mcp_config_id=user_mcp_config_id,
+            db=db,
+        ) as session:
             # Discover tools
             try:
                 tools_resp = await session.list_tools()
@@ -133,8 +144,14 @@ class McpManager:
         db: AsyncSession,
         *,
         agent_id: str | None = None,
+        team_id: UUID | str | None = None,
+        project_id: UUID | str | None = None,
     ) -> dict[str, Any]:
         """Fetch installed MCP servers for a user and return bridged tools + context.
+
+        Scope resolution uses :func:`services.mcp.scoping.resolve_mcp_configs`
+        to implement ``project > user > team`` precedence across the user's
+        active teams, the request's team, and the current project.
 
         Parameters
         ----------
@@ -145,7 +162,12 @@ class McpManager:
         agent_id:
             Optional — when set, only MCP servers explicitly assigned to this
             agent via :class:`AgentMcpAssignment` are loaded.  When ``None``,
-            all active user MCP configs are returned directly.
+            all in-scope user MCP configs are returned directly.
+        team_id:
+            Active team for this execution — team-scoped rows for this team
+            participate even when the user isn't a member (rare, admin path).
+        project_id:
+            Active project — project-scoped overrides take precedence.
 
         Returns
         -------
@@ -153,7 +175,7 @@ class McpManager:
             tools : list[Tool]
                 Tesslate Tool objects ready for registry registration.
             mcp_configs : dict[str, dict]
-                Mapping ``server_slug -> {"server": ..., "credentials": ...}``
+                Mapping ``server_slug -> {"server", "credentials", "user_mcp_config_id"}``
                 injected into the agent execution context so executors can reconnect.
             resource_catalog : list[dict]
                 Flat list of available resources across all servers.
@@ -163,40 +185,23 @@ class McpManager:
         settings = get_settings()
         cache_ttl = settings.mcp_tool_cache_ttl
 
-        # 1. Query active UserMcpConfig rows with joined MarketplaceAgent.
-        #    When agent_id is set, only explicitly assigned servers are loaded.
-        logger.debug(
-            "MCP context query: user_id=%s, agent_id=%s",
-            user_id, agent_id,
-        )
-        if agent_id:
-            stmt = (
-                select(UserMcpConfig)
-                .options(selectinload(UserMcpConfig.marketplace_agent))
-                .join(
-                    AgentMcpAssignment,
-                    AgentMcpAssignment.mcp_config_id == UserMcpConfig.id,
-                )
-                .where(
-                    UserMcpConfig.user_id == user_id,
-                    UserMcpConfig.is_active.is_(True),
-                    AgentMcpAssignment.agent_id == agent_id,
-                    AgentMcpAssignment.user_id == user_id,
-                    AgentMcpAssignment.enabled.is_(True),
-                )
-            )
-        else:
-            stmt = (
-                select(UserMcpConfig)
-                .options(selectinload(UserMcpConfig.marketplace_agent))
-                .where(
-                    UserMcpConfig.user_id == user_id,
-                    UserMcpConfig.is_active.is_(True),
-                )
-            )
+        user_uuid = _coerce_uuid(user_id)
+        team_uuid = _coerce_uuid(team_id) if team_id else None
+        project_uuid = _coerce_uuid(project_id) if project_id else None
+        agent_uuid = _coerce_uuid(agent_id) if agent_id else None
 
-        result = await db.execute(stmt)
-        configs: list[UserMcpConfig] = list(result.scalars().all())
+        logger.debug(
+            "MCP context resolve: user=%s team=%s project=%s agent=%s",
+            user_uuid, team_uuid, project_uuid, agent_uuid,
+        )
+
+        configs: list[UserMcpConfig] = await resolve_mcp_configs(
+            db,
+            user_id=user_uuid,
+            team_id=team_uuid,
+            project_id=project_uuid,
+            agent_id=agent_uuid,
+        )
 
         all_tools = []
         mcp_configs: dict[str, dict[str, Any]] = {}
@@ -205,21 +210,36 @@ class McpManager:
 
         for umc in configs:
             agent: MarketplaceAgent | None = umc.marketplace_agent
-            if agent is None:
-                logger.warning(
-                    "UserMcpConfig %s has no marketplace_agent, skipping",
-                    umc.id,
-                )
-                continue
+            # Catalog rows require a joined MarketplaceAgent; custom connectors
+            # (marketplace_agent_id IS NULL) derive server info from the row
+            # directly.
+            if agent is not None:
+                server_slug = agent.slug
+                server_config = dict(agent.config or {})
+            else:
+                # Custom connector: synthesize a slug + config from the row.
+                # Server URL lives on the paired McpOAuthConnection and is
+                # loaded lazily below if needed.
+                server_slug = f"custom-{str(umc.id)[:8]}"
+                server_config = {
+                    "transport": "streamable-http",
+                    "auth_type": "oauth",
+                    "url": None,  # populated below from oauth_connection
+                }
 
-            server_slug: str = agent.slug
-            server_config: dict[str, Any] = agent.config or {}
+            # For OAuth custom connectors, hydrate the server URL from the
+            # paired row so the manager+client can actually connect.
+            if server_config.get("auth_type") == "oauth" and not server_config.get("url"):
+                oauth_row = getattr(umc, "oauth_connection", None)
+                if oauth_row is not None and getattr(oauth_row, "server_url", None):
+                    server_config["url"] = oauth_row.server_url
 
             if not server_config.get("transport"):
-                logger.debug("MCP agent '%s' has no transport configured, skipping", server_slug)
+                logger.debug("MCP config %s has no transport configured, skipping", umc.id)
                 continue
 
-            # Decrypt user credentials
+            # Decrypt user credentials (legacy static auth). OAuth connectors
+            # don't use this — tokens live in mcp_oauth_connections.
             credentials: dict[str, Any] = {}
             if umc.credentials:
                 try:
@@ -232,15 +252,20 @@ class McpManager:
                     )
                     continue
 
-            # 2. Check Redis cache for schemas
-            agent_id_str = str(agent.id)
-            cache_key = f"{_CACHE_PREFIX}:{user_id}:{agent_id_str}"
+            # 2. Check Redis cache for schemas (keyed on config id — per-scope,
+            #    per-install — so disabled_tools toggles invalidate cleanly).
+            cache_key = f"{_CACHE_PREFIX}:{user_id}:{umc.id}"
             schemas = await self._get_cached_schemas(cache_key)
 
             # 3. If not cached, discover and cache
             if schemas is None:
                 try:
-                    schemas = await self.discover_server(server_config, credentials)
+                    schemas = await self.discover_server(
+                        server_config,
+                        credentials,
+                        user_mcp_config_id=umc.id,
+                        db=db,
+                    )
                     await self._set_cached_schemas(cache_key, schemas, cache_ttl)
                 except Exception as exc:
                     logger.error(
@@ -251,17 +276,25 @@ class McpManager:
                     )
                     continue
 
-            # Store config for executor reconnections
+            # Apply the user's per-tool disabled_tools filter before bridging.
+            disabled_tools = set(umc.disabled_tools or [])
+            filtered_tools = [
+                t for t in (schemas.get("tools") or [])
+                if _prefixed_tool_name(server_slug, t) not in disabled_tools
+            ]
+
+            # Store config for executor reconnections (bridge → connect_mcp).
             mcp_configs[server_slug] = {
                 "server": server_config,
                 "credentials": credentials,
+                "user_mcp_config_id": str(umc.id),
             }
 
             # 4. Bridge tools
             enabled = umc.enabled_capabilities or ["tools", "resources", "prompts"]
 
-            if "tools" in enabled and schemas.get("tools"):
-                all_tools.extend(bridge_mcp_tools(server_slug, schemas["tools"]))
+            if "tools" in enabled and filtered_tools:
+                all_tools.extend(bridge_mcp_tools(server_slug, filtered_tools))
 
             if "resources" in enabled:
                 resources = schemas.get("resources", [])
@@ -304,10 +337,15 @@ class McpManager:
     async def invalidate_cache(
         self,
         user_id: str,
-        marketplace_agent_id: str,
+        user_mcp_config_id: str,
     ) -> None:
-        """Invalidate cached schemas for a specific MCP server."""
-        cache_key = f"{_CACHE_PREFIX}:{user_id}:{marketplace_agent_id}"
+        """Invalidate cached schemas for a specific user/config pair.
+
+        Cache keys are now ``mcp:schema:{user_id}:{user_mcp_config_id}`` — the
+        config id (not the marketplace agent id) so per-scope installs don't
+        collide and ``disabled_tools`` toggles invalidate cleanly.
+        """
+        cache_key = f"{_CACHE_PREFIX}:{user_id}:{user_mcp_config_id}"
 
         redis = await get_redis_client()
         if redis:
@@ -367,3 +405,20 @@ def get_mcp_manager() -> McpManager:
     if _manager is None:
         _manager = McpManager()
     return _manager
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _coerce_uuid(val: Any) -> UUID:
+    """Return a UUID regardless of whether the caller passed a str or UUID."""
+    if isinstance(val, UUID):
+        return val
+    return UUID(str(val))
+
+
+def _prefixed_tool_name(server_slug: str, tool: dict[str, Any]) -> str:
+    """Build the Tesslate-prefixed tool name for disabled_tools matching."""
+    return f"mcp__{server_slug}__{tool.get('name', '')}"
