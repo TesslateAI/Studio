@@ -7,9 +7,11 @@ const settingsTabs = [
   { label: 'Preferences', path: '/settings/preferences' },
   { label: 'Security', path: '/settings/security' },
   { label: 'Deployment', path: '/settings/deployment' },
-  { label: 'Connectors', path: '/settings/connectors' },
   { label: 'API Keys', path: '/settings/api-keys' },
 ];
+// Connectors moved to Library → Connectors (#307).
+// The /settings/connectors route is aliased to a redirect in App.tsx so
+// bookmarks keep working.
 
 export function SettingsLayout() {
   const location = useLocation();

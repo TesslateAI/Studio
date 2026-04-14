@@ -42,7 +42,6 @@ import SecuritySettings from './pages/settings/SecuritySettings';
 import DeploymentSettings from './pages/settings/DeploymentSettings';
 import BillingSettings from './pages/settings/BillingSettings';
 import ApiKeysSettings from './pages/settings/ApiKeysSettings';
-import { ConnectorsPage } from './pages/settings/ConnectorsPage';
 import TeamSettingsPage from './pages/settings/TeamSettingsPage';
 import TeamMembersPage from './pages/settings/TeamMembersPage';
 import AuditLogPage from './pages/settings/AuditLogPage';
@@ -370,7 +369,11 @@ function AppContent() {
           <Route path="preferences" element={<PreferencesSettings />} />
           <Route path="security" element={<SecuritySettings />} />
           <Route path="deployment" element={<DeploymentSettings />} />
-          <Route path="connectors" element={<ConnectorsPage />} />
+          {/* /settings/connectors moved to Library → Connectors (#307). */}
+          <Route
+            path="connectors"
+            element={<Navigate to="/library?tab=connectors" replace />}
+          />
           <Route path="api-keys" element={<ApiKeysSettings />} />
           <Route path="billing" element={<Navigate to="/settings/team/billing" replace />} />
           <Route path="messaging" element={<ConnectionsSettings />} />

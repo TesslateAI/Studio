@@ -95,7 +95,7 @@ const LIBRARY_ITEMS: Array<{
   { key: 'agents', label: 'Agents', icon: AgentFaceIcon },
   { key: 'bases', label: 'Bases', icon: Rocket },
   { key: 'skills', label: 'Skills', icon: Zap },
-  { key: 'mcp_servers', label: 'MCP Servers', icon: Plug },
+  { key: 'mcp_servers', label: 'Connectors', icon: Plug },
   { key: 'models', label: 'Models', icon: Cpu },
   { key: 'themes', label: 'Themes', icon: Palette },
 ];
