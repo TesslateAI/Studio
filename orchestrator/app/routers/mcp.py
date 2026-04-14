@@ -7,9 +7,11 @@ discovering server capabilities.
 """
 
 import logging
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,14 +65,32 @@ async def _get_owned_config(
     *,
     team_id: UUID | None = None,
 ) -> UserMcpConfig:
-    """Fetch a UserMcpConfig and verify ownership. Raises 404 if missing."""
-    ownership_filter = (
-        UserMcpConfig.team_id == team_id
-        if team_id
-        else UserMcpConfig.user_id == user_id
-    )
+    """Fetch a UserMcpConfig and verify ownership. Raises 404 if missing.
+
+    Ownership matches when the row belongs to ``user_id`` OR is on ``team_id``
+    (when supplied) — either condition authorizes the caller. The previous
+    ``if team_id else user_id`` form hid personal rows whenever a user had a
+    default team, which broke every per-install endpoint for them.
+
+    The ``oauth_connection`` relationship is eager-loaded so callers can
+    read ``config.oauth_connection`` without tripping async lazy-load
+    (``MissingGreenlet``) from a detached instance.
+    """
+    from sqlalchemy import or_ as _or
+    from sqlalchemy.orm import selectinload as _selectin
+
+    if team_id is not None:
+        ownership_filter = _or(
+            UserMcpConfig.user_id == user_id,
+            UserMcpConfig.team_id == team_id,
+        )
+    else:
+        ownership_filter = UserMcpConfig.user_id == user_id
+
     result = await db.execute(
-        select(UserMcpConfig).where(
+        select(UserMcpConfig)
+        .options(_selectin(UserMcpConfig.oauth_connection))
+        .where(
             UserMcpConfig.id == config_id,
             ownership_filter,
             UserMcpConfig.is_active.is_(True),
@@ -95,17 +115,17 @@ async def _get_agent_for_config(
     return agent
 
 
-async def _invalidate_mcp_cache(user_id: UUID, marketplace_agent_id: UUID) -> None:
-    """Invalidate Redis cache for a user's MCP server schemas (best-effort).
+async def _invalidate_mcp_cache(user_id: UUID, user_mcp_config_id: UUID) -> None:
+    """Invalidate Redis cache for a user/config pair (best-effort).
 
-    Uses the same key pattern as McpManager: ``mcp:schema:{user_id}:{agent_id}``.
+    Matches :class:`McpManager`'s cache key: ``mcp:schema:{user_id}:{config_id}``.
     """
     try:
         from ..services.cache_service import get_redis_client
 
         redis = await get_redis_client()
         if redis:
-            cache_key = f"mcp:schema:{user_id}:{marketplace_agent_id}"
+            cache_key = f"mcp:schema:{user_id}:{user_mcp_config_id}"
             await redis.delete(cache_key)
             logger.debug("Invalidated MCP cache: %s", cache_key)
     except Exception:
@@ -290,7 +310,7 @@ async def update_installed_mcp_server(
     await db.commit()
     await db.refresh(config)
 
-    await _invalidate_mcp_cache(user.id, config.marketplace_agent_id)
+    await _invalidate_mcp_cache(user.id, config.id)
 
     agent = await _get_agent_for_config(config.marketplace_agent_id, db)
     return _build_config_response(config, agent)
@@ -307,7 +327,7 @@ async def uninstall_mcp_server(
     config.is_active = False
     await db.commit()
 
-    await _invalidate_mcp_cache(user.id, config.marketplace_agent_id)
+    await _invalidate_mcp_cache(user.id, config.id)
 
 
 @router.post("/installed/{config_id}/test", response_model=McpTestResponse)
@@ -356,7 +376,7 @@ async def discover_mcp_server(
     config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
     agent = await _get_agent_for_config(config.marketplace_agent_id, db)
 
-    await _invalidate_mcp_cache(user.id, config.marketplace_agent_id)
+    await _invalidate_mcp_cache(user.id, config.id)
 
     credentials = {}
     if config.credentials:
@@ -556,3 +576,252 @@ async def get_agent_mcp_servers(
         )
         for assignment, _config, marketplace_agent in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# OAuth-connector specific endpoints (catalog, per-tool toggles, overrides,
+# reconnect) — added in #287 / Phase 3.
+# ---------------------------------------------------------------------------
+
+
+# Pydantic models for the new endpoints ------------------------------------
+
+
+class CatalogEntry(BaseModel):
+    """One row in GET /api/mcp/catalog — a published MCP server."""
+
+    id: UUID
+    slug: str
+    name: str
+    description: str
+    icon: str | None = None
+    icon_url: str | None = None
+    category: str | None = None
+    config: dict = Field(default_factory=dict)
+
+
+class DisabledToolsUpdate(BaseModel):
+    """Body for PATCH /api/mcp/installed/{id}/tools."""
+
+    disabled_tools: list[str]
+
+
+class OverrideRequest(BaseModel):
+    """Body for POST /api/mcp/installed/{id}/override."""
+
+    project_id: UUID
+
+
+class OverrideResponse(BaseModel):
+    id: UUID
+    parent_config_id: UUID
+    project_id: UUID
+    scope_level: str
+
+
+class ReconnectResponse(BaseModel):
+    authorize_url: str
+    flow_id: str
+
+
+def _require_project_member(user: Any, project_id: UUID) -> None:
+    """Stub for project-level permission check. Real check lives in teams/project RBAC.
+
+    Raises 403 if the user cannot manage connectors at the project scope.
+    """
+    # TODO(permissions): wire into `orchestrator.app.permissions`.
+    return
+
+
+@router.get("/catalog", response_model=list[CatalogEntry])
+async def get_mcp_catalog(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(current_active_user),  # noqa: ARG001 — require auth, no per-user filter
+):
+    """List all published MCP servers from the marketplace."""
+    result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.item_type == "mcp_server",
+            MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.is_published.is_(True),
+        ).order_by(MarketplaceAgent.name.asc())
+    )
+    rows = list(result.scalars().all())
+    return [
+        CatalogEntry(
+            id=row.id,
+            slug=row.slug,
+            name=row.name,
+            description=row.description,
+            icon=row.icon,
+            icon_url=row.avatar_url,
+            category=row.category,
+            config=row.config or {},
+        )
+        for row in rows
+    ]
+
+
+@router.patch("/installed/{config_id}/tools", response_model=McpConfigResponse)
+async def update_disabled_tools(
+    config_id: UUID,
+    body: DisabledToolsUpdate,
+    user=Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the ``disabled_tools`` filter on an installed MCP config.
+
+    The list entries are prefixed tool names (``mcp__{slug}__{tool}``) — the
+    same form :func:`services.mcp.manager.get_user_mcp_context` compares
+    against when bridging. Invalidates the Redis schema cache so the change
+    takes effect on the next agent run.
+    """
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
+    # Normalize to a unique, sorted list.
+    config.disabled_tools = sorted(set(body.disabled_tools))
+    await db.commit()
+    await db.refresh(config)
+    await _invalidate_mcp_cache(user.id, config.id)
+    agent = None
+    if config.marketplace_agent_id:
+        agent = await _get_agent_for_config(config.marketplace_agent_id, db)
+    return _build_config_response(config, agent)
+
+
+@router.post("/installed/{config_id}/override", response_model=OverrideResponse)
+async def override_config_for_project(
+    config_id: UUID,
+    body: OverrideRequest,
+    user=Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clone a user/team-scoped config into a project-scoped row.
+
+    The resulting project row's ``parent_config_id`` references the source
+    for the UI ("Inherited from team"). Reconnection flow is left to the
+    client — the new row is inactive-but-present until the user completes
+    OAuth (or the override copies credentials for static auth).
+    """
+    _require_project_member(user, body.project_id)
+
+    source = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
+    if source.scope_level == "project":
+        raise HTTPException(status_code=400, detail="Cannot override a project-scoped config")
+
+    # Already overridden? Scope by user to prevent cross-tenant collisions.
+    existing = (
+        await db.execute(
+            select(UserMcpConfig).where(
+                UserMcpConfig.parent_config_id == source.id,
+                UserMcpConfig.project_id == body.project_id,
+                UserMcpConfig.user_id == user.id,
+                UserMcpConfig.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return OverrideResponse(
+            id=existing.id,
+            parent_config_id=source.id,
+            project_id=body.project_id,
+            scope_level=existing.scope_level,
+        )
+
+    clone = UserMcpConfig(
+        user_id=user.id,
+        team_id=None,
+        project_id=body.project_id,
+        marketplace_agent_id=source.marketplace_agent_id,
+        credentials=source.credentials,
+        enabled_capabilities=source.enabled_capabilities,
+        disabled_tools=source.disabled_tools,
+        scope_level="project",
+        parent_config_id=source.id,
+        is_active=True,
+    )
+    db.add(clone)
+    await db.commit()
+    await db.refresh(clone)
+    return OverrideResponse(
+        id=clone.id,
+        parent_config_id=source.id,
+        project_id=body.project_id,
+        scope_level="project",
+    )
+
+
+@router.delete("/installed/{config_id}/override", status_code=204)
+async def remove_project_override(
+    config_id: UUID,
+    user=Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a project-scoped override. The row must be project-scoped."""
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
+    if config.scope_level != "project":
+        raise HTTPException(
+            status_code=400,
+            detail="Only project-scoped overrides can be removed via this endpoint",
+        )
+    config.is_active = False
+    await db.commit()
+    await _invalidate_mcp_cache(user.id, config.id)
+
+
+@router.post("/installed/{config_id}/reconnect", response_model=ReconnectResponse)
+async def reconnect_mcp_config(
+    config_id: UUID,
+    request: Request,
+    user=Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Start a fresh OAuth flow for an existing connector.
+
+    Used when the refresh token has been revoked or expired. Reuses the
+    original ``MarketplaceAgent.config`` + ``registration_method``.
+    """
+    from ..services.mcp.oauth_flow import OAuthFlowError, start_oauth_flow
+
+    config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
+
+    # Pull provider metadata from the original install.
+    if config.marketplace_agent_id:
+        agent = await _get_agent_for_config(config.marketplace_agent_id, db)
+        server_url = (agent.config or {}).get("url")
+        registration_method = (agent.config or {}).get("registration_method", "dcr")
+    else:
+        # Custom connector — get server_url from paired oauth_connection.
+        oauth_row = config.oauth_connection
+        if not oauth_row:
+            raise HTTPException(
+                status_code=400,
+                detail="Custom connector has no prior OAuth connection to reuse",
+            )
+        server_url = oauth_row.server_url
+        registration_method = oauth_row.registration_method
+
+    if not server_url:
+        raise HTTPException(status_code=400, detail="No server URL resolved for reconnect")
+
+    redirect_uri = (
+        f"{(get_settings().public_base_url.rstrip('/'))}/api/mcp/oauth/callback"
+        if get_settings().public_base_url
+        else f"{request.url.scheme}://{request.url.netloc}/api/mcp/oauth/callback"
+    )
+
+    try:
+        result = await start_oauth_flow(
+            db=db,
+            user_id=user.id,
+            server_url=server_url,
+            registration_method=registration_method,
+            redirect_uri=redirect_uri,
+            marketplace_agent_id=config.marketplace_agent_id,
+            scope_level=config.scope_level,
+            team_id=config.team_id,
+            project_id=config.project_id,
+        )
+    except OAuthFlowError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ReconnectResponse(authorize_url=result.authorize_url, flow_id=result.flow_id)
