@@ -16,13 +16,15 @@ const ROLE_PERMISSIONS: Record<string, Set<string>> = {
     'snapshot.restore', 'terminal.access', 'credentials.view', 'credentials.manage',
     'channel.view', 'channel.manage', 'mcp.view', 'mcp.manage',
     'agent.view', 'agent.manage',
-    // MCP OAuth connectors (issue #287)
+    // MCP OAuth connectors (issue #287; team-scope dropped in #307).
     'connectors.view', 'connectors.manage_user', 'connectors.manage_project',
   ]),
   viewer: new Set([
     'team.view', 'billing.view', 'project.list', 'project.view', 'file.read',
     'container.view', 'chat.view', 'deployment.view', 'git.view', 'kanban.view',
     'snapshot.view', 'credentials.view', 'channel.view', 'mcp.view', 'agent.view',
+    // Viewers can install connectors to their own account; they still can't
+    // edit projects they only view, so project-scope installs remain gated.
     'connectors.view', 'connectors.manage_user',
   ]),
 };

@@ -1561,10 +1561,16 @@ export const marketplaceApi = {
   },
 
   // MCP install/manage (separate from marketplace browse)
-  installMcpServer: async (marketplaceAgentId: string, credentials?: Record<string, string>) => {
+  installMcpServer: async (
+    marketplaceAgentId: string,
+    credentials?: Record<string, string>,
+    opts?: { scope_level?: 'user' | 'project'; project_id?: string },
+  ) => {
     const response = await api.post('/api/mcp/install', {
       marketplace_agent_id: marketplaceAgentId,
       credentials: credentials || {},
+      scope_level: opts?.scope_level ?? 'user',
+      project_id: opts?.project_id,
     });
     return response.data;
   },

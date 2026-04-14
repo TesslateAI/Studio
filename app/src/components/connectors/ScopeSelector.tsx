@@ -1,6 +1,6 @@
 import { useTeam } from '../../contexts/TeamContext';
 
-type Scope = 'team' | 'user' | 'project';
+export type Scope = 'user' | 'project';
 
 interface Props {
   value: Scope;
@@ -8,28 +8,32 @@ interface Props {
   projectId?: string;
 }
 
+/**
+ * Two-option scope picker for connector installs (issue #307).
+ *
+ * - **My account** — install lands on the caller's user and follows them
+ *   across every team they belong to. Always available.
+ * - **This project** — per-user override pinned to a project. Disabled
+ *   unless a projectId is provided and the caller can edit that project.
+ *
+ * Team-scope install is intentionally not offered — OAuth identities are
+ * bound to one user and cannot be shared across members.
+ */
 export function ScopeSelector({ value, onChange, projectId }: Props) {
   const { can } = useTeam();
-  const canTeam = can('connectors.manage_team');
   const canProject = can('connectors.manage_project') && !!projectId;
 
   const options: Array<{ id: Scope; label: string; hint: string; disabled: boolean }> = [
     {
-      id: 'team',
-      label: 'Team default',
-      hint: 'Everyone in the team uses this connector unless they override it.',
-      disabled: !canTeam,
-    },
-    {
       id: 'user',
-      label: 'Personal',
-      hint: 'Only your chats and agents see this connector.',
+      label: 'My account',
+      hint: 'Available in every team you belong to. Your OAuth tokens only.',
       disabled: false,
     },
     {
       id: 'project',
       label: 'This project only',
-      hint: 'Scoped to the current project — overrides team or personal.',
+      hint: 'Per-user override pinned to the current project.',
       disabled: !canProject,
     },
   ];
