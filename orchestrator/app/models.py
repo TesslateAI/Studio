@@ -107,6 +107,9 @@ class Project(Base):
     # Per-project sync toggle for desktop → cloud reverse-sync.
     sync_enabled = Column(Boolean, nullable=True, default=False, server_default=expression.false())
 
+    # Long-form mission statement propagated into agent goal ancestry.
+    mission = Column(Text, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -645,6 +648,63 @@ class AgentStep(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     message = relationship("Message", back_populates="steps")
+
+
+class AgentTask(Base):
+    """Work ticket allocated to an agent within a project.
+
+    Tickets carry a human-readable ``ref_id`` of the form ``TSK-NNNN`` and
+    track status across the lifecycle (queued → running → completed | failed
+    | cancelled; or paused / awaiting_approval for gated work).
+
+    ``requires_approval_for`` is a JSON list of tool names that must be
+    explicitly approved before the ticket can proceed; the approval-gate
+    service flips status to ``awaiting_approval`` when a gated tool is hit.
+    """
+
+    __tablename__ = "agent_tasks"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    ref_id = Column(String(16), unique=True, nullable=False, index=True)
+    project_id = Column(
+        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_task_id = Column(
+        GUID(), ForeignKey("agent_tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    goal_ancestry = Column(JSON, nullable=True)
+    status = Column(String(32), nullable=False, default="queued", server_default="queued", index=True)
+    requires_approval_for = Column(JSON, nullable=True)
+    # No FK — marketplace agents may be deleted without cascading ticket loss.
+    assignee_agent_id = Column(GUID(), nullable=True)
+    title = Column(String(512), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    project = relationship("Project")
+    parent = relationship("AgentTask", remote_side=[id])
+
+
+class AgentBudget(Base):
+    """Monthly USD cap for an agent, optionally scoped to a project.
+
+    A row with ``project_id IS NULL`` acts as the agent-wide fallback; a
+    row with a concrete ``project_id`` overrides it for that project only.
+    """
+
+    __tablename__ = "agent_budgets"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(GUID(), nullable=False, index=True)
+    project_id = Column(GUID(), nullable=True)
+    monthly_limit_usd = Column(Numeric(10, 4), nullable=False)
+    spent_usd = Column(Numeric(10, 4), nullable=False, default=0, server_default="0")
+    reset_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("agent_id", "project_id", name="uq_agent_budgets_agent_project"),
+    )
 
 
 class AgentCommandLog(Base):
