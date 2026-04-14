@@ -14,8 +14,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import redis.exceptions
-
 logger = logging.getLogger(__name__)
 
 _PENDING_SENTINEL = object()
@@ -441,14 +439,14 @@ class GatewayRunner:
         Self-terminates on complete/done/error or after TIMEOUT seconds.
         Failure here must NOT prevent final delivery.
         """
-        import json
         import time
 
+        from ..pubsub import get_pubsub
+
         adapter = self.adapters.get(config_id)
-        if not adapter or not self._redis:
+        if not adapter:
             return
 
-        stream_key = f"tesslate:agent:stream:{task_id}"
         status_message_id: str | None = None
         last_status_time = 0.0
         last_typing_time = 0.0
@@ -456,100 +454,89 @@ class GatewayRunner:
         _TYPING_INTERVAL = 5.0
         _TIMEOUT = 600  # 10 min matches worker_job_timeout
 
+        pubsub = get_pubsub()
+        event_iter = pubsub.subscribe_agent_events(task_id).__aiter__()
+
         try:
             # Immediate typing indicator
             await adapter.set_typing(chat_id, on=True)
             last_typing_time = time.monotonic()
 
-            last_id = "0-0"
             start_time = time.monotonic()
 
             while time.monotonic() - start_time < _TIMEOUT:
                 try:
-                    entries = await self._redis.xread({stream_key: last_id}, count=10, block=3000)
-                except Exception:
-                    break
-
-                if not entries:
+                    event = await asyncio.wait_for(event_iter.__anext__(), timeout=3.0)
+                except asyncio.TimeoutError:
                     now = time.monotonic()
                     if now - last_typing_time >= _TYPING_INTERVAL:
                         await adapter.set_typing(chat_id, on=True)
                         last_typing_time = now
                     continue
+                except StopAsyncIteration:
+                    break
 
-                for _stream_name, messages in entries:
-                    for msg_id, data in messages:
-                        last_id = msg_id
+                event_type = event.get("type", "")
 
-                        raw = data.get(b"data") or data.get("data", b"{}")
-                        if isinstance(raw, bytes):
-                            raw = raw.decode()
-                        try:
-                            event = json.loads(raw)
-                        except Exception:
-                            continue
+                # Terminal events — clean up and stop
+                if event_type in ("complete", "done"):
+                    if status_message_id:
+                        with contextlib.suppress(Exception):
+                            await adapter.delete_message(chat_id, status_message_id)
+                    return
 
-                        event_type = event.get("type", "")
+                if event_type == "error":
+                    error_text = "\u274c Something went wrong"
+                    with contextlib.suppress(Exception):
+                        await adapter.send_status(chat_id, error_text, status_message_id)
+                    return
 
-                        # Terminal events — clean up and stop
-                        if event_type in ("complete", "done"):
-                            if status_message_id:
-                                with contextlib.suppress(Exception):
-                                    await adapter.delete_message(chat_id, status_message_id)
-                            return
-
-                        if event_type == "error":
-                            error_text = "\u274c Something went wrong"
+                # Per-tool streaming — update status immediately
+                if event_type == "tool_call":
+                    tc_data = event.get("data", {})
+                    now = time.monotonic()
+                    if now - last_status_time >= _MIN_STATUS_INTERVAL:
+                        tc_name = tc_data.get("name", "")
+                        tc_params = tc_data.get("parameters", {})
+                        status_text = self._build_status_text(
+                            [{"name": tc_name, "parameters": tc_params}]
+                        )
+                        if status_text:
                             with contextlib.suppress(Exception):
-                                await adapter.send_status(chat_id, error_text, status_message_id)
-                            return
-
-                        # Per-tool streaming — update status immediately
-                        if event_type == "tool_call":
-                            tc_data = event.get("data", {})
-                            now = time.monotonic()
-                            if now - last_status_time >= _MIN_STATUS_INTERVAL:
-                                tc_name = tc_data.get("name", "")
-                                tc_params = tc_data.get("parameters", {})
-                                status_text = self._build_status_text(
-                                    [{"name": tc_name, "parameters": tc_params}]
+                                new_id = await adapter.send_status(
+                                    chat_id,
+                                    status_text,
+                                    status_message_id,
                                 )
-                                if status_text:
-                                    with contextlib.suppress(Exception):
-                                        new_id = await adapter.send_status(
-                                            chat_id,
-                                            status_text,
-                                            status_message_id,
-                                        )
-                                        if new_id:
-                                            status_message_id = new_id
-                                        last_status_time = now
+                                if new_id:
+                                    status_message_id = new_id
+                                last_status_time = now
 
-                        # Agent step summary — extract tool calls for status
-                        elif event_type == "agent_step":
-                            step_data = event.get("data", {})
-                            tool_calls = step_data.get("tool_calls", [])
+                # Agent step summary — extract tool calls for status
+                elif event_type == "agent_step":
+                    step_data = event.get("data", {})
+                    tool_calls = step_data.get("tool_calls", [])
 
-                            if tool_calls:
-                                now = time.monotonic()
-                                if now - last_status_time >= _MIN_STATUS_INTERVAL:
-                                    status_text = self._build_status_text(tool_calls)
-                                    if status_text:
-                                        with contextlib.suppress(Exception):
-                                            new_id = await adapter.send_status(
-                                                chat_id,
-                                                status_text,
-                                                status_message_id,
-                                            )
-                                            if new_id:
-                                                status_message_id = new_id
-                                            last_status_time = now
-                            else:
-                                # Thinking — refresh typing
-                                now = time.monotonic()
-                                if now - last_typing_time >= _TYPING_INTERVAL:
-                                    await adapter.set_typing(chat_id, on=True)
-                                    last_typing_time = now
+                    if tool_calls:
+                        now = time.monotonic()
+                        if now - last_status_time >= _MIN_STATUS_INTERVAL:
+                            status_text = self._build_status_text(tool_calls)
+                            if status_text:
+                                with contextlib.suppress(Exception):
+                                    new_id = await adapter.send_status(
+                                        chat_id,
+                                        status_text,
+                                        status_message_id,
+                                    )
+                                    if new_id:
+                                        status_message_id = new_id
+                                    last_status_time = now
+                    else:
+                        # Thinking — refresh typing
+                        now = time.monotonic()
+                        if now - last_typing_time >= _TYPING_INTERVAL:
+                            await adapter.set_typing(chat_id, on=True)
+                            last_typing_time = now
 
         except asyncio.CancelledError:
             pass
@@ -560,6 +547,8 @@ class GatewayRunner:
                 exc_info=True,
             )
         finally:
+            with contextlib.suppress(Exception):
+                await event_iter.aclose()  # type: ignore[attr-defined]
             if status_message_id:
                 with contextlib.suppress(Exception):
                     await adapter.delete_message(chat_id, status_message_id)
@@ -722,9 +711,16 @@ class GatewayRunner:
     # ------------------------------------------------------------------
 
     async def _delivery_consumer(self) -> None:
-        """XREADGROUP on tesslate:gateway:deliveries stream."""
+        """XREADGROUP on tesslate:gateway:deliveries stream.
+
+        Cross-pod delivery routing is Redis-only. On desktop (no redis_url) the
+        worker also skips XADD delivery — disable this consumer entirely.
+        """
         if not self._redis:
+            logger.info("[GATEWAY] No Redis — delivery consumer disabled")
             return
+
+        import redis.exceptions
 
         from ...config import get_settings
 

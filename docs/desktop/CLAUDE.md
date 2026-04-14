@@ -12,6 +12,17 @@ shell.
 - `/orchestrator/app/services/desktop_paths.py` — `$TESSLATE_STUDIO_HOME` resolver
 - `/orchestrator/app/services/orchestration/factory.py` — per-project runtime dispatch
 
+## Content pages
+| Page | What it covers | Load when |
+| ---- | -------------- | --------- |
+| [runtimes.md](runtimes.md) | Runtime probe, per-project dispatch, port allocator, `$TESSLATE_STUDIO_HOME` layout, tray endpoints | Touching the tray, runtime picker, local-runtime ports, or FS layout |
+| [import.md](import.md) | `POST /api/desktop/import`, `import_path` schema, canonical-path dedup, POSIX symlink vs Windows `.tesslate-source` marker | Wiring the "open existing folder" flow or changing `ProjectCreate` |
+| [cloud.md](cloud.md) | `CloudClient` pool/retry/breaker, `token_store` precedence, pairing endpoints, `tesslate://auth/callback` deep-link | Any change that calls the cloud from the sidecar |
+| [marketplace.md](marketplace.md) | Dual-source listing, stale-while-revalidate cache, SHA-256 install pipeline, install/uninstall error map | Marketplace UI changes or installer edits |
+| [sync.md](sync.md) | Pack exclusions, manifest shape, push conflict pre-check, atomic pull extraction, sync status | Working on `sync_client.py` or the sync routes |
+| [agents.md](agents.md) | `TSK-NNNN` allocator, budget precedence, approval gate, `/agents/tickets`, `/agents/sessions` filter matrix | Agent worker, ticket UI, approval flows |
+| [unified-workspace.md](unified-workspace.md) | `Directory` CRUD + dedup + git-root, AgentTask ↔ Directory, `HandoffBundle`, planned `open_in_ide` | Unified workspace UI or handoff wiring |
+
 ## Related contexts
 - `/docs/orchestrator/orchestration/CLAUDE.md` — container orchestrators
 - `/docs/orchestrator/services/` — services the desktop sidecar consumes

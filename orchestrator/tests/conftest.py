@@ -29,6 +29,11 @@ import pytest
 orchestrator_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(orchestrator_dir))
 
+# Make the sibling tesslate-agent submodule importable during tests.
+_agent_src = orchestrator_dir.parent / "packages" / "tesslate-agent" / "src"
+if _agent_src.is_dir():
+    sys.path.insert(0, str(_agent_src))
+
 
 def pytest_configure(config):
     """

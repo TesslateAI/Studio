@@ -76,6 +76,16 @@ class Settings(BaseSettings):
     # Empty string → resolved per-OS at runtime via services.desktop_paths.resolve_studio_home().
     tesslate_studio_home: str = ""
 
+    # Desktop: cloud companion endpoint. The desktop sidecar talks to this URL
+    # via services.cloud_client.CloudClient for marketplace pulls, model proxy,
+    # sync, etc. Bearer token is sourced from services.token_store.
+    tesslate_cloud_url: str = "https://your-domain.com"
+
+    # Desktop marketplace: when True and paired, /api/desktop/marketplace/items
+    # merges cloud catalog entries with local installed items. Toggle off to
+    # keep the desktop fully offline.
+    pull_from_cloud: bool = True
+
     # Local runtime: inclusive TCP port range for per-container host ports.
     # The allocator (services.orchestration.local_ports) reserves ports from this
     # window and persists assignments under $TESSLATE_STUDIO_HOME/cache/ports.json.

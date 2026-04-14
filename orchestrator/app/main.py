@@ -57,6 +57,7 @@ from .routers import (
     magic_link,
     marketplace,
     marketplace_apps,
+    marketplace_local,
     mcp,
     mcp_oauth,
     mcp_server,
@@ -1176,6 +1177,7 @@ app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapsh
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)
 app.include_router(desktop.router)  # /api/desktop - Runtime probe + tray state
+app.include_router(marketplace_local.router)  # /api/desktop/marketplace - local + cloud merge
 app.include_router(desktop_pair.session_router)  # /api/desktop - Session-auth pairing mint
 app.include_router(desktop_pair.public_router)  # /api/v1/desktop - tsk-auth pairing revoke
 from .routers.public import public_routers  # noqa: E402

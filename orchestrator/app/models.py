@@ -684,6 +684,59 @@ class AgentTask(Base):
 
     project = relationship("Project")
     parent = relationship("AgentTask", remote_side=[id])
+    directories = relationship(
+        "Directory",
+        secondary="agent_task_directories",
+        back_populates="tickets",
+    )
+
+
+class Directory(Base):
+    """User-scoped workspace directory entry.
+
+    Represents an on-disk path the desktop client has opened; carries
+    optional runtime/project/git-root metadata so the unified workspace
+    view can group agent sessions by directory.
+    """
+
+    __tablename__ = "directories"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    path = Column(String(1024), nullable=False)
+    runtime = Column(String(16), nullable=True)
+    project_id = Column(
+        GUID(), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    git_root = Column(String(1024), nullable=True)
+    last_opened_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "path", name="uq_directories_user_path"),
+    )
+
+    project = relationship("Project")
+    tickets = relationship(
+        "AgentTask",
+        secondary="agent_task_directories",
+        back_populates="directories",
+    )
+
+
+class AgentTaskDirectory(Base):
+    """Join row linking agent tickets to workspace directories."""
+
+    __tablename__ = "agent_task_directories"
+
+    ticket_id = Column(
+        GUID(), ForeignKey("agent_tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    directory_id = Column(
+        GUID(), ForeignKey("directories.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class AgentBudget(Base):

@@ -111,7 +111,19 @@ class RuntimeProbe:
             return unreachable
 
     async def k8s_remote_available(self, user=None) -> ProbeResult:
-        """Remote (cloud) k8s requires pairing. Stubbed until pairing lands."""
+        """Remote (cloud) k8s is available only when the sidecar is paired.
+
+        We check for a present cloud token — a full cloud round-trip
+        (``CloudClient.get("/api/v1/k8s/health")``) would couple this probe
+        to network latency and violate the non-blocking contract.
+        """
+        try:
+            from . import token_store
+
+            if token_store.is_paired():
+                return ProbeResult(ok=True, reason=None)
+        except Exception:
+            pass
         return ProbeResult(ok=False, reason="Cloud pairing required")
 
 

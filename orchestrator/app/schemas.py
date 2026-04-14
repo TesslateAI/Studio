@@ -72,6 +72,14 @@ class ProjectCreate(ProjectBase):
     )
     base_id: UUID | str | None = None  # UUID for marketplace bases, 'builtin' for built-in template
     base_version: str | None = None  # Git tag to clone from (e.g., "v2.1.0")
+    # Per-project runtime override ("local" | "docker" | "k8s"). NULL resolves
+    # to the deployment-wide default at handler time (local when
+    # DEPLOYMENT_MODE=desktop, else docker).
+    runtime: Literal["local", "docker", "k8s"] | None = None
+    # Host-path the desktop shell is importing from. When set, template /
+    # git scaffolding is skipped — the project root just points at the
+    # existing directory (symlink on POSIX, marker file on Windows).
+    import_path: str | None = None
 
     @field_validator("source_type")
     @classmethod
@@ -129,6 +137,10 @@ class ProjectCreate(ProjectBase):
     @field_validator("base_id")
     @classmethod
     def validate_base_id(cls, v, info):
+        # When import_path is set we're adopting an existing directory; no
+        # template / base scaffolding runs, so base_id is not required.
+        if info.data.get("import_path"):
+            return v
         if info.data.get("source_type") == "base":
             if not v:
                 raise ValueError('base_id is required when source_type is "base"')

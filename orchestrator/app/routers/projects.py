@@ -491,6 +491,201 @@ async def _perform_project_setup(
             raise
 
 
+def _resolve_default_runtime(settings) -> str:
+    """Map deployment_mode → per-project runtime default.
+
+    Desktop shells default new projects to the local runtime; cloud / server
+    deployments keep the historical docker default so existing callers that
+    omit ``runtime`` are unaffected.
+    """
+    mode = (settings.deployment_mode or "").lower()
+    if mode == "desktop":
+        return "local"
+    if mode == "kubernetes":
+        return "k8s"
+    return "docker"
+
+
+def _materialize_imported_root(source_path: str, project_root: str) -> None:
+    """Point ``project_root`` at an existing ``source_path``.
+
+    POSIX: create a symlink ``project_root → source_path``.
+    Windows: create ``project_root`` as a plain directory containing a
+    ``.tesslate-source`` marker file with the canonical source path — symlink
+    creation on Windows typically requires elevation and is therefore
+    unreliable for a desktop shell.
+    """
+    parent = os.path.dirname(project_root)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if os.path.lexists(project_root):
+        return
+    if os.name == "nt":
+        os.makedirs(project_root, exist_ok=True)
+        marker = os.path.join(project_root, ".tesslate-source")
+        with open(marker, "w", encoding="utf-8") as fh:
+            fh.write(source_path)
+        return
+    os.symlink(source_path, project_root)
+
+
+async def create_project_from_payload(
+    payload: ProjectCreate,
+    *,
+    current_user: User,
+    db: AsyncSession,
+) -> dict:
+    """Shared core for ``POST /api/projects`` and ``POST /api/desktop/import``.
+
+    Encapsulates permission + quota checks, slug collision handling, and the
+    import-path vs. template branch. Returns the same shape both callers
+    expose to clients: ``{"project", "task_id", "status_endpoint"}`` for the
+    template flow, or ``{"project", "task_id": None, "status_endpoint": None}``
+    for imports (no background setup required).
+    """
+    # Validate base_id is provided for base source type (skipped for imports).
+    if (
+        not payload.import_path
+        and payload.source_type == "base"
+        and not payload.base_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A template must be selected to create a project. Please select a template and try again.",
+        )
+
+    # Team permission check (create).
+    from ..permissions import check_team_permission
+
+    if current_user.default_team_id:
+        await check_team_permission(
+            db, current_user.default_team_id, current_user.id, Permission.PROJECT_CREATE
+        )
+
+    await enforce_project_limit(current_user, db)
+
+    settings = get_settings()
+    resolved_runtime = payload.runtime or _resolve_default_runtime(settings)
+
+    # Import branch: resolve + dedupe the source_path up-front.
+    canonical_source: str | None = None
+    if payload.import_path:
+        expanded = os.path.expanduser(payload.import_path)
+        if not os.path.isdir(expanded):
+            raise HTTPException(
+                status_code=400,
+                detail=f"import_path is not a directory: {payload.import_path}",
+            )
+        canonical_source = os.path.realpath(expanded)
+
+        dup = await db.execute(
+            select(Project).where(
+                Project.owner_id == current_user.id,
+                Project.source_path == canonical_source,
+            )
+        )
+        if dup.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A project already exists for this path: {canonical_source}",
+            )
+
+    project_slug = generate_project_slug(payload.name)
+    max_retries = 10
+    db_project: Project | None = None
+    for attempt in range(max_retries):
+        try:
+            db_project = Project(
+                name=payload.name,
+                slug=project_slug,
+                description=payload.description,
+                owner_id=current_user.id,
+                team_id=current_user.default_team_id,
+                runtime=resolved_runtime,
+                source_path=canonical_source,
+            )
+            db.add(db_project)
+            await db.flush()
+
+            from ..models_team import ProjectMembership
+
+            creator_membership = ProjectMembership(
+                project_id=db_project.id,
+                user_id=current_user.id,
+                role="admin",
+                granted_by_id=current_user.id,
+            )
+            db.add(creator_membership)
+            await db.commit()
+            await db.refresh(db_project)
+            break
+        except Exception as e:
+            await db.rollback()
+            if (
+                "unique" in str(e).lower()
+                and "slug" in str(e).lower()
+                and attempt < max_retries - 1
+            ):
+                project_slug = generate_project_slug(payload.name)
+                logger.warning(f"[CREATE] Slug collision, retrying with: {project_slug}")
+            else:
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to create project: {str(e)}"
+                ) from e
+
+    assert db_project is not None
+    logger.info(f"[CREATE] Project {db_project.slug} (ID: {db_project.id}) created in database")
+
+    # Import flow: materialize project root pointing at source and short-circuit.
+    if canonical_source is not None:
+        try:
+            from ..services.orchestration.local import _get_project_root
+
+            project_root = str(_get_project_root(db_project))
+            _materialize_imported_root(canonical_source, project_root)
+            db_project.environment_status = "active"
+            await db.commit()
+            await db.refresh(db_project)
+        except Exception as exc:
+            logger.warning(
+                "[CREATE] import_path materialization failed for %s: %s",
+                db_project.id,
+                exc,
+            )
+        return {"project": db_project, "task_id": None, "status_endpoint": None}
+
+    # Template flow: hand off to the existing background setup pipeline.
+    task_manager = get_task_manager()
+    task = task_manager.create_task(
+        user_id=current_user.id,
+        task_type="project_creation",
+        metadata={
+            "project_id": str(db_project.id),
+            "project_slug": db_project.slug,
+            "project_name": db_project.name,
+            "source_type": payload.source_type,
+        },
+    )
+
+    task_manager.start_background_task(
+        task_id=task.id,
+        coro=_perform_project_setup,
+        project_data=payload,
+        db_project_id=db_project.id,
+        db_project_slug=db_project.slug,
+        user_id=current_user.id,
+        settings=settings,
+    )
+
+    logger.info(f"[CREATE] Background task {task.id} started for project {db_project.id}")
+
+    return {
+        "project": db_project,
+        "task_id": task.id,
+        "status_endpoint": f"/api/tasks/{task.id}",
+    }
+
+
 @router.post("/")
 async def create_project(
     project: ProjectCreate,
@@ -510,129 +705,17 @@ async def create_project(
     - Repository will be cloned into the project
     - Project files will be populated from the repository
     """
+    logger.info(
+        f"[CREATE] Creating project for user {current_user.id}: {project.name} "
+        f"(source: {project.source_type}, base_id: {project.base_id}, "
+        f"runtime={project.runtime}, import_path={project.import_path})"
+    )
     try:
-        # Validate base_id is provided for base source type
-        if project.source_type == "base" and not project.base_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="A template must be selected to create a project. Please select a template and try again.",
-            )
-
-        logger.info(
-            f"[CREATE] Creating project for user {current_user.id}: {project.name} "
-            f"(source: {project.source_type}, base_id: {project.base_id})"
-        )
-
-        # Check team permission — admins and editors can create projects
-        from ..permissions import Permission, check_team_permission
-
-        if current_user.default_team_id:
-            await check_team_permission(
-                db, current_user.default_team_id, current_user.id, Permission.PROJECT_CREATE
-            )
-
-        # Check project limits based on subscription tier
-        await enforce_project_limit(current_user, db)
-
-        settings = get_settings()
-
-        # Generate unique slug for the project
-        project_slug = generate_project_slug(project.name)
-
-        # Handle collision (retry with new slug)
-        max_retries = 10
-        for attempt in range(max_retries):
-            try:
-                # Create project database record
-                db_project = Project(
-                    name=project.name,
-                    slug=project_slug,
-                    description=project.description,
-                    owner_id=current_user.id,
-                    team_id=current_user.default_team_id,
-                )
-                db.add(db_project)
-                await db.flush()
-
-                # Create ProjectMembership for the creator
-                from ..models_team import ProjectMembership
-
-                creator_membership = ProjectMembership(
-                    project_id=db_project.id,
-                    user_id=current_user.id,
-                    role="admin",
-                    granted_by_id=current_user.id,
-                )
-                db.add(creator_membership)
-                await db.commit()
-                await db.refresh(db_project)
-                break
-            except Exception as e:
-                await db.rollback()
-                if (
-                    "unique" in str(e).lower()
-                    and "slug" in str(e).lower()
-                    and attempt < max_retries - 1
-                ):
-                    # Slug collision, generate a new one
-                    project_slug = generate_project_slug(project.name)
-                    logger.warning(f"[CREATE] Slug collision, retrying with: {project_slug}")
-                else:
-                    # Other error or max retries reached
-                    raise HTTPException(
-                        status_code=500, detail=f"Failed to create project: {str(e)}"
-                    ) from e
-
-        logger.info(f"[CREATE] Project {db_project.slug} (ID: {db_project.id}) created in database")
-
-        # Create background task for project setup
-        task_manager = get_task_manager()
-        task = task_manager.create_task(
-            user_id=current_user.id,
-            task_type="project_creation",
-            metadata={
-                "project_id": str(db_project.id),
-                "project_slug": db_project.slug,
-                "project_name": db_project.name,
-                "source_type": project.source_type,
-            },
-        )
-
-        # Start background task (non-blocking)
-        task_manager.start_background_task(
-            task_id=task.id,
-            coro=_perform_project_setup,
-            project_data=project,
-            db_project_id=db_project.id,
-            db_project_slug=db_project.slug,
-            user_id=current_user.id,
-            settings=settings,
-        )
-
-        logger.info(f"[CREATE] Background task {task.id} started for project {db_project.id}")
-
-        # Return IMMEDIATELY with project and task info
-        return {
-            "project": db_project,
-            "task_id": task.id,
-            "status_endpoint": f"/api/tasks/{task.id}",
-        }
-
+        return await create_project_from_payload(project, current_user=current_user, db=db)
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
         logger.error(f"[CREATE] Critical error during project creation: {e}", exc_info=True)
-
-        # Clean up failed project from database if it was created
-        try:
-            if "db_project" in locals():
-                await db.delete(db_project)
-                await db.commit()
-                logger.info("[CREATE] Cleaned up failed project from database")
-        except Exception as cleanup_error:
-            logger.error(f"[CREATE] Error during cleanup: {cleanup_error}", exc_info=True)
-
         raise HTTPException(status_code=500, detail=f"Failed to create project: {str(e)}") from e
 
 
