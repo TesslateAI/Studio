@@ -463,7 +463,7 @@ function McpServerCard({
   onReload: () => void;
 }) {
   const [showDropdown, setShowDropdown] = useState(false);
-  const [assigning, setAssigning] = useState(false);
+  const [, setAssigning] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});

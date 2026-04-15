@@ -393,27 +393,6 @@ export function NavigationSidebar({
   const inactiveLabelClass =
     'text-[14px] font-medium text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)] transition-colors';
 
-  // Sub-item styles for Library dropdown children
-  // Sub-items indented under Library parent
-  const subItemClass = (isActive: boolean) =>
-    `group flex items-center h-7 w-full transition-colors rounded-lg pl-[26px] pr-[7px] gap-2.5 ${
-      isActive ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
-    }`;
-
-  const subItemIconClass = (isActive: boolean) =>
-    `transition-colors flex-shrink-0 ${
-      isActive
-        ? 'text-[var(--sidebar-text)]'
-        : 'text-[var(--text-subtle)] group-hover:text-[var(--sidebar-text)]'
-    }`;
-
-  const subItemLabelClass = (isActive: boolean) =>
-    `text-[11px] font-medium transition-colors ${
-      isActive
-        ? 'text-[var(--sidebar-text)]'
-        : 'text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)]'
-    }`;
-
   return (
     <motion.div
       initial={false}
