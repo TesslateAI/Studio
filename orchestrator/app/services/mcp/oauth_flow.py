@@ -214,15 +214,19 @@ async def start_oauth_flow(
     elif registration_method == "platform_app":
         platform_app = _lookup_platform_app(settings, server_url)
         if not platform_app:
+            # Log the actionable detail for operators; keep the user-facing
+            # message generic so we don't leak the provider hostname or the
+            # exact env-var names we expect.
             host = urlparse(server_url).hostname or server_url
+            logger.warning(
+                "platform_app OAuth not configured for %s — set MCP_OAUTH_APP_<PROVIDER>_CLIENT_ID/SECRET",
+                host,
+            )
             raise OAuthFlowError(
-                "This connector uses a Tesslate-owned OAuth app which hasn't "
-                "been configured on this environment. Register an OAuth app "
-                f"with the provider ({host}), set the matching "
-                "MCP_OAUTH_APP_<PROVIDER>_CLIENT_ID and CLIENT_SECRET "
-                "environment variables, and restart the orchestrator. "
-                "Alternatively add the server as a custom connector with "
-                "your own client_id / client_secret."
+                "This connector isn't available on this environment yet. "
+                "Please contact support to enable it. Alternatively, add the "
+                "server as a custom connector with your own client_id / "
+                "client_secret."
             )
         client_info = _make_byo_client_info(
             client_id=platform_app["client_id"],
