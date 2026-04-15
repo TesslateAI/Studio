@@ -6,6 +6,9 @@ import { ThemeProvider, useTheme } from './theme';
 import { AuthProvider } from './contexts/AuthContext';
 import { ChatPositionProvider } from './contexts/ChatPositionContext';
 import { TeamProvider } from './contexts/TeamContext';
+import { AppsProvider } from './contexts/AppsContext';
+import { WalletProvider } from './contexts/WalletContext';
+import { AdminProvider } from './contexts/AdminContext';
 import { CommandProvider } from './contexts/CommandContext';
 import { FeatureFlagProvider } from './contexts/FeatureFlagContext';
 import { useFeatureFlags } from './contexts/useFeatureFlag';
@@ -56,6 +59,22 @@ import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import MarketplaceSuccess from './pages/MarketplaceSuccess';
 import UserProfilePage from './pages/UserProfile';
+// Tesslate Apps (Waves 4-5)
+import AppsMarketplacePage from './pages/AppsMarketplacePage';
+import AppDetailPage from './pages/AppDetailPage';
+import BundleDetailPage from './pages/BundleDetailPage';
+import MyAppsPage from './pages/MyAppsPage';
+import AppWorkspacePage from './pages/AppWorkspacePage';
+import AppSourceBrowserPage from './pages/AppSourceBrowserPage';
+import ForkPage from './pages/ForkPage';
+import CreatorStudioPage from './pages/CreatorStudioPage';
+import CreatorAppPublishPage from './pages/CreatorAppPublishPage';
+import CreatorBillingPage from './pages/CreatorBillingPage';
+import AdminMarketplaceReviewPage from './pages/AdminMarketplaceReviewPage';
+import AdminSubmissionWorkbenchPage from './pages/AdminSubmissionWorkbenchPage';
+import AdminYankCenterPage from './pages/AdminYankCenterPage';
+import AdminCreatorReputationPage from './pages/AdminCreatorReputationPage';
+import AdminAdversarialSuitePage from './pages/AdminAdversarialSuitePage';
 
 function CategoryRedirect() {
   const { category } = useParams();
@@ -321,6 +340,27 @@ function AppContent() {
           <Route path="/marketplace/success" element={<MarketplaceSuccess />} />
           <Route path="/library" element={<Library />} />
           <Route path="/feedback" element={<Feedback />} />
+
+          {/* Tesslate Apps — browse/detail/install (order matters: bundles and installed before :appId) */}
+          <Route path="/apps" element={<AppsMarketplacePage />} />
+          <Route path="/apps/bundles/:bundleId" element={<BundleDetailPage />} />
+          <Route path="/apps/installed" element={<MyAppsPage />} />
+          <Route path="/apps/installed/:appInstanceId/workspace" element={<AppWorkspacePage />} />
+          <Route path="/apps/:appId/source" element={<AppSourceBrowserPage />} />
+          <Route path="/apps/:appId/fork" element={<ForkPage />} />
+          <Route path="/apps/:appId" element={<AppDetailPage />} />
+
+          {/* Creator Studio */}
+          <Route path="/creator" element={<CreatorStudioPage />} />
+          <Route path="/creator/publish/:appId" element={<CreatorAppPublishPage />} />
+          <Route path="/creator/billing" element={<CreatorBillingPage />} />
+
+          {/* Admin Marketplace */}
+          <Route path="/admin/marketplace" element={<AdminMarketplaceReviewPage />} />
+          <Route path="/admin/marketplace/submissions/:submissionId" element={<AdminSubmissionWorkbenchPage />} />
+          <Route path="/admin/marketplace/yanks" element={<AdminYankCenterPage />} />
+          <Route path="/admin/marketplace/reputation" element={<AdminCreatorReputationPage />} />
+          <Route path="/admin/marketplace/adversarial" element={<AdminAdversarialSuitePage />} />
         </Route>
 
         {/* Standalone Routes */}
@@ -409,19 +449,25 @@ function App() {
       <FeatureFlagProvider>
         <AuthProvider>
           <TeamProvider>
-            <ChatPositionProvider>
-              <CommandProvider>
-                <style>{`
+            <AppsProvider>
+              <WalletProvider>
+                <AdminProvider>
+                  <ChatPositionProvider>
+                    <CommandProvider>
+                      <style>{`
               @keyframes spin {
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
               }
             `}</style>
-                <BrowserRouter>
-                  <AppContent />
-                </BrowserRouter>
-              </CommandProvider>
-            </ChatPositionProvider>
+                      <BrowserRouter>
+                        <AppContent />
+                      </BrowserRouter>
+                    </CommandProvider>
+                  </ChatPositionProvider>
+                </AdminProvider>
+              </WalletProvider>
+            </AppsProvider>
           </TeamProvider>
         </AuthProvider>
       </FeatureFlagProvider>

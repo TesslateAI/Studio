@@ -189,6 +189,7 @@ k8s/overlays/*/generated-*.yaml
 
 # Claude AI
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # Jupyter Notebooks
 .ipynb_checkpoints/

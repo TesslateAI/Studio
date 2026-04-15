@@ -23,6 +23,7 @@ import {
   X,
   Funnel,
   Lightning,
+  Cube,
 } from '@phosphor-icons/react';
 import { MobileMenu } from '../components/ui';
 import {
@@ -37,7 +38,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateMarketplaceStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
-type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
+type ItemType = 'app' | 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -73,9 +74,11 @@ export default function Marketplace() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // State - Filters
-  const [selectedItemType, setSelectedItemType] = useState<ItemType>(
-    (searchParams.get('type') as ItemType) || 'agent'
-  );
+  const [selectedItemType, setSelectedItemType] = useState<ItemType>(() => {
+    const t = searchParams.get('type') as ItemType | null;
+    if (t === 'app') return 'agent';
+    return t || 'agent';
+  });
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [sortBy, setSortBy] = useState<SortOption>(
     (searchParams.get('sort') as SortOption) || 'featured'
@@ -170,6 +173,7 @@ export default function Marketplace() {
   };
 
   const itemTypes: { id: ItemType; label: string; icon: React.ReactNode }[] = [
+    { id: 'app', label: 'Apps', icon: <Cube size={16} weight="fill" /> },
     { id: 'agent', label: 'Agents', icon: <Cpu size={16} /> },
     { id: 'base', label: 'Bases', icon: <Package size={16} /> },
     { id: 'tool', label: 'Tools', icon: <Wrench size={16} /> },
@@ -438,6 +442,10 @@ export default function Marketplace() {
 
   // Handle item type change
   const handleItemTypeChange = (type: ItemType) => {
+    if (type === 'app') {
+      navigate('/apps');
+      return;
+    }
     setSelectedItemType(type);
     setPage(1);
   };

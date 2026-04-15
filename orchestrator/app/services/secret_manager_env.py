@@ -1,5 +1,23 @@
-"""Helpers for decoding container env vars at runtime and resolving connection templates."""
+"""Helpers for resolving container env vars at runtime and substituting
+connection templates.
 
+Secret resolution (post-migration 0057):
+  * Values in ``Container.encrypted_secrets`` are Fernet-encrypted and
+    decrypted via ``deployment_encryption_service``.
+  * Values in ``Container.environment_vars`` are PLAINTEXT — they are written
+    plaintext by the direct-edit PATCH endpoint and the node-config tool for
+    non-secret keys.
+  * For transitional safety, if an ``environment_vars`` value fails to look
+    like plaintext (looks base64-ish and decodes to something printable), we
+    also accept it but emit a ``secret_backfill_needed`` structured warning
+    so ops can spot un-migrated rows.
+
+Once migration 0058 has run everywhere the base64 fallback can be removed
+(currently gated by ``_try_legacy_base64``).
+"""
+
+import base64
+import binascii
 import json
 import logging
 import re
@@ -7,8 +25,6 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import select
-
-from .secret_codec import decode_secret_map
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +35,119 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Secret resolution
+# ---------------------------------------------------------------------------
+
+
+_LEGACY_BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]+$")
+
+
+def _try_legacy_base64(value: str) -> str | None:
+    """If *value* looks like base64 AND decodes to printable ASCII, return the
+    decoded string. Otherwise return None.
+
+    Transitional helper — kept until everyone has run migration 0058.
+    """
+    if not value or len(value) < 8 or len(value) % 4 != 0:
+        return None
+    if not _LEGACY_BASE64_RE.match(value):
+        return None
+    try:
+        decoded_bytes = base64.b64decode(value.encode("utf-8"), validate=True)
+        decoded = decoded_bytes.decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    # Heuristic: the round-trip that re-encodes must match the original AND
+    # the decoded string must look reasonable (printable).
+    if any(ord(ch) < 32 and ch not in "\n\r\t" for ch in decoded):
+        return None
+    return decoded
+
+
+def _decode_env_map(
+    raw: dict[str, str] | None,
+    *,
+    project_id: str | None = None,
+    container_id: str | None = None,
+) -> dict[str, str]:
+    """Return a plaintext env map. See module docstring for strategy."""
+    if not raw:
+        return {}
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(value, str):
+            out[key] = "" if value is None else str(value)
+            continue
+        legacy = _try_legacy_base64(value)
+        if legacy is not None and legacy != value:
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "secret_backfill_needed",
+                        "project_id": project_id,
+                        "container_id": container_id,
+                        "key": key,
+                    }
+                )
+            )
+            out[key] = legacy
+        else:
+            out[key] = value
+    return out
+
+
+def _merge_decrypted_secrets(
+    container: "Container", env_map: dict[str, str]
+) -> dict[str, str]:
+    """Overlay decrypted ``encrypted_secrets`` on top of *env_map*."""
+    encrypted = getattr(container, "encrypted_secrets", None) or {}
+    if not encrypted:
+        return env_map
+    try:
+        from .deployment_encryption import (
+            DeploymentEncryptionError,
+            get_deployment_encryption_service,
+        )
+
+        enc = get_deployment_encryption_service()
+    except Exception:
+        logger.warning(
+            "[secret_manager_env] no encryption service — skipping %d secret key(s) "
+            "on container %s",
+            len(encrypted),
+            getattr(container, "id", "?"),
+        )
+        return env_map
+    for key, enc_val in encrypted.items():
+        if not isinstance(enc_val, str) or not enc_val:
+            continue
+        try:
+            env_map[key] = enc.decrypt(enc_val)
+        except DeploymentEncryptionError:
+            logger.warning(
+                "[secret_manager_env] decrypt failed for container=%s key=%s",
+                getattr(container, "id", "?"),
+                key,
+            )
+    return env_map
+
+
+def container_env(container: "Container") -> dict[str, str]:
+    """Public helper: return the fully-resolved plaintext env map for a container."""
+    base = _decode_env_map(
+        container.environment_vars,
+        project_id=str(getattr(container, "project_id", "")) or None,
+        container_id=str(getattr(container, "id", "")) or None,
+    )
+    return _merge_decrypted_secrets(container, base)
+
+
+# ---------------------------------------------------------------------------
+# Connection template resolution
+# ---------------------------------------------------------------------------
+
+
 def resolve_connection_env_vars(
     source_container: "Container",
     service_def: "ServiceDefinition | None",
@@ -26,16 +155,7 @@ def resolve_connection_env_vars(
 ) -> dict[str, str]:
     """Resolve connection template variables for a service container.
 
-    For container-type services (postgres, redis, etc.), substitutes:
-      - {container_name} → sanitised Docker/K8s container name
-      - {internal_port}  → str(service_def.internal_port)
-      - {VAR}            → value from service_def.environment_vars
-
-    For external services, substitutes:
-      - {credential_key} → value from *decrypted_credentials*
-
-    Returns a dict of env var name → resolved value ready to inject into
-    the target container.
+    See module docstring for the decode strategy.
     """
     if service_def is None:
         return {}
@@ -44,65 +164,42 @@ def resolve_connection_env_vars(
     if not template:
         return {}
 
-    # Build the substitution context
     context: dict[str, str] = {}
-
-    # Container name (sanitised for DNS)
     context["container_name"] = source_container.container_name or ""
-
-    # Internal port
     if service_def.internal_port is not None:
         context["internal_port"] = str(service_def.internal_port)
-
-    # Service default env vars (e.g. POSTGRES_USER, POSTGRES_PASSWORD)
     for key, value in (service_def.environment_vars or {}).items():
         context[key] = value
-
-    # Override with any user-customised env vars stored on the container
-    if source_container.environment_vars:
-        decoded = decode_secret_map(source_container.environment_vars)
-        for key, value in decoded.items():
-            context[key] = value
-
-    # For external services, merge decrypted credentials into context
-    # Credentials are stored in DeploymentCredential (Fernet-encrypted JSON)
-    # and must be decrypted by the caller before passing here.
+    if source_container.environment_vars or getattr(
+        source_container, "encrypted_secrets", None
+    ):
+        context.update(container_env(source_container))
     if decrypted_credentials:
         context.update(decrypted_credentials)
 
-    # Perform template substitution
     resolved: dict[str, str] = {}
     for env_key, tmpl in template.items():
         try:
-            value = _substitute_template(tmpl, context)
-            resolved[env_key] = value
+            resolved[env_key] = _substitute_template(tmpl, context)
         except Exception:
             logger.debug(
                 "Skipping unresolvable template key %s for service %s",
                 env_key,
                 service_def.slug,
             )
-
     return resolved
 
 
 def _resolve_via_exports(source_container: "Container") -> dict[str, str]:
-    """Resolve env vars using the new export-based system.
-
-    When a container has .exports populated, resolve ${} placeholders
-    against the container's own env vars, HOST (container_name), and PORT.
-
-    Returns resolved export key-value pairs ready for injection.
-    """
+    """Resolve env vars using the export-based system (plaintext env map)."""
     from .export_resolver import resolve_node_exports
 
-    decoded_env = decode_secret_map(source_container.environment_vars or {})
+    decoded_env = container_env(source_container)
     effective_port = (
         source_container.internal_port
         or source_container.port
         or 3000
     )
-
     return resolve_node_exports(
         node_name=source_container.container_name or source_container.name or "",
         exports=source_container.exports,
@@ -112,11 +209,6 @@ def _resolve_via_exports(source_container: "Container") -> dict[str, str]:
 
 
 def _substitute_template(template: str, context: dict[str, str]) -> str:
-    """Replace {placeholder} tokens in *template* with values from *context*.
-
-    Raises ``KeyError`` if any placeholder is missing from context.
-    """
-
     def _replacer(match: re.Match) -> str:
         key = match.group(1)
         if key not in context:
@@ -130,10 +222,6 @@ async def _decrypt_container_credentials(
     db: "AsyncSession",
     container: "Container",
 ) -> dict[str, str] | None:
-    """Decrypt stored credentials for an external service container.
-
-    Returns the credential key-value pairs or None if no credentials exist.
-    """
     if not container.credentials_id:
         return None
 
@@ -163,10 +251,6 @@ async def get_injected_env_vars_for_container(
     container_id: UUID,
     project_id: UUID,
 ) -> list[dict]:
-    """Return the list of injected env vars for a target container.
-
-    Each entry: {"key": "DATABASE_URL", "source_container_name": "postgres-1", "source_container_id": "<uuid>"}
-    """
     from ..models import Container, ContainerConnection
 
     result = await db.execute(
@@ -177,7 +261,6 @@ async def get_injected_env_vars_for_container(
         )
     )
     connections = result.scalars().all()
-
     if not connections:
         return []
 
@@ -189,18 +272,22 @@ async def get_injected_env_vars_for_container(
         if not source:
             continue
 
-        # New export-based path: if source has .exports, use the export resolver
         if source.exports:
-            resolved = _resolve_via_exports(source)
-        else:
-            # Fallback to legacy template-based resolution
-            service_def = get_service(source.service_slug) if source.service_slug else None
+            # resolve via exports — uses the plaintext env map
+            from .export_resolver import resolve_node_exports
 
-            # Decrypt credentials for external services
+            effective_port = source.internal_port or source.port or 3000
+            resolved = resolve_node_exports(
+                node_name=source.container_name or source.name or "",
+                exports=source.exports,
+                env=container_env(source),
+                port=effective_port,
+            )
+        else:
+            service_def = get_service(source.service_slug) if source.service_slug else None
             creds = None
             if source.deployment_mode == "external" and source.credentials_id:
                 creds = await _decrypt_container_credentials(db, source)
-
             resolved = resolve_connection_env_vars(source, service_def, decrypted_credentials=creds)
 
         for env_key in resolved:
@@ -220,19 +307,14 @@ async def build_env_overrides(
     project_id: UUID,
     containers: list,
 ) -> dict[UUID, dict[str, str]]:
-    """Decode base64-encoded container env vars *and* merge injected connection
-    template vars for runtime injection.
-
-    Returns {container_id: {env_key: plain_value}} for every container.
-    """
+    """Build {container_id: {env_key: plaintext_value}} — decoded env vars
+    plus decrypted secrets, merged with any connection-template injections."""
     from ..models import Container, ContainerConnection
 
-    # 1. Start with each container's own env vars (decoded)
     overrides: dict[UUID, dict[str, str]] = {
-        c.id: decode_secret_map(c.environment_vars or {}) for c in containers
+        c.id: container_env(c) for c in containers
     }
 
-    # 2. Look up all env_injection connections in the project
     result = await db.execute(
         select(ContainerConnection).where(
             ContainerConnection.project_id == project_id,
@@ -240,36 +322,35 @@ async def build_env_overrides(
         )
     )
     connections = result.scalars().all()
-
     if not connections:
         return overrides
 
-    # Build a lookup of container by id for fast access
     container_map: dict[UUID, object] = {c.id: c for c in containers}
-
     from .service_definitions import get_service
 
     for conn in connections:
         source = container_map.get(conn.source_container_id)
         if source is None:
-            # Source container not in provided list — fetch from DB
             source = await db.get(Container, conn.source_container_id)
             if source is None:
                 continue
             container_map[source.id] = source
 
-        # New export-based path: if source has .exports, use the export resolver
         if source.exports:
-            resolved = _resolve_via_exports(source)
-        else:
-            # Fallback to legacy template-based resolution
-            service_def = get_service(source.service_slug) if source.service_slug else None
+            from .export_resolver import resolve_node_exports
 
-            # Decrypt credentials for external services
+            effective_port = source.internal_port or source.port or 3000
+            resolved = resolve_node_exports(
+                node_name=source.container_name or source.name or "",
+                exports=source.exports,
+                env=container_env(source),
+                port=effective_port,
+            )
+        else:
+            service_def = get_service(source.service_slug) if source.service_slug else None
             creds = None
             if source.deployment_mode == "external" and source.credentials_id:
                 creds = await _decrypt_container_credentials(db, source)
-
             resolved = resolve_connection_env_vars(source, service_def, decrypted_credentials=creds)
 
         if resolved:

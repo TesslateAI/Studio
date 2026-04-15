@@ -366,6 +366,25 @@ type (
 		CurrentHolder string `json:"current_holder,omitempty"`
 	}
 
+	// Bundle RPCs (apps primitive)
+	PublishBundleRequest struct {
+		VolumeID string `json:"volume_id"`
+		AppID    string `json:"app_id"`
+		Version  string `json:"version"`
+	}
+	PublishBundleResponse struct {
+		BundleHash string `json:"bundle_hash"`
+	}
+
+	CreateVolumeFromBundleRequest struct {
+		BundleHash string `json:"bundle_hash"`
+		HintNode   string `json:"hint_node,omitempty"`
+	}
+	CreateVolumeFromBundleResponse struct {
+		VolumeID string `json:"volume_id"`
+		NodeName string `json:"node_name"`
+	}
+
 	Empty struct{}
 )
 
@@ -406,6 +425,8 @@ func registerVolumeHubServer(srv *grpc.Server, s *Server) {
 			{MethodName: "ReleaseVolumeLease", Handler: s.handleReleaseVolumeLease},
 			{MethodName: "RenewVolumeLease", Handler: s.handleRenewVolumeLease},
 			{MethodName: "BatchAcquireLease", Handler: s.handleBatchAcquireLease},
+			{MethodName: "PublishBundle", Handler: s.handlePublishBundle},
+			{MethodName: "CreateVolumeFromBundle", Handler: s.handleCreateVolumeFromBundle},
 		},
 		Streams: []grpc.StreamDesc{},
 	}, s)
@@ -1730,6 +1751,30 @@ func (s *Server) handleForkVolume(_ interface{}, ctx context.Context, dec func(i
 		return nil, status.Errorf(codes.Internal, "%v", err)
 	}
 	return &ForkVolumeResponse{VolumeID: newVolumeID, NodeName: nodeName}, nil
+}
+
+func (s *Server) handlePublishBundle(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req PublishBundleRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	hash, err := s.PublishBundleForVolume(ctx, req.VolumeID, req.AppID, req.Version)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "%v", err)
+	}
+	return &PublishBundleResponse{BundleHash: hash}, nil
+}
+
+func (s *Server) handleCreateVolumeFromBundle(_ interface{}, ctx context.Context, dec func(interface{}) error, _ grpc.UnaryServerInterceptor) (interface{}, error) {
+	var req CreateVolumeFromBundleRequest
+	if err := dec(&req); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "decode: %v", err)
+	}
+	volumeID, nodeName, err := s.CreateVolumeFromBundleOnNode(ctx, req.BundleHash, req.HintNode)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "%v", err)
+	}
+	return &CreateVolumeFromBundleResponse{VolumeID: volumeID, NodeName: nodeName}, nil
 }
 
 // ForkVolumeOnNode creates a new volume by snapshotting an existing one

@@ -290,6 +290,54 @@ class FileOpsClient:
     # Convenience wrappers
     # ------------------------------------------------------------------
 
+    async def write_file_safe(
+        self,
+        volume_id: str,
+        path: str,
+        data: bytes,
+        *,
+        mode: int = 0o644,
+        uid: int = 1000,
+        gid: int = 1000,
+        timeout: float = 30.0,
+    ) -> None:
+        """Create intermediate directories (mkdir -p) then write the file.
+
+        Use instead of ``write_file`` when the parent directory may not
+        exist yet. This saves every caller from repeating the same
+        ``mkdir_all(dirname(path))`` dance.
+        """
+        import os as _os
+
+        dirpath = _os.path.dirname(path)
+        if dirpath and dirpath not in ("/", ""):
+            await self.mkdir_all(volume_id, dirpath, uid=uid, gid=gid, timeout=timeout)
+        await self.write_file(
+            volume_id, path, data, mode=mode, uid=uid, gid=gid, timeout=timeout
+        )
+
+    async def write_file_text_safe(
+        self,
+        volume_id: str,
+        path: str,
+        text: str,
+        *,
+        mode: int = 0o644,
+        uid: int = 1000,
+        gid: int = 1000,
+        timeout: float = 30.0,
+    ) -> None:
+        """UTF-8 text variant of ``write_file_safe``."""
+        await self.write_file_safe(
+            volume_id,
+            path,
+            text.encode("utf-8"),
+            mode=mode,
+            uid=uid,
+            gid=gid,
+            timeout=timeout,
+        )
+
     async def read_file_text(self, volume_id: str, path: str, *, timeout: float = 30.0) -> str:
         """Read a file as UTF-8 text."""
         data = await self.read_file(volume_id, path, timeout=timeout)

@@ -71,6 +71,9 @@ dependencies = [
     # Local orchestrator: interactive PTY sessions + gitignore parsing
     "ptyprocess>=0.7.0",
     "pathspec>=0.12.0",
+    # Tesslate Apps: manifest schema validation + YAML parsing
+    "jsonschema>=4.21.0",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

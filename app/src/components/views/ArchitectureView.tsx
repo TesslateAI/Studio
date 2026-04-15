@@ -39,6 +39,8 @@ import api, {
 import { useTheme } from '../../theme/ThemeContext';
 import { fileEvents } from '../../utils/fileEvents';
 import { connectionEvents } from '../../utils/connectionEvents';
+import { nodeConfigEvents } from '../../utils/nodeConfigEvents';
+import { useNodeConfigPending } from '../../contexts/NodeConfigPendingContext';
 import toast from 'react-hot-toast';
 import {
   EnvInjectionEdge,
@@ -50,6 +52,7 @@ import {
   getEdgeType,
 } from '../edges';
 import { getLayoutedElements } from '../../utils/autoLayout';
+import { appsCanvasNodeTypes, appsCanvasEdgeTypes } from '../canvas/appNodes';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -59,6 +62,7 @@ const nodeTypes: NodeTypes = {
   containerNode: ContainerNode,
   browserPreview: BrowserPreviewNode,
   deploymentTarget: DeploymentTargetNode,
+  ...appsCanvasNodeTypes,
 };
 
 const edgeTypes = {
@@ -68,6 +72,7 @@ const edgeTypes = {
   cache: CacheEdge,
   browser_preview: BrowserPreviewEdge,
   deployment: DeploymentEdge,
+  ...appsCanvasEdgeTypes,
 };
 
 // ---------------------------------------------------------------------------
@@ -140,6 +145,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
     ref
   ) => {
     const { theme } = useTheme();
+    const { isPending: isNodePending } = useNodeConfigPending();
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const reactFlowInstance = useReactFlow();
@@ -233,9 +239,36 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       isDraggingRef.current = isDragging;
     }, [isDragging]);
 
+    // Sync the pulsing ring on containerNode nodes whose config is pending.
+    // Additive: when no ids are pending, no node data changes.
+    useEffect(() => {
+      setNodes((nds) => {
+        let changed = false;
+        const next = nds.map((n) => {
+          if (n.type !== 'containerNode') return n;
+          const pending = isNodePending(n.id);
+          const current = (n.data as { pendingConfig?: boolean }).pendingConfig ?? false;
+          if (pending === current) return n;
+          changed = true;
+          return { ...n, data: { ...n.data, pendingConfig: pending } };
+        });
+        return changed ? next : nds;
+      });
+    }, [isNodePending, setNodes]);
+
+    // Refresh canvas when the agent announces a newly added architecture node.
+    useEffect(() => {
+      const unsub = nodeConfigEvents.on('architecture-node-added', () => {
+        fetchProjectDataRef.current?.();
+      });
+      return unsub;
+    }, []);
+
     // -----------------------------------------------------------------------
     // Data fetching
     // -----------------------------------------------------------------------
+
+    const fetchProjectDataRef = useRef<(() => Promise<void>) | null>(null);
 
     const fetchProjectData = async () => {
       try {
@@ -450,6 +483,11 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
     useEffect(() => {
       onStateChange?.({ configDirty, isRunning });
     }, [configDirty, isRunning, onStateChange]);
+
+    // Keep a stable ref to fetchProjectData so subscriptions can call it.
+    useEffect(() => {
+      fetchProjectDataRef.current = fetchProjectData;
+    });
 
     // -----------------------------------------------------------------------
     // Initial load
@@ -1916,6 +1954,16 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
             projectSlug={slug}
             port={selectedContainer.port}
             containerType={selectedContainer.containerType}
+            onConfigure={
+              projectId
+                ? () =>
+                    nodeConfigEvents.emit('open-config-tab-request', {
+                      projectId,
+                      containerId: selectedContainer.id,
+                      containerName: selectedContainer.name,
+                    })
+                : undefined
+            }
             onClose={() => setSelectedContainer(null)}
             onStatusChange={(newStatus) => {
               setNodes((nds) =>

@@ -126,6 +126,19 @@ Required values in `.env.minikube`:
 - `SECRET_KEY` - JWT signing key (generate a random string)
 - `LITELLM_API_KEY` - Your LLM API key (OpenAI, Anthropic, etc.)
 
+#### Llama API Secret (for Tesslate Apps seeds)
+
+The seeded `crm-demo` and `nightly-digest` apps reference a cluster secret
+`llama-api-credentials` for their Llama API key. Create it once:
+
+```bash
+kubectl --context=tesslate -n tesslate create secret generic llama-api-credentials \
+  --from-literal=api_key='<your-llama-api-key>'
+```
+
+Without this secret the seeded apps' pods/Jobs will fail to start with
+`LLAMA_API_KEY required`.
+
 ### Step 7: Apply Kubernetes Manifests
 
 ```powershell

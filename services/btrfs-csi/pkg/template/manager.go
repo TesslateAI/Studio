@@ -3,9 +3,12 @@ package template
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
@@ -210,18 +213,32 @@ func (m *Manager) downloadTemplate(ctx context.Context, name string) error {
 
 // downloadTemplateByHash fetches a template blob by hash and receives it into
 // the templates directory.
+//
+// btrfs receive writes the subvolume under the name embedded in the send
+// stream — which is the *source* subvolume's name, not our requested
+// template name (e.g. "bundle:<hash>"). We work around this by receiving
+// into a unique staging directory then renaming the single received
+// subvolume into its final location.
 func (m *Manager) downloadTemplateByHash(ctx context.Context, name, hash string) error {
 	reader, err := m.cas.GetBlob(ctx, hash)
 	if err != nil {
 		return fmt.Errorf("download template %s blob %s: %w", name, cas.ShortHash(hash), err)
 	}
 
+	// Staging dir: templates/.recv/<uuid>. On the same btrfs FS as the
+	// final templates/ subvolume so os.Rename works atomically.
+	stagingRel := filepath.Join("templates", ".recv", uuid.NewString())
+	stagingAbs := filepath.Join(m.poolPath, stagingRel)
+	if err := os.MkdirAll(stagingAbs, 0o755); err != nil {
+		return fmt.Errorf("mkdir staging %q: %w", stagingRel, err)
+	}
+	// Always clean up the (now-empty) staging dir on exit.
+	defer os.RemoveAll(stagingAbs)
+
 	stallCtx, stallCancel := context.WithCancelCause(ctx)
 	stallR := ioutil.NewStallReader(reader, stallCtx, stallCancel, ioutil.StallTimeout)
 
-	// btrfs receive creates the subvolume with the basename from the send
-	// stream. For templates, the send stream name is the template name.
-	if err := m.btrfs.Receive(stallCtx, "templates", stallR); err != nil {
+	if err := m.btrfs.Receive(stallCtx, stagingRel, stallR); err != nil {
 		stallR.Close()
 		if cause := context.Cause(stallCtx); cause != nil {
 			err = fmt.Errorf("%w (cause: %v)", err, cause)
@@ -230,6 +247,59 @@ func (m *Manager) downloadTemplateByHash(ctx context.Context, name, hash string)
 	}
 	stallR.Close()
 
-	klog.Infof("Downloaded and received template %s (hash=%s) from CAS", name, cas.ShortHash(hash))
+	// Discover the single received subvolume inside staging. We expect
+	// exactly one; 0 or >1 is a protocol error.
+	entries, readErr := os.ReadDir(stagingAbs)
+	if readErr != nil {
+		return fmt.Errorf("read staging %q after receive: %w", stagingRel, readErr)
+	}
+	var received string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(stagingRel, e.Name())
+		if m.btrfs.SubvolumeExists(ctx, candidate) {
+			if received != "" {
+				// Multiple subvolumes; cleanup all and error out.
+				for _, ee := range entries {
+					if ee.IsDir() {
+						_ = m.btrfs.DeleteSubvolume(ctx, filepath.Join(stagingRel, ee.Name()))
+					}
+				}
+				return fmt.Errorf(
+					"btrfs receive %q produced multiple subvolumes under %q",
+					name, stagingRel,
+				)
+			}
+			received = e.Name()
+		}
+	}
+	if received == "" {
+		return fmt.Errorf("btrfs receive %q produced no subvolume under %q", name, stagingRel)
+	}
+
+	receivedRel := filepath.Join(stagingRel, received)
+	targetRel := filepath.Join("templates", name)
+
+	// If a stale target somehow exists, bail out after cleaning up staging.
+	if m.btrfs.SubvolumeExists(ctx, targetRel) {
+		_ = m.btrfs.DeleteSubvolume(ctx, receivedRel)
+		return fmt.Errorf("template %q already exists at %q", name, targetRel)
+	}
+
+	// Rename via the btrfs Manager (os.Rename first, snapshot+delete fallback).
+	if renameErr := m.btrfs.RenameSubvolume(ctx, receivedRel, targetRel); renameErr != nil {
+		_ = m.btrfs.DeleteSubvolume(ctx, receivedRel)
+		return fmt.Errorf("rename received subvolume %q → %q: %w", receivedRel, targetRel, renameErr)
+	}
+
+	// Templates must be read-only.
+	if err := m.btrfs.EnsureReadOnly(ctx, targetRel); err != nil {
+		klog.Warningf("EnsureReadOnly on template %q after restore failed: %v", name, err)
+	}
+
+	klog.Infof("Downloaded and received template %s (hash=%s) from CAS (staged in %s as %q)",
+		name, cas.ShortHash(hash), stagingRel, received)
 	return nil
 }

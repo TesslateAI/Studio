@@ -20,8 +20,18 @@ from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
 from .oauth import get_available_oauth_clients
 from .routers import (
     admin,
+    admin_marketplace,
     agent,
     agents,
+    app_billing,
+    app_bundles,
+    app_installs,
+    app_runtime,
+    app_runtime_status,
+    app_submissions,
+    app_triggers,
+    app_versions,
+    app_yanks,
     auth,
     billing,
     channels,
@@ -44,9 +54,11 @@ from .routers import (
     kanban,
     magic_link,
     marketplace,
+    marketplace_apps,
     mcp,
     mcp_oauth,
     mcp_server,
+    node_config,
     projects,
     referrals,
     schedules,
@@ -59,6 +71,7 @@ from .routers import (
     themes,
     two_fa,
     users,
+    version,
     webhooks,
 )
 from .schemas_auth import UserCreate, UserRead, UserUpdate
@@ -1114,6 +1127,7 @@ async def get_csrf_token():
 # ============================================================================
 
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
+app.include_router(node_config.router, prefix="/api", tags=["node-config"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
@@ -1166,6 +1180,24 @@ app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 app.include_router(internal.router, prefix="/api")  # /api/internal - Cluster-internal endpoints
 app.include_router(feature_flags.router, tags=["feature-flags"])  # /api/feature-flags
+app.include_router(version.router, prefix="/api", tags=["version"])  # /api/version - Deployment metadata + compat check
+
+# --- Tesslate Apps (Waves 1-3) ---------------------------------------------
+app.include_router(marketplace_apps.router, prefix="/api/marketplace-apps", tags=["apps:marketplace"])
+app.include_router(app_versions.router, prefix="/api/app-versions", tags=["apps:versions"])
+app.include_router(app_installs.router, prefix="/api/app-installs", tags=["apps:installs"])
+app.include_router(
+    app_runtime_status.router,
+    prefix="/api/app-installs",
+    tags=["apps:runtime-status"],
+)
+app.include_router(app_runtime.router, prefix="/api/apps/runtime", tags=["apps:runtime"])
+app.include_router(app_billing.router, prefix="/api/apps/billing", tags=["apps:billing"])
+app.include_router(app_submissions.router, prefix="/api/app-submissions", tags=["apps:submissions"])
+app.include_router(app_yanks.router, prefix="/api/app-yanks", tags=["apps:yanks"])
+app.include_router(app_triggers.router, tags=["apps:triggers"])  # /api/app-instances/{id}/trigger/{name} — HMAC auth
+app.include_router(admin_marketplace.router, prefix="/api/admin-marketplace", tags=["apps:admin"])
+app.include_router(app_bundles.router, prefix="/api/app-bundles", tags=["apps:bundles"])
 
 # Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
 try:

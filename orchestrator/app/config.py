@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     worker_job_timeout: int = 600  # Agent run timeout in seconds (10 min default)
     worker_max_tries: int = 2  # Retry failed jobs once (transient errors)
 
+    # Node-config (agent-driven user input) — how long we wait for the user
+    # to submit the form before giving up and cancelling the paused task.
+    node_config_input_timeout_seconds: int = 1800  # 30 minutes
+
     # Agent Compaction
     compaction_summary_model: str = ""  # e.g. "builtin/gemini-2.0-flash", empty = main model
     compaction_protect_last_n: int = 20
@@ -673,6 +677,11 @@ class Settings(BaseSettings):
             }
         return out
 
+    # Tesslate Apps — platform "system" admin user id. Used by background
+    # monitoring to auto-open yanks when no human requester exists. If unset,
+    # auto-yank is skipped and the failure is logged instead.
+    platform_admin_user_id: str = ""
+
     class Config:
         # For Docker Compose: environment variables are passed directly
         # For native development: looks for .env in parent directory (project root)
@@ -684,4 +693,23 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings():
-    return Settings()
+    settings = Settings()
+    _assert_no_auto_approve_in_prod(settings)
+    return settings
+
+
+def _assert_no_auto_approve_in_prod(settings: "Settings") -> None:
+    """Fail fast if the apps dev auto-approve flag is enabled in an HTTPS
+    deployment. Stops accidental promotion of the dev-only bypass into
+    production where it would auto-approve every published app version.
+    """
+    base = (settings.app_base_url or "").strip().lower()
+    if not base.startswith("https://"):
+        return
+    from .services.apps._auto_approve_flag import is_auto_approve_enabled
+
+    if is_auto_approve_enabled():
+        raise RuntimeError(
+            "TSL_APPS_DEV_AUTO_APPROVE must not be set in HTTPS/production "
+            "deployments (app_base_url=%r)." % settings.app_base_url
+        )

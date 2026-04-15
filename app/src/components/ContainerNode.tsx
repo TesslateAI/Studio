@@ -10,6 +10,8 @@ interface ContainerNodeData extends Record<string, unknown> {
   techStack?: string[];
   containerType?: 'base' | 'service';
   serviceType?: 'container' | 'external' | 'hybrid';
+  /** When true, renders a pulsing ring to indicate an open config prompt. */
+  pendingConfig?: boolean;
   onDelete?: (id: string) => void;
   onClick?: (id: string) => void;
   onDoubleClick?: (id: string) => void;
@@ -47,6 +49,7 @@ const arePropsEqual = (
     prevData.port === nextData.port &&
     prevData.containerType === nextData.containerType &&
     prevData.serviceType === nextData.serviceType &&
+    prevData.pendingConfig === nextData.pendingConfig &&
     prevData.techStack?.length === nextData.techStack?.length &&
     (prevData.techStack?.every((t, i) => t === nextData.techStack?.[i]) ?? true)
   );
@@ -57,7 +60,7 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
 
   return (
     <div
-      className="relative group"
+      className={`relative group ${data.pendingConfig ? 'ring-2 ring-[var(--primary)] ring-offset-2 ring-offset-transparent animate-pulse rounded-xl' : ''}`}
       style={{ contain: 'layout style' }}
     >
       {/* Connection handles */}

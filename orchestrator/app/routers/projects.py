@@ -76,7 +76,6 @@ from ..schemas import Container as ContainerSchema
 from ..schemas import ContainerConnection as ContainerConnectionSchema
 from ..schemas import Project as ProjectSchema
 from ..schemas import ProjectFile as ProjectFileSchema
-from ..services.secret_codec import decode_secret_map, encode_secret_map
 from ..services.secret_manager_env import build_env_overrides, get_injected_env_vars_for_container
 from ..services.service_definitions import get_service
 from ..services.task_manager import Task, get_task_manager
@@ -317,15 +316,22 @@ async def get_projects(
     if not member and not getattr(current_user, "is_superuser", False):
         return []
 
+    # Hide installed-app instance projects from the normal Projects list —
+    # those are rendered in Library > Apps instead. Forks (app_source) remain.
+    app_role_filter = or_(Project.app_role.is_(None), Project.app_role == "app_source")
+
     # Admins / superusers see all projects in the team
     if (member and member.role == "admin") or getattr(current_user, "is_superuser", False):
-        result = await db.execute(select(Project).where(Project.team_id == team_id))
+        result = await db.execute(
+            select(Project).where(and_(Project.team_id == team_id, app_role_filter))
+        )
     else:
         # Non-admin: team-visible projects + projects with explicit membership
         result = await db.execute(
             select(Project).where(
                 and_(
                     Project.team_id == team_id,
+                    app_role_filter,
                     or_(
                         Project.visibility == "team",
                         Project.id.in_(
@@ -2243,6 +2249,54 @@ async def update_project_settings(
         await db.rollback()
         logger.error(f"[SETTINGS] Failed to update settings: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}") from e
+
+
+@router.patch("/{project_slug}/app-role", response_model=ProjectSchema)
+async def set_project_app_role(
+    project_slug: str,
+    payload: dict,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Flip a project between `null` (regular) and `app_source` (publishable).
+
+    Transitions allowed: ``None ↔ 'app_source'``. An ``app_instance`` project
+    is an installed app — not a creator surface — and may NOT be re-roled.
+    """
+    from ..permissions import get_project_with_access
+
+    # Accept {"app_role": "app_source" | null} from the request body.
+    if not isinstance(payload, dict) or "app_role" not in payload:
+        raise HTTPException(status_code=400, detail="missing 'app_role' field")
+    requested = payload["app_role"]
+    if requested not in (None, "app_source"):
+        raise HTTPException(
+            status_code=400,
+            detail="app_role must be null or 'app_source'",
+        )
+
+    project, _role = await get_project_with_access(
+        db, project_slug, current_user.id, Permission.PROJECT_EDIT
+    )
+
+    current = project.app_role
+    if current == "app_instance":
+        raise HTTPException(
+            status_code=409,
+            detail="installed app_instance projects cannot change app_role",
+        )
+    if current == requested:
+        # No-op; return current.
+        return ProjectSchema.model_validate(project)
+
+    project.app_role = requested
+    await db.commit()
+    await db.refresh(project)
+    logger.info(
+        "project %s app_role: %s -> %s (user=%s)",
+        project.id, current, requested, current_user.id,
+    )
+    return ProjectSchema.model_validate(project)
 
 
 @router.post("/{project_slug}/export-template")
@@ -4692,15 +4746,15 @@ async def update_container(
         if container_data.port is not None:
             container.port = container_data.port
         if container_data.env_vars_to_set:
-            existing = decode_secret_map(container.environment_vars or {})
+            existing = dict(container.environment_vars or {})
             existing.update(container_data.env_vars_to_set)
-            container.environment_vars = encode_secret_map(existing)
+            container.environment_vars = existing
             flag_modified(container, "environment_vars")
         if container_data.env_vars_to_delete:
-            existing = decode_secret_map(container.environment_vars or {})
+            existing = dict(container.environment_vars or {})
             for key in container_data.env_vars_to_delete:
                 existing.pop(key, None)
-            container.environment_vars = encode_secret_map(existing)
+            container.environment_vars = existing
             flag_modified(container, "environment_vars")
 
         await db.commit()

@@ -5,6 +5,7 @@ import {
   Kanban as KanbanIcon,
   Monitor,
   PencilRuler,
+  SlidersHorizontal,
   Terminal as TerminalIcon,
   TreeStructure,
   X,
@@ -53,6 +54,11 @@ export const TOOL_TAB_META: Record<ToolType, ToolTabMeta> = {
     id: 'terminal',
     label: 'Terminal',
     icon: <TerminalIcon size={13} weight="bold" />,
+  },
+  'node-config': {
+    id: 'node-config',
+    label: 'Configure',
+    icon: <SlidersHorizontal size={13} weight="bold" />,
   },
 };
 

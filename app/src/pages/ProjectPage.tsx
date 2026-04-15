@@ -43,7 +43,14 @@ import {
   AssetsPanel,
   KanbanPanel,
   TerminalPanel,
+  NodeConfigPanel,
 } from '../components/panels';
+import {
+  NodeConfigPendingProvider,
+  useNodeConfigPending,
+} from '../contexts/NodeConfigPendingContext';
+import { nodeConfigEvents } from '../utils/nodeConfigEvents';
+import { nodeConfigApi } from '../lib/api';
 import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
@@ -82,13 +89,14 @@ const TOOL_LABELS: Record<ToolType, string> = {
   kanban: 'Kanban',
   assets: 'Assets',
   terminal: 'Terminal',
+  'node-config': 'Configure',
 };
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export default function ProjectPage() {
+function ProjectPageInner() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -134,10 +142,116 @@ export default function ProjectPage() {
 
   // Tool dock (tabs only — preview is a regular tab in this model).
   const dock = useToolDock(slug);
+  const { markPending, clearPending } = useNodeConfigPending();
   const activeTabType: ToolType | null = useMemo(() => {
     const active = dock.state.tabs.find((t) => t.id === dock.state.activeTabId);
     return active?.type ?? null;
   }, [dock.state]);
+
+  // Agent-driven node configuration event wiring. Events are emitted by
+  // `useAgentChat` when the corresponding SSE events arrive on the chat stream;
+  // we translate them into dock + canvas updates here.
+  useEffect(() => {
+    const unsubs: Array<() => void> = [];
+
+    unsubs.push(
+      nodeConfigEvents.on('architecture-node-added', () => {
+        if (slug) {
+          projectsApi
+            .getContainers(slug)
+            .then(setContainers)
+            .catch(() => {});
+        }
+      })
+    );
+
+    unsubs.push(
+      nodeConfigEvents.on('user-input-required', (payload) => {
+        if (!project?.id) return;
+        dock.openNodeConfigTab({
+          projectId: project.id as string,
+          containerId: payload.container_id,
+          containerName: payload.container_name,
+          schema: payload.schema,
+          initialValues: payload.initial_values,
+          mode: payload.mode,
+          preset: payload.preset,
+          agentInputId: payload.input_id,
+        });
+        markPending(payload.container_id);
+      })
+    );
+
+    unsubs.push(
+      nodeConfigEvents.on('node-config-resumed', (payload) => {
+        dock.closeNodeConfigTabByInputId(payload.input_id);
+        clearPending(payload.container_id);
+        if (slug) {
+          projectsApi
+            .getContainers(slug)
+            .then(setContainers)
+            .catch(() => {});
+        }
+        const parts: string[] = [];
+        if (payload.updated_keys.length) parts.push(`${payload.updated_keys.length} updated`);
+        if (payload.rotated_secrets.length)
+          parts.push(`${payload.rotated_secrets.length} rotated`);
+        if (payload.cleared_secrets.length)
+          parts.push(`${payload.cleared_secrets.length} cleared`);
+        toast.success(
+          parts.length > 0 ? `Config saved · ${parts.join(', ')}` : 'Config saved'
+        );
+      })
+    );
+
+    unsubs.push(
+      nodeConfigEvents.on('node-config-cancelled', (payload) => {
+        dock.closeNodeConfigTabByInputId(payload.input_id);
+        clearPending(payload.container_id);
+        toast('Config cancelled', { icon: 'ℹ️' });
+      })
+    );
+
+    unsubs.push(
+      nodeConfigEvents.on('open-config-tab-request', async (payload) => {
+        try {
+          const cfg = await nodeConfigApi.getContainerConfig(
+            payload.projectId,
+            payload.containerId
+          );
+          dock.openNodeConfigTab({
+            projectId: payload.projectId,
+            containerId: payload.containerId,
+            containerName: payload.containerName,
+            schema: cfg.schema,
+            initialValues: cfg.values,
+            mode: 'edit',
+            preset: cfg.preset,
+          });
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'Failed to load container config';
+          toast.error(message);
+        }
+      })
+    );
+
+    unsubs.push(
+      nodeConfigEvents.on('secret-rotated', (payload) => {
+        if (slug) {
+          projectsApi
+            .getContainers(slug)
+            .then(setContainers)
+            .catch(() => {});
+        }
+        toast(`Secret rotated: ${payload.keys.join(', ')}`, { icon: '🔐' });
+      })
+    );
+
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, [slug, project?.id, dock, markPending, clearPending]);
 
   // Chat pane visibility — collapsible so the dock can take the full canvas.
   // Persisted globally so the preference survives project switches.
@@ -1259,6 +1373,35 @@ export default function ProjectPage() {
       disabled: !canEditSettings,
       restricted: !canEditSettings,
     },
+    // "Publish as App" flips app_role from null → app_source and jumps
+    // into the creator publish flow. Hidden for installed app_instances
+    // (which can't be re-roled) and gated by project.edit.
+    ...(project?.app_role !== 'app_instance'
+      ? [
+          {
+            icon: <Rocket size={16} />,
+            title: 'Publish as App',
+            onClick: canEditSettings
+              ? async () => {
+                  if (!slug) return;
+                  try {
+                    if (project?.app_role !== 'app_source') {
+                      await projectsApi.setAppRole(slug, 'app_source');
+                    }
+                    navigate(`/creator/publish/${project?.id}`);
+                  } catch (err) {
+                    // Surface failure via toast-free fallback; the route
+                    // itself will re-validate role and show its own error.
+                    console.error('setAppRole failed', err);
+                  }
+                }
+              : undefined,
+            active: false,
+            disabled: !canEditSettings,
+            restricted: !canEditSettings,
+          },
+        ]
+      : []),
   ];
 
   // Mobile drawer builder section — renders tool buttons + panel toggles inside
@@ -1494,6 +1637,36 @@ export default function ProjectPage() {
     assets: (_tab: TabInstance, _idx: number) => (
       <AssetsPanel projectSlug={slug!} readOnly={!canEditAssets} />
     ),
+    'node-config': (tab: TabInstance, _idx: number) => {
+      const payload = dock.getNodeConfigPayload(tab.id);
+      if (!payload) {
+        return (
+          <div className="w-full h-full flex items-center justify-center">
+            <p className="text-xs text-[var(--text-muted)]">
+              This configuration session is no longer available.
+            </p>
+          </div>
+        );
+      }
+      return (
+        <NodeConfigPanel
+          projectId={payload.projectId}
+          containerId={payload.containerId}
+          containerName={payload.containerName}
+          schema={payload.schema}
+          initialValues={payload.initialValues}
+          mode={payload.mode}
+          preset={payload.preset}
+          agentInputId={payload.agentInputId}
+          onClose={() => {
+            if (payload.agentInputId) {
+              clearPending(payload.containerId);
+            }
+            dock.closeTab(tab.id);
+          }}
+        />
+      );
+    },
     terminal: (tab: TabInstance, _idx: number) =>
       canAccessTerminal ? (
         <TerminalPanel
@@ -2007,5 +2180,13 @@ export default function ProjectPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function ProjectPage() {
+  return (
+    <NodeConfigPendingProvider>
+      <ProjectPageInner />
+    </NodeConfigPendingProvider>
   );
 }

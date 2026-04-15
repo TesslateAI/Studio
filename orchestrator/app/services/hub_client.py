@@ -505,6 +505,76 @@ class HubClient:
         )
 
     # ------------------------------------------------------------------
+    # Bundles (Tesslate Apps)
+    # ------------------------------------------------------------------
+
+    async def publish_bundle(
+        self,
+        *,
+        volume_id: str,
+        app_id: str,
+        version: str,
+        timeout: float = 600.0,
+    ) -> str:
+        """Publish a volume as an immutable CAS bundle.
+
+        Args:
+            volume_id: Volume to publish.
+            app_id: Marketplace app identifier.
+            version: App version string.
+            timeout: gRPC deadline in seconds.
+
+        Returns:
+            The bundle hash (``sha256:...``). Publishing is idempotent: the
+            same volume state yields the same hash.
+        """
+        resp = await self._call(
+            "PublishBundle",
+            {"volume_id": volume_id, "app_id": app_id, "version": version},
+            timeout=timeout,
+        )
+        bundle_hash = resp["bundle_hash"]
+        logger.info(
+            "PublishBundle succeeded: volume=%s app=%s version=%s → %s",
+            volume_id,
+            app_id,
+            version,
+            bundle_hash[:16],
+        )
+        return bundle_hash
+
+    async def create_volume_from_bundle(
+        self,
+        *,
+        bundle_hash: str,
+        hint_node: str | None = None,
+        timeout: float = 600.0,
+    ) -> tuple[str, str]:
+        """Provision a new volume by restoring a published bundle.
+
+        Args:
+            bundle_hash: Bundle hash returned by :meth:`publish_bundle`.
+            hint_node: Optional preferred node for placement.
+            timeout: gRPC deadline in seconds.
+
+        Returns:
+            Tuple of ``(volume_id, node_name)``.
+        """
+        request: dict[str, str] = {"bundle_hash": bundle_hash}
+        if hint_node:
+            request["hint_node"] = hint_node
+        resp = await self._call("CreateVolumeFromBundle", request, timeout=timeout)
+        volume_id = resp["volume_id"]
+        node_name = resp["node_name"]
+        logger.info(
+            "CreateVolumeFromBundle succeeded: %s → %s on %s",
+            bundle_hash[:16],
+            volume_id,
+            node_name,
+        )
+        return volume_id, node_name
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 

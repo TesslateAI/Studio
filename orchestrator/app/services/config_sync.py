@@ -35,7 +35,7 @@ from .base_config_parser import (
     PreviewConfig,
     TesslateProjectConfig,
 )
-from .secret_codec import decode_secret_map, encode_secret_map
+from .secret_manager_env import container_env
 
 if TYPE_CHECKING:
     from ..schemas import SetupConfigSyncResponse, TesslateConfigCreate
@@ -62,7 +62,9 @@ async def build_config_from_db(
 
     for c in containers:
         # Decode base64-encoded env vars to plain text for config output
-        decoded_env = decode_secret_map(c.environment_vars) if c.environment_vars else {}
+        # Emits plaintext env vars plus decrypted secrets — legacy base64
+        # rows are detected and handled (with a structured warning).
+        decoded_env = container_env(c) if (c.environment_vars or c.encrypted_secrets) else {}
 
         if c.container_type == "base":
             config.apps[c.name] = AppConfig(
@@ -287,7 +289,7 @@ async def sync_project_config(
             container.directory = app_config.directory
             container.internal_port = app_config.port or 3000
             container.environment_vars = (
-                encode_secret_map(app_config.env) if app_config.env else {}
+                dict(app_config.env) if app_config.env else {}
             )
             container.exports = app_config.exports or None
             container.startup_command = app_config.start or None
@@ -307,7 +309,7 @@ async def sync_project_config(
                 container_name=f"{project.slug}-{app_name}",
                 internal_port=app_config.port or 3000,
                 environment_vars=(
-                    encode_secret_map(app_config.env) if app_config.env else {}
+                    dict(app_config.env) if app_config.env else {}
                 ),
                 exports=app_config.exports or None,
                 startup_command=app_config.start or None,
@@ -332,7 +334,7 @@ async def sync_project_config(
             container = existing_containers[infra_name]
             container.internal_port = infra_config.port
             container.environment_vars = (
-                encode_secret_map(infra_config.env)
+                dict(infra_config.env)
                 if infra_config.env
                 else container.environment_vars
             )
@@ -356,7 +358,7 @@ async def sync_project_config(
                 container_name=f"{project.slug}-{infra_name}",
                 internal_port=infra_config.port,
                 environment_vars=(
-                    encode_secret_map(infra_config.env) if infra_config.env else {}
+                    dict(infra_config.env) if infra_config.env else {}
                 ),
                 exports=infra_config.exports or None,
                 container_type="service",

@@ -3,6 +3,60 @@ import { chatApi } from '../lib/api';
 import type { AgentMessageData, SerializedAttachment } from '../types/agent';
 import type { ChatAgent } from '../types/chat';
 import type { EditMode } from '../components/chat/EditModeStatus';
+import { nodeConfigEvents } from '../utils/nodeConfigEvents';
+import type {
+  ArchitectureNodeAddedEvent,
+  NodeConfigCancelledEvent,
+  NodeConfigResumedEvent,
+  SecretRotatedEvent,
+  UserInputRequiredEvent,
+} from '../types/nodeConfig';
+
+/**
+ * Re-dispatch a node-config-family SSE event onto the local bus so the
+ * ProjectPage can manage dock tabs / canvas pulses without pulling in
+ * UI dependencies here.
+ */
+function dispatchNodeConfigEvent(
+  type: string,
+  data: Record<string, unknown> | undefined
+): boolean {
+  if (!data) return false;
+  switch (type) {
+    case 'architecture_node_added':
+      nodeConfigEvents.emit(
+        'architecture-node-added',
+        data as unknown as ArchitectureNodeAddedEvent
+      );
+      return true;
+    case 'user_input_required':
+      nodeConfigEvents.emit(
+        'user-input-required',
+        data as unknown as UserInputRequiredEvent
+      );
+      return true;
+    case 'node_config_resumed':
+      nodeConfigEvents.emit(
+        'node-config-resumed',
+        data as unknown as NodeConfigResumedEvent
+      );
+      return true;
+    case 'node_config_cancelled':
+      nodeConfigEvents.emit(
+        'node-config-cancelled',
+        data as unknown as NodeConfigCancelledEvent
+      );
+      return true;
+    case 'secret_rotated':
+      nodeConfigEvents.emit(
+        'secret-rotated',
+        data as unknown as SecretRotatedEvent
+      );
+      return true;
+    default:
+      return false;
+  }
+}
 
 function formatAgentError(raw: string): string {
   if (raw.includes('does not exist') || raw.includes('NotFoundError'))
@@ -335,6 +389,13 @@ export function useAgentChat({
                   },
                 ];
               });
+            } else if (
+              dispatchNodeConfigEvent(
+                data.type as string,
+                data.data as Record<string, unknown> | undefined
+              )
+            ) {
+              // handled via nodeConfigEvents bus
             } else if (data.type === 'approval_required') {
               const approvalData = data.data || data;
               if (editModeRef.current === 'allow') {
@@ -704,6 +765,13 @@ export function useAgentChat({
               const errorMsg =
                 (event.data as { message?: string })?.message || 'Agent execution failed';
               throw new Error(errorMsg);
+            } else if (
+              dispatchNodeConfigEvent(
+                event.type as string,
+                event.data as Record<string, unknown> | undefined
+              )
+            ) {
+              // handled via nodeConfigEvents bus
             } else if (event.type === 'approval_required') {
               if (editModeRef.current === 'allow') {
                 chatApi

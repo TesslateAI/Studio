@@ -17,6 +17,8 @@ from uuid import UUID
 
 from kubernetes import client
 
+from ...apps.env_resolver import resolve_env_for_pod
+
 logger = logging.getLogger(__name__)
 
 # Kubernetes DNS-1123 name limit
@@ -320,10 +322,10 @@ def create_container_deployment(
         client.V1EnvVar(name="NODE_ENV", value="development"),
     ]
 
-    for key, value in (extra_env or {}).items():
-        if key in {"HOST", "PORT", "NODE_ENV"}:
-            continue
-        env_vars.append(client.V1EnvVar(name=key, value=str(value)))
+    # Filter out reserved keys, then resolve ${secret:name/key} references
+    # to V1EnvVar(valueFrom=secretKeyRef(...)) — never plaintext in pod spec.
+    _filtered = {k: v for k, v in (extra_env or {}).items() if k not in {"HOST", "PORT", "NODE_ENV"}}
+    env_vars.extend(resolve_env_for_pod(_filtered))
 
     dev_container = client.V1Container(
         name="dev-server",
@@ -830,7 +832,7 @@ def create_service_container_deployment(
     selector_labels = {"tesslate.io/container-id": str(container_id)}
 
     # Build environment variables
-    env_vars = [client.V1EnvVar(name=k, value=v) for k, v in environment_vars.items()]
+    env_vars = resolve_env_for_pod(environment_vars)
 
     # Build volume mounts and volumes
     # Each volume path gets its own mount backed by the same PVC.
@@ -1353,10 +1355,10 @@ def create_v2_dev_deployment(
         client.V1EnvVar(name="PORT", value=str(port)),
         client.V1EnvVar(name="NODE_ENV", value="development"),
     ]
-    for key, value in (extra_env or {}).items():
-        if key in {"HOST", "PORT", "NODE_ENV"}:
-            continue
-        env_vars.append(client.V1EnvVar(name=key, value=str(value)))
+    # Filter out reserved keys, then resolve ${secret:name/key} references
+    # to V1EnvVar(valueFrom=secretKeyRef(...)) — never plaintext in pod spec.
+    _filtered = {k: v for k, v in (extra_env or {}).items() if k not in {"HOST", "PORT", "NODE_ENV"}}
+    env_vars.extend(resolve_env_for_pod(_filtered))
 
     dev_container = client.V1Container(
         name="dev-server",
@@ -1517,7 +1519,7 @@ def create_v2_service_deployment(
 
     selector_labels = {"tesslate.io/container-id": str(container_id)}
 
-    env_vars = [client.V1EnvVar(name=k, value=v) for k, v in environment_vars.items()]
+    env_vars = resolve_env_for_pod(environment_vars)
 
     # All mount paths backed by the same PVC (CSI-backed service volume)
     volume_mounts = []

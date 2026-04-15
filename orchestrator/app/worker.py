@@ -917,6 +917,251 @@ async def refresh_templates(ctx: dict):
             logger.info("[WORKER] Refreshed %d templates", rebuilt)
 
 
+async def reap_idle_session_keys(ctx: dict) -> dict:
+    """Periodic task: sweep idle session-tier LiteLLM keys past their TTL.
+
+    For each idle key, transition active -> settling (revokes at LiteLLM),
+    then settling -> settled. Per-key work is best-effort; failures are
+    logged and the sweep continues.
+    """
+    from .database import AsyncSessionLocal
+    from .services import litellm_keys
+    from .services.litellm_service import litellm_service
+
+    async with AsyncSessionLocal() as db:
+        try:
+            key_ids = await litellm_keys.select_idle_session_keys(db, limit=200)
+        except Exception:
+            logger.exception("reap_idle_session_keys: select failed")
+            return {"swept": 0}
+
+        swept = 0
+        for key_id in key_ids:
+            try:
+                await litellm_keys.begin_settlement(
+                    db, delegate=litellm_service, key_id=key_id, reason="idle_reap"
+                )
+                await litellm_keys.finalize_settlement(db, key_id=key_id)
+                await db.commit()
+                swept += 1
+            except Exception:
+                await db.rollback()
+                logger.exception("reap_idle_session_keys: key %s failed", key_id)
+
+        if swept:
+            logger.info("[WORKER] reaped %d idle session keys", swept)
+        return {"swept": swept}
+
+
+async def settle_invocation_key(ctx: dict, key_id: str) -> dict:
+    """Enqueue-able: settle a completed invocation key (headless run).
+
+    Called by the billing dispatcher when an invocation completes. The
+    dispatcher is responsible for wallet reserve/settle — this function
+    owns only the ledger transition and the LiteLLM revoke.
+    """
+    from .database import AsyncSessionLocal
+    from .services import litellm_keys
+    from .services.litellm_service import litellm_service
+
+    async with AsyncSessionLocal() as db:
+        try:
+            await litellm_keys.begin_settlement(
+                db, delegate=litellm_service, key_id=key_id, reason="complete"
+            )
+            await litellm_keys.finalize_settlement(db, key_id=key_id)
+            await db.commit()
+            return {"key_id": key_id, "state": "settled"}
+        except Exception:
+            await db.rollback()
+            logger.exception("settle_invocation_key: %s failed", key_id)
+            raise
+
+
+async def cascade_revoke_children(ctx: dict, parent_key_id: str) -> dict:
+    """Enqueue-able: BFS revoke all active descendants of a key.
+
+    Fired when a parent transitions out of active (explicit revoke, failed
+    state, etc.). Returns the list of revoked key_ids.
+    """
+    from .database import AsyncSessionLocal
+    from .services import litellm_keys
+    from .services.litellm_service import litellm_service
+
+    async with AsyncSessionLocal() as db:
+        try:
+            revoked = await litellm_keys.cascade_revoke(
+                db, delegate=litellm_service, parent_key_id=parent_key_id
+            )
+            await db.commit()
+            return {"parent_key_id": parent_key_id, "revoked": revoked}
+        except Exception:
+            await db.rollback()
+            logger.exception("cascade_revoke_children: %s failed", parent_key_id)
+            raise
+
+
+async def refill_warm_pools_cron(ctx: dict) -> dict:
+    """Every 60s: refill warm pools for all installed AppInstances whose
+    manifest declares any hosted agent with `warm_pool_size > 0`.
+
+    The refill is idempotent — it only mints the shortfall per agent.
+    """
+    from sqlalchemy import select
+
+    from .database import AsyncSessionLocal
+    from .models import AppInstance
+    from .services.apps import warm_pool
+    from .services.litellm_service import litellm_service
+
+    async with AsyncSessionLocal() as db:
+        try:
+            instance_ids = (
+                await db.execute(
+                    select(AppInstance.id).where(AppInstance.state == "installed")
+                )
+            ).scalars().all()
+        except Exception:
+            logger.exception("refill_warm_pools_cron: scan failed")
+            return {"scanned": 0, "refilled": 0}
+
+    refilled = 0
+    for instance_id in instance_ids:
+        async with AsyncSessionLocal() as db:
+            try:
+                result = await warm_pool.refill_warm_pool(
+                    db, app_instance_id=instance_id, delegate=litellm_service
+                )
+                await db.commit()
+                if result.get("minted", 0) > 0:
+                    refilled += 1
+            except Exception:
+                await db.rollback()
+                logger.exception(
+                    "refill_warm_pools_cron: instance %s failed", instance_id
+                )
+    return {"scanned": len(instance_ids), "refilled": refilled}
+
+
+async def refill_warm_pool_task(ctx: dict, app_instance_id: str) -> dict:
+    """Enqueue-able per-instance warm-pool refill (e.g., right after install)."""
+    from .database import AsyncSessionLocal
+    from .services.apps import warm_pool
+    from .services.litellm_service import litellm_service
+
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await warm_pool.refill_warm_pool(
+                db,
+                app_instance_id=UUID(app_instance_id),
+                delegate=litellm_service,
+            )
+            await db.commit()
+            return result
+        except Exception:
+            await db.rollback()
+            logger.exception("refill_warm_pool_task: %s failed", app_instance_id)
+            raise
+
+
+async def drain_warm_pool_task(ctx: dict, app_instance_id: str) -> dict:
+    """Enqueue-able warm-pool drain on uninstall/yank."""
+    from .database import AsyncSessionLocal
+    from .services.apps import warm_pool
+    from .services.litellm_service import litellm_service
+
+    async with AsyncSessionLocal() as db:
+        try:
+            count = await warm_pool.drain_warm_pool(
+                db,
+                app_instance_id=UUID(app_instance_id),
+                delegate=litellm_service,
+            )
+            await db.commit()
+            return {"app_instance_id": app_instance_id, "drained": count}
+        except Exception:
+            await db.rollback()
+            logger.exception("drain_warm_pool_task: %s failed", app_instance_id)
+            raise
+
+
+from .services.apps.settlement_worker import settle_spend_batch as settle_spend_batch_cron  # noqa: E402
+from .services.apps.app_invocations import invoke_app_instance_task  # noqa: E402
+
+
+async def run_stage1_scan_task(ctx: dict, submission_id: str) -> dict:
+    """Wave 7: run the Stage1 structural scan on a submission."""
+    from uuid import UUID as _UUID
+
+    from .database import AsyncSessionLocal
+    from .services.apps import stage1_scanner
+
+    async with AsyncSessionLocal() as db:
+        try:
+            out = await stage1_scanner.run_stage1_scan(
+                db, submission_id=_UUID(submission_id)
+            )
+            await db.commit()
+            return out
+        except Exception:
+            await db.rollback()
+            logger.exception("run_stage1_scan_task: %s failed", submission_id)
+            raise
+
+
+async def run_stage2_eval_task(ctx: dict, submission_id: str) -> dict:
+    """Wave 7: run the Stage2 sandbox eval on a submission."""
+    from uuid import UUID as _UUID
+
+    from .database import AsyncSessionLocal
+    from .services.apps import stage2_sandbox
+
+    async with AsyncSessionLocal() as db:
+        try:
+            out = await stage2_sandbox.run_stage2_eval(
+                db, submission_id=_UUID(submission_id)
+            )
+            await db.commit()
+            return out
+        except Exception:
+            await db.rollback()
+            logger.exception("run_stage2_eval_task: %s failed", submission_id)
+            raise
+
+
+async def run_monitoring_sweep_task(ctx: dict, app_version_id: str) -> dict:
+    """Wave 7: run a single monitoring canary sweep for an approved AppVersion."""
+    from uuid import UUID as _UUID
+
+    from .database import AsyncSessionLocal
+    from .services.apps import monitoring_sweep
+
+    async with AsyncSessionLocal() as db:
+        try:
+            out = await monitoring_sweep.run_monitoring_sweep(
+                db, app_version_id=_UUID(app_version_id)
+            )
+            await db.commit()
+            return out
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                "run_monitoring_sweep_task: %s failed", app_version_id
+            )
+            raise
+
+
+async def process_schedule_triggers_cron(ctx: dict) -> dict:
+    """Wave 7 cron: drain pending schedule_trigger_events."""
+    from .services.apps import schedule_triggers
+
+    try:
+        return await schedule_triggers.process_trigger_events_batch(ctx)
+    except Exception:
+        logger.exception("process_schedule_triggers_cron failed")
+        return {"processed": 0, "failed": 0, "skipped": 0, "error": True}
+
+
 async def startup(ctx: dict):
     """Worker startup hook — initialize logging."""
     logging.basicConfig(
@@ -987,6 +1232,52 @@ def _build_cron_jobs():
             )
         )
 
+    # Tesslate Apps: idle session-key reaper. Runs every minute; short budget.
+    # The reaper is cheap when idle (single SELECT with partial index), so
+    # the 60s cadence is safe and keeps session TTL enforcement tight.
+    jobs.append(
+        cron(
+            reap_idle_session_keys,
+            minute=set(range(0, 60)),  # every minute
+            timeout=120,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
+    # Tesslate Apps: spend settlement sweep. Every minute, bounded batch.
+    jobs.append(
+        cron(
+            settle_spend_batch_cron,
+            minute=set(range(0, 60)),
+            timeout=180,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
+    # Tesslate Apps (Wave 6): hosted-agent warm-pool refill. 60s cadence.
+    jobs.append(
+        cron(
+            refill_warm_pools_cron,
+            minute=set(range(0, 60)),
+            timeout=120,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
+    # Tesslate Apps (Wave 7): schedule trigger events drain. 60s cadence.
+    jobs.append(
+        cron(
+            process_schedule_triggers_cron,
+            minute=set(range(0, 60)),
+            timeout=120,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
     return jobs
 
 
@@ -996,7 +1287,22 @@ _max_jobs, _job_timeout, _max_tries = _get_worker_settings()
 class WorkerSettings:
     """ARQ worker configuration."""
 
-    functions = [execute_agent_task, send_webhook_callback]
+    functions = [
+        execute_agent_task,
+        send_webhook_callback,
+        reap_idle_session_keys,
+        settle_invocation_key,
+        cascade_revoke_children,
+        settle_spend_batch_cron,
+        refill_warm_pools_cron,
+        refill_warm_pool_task,
+        drain_warm_pool_task,
+        run_stage1_scan_task,
+        run_stage2_eval_task,
+        run_monitoring_sweep_task,
+        process_schedule_triggers_cron,
+        invoke_app_instance_task,
+    ]
     cron_jobs = _build_cron_jobs()
     redis_settings = _get_redis_settings()
     max_jobs = _max_jobs

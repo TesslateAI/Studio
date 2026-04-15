@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tesslate.com/schemas/app-manifest/2025-02.schema.json",
+  "title": "Tesslate App Manifest",
+  "description": "v2 manifest schema for Tesslate Apps. Version tag: 2025-02. Adds headless apps (surfaces.minItems=0), container.primary, compute.connections, schedule trigger_kind + execution.",
+  "type": "object",
+  "required": ["manifest_schema_version", "app", "compatibility", "surfaces", "state", "billing", "listing"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_schema_version": {
+      "type": "string",
+      "const": "2025-02"
+    },
+    "app": {
+      "type": "object",
+      "required": ["id", "name", "slug", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)+$", "description": "Reverse-DNS unique id, e.g. com.example.intake-contract"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "minLength": 1, "maxLength": 80},
+        "creator_id": {"type": ["string", "null"], "format": "uuid"},
+        "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$", "description": "Semver"},
+        "description": {"type": "string", "maxLength": 4000},
+        "category": {"type": "string", "maxLength": 64},
+        "icon_ref": {"type": ["string", "null"], "description": "CAS hash or URL"},
+        "changelog": {"type": "string", "maxLength": 8000},
+        "forkable": {"enum": ["true", "restricted", "no"], "default": "restricted"},
+        "forked_from": {"type": ["string", "null"], "description": "app_id@semver of parent"}
+      }
+    },
+    "source_visibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {"enum": ["public", "installers", "private"], "default": "installers"},
+        "excluded_paths": {"type": "array", "items": {"type": "string"}, "default": [".env*", "secrets/**", ".git/**", ".tesslate/internal/**"]},
+        "manifest_always_public": {"type": "boolean", "default": true}
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "required": ["studio", "manifest_schema", "runtime_api"],
+      "additionalProperties": false,
+      "properties": {
+        "studio": {
+          "type": "object",
+          "required": ["min"],
+          "additionalProperties": false,
+          "properties": {
+            "min": {"type": "string"},
+            "max": {"type": "string"}
+          }
+        },
+        "manifest_schema": {"type": "string", "const": "2025-02"},
+        "runtime_api": {"type": "string", "description": "semver range, e.g. ^1.2"},
+        "required_features": {"type": "array", "items": {"type": "string"}, "default": []}
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"enum": ["ui", "chat", "scheduled", "triggered", "mcp-tool"]},
+          "entrypoint": {"type": "string", "description": "Path within bundle (relative to primary container URL for ui/chat kinds in 2025-02)."},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "tool_schema": {"type": "object", "description": "Required when kind=mcp-tool; JSON Schema for MCP tool input"}
+        },
+        "if": {
+          "properties": {"kind": {"enum": ["ui", "chat"]}}
+        },
+        "then": {
+          "required": ["kind", "entrypoint"]
+        },
+        "else": {
+          "required": ["kind"]
+        }
+      }
+    },
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tier": {"type": "integer", "enum": [0, 1, 2], "default": 0},
+        "compute_model": {"enum": ["per-invocation", "per-installer", "shared-singleton"], "default": "per-invocation"},
+        "containers": {
+          "type": "array",
+          "if": {"minItems": 1},
+          "then": {
+            "contains": {
+              "type": "object",
+              "properties": {"primary": {"const": true}},
+              "required": ["primary"]
+            }
+          },
+          "items": {
+            "type": "object",
+            "required": ["name", "image"],
+            "additionalProperties": true,
+            "properties": {
+              "name": {"type": "string"},
+              "image": {"type": "string"},
+              "primary": {"type": "boolean", "default": false},
+              "ports": {"type": "array", "items": {"type": "integer"}},
+              "env": {"type": "object", "additionalProperties": {"type": "string"}},
+              "startup_command": {"type": "string"},
+              "resources": {"type": "object"}
+            }
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source_container", "target_container", "connector_type"],
+            "additionalProperties": false,
+            "properties": {
+              "source_container": {"type": "string"},
+              "target_container": {"type": "string"},
+              "connector_type": {
+                "enum": [
+                  "env_injection",
+                  "http_api",
+                  "database",
+                  "cache",
+                  "message_queue",
+                  "websocket",
+                  "depends_on"
+                ]
+              },
+              "config": {"type": "object", "additionalProperties": true, "default": {}}
+            }
+          },
+          "default": []
+        },
+        "hosted_agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "system_prompt_ref"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "model_pref": {"type": "string"},
+              "system_prompt_ref": {"type": "string", "description": "Path within bundle to prompt file"},
+              "tools_ref": {"type": "array", "items": {"type": "string"}},
+              "mcps_ref": {"type": "array", "items": {"type": "string"}},
+              "temperature": {"type": "number"},
+              "max_tokens": {"type": "integer"},
+              "thinking_effort": {"type": "string"},
+              "warm_pool_size": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": ["model"],
+      "additionalProperties": false,
+      "properties": {
+        "model": {"enum": ["stateless", "per-install-volume", "byo-database"]},
+        "volume_size": {"type": "string", "pattern": "^\\d+(Mi|Gi)$"},
+        "byo_database": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema": {"type": "string"},
+            "connection_env": {"type": "string"},
+            "external_db_version": {"type": "string"}
+          }
+        }
+      }
+    },
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"enum": ["mcp", "api_key", "oauth", "webhook"]},
+          "scopes": {"type": "array", "items": {"type": "string"}},
+          "required": {"type": "boolean", "default": true},
+          "oauth": {"type": "boolean", "default": false},
+          "secret_key": {"type": "string"}
+        }
+      }
+    },
+    "schedules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "default_cron": {"type": "string"},
+          "entrypoint": {"type": "string"},
+          "execution": {"enum": ["job", "http-post"], "default": "job"},
+          "trigger_kind": {"enum": ["cron", "webhook"], "default": "cron"},
+          "editable": {"type": "boolean", "default": true},
+          "optional": {"type": "boolean", "default": true}
+        }
+      }
+    },
+    "migrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "from": {"type": "string"},
+          "to": {"type": "string"},
+          "auto_safe": {"type": "boolean", "default": false},
+          "up": {"type": "string"},
+          "down": {"type": "string"}
+        }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "required": ["ai_compute", "general_compute", "platform_fee"],
+      "additionalProperties": false,
+      "properties": {
+        "ai_compute": {"$ref": "#/$defs/dimensionBilling"},
+        "general_compute": {"$ref": "#/$defs/dimensionBilling"},
+        "platform_fee": {
+          "type": "object",
+          "required": ["model"],
+          "additionalProperties": false,
+          "properties": {
+            "model": {"enum": ["free", "one_time", "subscription", "per_invocation"]},
+            "price_usd": {"type": "number", "minimum": 0},
+            "billing_period": {"type": ["string", "null"], "enum": ["monthly", "yearly", null]},
+            "trial_days": {"type": "integer", "minimum": 0, "default": 0}
+          }
+        },
+        "promotional_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fund_usd": {"type": "number", "minimum": 0, "default": 0},
+            "covers": {"type": "array", "items": {"enum": ["ai_compute", "general_compute", "platform_fee"]}},
+            "on_exhaust": {"enum": ["disable", "flip_to_installer", "degrade_to_free"], "default": "flip_to_installer"}
+          }
+        }
+      }
+    },
+    "listing": {
+      "type": "object",
+      "required": ["visibility"],
+      "additionalProperties": false,
+      "properties": {
+        "visibility": {
+          "oneOf": [
+            {"type": "string", "enum": ["public", "private"]},
+            {"type": "string", "pattern": "^team:[0-9a-f-]{36}$"}
+          ]
+        },
+        "update_policy_default": {"enum": ["manual", "patch-auto", "minor-auto", "pinned"], "default": "manual"},
+        "minimum_rollback_version": {"type": "string"}
+      }
+    },
+    "eval_scenarios": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["entrypoint", "input", "expected_behavior"],
+        "additionalProperties": false,
+        "properties": {
+          "entrypoint": {"type": "string"},
+          "input": {},
+          "expected_behavior": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dimensionBilling": {
+      "type": "object",
+      "required": ["payer"],
+      "additionalProperties": false,
+      "properties": {
+        "payer": {"enum": ["creator", "platform", "installer", "byok"]},
+        "markup_pct": {"type": "number", "minimum": 0, "default": 0},
+        "cap_usd_per_session": {"type": "number", "minimum": 0},
+        "cap_usd_per_month_per_install": {"type": "number", "minimum": 0},
+        "on_cap": {"enum": ["pause", "degrade", "notify-only"], "default": "pause"},
+        "free_tier": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "cpu_seconds_per_month": {"type": "integer", "minimum": 0},
+            "volume_gb": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    }
+  }
+}

@@ -93,6 +93,7 @@ const LIBRARY_ITEMS: Array<{
   label: string;
   icon: ComponentType<SidebarIconProps>;
 }> = [
+  { key: 'apps', label: 'Apps', icon: Boxes },
   { key: 'agents', label: 'Agents', icon: AgentFaceIcon },
   { key: 'bases', label: 'Bases', icon: Rocket },
   { key: 'skills', label: 'Skills', icon: Zap },

@@ -3,13 +3,23 @@ LiteLLM Service for managing user virtual keys and tracking usage.
 """
 
 import logging
+import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+def _scoped_key_alias(key_id: str) -> str:
+    """Deterministic LiteLLM `key_alias` derived from our opaque key_id.
+
+    One format, used by both mint and revoke — no tier in the alias.
+    """
+    return f"tsl_app_{key_id}"
 
 
 class LiteLLMService:
@@ -485,6 +495,88 @@ class LiteLLMService:
             except Exception as e:
                 logger.debug(f"Could not fetch /model/info: {e}")
                 return []
+
+    # ------------------------------------------------------------------
+    # Tesslate Apps: scoped (session/invocation/nested) key mint + revoke.
+    # Distinct from the per-user keys above (create_user_key). Scoped keys
+    # are short-lived, budget-bounded, and tagged with metadata the billing
+    # dispatcher uses for attribution.
+    # ------------------------------------------------------------------
+
+    async def create_scoped_key(
+        self,
+        *,
+        tier: str,
+        budget_usd: Decimal,
+        ttl_seconds: int,
+        metadata: dict[str, Any],
+    ) -> dict[str, str]:
+        """Mint a scoped virtual key at the LiteLLM proxy.
+
+        Returns {"key_id": <opaque-id>, "api_key": <secret>}. The opaque id
+        is our own UUID, stored in LiteLLM as `key_alias` — revoke uses the
+        alias so we never have to persist the secret to talk to the proxy.
+        Callers that need to make LLM calls with this key must keep the
+        `api_key` value returned here (we stash it in ledger.meta for now;
+        encryption-at-rest is a Wave 2 hardening item).
+        """
+        if not self.master_key:
+            raise RuntimeError("LITELLM_MASTER_KEY not configured; cannot mint scoped key")
+
+        key_id = uuid.uuid4().hex
+        duration = f"{max(int(ttl_seconds), 60)}s"
+        payload: dict[str, Any] = {
+            "key_alias": _scoped_key_alias(key_id),
+            "max_budget": float(Decimal(budget_usd)),
+            "duration": duration,
+            "metadata": {**metadata, "tsl_key_id": key_id, "tsl_tier": tier},
+            "team_id": self.team_id,
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{self.management_base_url}/key/generate",
+                headers=self.headers,
+                json=payload,
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise RuntimeError(f"LiteLLM /key/generate failed: {resp.status} {text}")
+                data = await resp.json()
+
+        return {"key_id": key_id, "api_key": data.get("key", "")}
+
+    async def revoke_scoped_key(self, key_id: str) -> None:
+        """Revoke a scoped key by our opaque id (stored as key_alias in LiteLLM).
+
+        Best-effort: non-200 responses are logged, not raised — the LiteLLM
+        proxy will stop honoring the key at TTL regardless.
+        """
+        async with aiohttp.ClientSession() as session:
+            # LiteLLM /key/delete accepts either `keys` (secret values) or
+            # `key_aliases` (our label). We never persist the secret long-
+            # term, so we always revoke by alias.
+            payload = {"key_aliases": [_scoped_key_alias(key_id)]}
+            try:
+                async with session.post(
+                    f"{self.management_base_url}/key/delete",
+                    headers=self.headers,
+                    json=payload,
+                ) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        logger.warning("LiteLLM /key/delete non-200: %s %s", resp.status, text)
+            except Exception:
+                logger.exception("LiteLLM revoke_scoped_key failed for %s", key_id)
+
+    # ------------------------------------------------------------------
+    # LiteLLMDelegate protocol (for services/litellm_keys.py).
+    # Structural match so we can be passed as-is.
+    # ------------------------------------------------------------------
+
+    async def revoke_key(self, key_id: str) -> None:
+        """Alias for revoke_scoped_key to satisfy LiteLLMDelegate protocol."""
+        await self.revoke_scoped_key(key_id)
 
 
 # Singleton instance

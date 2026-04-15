@@ -39,6 +39,8 @@ interface ContainerPropertiesPanelProps {
   onNameChange?: (newName: string) => void;
   port?: number;
   containerType?: 'base' | 'service';
+  /** When provided, renders a "Configure" button that opens the node-config tab. */
+  onConfigure?: () => void;
 }
 
 const PANEL_MIN_WIDTH = 280;
@@ -67,6 +69,7 @@ export const ContainerPropertiesPanel = ({
   onStatusChange,
   onNameChange,
   port,
+  onConfigure,
 }: ContainerPropertiesPanelProps) => {
   const [panelWidth, setPanelWidth] = useState(getStoredWidth);
   const isResizingRef = useRef(false);
@@ -599,6 +602,16 @@ export const ContainerPropertiesPanel = ({
               <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
                 {port && (
                   <span className="text-[10px] text-[var(--text-subtle)] font-mono">:{port}</span>
+                )}
+                {onConfigure && (
+                  <button
+                    onClick={onConfigure}
+                    className="btn btn-icon btn-sm"
+                    title="Configure container (opens config tab)"
+                    aria-label="Configure container"
+                  >
+                    <Key size={13} />
+                  </button>
                 )}
                 <button onClick={onClose} className="btn btn-icon btn-sm">
                   <X size={14} />

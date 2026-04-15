@@ -14,6 +14,7 @@ Or inside Docker container:
 
 import asyncio
 import sys
+import uuid as uuid_module
 from getpass import getpass
 
 from nanoid import generate
@@ -111,6 +112,38 @@ async def create_superuser():
             )
 
             session.add(superuser)
+            await session.flush()
+            await session.refresh(superuser)
+
+            # Every user — including superusers minted via this script —
+            # must have a personal Team + active TeamMembership. The
+            # normal registration path creates this in
+            # ``UserManager._create_personal_team``; do the same here so
+            # env/script-bootstrapped superusers aren't missing their
+            # team (which breaks RBAC-gated flows like seed scripts,
+            # project creation, and Library scoping).
+            from app.models_team import Team, TeamMembership
+
+            team_id = uuid_module.uuid4()
+            team = Team(
+                id=team_id,
+                name=f"{superuser.name}'s Team",
+                slug=f"{superuser.slug}-team",
+                is_personal=True,
+                created_by_id=superuser.id,
+                subscription_tier=superuser.subscription_tier or "free",
+            )
+            session.add(team)
+            await session.flush()
+            session.add(
+                TeamMembership(
+                    team_id=team_id,
+                    user_id=superuser.id,
+                    role="admin",
+                )
+            )
+            superuser.default_team_id = team_id
+
             await session.commit()
             await session.refresh(superuser)
 

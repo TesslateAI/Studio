@@ -4,19 +4,21 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     SmallInteger,
     String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -89,6 +91,14 @@ class Project(Base):
     )  # none, ephemeral, environment
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
     active_compute_pod = Column(String(255), nullable=True)
+
+    # Tesslate Apps primitive: role of this Project in the app lifecycle.
+    # none: ordinary user project (default, existing behavior)
+    # app_source: the authoring project a creator publishes AppVersions from
+    # app_instance: a runtime mount of an installed AppVersion (one per install)
+    app_role = Column(
+        String(20), default="none", server_default="none", nullable=False, index=True
+    )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -228,7 +238,15 @@ class Container(Base):
     internal_port = Column(
         Integer, nullable=True
     )  # Port the dev server listens on inside the container
-    environment_vars = Column(JSON, nullable=True)  # Environment variables
+    environment_vars = Column(JSON, nullable=True)  # Environment variables (plaintext, non-secret)
+    # Fernet-encrypted secret values keyed by env-var name. Populated by the
+    # node-config tool and direct-edit PATCH endpoint. Never serialized to the
+    # agent or the event stream — decryption happens server-side at container
+    # start (secret_manager_env) or on explicit user reveal.
+    encrypted_secrets = Column(JSON, nullable=True)
+    # Set when a secret is rotated so the existing container-restart path can
+    # pick the container up on next reconciliation.
+    needs_restart = Column(Boolean, default=False, nullable=False)
     exports = Column(JSON, nullable=True)  # Exported env vars for connected consumers
     startup_command = Column(String, nullable=True)  # Shell command to start the dev server
     build_command = Column(String, nullable=True)  # Build command (e.g. "npm run build")
@@ -272,6 +290,11 @@ class Container(Base):
         String, default="stopped"
     )  # stopped, starting, running, failed, connected (for external)
     last_started_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Explicit "primary" flag used by runtime URL resolution + app_instance
+    # surface rendering. At most one per project (enforced by the partial
+    # unique index ``ix_containers_one_primary`` added in migration 0059).
+    is_primary = Column(Boolean, nullable=False, default=False, server_default="false")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -1568,11 +1591,683 @@ class UsageLog(Base):
     request_id = Column(String, nullable=True)  # LiteLLM request ID
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
+    # Tesslate Apps billing dispatcher — per-session / per-install attribution.
+    # Populated when a spend event originates from an AppInstance invocation;
+    # existing rows (pre-Apps) have NULLs here and dimension='ai_compute'.
+    session_id = Column(UUID(as_uuid=True), nullable=True)
+    installer_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    dimension = Column(
+        String(24),
+        default="ai_compute",
+        server_default="ai_compute",
+        nullable=False,
+    )  # ai_compute | general_compute | storage | egress | mcp_tool_call | platform_fee
+    app_instance_id = Column(UUID(as_uuid=True), nullable=True)
+    litellm_key_id = Column(Text, nullable=True)
+
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
     agent = relationship("MarketplaceAgent")
     project = relationship("Project")
     creator = relationship("User", foreign_keys=[creator_id])
+    installer = relationship("User", foreign_keys=[installer_user_id])
+
+
+class LiteLLMKeyLedger(Base):
+    """One row per minted LiteLLM virtual key across three tiers.
+
+    Tiers:
+      - session    : long-running interactive surface (chat/ui). Lives as long as
+                     the chat session. Idle reaper sweeps >TTL_SESSION_IDLE.
+      - invocation : headless agent run (scheduled/triggered/mcp-tool). Born
+                     with budget, dies on completion or error.
+      - nested     : minted by a hosted agent inside an app which calls another
+                     app. `parent_key_id` is the enclosing session or invocation
+                     key. Child budget must be <= parent remaining. Parent
+                     settlement is barriered on all children reaching a
+                     terminal state.
+
+    See docs/proposed/plans/tesslate-apps.md §6 for the full state machine
+    and docs/specs/app-manifest-2025-01.md for billing semantics.
+    """
+
+    __tablename__ = "litellm_key_ledger"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key_id = Column(Text, unique=True, nullable=False)
+    parent_key_id = Column(
+        Text,
+        ForeignKey(
+            "litellm_key_ledger.key_id",
+            ondelete="SET NULL",
+            name="fk_litellm_key_ledger_parent",
+        ),
+        nullable=True,
+        index=True,
+    )
+    tier = Column(String(16), nullable=False)  # session | invocation | nested
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    app_instance_id = Column(UUID(as_uuid=True), nullable=True)
+    session_id = Column(UUID(as_uuid=True), nullable=True)
+    budget_usd = Column(Numeric(12, 6), nullable=False)
+    spent_usd = Column(Numeric(12, 6), nullable=False, default=0, server_default="0")
+    ttl_at = Column(DateTime(timezone=True), nullable=True)
+    state = Column(
+        String(16),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )  # pending | active | settling | settled | reaped | revoked | failed
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    meta = Column(JSONB, nullable=False, default=dict, server_default="{}")
+
+    user = relationship("User", foreign_keys=[user_id])
+    parent = relationship(
+        "LiteLLMKeyLedger",
+        remote_side="LiteLLMKeyLedger.key_id",
+        foreign_keys=[parent_key_id],
+        backref="children",
+    )
+
+
+# ============================================================================
+# Tesslate Apps — Hub Entities (Wave 1)
+# See docs/proposed/plans/tesslate-apps.md
+# ============================================================================
+
+
+class MarketplaceApp(Base):
+    """First-class "App" hub object. Separate from MarketplaceAgent.
+
+    An App is the identity anchor; `AppVersion` rows hold the immutable
+    per-release manifest snapshots. Fork lineage is tracked via the self-FK
+    `forked_from`. Visibility is a raw string — `public`, `private`, or
+    `team:<uuid>` — parsed in the service layer.
+    """
+
+    __tablename__ = "marketplace_apps"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    slug = Column(Text, unique=True, nullable=False)
+    name = Column(Text, nullable=False)
+    creator_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    description = Column(Text, nullable=True)
+    category = Column(String(64), nullable=True, index=True)
+    icon_ref = Column(Text, nullable=True)
+    forkable = Column(
+        String(16), nullable=False, default="restricted", server_default="restricted"
+    )  # true | restricted | no
+    forked_from = Column(
+        UUID(as_uuid=True),
+        ForeignKey("marketplace_apps.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    visibility = Column(
+        String(32), nullable=False, default="private", server_default="private"
+    )  # public | private | team:<uuid>
+    state = Column(
+        String(24), nullable=False, default="draft", server_default="draft"
+    )  # draft | pending_stage1 | pending_stage2 | approved | deprecated | yanked
+    reputation = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    creator = relationship("User", foreign_keys=[creator_user_id])
+    versions = relationship(
+        "AppVersion", back_populates="app", cascade="all, delete-orphan"
+    )
+    # ondelete=RESTRICT on app_instances.app_id — no cascade.
+    instances = relationship(
+        "AppInstance", back_populates="app", passive_deletes=True
+    )
+    parent_app = relationship(
+        "MarketplaceApp",
+        remote_side="MarketplaceApp.id",
+        foreign_keys=[forked_from],
+        backref="forks",
+    )
+
+
+class AppVersion(Base):
+    """IMMUTABLE per-version manifest snapshot.
+
+    Once published, a version's manifest_json, manifest_hash, feature_set_hash,
+    and bundle_hash never mutate. Approval and yanking are the only
+    state-machine transitions after publish. Critical yanks require a second
+    admin (enforced by `ck_app_version_critical_two_admin` CHECK constraint).
+    """
+
+    __tablename__ = "app_versions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("marketplace_apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version = Column(Text, nullable=False)
+    manifest_schema_version = Column(String(16), nullable=False)
+    manifest_json = Column(JSONB, nullable=False)
+    manifest_hash = Column(Text, nullable=False)
+    bundle_hash = Column(Text, nullable=True)
+    feature_set_hash = Column(Text, nullable=False)
+    required_features = Column(JSONB, nullable=False, default=list, server_default="[]")
+    approval_state = Column(
+        String(24),
+        nullable=False,
+        default="pending_stage1",
+        server_default="pending_stage1",
+    )  # pending_stage1 | stage1_approved | pending_stage2 | stage2_approved | rejected | yanked
+    approval_meta = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    yanked_at = Column(DateTime(timezone=True), nullable=True)
+    yanked_reason = Column(Text, nullable=True)
+    yanked_by_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    yanked_is_critical = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    yanked_second_admin_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("app_id", "version", name="uq_app_version_app_slug"),
+    )
+
+    app = relationship("MarketplaceApp", back_populates="versions")
+    instances = relationship("AppInstance", back_populates="app_version")
+    yanked_by = relationship("User", foreign_keys=[yanked_by_user_id])
+    yanked_second_admin = relationship("User", foreign_keys=[yanked_second_admin_id])
+
+
+class AppInstance(Base):
+    """Per-install leaf. One installed App per Project (partial UNIQUE)."""
+
+    __tablename__ = "app_instances"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("marketplace_apps.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    app_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    installer_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
+    )
+    state = Column(
+        String(24), nullable=False, default="installing", server_default="installing"
+    )  # installing | installed | upgrading | uninstalled | error
+    consent_record = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    wallet_mix = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    update_policy = Column(
+        String(16), nullable=False, default="manual", server_default="manual"
+    )  # manual | patch-auto | minor-auto | pinned
+    volume_id = Column(Text, nullable=True)
+    feature_set_hash = Column(Text, nullable=True)
+    # Materialized pointer to the manifest's primary container, so the
+    # runtime-status endpoint can resolve ``primary_url`` without scanning
+    # ``containers``. Set by the installer from manifest compute.containers.
+    primary_container_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("containers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    installed_at = Column(DateTime(timezone=True), nullable=True)
+    uninstalled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    app = relationship("MarketplaceApp", back_populates="instances")
+    app_version = relationship("AppVersion", back_populates="instances")
+    installer = relationship("User", foreign_keys=[installer_user_id])
+    project = relationship("Project", foreign_keys=[project_id])
+    consents = relationship(
+        "McpConsentRecord", back_populates="app_instance", cascade="all, delete-orphan"
+    )
+
+
+class McpConsentRecord(Base):
+    """Per-install scoped MCP consent grant. MCP team owns the server surface."""
+
+    __tablename__ = "mcp_consent_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_instance_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    mcp_server_id = Column(Text, nullable=False)
+    scopes = Column(JSONB, nullable=False, default=list, server_default="[]")
+    granted_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    meta = Column(JSONB, nullable=False, default=dict, server_default="{}")
+
+    app_instance = relationship("AppInstance", back_populates="consents")
+
+
+class Wallet(Base):
+    """Per-owner USD balance. owner_type: creator | platform | installer.
+
+    Platform wallet has owner_user_id IS NULL. Singleton platform wallet is
+    enforced by the service layer (PG NULL-distinct semantics prevent the
+    partial unique index from doing it).
+    """
+
+    __tablename__ = "wallets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_type = Column(String(16), nullable=False)  # creator | platform | installer
+    owner_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    balance_usd = Column(Numeric(12, 6), nullable=False, default=0, server_default="0")
+    state = Column(
+        String(16), nullable=False, default="active", server_default="active"
+    )  # active | frozen
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    owner = relationship("User", foreign_keys=[owner_user_id])
+    entries = relationship(
+        "WalletLedgerEntry", back_populates="wallet", cascade="all, delete-orphan"
+    )
+
+
+class WalletLedgerEntry(Base):
+    """Append-only wallet ledger. Positive delta = credit, negative = debit."""
+
+    __tablename__ = "wallet_ledger_entries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wallet_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("wallets.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    delta_usd = Column(Numeric(12, 6), nullable=False)
+    kind = Column(
+        String(24), nullable=False
+    )  # credit | debit | transfer | settlement | adjustment
+    reference_type = Column(String(32), nullable=True)
+    reference_id = Column(UUID(as_uuid=True), nullable=True)  # polymorphic; no FK
+    meta = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    wallet = relationship("Wallet", back_populates="entries")
+
+
+class SpendRecord(Base):
+    """Per-event spend attribution across the six billing dimensions.
+
+    No FK to app_instances this wave — avoids circular import/ordering. A
+    later migration can add the FK once the Apps service layer is stable.
+    """
+
+    __tablename__ = "spend_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_instance_id = Column(UUID(as_uuid=True), nullable=True)  # no FK this wave
+    session_id = Column(UUID(as_uuid=True), nullable=True)
+    installer_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    dimension = Column(
+        String(24), nullable=False
+    )  # ai_compute | general_compute | storage | egress | mcp_tool_call | platform_fee
+    payer = Column(String(16), nullable=False)  # creator | platform | installer | byok
+    payer_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    amount_usd = Column(Numeric(12, 6), nullable=False)
+    litellm_key_id = Column(Text, nullable=True)
+    usage_log_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("usage_logs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    settled = Column(Boolean, nullable=False, default=False, server_default="false")
+    settled_at = Column(DateTime(timezone=True), nullable=True)
+    meta = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    installer = relationship("User", foreign_keys=[installer_user_id])
+    payer_user = relationship("User", foreign_keys=[payer_user_id])
+    usage_log = relationship("UsageLog", foreign_keys=[usage_log_id])
+
+
+# ============================================================================
+# Tesslate Apps - Wave 2: Bundles, Approvals, Yanks, Monitoring, Reputation
+# See docs/proposed/plans/tesslate-apps.md §2
+# ============================================================================
+
+
+class AppBundle(Base):
+    """A collection of AppVersions shipped and installed as a single unit."""
+
+    __tablename__ = "app_bundles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    slug = Column(Text, unique=True, nullable=False)
+    owner_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    display_name = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    status = Column(
+        String(16), nullable=False, default="draft", server_default="draft"
+    )  # draft | approved | yanked
+    consolidated_manifest_hash = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    owner = relationship("User", foreign_keys=[owner_user_id])
+    items = relationship(
+        "AppBundleItem", back_populates="bundle", cascade="all, delete-orphan"
+    )
+
+
+class AppBundleItem(Base):
+    """Ordered membership of an AppVersion in a bundle."""
+
+    __tablename__ = "app_bundle_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bundle_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_bundles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    app_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    order_index = Column(Integer, nullable=False, default=0, server_default="0")
+    default_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    required = Column(Boolean, nullable=False, default=False, server_default="false")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("bundle_id", "app_version_id", name="uq_bundle_version"),
+    )
+
+    bundle = relationship("AppBundle", back_populates="items")
+    app_version = relationship("AppVersion", foreign_keys=[app_version_id])
+
+
+class AppSubmission(Base):
+    """Staged approval pipeline row for an AppVersion."""
+
+    __tablename__ = "app_submissions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    submitter_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    stage = Column(
+        String(16), nullable=False, default="stage0", server_default="stage0"
+    )  # stage0 | stage1 | stage2 | stage3 | approved | rejected
+    stage_entered_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    sla_deadline_at = Column(DateTime(timezone=True), nullable=True)
+    reviewer_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    decision = Column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )  # pending | approved | rejected | needs_changes
+    decision_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    app_version = relationship("AppVersion", foreign_keys=[app_version_id])
+    submitter = relationship("User", foreign_keys=[submitter_user_id])
+    reviewer = relationship("User", foreign_keys=[reviewer_user_id])
+    checks = relationship(
+        "SubmissionCheck", back_populates="submission", cascade="all, delete-orphan"
+    )
+
+
+class SubmissionCheck(Base):
+    """Individual per-stage check row against an AppSubmission."""
+
+    __tablename__ = "submission_checks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    submission_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_submissions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    stage = Column(String(16), nullable=False)
+    check_name = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False)  # passed | failed | warning | errored
+    details = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    submission = relationship("AppSubmission", back_populates="checks")
+
+
+class YankRequest(Base):
+    """Yank workflow row. Critical yanks require a second admin (CHECK)."""
+
+    __tablename__ = "yank_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    requester_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    severity = Column(String(16), nullable=False)  # low | medium | critical
+    reason = Column(Text, nullable=False)
+    status = Column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )  # pending | approved | rejected | appealed
+    primary_admin_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    secondary_admin_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "NOT (severity = 'critical' AND status = 'approved'"
+            " AND (primary_admin_id IS NULL OR secondary_admin_id IS NULL))",
+            name="ck_yank_critical_two_admin",
+        ),
+    )
+
+    app_version = relationship("AppVersion", foreign_keys=[app_version_id])
+    requester = relationship("User", foreign_keys=[requester_user_id])
+    primary_admin = relationship("User", foreign_keys=[primary_admin_id])
+    secondary_admin = relationship("User", foreign_keys=[secondary_admin_id])
+    appeal = relationship(
+        "YankAppeal",
+        back_populates="yank_request",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class YankAppeal(Base):
+    """1:1 appeal on a yank request."""
+
+    __tablename__ = "yank_appeals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    yank_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("yank_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    appellant_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reason = Column(Text, nullable=False)
+    status = Column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )  # pending | upheld | overturned
+    reviewer_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    yank_request = relationship("YankRequest", back_populates="appeal")
+    appellant = relationship("User", foreign_keys=[appellant_user_id])
+    reviewer = relationship("User", foreign_keys=[reviewer_user_id])
+
+
+class MonitoringRun(Base):
+    """Canary / replay / drift monitoring run for a published AppVersion."""
+
+    __tablename__ = "monitoring_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind = Column(String(16), nullable=False)  # canary | replay | drift
+    status = Column(
+        String(16), nullable=False
+    )  # pending | running | passed | failed | errored
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    findings = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    app_version = relationship("AppVersion", foreign_keys=[app_version_id])
+
+
+class AdversarialSuite(Base):
+    """Named+versioned adversarial test suite. Content pinned by CAS hash."""
+
+    __tablename__ = "adversarial_suites"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Text, unique=True, nullable=False)
+    version = Column(Text, nullable=False)
+    suite_yaml_cas_hash = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("name", "version", name="uq_adversarial_suite_name_version"),
+    )
+
+    runs = relationship(
+        "AdversarialRun", back_populates="suite", cascade="all, delete-orphan"
+    )
+
+
+class AdversarialRun(Base):
+    """Per-version adversarial evaluation against a suite."""
+
+    __tablename__ = "adversarial_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suite_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("adversarial_suites.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    app_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    score = Column(Numeric(6, 3), nullable=True)
+    findings = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    suite = relationship("AdversarialSuite", back_populates="runs")
+    app_version = relationship("AppVersion", foreign_keys=[app_version_id])
+
+
+class CreatorReputation(Base):
+    """Per-creator reputation score and lifetime approval / yank counters."""
+
+    __tablename__ = "creator_reputation"
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    score = Column(Numeric(6, 3), nullable=False, default=0, server_default="0")
+    approvals_count = Column(Integer, nullable=False, default=0, server_default="0")
+    yanks_count = Column(Integer, nullable=False, default=0, server_default="0")
+    critical_yanks_count = Column(Integer, nullable=False, default=0, server_default="0")
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user = relationship("User", foreign_keys=[user_id])
 
 
 # ============================================================================
@@ -2161,8 +2856,55 @@ class AgentSchedule(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # Wave 7: trigger kind + config. Default 'cron' keeps existing schedules
+    # behaviourally identical. Non-cron kinds are fired via
+    # ``schedule_trigger_events`` by the process_schedule_triggers worker.
+    trigger_kind = Column(
+        String(16), nullable=False, default="cron", server_default="cron"
+    )  # cron | webhook | mcp_event | app_invocation
+    trigger_config = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    app_instance_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_instances.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     user = relationship("User", backref="agent_schedules")
     project = relationship("Project", backref="agent_schedules")
+    trigger_events = relationship(
+        "ScheduleTriggerEvent",
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+    )
+
+
+class ScheduleTriggerEvent(Base):
+    """Inbound trigger event queued for an AgentSchedule.
+
+    Rows are inserted by routers/webhooks and drained by the
+    ``process_schedule_triggers_cron`` worker, which enqueues the
+    schedule's bound agent task and stamps ``processed_at`` +
+    ``result_status``.
+    """
+
+    __tablename__ = "schedule_trigger_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    schedule_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_schedules.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    payload = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    received_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    result_status = Column(String(16), nullable=True)  # enqueued | failed | skipped
+    error = Column(Text, nullable=True)
+
+    schedule = relationship("AgentSchedule", back_populates="trigger_events")
 
 
 # Import team models so they're included in Base.metadata (same pattern as models_kanban)

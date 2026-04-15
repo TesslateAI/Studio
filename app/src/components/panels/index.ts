@@ -1,5 +1,4 @@
 export { GitHubPanel } from './GitHubPanel';
-export { ArchitecturePanel } from './ArchitecturePanel';
 export { NotesPanel } from './NotesPanel';
 export { SettingsPanel } from './SettingsPanel';
 export { MarketplacePanel } from './MarketplacePanel';
@@ -8,3 +7,5 @@ export { KanbanPanel } from './KanbanPanel';
 export { TerminalPanel } from './TerminalPanel';
 export { DeploymentsPanel } from './DeploymentsPanel';
 export { TimelinePanel } from './TimelinePanel';
+export { NodeConfigPanel } from './NodeConfigPanel';
+export type { NodeConfigPanelProps } from './NodeConfigPanel';

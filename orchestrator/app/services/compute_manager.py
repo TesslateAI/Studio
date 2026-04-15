@@ -1107,13 +1107,23 @@ class ComputeManager:
                 extra_env.setdefault(f"{sib_name}_URL", sib_url)
                 extra_env.setdefault(f"VITE_{sib_name}_URL", sib_url)
 
+            # Tesslate Apps: manifest-declared image stashed in env by installer.
+            # If present, use it as the pod image instead of the default devserver.
+            container_env = container.environment_vars or {}
+            manifest_image = container_env.get("TSL_CONTAINER_IMAGE")
+            effective_image = manifest_image or settings.k8s_devserver_image
+            # Don't leak the sentinel into pod env
+            if manifest_image:
+                container_env = {k: v for k, v in container_env.items() if k != "TSL_CONTAINER_IMAGE"}
+                # Also drop from extra_env if ComputeManager already merged it
+                extra_env = {k: v for k, v in extra_env.items() if k != "TSL_CONTAINER_IMAGE"}
             deployment = create_v2_dev_deployment(
                 namespace=namespace,
                 project_id=project.id,
                 user_id=user_id,
                 container_id=container.id,
                 container_directory=container_directory,
-                image=settings.k8s_devserver_image,
+                image=effective_image,
                 port=port,
                 startup_command=startup_command,
                 pvc_name="project-source",
@@ -1148,9 +1158,14 @@ class ComputeManager:
             )
             await k8s.create_ingress(ingress, namespace)
 
-            protocol = settings.k8s_container_url_protocol
-            hostname = f"{project.slug}-{container_directory}.{settings.app_domain}"
-            preview_url = f"{protocol}://{hostname}"
+            from .apps.runtime_urls import container_url as _container_url
+
+            preview_url = _container_url(
+                project_slug=project.slug,
+                container_dir_or_name=container_directory,
+                app_domain=settings.app_domain,
+                protocol=settings.k8s_container_url_protocol,
+            )
             container_urls[container_directory] = preview_url
 
             logger.info("[COMPUTE-T2] Dev container %s → %s", container_directory, preview_url)

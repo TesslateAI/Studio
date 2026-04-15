@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/container-storage-interface/spec v1.12.0
+	github.com/google/uuid v1.6.0
 	github.com/klauspost/compress v1.18.4
 	github.com/minio/minio-go/v7 v7.0.100
 	github.com/prometheus/client_golang v1.23.2

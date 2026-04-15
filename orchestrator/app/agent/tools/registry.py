@@ -286,6 +286,19 @@ class ToolRegistry:
             # Execute the tool
             result = await tool.executor(parameters, context)
 
+            # Scrub secret values out of shell-tool output before the agent
+            # ever sees it. Short secrets (< 6 chars) are skipped. The project
+            # secret map is cached on the context for the life of the task.
+            if tool.category == ToolCategory.SHELL and isinstance(result, dict):
+                try:
+                    from ._secret_scrubber import scrub_tool_result
+
+                    result = await scrub_tool_result(result, context)
+                except Exception:  # pragma: no cover — defensive
+                    logger.debug(
+                        "[TOOL-EXEC] secret scrub failed for %s", tool_name, exc_info=True
+                    )
+
             # Check if the tool itself reported success/failure
             # Tools return dicts with "success" field to indicate operation status
             tool_succeeded = result.get("success", True) if isinstance(result, dict) else True
@@ -327,6 +340,7 @@ def _register_all_tools(registry: ToolRegistry):
     from .git_ops import register_git_ops_tools
     from .memory_ops import register_memory_ops_tools
     from .nav_ops import register_nav_ops_tools
+    from .node_config import register_all_node_config_tools
     from .planning_ops import register_all_planning_tools
     from .project_ops import register_all_project_tools
     from .shell_ops import register_all_shell_tools
@@ -355,6 +369,8 @@ def _register_all_tools(registry: ToolRegistry):
     register_all_web_tools(registry)
     # Skill ops: load_skill
     register_all_skill_tools(registry)
+    # Node config ops: request_node_config, run_with_secrets
+    register_all_node_config_tools(registry)
 
     logger.info(f"Registered {len(registry._tools)} tools total")
 

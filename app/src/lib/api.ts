@@ -22,6 +22,12 @@ import type {
   SetupConfigSyncResponse,
   ConfigSyncSaveResponse,
 } from '../types/tesslateConfig';
+import type {
+  ContainerConfigResponse,
+  NodeConfigMode,
+  RevealSecretResponse,
+  SubmittedValues,
+} from '../types/nodeConfig';
 import { config } from '../config';
 
 const API_URL = config.API_URL;
@@ -467,6 +473,10 @@ export const projectsApi = {
   },
   get: async (slug: string) => {
     const response = await api.get(`/api/projects/${slug}`);
+    return response.data;
+  },
+  setAppRole: async (slug: string, role: 'app_source' | null) => {
+    const response = await api.patch(`/api/projects/${slug}/app-role`, { app_role: role });
     return response.data;
   },
   delete: async (slug: string) => {
@@ -1040,6 +1050,60 @@ export const chatApi = {
       tool_name: toolName,
       parameters,
     });
+    return response.data;
+  },
+};
+
+export const nodeConfigApi = {
+  /** Submit form values for a pending agent `user_input_required`. */
+  submit: async (inputId: string, values: SubmittedValues): Promise<void> => {
+    await api.post(`/api/chat/node-config/${inputId}/submit`, { values });
+  },
+
+  /** Cancel a pending agent `user_input_required`. */
+  cancel: async (inputId: string): Promise<void> => {
+    await api.post(`/api/chat/node-config/${inputId}/cancel`);
+  },
+
+  /** Fetch current config (schema + values) for a container. */
+  getContainerConfig: async (
+    projectId: string,
+    containerId: string
+  ): Promise<ContainerConfigResponse> => {
+    const response = await api.get(
+      `/api/projects/${projectId}/containers/${containerId}/config`
+    );
+    return response.data;
+  },
+
+  /** Apply a direct (non-agent) edit to a container's config. */
+  patchContainerConfig: async (
+    projectId: string,
+    containerId: string,
+    body: {
+      values: SubmittedValues;
+      overrides?: Record<string, unknown>;
+      preset?: string;
+      mode?: NodeConfigMode;
+    }
+  ): Promise<void> => {
+    await api.patch(
+      `/api/projects/${projectId}/containers/${containerId}/config`,
+      body
+    );
+  },
+
+  /** Reveal the plaintext of a single encrypted secret (user-scoped). */
+  revealSecret: async (
+    projectId: string,
+    containerId: string,
+    key: string
+  ): Promise<RevealSecretResponse> => {
+    const response = await api.post(
+      `/api/projects/${projectId}/containers/${containerId}/secrets/${encodeURIComponent(
+        key
+      )}/reveal`
+    );
     return response.data;
   },
 };
@@ -3566,5 +3630,716 @@ _fetchFlags();
 export const featureFlagsApi = {
   getFlags: (): Promise<FeatureFlagsResponse> => _fetchFlags(),
 };
+
+// =============================================================================
+// ===== Tesslate Apps =====
+// =============================================================================
+//
+// API client for the Tesslate Apps marketplace (Wave 3 backend).
+//
+// All mutations go through the shared `api` axios instance which already
+// handles Bearer-token auth AND (for cookie-based OAuth sessions) attaches
+// the X-CSRF-Token header via the request interceptor above. Do NOT add CSRF
+// plumbing here — the interceptor on lines ~95-110 is authoritative.
+//
+// Endpoint routers (prefix → router):
+//   /api/marketplace-apps   marketplace_apps.py
+//   /api/app-versions       app_versions.py
+//   /api/app-installs       app_installs.py
+//   /api/apps/runtime       app_runtime.py
+//   /api/apps/billing       app_billing.py
+//   /api/app-submissions    app_submissions.py
+//   /api/app-yanks          app_yanks.py
+//   /api/admin-marketplace  admin_marketplace.py
+//   /api/app-bundles        app_bundles.py
+// =============================================================================
+
+// --- Shared types -----------------------------------------------------------
+
+export type ForkableMode = 'true' | 'restricted' | 'no';
+export type AppVisibility = 'public' | 'unlisted' | 'private' | string;
+export type AppState = 'draft' | 'review' | 'approved' | 'yanked' | string;
+export type ApprovalState = 'draft' | 'pending' | 'approved' | 'rejected' | 'yanked' | string;
+export type InstallState = 'installed' | 'running' | 'stopped' | 'uninstalled' | string;
+export type UpdatePolicy = 'manual' | 'minor' | 'patch' | string;
+export type YankSeverity = 'low' | 'medium' | 'critical' | string;
+export type WalletType = 'installer' | 'creator' | 'platform';
+export type SpendDimension = string;
+
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// --- Marketplace Apps -------------------------------------------------------
+
+export interface MarketplaceApp {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  icon_ref: string | null;
+  forkable: ForkableMode;
+  forked_from: string | null;
+  visibility: AppVisibility;
+  state: AppState;
+  reputation: Record<string, unknown>;
+  creator_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppVersionSummary {
+  id: string;
+  app_id: string;
+  version: string;
+  manifest_schema_version: string;
+  manifest_hash: string;
+  bundle_hash: string | null;
+  approval_state: ApprovalState;
+  yanked_at: string | null;
+  yanked_reason: string | null;
+  yanked_is_critical: boolean;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface AppVersionDetail extends AppVersionSummary {
+  manifest_json: Record<string, unknown> | null;
+  feature_set_hash: string;
+  required_features: string[];
+}
+
+export interface CompatReport {
+  compatible: boolean;
+  missing_features: string[];
+  unsupported_manifest_schema: boolean;
+  upgrade_required: boolean;
+  server_manifest_schemas: string[];
+  server_feature_set_hash: string;
+}
+
+export interface ListAppsParams {
+  q?: string;
+  category?: string;
+  creator_user_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const marketplaceAppsApi = {
+  async list(params: ListAppsParams = {}): Promise<Paginated<MarketplaceApp>> {
+    const response = await api.get('/api/marketplace-apps', { params });
+    return response.data;
+  },
+  async get(appId: string): Promise<MarketplaceApp> {
+    const response = await api.get(`/api/marketplace-apps/${appId}`);
+    return response.data;
+  },
+  async listVersions(
+    appId: string,
+    params: { limit?: number; offset?: number } = {}
+  ): Promise<Paginated<AppVersionSummary>> {
+    const response = await api.get(`/api/marketplace-apps/${appId}/versions`, { params });
+    return response.data;
+  },
+  async fork(
+    appId: string,
+    body: { source_app_version_id: string; new_slug: string; new_name: string; team_id?: string }
+  ): Promise<MarketplaceApp & { project_id?: string | null; project_slug?: string | null }> {
+    const response = await api.post(`/api/marketplace-apps/${appId}/fork`, body);
+    return response.data;
+  },
+};
+
+// --- App Versions -----------------------------------------------------------
+
+export interface PublishRequest {
+  project_id: string;
+  manifest: string | Record<string, unknown>;
+  app_id?: string | null;
+}
+
+export interface PublishResult {
+  app_id: string;
+  app_version_id: string;
+  version: string;
+  bundle_hash: string;
+  manifest_hash: string;
+  submission_id: string;
+}
+
+export const appVersionsApi = {
+  async publish(body: PublishRequest): Promise<PublishResult> {
+    const response = await api.post('/api/app-versions/publish', body);
+    return response.data;
+  },
+  async get(appVersionId: string): Promise<AppVersionDetail> {
+    const response = await api.get(`/api/app-versions/${appVersionId}`);
+    return response.data;
+  },
+  async compat(appVersionId: string): Promise<CompatReport> {
+    const response = await api.get(`/api/app-versions/${appVersionId}/compat`);
+    return response.data;
+  },
+};
+
+// --- App Installs -----------------------------------------------------------
+
+export interface InstallRequest {
+  app_version_id: string;
+  team_id: string;
+  wallet_mix_consent?: Record<string, unknown>;
+  mcp_consents?: Record<string, unknown>[];
+  update_policy?: UpdatePolicy;
+}
+
+export interface InstallResult {
+  app_instance_id: string;
+  project_id: string | null;
+  volume_id: string;
+  node_name: string;
+}
+
+export interface AppInstance {
+  id: string;
+  app_id: string;
+  app_version_id: string;
+  project_id: string | null;
+  state: InstallState;
+  update_policy: UpdatePolicy;
+  volume_id: string | null;
+  installed_at: string | null;
+  uninstalled_at: string | null;
+  created_at: string;
+  app_slug: string | null;
+  app_name: string | null;
+  app_version: string | null;
+}
+
+export interface UninstallResult {
+  app_instance_id: string;
+  state: InstallState;
+  uninstalled_at: string;
+}
+
+export const appInstallsApi = {
+  async install(body: InstallRequest): Promise<InstallResult> {
+    const response = await api.post('/api/app-installs/install', body);
+    return response.data;
+  },
+  async listMine(
+    params: { limit?: number; offset?: number } = {}
+  ): Promise<Paginated<AppInstance>> {
+    const response = await api.get('/api/app-installs/mine', { params });
+    return response.data;
+  },
+  async uninstall(appInstanceId: string): Promise<UninstallResult> {
+    const response = await api.post(`/api/app-installs/${appInstanceId}/uninstall`);
+    return response.data;
+  },
+};
+
+// --- App Runtime Status (lifecycle for installed-app pods) -----------------
+
+export type AppRuntimeState = 'stopped' | 'starting' | 'running' | 'error';
+
+export interface AppRuntimeContainer {
+  id: string;
+  name: string;
+  status: string;
+  url: string | null;
+}
+
+export interface AppRuntimeStatus {
+  state: AppRuntimeState;
+  primary_url: string | null;
+  project_id: string;
+  project_slug: string;
+  containers: AppRuntimeContainer[];
+}
+
+export const appRuntimeStatusApi = {
+  async getRuntime(appInstanceId: string): Promise<AppRuntimeStatus> {
+    const response = await api.get(`/api/app-installs/${appInstanceId}/runtime`);
+    return response.data;
+  },
+  async start(appInstanceId: string): Promise<AppRuntimeStatus> {
+    const response = await api.post(`/api/app-installs/${appInstanceId}/start`);
+    return response.data;
+  },
+  async stop(appInstanceId: string): Promise<AppRuntimeStatus> {
+    const response = await api.post(`/api/app-installs/${appInstanceId}/stop`);
+    return response.data;
+  },
+  async listSchedules(appInstanceId: string): Promise<AppScheduleRow[]> {
+    const response = await api.get(`/api/app-installs/${appInstanceId}/schedules`);
+    return response.data;
+  },
+  async patchSchedule(
+    appInstanceId: string,
+    scheduleId: string,
+    body: { enabled?: boolean },
+  ): Promise<AppScheduleRow> {
+    const response = await api.patch(
+      `/api/app-installs/${appInstanceId}/schedules/${scheduleId}`,
+      body,
+    );
+    return response.data;
+  },
+  async runSchedule(
+    appInstanceId: string,
+    scheduleId: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<{ event_id: string; status: string }> {
+    const response = await api.post(
+      `/api/app-installs/${appInstanceId}/schedules/${scheduleId}/trigger`,
+      payload,
+    );
+    return response.data;
+  },
+};
+
+export interface AppScheduleRow {
+  id: string;
+  name: string;
+  cron: string | null;
+  trigger_kind: string;
+  last_run_at: string | null;
+  last_status: string | null;
+  enabled: boolean;
+}
+
+// --- App Runtime (sessions + invocations) -----------------------------------
+
+export interface SessionRequest {
+  app_instance_id: string;
+  budget_usd?: number;
+  ttl_seconds?: number;
+}
+
+export interface SessionHandle {
+  session_id: string;
+  app_instance_id: string;
+  litellm_key_id: string;
+  api_key: string;
+  budget_usd: number;
+  ttl_seconds: number;
+}
+
+export const appRuntimeApi = {
+  async createSession(body: SessionRequest): Promise<SessionHandle> {
+    const response = await api.post('/api/apps/runtime/sessions', body);
+    return response.data;
+  },
+  async deleteSession(sessionId: string): Promise<void> {
+    await api.delete(`/api/apps/runtime/sessions/${sessionId}`);
+  },
+  async createInvocation(body: SessionRequest): Promise<SessionHandle> {
+    const response = await api.post('/api/apps/runtime/invocations', body);
+    return response.data;
+  },
+  async deleteInvocation(sessionId: string): Promise<void> {
+    await api.delete(`/api/apps/runtime/invocations/${sessionId}`);
+  },
+};
+
+// --- App Billing (wallets, ledger, spend) -----------------------------------
+
+export interface WalletSnapshot {
+  id: string;
+  owner_type: WalletType;
+  owner_user_id: string | null;
+  balance_usd: number;
+  currency?: string;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+export interface LedgerEntry {
+  id: string;
+  wallet_id: string;
+  entry_type: string;
+  amount_usd: number;
+  reference_type: string | null;
+  reference_id: string | null;
+  meta: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface SpendEntry {
+  id: string;
+  app_instance_id: string | null;
+  session_id: string | null;
+  installer_user_id: string | null;
+  dimension: SpendDimension;
+  payer: string;
+  payer_user_id: string | null;
+  amount_usd: number;
+  litellm_key_id: string | null;
+  usage_log_id: string | null;
+  settled: boolean;
+  settled_at: string | null;
+  meta: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface SpendSummary {
+  total_usd_30d: number;
+  total_usd_7d: number;
+  total_usd_24h: number;
+  total_settled_usd: number;
+  total_unsettled_usd: number;
+  per_dimension: Record<string, number>;
+  per_app: Array<{ app_instance_id: string | null; amount_usd: number }>;
+}
+
+export interface LedgerQuery {
+  wallet_type?: WalletType;
+  limit?: number;
+  offset?: number;
+  since?: string;
+}
+
+export interface SpendQuery {
+  app_instance_id?: string;
+  dimension?: SpendDimension;
+  settled?: boolean;
+  since?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const appBillingApi = {
+  async getInstallerWallet(): Promise<WalletSnapshot> {
+    const response = await api.get('/api/apps/billing/wallet');
+    return response.data;
+  },
+  async getCreatorWallet(): Promise<WalletSnapshot> {
+    const response = await api.get('/api/apps/billing/wallet/creator');
+    return response.data;
+  },
+  async getLedger(params: LedgerQuery = {}): Promise<Paginated<LedgerEntry>> {
+    const response = await api.get('/api/apps/billing/wallet/ledger', { params });
+    return response.data;
+  },
+  async getSpend(params: SpendQuery = {}): Promise<Paginated<SpendEntry>> {
+    const response = await api.get('/api/apps/billing/spend', { params });
+    return response.data;
+  },
+  async getSpendSummary(): Promise<SpendSummary> {
+    const response = await api.get('/api/apps/billing/spend/summary');
+    return response.data;
+  },
+  async recordSpend(body: {
+    app_instance_id: string;
+    installer_user_id: string;
+    dimension: SpendDimension;
+    amount_usd: number;
+    session_id?: string;
+    litellm_key_id?: string;
+    usage_log_id?: string;
+    is_byok?: boolean;
+    meta?: Record<string, unknown>;
+  }): Promise<{ spend_record_id: string; payer: string; amount_usd: number; dimension: string }> {
+    const response = await api.post('/api/apps/billing/spend/record', body);
+    return response.data;
+  },
+  async getPlatformWallet(): Promise<WalletSnapshot & { recent_ledger: LedgerEntry[] }> {
+    const response = await api.get('/api/apps/billing/wallet/admin/platform');
+    return response.data;
+  },
+};
+
+// --- App Submissions --------------------------------------------------------
+
+export interface Submission {
+  id: string;
+  app_version_id: string;
+  submitter_user_id: string | null;
+  stage: string;
+  decision: string;
+  reviewer_user_id: string | null;
+  decision_notes: string | null;
+}
+
+export interface SubmissionCheck {
+  id: string;
+  submission_id: string;
+  stage: string;
+  check_name: string;
+  status: string;
+  details: Record<string, unknown>;
+}
+
+export interface SubmissionDetail extends Submission {
+  checks: SubmissionCheck[];
+}
+
+export const appSubmissionsApi = {
+  async list(
+    params: {
+      stage?: string;
+      reviewer_user_id?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<Paginated<Submission>> {
+    const response = await api.get('/api/app-submissions/', { params });
+    return response.data;
+  },
+  async get(submissionId: string): Promise<SubmissionDetail> {
+    const response = await api.get(`/api/app-submissions/${submissionId}`);
+    return response.data;
+  },
+  async advance(
+    submissionId: string,
+    body: { to_stage: string; decision_notes?: string }
+  ): Promise<Submission> {
+    const response = await api.post(`/api/app-submissions/${submissionId}/advance`, body);
+    return response.data;
+  },
+  async recordCheck(
+    submissionId: string,
+    body: {
+      stage: string;
+      check_name: string;
+      status: string;
+      details?: Record<string, unknown>;
+    }
+  ): Promise<{ check_id: string }> {
+    const response = await api.post(`/api/app-submissions/${submissionId}/checks`, body);
+    return response.data;
+  },
+};
+
+// --- App Yanks --------------------------------------------------------------
+
+export interface YankRequest {
+  id: string;
+  app_version_id: string;
+  requester_user_id: string | null;
+  severity: YankSeverity;
+  reason: string;
+  status: string;
+  primary_admin_id: string | null;
+  secondary_admin_id: string | null;
+}
+
+export interface YankApproveResult {
+  status: string;
+  needs_second_admin: boolean;
+  primary_admin_id: string | null;
+  secondary_admin_id: string | null;
+}
+
+export const appYanksApi = {
+  async create(body: {
+    app_version_id: string;
+    severity: YankSeverity;
+    reason: string;
+  }): Promise<{ yank_request_id: string }> {
+    const response = await api.post('/api/app-yanks/', body);
+    return response.data;
+  },
+  async approve(yankRequestId: string): Promise<YankApproveResult> {
+    const response = await api.post(`/api/app-yanks/${yankRequestId}/approve`);
+    return response.data;
+  },
+  async reject(yankRequestId: string, note?: string): Promise<{ status: string }> {
+    const response = await api.post(`/api/app-yanks/${yankRequestId}/reject`, { note });
+    return response.data;
+  },
+  async appeal(yankRequestId: string, reason: string): Promise<{ appeal_id: string }> {
+    const response = await api.post(`/api/app-yanks/${yankRequestId}/appeal`, { reason });
+    return response.data;
+  },
+  async list(
+    params: { limit?: number; offset?: number; status?: string } = {}
+  ): Promise<Paginated<YankRequest>> {
+    const response = await api.get('/api/app-yanks/', { params });
+    return response.data;
+  },
+};
+
+// --- Admin Marketplace ------------------------------------------------------
+
+export interface SubmissionQueueItem {
+  submission_id: string;
+  app_version_id: string;
+  app_id: string;
+  app_name: string | null;
+  version: string | null;
+  stage: string;
+  sla_deadline_at: string | null;
+  stage_entered_at: string | null;
+  check_count: number;
+}
+
+export interface YankQueueItem {
+  id: string;
+  app_version_id: string;
+  severity: YankSeverity;
+  status: string;
+  reason: string;
+  created_at: string | null;
+}
+
+export interface AdminStats {
+  apps_total: number;
+  apps_approved: number;
+  apps_pending: number;
+  yanks_pending: number;
+  submissions_in_flight: number;
+  monitoring_runs_24h: number;
+}
+
+export const adminMarketplaceApi = {
+  async getQueue(
+    params: { limit?: number; offset?: number } = {}
+  ): Promise<{ items: SubmissionQueueItem[]; limit: number; offset: number }> {
+    const response = await api.get('/api/admin-marketplace/queue', { params });
+    return response.data;
+  },
+  async getYankQueue(
+    params: { limit?: number; offset?: number } = {}
+  ): Promise<{ items: YankQueueItem[]; limit: number; offset: number }> {
+    const response = await api.get('/api/admin-marketplace/yank-queue', { params });
+    return response.data;
+  },
+  async getStats(): Promise<AdminStats> {
+    const response = await api.get('/api/admin-marketplace/stats');
+    return response.data;
+  },
+  async startMonitoringRun(body: {
+    app_version_id: string;
+    kind: string;
+  }): Promise<{ run_id: string }> {
+    const response = await api.post('/api/admin-marketplace/monitoring/runs', body);
+    return response.data;
+  },
+  async finishMonitoringRun(
+    runId: string,
+    body: { status: string; findings?: Record<string, unknown> }
+  ): Promise<void> {
+    await api.patch(`/api/admin-marketplace/monitoring/runs/${runId}`, body);
+  },
+  async recordAdversarialRun(body: {
+    suite_id: string;
+    app_version_id: string;
+    score?: number;
+    findings?: Record<string, unknown>;
+  }): Promise<{ run_id: string }> {
+    const response = await api.post('/api/admin-marketplace/adversarial/runs', body);
+    return response.data;
+  },
+  async adjustReputation(
+    userId: string,
+    body: {
+      delta_score?: number;
+      delta_approvals?: number;
+      delta_yanks?: number;
+      delta_critical_yanks?: number;
+    }
+  ): Promise<void> {
+    await api.post(`/api/admin-marketplace/reputation/${userId}`, body);
+  },
+};
+
+// --- App Bundles ------------------------------------------------------------
+
+export interface BundleItem {
+  app_version_id: string;
+  order_index: number;
+  default_enabled: boolean;
+  required: boolean;
+}
+
+export interface BundleDetail {
+  id: string;
+  slug: string;
+  display_name: string;
+  status: string;
+  consolidated_manifest_hash: string | null;
+  items: BundleItem[];
+}
+
+export interface BundleListItem {
+  id: string;
+  slug: string;
+  display_name: string;
+  status: string;
+  owner_user_id: string | null;
+}
+
+export interface BundleInstallItemRequest {
+  app_version_id: string;
+  wallet_mix_consent?: Record<string, unknown>;
+  mcp_consents?: Record<string, unknown>[];
+}
+
+export interface BundleInstallResult {
+  succeeded: Array<{
+    app_version_id: string;
+    app_instance_id: string;
+    project_id: string;
+  }>;
+  failed: Array<{ app_version_id: string; error: string }>;
+  note: string | null;
+}
+
+export const appBundlesApi = {
+  async list(
+    params: {
+      owner_user_id?: string;
+      status?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<Paginated<BundleListItem>> {
+    const response = await api.get('/api/app-bundles', { params });
+    return response.data;
+  },
+  async get(bundleId: string): Promise<BundleDetail> {
+    const response = await api.get(`/api/app-bundles/${bundleId}`);
+    return response.data;
+  },
+  async create(body: {
+    slug: string;
+    display_name: string;
+    items: Array<{
+      app_version_id: string;
+      order_index?: number;
+      default_enabled?: boolean;
+      required?: boolean;
+    }>;
+    summary?: string;
+    description?: string;
+  }): Promise<{ bundle_id: string }> {
+    const response = await api.post('/api/app-bundles', body);
+    return response.data;
+  },
+  async publish(bundleId: string): Promise<void> {
+    await api.post(`/api/app-bundles/${bundleId}/publish`);
+  },
+  async yank(bundleId: string, reason: string): Promise<void> {
+    await api.post(`/api/app-bundles/${bundleId}/yank`, { reason });
+  },
+  async install(
+    bundleId: string,
+    body: { team_id: string; installs: BundleInstallItemRequest[] }
+  ): Promise<BundleInstallResult> {
+    const response = await api.post(`/api/app-bundles/${bundleId}/install`, body);
+    return response.data;
+  },
+};
+
+// =============================================================================
+// ===== /Tesslate Apps =====
+// =============================================================================
 
 export default api;

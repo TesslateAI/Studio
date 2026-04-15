@@ -147,64 +147,99 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         # so that team_id is available for library scoping
         await self._create_personal_team(user)
 
-        # Auto-add default agents (Tesslate Agent) to new users
-        try:
-            from sqlalchemy import select
+        # Auto-add default agents + themes to new users.
+        #
+        # We insert via ``INSERT ... ON CONFLICT DO NOTHING`` in a single
+        # statement per table (one round-trip, atomic within the request
+        # txn). This avoids the FK-ShareLock deadlock cycle we previously
+        # hit under concurrent registrations: a loop of per-row ORM inserts
+        # holds row locks across multiple statements, giving two concurrent
+        # sessions a window to deadlock on shared parent rows (the global
+        # MarketplaceAgent / Theme catalog rows). A single statement
+        # acquires all its locks atomically, and ON CONFLICT DO NOTHING
+        # makes it idempotent, so retrying after a transient failure is
+        # always safe.
+        import uuid as _uuid
 
+        from sqlalchemy import select
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        try:
             from .models import MarketplaceAgent, UserPurchasedAgent
 
-            # Default agents to add to every new user
             default_agent_slugs = ["tesslate-agent"]
-
-            for slug in default_agent_slugs:
-                result = await self.user_db.session.execute(
-                    select(MarketplaceAgent).where(MarketplaceAgent.slug == slug)
-                )
-                agent = result.scalar_one_or_none()
-
-                if agent:
-                    purchase = UserPurchasedAgent(
-                        user_id=user.id,
-                        team_id=user.default_team_id,
-                        agent_id=agent.id,
-                        purchase_type="free",
-                        is_active=True,
+            agent_rows = (
+                await self.user_db.session.execute(
+                    select(MarketplaceAgent.id, MarketplaceAgent.name).where(
+                        MarketplaceAgent.slug.in_(default_agent_slugs)
                     )
-                    self.user_db.session.add(purchase)
-                    logger.info(f"Auto-added {agent.name} to user {user.username}")
-                else:
-                    logger.warning(f"{slug} not found - user registered without this default agent")
+                )
+            ).all()
 
-            await self.user_db.session.commit()
+            if agent_rows:
+                values = [
+                    {
+                        "id": _uuid.uuid4(),
+                        "user_id": user.id,
+                        "team_id": user.default_team_id,
+                        "agent_id": row.id,
+                        "purchase_type": "free",
+                        "is_active": True,
+                    }
+                    for row in agent_rows
+                ]
+                stmt = pg_insert(UserPurchasedAgent).values(values)
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=["user_id", "team_id", "agent_id"]
+                )
+                await self.user_db.session.execute(stmt)
+                await self.user_db.session.commit()
+                for row in agent_rows:
+                    logger.info(f"Auto-added {row.name} to user {user.username}")
+            missing = set(default_agent_slugs) - {
+                row.name for row in agent_rows  # noqa: F821 — name used as slug when present
+            }
+            for slug in missing:
+                logger.warning(
+                    f"{slug} not found - user registered without this default agent"
+                )
         except Exception as e:
             logger.error(f"Failed to add default agents to user {user.username}: {e}")
 
-        # Auto-add default themes (default-dark, default-light) to new users
         try:
-            from sqlalchemy import select
-
             from .models import Theme, UserLibraryTheme
 
             default_theme_ids = ["default-dark", "default-light"]
-
-            for theme_id in default_theme_ids:
-                result = await self.user_db.session.execute(
-                    select(Theme).where(Theme.id == theme_id)
+            theme_rows = (
+                await self.user_db.session.execute(
+                    select(Theme.id, Theme.name).where(Theme.id.in_(default_theme_ids))
                 )
-                theme = result.scalar_one_or_none()
+            ).all()
 
-                if theme:
-                    library_entry = UserLibraryTheme(
-                        user_id=user.id, theme_id=theme.id, purchase_type="free", is_active=True
-                    )
-                    self.user_db.session.add(library_entry)
-                    logger.info(f"Auto-added theme {theme.name} to user {user.username}")
-                else:
-                    logger.warning(
-                        f"Theme {theme_id} not found - user registered without this default theme"
-                    )
-
-            await self.user_db.session.commit()
+            if theme_rows:
+                values = [
+                    {
+                        "id": _uuid.uuid4(),
+                        "user_id": user.id,
+                        "theme_id": row.id,
+                        "purchase_type": "free",
+                        "is_active": True,
+                    }
+                    for row in theme_rows
+                ]
+                stmt = pg_insert(UserLibraryTheme).values(values)
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=["user_id", "theme_id", "team_id"]
+                )
+                await self.user_db.session.execute(stmt)
+                await self.user_db.session.commit()
+                for row in theme_rows:
+                    logger.info(f"Auto-added theme {row.name} to user {user.username}")
+            missing = set(default_theme_ids) - {row.id for row in theme_rows}
+            for theme_id in missing:
+                logger.warning(
+                    f"Theme {theme_id} not found - user registered without this default theme"
+                )
         except Exception as e:
             logger.error(f"Failed to add default themes to user {user.username}: {e}")
 

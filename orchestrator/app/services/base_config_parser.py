@@ -227,6 +227,55 @@ class PreviewConfig:
     y: float | None = None
 
 
+@dataclass(frozen=True)
+class HostedAgentConfig:
+    """Hosted agent spec authored via canvas; mirrors HostedAgentSpec in app_manifest."""
+    id: str = ""
+    system_prompt_ref: str = ""
+    model_pref: str | None = None
+    tools_ref: tuple[str, ...] = ()
+    mcps_ref: tuple[str, ...] = ()
+    temperature: float | None = None
+    max_tokens: int | None = None
+    thinking_effort: str | None = None
+    warm_pool_size: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "id": self.id,
+            "system_prompt_ref": self.system_prompt_ref,
+        }
+        if self.model_pref is not None:
+            out["model_pref"] = self.model_pref
+        if self.tools_ref:
+            out["tools_ref"] = list(self.tools_ref)
+        if self.mcps_ref:
+            out["mcps_ref"] = list(self.mcps_ref)
+        if self.temperature is not None:
+            out["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            out["max_tokens"] = self.max_tokens
+        if self.thinking_effort is not None:
+            out["thinking_effort"] = self.thinking_effort
+        if self.warm_pool_size is not None:
+            out["warm_pool_size"] = self.warm_pool_size
+        return out
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "HostedAgentConfig":
+        return cls(
+            id=d.get("id", ""),
+            system_prompt_ref=d.get("system_prompt_ref", ""),
+            model_pref=d.get("model_pref"),
+            tools_ref=tuple(d.get("tools_ref") or ()),
+            mcps_ref=tuple(d.get("mcps_ref") or ()),
+            temperature=d.get("temperature"),
+            max_tokens=d.get("max_tokens"),
+            thinking_effort=d.get("thinking_effort"),
+            warm_pool_size=d.get("warm_pool_size"),
+        )
+
+
 @dataclass
 class TesslateProjectConfig:
     """Parsed .tesslate/config.json configuration."""
@@ -235,6 +284,7 @@ class TesslateProjectConfig:
     connections: list[ConnectionConfig] = field(default_factory=list)
     deployments: dict[str, DeploymentConfig] = field(default_factory=dict)
     previews: dict[str, PreviewConfig] = field(default_factory=dict)
+    hosted_agents: tuple[HostedAgentConfig, ...] = ()
     primaryApp: str = ""
 
 
@@ -318,6 +368,19 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             x=preview_data.get("x"),
             y=preview_data.get("y"),
         )
+
+    # Parse hosted agents (authored via canvas; consumed by publish-time merger)
+    hosted_agents_raw = data.get("hosted_agents") or []
+    if isinstance(hosted_agents_raw, dict):
+        # Allow dict-of-id → spec form in addition to list form
+        hosted_agents_iter = [
+            {**spec, "id": spec.get("id", key)} for key, spec in hosted_agents_raw.items()
+        ]
+    else:
+        hosted_agents_iter = list(hosted_agents_raw)
+    config.hosted_agents = tuple(
+        HostedAgentConfig.from_dict(a) for a in hosted_agents_iter if isinstance(a, dict)
+    )
 
     config.primaryApp = data.get("primaryApp", "")
 

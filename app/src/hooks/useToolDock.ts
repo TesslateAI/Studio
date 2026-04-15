@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { NodeConfigTabPayload } from '../types/nodeConfig';
 
 export type ToolType =
   | 'architecture'
@@ -7,7 +8,8 @@ export type ToolType =
   | 'design'
   | 'kanban'
   | 'assets'
-  | 'terminal';
+  | 'terminal'
+  | 'node-config';
 
 export const TOOL_TYPES: ToolType[] = [
   'architecture',
@@ -17,7 +19,13 @@ export const TOOL_TYPES: ToolType[] = [
   'kanban',
   'assets',
   'terminal',
+  'node-config',
 ];
+
+/** Type-specific tab payload. `node-config` carries the form schema + values. */
+export interface TabPayloadMap {
+  'node-config': NodeConfigTabPayload;
+}
 
 export interface TabInstance {
   id: string;
@@ -51,6 +59,8 @@ function sanitize(raw: unknown): DockState {
     const tt = t as Record<string, unknown>;
     const type = tt.type;
     const id = tt.id;
+    // node-config tabs carry in-memory-only payloads. Skip them on rehydrate.
+    if (type === 'node-config') continue;
     if (isToolType(type) && typeof id === 'string' && id.length > 0) {
       tabs.push({ id, type });
     }
@@ -101,6 +111,12 @@ export interface UseToolDockResult {
   hasType: (type: ToolType) => boolean;
   /** Is the currently focused tab of this type? */
   isActiveType: (type: ToolType) => boolean;
+  /** Open (or re-focus) a node-config tab. Returns the tab id. */
+  openNodeConfigTab: (payload: NodeConfigTabPayload) => string;
+  /** Close the node-config tab associated with the given agent input id, if any. */
+  closeNodeConfigTabByInputId: (inputId: string) => boolean;
+  /** Read the in-memory payload for a node-config tab. */
+  getNodeConfigPayload: (id: string) => NodeConfigTabPayload | undefined;
 }
 
 export function useToolDock(slug: string | undefined): UseToolDockResult {
@@ -114,11 +130,30 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
     const key = storageKey(slug);
     if (!key) return;
     try {
-      window.localStorage.setItem(key, JSON.stringify(state));
+      // Don't persist node-config tabs — their in-memory payloads won't survive a reload.
+      const persistable = {
+        ...state,
+        tabs: state.tabs.filter((t) => t.type !== 'node-config'),
+      };
+      if (
+        persistable.activeTabId &&
+        !persistable.tabs.some((t) => t.id === persistable.activeTabId)
+      ) {
+        persistable.activeTabId = persistable.tabs[persistable.tabs.length - 1]?.id ?? null;
+      }
+      window.localStorage.setItem(key, JSON.stringify(persistable));
     } catch {
       // ignore quota errors
     }
   }, [slug, state]);
+
+  // In-memory payload store for tabs whose content can't be serialized.
+  const payloadsRef = useRef<Map<string, NodeConfigTabPayload>>(new Map());
+
+  const getNodeConfigPayload = useCallback(
+    (id: string): NodeConfigTabPayload | undefined => payloadsRef.current.get(id),
+    []
+  );
 
   const openTool = useCallback((type: ToolType) => {
     setState((prev) => {
@@ -140,6 +175,7 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
   }, []);
 
   const closeTab = useCallback((id: string) => {
+    payloadsRef.current.delete(id);
     setState((prev) => {
       if (!prev.tabs.some((t) => t.id === id)) return prev;
       const idx = prev.tabs.findIndex((t) => t.id === id);
@@ -151,6 +187,53 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
       return { tabs, activeTabId };
     });
   }, []);
+
+  const openNodeConfigTab = useCallback(
+    (payload: NodeConfigTabPayload): string => {
+      // De-duplicate on (containerId, agentInputId) so repeat events don't stack.
+      let reusedId: string | null = null;
+      payloadsRef.current.forEach((p, tabId) => {
+        if (reusedId) return;
+        if (
+          p.containerId === payload.containerId &&
+          (p.agentInputId ?? null) === (payload.agentInputId ?? null)
+        ) {
+          reusedId = tabId;
+        }
+      });
+
+      if (reusedId) {
+        // Refresh payload (schema/initial values may have changed) + focus.
+        payloadsRef.current.set(reusedId, payload);
+        const existingId = reusedId;
+        setState((prev) => {
+          if (!prev.tabs.some((t) => t.id === existingId)) return prev;
+          return { ...prev, activeTabId: existingId };
+        });
+        return reusedId;
+      }
+
+      const tab: TabInstance = { id: makeTabId('node-config'), type: 'node-config' };
+      payloadsRef.current.set(tab.id, payload);
+      setState((prev) => ({
+        tabs: [...prev.tabs, tab],
+        activeTabId: tab.id,
+      }));
+      return tab.id;
+    },
+    []
+  );
+
+  const closeNodeConfigTabByInputId = useCallback((inputId: string): boolean => {
+    let foundId: string | null = null;
+    payloadsRef.current.forEach((p, tabId) => {
+      if (foundId) return;
+      if (p.agentInputId === inputId) foundId = tabId;
+    });
+    if (!foundId) return false;
+    closeTab(foundId);
+    return true;
+  }, [closeTab]);
 
   const closeType = useCallback((type: ToolType) => {
     setState((prev) => {
@@ -207,6 +290,9 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
       countOf,
       hasType,
       isActiveType,
+      openNodeConfigTab,
+      closeNodeConfigTabByInputId,
+      getNodeConfigPayload,
     }),
     [
       state,
@@ -220,6 +306,9 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
       countOf,
       hasType,
       isActiveType,
+      openNodeConfigTab,
+      closeNodeConfigTabByInputId,
+      getNodeConfigPayload,
     ]
   );
 }

@@ -1,0 +1,13 @@
+{
+  "name": "tesslate-nightly-digest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "digest": "node scripts/digest.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "openai": "^4.0.0"
+  }
+}
