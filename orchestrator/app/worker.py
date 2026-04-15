@@ -125,6 +125,94 @@ async def _heartbeat_lock(pubsub, chat_id: str, task_id: str):
         pass
 
 
+def _build_submodule_registry(in_tree_registry):
+    """Transfer tools from an in-tree ToolRegistry to a submodule ToolRegistry.
+
+    Both registries store tools in a ``_tools`` dict keyed by tool name. The
+    in-tree Tool objects are structurally identical to the submodule's Tool
+    (same dataclass fields), so they can be registered directly without
+    conversion. Category comparisons are string-name-based at execution time.
+    """
+    try:
+        from tesslate_agent.agent.tools.registry import ToolRegistry as SubmoduleRegistry
+
+        sub = SubmoduleRegistry()
+        for tool in in_tree_registry._tools.values():
+            sub.register(tool)
+        return sub
+    except Exception as exc:
+        logger.warning("[WORKER] Submodule registry build failed: %s", exc)
+        return None
+
+
+async def _create_agent_runner(agent_model, model_adapter, tools_override, settings):
+    """Return an object with a ``.run(message, context)`` async-generator method.
+
+    When ``settings.agent_runner == "bridge"`` the submodule's TesslateAgent
+    runner is used (via TesslateAgentBridge). Otherwise the in-tree runner is
+    returned unchanged.  Both satisfy the same ``run(message, context)``
+    interface so the caller does not need to branch.
+    """
+    if settings.agent_runner == "bridge":
+        from .services.tesslate_agent_bridge import TesslateAgentBridge
+
+        # Build the tool registry for the bridge.
+        if tools_override is not None:
+            sub_registry = _build_submodule_registry(tools_override)
+        else:
+            from .agent.tools.registry import get_tool_registry
+
+            sub_registry = _build_submodule_registry(get_tool_registry())
+
+        if sub_registry is None:
+            # Submodule unavailable — fall back to inline runner gracefully.
+            logger.warning("[WORKER] Bridge registry unavailable; falling back to inline runner")
+            from .agent.factory import create_agent_from_db_model
+
+            return await create_agent_from_db_model(
+                agent_model=agent_model,
+                model_adapter=model_adapter,
+                tools_override=tools_override,
+            )
+
+        # Build compaction adapter from agent config (same logic as factory.py).
+        compaction_adapter = None
+        agent_config = getattr(agent_model, "config", None) or {}
+        compaction_model_name = (
+            agent_config.get("compaction_model", "") or settings.compaction_summary_model
+        )
+        if compaction_model_name and model_adapter and hasattr(model_adapter, "client"):
+            try:
+                from .agent.models import OpenAIAdapter, resolve_model_name
+
+                compaction_adapter = OpenAIAdapter(
+                    model_name=resolve_model_name(compaction_model_name),
+                    client=model_adapter.client,
+                    temperature=0.3,
+                )
+            except Exception as ca_err:
+                logger.warning("[WORKER] Compaction adapter failed (non-fatal): %s", ca_err)
+
+        bridge = TesslateAgentBridge(
+            system_prompt=agent_model.system_prompt,
+            tools=sub_registry,
+            model=model_adapter,
+            compaction_adapter=compaction_adapter,
+        )
+        # Return the inner submodule agent — it has the .run() + .tools interface
+        # the caller expects. The bridge wrapper is not needed once constructed.
+        return bridge.inner
+
+    # Inline (in-tree) path.
+    from .agent.factory import create_agent_from_db_model
+
+    return await create_agent_from_db_model(
+        agent_model=agent_model,
+        model_adapter=model_adapter,
+        tools_override=tools_override,
+    )
+
+
 async def execute_agent_task(ctx: dict, payload_dict: dict):
     """
     Execute an agent task in the worker process.
@@ -141,7 +229,6 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     """
     from sqlalchemy import select
 
-    from .agent.factory import create_agent_from_db_model
     from .agent.iterative_agent import _convert_uuids_to_strings
     from .agent.models import create_model_adapter
     from .config import get_settings
@@ -174,11 +261,32 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     heartbeat_task = None
     lock_acquired = False
     message_id = None
+    # Ticket tracking — set when payload carries an agent_task_id and the claim succeeds
+    claimed_ticket_id: UUID | None = None
 
     logger.info(f"[WORKER] Starting agent task {task_id} for project {project_id}")
 
     async with AsyncSessionLocal() as db:
         try:
+            # 0. Atomic ticket checkout (desktop multi-agent orchestration)
+            # If payload carries a ticket ID, claim it from "queued" → "running".
+            # If the claim fails (another worker already picked it up), skip silently.
+            if payload.agent_task_id:
+                from .services.agent_tickets import checkout_ticket_by_id
+
+                claimed = await checkout_ticket_by_id(
+                    db,
+                    ticket_id=UUID(payload.agent_task_id),
+                    worker_id=task_id,
+                )
+                if not claimed:
+                    logger.info(
+                        "[WORKER] Ticket %s already running — skipping duplicate pickup",
+                        payload.agent_task_id,
+                    )
+                    return
+                claimed_ticket_id = UUID(payload.agent_task_id)
+
             # 1. Load project (optional for standalone chats)
             project = None
             if project_id:
@@ -289,11 +397,12 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         container_id=(UUID(payload.container_id) if payload.container_id else None),
                     )
 
-            # 7. Create agent instance
-            agent_instance = await create_agent_from_db_model(
+            # 7. Create agent runner — bridge (submodule) or inline (in-tree)
+            agent_run_obj = await _create_agent_runner(
                 agent_model=agent_model,
                 model_adapter=model_adapter,
                 tools_override=tools_override,
+                settings=settings,
             )
 
             # 7b. Load MCP tools for this user/agent and inject into tool registry
@@ -310,14 +419,16 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     project_id=payload.project_id or None,
                 )
                 mcp_tools = mcp_context.get("tools", [])
-                if mcp_tools and hasattr(agent_instance, "tools") and agent_instance.tools:
-                    for mcp_tool in mcp_tools:
-                        agent_instance.tools.register(mcp_tool)
-                    logger.info(
-                        "[WORKER] Registered %d MCP tools for agent '%s'",
-                        len(mcp_tools),
-                        agent_model.slug,
-                    )
+                if mcp_tools:
+                    tools_registry = getattr(agent_run_obj, "tools", None)
+                    if tools_registry:
+                        for mcp_tool in mcp_tools:
+                            tools_registry.register(mcp_tool)
+                        logger.info(
+                            "[WORKER] Registered %d MCP tools for agent '%s'",
+                            len(mcp_tools),
+                            agent_model.slug,
+                        )
 
                 # Surface connectors that failed discovery (stale OAuth, 401,
                 # etc.) — without this, the agent silently gets an empty tool
@@ -494,6 +605,16 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             await db.refresh(assistant_message)
             message_id = assistant_message.id
 
+            # Back-fill ticket → message FK so the AgentTask row points to
+            # the assistant Message created above.
+            if claimed_ticket_id is not None:
+                from .services.agent_tickets import update_ticket_message_id
+
+                with contextlib.suppress(Exception):
+                    await update_ticket_message_id(
+                        db, ticket_id=claimed_ticket_id, message_id=message_id
+                    )
+
             # Create file checkpoint before agent execution (for /undo file revert).
             # Uses git ghost commits when a container is running, or a btrfs
             # volume fork for K8s tier-0 projects (no pod).
@@ -534,7 +655,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             step_index = 0
 
             try:
-                async for event in agent_instance.run(payload.message, context):
+                async for event in agent_run_obj.run(payload.message, context):
                     event_count += 1
                     event_type = event.get("type", "unknown")
 
@@ -724,10 +845,46 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             # pod didn't call update_task_status.
             await _update_task_status_redis(task_id, "completed")
 
+            # Mark the AgentTask ticket as completed / cancelled.
+            if claimed_ticket_id is not None:
+                terminal = "cancelled" if completion_reason == "cancelled" else "completed"
+                with contextlib.suppress(Exception):
+                    from .services.agent_tickets import finish_ticket
+
+                    await finish_ticket(db, ticket_id=claimed_ticket_id, status=terminal)
+
             logger.info(f"[WORKER] Task {task_id} complete, saved to database")
 
         except Exception as e:
             import traceback
+
+            from .services.agent_approval import ApprovalRequired
+
+            if isinstance(e, ApprovalRequired):
+                # Tool hit an approval gate: ticket is already flipped to
+                # "awaiting_approval" by check_tool_allowed(); we only need to
+                # publish a paused event so the frontend / tray knows.
+                logger.info(
+                    "[WORKER] Task %s paused awaiting approval for tool %r",
+                    task_id,
+                    e.tool_name,
+                )
+                with contextlib.suppress(Exception):
+                    if pubsub:
+                        await pubsub.publish_agent_event(
+                            task_id,
+                            {
+                                "type": "awaiting_approval",
+                                "data": {
+                                    "tool_name": e.tool_name,
+                                    "ticket_id": str(e.ticket_id),
+                                    "task_id": task_id,
+                                },
+                            },
+                        )
+                # Do NOT mark the ticket failed — it stays "awaiting_approval"
+                # until the operator approves and re-queues it.
+                return
 
             error_traceback = traceback.format_exc()
             logger.error(f"[WORKER] Agent task {task_id} failed: {e}")
@@ -738,6 +895,13 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
             # Update task status to FAILED in Redis
             await _update_task_status_redis(task_id, "failed", error=str(e))
+
+            # Mark the AgentTask ticket as failed
+            if claimed_ticket_id is not None:
+                with contextlib.suppress(Exception):
+                    from .services.agent_tickets import finish_ticket
+
+                    await finish_ticket(db, ticket_id=claimed_ticket_id, status="failed")
 
             # Finalize stale in_progress placeholder message and reset chat status
             try:

@@ -1542,7 +1542,6 @@ async def agent_chat_stream(
             await db.commit()
 
             # Create agent using same pattern as HTTP endpoint
-            from ..agent.factory import create_agent_from_db_model
             from ..agent.models import create_model_adapter
             from ..config import get_settings
 
@@ -1656,12 +1655,18 @@ async def agent_chat_stream(
                     f"[SSE-AGENT] Created view-scoped registry for view: {view_context.value}"
                 )
 
-            # 5. Create agent via factory
-            agent_instance = await create_agent_from_db_model(
-                agent_model=agent_model, model_adapter=model_adapter, tools_override=tools_override
+            # 5. Create agent runner (bridge or inline based on settings.agent_runner)
+            from ..config import get_settings as _get_settings
+            from ..worker import _create_agent_runner
+
+            agent_instance = await _create_agent_runner(
+                agent_model=agent_model,
+                model_adapter=model_adapter,
+                tools_override=tools_override,
+                settings=_get_settings(),
             )
 
-            # Set max_iterations (None = unlimited)
+            # Set max_iterations when supported by the runner
             if hasattr(agent_instance, "max_iterations"):
                 agent_instance.max_iterations = request.max_iterations
 

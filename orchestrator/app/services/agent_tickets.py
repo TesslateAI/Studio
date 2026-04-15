@@ -21,7 +21,7 @@ inside a single statement, so concurrent workers cannot double-claim.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Integer, cast, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,9 +42,7 @@ async def next_ref_id(session: AsyncSession) -> str:
     Uses ``max(cast(substr(ref_id, 5), Integer))`` so the query works on
     both SQLite (no window funcs needed) and Postgres.
     """
-    stmt = select(
-        func.max(cast(func.substr(AgentTask.ref_id, len(REF_PREFIX) + 1), Integer))
-    )
+    stmt = select(func.max(cast(func.substr(AgentTask.ref_id, len(REF_PREFIX) + 1), Integer)))
     result = await session.execute(stmt)
     current = result.scalar()
     next_n = (current or 0) + 1
@@ -60,6 +58,7 @@ async def create_ticket(
     parent_task_id: uuid.UUID | None = None,
     goal_ancestry: list[str] | None = None,
     requires_approval_for: list[str] | None = None,
+    message_id: uuid.UUID | None = None,
 ) -> AgentTask:
     """Allocate a ref_id and insert a queued ticket."""
     ref_id = await next_ref_id(session)
@@ -72,6 +71,7 @@ async def create_ticket(
         parent_task_id=parent_task_id,
         goal_ancestry=goal_ancestry,
         requires_approval_for=requires_approval_for,
+        message_id=message_id,
         status="queued",
     )
     session.add(ticket)
@@ -99,7 +99,7 @@ async def checkout_ticket(
     stmt = (
         update(AgentTask)
         .where(AgentTask.id.in_(inner.scalar_subquery()))
-        .values(status="running", updated_at=datetime.now(timezone.utc))
+        .values(status="running", updated_at=datetime.now(UTC))
         .returning(AgentTask.id)
         .execution_options(synchronize_session=False)
     )
@@ -114,6 +114,47 @@ async def checkout_ticket(
     return fetched.scalar_one_or_none()
 
 
+async def checkout_ticket_by_id(
+    session: AsyncSession,
+    *,
+    ticket_id: uuid.UUID,
+    worker_id: str,  # reserved for future lease tracking
+) -> bool:
+    """Atomically claim a specific ticket by ID.
+
+    Flips status from ``queued`` → ``running``.  Returns ``True`` if the
+    claim succeeded, ``False`` if the ticket was already running or missing
+    (concurrent worker beat us; caller should skip the job).
+    """
+    stmt = (
+        update(AgentTask)
+        .where(AgentTask.id == ticket_id, AgentTask.status == "queued")
+        .values(status="running", updated_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    # CursorResult exposes rowcount; SQLAlchemy AsyncResult proxies it.
+    return getattr(result, "rowcount", 1) > 0
+
+
+async def update_ticket_message_id(
+    session: AsyncSession,
+    *,
+    ticket_id: uuid.UUID,
+    message_id: uuid.UUID,
+) -> None:
+    """Back-fill the ``message_id`` FK after the assistant Message is created."""
+    stmt = (
+        update(AgentTask)
+        .where(AgentTask.id == ticket_id)
+        .values(message_id=message_id, updated_at=datetime.now(UTC))
+        .execution_options(synchronize_session=False)
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
 async def finish_ticket(
     session: AsyncSession,
     *,
@@ -121,7 +162,7 @@ async def finish_ticket(
     status: str,
 ) -> None:
     """Mark a ticket finished with the given terminal status."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stmt = (
         update(AgentTask)
         .where(AgentTask.id == ticket_id)
@@ -136,5 +177,7 @@ __all__: list[str] = [
     "next_ref_id",
     "create_ticket",
     "checkout_ticket",
+    "checkout_ticket_by_id",
+    "update_ticket_message_id",
     "finish_ticket",
 ]

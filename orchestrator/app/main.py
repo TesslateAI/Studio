@@ -627,6 +627,11 @@ async def startup():
 
     asyncio.create_task(refresh_eligible_models())
 
+    # Register LiteLLM success callback for per-agent budget tracking (idempotent)
+    from .services.agent_budget import register_litellm_budget_callback
+
+    register_litellm_budget_callback()
+
     # Eagerly build btrfs templates for featured bases on startup (K8s only)
     if (
         settings.is_kubernetes_mode
@@ -1180,6 +1185,9 @@ app.include_router(desktop.router)  # /api/desktop - Runtime probe + tray state
 app.include_router(marketplace_local.router)  # /api/desktop/marketplace - local + cloud merge
 app.include_router(desktop_pair.session_router)  # /api/desktop - Session-auth pairing mint
 app.include_router(desktop_pair.public_router)  # /api/v1/desktop - tsk-auth pairing revoke
+from .routers.proxy import router as proxy_router  # noqa: E402
+
+app.include_router(proxy_router)  # /v1/models + /v1/chat/completions - OpenAI-compat model proxy
 from .routers.public import public_routers  # noqa: E402
 
 for _public_router in public_routers:

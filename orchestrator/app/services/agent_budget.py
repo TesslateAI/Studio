@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import and_, select, update
@@ -129,7 +129,7 @@ async def reset_if_due(session: AsyncSession) -> int:
     Returns the number of rows reset.
     """
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         next_reset = now + timedelta(days=RESET_WINDOW_DAYS)
         stmt = (
             update(AgentBudget)
@@ -145,4 +145,63 @@ async def reset_if_due(session: AsyncSession) -> int:
         return 0
 
 
-__all__ = ["BudgetStatus", "check_budget", "record_spend", "reset_if_due"]
+async def _litellm_budget_success_handler(
+    kwargs: dict, completion_response: object, start_time: object, end_time: object
+) -> None:  # noqa: ARG001
+    """LiteLLM async success callback that records spend against agent budgets.
+
+    Activated by ``register_litellm_budget_callback()``.  Callers must pass
+    ``metadata={"agent_id": "<uuid>", "project_id": "<uuid>"}`` in the
+    LiteLLM completion kwargs for spend to be attributed correctly.  Calls
+    without metadata are silently skipped.
+    """
+    try:
+        import litellm
+
+        metadata: dict = (kwargs.get("litellm_params") or {}).get("metadata") or {}
+        raw_agent_id = metadata.get("agent_id")
+        raw_project_id = metadata.get("project_id")
+        if not raw_agent_id:
+            return
+
+        import uuid as _uuid
+
+        agent_id = _uuid.UUID(raw_agent_id)
+        project_id = _uuid.UUID(raw_project_id) if raw_project_id else None
+
+        try:
+            cost = Decimal(str(litellm.completion_cost(completion_response=completion_response)))
+        except Exception:
+            cost = Decimal(0)
+
+        from ..database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            await record_spend(session, agent_id=agent_id, project_id=project_id, amount_usd=cost)
+    except Exception as exc:  # pragma: no cover - best-effort
+        logger.debug("_litellm_budget_success_handler: %s", exc)
+
+
+def register_litellm_budget_callback() -> None:
+    """Register the budget success handler with LiteLLM (idempotent).
+
+    Call once at application startup (e.g. from ``main.py`` lifespan).
+    Safe to call multiple times — duplicate registrations are filtered out.
+    """
+    try:
+        import litellm
+
+        if _litellm_budget_success_handler not in litellm.success_callback:
+            litellm.success_callback.append(_litellm_budget_success_handler)
+            logger.debug("agent_budget: LiteLLM success_callback registered")
+    except Exception as exc:  # pragma: no cover - litellm may not be installed in all envs
+        logger.debug("agent_budget: failed to register LiteLLM callback: %s", exc)
+
+
+__all__ = [
+    "BudgetStatus",
+    "check_budget",
+    "record_spend",
+    "reset_if_due",
+    "register_litellm_budget_callback",
+]

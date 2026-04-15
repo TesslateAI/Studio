@@ -69,6 +69,9 @@ class AgentTaskPayload:
     session_key: str | None = None  # Per-platform session key
     schedule_id: str | None = None  # AgentSchedule UUID if triggered by cron
 
+    # Desktop multi-agent ticket tracking (None = not ticket-bound)
+    agent_task_id: str | None = None  # AgentTask UUID; worker atomically claims it on pickup
+
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""
         return asdict(self)

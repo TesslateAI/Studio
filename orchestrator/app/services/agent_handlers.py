@@ -5,6 +5,13 @@ Both ARQ (via `app.worker.WorkerSettings.functions`) and `LocalTaskQueue`
 resolve handlers by name through this registry. The actual handler bodies
 live in `app.worker` — we only re-export the references so we don't fork
 implementations.
+
+Agent execution is routed by ``settings.agent_runner``:
+  - ``"bridge"`` (default): submodule runner via
+    ``services/tesslate_agent_bridge.TesslateAgentBridge``.
+  - ``"inline"``: in-tree ``app/agent/`` runner.
+Both paths are called from ``worker.execute_agent_task`` via
+``_create_agent_runner()``.
 """
 
 from __future__ import annotations

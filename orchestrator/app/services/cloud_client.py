@@ -126,14 +126,10 @@ class CloudClient:
     # Public verbs
     # ------------------------------------------------------------------
 
-    async def get(
-        self, path: str, *, params: dict[str, Any] | None = None
-    ) -> httpx.Response:
+    async def get(self, path: str, *, params: dict[str, Any] | None = None) -> httpx.Response:
         return await self._request("GET", path, params=params)
 
-    async def post(
-        self, path: str, *, json: Any = None
-    ) -> httpx.Response:
+    async def post(self, path: str, *, json: Any = None) -> httpx.Response:
         return await self._request("POST", path, json=json)
 
     async def post_multipart(
@@ -153,9 +149,7 @@ class CloudClient:
         headers = self._build_headers()
         headers.pop("Accept", None)
         try:
-            resp = await self._client.post(
-                path, files=files, data=data, headers=headers
-            )
+            resp = await self._client.post(path, files=files, data=data, headers=headers)
             if resp.status_code >= 500:
                 self._breaker.record_failure()
             else:
@@ -168,9 +162,7 @@ class CloudClient:
             raise
 
     @asynccontextmanager
-    async def stream(
-        self, path: str, *, method: str = "GET"
-    ) -> AsyncIterator[httpx.Response]:
+    async def stream(self, path: str, *, method: str = "GET") -> AsyncIterator[httpx.Response]:
         """Streaming variant. Bearer + breaker enforced; retries are NOT applied
         to streaming requests (the body would be partially consumed).
         """
@@ -178,9 +170,29 @@ class CloudClient:
             raise CircuitOpenError("cloud circuit open")
         headers = self._build_headers()
         try:
-            async with self._client.stream(
-                method, path, headers=headers
-            ) as resp:
+            async with self._client.stream(method, path, headers=headers) as resp:
+                if resp.status_code >= 500:
+                    self._breaker.record_failure()
+                else:
+                    self._breaker.record_success()
+                yield resp
+        except asyncio.CancelledError:
+            raise
+        except (httpx.TransportError, httpx.TimeoutException):
+            self._breaker.record_failure()
+            raise
+
+    @asynccontextmanager
+    async def stream_post(self, path: str, *, json: Any = None) -> AsyncIterator[httpx.Response]:
+        """Streaming POST variant. Passes a JSON body with bearer + breaker
+        enforced. Retries are NOT applied (body would be partially consumed).
+        """
+        if not self._breaker.allow():
+            raise CircuitOpenError("cloud circuit open")
+        headers = self._build_headers()
+        headers["Content-Type"] = "application/json"
+        try:
+            async with self._client.stream("POST", path, json=json, headers=headers) as resp:
                 if resp.status_code >= 500:
                     self._breaker.record_failure()
                 else:
@@ -287,8 +299,8 @@ def reset_cloud_client_for_tests() -> None:
     global _singleton
     if _singleton is not None:
         # Best-effort sync close; tests typically own their own client anyway.
-        try:
+        import contextlib
+
+        with contextlib.suppress(RuntimeError):
             asyncio.get_event_loop().create_task(_singleton.aclose())
-        except RuntimeError:
-            pass
     _singleton = None
