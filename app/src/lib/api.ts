@@ -3510,13 +3510,22 @@ export interface FeatureFlagsResponse {
 let _lastGoodFlags: FeatureFlagsResponse = { env: '', flags: {} };
 
 function _fetchFlags(): Promise<FeatureFlagsResponse> {
-  return api
-    .get('/api/feature-flags')
-    .then((r) => {
-      _lastGoodFlags = r.data as FeatureFlagsResponse;
-      return _lastGoodFlags;
-    })
-    .catch(() => _lastGoodFlags);
+  try {
+    const req = api.get('/api/feature-flags');
+    if (!req || typeof req.then !== 'function') {
+      // api.get is mocked in tests and may return undefined — don't crash
+      // the module at import time.
+      return Promise.resolve(_lastGoodFlags);
+    }
+    return req
+      .then((r) => {
+        _lastGoodFlags = r.data as FeatureFlagsResponse;
+        return _lastGoodFlags;
+      })
+      .catch(() => _lastGoodFlags);
+  } catch {
+    return Promise.resolve(_lastGoodFlags);
+  }
 }
 
 // Prefetch at module load — fires alongside CSRF token fetch, before React mounts.
