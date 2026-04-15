@@ -594,12 +594,83 @@ async def get_llm_client(
             default_headers=provider_config.get("default_headers", {}),
         )
     else:
-        # No prefix — use LiteLLM proxy for system models
+        # No prefix — use LiteLLM proxy for system models.
+        # In desktop mode (no LiteLLM proxy) fall back to common env-var API
+        # keys so users can drop OPENAI_API_KEY / ANTHROPIC_API_KEY into
+        # $TESSLATE_STUDIO_HOME/.env without needing to configure BYOK in the UI.
+        import os as _os
+
+        if not user.litellm_api_key or not settings.litellm_api_base:
+            # Desktop / standalone: no per-user LiteLLM key provisioned.
+            # If the proxy is configured (LITELLM_API_BASE + LITELLM_MASTER_KEY
+            # both set — e.g. from $TESSLATE_STUDIO_HOME/.env), use the master
+            # key directly so the proxy is reachable without requiring the full
+            # cloud user-key provisioning flow.
+            if settings.litellm_api_base and settings.litellm_master_key:
+                logger.info(
+                    "User has no litellm_api_key; using master key for LiteLLM proxy (model=%s)",
+                    model_name,
+                )
+                return AsyncOpenAI(
+                    api_key=settings.litellm_master_key,
+                    base_url=settings.litellm_api_base,
+                    max_retries=1,
+                )
+
+            _env_fallbacks = [
+                # (env_var, base_url, model_rewrite_prefix)
+                ("OPENAI_API_KEY", "https://api.openai.com/v1", None),
+                ("ANTHROPIC_API_KEY", "https://api.anthropic.com/v1", None),
+                ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1", None),
+            ]
+            for env_var, base_url, _ in _env_fallbacks:
+                api_key = _os.environ.get(env_var)
+                if api_key:
+                    logger.info(
+                        "LiteLLM proxy not configured; falling back to %s env var for model %s",
+                        env_var,
+                        model_name,
+                    )
+                    return AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=1)
+
+            # Last resort: if user has any active BYOK provider, use it.
+            # This lets unprefixed default models (e.g. "claude-sonnet-4.6")
+            # work when the LiteLLM proxy isn't configured.
+            if db is not None and user_id is not None:
+                from ..models import UserAPIKey  # noqa: PLC0415
+                from ..routers.secrets import decode_key  # noqa: PLC0415
+
+                byok_result = await db.execute(
+                    select(UserAPIKey)
+                    .where(
+                        UserAPIKey.user_id == user_id,
+                        UserAPIKey.is_active.is_(True),
+                    )
+                    .limit(1)
+                )
+                any_key = byok_result.scalar_one_or_none()
+                if any_key and any_key.provider in BUILTIN_PROVIDERS:
+                    provider_cfg = BUILTIN_PROVIDERS[any_key.provider]
+                    logger.info(
+                        "No LiteLLM proxy; auto-routing unprefixed model '%s' to user's %s BYOK key",
+                        model_name,
+                        any_key.provider,
+                    )
+                    return AsyncOpenAI(
+                        api_key=decode_key(any_key.encrypted_value),
+                        base_url=any_key.base_url or provider_cfg["base_url"],
+                        default_headers=provider_cfg.get("default_headers", {}),
+                        max_retries=1,
+                    )
+
+            raise ValueError(
+                "No LLM API key configured. "
+                "Add a provider key in Library → API Keys, or set OPENAI_API_KEY / "
+                "ANTHROPIC_API_KEY / OPENROUTER_API_KEY in "
+                "$TESSLATE_STUDIO_HOME/.env."
+            )
+
         logger.info(f"Using LiteLLM proxy for model: {model_name}")
-
-        if not user.litellm_api_key:
-            raise ValueError("User does not have a LiteLLM API key. Please contact support.")
-
         return AsyncOpenAI(
             api_key=user.litellm_api_key, base_url=settings.litellm_api_base, max_retries=1
         )
@@ -629,29 +700,18 @@ class ModelAdapter(ABC):
     async def chat_with_tools(
         self,
         messages: list[dict],
-        tools: list[dict],
+        tools: list[dict] | None = None,
         tool_choice: str = "auto",
-    ) -> AsyncGenerator[dict, None]:
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> dict | AsyncGenerator[dict, None]:
         """
-        Stream chat completion with native function calling support.
+        Call the model with optional tool definitions.
 
-        This method uses the OpenAI tools API for structured tool calling,
-        unlike chat() which only streams text. Used by TesslateAgent for
-        reliable tool call parsing.
-
-        Args:
-            messages: List of message dicts (supports role: system/user/assistant/tool)
-            tools: List of tool definitions in OpenAI format
-            tool_choice: "auto", "none", or {"type": "function", "function": {"name": "..."}}
-
-        Yields:
-            Dicts with types:
-            - {"type": "text_delta", "content": "..."}     - Text being generated
-            - {"type": "tool_calls_complete", "tool_calls": [...]} - Accumulated tool calls
-            - {"type": "done", "finish_reason": "...", "usage": {...}} - Stream complete
+        When ``stream=False`` (default) returns a dict with keys:
+          ``content``, ``tool_calls``, ``usage``, ``finish_reason``, ``raw_response``.
+        When ``stream=True`` returns an async iterator of delta dicts.
         """
-        # Default implementation raises NotImplementedError
-        # Subclasses should override this
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support chat_with_tools(). "
             f"Use an adapter that supports native function calling (e.g., OpenAIAdapter)."
@@ -800,78 +860,133 @@ class OpenAIAdapter(ModelAdapter):
     async def chat_with_tools(
         self,
         messages: list[dict],
-        tools: list[dict],
+        tools: list[dict] | None = None,
         tool_choice: str = "auto",
-    ) -> AsyncGenerator[dict, None]:
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> dict | AsyncGenerator[dict, None]:
         """
-        Stream chat completion with native OpenAI function calling.
+        Call the model with optional tool definitions.
 
-        Accumulates tool call deltas from the stream and yields structured events.
-        Follows the exact message format required by the OpenAI API.
+        When ``stream=False`` (default used by TesslateAgent) makes a single
+        non-streaming request and returns a dict with:
+          ``content``, ``tool_calls``, ``usage``, ``finish_reason``.
+
+        When ``stream=True`` returns an async generator of delta dicts.
         """
-        request_params = {
+        request_params: dict[str, Any] = {
             "model": self.model_name,
             "messages": messages,
-            "tools": tools,
             "tool_choice": tool_choice,
-            "stream": True,
-            "stream_options": {"include_usage": True},
         }
+        if tools:
+            request_params["tools"] = tools
+            request_params["parallel_tool_calls"] = True
 
         if self.max_tokens:
             request_params["max_tokens"] = self.max_tokens
 
-        # Enable parallel tool calls if supported
-        request_params["parallel_tool_calls"] = True
-
         # Extended thinking for capable models.
-        # LiteLLM translates these to the appropriate provider format
-        # (Anthropic thinking param, OpenRouter reasoning, etc.)
         if self.thinking_effort and _is_thinking_capable(self.model_name):
             budget = THINKING_BUDGET.get(self.thinking_effort, 0)
             if budget:
-                extra_body = request_params.get("extra_body", {})
+                extra_body: dict[str, Any] = dict(request_params.get("extra_body") or {})
                 if _supports_adaptive_thinking(self.model_name):
-                    # Claude 4.6: adaptive thinking + effort level
                     extra_body["thinking"] = {"type": "adaptive"}
                     extra_body["output_config"] = {
                         "effort": _ADAPTIVE_EFFORT_MAP.get(self.thinking_effort, "medium")
                     }
                 else:
-                    # Older Claude / other: manual budget
-                    extra_body["thinking"] = {
-                        "type": "enabled",
-                        "budget_tokens": budget,
-                    }
+                    extra_body["thinking"] = {"type": "enabled", "budget_tokens": budget}
                 request_params["extra_body"] = extra_body
 
+        # Inject prompt caching breakpoints for eligible models (e.g. Claude).
         try:
-            # Inject prompt caching breakpoints for eligible models (e.g. Claude).
             from .prompt_caching import inject_cache_breakpoints
 
             inject_cache_breakpoints(messages, self.model_name)
+        except Exception:
+            pass
 
-            logger.debug(
-                f"chat_with_tools: {self.model_name}, {len(messages)} messages, {len(tools)} tools"
+        n_tools = len(tools) if tools else 0
+        logger.debug(
+            "chat_with_tools: %s, %d messages, %d tools, stream=%s",
+            self.model_name,
+            len(messages),
+            n_tools,
+            stream,
+        )
+
+        if stream:
+            return self._stream_with_tools(request_params)
+
+        # Non-streaming path — accumulate and return the submodule-contract dict.
+        try:
+            response = await self.client.chat.completions.create(**request_params)
+        except Exception as e:
+            logger.error("chat_with_tools error: %s", e, exc_info=True)
+            raise RuntimeError(f"Model API error: {e}") from e
+
+        return self._format_response(response)
+
+    def _format_response(self, response: Any) -> dict[str, Any]:
+        """Convert a non-streaming OpenAI response into the adapter-contract dict."""
+        choice = response.choices[0]
+        message = choice.message
+        tool_calls: list[dict[str, Any]] = []
+        for tc in getattr(message, "tool_calls", None) or []:
+            func = getattr(tc, "function", None)
+            tool_calls.append(
+                {
+                    "id": getattr(tc, "id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": getattr(func, "name", "") if func else "",
+                        "arguments": getattr(func, "arguments", "") if func else "",
+                    },
+                }
             )
+        usage: dict[str, Any] = {}
+        raw_usage = getattr(response, "usage", None)
+        if raw_usage is not None:
+            usage["prompt_tokens"] = getattr(raw_usage, "prompt_tokens", 0) or 0
+            usage["completion_tokens"] = getattr(raw_usage, "completion_tokens", 0) or 0
+            usage["total_tokens"] = getattr(raw_usage, "total_tokens", 0) or 0
+            for field in (
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+                "cached_tokens",
+            ):
+                val = getattr(raw_usage, field, None)
+                if val:
+                    usage[field] = val
+        return {
+            "content": getattr(message, "content", "") or "",
+            "tool_calls": tool_calls,
+            "usage": usage,
+            "finish_reason": getattr(choice, "finish_reason", None),
+            "raw_response": response,
+        }
 
-            stream = await self.client.chat.completions.create(**request_params)
+    async def _stream_with_tools(
+        self, request_params: dict[str, Any]
+    ) -> AsyncGenerator[dict, None]:
+        """Async generator for the streaming path of chat_with_tools."""
+        try:
+            params = {**request_params, "stream": True, "stream_options": {"include_usage": True}}
+            api_stream = await self.client.chat.completions.create(**params)
 
-            # Accumulate tool calls indexed by position
-            tool_calls_data: dict[int, dict] = {}
+            tool_calls_data: dict[int, dict[str, Any]] = {}
             content_text = ""
             finish_reason = None
-            usage_data = None
+            usage_data: dict[str, Any] | None = None
 
-            async for chunk in stream:
-                # Capture usage from any chunk (some providers send it
-                # with the final choice, others in a separate empty chunk).
+            async for chunk in api_stream:
                 if hasattr(chunk, "usage") and chunk.usage:
                     usage_data = {
                         "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
                         "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
                     }
-                    # Capture Anthropic/Bedrock cache metrics when present
                     for field in (
                         "cache_creation_input_tokens",
                         "cache_read_input_tokens",
@@ -882,33 +997,23 @@ class OpenAIAdapter(ModelAdapter):
                             usage_data[field] = val
                 if not chunk.choices:
                     continue
-
                 choice = chunk.choices[0]
                 delta = choice.delta
-
-                # Track finish reason
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
-
-                # Accumulate text content
                 if delta.content:
                     content_text += delta.content
                     yield {"type": "text_delta", "content": delta.content}
-
-                # Accumulate tool calls
                 if delta.tool_calls:
                     for tc_delta in delta.tool_calls:
                         idx = tc_delta.index
-
                         if idx not in tool_calls_data:
                             tool_calls_data[idx] = {
                                 "id": "",
                                 "function": {"name": "", "arguments": ""},
                             }
-
                         if tc_delta.id:
                             tool_calls_data[idx]["id"] = tc_delta.id
-
                         if tc_delta.function:
                             if tc_delta.function.name:
                                 tool_calls_data[idx]["function"]["name"] = tc_delta.function.name
@@ -917,13 +1022,10 @@ class OpenAIAdapter(ModelAdapter):
                                     tc_delta.function.arguments
                                 )
 
-            # Yield accumulated tool calls if any
             if tool_calls_data:
-                # Sort by index and convert to list
-                sorted_calls = [tool_calls_data[idx] for idx in sorted(tool_calls_data.keys())]
+                sorted_calls = [tool_calls_data[i] for i in sorted(tool_calls_data)]
                 yield {"type": "tool_calls_complete", "tool_calls": sorted_calls}
 
-            # Yield done event
             yield {
                 "type": "done",
                 "finish_reason": finish_reason or ("tool_calls" if tool_calls_data else "stop"),
@@ -931,14 +1033,13 @@ class OpenAIAdapter(ModelAdapter):
             }
 
             logger.debug(
-                f"chat_with_tools complete: "
-                f"{len(content_text)} chars text, "
-                f"{len(tool_calls_data)} tool calls"
+                "chat_with_tools stream complete: %d chars, %d tool calls",
+                len(content_text),
+                len(tool_calls_data),
             )
-
         except Exception as e:
-            logger.error(f"chat_with_tools error: {e}", exc_info=True)
-            raise RuntimeError(f"Model API error: {str(e)}") from e
+            logger.error("chat_with_tools stream error: %s", e, exc_info=True)
+            raise RuntimeError(f"Model API error: {e}") from e
 
     def get_model_name(self) -> str:
         return self.model_name

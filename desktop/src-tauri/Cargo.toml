@@ -24,3 +24,5 @@ anyhow = "1"
 log = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 url = "2"
+dirs-next = "2"
+tempfile = "3"

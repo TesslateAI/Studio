@@ -74,14 +74,10 @@ async def _resolve_team(db: AsyncSession, team_slug: str) -> Team:
     return team
 
 
-async def _resolve_project_in_team(
-    db: AsyncSession, team: Team, project_slug: str
-) -> Project:
+async def _resolve_project_in_team(db: AsyncSession, team: Team, project_slug: str) -> Project:
     """Fetch a project that belongs to *team* by slug or raise 404."""
     result = await db.execute(
-        select(Project).where(
-            and_(Project.team_id == team.id, Project.slug == project_slug)
-        )
+        select(Project).where(and_(Project.team_id == team.id, Project.slug == project_slug))
     )
     project = result.scalar_one_or_none()
     if project is None:
@@ -232,6 +228,51 @@ async def list_teams(
         .order_by(Team.created_at)
     )
     rows = result.all()
+
+    # Auto-provision a personal team for legacy users who never got one.
+    # This is idempotent: the helper returns immediately if default_team_id is set.
+    if not rows:
+        import uuid as _uuid
+
+        team_id = _uuid.uuid4()
+        team_slug = f"personal-{str(user.id)[:8]}"
+        team = Team(
+            id=team_id,
+            name="Personal",
+            slug=team_slug,
+            is_personal=True,
+            created_by_id=user.id,
+            subscription_tier=getattr(user, "subscription_tier", "free") or "free",
+            daily_credits=0,
+            signup_bonus_credits=0,
+        )
+        db.add(team)
+        await db.flush()
+
+        membership = TeamMembership(
+            team_id=team_id,
+            user_id=user.id,
+            role="admin",
+        )
+        db.add(membership)
+        user.default_team_id = team_id
+        await db.commit()
+        logger.info("Auto-provisioned personal team '%s' for user %s", team_slug, user.id)
+
+        # Re-query so the response reflects the new team
+        result = await db.execute(
+            select(Team, TeamMembership.role)
+            .join(TeamMembership, TeamMembership.team_id == Team.id)
+            .where(
+                and_(
+                    TeamMembership.user_id == user.id,
+                    TeamMembership.is_active.is_(True),
+                )
+            )
+            .order_by(Team.created_at)
+        )
+        rows = result.all()
+
     out: list[TeamList] = []
     for team, role in rows:
         item = TeamList.model_validate(team)
@@ -555,7 +596,9 @@ async def invite_by_email(
         )
     )
     if pending.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=409, detail="A pending invitation already exists for this email")
+        raise HTTPException(
+            status_code=409, detail="A pending invitation already exists for this email"
+        )
 
     # Rate limit: 50 invitations per day
     day_ago = datetime.now(UTC) - timedelta(days=1)
@@ -687,9 +730,7 @@ async def remove_member(
     target_membership.is_active = False
 
     # Deactivate all project memberships for this user in this team's projects
-    team_projects = await db.execute(
-        select(Project.id).where(Project.team_id == team.id)
-    )
+    team_projects = await db.execute(select(Project.id).where(Project.team_id == team.id))
     project_ids = [row[0] for row in team_projects.all()]
     if project_ids:
         proj_memberships = await db.execute(
@@ -891,7 +932,6 @@ async def revoke_invitation(
         request=request,
     )
     await db.commit()
-
 
 
 # (invite accept/details routes moved before /{team_slug} to avoid route collision)
@@ -1316,23 +1356,35 @@ async def export_audit_log(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "id", "team_id", "project_id", "user_id", "action",
-        "resource_type", "resource_id", "details", "ip_address", "created_at",
-    ])
+    writer.writerow(
+        [
+            "id",
+            "team_id",
+            "project_id",
+            "user_id",
+            "action",
+            "resource_type",
+            "resource_id",
+            "details",
+            "ip_address",
+            "created_at",
+        ]
+    )
     for row in rows:
-        writer.writerow([
-            str(row.id),
-            str(row.team_id),
-            str(row.project_id) if row.project_id else "",
-            str(row.user_id),
-            row.action,
-            row.resource_type,
-            str(row.resource_id) if row.resource_id else "",
-            str(row.details) if row.details else "",
-            row.ip_address or "",
-            row.created_at.isoformat() if row.created_at else "",
-        ])
+        writer.writerow(
+            [
+                str(row.id),
+                str(row.team_id),
+                str(row.project_id) if row.project_id else "",
+                str(row.user_id),
+                row.action,
+                row.resource_type,
+                str(row.resource_id) if row.resource_id else "",
+                str(row.details) if row.details else "",
+                row.ip_address or "",
+                row.created_at.isoformat() if row.created_at else "",
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(

@@ -28,8 +28,8 @@ export function MarketplaceLayout() {
   const location = useLocation();
   // Fast synchronous check: if a JWT token exists, render authenticated immediately
   // This avoids the public marketplace flash for logged-in users
-  const [authState, setAuthState] = useState<AuthState>(
-    () => localStorage.getItem('token') ? 'authenticated' : 'loading'
+  const [authState, setAuthState] = useState<AuthState>(() =>
+    localStorage.getItem('token') ? 'authenticated' : 'loading'
   );
 
   // Slow path: for cookie-based OAuth users without a token
@@ -83,7 +83,7 @@ export function MarketplaceLayout() {
   if (authState === 'loading') {
     return (
       <MarketplaceAuthContext.Provider value={authContextValue}>
-        <div className="h-screen bg-[var(--sidebar-bg)]" />
+        <div className="h-full bg-[var(--sidebar-bg)]" />
       </MarketplaceAuthContext.Provider>
     );
   }
@@ -93,7 +93,7 @@ export function MarketplaceLayout() {
     return (
       <MarketplaceAuthContext.Provider value={authContextValue}>
         <motion.div
-          className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]"
+          className="h-full flex overflow-hidden bg-[var(--sidebar-bg)]"
           initial={{ opacity: 0.95 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.15 }}

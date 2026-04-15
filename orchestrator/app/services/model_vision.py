@@ -62,7 +62,7 @@ async def model_supports_vision(model_name: str) -> bool:
     Strips routing prefixes (builtin/, custom/, provider/) before lookup
     so callers don't need to worry about prefix handling.
     """
-    from ..agent.models import resolve_model_name
+    from .model_adapters import resolve_model_name
 
     bare = resolve_model_name(model_name)
     vision_map = await get_cached_model_vision_map()

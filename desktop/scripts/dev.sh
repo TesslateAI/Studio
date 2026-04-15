@@ -54,6 +54,10 @@ fi
 # would leave the frontend pointing at the cloud docker-compose backend.
 export TESSLATE_DESKTOP_PORT="${TESSLATE_DESKTOP_PORT:-43111}"
 export VITE_API_URL="${VITE_API_URL:-http://127.0.0.1:$TESSLATE_DESKTOP_PORT}"
+# Also tell Vite's dev-server proxy where to forward /api/* requests so that
+# raw fetch() calls (which use a relative path resolved against localhost:5173)
+# reach the sidecar instead of falling back to the docker default (port 8000).
+export VITE_BACKEND_URL="${VITE_BACKEND_URL:-http://127.0.0.1:$TESSLATE_DESKTOP_PORT}"
 
 # Preflight: kill anything holding the pinned sidecar port, the vite
 # port, or any orphaned orchestrator/host process from a prior crashed

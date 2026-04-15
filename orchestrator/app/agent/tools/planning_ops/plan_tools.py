@@ -12,7 +12,7 @@ update_plan: Called by main agent during execution to track step progress
 import logging
 from typing import Any
 
-from ...plan_manager import PlanManager
+from ....services.plan_manager import PlanManager
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 

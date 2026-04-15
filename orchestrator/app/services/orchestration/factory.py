@@ -141,8 +141,13 @@ class OrchestratorFactory:
 
     @staticmethod
     def is_local_mode() -> bool:
-        """Check if running in local (filesystem + subprocess) deployment mode."""
-        return OrchestratorFactory.get_deployment_mode() == DeploymentMode.LOCAL
+        """Check if running in local or desktop deployment mode.
+
+        Both LOCAL and DESKTOP use the LocalOrchestrator / LocalPTYBroker stack.
+        DESKTOP is the Tauri shell mode whose per-project runtime defaults to LOCAL.
+        """
+        mode = OrchestratorFactory.get_deployment_mode()
+        return mode in (DeploymentMode.LOCAL, DeploymentMode.DESKTOP)
 
     @staticmethod
     def clear_cache() -> None:

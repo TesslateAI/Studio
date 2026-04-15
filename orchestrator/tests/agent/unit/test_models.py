@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from app.agent.models import (
+from app.services.model_adapters import (
     ModelAdapter,
     OpenAIAdapter,
     create_model_adapter,
@@ -221,7 +221,7 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_for_openai_model(self, mock_user_id, mock_db):
         """Test creating adapter for OpenAI model."""
-        with patch("app.agent.models.get_llm_client") as mock_get_client:
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
@@ -236,7 +236,7 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_for_openrouter_model(self, mock_user_id, mock_db):
         """Test creating adapter for OpenRouter model strips provider prefix."""
-        with patch("app.agent.models.get_llm_client") as mock_get_client:
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
@@ -253,7 +253,7 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_with_custom_params(self, mock_user_id, mock_db):
         """Test creating adapter with custom parameters."""
-        with patch("app.agent.models.get_llm_client") as mock_get_client:
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
@@ -291,7 +291,7 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_auto_detects_provider(self, mock_user_id, mock_db):
         """Test that provider is auto-detected from model name."""
-        with patch("app.agent.models.get_llm_client") as mock_get_client:
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
@@ -312,7 +312,7 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_for_custom_provider_model(self, mock_user_id, mock_db):
         """Test creating adapter for custom provider model strips custom/{slug}/ prefix."""
-        with patch("app.agent.models.get_llm_client") as mock_get_client:
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
@@ -334,7 +334,7 @@ class TestCreateModelAdapter:
         self, mock_user_id, mock_db
     ):
         """Test that custom/anthropic/model is NOT auto-detected as native Anthropic provider."""
-        with patch("app.agent.models.get_llm_client") as mock_get_client:
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
@@ -351,7 +351,7 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_builtin_prefix_strips_correctly(self, mock_user_id, mock_db):
         """Test that builtin/ prefix is stripped for LiteLLM models."""
-        with patch("app.agent.models.get_llm_client") as mock_get_client:
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 

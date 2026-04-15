@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,11 +31,7 @@ async def list_directories(
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    stmt = (
-        select(Directory)
-        .where(Directory.user_id == user.id)
-        .order_by(Directory.created_at)
-    )
+    stmt = select(Directory).where(Directory.user_id == user.id).order_by(Directory.created_at)
     result = await db.execute(stmt)
     rows = result.scalars().all()
     return {"directories": [_serialize_directory(d) for d in rows]}
@@ -49,13 +45,11 @@ async def create_directory(
 ) -> dict[str, Any]:
     canonical = _canonical_path(body.path)
     existing = await db.execute(
-        select(Directory).where(
-            Directory.user_id == user.id, Directory.path == canonical
-        )
+        select(Directory).where(Directory.user_id == user.id, Directory.path == canonical)
     )
     row = existing.scalar_one_or_none()
     if row is not None:
-        row.last_opened_at = datetime.now(timezone.utc)
+        row.last_opened_at = datetime.now(UTC)
         if body.runtime:
             row.runtime = body.runtime
         if body.project_id is not None:
@@ -71,7 +65,7 @@ async def create_directory(
         runtime=body.runtime,
         project_id=body.project_id,
         git_root=_detect_git_root(canonical),
-        last_opened_at=datetime.now(timezone.utc),
+        last_opened_at=datetime.now(UTC),
     )
     db.add(directory)
     try:
@@ -79,9 +73,7 @@ async def create_directory(
     except IntegrityError:
         await db.rollback()
         existing = await db.execute(
-            select(Directory).where(
-                Directory.user_id == user.id, Directory.path == canonical
-            )
+            select(Directory).where(Directory.user_id == user.id, Directory.path == canonical)
         )
         row = existing.scalar_one()
         return _serialize_directory(row)
@@ -96,9 +88,7 @@ async def delete_directory(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     existing = await db.execute(
-        select(Directory).where(
-            Directory.id == directory_id, Directory.user_id == user.id
-        )
+        select(Directory).where(Directory.id == directory_id, Directory.user_id == user.id)
     )
     row = existing.scalar_one_or_none()
     if row is None:

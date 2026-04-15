@@ -47,15 +47,80 @@ def _mint_bearer() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _load_dot_env(studio_home: Path) -> None:
+    """Load ``$TESSLATE_STUDIO_HOME/.env`` into the process environment.
+
+    Only sets variables that are not already present so that explicit env
+    overrides (shell exports, CI) take priority.  Uses a minimal parser to
+    avoid a python-dotenv dependency — supports ``KEY=value`` and
+    ``KEY="value"`` lines; skips blank lines and ``#`` comments.
+    """
+    dot_env = studio_home / ".env"
+    if not dot_env.is_file():
+        return
+    try:
+        with dot_env.open(encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except OSError:
+        pass  # Best-effort; missing/unreadable .env is not fatal.
+
+
+def _ensure_secret_key(studio_home: Path) -> str:
+    """Return a stable per-installation SECRET_KEY, generating one on first boot.
+
+    The key is persisted at ``$TESSLATE_STUDIO_HOME/.secret_key`` (0600) so
+    that JWTs survive sidecar restarts.  If ``SECRET_KEY`` is already set in
+    the environment (or loaded from ``.env``), that value is used as-is.
+    """
+    existing = os.environ.get("SECRET_KEY", "").strip()
+    if len(existing) >= 32:
+        return existing
+
+    key_file = studio_home / ".secret_key"
+    if key_file.is_file():
+        try:
+            key = key_file.read_text(encoding="utf-8").strip()
+            if len(key) >= 32:
+                return key
+        except OSError:
+            pass
+
+    # First boot — generate and persist.
+    key = secrets.token_urlsafe(48)
+    try:
+        key_file.write_text(key, encoding="utf-8")
+        key_file.chmod(0o600)
+    except OSError:
+        pass  # Best-effort; if the write fails we still use the in-memory key.
+    return key
+
+
 def _configure_environment(studio_home: Path) -> None:
     """Set the env vars FastAPI / SQLAlchemy read at import time."""
+    # User-supplied keys (OPENAI_API_KEY etc.) land first so the rest of the
+    # defaults below don't accidentally shadow them.
+    _load_dot_env(studio_home)
     os.environ.setdefault("DEPLOYMENT_MODE", "desktop")
+    os.environ.setdefault("DEPLOYMENT_ENV", "desktop")
     os.environ.setdefault("TESSLATE_STUDIO_HOME", str(studio_home))
     os.environ.setdefault(
         "DATABASE_URL", f"sqlite+aiosqlite:///{studio_home / 'studio.db'}"
     )
     # SQLite + desktop mode must not try to talk to Redis.
     os.environ.setdefault("REDIS_URL", "")
+    # Ensure a stable JWT signing key (min 32 bytes required by jose/SHA-256).
+    secret = _ensure_secret_key(studio_home)
+    os.environ.setdefault("SECRET_KEY", secret)
 
 
 def _alembic_dir() -> Path:

@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.types import JSON
+
 from app.types.guid import GUID
 
 from .database import Base
@@ -36,9 +37,7 @@ class Team(Base):
     slug = Column(String(100), unique=True, nullable=False, index=True)
     avatar_url = Column(Text, nullable=True)
     is_personal = Column(Boolean, nullable=False, default=False)
-    created_by_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    created_by_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Billing (moved from User)
     subscription_tier = Column(String, nullable=False, default="free")
@@ -59,7 +58,9 @@ class Team(Base):
     theme_preset = Column(String, nullable=True, default="default-dark")
 
     # Model preferences
-    disabled_models = Column(JSON, nullable=True, default=list)  # Model IDs hidden from chat selector
+    disabled_models = Column(
+        JSON, nullable=True, default=list
+    )  # Model IDs hidden from chat selector
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -80,8 +81,11 @@ class Team(Base):
         from datetime import UTC
         from datetime import datetime as dt
 
+        from .database import ensure_aware
+
         bonus = self.signup_bonus_credits or 0
-        if self.signup_bonus_expires_at and dt.now(UTC) > self.signup_bonus_expires_at:
+        _expires = ensure_aware(self.signup_bonus_expires_at)
+        if _expires and dt.now(UTC) > _expires:
             bonus = 0
         return (
             (self.daily_credits or 0)
@@ -101,9 +105,7 @@ class TeamMembership(Base):
     user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(20), nullable=False)  # 'admin', 'editor', 'viewer'
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
-    invited_by_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    invited_by_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     joined_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -123,14 +125,10 @@ class ProjectMembership(Base):
     __tablename__ = "project_memberships"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    project_id = Column(
-        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
-    )
+    project_id = Column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(20), nullable=False)  # 'admin', 'editor', 'viewer'
-    granted_by_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    granted_by_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
@@ -158,14 +156,10 @@ class TeamInvitation(Base):
     role = Column(String(20), nullable=False)  # 'admin', 'editor', 'viewer'
     token = Column(String(64), unique=True, nullable=False, index=True)
     invite_type = Column(String(20), nullable=False, default="email")  # 'email', 'link'
-    invited_by_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
-    )
+    invited_by_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     accepted_at = Column(DateTime(timezone=True), nullable=True)
-    accepted_by_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    accepted_by_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     max_uses = Column(Integer, nullable=True)  # for link invites (null = unlimited)
     use_count = Column(Integer, nullable=False, default=0)
@@ -185,12 +179,8 @@ class AuditLog(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
-    project_id = Column(
-        GUID(), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
-    )
-    user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=False
-    )
+    project_id = Column(GUID(), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=False)
     action = Column(String(100), nullable=False)  # e.g., 'member.invited', 'project.deleted'
     resource_type = Column(String(50), nullable=False)  # e.g., 'team', 'project', 'container'
     resource_id = Column(GUID(), nullable=True)

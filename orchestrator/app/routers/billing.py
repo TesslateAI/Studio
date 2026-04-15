@@ -197,7 +197,10 @@ async def get_subscription(
     purchased = team.purchased_credits or 0
     daily = team.daily_credits or 0
     bonus = team.signup_bonus_credits or 0
-    if team.signup_bonus_expires_at and datetime.now(UTC) > team.signup_bonus_expires_at:
+    from ..database import ensure_aware as _ensure_aware
+
+    _bonus_exp = _ensure_aware(team.signup_bonus_expires_at)
+    if _bonus_exp and datetime.now(UTC) > _bonus_exp:
         bonus = 0
     total_credits = daily + bundled + bonus + purchased
 
@@ -671,7 +674,10 @@ async def get_credit_status(
     purchased = team.purchased_credits or 0
     daily = team.daily_credits or 0
     bonus = team.signup_bonus_credits or 0
-    if team.signup_bonus_expires_at and datetime.now(UTC) > team.signup_bonus_expires_at:
+    from ..database import ensure_aware as _ensure_aware
+
+    _bonus_exp = _ensure_aware(team.signup_bonus_expires_at)
+    if _bonus_exp and datetime.now(UTC) > _bonus_exp:
         bonus = 0
     total = daily + bundled + bonus + purchased
     monthly_allowance = settings.get_tier_bundled_credits(tier)

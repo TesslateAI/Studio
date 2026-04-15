@@ -962,8 +962,7 @@ function ProjectPageInner() {
   // Dock / tool helpers
   // ---------------------------------------------------------------------------
 
-  const isDesktop =
-    typeof window !== 'undefined' ? window.innerWidth >= 768 : true;
+  const isDesktop = typeof window !== 'undefined' ? window.innerWidth >= 768 : true;
 
   const openToolAndShowDock = useCallback(
     (tool: ToolType, options?: { forceNew?: boolean }) => {
@@ -1276,8 +1275,18 @@ function ProjectPageInner() {
     { id: 'preview', icon: <Monitor size={14} weight="bold" />, hotkey: '⌘2' },
     { id: 'code', icon: <Code size={14} weight="bold" />, hotkey: '⌘3' },
     { id: 'design', icon: <PencilRuler size={14} weight="bold" />, hotkey: '⌘4' },
-    { id: 'kanban', icon: <Kanban size={14} weight="bold" />, hotkey: '⌘5', restricted: !canEditKanban },
-    { id: 'assets', icon: <Image size={14} weight="bold" />, hotkey: '⌘6', restricted: !canEditAssets },
+    {
+      id: 'kanban',
+      icon: <Kanban size={14} weight="bold" />,
+      hotkey: '⌘5',
+      restricted: !canEditKanban,
+    },
+    {
+      id: 'assets',
+      icon: <Image size={14} weight="bold" />,
+      hotkey: '⌘6',
+      restricted: !canEditAssets,
+    },
     {
       id: 'terminal',
       icon: <Terminal size={14} weight="bold" />,
@@ -1534,8 +1543,7 @@ function ProjectPageInner() {
   // iframes but the shared controls continue to target the primary one.
   // ---------------------------------------------------------------------------
 
-  const selectedPreviewContainerId =
-    containerId || (container?.id as string) || null;
+  const selectedPreviewContainerId = containerId || (container?.id as string) || null;
 
   const tabRenderers: Partial<Record<ToolType, TabRenderer>> = {
     architecture: (_tab: TabInstance, _idx: number) => (
@@ -1669,11 +1677,7 @@ function ProjectPageInner() {
     },
     terminal: (tab: TabInstance, _idx: number) =>
       canAccessTerminal ? (
-        <TerminalPanel
-          projectId={slug!}
-          projectUuid={project?.id as string}
-          instanceId={tab.id}
-        />
+        <TerminalPanel projectId={slug!} projectUuid={project?.id as string} instanceId={tab.id} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <div className="text-center p-6">
@@ -1715,11 +1719,7 @@ function ProjectPageInner() {
       <div className="hidden md:flex">{renderToolButtons()}</div>
 
       {/* Chat visibility toggle — VS Code Cmd+B style */}
-      <Tooltip
-        content={`${isChatVisible ? 'Hide' : 'Show'} chat  ⌘B`}
-        side="bottom"
-        delay={200}
-      >
+      <Tooltip content={`${isChatVisible ? 'Hide' : 'Show'} chat  ⌘B`} side="bottom" delay={200}>
         <button
           onClick={toggleChatVisible}
           className={`hidden md:flex h-7 px-2 items-center gap-1.5 rounded-[var(--radius-small)] text-[11px] font-medium transition-colors ${
@@ -1791,13 +1791,9 @@ function ProjectPageInner() {
   const chatOnLeft = chatPosition === 'left';
   const hasAgents = agents.length > 0;
 
-  const renderDockedChatPane = () => (
-    <ChatContainer {...chatProps} isDocked={true} />
-  );
+  const renderDockedChatPane = () => <ChatContainer {...chatProps} isDocked={true} />;
 
-  const activeDockTabType = dock.state.tabs.find(
-    (t) => t.id === dock.state.activeTabId
-  )?.type;
+  const activeDockTabType = dock.state.tabs.find((t) => t.id === dock.state.activeTabId)?.type;
   const dockExtraHeader =
     activeDockTabType === 'terminal' ? (
       <Tooltip content="New terminal" side="bottom" delay={200}>
@@ -1847,11 +1843,7 @@ function ProjectPageInner() {
 
     // Dock closed (or chat hidden with nothing to show) — chat takes full canvas.
     if (!dockOpen) {
-      return (
-        <div className="w-full h-full flex bg-[var(--bg-dark)]">
-          {renderDockedChatPane()}
-        </div>
-      );
+      return <div className="w-full h-full flex bg-[var(--bg-dark)]">{renderDockedChatPane()}</div>;
     }
 
     // Both visible — split. Chat gets a generous default + a hard 33% floor so
@@ -1911,7 +1903,7 @@ function ProjectPageInner() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]">
+    <div className="h-full flex overflow-hidden bg-[var(--sidebar-bg)]">
       {idleWarningMinutes !== null && slug && (
         <IdleWarningBanner
           minutesLeft={idleWarningMinutes}

@@ -1,0 +1,4 @@
+# Desktop overrides — Tauri sidecar / DEPLOYMENT_MODE=desktop
+# Only list flags that differ from defaults.yaml
+enable_landing_page: false   # Redirect "/" straight to /login — no marketing page needed
+template_builder: false      # btrfs CSI + K8s infrastructure not available locally

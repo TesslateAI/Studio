@@ -50,5 +50,31 @@ class TesslateAgentBridge:
     async def run(self, user_request: str, context: dict[str, Any]) -> Any:
         return await self._inner.run(user_request, context)
 
+    async def run_turn(
+        self,
+        user_request: str,
+        bridge_context: BridgeContext,
+        *,
+        event_sink: EventSink | None = None,
+    ) -> dict[str, Any]:
+        """Drive a single agent turn, forwarding each yielded event.
+
+        Returns the last event emitted (typically ``{"type": "complete", ...}``
+        or ``{"type": "max_iterations", ...}``). If ``event_sink`` is
+        provided, every event is awaited on it first — this is how the
+        orchestrator persists trajectory events as ``AgentStep`` rows and
+        fans them out on the PubSub stream without coupling the submodule
+        to that plumbing.
+        """
+        last: dict[str, Any] = {}
+        ctx = bridge_context.to_submodule_context()
+        async for event in _iter_events(self._inner, user_request, ctx):
+            last = event
+            if event_sink is not None:
+                try:
+                    await event_sink(event)
+                except Exception as exc:
+                    logger.debug("event_sink raised; swallowing: %s", exc)
+        return last
 
 __all__ = ["BridgeContext", "TesslateAgentBridge"]

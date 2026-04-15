@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -130,9 +131,7 @@ async def sync_status(
         remote_dt = sync_client._parse_updated_at(cloud_updated_at)
         local_dt = project.last_sync_at
         if local_dt is not None and local_dt.tzinfo is None:
-            from datetime import timezone as _tz
-
-            local_dt = local_dt.replace(tzinfo=_tz.utc)
+            local_dt = local_dt.replace(tzinfo=UTC)
         if remote_dt is not None and local_dt is not None:
             in_sync = not (remote_dt > local_dt)
     elif not cloud_updated_at and not local_last:

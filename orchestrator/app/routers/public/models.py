@@ -11,13 +11,13 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...agent.models import BUILTIN_PROVIDERS, get_llm_client, resolve_model_name
 from ...auth_external import require_api_scope
 from ...database import get_db
 from ...models import UsageLog, User, UserAPIKey
 from ...permissions import Permission
 from ...services.credit_service import check_credits, deduct_credits
 from ...services.litellm_service import LiteLLMService
+from ...services.model_adapters import BUILTIN_PROVIDERS, get_llm_client, resolve_model_name
 from ._shared import add_cache_headers
 
 logger = logging.getLogger(__name__)

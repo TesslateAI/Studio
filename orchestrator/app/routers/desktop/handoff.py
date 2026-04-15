@@ -32,14 +32,14 @@ async def agents_handoff_push(
 
     try:
         bundle = await handoff_client.push(db, ticket_id=ticket_id)
-    except LookupError:
-        raise HTTPException(status_code=404, detail="ticket not found")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="ticket not found") from exc
     try:
         cloud_task_id = await handoff_client.upload_to_cloud(bundle)
-    except NotPairedError:
-        raise HTTPException(status_code=401, detail="sidecar not paired")
-    except CircuitOpenError:
-        raise HTTPException(status_code=502, detail="cloud unreachable")
+    except NotPairedError as exc:
+        raise HTTPException(status_code=401, detail="sidecar not paired") from exc
+    except CircuitOpenError as exc:
+        raise HTTPException(status_code=502, detail="cloud unreachable") from exc
     return {"ticket_id": str(ticket_id), "cloud_task_id": cloud_task_id}
 
 
@@ -53,10 +53,10 @@ async def agents_handoff_pull(
 
     try:
         bundle = await handoff_client.download_from_cloud(body.cloud_task_id)
-    except NotPairedError:
-        raise HTTPException(status_code=401, detail="sidecar not paired")
-    except CircuitOpenError:
-        raise HTTPException(status_code=502, detail="cloud unreachable")
+    except NotPairedError as exc:
+        raise HTTPException(status_code=401, detail="sidecar not paired") from exc
+    except CircuitOpenError as exc:
+        raise HTTPException(status_code=502, detail="cloud unreachable") from exc
     ticket = await handoff_client.pull(
         db,
         cloud_task_id=body.cloud_task_id,

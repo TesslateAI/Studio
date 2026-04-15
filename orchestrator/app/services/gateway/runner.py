@@ -467,7 +467,7 @@ class GatewayRunner:
             while time.monotonic() - start_time < _TIMEOUT:
                 try:
                     event = await asyncio.wait_for(event_iter.__anext__(), timeout=3.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     now = time.monotonic()
                     if now - last_typing_time >= _TYPING_INTERVAL:
                         await adapter.set_typing(chat_id, on=True)

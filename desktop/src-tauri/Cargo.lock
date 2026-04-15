@@ -5441,6 +5441,7 @@ name = "tesslate-studio-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dirs-next",
  "log",
  "reqwest 0.12.28",
  "serde",
@@ -5454,6 +5455,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-stronghold",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "url",
 ]

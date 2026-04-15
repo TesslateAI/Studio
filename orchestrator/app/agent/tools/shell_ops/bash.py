@@ -812,12 +812,47 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
             idle_timeout_ms=idle_timeout_ms,
         )
 
-    # Non-local modes do not support background spawning via this tool —
-    # the caller should use shell_open / shell_exec for persistent
-    # sessions in containerized deployments.
+    # Desktop mode: PTY execution against the local project directory.
+    if mode == "desktop":
+        import uuid as _uuid
+
+        from ....database import AsyncSessionLocal
+        from ....models import Project
+        from ....services.project_fs import get_project_fs_path
+
+        project_id = context.get("project_id")
+        cwd = None
+        if project_id:
+            try:
+                _pid = (
+                    _uuid.UUID(str(project_id))
+                    if not isinstance(project_id, _uuid.UUID)
+                    else project_id
+                )
+                async with AsyncSessionLocal() as _db:
+                    _proj = await _db.get(Project, _pid)
+                    if _proj is not None:
+                        _path = get_project_fs_path(_proj)
+                        if _path is not None and _path.exists():
+                            cwd = str(_path)
+            except Exception:
+                pass
+
+        desktop_context = {**context, "cwd": cwd} if cwd else context
+        return await _run_local_pty(
+            context=desktop_context,
+            command=command,
+            timeout=timeout,
+            yield_time_ms=yield_time_ms,
+            max_output_tokens=max_output_tokens,
+            is_background=is_background,
+            idle_timeout_ms=idle_timeout_ms,
+        )
+
+    # Docker/K8s modes do not support background spawning via this tool.
     if is_background:
         return error_output(
-            message="is_background=True is only supported in local deployment mode",
+            message="is_background=True is only supported in local/desktop deployment mode",
             suggestion="Use shell_open + shell_exec for persistent sessions in Docker/K8s mode",
             details={"command": command},
         )

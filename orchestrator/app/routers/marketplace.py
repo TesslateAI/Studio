@@ -142,8 +142,8 @@ async def get_available_models(
     Includes both system models and models from user's configured providers.
     Returns models that users can select for open source agents.
     """
-    from ..agent.models import BUILTIN_PROVIDERS, resolve_model_name
     from ..models import UserAPIKey, UserCustomModel, UserProvider
+    from ..services.model_adapters import BUILTIN_PROVIDERS, resolve_model_name
 
     # Get models, pricing, and health from LiteLLM in parallel (all cached independently)
     litellm_models, pricing_map, health_map, vision_map = await asyncio.gather(
@@ -185,10 +185,12 @@ async def get_available_models(
 
     # Get user's custom models (team-scoped)
     _cm_team = current_user.default_team_id
-    _cm_filter = UserCustomModel.team_id == _cm_team if _cm_team else UserCustomModel.user_id == current_user.id
-    custom_models_query = select(UserCustomModel).where(
-        _cm_filter, UserCustomModel.is_active
+    _cm_filter = (
+        UserCustomModel.team_id == _cm_team
+        if _cm_team
+        else UserCustomModel.user_id == current_user.id
     )
+    custom_models_query = select(UserCustomModel).where(_cm_filter, UserCustomModel.is_active)
     result = await db.execute(custom_models_query)
     custom_models = result.scalars().all()
 
@@ -227,7 +229,9 @@ async def get_available_models(
     provider_models: list[dict] = []
 
     # Custom user providers with available_models (team-scoped)
-    _cp_filter = UserProvider.team_id == _cm_team if _cm_team else UserProvider.user_id == current_user.id
+    _cp_filter = (
+        UserProvider.team_id == _cm_team if _cm_team else UserProvider.user_id == current_user.id
+    )
     custom_providers_query = select(UserProvider).where(
         _cp_filter,
         UserProvider.is_active.is_(True),
@@ -255,7 +259,7 @@ async def get_available_models(
             )
 
     # Build external providers list dynamically from the provider registry
-    from ..agent.models import BUILTIN_PROVIDERS
+    from ..services.model_adapters import BUILTIN_PROVIDERS
 
     external_providers = [
         {
@@ -328,8 +332,8 @@ async def add_custom_model(
     Add a custom model to the user's account.
     Provider can be explicitly specified, or inferred from the model_id prefix.
     """
-    from ..agent.models import BUILTIN_PROVIDERS
     from ..models import UserCustomModel
+    from ..services.model_adapters import BUILTIN_PROVIDERS
 
     # Provider is always explicitly set by the frontend — respect the user's choice.
     # e.g. "z-ai/glm-5" under OpenRouter should stay under OpenRouter,
@@ -337,7 +341,11 @@ async def add_custom_model(
 
     # Check if model already exists for this team + provider combo
     _add_team = current_user.default_team_id
-    _add_filter = UserCustomModel.team_id == _add_team if _add_team else UserCustomModel.user_id == current_user.id
+    _add_filter = (
+        UserCustomModel.team_id == _add_team
+        if _add_team
+        else UserCustomModel.user_id == current_user.id
+    )
     existing_query = select(UserCustomModel).where(
         _add_filter,
         UserCustomModel.model_id == model_id,
@@ -399,10 +407,12 @@ async def delete_custom_model(
 
     # Find the model (team-scoped)
     _del_team = current_user.default_team_id
-    _del_filter = UserCustomModel.team_id == _del_team if _del_team else UserCustomModel.user_id == current_user.id
-    query = select(UserCustomModel).where(
-        UserCustomModel.id == model_id, _del_filter
+    _del_filter = (
+        UserCustomModel.team_id == _del_team
+        if _del_team
+        else UserCustomModel.user_id == current_user.id
     )
+    query = select(UserCustomModel).where(UserCustomModel.id == model_id, _del_filter)
     result = await db.execute(query)
     model = result.scalar_one_or_none()
 
@@ -1691,7 +1701,7 @@ async def list_subagents(
     """
     List subagents for an agent: built-in configs + custom user subagents from DB.
     """
-    from ..agent.subagent_manager import _get_builtin_configs
+    from ..services.subagent_configs import _get_builtin_configs
 
     # Built-in subagents
     builtins = _get_builtin_configs()
@@ -1816,7 +1826,7 @@ async def update_subagent(
     For built-in subagents (no DB id), this creates a user fork.
     """
     # Check if this is a built-in subagent being edited (subagent_id == name)
-    from ..agent.subagent_manager import _get_builtin_configs
+    from ..services.subagent_configs import _get_builtin_configs
 
     builtins = _get_builtin_configs()
 

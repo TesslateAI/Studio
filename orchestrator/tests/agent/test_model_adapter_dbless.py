@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.agent.models import (
+from app.services.model_adapters import (
     BYOK_PROVIDER_ENV_VARS,
     LITELLM_API_BASE_ENV_VAR,
     LITELLM_API_KEY_ENV_VAR,
@@ -253,7 +253,7 @@ class TestCreateModelAdapterDbBackedRegression:
         from unittest.mock import AsyncMock
         from uuid import uuid4
 
-        with patch("app.agent.models.get_llm_client") as mock_get_client:
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
             mock_get_client.return_value = AsyncMock()
             user_id = uuid4()
             mock_db = AsyncMock()

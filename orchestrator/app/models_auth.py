@@ -11,6 +11,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from sqlalchemy.types import JSON
+
 from app.types.guid import GUID
 
 from .database import Base
@@ -34,9 +35,7 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     __tablename__ = "users"
 
     # Override id to use our UUID type
-    id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), primary_key=True, default=uuid.uuid4, index=True
-    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
 
     # Custom fields (preserve existing schema)
     name: Mapped[str] = mapped_column(String, nullable=False)  # Display name
@@ -103,8 +102,11 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
         """Total available credits (daily + bundled + signup_bonus + purchased)."""
         from datetime import UTC
 
+        from .database import ensure_aware
+
         bonus = self.signup_bonus_credits or 0
-        if self.signup_bonus_expires_at and datetime.now(UTC) > self.signup_bonus_expires_at:
+        _expires = ensure_aware(self.signup_bonus_expires_at)
+        if _expires and datetime.now(UTC) > _expires:
             bonus = 0
         return (
             (self.daily_credits or 0)
@@ -282,9 +284,7 @@ class OAuthAccount(SQLAlchemyBaseOAuthAccountTable[uuid.UUID], Base):
     __tablename__ = "oauth_accounts"
 
     # Override id and user_id to use our UUID type
-    id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), primary_key=True, default=uuid.uuid4, index=True
-    )
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="cascade"), nullable=False
     )

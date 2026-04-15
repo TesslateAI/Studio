@@ -235,7 +235,9 @@ export function NavigationSidebar({
   useEffect(() => {
     setImgError(false);
   }, [avatarSrc]);
-  useEffect(() => { setTeamAvatarError(false); }, [activeTeam?.avatar_url]);
+  useEffect(() => {
+    setTeamAvatarError(false);
+  }, [activeTeam?.avatar_url]);
 
   // Fetch credits
   useEffect(() => {
@@ -270,7 +272,11 @@ export function NavigationSidebar({
     if (!newTeamName.trim()) return;
     setCreatingTeam(true);
     try {
-      const slug = newTeamName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const slug = newTeamName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
       await teamsApi.create({ name: newTeamName.trim(), slug });
       await refreshTeams();
       setNewTeamName('');
@@ -306,28 +312,32 @@ export function NavigationSidebar({
     onExpandedChange?.(isExpanded);
   }, [isExpanded, onExpandedChange]);
 
-
   // Fetch recent chats + projects for sidebar (refreshes on route change)
   useEffect(() => {
     let cancelled = false;
     Promise.all([
       chatApi.getUserSessions({ limit: 5 }).catch(() => ({ sessions: [] })),
-      projectsApi.getAll().catch(() => []),  // API returns all; sliced below
+      projectsApi.getAll().catch(() => []), // API returns all; sliced below
     ]).then(([chatData, projects]) => {
       if (cancelled) return;
-      const chats: RecentItem[] = ((chatData as { sessions?: Array<Record<string, unknown>> }).sessions || []).slice(0, 5).map((s) => ({
-        id: s.id as string,
-        type: 'chat' as const,
-        title: (s.title as string) || 'Untitled chat',
-        updatedAt: (s.updated_at as string) || (s.created_at as string) || '',
-      }));
+      const chats: RecentItem[] = (
+        (chatData as { sessions?: Array<Record<string, unknown>> }).sessions || []
+      )
+        .slice(0, 5)
+        .map((s) => ({
+          id: s.id as string,
+          type: 'chat' as const,
+          title: (s.title as string) || 'Untitled chat',
+          updatedAt: (s.updated_at as string) || (s.created_at as string) || '',
+        }));
       const projs: RecentItem[] = (projects as Array<Record<string, unknown>>)
         .map((p) => ({
           id: p.id as string,
           type: 'project' as const,
           title: (p.name as string) || 'Untitled project',
           slug: p.slug as string,
-          updatedAt: (p.updated_at as string) || (p.created_at as string) || new Date(0).toISOString(),
+          updatedAt:
+            (p.updated_at as string) || (p.created_at as string) || new Date(0).toISOString(),
         }))
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         .slice(0, 5);
@@ -336,22 +346,27 @@ export function NavigationSidebar({
         .slice(0, 5);
       setRecentItems(merged);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [teamSwitchKey]); // Re-fetch when team changes
 
-  const handleRecentClick = useCallback((item: RecentItem) => {
-    // Move clicked item to top immediately
-    setRecentItems((prev) => {
-      const key = `${item.type}-${item.id}`;
-      const without = prev.filter((i) => `${i.type}-${i.id}` !== key);
-      return [{ ...item, updatedAt: new Date().toISOString() }, ...without].slice(0, 5);
-    });
-    if (item.type === 'project') {
-      navigate(`/project/${item.slug}/builder`);
-    } else {
-      navigate('/chat', { state: { sessionId: item.id } });
-    }
-  }, [navigate]);
+  const handleRecentClick = useCallback(
+    (item: RecentItem) => {
+      // Move clicked item to top immediately
+      setRecentItems((prev) => {
+        const key = `${item.type}-${item.id}`;
+        const without = prev.filter((i) => `${i.type}-${i.id}` !== key);
+        return [{ ...item, updatedAt: new Date().toISOString() }, ...without].slice(0, 5);
+      });
+      if (item.type === 'project') {
+        navigate(`/project/${item.slug}/builder`);
+      } else {
+        navigate('/chat', { state: { sessionId: item.id } });
+      }
+    },
+    [navigate]
+  );
 
   const handleLogout = async () => {
     await logout();
@@ -403,7 +418,7 @@ export function NavigationSidebar({
         duration: 0.25,
         ease: [0.22, 1, 0.36, 1],
       }}
-      className={`${forceVisible ? 'flex' : 'hidden md:flex'} flex-col h-screen bg-[var(--sidebar-bg)] overflow-x-hidden`}
+      className={`${forceVisible ? 'flex' : 'hidden md:flex'} flex-col h-full bg-[var(--sidebar-bg)] overflow-x-hidden`}
     >
       {/* Team Switcher + Collapse toggle — top row */}
       <div
@@ -460,14 +475,25 @@ export function NavigationSidebar({
         {/* Team + User Dropdown — fixed position so it's not clipped by sidebar overflow */}
         {showUserDropdown && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => { setShowUserDropdown(false); setShowCreateTeam(false); setNewTeamName(''); }} />
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => {
+                setShowUserDropdown(false);
+                setShowCreateTeam(false);
+                setNewTeamName('');
+              }}
+            />
             <div
               className="fixed w-56 max-h-[70vh] bg-[var(--surface)] border rounded-[var(--radius-medium)] z-50 overflow-y-auto overflow-x-hidden"
               style={{
                 borderWidth: 'var(--border-width)',
                 borderColor: 'var(--border-hover)',
-                top: userDropdownRef.current ? userDropdownRef.current.getBoundingClientRect().bottom + 2 : 52,
-                left: userDropdownRef.current ? userDropdownRef.current.getBoundingClientRect().left + 11 : 11,
+                top: userDropdownRef.current
+                  ? userDropdownRef.current.getBoundingClientRect().bottom + 2
+                  : 52,
+                left: userDropdownRef.current
+                  ? userDropdownRef.current.getBoundingClientRect().left + 11
+                  : 11,
                 animation: 'team-dropdown-in 0.15s ease-out',
                 transformOrigin: 'top left',
               }}
@@ -477,7 +503,9 @@ export function NavigationSidebar({
                 {teams.length > 0 && (
                   <>
                     <div className="px-3 py-1">
-                      <span className="text-[10px] font-medium text-[var(--text-subtle)] uppercase tracking-wider">Teams</span>
+                      <span className="text-[10px] font-medium text-[var(--text-subtle)] uppercase tracking-wider">
+                        Teams
+                      </span>
                     </div>
                     {teams.map((team) => (
                       <button
@@ -494,25 +522,39 @@ export function NavigationSidebar({
                         }`}
                       >
                         {team.avatar_url ? (
-                          <img src={team.avatar_url} alt="" className="w-5 h-5 rounded-md object-cover flex-shrink-0" />
+                          <img
+                            src={team.avatar_url}
+                            alt=""
+                            className="w-5 h-5 rounded-md object-cover flex-shrink-0"
+                          />
                         ) : (
                           <div className="w-5 h-5 rounded-md bg-[var(--primary)]/20 flex items-center justify-center text-[9px] font-bold text-[var(--primary)] flex-shrink-0">
                             {team.name.charAt(0).toUpperCase()}
                           </div>
                         )}
-                        <span className={`text-[11px] truncate flex-1 ${
-                          activeTeam?.slug === team.slug ? 'font-medium text-[var(--text)]' : 'text-[var(--text-muted)]'
-                        }`}>
+                        <span
+                          className={`text-[11px] truncate flex-1 ${
+                            activeTeam?.slug === team.slug
+                              ? 'font-medium text-[var(--text)]'
+                              : 'text-[var(--text-muted)]'
+                          }`}
+                        >
                           {team.name}
                         </span>
                         {team.is_personal ? (
                           <span className="text-[9px] text-[#f89521] flex-shrink-0">Personal</span>
                         ) : team.role === 'admin' ? (
-                          <span className="text-[9px] text-[var(--primary)] flex-shrink-0">Admin</span>
+                          <span className="text-[9px] text-[var(--primary)] flex-shrink-0">
+                            Admin
+                          </span>
                         ) : team.role === 'editor' ? (
-                          <span className="text-[9px] text-[var(--text)] flex-shrink-0">Editor</span>
+                          <span className="text-[9px] text-[var(--text)] flex-shrink-0">
+                            Editor
+                          </span>
                         ) : team.role === 'viewer' ? (
-                          <span className="text-[9px] text-[var(--text-subtle)] flex-shrink-0">Viewer</span>
+                          <span className="text-[9px] text-[var(--text-subtle)] flex-shrink-0">
+                            Viewer
+                          </span>
                         ) : null}
                       </button>
                     ))}
@@ -533,7 +575,13 @@ export function NavigationSidebar({
                           type="text"
                           value={newTeamName}
                           onChange={(e) => setNewTeamName(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') handleCreateTeam(); if (e.key === 'Escape') { setShowCreateTeam(false); setNewTeamName(''); } }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleCreateTeam();
+                            if (e.key === 'Escape') {
+                              setShowCreateTeam(false);
+                              setNewTeamName('');
+                            }
+                          }}
                           placeholder="Team name"
                           autoFocus
                           className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)] placeholder-[var(--text-subtle)]"
@@ -547,7 +595,10 @@ export function NavigationSidebar({
                             {creatingTeam ? 'Creating...' : 'Create'}
                           </button>
                           <button
-                            onClick={() => { setShowCreateTeam(false); setNewTeamName(''); }}
+                            onClick={() => {
+                              setShowCreateTeam(false);
+                              setNewTeamName('');
+                            }}
                             className="btn btn-sm"
                           >
                             Cancel
@@ -602,9 +653,19 @@ export function NavigationSidebar({
                 {/* User section */}
                 <div className="px-3 py-1.5 flex items-center gap-2">
                   {avatarSrc && !imgError ? (
-                    <img src={avatarSrc} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" referrerPolicy="no-referrer" onError={() => setImgError(true)} />
+                    <img
+                      src={avatarSrc}
+                      alt=""
+                      className="w-4 h-4 rounded-full object-cover flex-shrink-0"
+                      referrerPolicy="no-referrer"
+                      onError={() => setImgError(true)}
+                    />
                   ) : (
-                    <User size={14} className="text-[var(--text-subtle)] flex-shrink-0" weight="fill" />
+                    <User
+                      size={14}
+                      className="text-[var(--text-subtle)] flex-shrink-0"
+                      weight="fill"
+                    />
                   )}
                   <span className="text-[10px] text-[var(--text-subtle)] truncate">{userName}</span>
                 </div>
@@ -669,9 +730,7 @@ export function NavigationSidebar({
                 }
               >
                 <Home size={16} className={iconClass(activePage === 'home')} />
-                {isExpanded && (
-                  <span className={labelClass(activePage === 'home')}>Home</span>
-                )}
+                {isExpanded && <span className={labelClass(activePage === 'home')}>Home</span>}
               </button>
             </Tooltip>
 
@@ -690,11 +749,7 @@ export function NavigationSidebar({
                 }
                 style={!canChat ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
               >
-                <MoodyFace
-                  size={16}
-                  animate
-                  className={iconClass(activePage === 'chat')}
-                />
+                <MoodyFace size={16} animate className={iconClass(activePage === 'chat')} />
                 {isExpanded && (
                   <span className={`${labelClass(activePage === 'chat')} flex items-center gap-1`}>
                     Agents
@@ -790,8 +845,8 @@ export function NavigationSidebar({
             {/* Feedback and Docs moved to HelpMenu (sidebar "?" button) */}
 
             {/* Recent — collapsible, mixed chats + projects */}
-            {recentItems.length > 0 && (
-              !isExpanded ? (
+            {recentItems.length > 0 &&
+              (!isExpanded ? (
                 <Tooltip content="Recent" side="right" delay={200}>
                   <button
                     onClick={() => {
@@ -806,10 +861,7 @@ export function NavigationSidebar({
               ) : (
                 <>
                   <div className="h-px bg-[var(--sidebar-border)] my-1 mx-3 flex-shrink-0" />
-                  <button
-                    onClick={() => setRecentOpen(!recentOpen)}
-                    className={inactiveNavButton}
-                  >
+                  <button onClick={() => setRecentOpen(!recentOpen)} className={inactiveNavButton}>
                     <Clock size={16} className={`flex-shrink-0 ${inactiveIconClass}`} />
                     <span className={`${inactiveLabelClass} flex items-center gap-1`}>
                       Recent
@@ -841,13 +893,14 @@ export function NavigationSidebar({
                         onClick={() => navigate('/dashboard')}
                         className="group flex items-center h-7 w-full transition-colors rounded-lg pl-[7px] pr-[7px] gap-2 hover:bg-[var(--sidebar-hover)]"
                       >
-                        <span className="text-[11px] text-[var(--text-subtle)] group-hover:text-[var(--text-muted)] transition-colors">See all →</span>
+                        <span className="text-[11px] text-[var(--text-subtle)] group-hover:text-[var(--text-muted)] transition-colors">
+                          See all →
+                        </span>
                       </button>
                     </div>
                   )}
                 </>
-              )
-            )}
+              ))}
 
             {/* Settings is accessed via user dropdown, not sidebar nav */}
           </>
@@ -915,7 +968,6 @@ export function NavigationSidebar({
             ?
           </button>
         )}
-
       </motion.div>
 
       {/* Help Menu */}

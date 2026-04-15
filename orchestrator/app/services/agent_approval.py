@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +55,7 @@ async def check_tool_allowed(
         return
     if tool_name not in required:
         return
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await session.execute(
         update(AgentTask)
         .where(AgentTask.id == ticket_id)
@@ -68,7 +68,7 @@ async def check_tool_allowed(
 
 async def approve_ticket(session: AsyncSession, *, ticket_id: uuid.UUID) -> None:
     """Flip a gated ticket back to ``queued`` for the worker to re-claim."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await session.execute(
         update(AgentTask)
         .where(AgentTask.id == ticket_id)

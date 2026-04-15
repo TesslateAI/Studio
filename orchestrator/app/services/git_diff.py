@@ -23,24 +23,23 @@ DIFF_MAX_BYTES = 1_000_000
 
 async def git_diff_for_project(project: Any) -> str:
     try:
-        if project.source_path:
-            root = Path(str(project.source_path))
-        else:
-            root = _get_project_root(project)
+        root = Path(str(project.source_path)) if project.source_path else _get_project_root(project)
     except Exception:
         return ""
     if not root or not root.is_dir() or not (root / ".git").exists():
         return ""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", "-C", str(root), "diff", "HEAD",
+            "git",
+            "-C",
+            str(root),
+            "diff",
+            "HEAD",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        stdout, _ = await asyncio.wait_for(
-            proc.communicate(), timeout=DIFF_TIMEOUT_SECONDS
-        )
-    except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=DIFF_TIMEOUT_SECONDS)
+    except (TimeoutError, FileNotFoundError, OSError) as exc:
         logger.debug("git diff for %s failed: %s", root, exc)
         return ""
     text = stdout.decode("utf-8", errors="replace")

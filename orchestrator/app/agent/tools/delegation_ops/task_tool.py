@@ -45,6 +45,8 @@ import uuid as uuid_mod
 from datetime import UTC, datetime
 from typing import Any
 
+from tesslate_agent.agent.tesslate_agent import TesslateAgent
+
 from ..output_formatter import error_output, success_output
 from ..registry import (
     Tool,
@@ -141,7 +143,7 @@ async def _resolve_model_adapter(
     if model_name is None and parent_adapter is not None:
         return parent_adapter
 
-    from ...models import create_model_adapter
+    from ....services.model_adapters import create_model_adapter
 
     effective_name = model_name or getattr(parent_adapter, "model_name", None)
     if not effective_name:
@@ -263,7 +265,7 @@ async def _run_subagent(
     it updates the registry record exactly once.
     """
 
-    from ...trajectory import TrajectoryRecorder
+    from tesslate_agent.agent.trajectory import TrajectoryRecorder
 
     recorder = TrajectoryRecorder(
         session_id=agent_id,
@@ -420,9 +422,6 @@ async def task_executor(params: dict[str, Any], context: dict[str, Any]) -> dict
                 "[delegation] adapter %s ignored reasoning_effort override",
                 getattr(adapter, "model_name", "?"),
             )
-
-    # Late import to avoid a circular import at module load time.
-    from ...tesslate_agent import TesslateAgent
 
     agent_id = uuid_mod.uuid4().hex
     child_context = _build_child_context(context, agent_id, adapter)

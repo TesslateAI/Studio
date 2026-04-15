@@ -706,10 +706,10 @@ class StripeService:
                 if to_deduct > 0:
                     bonus = user.signup_bonus_credits or 0
                     # Check if bonus is still valid
-                    if (
-                        user.signup_bonus_expires_at
-                        and datetime.now(UTC) > user.signup_bonus_expires_at
-                    ):
+                    from ..database import ensure_aware as _ensure_aware
+
+                    _bonus_exp = _ensure_aware(user.signup_bonus_expires_at)
+                    if _bonus_exp and datetime.now(UTC) > _bonus_exp:
                         bonus = 0
                     if bonus > 0:
                         used = min(bonus, to_deduct)

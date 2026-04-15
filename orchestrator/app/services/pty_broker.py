@@ -12,6 +12,7 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ class PTYSession:
         session_id: str,
         user_id: UUID,
         project_id: str,
-        container_name: str,
+        container_name: str | None,
         command: str = "/bin/bash",
         cwd: str = "/app",
         rows: int = 24,
@@ -53,9 +54,9 @@ class PTYSession:
         self.buffer_lock = asyncio.Lock()  # Thread-safe buffer access
 
         # Will be set by concrete implementations
-        self.socket = None  # PTY socket
-        self.exec_id = None  # Docker exec ID or K8s stream
-        self.reader_task: asyncio.Task | None = None
+        self.socket: Any = None  # PTY socket (Docker SocketIO or K8s WebSocket stream)
+        self.exec_id: str | None = None  # Docker exec ID (None for K8s)
+        self.reader_task: asyncio.Task[None] | None = None
         self.is_closed = False
 
     async def append_output(self, data: bytes) -> None:
@@ -94,10 +95,11 @@ class BasePTYBroker(ABC):
         self,
         user_id: UUID,
         project_id: str,
-        container_name: str,
+        container_name: str | None = None,
         command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
+        **kwargs,
     ) -> PTYSession:
         """Create a new PTY session."""
         pass
@@ -131,16 +133,20 @@ class DockerPTYBroker(BasePTYBroker):
         self,
         user_id: UUID,
         project_id: str,
-        container_name: str,
+        container_name: str | None = None,
         command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
+        **_kwargs,
     ) -> PTYSession:
         """Create Docker exec with PTY and start output buffering.
 
         All synchronous Docker SDK calls are wrapped in run_in_executor()
         to avoid blocking the asyncio event loop (exec_start alone takes ~10s).
         """
+
+        if not container_name:
+            raise ValueError("container_name is required for DockerPTYBroker")
 
         session_id = str(uuid.uuid4())
         loop = asyncio.get_event_loop()
@@ -273,10 +279,11 @@ class DockerPTYBroker(BasePTYBroker):
         session = self.sessions.get(session_id)
         if not session or session.is_closed or not session.exec_id:
             return
+        exec_id: str = session.exec_id  # narrowed: guarded above
         loop = asyncio.get_event_loop()
         try:
             await loop.run_in_executor(
-                None, lambda: self.client.api.exec_resize(session.exec_id, height=rows, width=cols)
+                None, lambda: self.client.api.exec_resize(exec_id, height=rows, width=cols)
             )
         except Exception as e:
             logger.warning(f"Failed to resize Docker PTY {session_id}: {e}")
@@ -368,13 +375,14 @@ class KubernetesPTYBroker(BasePTYBroker):
         self,
         user_id: UUID,
         project_id: str,
-        container_name: str = None,
+        container_name: str | None = None,
         command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
-        namespace: str = None,
+        namespace: str | None = None,
         container: str = "dev-server",
         pod_name: str | None = None,
+        **_kwargs,
     ) -> PTYSession:
         """
         Create K8s exec with PTY and start output buffering.
@@ -635,13 +643,15 @@ class TsinitPTYBroker(BasePTYBroker):
 
         # tsinit sessions (keyed by session_id)
         self.sessions: dict[str, PTYSession] = {}
-        self._streams: dict[str, object] = {}  # session_id -> RunStream
+        from .tsinit_client import RunStream
+
+        self._streams: dict[str, RunStream] = {}  # session_id -> RunStream
 
     async def _get_pod_ip(self, pod_name: str, namespace: str) -> str | None:
         """Look up the pod IP via the K8s API."""
         try:
             pod = await asyncio.to_thread(self._core_v1.read_namespaced_pod, pod_name, namespace)
-            return pod.status.pod_ip
+            return pod.status.pod_ip  # type: ignore[union-attr]
         except Exception:
             return None
 
@@ -649,13 +659,14 @@ class TsinitPTYBroker(BasePTYBroker):
         self,
         user_id: UUID,
         project_id: str,
-        container_name: str = None,
+        container_name: str | None = None,
         command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
-        namespace: str = None,
+        namespace: str | None = None,
         container: str = "dev-server",
         pod_name: str | None = None,
+        **_kwargs,
     ) -> PTYSession:
         if not namespace:
             namespace = f"proj-{project_id}"
@@ -794,19 +805,124 @@ class TsinitPTYBroker(BasePTYBroker):
 # Singleton instances
 _docker_pty_broker = None
 _kubernetes_pty_broker = None
+_local_pty_broker = None
+
+
+class LocalPTYBroker(BasePTYBroker):
+    """PTY broker for desktop/local deployment mode.
+
+    Delegates to the in-process PtySessionRegistry maintained by
+    LocalOrchestrator.  No Docker daemon or kubectl required.
+    """
+
+    def __init__(self) -> None:
+        from .orchestration.local import PTY_SESSIONS
+
+        self._registry = PTY_SESSIONS
+        # Map from PTYSession.session_id → PtySessionRegistry session_id
+        self._id_map: dict[str, str] = {}
+
+    async def create_session(
+        self,
+        user_id: UUID,
+        project_id: str,
+        container_name: str | None = None,
+        command: str = "/bin/sh",
+        rows: int = 24,
+        cols: int = 80,
+        **_kwargs,  # absorb namespace/pod_name/container from K8s/Docker callers
+    ) -> PTYSession:
+        # Resolve the project's local filesystem path as cwd
+        import uuid as _uuid
+
+        from ..database import AsyncSessionLocal
+        from ..models import Project as _Project
+        from .project_fs import get_project_fs_path
+
+        cwd = None
+        try:
+            pid = project_id if isinstance(project_id, _uuid.UUID) else _uuid.UUID(project_id)
+            async with AsyncSessionLocal() as _db:
+                proj = await _db.get(_Project, pid)
+                if proj is not None:
+                    path = get_project_fs_path(proj)
+                    if path is not None and path.exists():
+                        cwd = str(path)
+        except Exception:
+            pass
+
+        loop = asyncio.get_event_loop()
+        reg_id = await loop.run_in_executor(
+            None,
+            lambda: self._registry.create(command, cwd=cwd),
+        )
+        session = PTYSession(
+            session_id=reg_id,
+            user_id=user_id,
+            project_id=project_id,
+            container_name=container_name or "local",
+            command=command,
+            cwd=cwd or "/",
+            rows=rows,
+            cols=cols,
+        )
+        # Start background drain: copy PtySessionRegistry output → PTYSession buffer
+        asyncio.create_task(self._drain_to_session(reg_id, session))
+        return session
+
+    async def _drain_to_session(self, reg_id: str, session: PTYSession) -> None:
+        """Copy output from PtySessionRegistry into PTYSession's append buffer."""
+        loop = asyncio.get_event_loop()
+        try:
+            while not session.is_closed:
+                chunk: bytes = await loop.run_in_executor(None, lambda: self._registry.read(reg_id))
+                if chunk:
+                    await session.append_output(chunk)
+                else:
+                    try:
+                        st = await loop.run_in_executor(None, lambda: self._registry.status(reg_id))
+                        if st.get("status") == "exited":
+                            await session.mark_eof()
+                            break
+                    except KeyError:
+                        await session.mark_eof()
+                        break
+                    await asyncio.sleep(0.05)
+        except Exception:
+            await session.mark_eof()
+
+    async def write_to_pty(self, session_id: str, data: bytes) -> None:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: self._registry.write(session_id, data.decode("utf-8", errors="replace")),
+        )
+
+    async def resize(self, session_id: str, cols: int, rows: int) -> None:
+        # PtySessionRegistry does not expose a resize method; no-op is safe.
+        pass
+
+    async def close_session(self, session_id: str) -> None:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: self._registry.close(session_id))
 
 
 def get_pty_broker() -> BasePTYBroker:
     """Factory function to get singleton PTY broker based on deployment mode."""
-    from .orchestration import is_kubernetes_mode
+    from .orchestration import is_kubernetes_mode, is_local_mode
 
-    global _docker_pty_broker, _kubernetes_pty_broker
+    global _docker_pty_broker, _kubernetes_pty_broker, _local_pty_broker
 
     if is_kubernetes_mode():
         if _kubernetes_pty_broker is None:
             _kubernetes_pty_broker = TsinitPTYBroker()
             logger.info("Created singleton TsinitPTYBroker instance")
         return _kubernetes_pty_broker
+    elif is_local_mode():
+        if _local_pty_broker is None:
+            _local_pty_broker = LocalPTYBroker()
+            logger.info("Created singleton LocalPTYBroker instance")
+        return _local_pty_broker
     else:
         if _docker_pty_broker is None:
             _docker_pty_broker = DockerPTYBroker()

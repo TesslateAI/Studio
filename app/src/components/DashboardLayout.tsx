@@ -53,11 +53,12 @@ export function DashboardLayout() {
 
   return (
     <motion.div
-      className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]"
+      className="h-full flex overflow-hidden bg-[var(--sidebar-bg)]"
       initial={fromLogin ? { opacity: 0 } : { opacity: 1 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
     >
+      {/* Sidebar + content row — TitleBar lives in the App-level shell above */}
       {/* Mobile Warning */}
       <MobileWarning />
 
@@ -79,11 +80,7 @@ export function DashboardLayout() {
       )}
       {mobileNavOpen && (
         <div className="md:hidden fixed inset-y-0 left-0 z-50">
-          <NavigationSidebar
-            activePage={getActivePage()}
-            showContent
-            forceVisible
-          />
+          <NavigationSidebar activePage={getActivePage()} showContent forceVisible />
         </div>
       )}
 
@@ -92,18 +89,19 @@ export function DashboardLayout() {
         <motion.div
           key="sidebar-container"
           initial={fromLogin ? { x: -300, width: 320 } : false}
-          animate={{ x: 0, width: "auto" }}
-          transition={fromLogin ? {
-            duration: 0.45,
-            ease: [0.45, 0, 0.55, 1]
-          } : { duration: 0 }}
+          animate={{ x: 0, width: 'auto' }}
+          transition={
+            fromLogin
+              ? {
+                  duration: 0.45,
+                  ease: [0.45, 0, 0.55, 1],
+                }
+              : { duration: 0 }
+          }
           className="flex-shrink-0 h-full"
         >
           {/* Navigation Sidebar - This stays mounted during navigation */}
-          <NavigationSidebar
-            activePage={getActivePage()}
-            showContent={showSidebarContent}
-          />
+          <NavigationSidebar activePage={getActivePage()} showContent={showSidebarContent} />
         </motion.div>
       )}
 
@@ -124,7 +122,6 @@ export function DashboardLayout() {
       >
         <Outlet />
       </motion.div>
-
     </motion.div>
   );
 }

@@ -33,13 +33,14 @@ Excludes (hard-coded, mirrors local.py orchestration conventions):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -206,7 +207,7 @@ async def compute_manifest(project: Any) -> dict[str, Any]:
             "project_id": str(getattr(project, "id", "") or ""),
             "files": files,
             "total_size": total,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
     return await asyncio.to_thread(_build)
@@ -228,9 +229,7 @@ def _parse_updated_at(value: str | None) -> datetime | None:
         return None
 
 
-async def _get_remote_manifest(
-    client: CloudClient, project_id: str
-) -> dict[str, Any] | None:
+async def _get_remote_manifest(client: CloudClient, project_id: str) -> dict[str, Any] | None:
     """Fetch the cloud manifest; return None if the project has no cloud history."""
     try:
         resp = await client.get(f"/api/v1/projects/sync/manifest/{project_id}")
@@ -273,7 +272,7 @@ async def push(
         if remote_updated is not None and local_last_sync is not None:
             # Both sides aware-datetime; compare directly.
             if local_last_sync.tzinfo is None:
-                local_last_sync = local_last_sync.replace(tzinfo=timezone.utc)
+                local_last_sync = local_last_sync.replace(tzinfo=UTC)
             if remote_updated > local_last_sync:
                 raise ConflictError(
                     "cloud has a newer sync; pull or force before pushing",
@@ -329,19 +328,15 @@ async def push(
 
     sync_id = str(body.get("sync_id") or body.get("snapshot_id") or "")
     uploaded_at = str(
-        body.get("uploaded_at")
-        or body.get("created_at")
-        or datetime.now(timezone.utc).isoformat()
+        body.get("uploaded_at") or body.get("created_at") or datetime.now(UTC).isoformat()
     )
     if not sync_id:
         raise SyncError("cloud push response missing sync_id")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Update in-memory attr so callers see the new timestamp; best-effort DB update.
-    try:
+    with contextlib.suppress(Exception):
         project.last_sync_at = now  # type: ignore[attr-defined]
-    except Exception:  # pragma: no cover
-        pass
     if db is not None:
         await db.execute(
             sa_update(Project).where(Project.id == project.id).values(last_sync_at=now)
@@ -388,16 +383,16 @@ async def _download_zip(url_or_path: str, *, base_url: str | None = None) -> Pat
     tmp = Path(tmp_name)
 
     try:
-        async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT) as http:
-            async with http.stream("GET", target) as resp:
-                if resp.status_code >= 400:
-                    raise SyncError(
-                        f"cloud pull failed: HTTP {resp.status_code}"
-                    )
-                with tmp.open("wb") as fh:
-                    async for chunk in resp.aiter_bytes(_STREAM_CHUNK):
-                        if chunk:
-                            fh.write(chunk)
+        async with (
+            httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT) as http,
+            http.stream("GET", target) as resp,
+        ):
+            if resp.status_code >= 400:
+                raise SyncError(f"cloud pull failed: HTTP {resp.status_code}")
+            with tmp.open("wb") as fh:
+                async for chunk in resp.aiter_bytes(_STREAM_CHUNK):
+                    if chunk:
+                        fh.write(chunk)
     except SyncError:
         tmp.unlink(missing_ok=True)
         raise
@@ -419,8 +414,16 @@ def _extract_atomic(zip_path: Path, dest: Path) -> tuple[int, int]:
 
     Returns ``(files_written, bytes_downloaded)``.
     """
-    incoming = dest.with_suffix(dest.suffix + ".incoming") if dest.suffix else dest.parent / (dest.name + ".incoming")
-    replaced = dest.with_suffix(dest.suffix + ".replaced") if dest.suffix else dest.parent / (dest.name + ".replaced")
+    incoming = (
+        dest.with_suffix(dest.suffix + ".incoming")
+        if dest.suffix
+        else dest.parent / (dest.name + ".incoming")
+    )
+    replaced = (
+        dest.with_suffix(dest.suffix + ".replaced")
+        if dest.suffix
+        else dest.parent / (dest.name + ".replaced")
+    )
 
     # Clean any leftovers from a previous crashed run.
     if incoming.exists():
@@ -517,9 +520,7 @@ async def pull(
 
     dest = _destination_for_pull(project, project_id)
     try:
-        files_written, bytes_written = await asyncio.to_thread(
-            _extract_atomic, zip_path, dest
-        )
+        files_written, bytes_written = await asyncio.to_thread(_extract_atomic, zip_path, dest)
     finally:
         zip_path.unlink(missing_ok=True)
 

@@ -149,7 +149,7 @@ def mock_tool_registry():
 @pytest.fixture
 def mock_model_adapter():
     """Create a mock model adapter factory for testing."""
-    from app.agent.models import ModelAdapter
+    from app.services.model_adapters import ModelAdapter
 
     class MockModelAdapter(ModelAdapter):
         def __init__(self, responses=None):
@@ -490,7 +490,7 @@ async def real_model_adapter(mock_user, mock_db):
     Use this fixture for tests that need actual LLM reasoning.
     Mark tests with @pytest.mark.llm to indicate they use real LLM.
     """
-    from app.agent.models import create_model_adapter
+    from app.services.model_adapters import create_model_adapter
 
     adapter = await create_model_adapter(
         model_name="Llama-4-Maverick-17B-128E-Instruct-FP8",
@@ -512,7 +512,7 @@ def mock_model_with_responses():
                 'TASK_COMPLETE'
             ])
     """
-    from app.agent.models import ModelAdapter
+    from app.services.model_adapters import ModelAdapter
 
     def create_model(responses: list[str]):
         class ConfiguredMockModel(ModelAdapter):
@@ -664,7 +664,7 @@ def full_tool_registry():
 
     Use this for integration tests that need actual tool implementations.
     """
-    from app.agent.tools.registry import get_global_registry
+    from app.agent.tools.registry import get_tool_registry as get_global_registry
 
     return get_global_registry()
 

@@ -465,8 +465,10 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             await self.user_db.session.refresh(user)
         except IntegrityError as e:
             await self.user_db.session.rollback()
-            # Check if it's a duplicate email constraint violation
-            if "ix_users_email" in str(e.orig):
+            # PostgreSQL names the index "ix_users_email"; SQLite reports
+            # "UNIQUE constraint failed: users.email".  Match both.
+            orig_str = str(e.orig)
+            if "ix_users_email" in orig_str or "users.email" in orig_str:
                 raise UserAlreadyExists() from e
             # Re-raise other integrity errors
             raise

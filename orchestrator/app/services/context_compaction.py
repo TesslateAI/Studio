@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .models import ModelAdapter
+from .model_adapters import ModelAdapter
 
 logger = logging.getLogger(__name__)
 

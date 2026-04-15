@@ -401,6 +401,40 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Effects
   // ==========================================================================
 
+  // Desktop auto-login: when running inside the Tauri shell, ask the host for
+  // the local user's JWT and store it in localStorage so the normal checkAuth()
+  // flow picks it up.  No npm package needed — the Tauri host injects
+  // window.__TESSLATE_DESKTOP_TOKEN__ via JS eval AND dispatches a custom event
+  // to cover both "token ready before React" and "token arrives after React" cases.
+  useEffect(() => {
+    // Detect Tauri by the injected internals object (present in all Tauri v2 webviews).
+    const isTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+    if (!isTauri) return;
+
+    const applyToken = (token: string) => {
+      if (token && !localStorage.getItem('token')) {
+        localStorage.setItem('token', token);
+        checkAuth({ force: true });
+      }
+    };
+
+    // Case 1: token already injected before React mounted.
+    const win = window as Record<string, unknown>;
+    const existing = win.__TESSLATE_DESKTOP_TOKEN__;
+    if (typeof existing === 'string' && existing) {
+      applyToken(existing);
+      return;
+    }
+
+    // Case 2: token arrives after React mounts (host fetched it async).
+    const handler = () => {
+      const t = (window as Record<string, unknown>).__TESSLATE_DESKTOP_TOKEN__;
+      if (typeof t === 'string') applyToken(t);
+    };
+    window.addEventListener('tesslate-desktop-token-ready', handler);
+    return () => window.removeEventListener('tesslate-desktop-token-ready', handler);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Initial auth check on mount
   useEffect(() => {
     mountedRef.current = true;

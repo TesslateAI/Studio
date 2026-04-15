@@ -81,7 +81,7 @@ fn spawn_tooltip_poll(app: AppHandle) {
                 continue;
             };
             let url = format!("{}/api/desktop/tray-state", state.api_url());
-            let bearer = format!("Bearer {}", state.bearer);
+            let bearer = format!("Bearer {}", state.bearer());
             let resp = client.get(&url).header("Authorization", &bearer).send().await;
             let payload: TrayState = match resp {
                 Ok(r) if r.status().is_success() => match r.json().await {

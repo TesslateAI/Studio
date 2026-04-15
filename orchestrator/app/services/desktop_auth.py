@@ -41,7 +41,7 @@ class _LoopbackUser:
     """
 
     id = uuid.UUID("00000000-0000-0000-0000-000000000001")
-    email = "desktop-loopback@tesslate.local"
+    email = "desktop-loopback@desktop.tesslate.app"
     is_active = True
     is_superuser = False
     is_verified = True
@@ -78,4 +78,20 @@ async def desktop_loopback_or_session(
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 
-__all__ = ["desktop_loopback_or_session"]
+async def desktop_loopback_only(
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Accept *only* the sidecar loopback bearer — no session fallback.
+
+    Used by ``GET /api/desktop/local-auth`` which must be callable before
+    any user session exists (desktop auto-login bootstrap).
+    """
+    expected = _sidecar_bearer()
+    if expected and authorization:
+        _, _, token = authorization.partition(" ")
+        if token.strip() == expected:
+            return
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+
+__all__ = ["desktop_loopback_or_session", "desktop_loopback_only"]

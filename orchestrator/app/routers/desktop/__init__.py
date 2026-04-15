@@ -18,9 +18,9 @@ and must never observe a 5xx caused by an unreachable probe or cloud.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
-
 from typing import Any
+
+from fastapi import APIRouter
 
 from ...models import User
 from ...services import sync_client  # noqa: F401  (re-exported for tests)
@@ -36,6 +36,10 @@ from ._helpers import (
     _serialize_session,
     _serialize_ticket,
 )
+from .auth import CloudTokenBody
+from .directories import DirectoryCreate
+from .handoff import HandoffPullBody
+from .projects import DesktopImportBody
 
 
 async def _collect_runtimes(user: User) -> dict[str, dict[str, Any]]:
@@ -48,10 +52,7 @@ async def _collect_runtimes(user: User) -> dict[str, dict[str, Any]]:
         "docker": await _safe_probe(probe.docker_available()),
         "k8s": await _safe_probe(probe.k8s_remote_available(user=user)),
     }
-from .auth import CloudTokenBody
-from .directories import DirectoryCreate
-from .handoff import HandoffPullBody
-from .projects import DesktopImportBody
+
 
 router = APIRouter(prefix="/api/desktop", tags=["desktop"])
 router.include_router(tray.router)

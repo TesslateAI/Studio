@@ -71,6 +71,9 @@ def _collect_datas(orchestrator_dir: pathlib.Path) -> list[tuple[str, str]]:
     alembic_dir = orchestrator_dir / "alembic"
     if alembic_dir.is_dir():
         out.append((str(alembic_dir), "alembic"))
+    feature_flags_dir = orchestrator_dir / "feature_flags"
+    if feature_flags_dir.is_dir():
+        out.append((str(feature_flags_dir), "feature_flags"))
     prompt_templates = orchestrator_dir / "app" / "agent" / "prompt_templates"
     if prompt_templates.is_dir():
         out.append((str(prompt_templates), "app/agent/prompt_templates"))

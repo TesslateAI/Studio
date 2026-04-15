@@ -36,6 +36,7 @@ async def place_files(
     deployment_mode: str,
     task=None,
     write_config: bool = True,
+    project_id: str | None = None,
 ) -> PlacedFiles:
     """
     Place source files into the project's storage location.
@@ -49,11 +50,15 @@ async def place_files(
         write_config: Whether to write .tesslate/config.json to the destination.
             Set to False when config is a fallback so the Setup page can
             distinguish "no config" from "real template config".
+        project_id: Project UUID string (required for desktop mode to match
+            the ``{slug}-{id}`` directory convention used by LocalOrchestrator).
     """
     if deployment_mode == "docker":
         return await _place_docker(source_path, config, project_slug, task, write_config)
     if deployment_mode == "desktop":
-        return await _place_desktop(source_path, config, project_slug, task, write_config)
+        return await _place_desktop(
+            source_path, config, project_slug, task, write_config, project_id=project_id
+        )
     return await _place_kubernetes(source_path, config, project_slug, task, write_config)
 
 
@@ -63,8 +68,13 @@ async def _place_desktop(
     project_slug: str,
     task=None,
     write_config: bool = True,
+    project_id: str | None = None,
 ) -> PlacedFiles:
-    """Copy source files into ``$TESSLATE_STUDIO_HOME/projects/<slug>/``.
+    """Copy source files into ``$TESSLATE_STUDIO_HOME/projects/<slug>-<id>/``.
+
+    The directory name uses the same ``{slug}-{id}`` convention as
+    ``LocalOrchestrator._get_project_root`` and ``project_fs.get_project_fs_path``
+    so all three code paths resolve to the same location.
 
     Desktop runs under the user's own UID, so the Docker-mode chown to
     1000:1000 is skipped — owner already matches. Skips the same set of
@@ -73,7 +83,8 @@ async def _place_desktop(
     from ...services.desktop_paths import ensure_studio_home
 
     studio_home = ensure_studio_home(None)
-    project_path = str(studio_home / "projects" / project_slug)
+    dir_name = f"{project_slug}-{project_id}" if project_id is not None else project_slug
+    project_path = str(studio_home / "projects" / dir_name)
     os.makedirs(project_path, exist_ok=True)
 
     if task:

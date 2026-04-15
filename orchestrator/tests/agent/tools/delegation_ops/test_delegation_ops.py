@@ -135,9 +135,13 @@ def _reset_registry() -> None:
 @pytest.fixture
 def patch_fake_agent(monkeypatch: pytest.MonkeyPatch):
     """Replace the real TesslateAgent import target with FakeAgent."""
-    from app.agent import tesslate_agent as _real_module
+    import app.agent.tools.delegation_ops.task_tool as _task_module
 
-    monkeypatch.setattr(_real_module, "TesslateAgent", FakeAgent)
+    monkeypatch.setattr(_task_module, "TesslateAgent", FakeAgent)
+    # Also patch the submodule source so the late-import path (if any) picks up FakeAgent.
+    import tesslate_agent.agent.tesslate_agent as _ta_mod
+
+    monkeypatch.setattr(_ta_mod, "TesslateAgent", FakeAgent)
     yield FakeAgent
     # Reset class-level knobs so tests stay isolated.
     FakeAgent.delay_s = 0.0
@@ -241,10 +245,10 @@ async def test_recursion_guard_strips_delegation_tools(patch_fake_agent, parent_
             super().__init__(system_prompt, tools, model)
             captured["tool_names"] = list(tools._tools.keys()) if tools else []
 
-    from app.agent import tesslate_agent as _real_module
+    import app.agent.tools.delegation_ops.task_tool as _task_module
 
     # Re-patch to our capturing subclass for this one test.
-    _real_module.TesslateAgent = CapturingAgent
+    _task_module.TesslateAgent = CapturingAgent
     try:
         result = await task_executor(
             {"role": "check", "prompt": "scope check", "wait": True},
@@ -252,7 +256,7 @@ async def test_recursion_guard_strips_delegation_tools(patch_fake_agent, parent_
         )
         assert result["success"] is True
     finally:
-        _real_module.TesslateAgent = FakeAgent
+        _task_module.TesslateAgent = FakeAgent
 
     tool_names = captured.get("tool_names") or []
     for banned in ("task", "wait_agent", "send_message_to_agent", "close_agent", "list_agents"):

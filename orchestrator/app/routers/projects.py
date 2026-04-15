@@ -401,9 +401,7 @@ async def enforce_project_limit(user: User, db: AsyncSession) -> None:
             tier = team.subscription_tier or "free"
 
     if team_id:
-        result = await db.execute(
-            select(func.count(Project.id)).where(Project.team_id == team_id)
-        )
+        result = await db.execute(select(func.count(Project.id)).where(Project.team_id == team_id))
     else:
         # Fallback: count projects across all teams the user belongs to
         user_team_ids = select(TeamMembership.team_id).where(
@@ -544,11 +542,7 @@ async def create_project_from_payload(
     for imports (no background setup required).
     """
     # Validate base_id is provided for base source type (skipped for imports).
-    if (
-        not payload.import_path
-        and payload.source_type == "base"
-        and not payload.base_id
-    ):
+    if not payload.import_path and payload.source_type == "base" and not payload.base_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="A template must be selected to create a project. Please select a template and try again.",
@@ -911,7 +905,7 @@ async def get_project_files(
     project = await get_project_by_slug(db, project_slug, current_user)
     project_id = project.id  # For internal operations
 
-    settings = get_settings()
+    get_settings()
 
     # Check if this project has a host-reachable filesystem path (docker shared
     # volume, or desktop $TESSLATE_STUDIO_HOME). K8s projects go through
@@ -922,9 +916,7 @@ async def get_project_files(
     if fs_path is not None:
         try:
             subdir_log = f"/{container_dir}" if container_dir else ""
-            logger.info(
-                f"[FILES] Reading files from project filesystem: {fs_path}{subdir_log}"
-            )
+            logger.info(f"[FILES] Reading files from project filesystem: {fs_path}{subdir_log}")
 
             volume_files = await read_all_files(
                 fs_path,
@@ -1969,7 +1961,7 @@ async def get_setup_config(
     """
     project = await get_project_by_slug(db, project_slug, current_user)
     await track_project_activity(project.id, db)
-    settings = get_settings()
+    get_settings()
 
     from ..services.base_config_parser import read_tesslate_config
 
@@ -2106,7 +2098,7 @@ async def sync_config_to_file(
     """
     project = await get_project_by_slug(db, project_slug, current_user, Permission.FILE_WRITE)
     await track_project_activity(project.id, db)
-    settings = get_settings()
+    get_settings()
 
     from ..services.base_config_parser import (
         serialize_config_to_json,
@@ -2166,7 +2158,7 @@ async def analyze_project(
     """
 
     project = await get_project_by_slug(db, project_slug, current_user, Permission.FILE_WRITE)
-    settings = get_settings()
+    get_settings()
 
     # Read file tree from filesystem/PVC
     file_tree = []
@@ -2289,13 +2281,16 @@ async def analyze_project(
     try:
         from ..services.project_setup.config_resolver import generate_config_via_llm
 
-        config = await generate_config_via_llm(
-            file_tree=sorted(file_tree)[:500],
-            config_files_content=dict(list(config_files_content.items())[:15]),
-            user_id=current_user.id,
-            db=db,
-            model=model,
-        )
+        try:
+            config = await generate_config_via_llm(
+                file_tree=sorted(file_tree)[:500],
+                config_files_content=dict(list(config_files_content.items())[:15]),
+                user_id=current_user.id,
+                db=db,
+                model=model,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
 
         if not config:
             raise HTTPException(
@@ -3665,7 +3660,9 @@ async def deploy_project(
     This is a premium feature with tier-based limits.
     """
     # Get project
-    project = await get_project_by_slug(db, project_slug, current_user, Permission.DEPLOYMENT_CREATE)
+    project = await get_project_by_slug(
+        db, project_slug, current_user, Permission.DEPLOYMENT_CREATE
+    )
 
     # Check if already deployed
     if project.is_deployed:
@@ -3755,7 +3752,9 @@ async def undeploy_project(
     Remove deployment status from a project (allows container to be stopped when idle).
     """
     # Get project
-    project = await get_project_by_slug(db, project_slug, current_user, Permission.DEPLOYMENT_DELETE)
+    project = await get_project_by_slug(
+        db, project_slug, current_user, Permission.DEPLOYMENT_DELETE
+    )
 
     if not project.is_deployed:
         return {"message": "Project is not deployed", "project_id": str(project.id)}
@@ -4806,14 +4805,22 @@ async def get_containers_status(
                 if k8s_key and frontend_key != k8s_key and k8s_key in containers_map:
                     containers_map[frontend_key] = containers_map[k8s_key]
 
-        # Derive live compute state so the frontend doesn't rely on stale DB
-        live_status = status.get("status")
-        if live_status in ("running", "partial"):
-            status["compute_state"] = "environment"
-        elif live_status == "stopped":
-            status["compute_state"] = "ephemeral"
-        else:
+        # Derive live compute state so the frontend doesn't rely on stale DB.
+        # Desktop (local runtime) never uses the K8s compute-tier system — the
+        # orchestrator reports "running" because the app is up, but that does
+        # not mean environment-level compute is provisioned. Always return "none"
+        # so the project page doesn't auto-trigger a container start loop.
+        settings_obj = get_settings()
+        if settings_obj.deployment_mode == "desktop":
             status["compute_state"] = "none"
+        else:
+            live_status = status.get("status")
+            if live_status in ("running", "partial"):
+                status["compute_state"] = "environment"
+            elif live_status == "stopped":
+                status["compute_state"] = "ephemeral"
+            else:
+                status["compute_state"] = "none"
 
         return status
 
@@ -5342,7 +5349,9 @@ async def start_all_containers(
     In Docker mode: Uses docker-compose up to start containers.
     In Kubernetes mode: Creates namespace, deployments, and services.
     """
-    project = await get_project_by_slug(db, project_slug, current_user, Permission.CONTAINER_START_STOP)
+    project = await get_project_by_slug(
+        db, project_slug, current_user, Permission.CONTAINER_START_STOP
+    )
 
     if project.environment_status == "provisioning":
         raise HTTPException(
@@ -5410,7 +5419,9 @@ async def stop_all_containers(
     In Docker mode: Uses docker-compose down.
     In Kubernetes mode: Deletes the project namespace.
     """
-    project = await get_project_by_slug(db, project_slug, current_user, Permission.CONTAINER_START_STOP)
+    project = await get_project_by_slug(
+        db, project_slug, current_user, Permission.CONTAINER_START_STOP
+    )
 
     try:
         # Use unified orchestration (handles both Docker and Kubernetes)
@@ -5492,7 +5503,9 @@ async def _start_container_background_task(
         # Stage 1: Validate project and container (10%)
         task.update_progress(10, 100, "Validating project and container")
 
-        project = await get_project_by_slug(db, project_slug, user_id, Permission.CONTAINER_START_STOP)
+        project = await get_project_by_slug(
+            db, project_slug, user_id, Permission.CONTAINER_START_STOP
+        )
         if not project:
             raise RuntimeError(f"Project '{project_slug}' not found")
 
@@ -5666,6 +5679,7 @@ async def _start_container_background_task(
                 sanitized_name = "".join(
                     c for c in sanitized_name if c.isalnum() or c == "-"
                 ).strip("-")
+<<<<<<< HEAD
                 protocol = (
                     "http"
                     if settings.deployment_mode == "docker"
@@ -5679,6 +5693,20 @@ async def _start_container_background_task(
                     protocol=protocol,
                     app_domain=settings.app_domain,
                 )
+=======
+                if settings.deployment_mode == "desktop":
+                    # Desktop mode: containers run as local processes on the host
+                    port = getattr(container, "effective_port", None)
+                    container_url = f"http://localhost:{port}" if port else "http://localhost"
+                elif settings.deployment_mode == "docker":
+                    # Docker mode always uses HTTP via Traefik on the app domain
+                    container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
+                else:
+                    protocol = settings.k8s_container_url_protocol
+                    container_url = (
+                        f"{protocol}://{project.slug}-{sanitized_name}.{settings.app_domain}"
+                    )
+>>>>>>> 96a03822 (feat(desktop): sidecar restart-on-crash, Rust token store, auto-login flow, and runtime hardening)
 
             # Give container a moment to fully initialize
             await asyncio.sleep(2)
@@ -5742,7 +5770,9 @@ async def start_single_container(
         }
     """
     # Verify project ownership
-    project = await get_project_by_slug(db, project_slug, current_user, Permission.CONTAINER_START_STOP)
+    project = await get_project_by_slug(
+        db, project_slug, current_user, Permission.CONTAINER_START_STOP
+    )
 
     if project.environment_status == "provisioning":
         raise HTTPException(
@@ -5851,7 +5881,9 @@ async def stop_single_container(
     """
     Stop a specific container in the project.
     """
-    project = await get_project_by_slug(db, project_slug, current_user, Permission.CONTAINER_START_STOP)
+    project = await get_project_by_slug(
+        db, project_slug, current_user, Permission.CONTAINER_START_STOP
+    )
 
     # Get the container
     container = await db.get(Container, container_id)
@@ -5931,7 +5963,15 @@ async def check_container_health(
     container_dir = resolve_k8s_container_dir(container)
 
     # Build container URL based on deployment mode
-    if settings.deployment_mode == "kubernetes":
+    if settings.deployment_mode == "desktop":
+        # Desktop/local mode: containers are processes managed by LocalOrchestrator.
+        # There is no Traefik or in-cluster DNS — just report healthy immediately
+        # so the frontend iframe can proceed.  LocalOrchestrator.start_container()
+        # is a no-op that returns "running" only after the process is up.
+        local_port = container.effective_port
+        external_url = f"http://localhost:{local_port}" if local_port else "http://localhost"
+        return {"healthy": True, "url": external_url, "mode": "local"}
+    elif settings.deployment_mode == "kubernetes":
         # External URL for frontend display (what users access via browser)
         external_url = f"{settings.k8s_container_url_protocol}://{project.slug}-{container_dir}.{settings.app_domain}"
         # Internal URL for health check (always reachable from within cluster)
@@ -6014,7 +6054,9 @@ async def restart_single_container(
     This endpoint returns immediately with a task ID. The client should poll
     for status updates.
     """
-    project = await get_project_by_slug(db, project_slug, current_user, Permission.CONTAINER_START_STOP)
+    project = await get_project_by_slug(
+        db, project_slug, current_user, Permission.CONTAINER_START_STOP
+    )
 
     if project.environment_status == "provisioning":
         raise HTTPException(
@@ -6076,7 +6118,9 @@ async def _restart_container_background_task(
     try:
         task.update_progress(10, 100, "Validating container")
 
-        project = await get_project_by_slug(db, project_slug, user_id, Permission.CONTAINER_START_STOP)
+        project = await get_project_by_slug(
+            db, project_slug, user_id, Permission.CONTAINER_START_STOP
+        )
         container = await db.get(Container, container_id)
 
         if not container or container.project_id != project.id:
@@ -6224,7 +6268,9 @@ async def hibernate_project(
             status_code=400, detail="Hibernation is only available in Kubernetes mode"
         )
 
-    project = await get_project_by_slug(db, project_slug, current_user, Permission.CONTAINER_START_STOP)
+    project = await get_project_by_slug(
+        db, project_slug, current_user, Permission.CONTAINER_START_STOP
+    )
 
     if project.environment_status in ("hibernated", "stopping"):
         raise HTTPException(status_code=400, detail="Already hibernated or stopping")

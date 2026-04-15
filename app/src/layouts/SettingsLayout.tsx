@@ -46,7 +46,7 @@ export function SettingsLayout() {
   ];
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--sidebar-bg)]">
+    <div className="h-full flex overflow-hidden bg-[var(--sidebar-bg)]">
       {/* Navigation Sidebar */}
       <div className="flex-shrink-0 h-full">
         <NavigationSidebar activePage="settings" />

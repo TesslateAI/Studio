@@ -6,6 +6,11 @@
   "permissions": [
     "core:default",
     "core:tray:default",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
     "shell:allow-open",
     "shell:allow-spawn",
     "dialog:default",

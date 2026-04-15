@@ -10,6 +10,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
 
 use crate::sidecar::SidecarHandle;
+use crate::tokens;
 
 /// Register the deep-link listener. Call once after `SidecarHandle` is
 /// managed on the app.
@@ -50,12 +51,18 @@ fn extract_auth_token(url: &Url) -> Option<String> {
 }
 
 fn dispatch_token(app: &AppHandle, token: String) {
+    // Persist the cloud token on the Rust side (file-backed cache) so it
+    // survives sidecar restarts even before the sidecar processes the POST.
+    if let Err(e) = tokens::store_cloud_token(&token) {
+        eprintln!("[deep-link] failed to persist cloud token locally: {e}");
+    }
+
     let Some(handle) = app.try_state::<SidecarHandle>() else {
-        eprintln!("[deep-link] dropped auth token: sidecar not ready yet");
+        eprintln!("[deep-link] dropped auth token to sidecar: sidecar not ready yet");
         return;
     };
     let api_url = handle.api_url();
-    let bearer = handle.bearer.clone();
+    let bearer = handle.bearer();
 
     tauri::async_runtime::spawn(async move {
         let client = match reqwest::Client::builder().build() {

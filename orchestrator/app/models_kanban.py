@@ -10,6 +10,7 @@ import uuid
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from app.types.guid import GUID
 
 from .database import Base
@@ -61,9 +62,7 @@ class KanbanColumn(Base):
     __tablename__ = "kanban_columns"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
-    board_id = Column(
-        GUID(), ForeignKey("kanban_boards.id", ondelete="CASCADE"), nullable=False
-    )
+    board_id = Column(GUID(), ForeignKey("kanban_boards.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     position = Column(Integer, nullable=False)  # Order of columns (0, 1, 2, ...)
@@ -99,12 +98,8 @@ class KanbanTask(Base):
     __tablename__ = "kanban_tasks"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
-    board_id = Column(
-        GUID(), ForeignKey("kanban_boards.id", ondelete="CASCADE"), nullable=False
-    )
-    column_id = Column(
-        GUID(), ForeignKey("kanban_columns.id", ondelete="CASCADE"), nullable=False
-    )
+    board_id = Column(GUID(), ForeignKey("kanban_boards.id", ondelete="CASCADE"), nullable=False)
+    column_id = Column(GUID(), ForeignKey("kanban_columns.id", ondelete="CASCADE"), nullable=False)
 
     # Human-readable reference number (auto-incremented per board, e.g. TSK-0001)
     ref_number = Column(Integer, nullable=True, index=True)
@@ -166,9 +161,7 @@ class KanbanTaskComment(Base):
     __tablename__ = "kanban_task_comments"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
-    task_id = Column(
-        GUID(), ForeignKey("kanban_tasks.id", ondelete="CASCADE"), nullable=False
-    )
+    task_id = Column(GUID(), ForeignKey("kanban_tasks.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     content = Column(Text, nullable=False)  # Markdown supported

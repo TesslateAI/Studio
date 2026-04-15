@@ -15,8 +15,16 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const { refreshUserTheme } = useTheme();
-  const { checkAuth } = useAuth();
+  const { checkAuth, isAuthenticated } = useAuth();
   const redirectTo = (location.state as { from?: string })?.from || '/home';
+
+  // Redirect away if already authenticated (covers desktop auto-login injecting
+  // the token after the page has mounted).
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(redirectTo, { replace: true });
+    }
+  }, [isAuthenticated, navigate, redirectTo]);
   const [formData, setFormData] = useState({
     email: '',
     password: '',

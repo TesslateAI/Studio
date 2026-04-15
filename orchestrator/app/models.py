@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -18,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression, func
 
 from app.types.guid import GUID
@@ -343,7 +345,7 @@ class Container(Base):
 
     @property
     def env_vars_count(self) -> int:
-        return len(self.environment_vars or {})
+        return len(self.environment_vars or {})  # type: ignore[arg-type]
 
     @property
     def effective_port(self) -> int:
@@ -354,7 +356,7 @@ class Container(Base):
           2. port — the exposed/mapped port (sometimes the same)
           3. 3000 — last-resort default
         """
-        return self.internal_port or self.port or 3000
+        return self.internal_port or self.port or 3000  # type: ignore[return-value]
 
 
 class ContainerConnection(Base):
@@ -994,24 +996,28 @@ class Deployment(Base):
 
     __tablename__ = "deployments"
 
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
-    project_id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
         GUID(),
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    provider = Column(String(50), nullable=False, index=True)  # cloudflare, vercel, netlify
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # cloudflare, vercel, netlify
 
     # Link to new deployment target system (nullable for backwards compatibility)
-    deployment_target_id = Column(
+    deployment_target_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
         ForeignKey("deployment_targets.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    container_id = Column(
+    container_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
         ForeignKey("containers.id", ondelete="SET NULL"),
         nullable=True,
@@ -1019,32 +1025,40 @@ class Deployment(Base):
     )  # Which container was deployed (for multi-container deployments)
 
     # Deployment identifiers
-    deployment_id = Column(
+    deployment_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )  # Provider's deployment ID (e.g., Vercel deployment ID)
-    deployment_url = Column(String(500), nullable=True)  # Live deployment URL
+    deployment_url: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )  # Live deployment URL
 
     # Versioning for rollback support
-    version = Column(
+    version: Mapped[str | None] = mapped_column(
         String(50), nullable=True
     )  # Semantic version or auto-generated (v1.0.0, v1.0.1)
 
     # Deployment status
-    status = Column(
+    status: Mapped[str] = mapped_column(
         String(50), nullable=False, default="pending", index=True
     )  # pending, building, deploying, success, failed
-    error = Column(Text, nullable=True)  # Error message if deployment failed
+    error: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # Error message if deployment failed
 
     # Deployment logs and metadata
-    logs = Column(JSON, nullable=True)  # Array of log messages
-    deployment_metadata = Column(
+    logs: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)  # Array of log messages
+    deployment_metadata: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata", JSON, nullable=True
     )  # Provider-specific metadata (build info, etc.)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    completed_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )  # When deployment finished (success or failure)
 

@@ -25,9 +25,6 @@ from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..agent import create_agent_from_db_model
-from ..agent.iterative_agent import _convert_uuids_to_strings
-from ..agent.models import create_model_adapter
 from ..agent.tools.registry import get_tool_registry
 from ..auth_unified import enforce_permission_scope, enforce_project_scope, get_authenticated_user
 from ..config import get_settings
@@ -53,6 +50,7 @@ from ..services.agent_context import (
     _get_chat_history,
     _resolve_container_name,
 )
+from ..services.model_adapters import create_model_adapter
 from ..users import current_superuser
 from ..utils.resource_naming import get_project_path
 
@@ -782,11 +780,10 @@ async def compact_chat(
         return {"success": False, "detail": "Not enough messages to compact"}
 
     # Run compressor
-    from ..agent.compaction import ContextCompressor
-    from ..agent.models import OpenAIAdapter
-
     # Create a cheap LiteLLM-backed adapter for summarization
     from ..config import get_settings
+    from ..services.context_compaction import ContextCompressor
+    from ..services.model_adapters import OpenAIAdapter
 
     settings = get_settings()
     compaction_model = settings.compaction_summary_model or settings.default_model
@@ -812,7 +809,7 @@ async def compact_chat(
         raise HTTPException(status_code=500, detail=f"Compaction failed: {e}") from e
 
     # Find the summary message in compressed output
-    from ..agent.compaction import SUMMARY_PREFIX
+    from ..services.context_compaction import SUMMARY_PREFIX
 
     summary_content = ""
     for m in compressed:
@@ -1015,11 +1012,17 @@ async def agent_chat(
                 status_code=500, detail=f"Error creating model adapter: {str(e)}"
             ) from e
 
-        # 4. Create agent via factory
-        logger.info("[HTTP-AGENT] Creating agent via factory")
+        # 4. Create agent via bridge runner
+        logger.info("[HTTP-AGENT] Creating agent via bridge runner")
         try:
-            agent_instance = await create_agent_from_db_model(
-                agent_model=agent_model, model_adapter=model_adapter
+            from ..config import get_settings as _gs
+            from ..worker import _create_agent_runner
+
+            agent_instance = await _create_agent_runner(
+                agent_model=agent_model,
+                model_adapter=model_adapter,
+                tools_override=None,
+                settings=_gs(),
             )
             logger.info("[HTTP-AGENT] Agent instance created successfully")
         except Exception as e:
@@ -1029,15 +1032,17 @@ async def agent_chat(
                 status_code=500, detail=f"Error creating agent instance: {str(e)}"
             ) from e
 
-        # Set max_iterations for IterativeAgent (None = unlimited)
+        # Set max_iterations for IterativeAgent (None = unlimited; submodule uses 0)
         if hasattr(agent_instance, "max_iterations"):
-            agent_instance.max_iterations = request.max_iterations
+            agent_instance.max_iterations = request.max_iterations or 0
         if hasattr(agent_instance, "minimal_prompts"):
             agent_instance.minimal_prompts = request.minimal_prompts
 
         logger.info(
             f"[HTTP-AGENT] Agent created successfully with max_iterations={request.max_iterations}"
         )
+
+        from ..worker import _convert_uuids_to_strings
 
         # Get or create chat for message history
         try:
@@ -1542,8 +1547,8 @@ async def agent_chat_stream(
             await db.commit()
 
             # Create agent using same pattern as HTTP endpoint
-            from ..agent.models import create_model_adapter
             from ..config import get_settings
+            from ..services.model_adapters import create_model_adapter
 
             settings = get_settings()
 
@@ -1666,9 +1671,9 @@ async def agent_chat_stream(
                 settings=_get_settings(),
             )
 
-            # Set max_iterations when supported by the runner
+            # Set max_iterations when supported by the runner (None = unlimited; submodule uses 0)
             if hasattr(agent_instance, "max_iterations"):
-                agent_instance.max_iterations = request.max_iterations
+                agent_instance.max_iterations = request.max_iterations or 0
 
             # Build project context
             project_context = {}
@@ -1859,7 +1864,7 @@ async def agent_chat_stream(
                             f"[SSE-AGENT] Agent step - iteration={step_data.get('iteration')}, tools={[tc.get('name') for tc in tool_calls]}"
                         )
                         # Progressive persistence: INSERT AgentStep row per step
-                        from ..worker import _build_step_dict
+                        from ..worker import _build_step_dict, _convert_uuids_to_strings
 
                         normalized = _build_step_dict(step_data, _convert_uuids_to_strings)
                         agent_step = AgentStep(
@@ -2686,9 +2691,15 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             )
             logger.info("[UNIFIED-CHAT] Created model adapter for IterativeAgent")
 
-        # Create the agent
-        agent_instance = await create_agent_from_db_model(
-            agent_model=agent_model, model_adapter=model_adapter
+        # Create the agent via bridge runner
+        from ..config import get_settings as _gs
+        from ..worker import _create_agent_runner
+
+        agent_instance = await _create_agent_runner(
+            agent_model=agent_model,
+            model_adapter=model_adapter,
+            tools_override=None,
+            settings=_gs(),
         )
 
         logger.info(
@@ -2696,9 +2707,9 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             f"for agent '{agent_model.name}'"
         )
 
-        # Set max_iterations for IterativeAgent (None = unlimited)
+        # Set max_iterations for IterativeAgent (None = unlimited; submodule uses 0)
         if hasattr(agent_instance, "max_iterations"):
-            max_iters = data.get("max_iterations")
+            max_iters = data.get("max_iterations") or 0
             agent_instance.max_iterations = max_iters
             logger.info(f"[UNIFIED-CHAT] Set max_iterations to {max_iters}")
 

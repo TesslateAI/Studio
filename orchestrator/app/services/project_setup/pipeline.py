@@ -191,9 +191,7 @@ async def _ensure_user_has_base(
     user_id = db_project.owner_id
     team_id = db_project.team_id
     ownership_filter = (
-        UserPurchasedBase.team_id == team_id
-        if team_id
-        else UserPurchasedBase.user_id == user_id
+        UserPurchasedBase.team_id == team_id if team_id else UserPurchasedBase.user_id == user_id
     )
     purchase = await db.scalar(
         select(UserPurchasedBase).where(
@@ -306,6 +304,7 @@ async def setup_project(
                     deployment_mode=settings.deployment_mode,
                     task=task,
                     write_config=config_from_template,
+                    project_id=str(db_project.id),
                 )
             else:
                 # Volume already created (shouldn't happen except template_snapshot above)

@@ -115,7 +115,11 @@ def is_cache_eligible(model_name: str) -> bool:
     if not name:
         return False
 
-    from .models import extract_provider_slug, get_builtin_provider_config, resolve_model_name
+    from .model_adapters import (
+        extract_provider_slug,
+        get_builtin_provider_config,
+        resolve_model_name,
+    )
 
     # --- BYOK path: check provider metadata ---
     provider = extract_provider_slug(name)

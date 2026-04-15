@@ -127,6 +127,25 @@ async def _list_project_pods(namespace: str) -> list[dict]:
     return targets
 
 
+async def _list_local_containers(project: Project, db: AsyncSession) -> list[dict]:
+    """List containers from the DB for a local/desktop project."""
+    from sqlalchemy import select as _select
+
+    result = await db.execute(_select(Container).where(Container.project_id == project.id))
+    containers = list(result.scalars().all())
+    return [
+        {
+            "id": f"ctr:{c.id}",
+            "name": c.name,
+            "type": c.container_type or "dev-container",
+            "status": c.status or "running",
+            "port": c.effective_port,
+            "container_directory": c.name,
+        }
+        for c in containers
+    ]
+
+
 async def _resolve_pod_by_container_id(namespace: str, container_id: str) -> str:
     """Find running pod name by tesslate.io/container-id label."""
     v1 = _k8s_core_v1()
@@ -153,9 +172,19 @@ async def get_terminal_targets(
     db: AsyncSession = Depends(get_db),
 ):
     """Return available terminal targets for a project."""
-    project = await _get_project(db, project_slug, current_user.id)
-    namespace = f"proj-{project.id}"
+    from ..services.orchestration import is_local_mode
 
+    project = await _get_project(db, project_slug, current_user.id)
+
+    if is_local_mode():
+        # Desktop mode: targets are DB containers, not K8s pods
+        targets = await _list_local_containers(project, db)
+        actions = [
+            {"id": "ephemeral", "name": "Local Shell", "description": "shell in project directory"},
+        ]
+        return {"targets": targets, "actions": actions}
+
+    namespace = f"proj-{project.id}"
     targets = await _list_project_pods(namespace)
 
     actions = [
@@ -210,8 +239,13 @@ async def terminal_connect(
         ephemeral_ns: str | None = None
         shell_session_id: UUID | None = None
 
+        from ..services.orchestration import is_local_mode
+
         try:
-            if target.startswith("ctr:"):
+            if is_local_mode():
+                # Desktop mode: no pods — resolve container from DB and spawn local PTY
+                pod_name = await _handle_local_target(websocket, project, target, db)
+            elif target.startswith("ctr:"):
                 pod_name = await _handle_container_target(websocket, namespace, target)
             elif target == "ephemeral":
                 pod_name, ephemeral_ns = await _handle_ephemeral_target(websocket, project)
@@ -312,6 +346,41 @@ async def terminal_connect(
 # ---------------------------------------------------------------------------
 # Target handlers
 # ---------------------------------------------------------------------------
+
+
+async def _handle_local_target(
+    websocket: WebSocket,
+    project: Project,
+    target: str,
+    db: AsyncSession,
+) -> str:
+    """Desktop/local mode: resolve target to a virtual 'pod_name' string.
+
+    For ``ctr:<uuid>`` targets the container is looked up in the DB for display
+    purposes only — the actual PTY is spawned by ``LocalPTYBroker`` in the
+    project's local filesystem directory.  For ``ephemeral`` / unknown targets
+    the project directory is used directly.
+    """
+    if target.startswith("ctr:"):
+        container_id_str = target.removeprefix("ctr:")
+        from uuid import UUID as _UUID
+
+        from sqlalchemy import select as _select
+
+        try:
+            cid = _UUID(container_id_str)
+            result = await db.execute(_select(Container).where(Container.id == cid))
+            ctr = result.scalar_one_or_none()
+            if ctr and ctr.project_id == project.id:
+                await websocket.send_json({"type": "ready"})
+                # Return a synthetic pod_name; LocalPTYBroker ignores it
+                return f"local-ctr-{container_id_str}"
+        except Exception:
+            pass
+
+    # ephemeral or unknown — just use project root shell
+    await websocket.send_json({"type": "ready"})
+    return f"local-{project.id}"
 
 
 async def _handle_container_target(
@@ -450,13 +519,17 @@ async def _run_pty_session(
     shell_session_id: UUID | None = None,
 ):
     """Attach PTY broker and run bidirectional I/O until disconnect."""
+    from ..services.orchestration import is_local_mode
     from ..services.pty_broker import get_pty_broker
 
     broker = get_pty_broker()
+    # In local/desktop mode the cwd is already the project directory;
+    # the "cd /app" prefix is Docker/K8s-specific and would fail on the host.
+    shell_command = "/bin/sh" if is_local_mode() else "cd /app && exec /bin/sh"
     session = await broker.create_session(
         user_id=project.owner_id,
         project_id=str(project.id),
-        command="cd /app && exec /bin/sh",
+        command=shell_command,
         namespace=namespace,
         pod_name=pod_name,
         container=container,

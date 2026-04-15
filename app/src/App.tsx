@@ -14,6 +14,7 @@ import { FeatureFlagProvider } from './contexts/FeatureFlagContext';
 import { useFeatureFlags } from './contexts/useFeatureFlag';
 import { DashboardLayout } from './components/DashboardLayout';
 import { PrivateRoute, PublicOnlyRoute } from './components/RouteGuards';
+import { TitleBar } from './components/desktop/TitleBar';
 import Landing from './pages/Landing';
 import NewLandingPage from './pages/NewLandingPage';
 import Login from './pages/Login';
@@ -75,17 +76,19 @@ import AdminYankCenterPage from './pages/AdminYankCenterPage';
 import AdminCreatorReputationPage from './pages/AdminCreatorReputationPage';
 import AdminAdversarialSuitePage from './pages/AdminAdversarialSuitePage';
 
+const IS_TAURI = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+
 function CategoryRedirect() {
   const { category } = useParams();
   return <Navigate to={`/marketplace/browse/agent?category=${category}`} replace />;
 }
 
 function LandingRoute() {
-  const { flags, loading } = useFeatureFlags();
-  // While flags are loading, render the landing page to match the `true`
-  // default — avoids a redirect flicker for the common case.
-  if (!loading && flags.enable_landing_page === false) {
-    return <Navigate to="/login" replace />;
+  const { flags } = useFeatureFlags();
+  if (flags.enable_landing_page === false) {
+    // In desktop (Tauri) mode skip the marketing page and go straight to the
+    // dashboard; PrivateRoute will send unauthenticated users to /login.
+    return <Navigate to={IS_TAURI ? '/home' : '/login'} replace />;
   }
   return <NewLandingPage />;
 }
@@ -469,7 +472,28 @@ function App() {
               }
             `}</style>
                       <BrowserRouter>
-                        <AppContent />
+                        <div
+                          style={{
+                            height: '100vh',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            overflow: 'hidden',
+                            borderRadius: IS_TAURI ? 10 : 0,
+                          }}
+                        >
+                          {IS_TAURI && <TitleBar />}
+                          <div
+                            style={{
+                              flex: 1,
+                              overflow: 'hidden',
+                              minHeight: 0,
+                              display: 'flex',
+                              flexDirection: 'column',
+                            }}
+                          >
+                            <AppContent />
+                          </div>
+                        </div>
                       </BrowserRouter>
                     </CommandProvider>
                   </ChatPositionProvider>

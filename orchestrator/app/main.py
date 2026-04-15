@@ -623,7 +623,7 @@ async def startup():
         logger.info("Skipping base cache manager initialization (Kubernetes mode)")
 
     # Load prompt-caching eligible models from LiteLLM (non-blocking)
-    from .agent.prompt_caching import refresh_eligible_models
+    from .services.prompt_caching import refresh_eligible_models
 
     asyncio.create_task(refresh_eligible_models())
 

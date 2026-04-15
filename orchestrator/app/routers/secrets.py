@@ -69,9 +69,7 @@ async def list_api_keys(
     """
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserAPIKey.team_id == team_id
-        if team_id
-        else UserAPIKey.user_id == current_user.id
+        UserAPIKey.team_id == team_id if team_id else UserAPIKey.user_id == current_user.id
     )
     query = select(UserAPIKey).where(ownership_filter, UserAPIKey.is_active.is_(True))
 
@@ -125,7 +123,7 @@ async def add_api_key(
 
     # Default key_name to provider display name if not provided
     if not key_name:
-        from ..agent.models import BUILTIN_PROVIDERS
+        from ..services.model_adapters import BUILTIN_PROVIDERS
 
         provider_config = BUILTIN_PROVIDERS.get(provider)
         key_name = provider_config["name"] if provider_config else provider.title()
@@ -133,9 +131,7 @@ async def add_api_key(
     # Check if key with same provider and name already exists
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserAPIKey.team_id == team_id
-        if team_id
-        else UserAPIKey.user_id == current_user.id
+        UserAPIKey.team_id == team_id if team_id else UserAPIKey.user_id == current_user.id
     )
     existing_query = select(UserAPIKey).where(
         ownership_filter,
@@ -209,9 +205,7 @@ async def update_api_key(
     """
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserAPIKey.team_id == team_id
-        if team_id
-        else UserAPIKey.user_id == current_user.id
+        UserAPIKey.team_id == team_id if team_id else UserAPIKey.user_id == current_user.id
     )
     query = select(UserAPIKey).where(UserAPIKey.id == key_id, ownership_filter)
     result = await db.execute(query)
@@ -250,9 +244,7 @@ async def delete_api_key(
     """
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserAPIKey.team_id == team_id
-        if team_id
-        else UserAPIKey.user_id == current_user.id
+        UserAPIKey.team_id == team_id if team_id else UserAPIKey.user_id == current_user.id
     )
     query = select(UserAPIKey).where(UserAPIKey.id == key_id, ownership_filter)
     result = await db.execute(query)
@@ -282,9 +274,7 @@ async def get_api_key(
     """
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserAPIKey.team_id == team_id
-        if team_id
-        else UserAPIKey.user_id == current_user.id
+        UserAPIKey.team_id == team_id if team_id else UserAPIKey.user_id == current_user.id
     )
     query = select(UserAPIKey).where(UserAPIKey.id == key_id, ownership_filter)
     result = await db.execute(query)
@@ -317,7 +307,7 @@ async def list_supported_providers(current_user: User = Depends(current_active_u
     List all supported LLM providers and their configuration.
     Returns built-in providers from the centralized registry.
     """
-    from ..agent.models import BUILTIN_PROVIDERS
+    from ..services.model_adapters import BUILTIN_PROVIDERS
 
     # Convert BUILTIN_PROVIDERS to list format with consistent structure
     providers = [
@@ -376,9 +366,7 @@ async def list_custom_providers(
 
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserProvider.team_id == team_id
-        if team_id
-        else UserProvider.user_id == current_user.id
+        UserProvider.team_id == team_id if team_id else UserProvider.user_id == current_user.id
     )
     query = (
         select(UserProvider)
@@ -431,8 +419,8 @@ async def create_custom_provider(
 
     import re
 
-    from ..agent.models import BUILTIN_PROVIDERS
     from ..models import UserProvider
+    from ..services.model_adapters import BUILTIN_PROVIDERS
 
     # Validate slug format (alphanumeric, hyphens, underscores only)
     if not re.match(r"^[a-z0-9][a-z0-9_-]*$", slug.lower()):
@@ -456,13 +444,9 @@ async def create_custom_provider(
     # Check if team/user already has a provider with this slug
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserProvider.team_id == team_id
-        if team_id
-        else UserProvider.user_id == current_user.id
+        UserProvider.team_id == team_id if team_id else UserProvider.user_id == current_user.id
     )
-    existing_query = select(UserProvider).where(
-        ownership_filter, UserProvider.slug == slug.lower()
-    )
+    existing_query = select(UserProvider).where(ownership_filter, UserProvider.slug == slug.lower())
     result = await db.execute(existing_query)
     existing_provider = result.scalar_one_or_none()
 
@@ -534,9 +518,7 @@ async def update_custom_provider(
 
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserProvider.team_id == team_id
-        if team_id
-        else UserProvider.user_id == current_user.id
+        UserProvider.team_id == team_id if team_id else UserProvider.user_id == current_user.id
     )
     query = select(UserProvider).where(UserProvider.id == provider_id, ownership_filter)
     result = await db.execute(query)
@@ -583,9 +565,7 @@ async def delete_custom_provider(
 
     team_id = current_user.default_team_id
     ownership_filter = (
-        UserProvider.team_id == team_id
-        if team_id
-        else UserProvider.user_id == current_user.id
+        UserProvider.team_id == team_id if team_id else UserProvider.user_id == current_user.id
     )
     query = select(UserProvider).where(UserProvider.id == provider_id, ownership_filter)
     result = await db.execute(query)

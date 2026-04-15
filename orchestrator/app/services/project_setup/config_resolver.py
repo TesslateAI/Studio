@@ -221,8 +221,8 @@ async def generate_config_via_llm(
     """Analyse project files via LLM tool call and generate config. Returns ``None`` on failure."""
     import json
 
-    from ...agent.models import get_llm_client, resolve_model_name
     from ...config import get_settings
+    from ..model_adapters import get_llm_client, resolve_model_name
 
     settings = get_settings()
 
@@ -263,6 +263,10 @@ async def generate_config_via_llm(
         args_json = message.tool_calls[0].function.arguments
         config_data = json.loads(args_json)
         return parse_tesslate_config(json.dumps(config_data))
+    except ValueError:
+        # API key / configuration errors — let them propagate so the caller
+        # can surface a meaningful message to the user.
+        raise
     except Exception as e:
         logger.warning(f"[CONFIG-RESOLVER] LLM config generation failed: {e}")
         return None

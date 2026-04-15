@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { tasksApi, projectsApi } from '../lib/api';
+import { config } from '../config';
 
 export type ContainerStartupStatus = 'idle' | 'starting' | 'health_checking' | 'ready' | 'error';
 
@@ -247,8 +248,10 @@ export function useContainerStartup(
 
       try {
         // Call start container API - this returns task_id immediately
+        // Use absolute URL so the request always reaches the correct backend
+        // (avoids Vite dev-proxy sending relative paths to the wrong host).
         const response = await fetch(
-          `/api/projects/${projectSlug}/containers/${effectiveContainerId}/start`,
+          `${config.API_URL}/api/projects/${projectSlug}/containers/${effectiveContainerId}/start`,
           {
             method: 'POST',
             headers: {

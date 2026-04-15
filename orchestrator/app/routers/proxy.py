@@ -51,8 +51,14 @@ async def list_models() -> JSONResponse:
     # Local LiteLLM / BYOK path — proxy directly to the local instance.
     if settings.litellm_api_base:
         try:
+            headers = {}
+            if settings.litellm_master_key:
+                headers["Authorization"] = f"Bearer {settings.litellm_master_key}"
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{settings.litellm_api_base.rstrip('/')}/models")
+                resp = await client.get(
+                    f"{settings.litellm_api_base.rstrip('/')}/models",
+                    headers=headers,
+                )
                 resp.raise_for_status()
                 return JSONResponse(content=resp.json())
         except Exception as exc:

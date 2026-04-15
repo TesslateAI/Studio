@@ -570,6 +570,11 @@ class PtySessionRegistry:
 # Module-level singleton for agent tools to share.
 PTY_SESSIONS = PtySessionRegistry()
 
+# Maps container_id (str) → PTY session_id for dev-server processes started
+# by LocalOrchestrator.start_container.  Lives at module level so the mapping
+# survives across multiple orchestrator instances within the same process.
+_LOCAL_DEV_SERVERS: dict[str, str] = {}
+
 
 # =============================================================================
 # LOCAL ORCHESTRATOR
@@ -731,13 +736,124 @@ class LocalOrchestrator(BaseOrchestrator):
         db: AsyncSession,
     ) -> dict[str, Any]:
         name = getattr(container, "name", "local")
-        logger.info("[LOCAL] start_container no-op for container=%s", name)
-        return {
-            "status": "running",
-            "container_name": name,
-            "url": "",
-            "mode": "local",
-        }
+        container_id = (
+            str(getattr(container, "id", "")) if getattr(container, "id", None) is not None else ""
+        )
+        startup_command = getattr(container, "startup_command", None)
+        project_id_val = getattr(project, "id", None)
+
+        # Under desktop mode, allocate a dedicated host port from the local
+        # port range (42000–42999) so user project dev servers never collide
+        # with the Vite dev server (5173) or any other well-known port.
+        # Allocation is idempotent — the same (project, container) pair always
+        # returns the same port, surviving restarts via the ports.json cache.
+        from ...config import get_settings
+
+        settings = get_settings()
+        is_desktop = settings.deployment_mode.lower() == "desktop"
+
+        allocated_port: int | None = None
+        if is_desktop and startup_command and project_id_val is not None:
+            try:
+                from .local_ports import get_default_allocator
+
+                allocator = await get_default_allocator()
+                allocated_port = await allocator.allocate(project_id_val, name)
+            except Exception as exc:
+                logger.warning("[LOCAL] Port allocation failed for container=%s: %s", name, exc)
+
+        # Determine the URL. Prefer the allocated port; fall back to config.
+        if allocated_port is not None:
+            url = f"http://localhost:{allocated_port}"
+        else:
+            fallback_port = getattr(container, "effective_port", None)
+            url = f"http://localhost:{fallback_port}" if fallback_port else ""
+
+        # No startup command — remain a no-op.
+        if not startup_command:
+            logger.info("[LOCAL] start_container no-op (no startup_command) for container=%s", name)
+            return {"status": "running", "container_name": name, "url": url, "mode": "local"}
+
+        # Check whether the previously-started session is still alive.
+        existing_sid = _LOCAL_DEV_SERVERS.get(container_id) if container_id else None
+        if existing_sid is not None:
+            try:
+                info = PTY_SESSIONS.status(existing_sid)
+                if info.get("status") == "running":
+                    logger.info(
+                        "[LOCAL] start_container skip — session %s already running for container=%s",
+                        existing_sid,
+                        name,
+                    )
+                    return {
+                        "status": "running",
+                        "container_name": name,
+                        "url": url,
+                        "mode": "local",
+                    }
+            except KeyError:
+                pass  # Session was dropped from registry; re-launch below.
+            # Clean up stale mapping.
+            _LOCAL_DEV_SERVERS.pop(container_id, None)
+
+        # Resolve project root so the process starts in the right directory.
+        project_root = _get_project_root(project)
+
+        # Inject the allocated port via the PORT env var — most frameworks
+        # (Vite, Next.js, CRA, uvicorn, etc.) respect this convention.
+        proc_env: dict[str, str] | None = None
+        if allocated_port is not None:
+            proc_env = {"PORT": str(allocated_port)}
+
+        logger.info(
+            "[LOCAL] start_container launching '%s' (port=%s) in %s for container=%s",
+            startup_command,
+            allocated_port or "default",
+            project_root,
+            name,
+        )
+        session_id = PTY_SESSIONS.create(
+            command=startup_command,
+            cwd=str(project_root),
+            env=proc_env,
+        )
+
+        if container_id:
+            _LOCAL_DEV_SERVERS[container_id] = session_id
+        # Also register by name so stop_container (which only receives the
+        # container name, not the UUID) can locate the session.
+        _LOCAL_DEV_SERVERS[name] = session_id
+
+        # Persist the allocated port to the Container row so that downstream
+        # callers (preview URL construction, status endpoints) see the right
+        # port without needing to re-derive it.
+        if allocated_port is not None:
+            container_id_uuid = getattr(container, "id", None)
+            if container_id_uuid is not None:
+                try:
+                    from sqlalchemy import update as sa_update
+
+                    from ...models import Container as ContainerModel
+
+                    await db.execute(
+                        sa_update(ContainerModel)
+                        .where(ContainerModel.id == container_id_uuid)
+                        .values(port=allocated_port)
+                    )
+                    await db.commit()
+                    logger.debug(
+                        "[LOCAL] Persisted allocated port %s for container=%s",
+                        allocated_port,
+                        name,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[LOCAL] Failed to persist allocated port for container=%s: %s",
+                        name,
+                        exc,
+                    )
+
+        return {"status": "running", "container_name": name, "url": url, "mode": "local"}
 
     async def stop_container(
         self,
@@ -747,10 +863,39 @@ class LocalOrchestrator(BaseOrchestrator):
         user_id: UUID,
     ) -> None:
         logger.info(
-            "[LOCAL] stop_container no-op for project=%s container=%s",
+            "[LOCAL] stop_container for project=%s container=%s",
             project_slug,
             container_name,
         )
+        # Look up any tracked dev-server session keyed by container_name as a
+        # fallback since we don't have the container UUID here.  The primary
+        # key used in start_container is the container UUID; we also keep a
+        # name-keyed entry for this stop path.
+        sid = _LOCAL_DEV_SERVERS.pop(container_name, None)
+        if sid is not None:
+            try:
+                PTY_SESSIONS.close(sid)
+                logger.info(
+                    "[LOCAL] Closed dev-server PTY session %s for container=%s", sid, container_name
+                )
+            except Exception as exc:
+                logger.warning("[LOCAL] Error closing PTY session %s: %s", sid, exc)
+
+        # Release the allocated port so it can be reclaimed for future starts.
+        from ...config import get_settings
+
+        settings = get_settings()
+        if settings.deployment_mode.lower() == "desktop":
+            try:
+                from .local_ports import get_default_allocator
+
+                allocator = await get_default_allocator()
+                await allocator.release(project_id, container_name)
+            except Exception as exc:
+                logger.warning(
+                    "[LOCAL] Failed to release port for container=%s: %s", container_name, exc
+                )
+
         return None
 
     async def get_container_status(

@@ -47,6 +47,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/deployments", tags=["deployments"])
 
 
+def _require_cloud_deployment() -> None:
+    """Dependency that rejects cloud-provider deployment attempts in desktop mode.
+
+    External providers (Vercel, Netlify, Cloudflare) require cloud credentials
+    and a build environment that are not available on the local desktop sidecar.
+    The endpoint returns HTTP 501 so the frontend can show a clear error instead
+    of an opaque 5xx from a missing Docker socket or missing credential store.
+    """
+    from ..services.orchestration import is_local_mode
+
+    if is_local_mode():
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="External provider deployments are not available in desktop mode.",
+        )
+
+
 # ============================================================================
 # Request/Response Models
 # ============================================================================
@@ -62,7 +79,9 @@ class DeploymentRequest(BaseModel):
     )
     custom_domain: str | None = Field(None, description="Custom domain")
     env_vars: dict[str, str] = Field(default_factory=dict, description="Environment variables")
-    build_command: str | None = Field(None, description="Build command override (primary source is container.build_command)")
+    build_command: str | None = Field(
+        None, description="Build command override (primary source is container.build_command)"
+    )
     framework: str | None = Field(
         None, description="Framework override (primary source is container.framework)"
     )
@@ -99,6 +118,7 @@ class DeploymentStatusResponse(BaseModel):
 
 class DeployAllResult(BaseModel):
     """Result for a single container deployment in deploy_all."""
+
     container_id: UUID
     container_name: str
     provider: str
@@ -110,6 +130,7 @@ class DeployAllResult(BaseModel):
 
 class DeployAllResponse(BaseModel):
     """Response for deploy_all endpoint."""
+
     total: int
     deployed: int
     failed: int
@@ -261,9 +282,7 @@ async def _execute_provider_deploy(
             cpu=config.env_vars.get(ENV_CPU, "0.25"),
             memory=config.env_vars.get(ENV_MEMORY, "512Mi"),
             env_vars={
-                k: v
-                for k, v in config.env_vars.items()
-                if not k.startswith(INTERNAL_ENV_PREFIX)
+                k: v for k, v in config.env_vars.items() if not k.startswith(INTERNAL_ENV_PREFIX)
             },
             region=config.env_vars.get(ENV_REGION, "us-east-1"),
         )
@@ -283,7 +302,11 @@ async def _execute_provider_deploy(
 # ============================================================================
 
 
-@router.post("/{project_slug}/deploy", response_model=DeploymentResponse)
+@router.post(
+    "/{project_slug}/deploy",
+    response_model=DeploymentResponse,
+    dependencies=[Depends(_require_cloud_deployment)],
+)
 async def deploy_project(
     project_slug: str,
     request: DeploymentRequest,
@@ -412,7 +435,7 @@ async def deploy_project(
                 project_slug=project.slug,
                 project_id=project.id,
                 container_name=build_container_name,
-                user_id=current_user.id
+                user_id=current_user.id,
             )
 
             is_running = container_status.get("status") == "running"
@@ -599,11 +622,15 @@ async def deploy_project(
         ) from e
 
 
-@router.post("/{project_slug}/deploy-all", response_model=DeployAllResponse)
+@router.post(
+    "/{project_slug}/deploy-all",
+    response_model=DeployAllResponse,
+    dependencies=[Depends(_require_cloud_deployment)],
+)
 async def deploy_all_containers(
     project_slug: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Deploy all containers that have deployment targets assigned.
@@ -631,24 +658,13 @@ async def deploy_all_containers(
     # 2. Get all containers with deployment targets
     result = await db.execute(
         select(Container)
-        .where(
-            and_(
-                Container.project_id == project.id,
-                Container.deployment_provider.isnot(None)
-            )
-        )
+        .where(and_(Container.project_id == project.id, Container.deployment_provider.isnot(None)))
         .options(selectinload(Container.base))
     )
     containers_with_targets = result.scalars().all()
 
     if not containers_with_targets:
-        return DeployAllResponse(
-            total=0,
-            deployed=0,
-            failed=0,
-            skipped=0,
-            results=[]
-        )
+        return DeployAllResponse(total=0, deployed=0, failed=0, skipped=0, results=[])
 
     # 3. Group containers by provider to validate credentials
     providers_needed = {c.deployment_provider for c in containers_with_targets}
@@ -665,7 +681,7 @@ async def deploy_all_containers(
             provider_credentials[provider] = {
                 "token": decrypted_token,
                 "metadata": credential.provider_metadata,
-                "credential": credential
+                "credential": credential,
             }
         except HTTPException:
             # Credential not found for this provider - will mark containers as failed
@@ -685,7 +701,7 @@ async def deploy_all_containers(
                 container_name=container.name,
                 provider=provider,
                 status="failed",
-                error=f"No credentials found for {provider}. Please connect your {provider} account in Settings."
+                error=f"No credentials found for {provider}. Please connect your {provider} account in Settings.",
             )
 
         # Skip service containers (databases, caches, etc.)
@@ -695,7 +711,7 @@ async def deploy_all_containers(
                 container_name=container.name,
                 provider=provider,
                 status="skipped",
-                error="Service containers cannot be deployed to external providers"
+                error="Service containers cannot be deployed to external providers",
             )
 
         try:
@@ -706,7 +722,10 @@ async def deploy_all_containers(
                 provider=provider,
                 status="building",
                 logs=[f"Deploy-all: Deploying {container.name} to {provider}"],
-                deployment_metadata={"container_id": str(container.id), "container_name": container.name}
+                deployment_metadata={
+                    "container_id": str(container.id),
+                    "container_name": container.name,
+                },
             )
             db.add(deployment)
             await db.commit()
@@ -717,11 +736,7 @@ async def deploy_all_containers(
             framework = container.framework or "static"
 
             # Determine deployment mode
-            default_modes = {
-                "vercel": "source",
-                "netlify": "pre-built",
-                "cloudflare": "pre-built"
-            }
+            default_modes = {"vercel": "source", "netlify": "pre-built", "cloudflare": "pre-built"}
             deployment_mode = default_modes.get(provider, "pre-built")
 
             # Build if needed
@@ -757,7 +772,7 @@ async def deploy_all_containers(
                         provider=provider,
                         status="failed",
                         deployment_id=deployment.id,
-                        error="Build failed"
+                        error="Build failed",
                     )
 
             # Deploy to provider
@@ -818,7 +833,7 @@ async def deploy_all_containers(
                 status="success" if deploy_result.success else "failed",
                 deployment_id=deployment.id,
                 deployment_url=deploy_result.deployment_url,
-                error=deploy_result.error
+                error=deploy_result.error,
             )
 
         except Exception as e:
@@ -828,7 +843,7 @@ async def deploy_all_containers(
                 container_name=container.name,
                 provider=provider,
                 status="failed",
-                error=str(e)
+                error=str(e),
             )
 
     # Run deployments in parallel
@@ -840,14 +855,12 @@ async def deploy_all_containers(
     failed = sum(1 for r in results if r.status == "failed")
     skipped = sum(1 for r in results if r.status == "skipped")
 
-    logger.info(f"Deploy-all completed for {project.slug}: {deployed} deployed, {failed} failed, {skipped} skipped")
+    logger.info(
+        f"Deploy-all completed for {project.slug}: {deployed} deployed, {failed} failed, {skipped} skipped"
+    )
 
     return DeployAllResponse(
-        total=len(results),
-        deployed=deployed,
-        failed=failed,
-        skipped=skipped,
-        results=results
+        total=len(results), deployed=deployed, failed=failed, skipped=skipped, results=results
     )
 
 
@@ -892,7 +905,11 @@ class ExportResponse(BaseModel):
     completed_at: str | None = None
 
 
-@router.post("/{project_slug}/deploy-container", response_model=DeploymentResponse)
+@router.post(
+    "/{project_slug}/deploy-container",
+    response_model=DeploymentResponse,
+    dependencies=[Depends(_require_cloud_deployment)],
+)
 async def deploy_container(
     project_slug: str,
     request: ContainerDeployRequest,
@@ -1021,7 +1038,9 @@ async def deploy_container(
         await db.commit()
 
         # Filter out internal env vars
-        env_vars = {k: v for k, v in request.env_vars.items() if not k.startswith(INTERNAL_ENV_PREFIX)}
+        env_vars = {
+            k: v for k, v in request.env_vars.items() if not k.startswith(INTERNAL_ENV_PREFIX)
+        }
 
         container_config = ContainerDeployConfig(
             image_ref=pushed_uri,
@@ -1296,7 +1315,11 @@ async def export_project(
         ) from e
 
 
-@router.post("/{project_slug}/containers/{container_id}/deploy", response_model=DeploymentResponse)
+@router.post(
+    "/{project_slug}/containers/{container_id}/deploy",
+    response_model=DeploymentResponse,
+    dependencies=[Depends(_require_cloud_deployment)],
+)
 async def deploy_single_container_endpoint(
     project_slug: str,
     container_id: UUID,
@@ -1391,7 +1414,9 @@ async def deploy_single_container_endpoint(
     await db.commit()
     await db.refresh(deployment)
 
-    logger.info(f"Created deployment {deployment.id} for container {container.name} to {provider_name}")
+    logger.info(
+        f"Created deployment {deployment.id} for container {container.name} to {provider_name}"
+    )
 
     try:
         # 7. Get builder and framework from container fields
@@ -1518,9 +1543,7 @@ async def deploy_single_container_endpoint(
             error=deployment.error,
             created_at=deployment.created_at.isoformat(),
             updated_at=deployment.updated_at.isoformat(),
-            completed_at=deployment.completed_at.isoformat()
-            if deployment.completed_at
-            else None,
+            completed_at=deployment.completed_at.isoformat() if deployment.completed_at else None,
         )
 
     except Exception as e:
@@ -1544,9 +1567,7 @@ async def deploy_single_container_endpoint(
             error=deployment.error,
             created_at=deployment.created_at.isoformat(),
             updated_at=deployment.updated_at.isoformat(),
-            completed_at=deployment.completed_at.isoformat()
-            if deployment.completed_at
-            else None,
+            completed_at=deployment.completed_at.isoformat() if deployment.completed_at else None,
         )
 
 
@@ -1883,7 +1904,11 @@ async def delete_deployment(
                 provider = DeploymentManager.get_provider(deployment.provider, provider_credentials)
                 await provider.delete_deployment(
                     deployment.deployment_id,
-                    **({"metadata": deployment.deployment_metadata} if deployment.deployment_metadata else {}),
+                    **(
+                        {"metadata": deployment.deployment_metadata}
+                        if deployment.deployment_metadata
+                        else {}
+                    ),
                 )
 
                 logger.info(

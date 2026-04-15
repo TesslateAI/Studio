@@ -27,7 +27,7 @@ def _get_byok_prefixes() -> tuple[str, ...]:
     automatically makes it recognized as BYOK here.
     """
     try:
-        from ..agent.models import get_byok_provider_prefixes
+        from .model_adapters import get_byok_provider_prefixes
 
         return get_byok_provider_prefixes()
     except Exception:

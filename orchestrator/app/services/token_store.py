@@ -16,6 +16,7 @@ and chmod'd to ``0600`` on POSIX.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -78,10 +79,8 @@ def set_cloud_token(token: str) -> None:
             os.chmod(tmp_name, 0o600)
         os.replace(tmp_name, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
 
 

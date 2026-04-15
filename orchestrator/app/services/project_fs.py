@@ -99,23 +99,48 @@ _EXCLUDED_DIRS: frozenset[str] = frozenset(
     }
 )
 
-_EXCLUDED_FILES: frozenset[str] = frozenset(
-    {".DS_Store", "Thumbs.db", ".env", ".env.local"}
-)
+_EXCLUDED_FILES: frozenset[str] = frozenset({".DS_Store", "Thumbs.db", ".env", ".env.local"})
 
 _BINARY_EXTENSIONS: frozenset[str] = frozenset(
     {
-        "png", "jpg", "jpeg", "gif", "ico", "webp", "svg", "bmp",
-        "pdf", "zip", "tar", "gz", "tgz", "bz2", "7z", "rar",
-        "exe", "dll", "so", "dylib", "bin",
-        "mp3", "mp4", "mov", "avi", "wav", "webm",
-        "woff", "woff2", "ttf", "otf", "eot",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "ico",
+        "webp",
+        "svg",
+        "bmp",
+        "pdf",
+        "zip",
+        "tar",
+        "gz",
+        "tgz",
+        "bz2",
+        "7z",
+        "rar",
+        "exe",
+        "dll",
+        "so",
+        "dylib",
+        "bin",
+        "mp3",
+        "mp4",
+        "mov",
+        "avi",
+        "wav",
+        "webm",
+        "woff",
+        "woff2",
+        "ttf",
+        "otf",
+        "eot",
     }
 )
 
 
 async def read_all_files(
-    base: "Path",
+    base: Path,
     *,
     max_files: int = 200,
     max_file_size: int = 100_000,

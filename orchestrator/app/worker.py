@@ -28,6 +28,20 @@ from .services.apps.settlement_worker import settle_spend_batch as settle_spend_
 logger = logging.getLogger(__name__)
 
 
+def _convert_uuids_to_strings(obj):
+    """Recursively convert UUID objects to strings in nested data structures."""
+    if isinstance(obj, UUID):
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {k: _convert_uuids_to_strings(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_uuids_to_strings(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_convert_uuids_to_strings(item) for item in obj)
+    else:
+        return obj
+
+
 async def _auto_title_chat(chat, model_adapter, user_message: str, db) -> None:
     """Generate and set a chat title from the user's first message. Non-blocking."""
     if not chat or chat.title:
@@ -148,69 +162,49 @@ def _build_submodule_registry(in_tree_registry):
 async def _create_agent_runner(agent_model, model_adapter, tools_override, settings):
     """Return an object with a ``.run(message, context)`` async-generator method.
 
-    When ``settings.agent_runner == "bridge"`` the submodule's TesslateAgent
-    runner is used (via TesslateAgentBridge). Otherwise the in-tree runner is
-    returned unchanged.  Both satisfy the same ``run(message, context)``
-    interface so the caller does not need to branch.
+    Uses the submodule's TesslateAgent runner via TesslateAgentBridge.
+    Satisfies the ``run(message, context)`` interface.
     """
-    if settings.agent_runner == "bridge":
-        from .services.tesslate_agent_bridge import TesslateAgentBridge
+    from .services.tesslate_agent_bridge import TesslateAgentBridge
 
-        # Build the tool registry for the bridge.
-        if tools_override is not None:
-            sub_registry = _build_submodule_registry(tools_override)
-        else:
-            from .agent.tools.registry import get_tool_registry
+    # Build the tool registry for the bridge.
+    if tools_override is not None:
+        sub_registry = _build_submodule_registry(tools_override)
+    else:
+        from .agent.tools.registry import get_tool_registry
 
-            sub_registry = _build_submodule_registry(get_tool_registry())
+        sub_registry = _build_submodule_registry(get_tool_registry())
 
-        if sub_registry is None:
-            # Submodule unavailable — fall back to inline runner gracefully.
-            logger.warning("[WORKER] Bridge registry unavailable; falling back to inline runner")
-            from .agent.factory import create_agent_from_db_model
+    if sub_registry is None:
+        raise RuntimeError("tesslate-agent submodule is unavailable; cannot create agent runner")
 
-            return await create_agent_from_db_model(
-                agent_model=agent_model,
-                model_adapter=model_adapter,
-                tools_override=tools_override,
-            )
-
-        # Build compaction adapter from agent config (same logic as factory.py).
-        compaction_adapter = None
-        agent_config = getattr(agent_model, "config", None) or {}
-        compaction_model_name = (
-            agent_config.get("compaction_model", "") or settings.compaction_summary_model
-        )
-        if compaction_model_name and model_adapter and hasattr(model_adapter, "client"):
-            try:
-                from .agent.models import OpenAIAdapter, resolve_model_name
-
-                compaction_adapter = OpenAIAdapter(
-                    model_name=resolve_model_name(compaction_model_name),
-                    client=model_adapter.client,
-                    temperature=0.3,
-                )
-            except Exception as ca_err:
-                logger.warning("[WORKER] Compaction adapter failed (non-fatal): %s", ca_err)
-
-        bridge = TesslateAgentBridge(
-            system_prompt=agent_model.system_prompt,
-            tools=sub_registry,
-            model=model_adapter,
-            compaction_adapter=compaction_adapter,
-        )
-        # Return the inner submodule agent — it has the .run() + .tools interface
-        # the caller expects. The bridge wrapper is not needed once constructed.
-        return bridge.inner
-
-    # Inline (in-tree) path.
-    from .agent.factory import create_agent_from_db_model
-
-    return await create_agent_from_db_model(
-        agent_model=agent_model,
-        model_adapter=model_adapter,
-        tools_override=tools_override,
+    # Build compaction adapter from agent config.
+    compaction_adapter = None
+    agent_config = getattr(agent_model, "config", None) or {}
+    compaction_model_name = (
+        agent_config.get("compaction_model", "") or settings.compaction_summary_model
     )
+    if compaction_model_name and model_adapter and hasattr(model_adapter, "client"):
+        try:
+            from .services.model_adapters import OpenAIAdapter, resolve_model_name
+
+            compaction_adapter = OpenAIAdapter(
+                model_name=resolve_model_name(compaction_model_name),
+                client=model_adapter.client,
+                temperature=0.3,
+            )
+        except Exception as ca_err:
+            logger.warning("[WORKER] Compaction adapter failed (non-fatal): %s", ca_err)
+
+    bridge = TesslateAgentBridge(
+        system_prompt=agent_model.system_prompt,
+        tools=sub_registry,
+        model=model_adapter,
+        compaction_adapter=compaction_adapter,
+    )
+    # Return the inner submodule agent — it has the .run() + .tools interface
+    # the caller expects. The bridge wrapper is not needed once constructed.
+    return bridge.inner
 
 
 async def execute_agent_task(ctx: dict, payload_dict: dict):
@@ -229,8 +223,6 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     """
     from sqlalchemy import select
 
-    from .agent.iterative_agent import _convert_uuids_to_strings
-    from .agent.models import create_model_adapter
     from .config import get_settings
     from .database import AsyncSessionLocal
     from .models import (
@@ -251,6 +243,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
         _resolve_container_name,
     )
     from .services.agent_task import AgentTaskPayload
+    from .services.model_adapters import create_model_adapter
     from .services.pubsub import get_pubsub
 
     settings = get_settings()
@@ -517,7 +510,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     project_context["mcp_prompt_catalog"] = mcp_context["prompt_catalog"]
 
             # Warm the local plan mirror from Redis before the agent builds its prompt.
-            from .agent.plan_manager import PlanManager
+            from .services.plan_manager import PlanManager
 
             payload_context = {
                 "user_id": UUID(payload.user_id),
@@ -1380,7 +1373,7 @@ async def startup(ctx: dict):
     logger.info("[WORKER] ARQ worker started")
 
     # Load prompt-caching eligible models from LiteLLM
-    from .agent.prompt_caching import refresh_eligible_models
+    from .services.prompt_caching import refresh_eligible_models
 
     await refresh_eligible_models()
 
