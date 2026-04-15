@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..database import get_db
-from ..models import AgentMcpAssignment, MarketplaceAgent, UserMcpConfig
+from ..models import AgentMcpAssignment, MarketplaceAgent, McpOAuthConnection, UserMcpConfig
 from ..schemas import (
     AgentMcpAssignmentResponse,
     McpConfigResponse,
@@ -491,8 +491,26 @@ async def uninstall_mcp_server(
     user=Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Soft-delete an MCP server installation."""
+    """Soft-delete an MCP server installation.
+
+    Reinstalling should be a clean slate — so we also drop OAuth tokens, agent
+    assignments, per-tool disables, and stored credentials. The row itself
+    stays (is_active=False) for audit and to preserve the uniqueness tuple.
+    """
     config = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
+
+    await db.execute(
+        McpOAuthConnection.__table__.delete().where(
+            McpOAuthConnection.user_mcp_config_id == config.id
+        )
+    )
+    await db.execute(
+        AgentMcpAssignment.__table__.delete().where(
+            AgentMcpAssignment.mcp_config_id == config.id
+        )
+    )
+    config.credentials = None
+    config.disabled_tools = []
     config.is_active = False
     await db.commit()
 
