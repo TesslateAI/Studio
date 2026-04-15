@@ -1468,6 +1468,13 @@ func (d *Daemon) doAcquireHubLease(ctx context.Context, volumeID, operation stri
 		return nil, fmt.Errorf("lease RPC for %s: %w", volumeID, err)
 	}
 
+	// Hub returns (false, "") when the volume is not registered. Retrying can
+	// never succeed — bail out immediately so the outer RPC surfaces the real
+	// error instead of hanging until the deadline expires.
+	if !acquired && current == "" {
+		return nil, fmt.Errorf("volume %s is not registered in Hub", volumeID)
+	}
+
 	if !acquired && wait {
 		// Retry until available or context cancelled. The holder's lease
 		// will either be released normally, expire via TTL, or be reaped
@@ -1483,6 +1490,9 @@ func (d *Daemon) doAcquireHubLease(ctx context.Context, volumeID, operation stri
 				acquired, current, err = d.hub.AcquireVolumeLease(ctx, volumeID, holder, leaseBaseTTL)
 				if err != nil {
 					return nil, fmt.Errorf("lease RPC for %s: %w", volumeID, err)
+				}
+				if !acquired && current == "" {
+					return nil, fmt.Errorf("volume %s is not registered in Hub", volumeID)
 				}
 			}
 		}

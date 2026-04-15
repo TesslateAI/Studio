@@ -1214,6 +1214,16 @@ func (s *Server) tryCreateOnNode(ctx context.Context, volumeID, template, target
 		klog.Warningf("CreateVolumeOnNode: track %s on %s: %v", volumeID, targetNode, err)
 	}
 
+	// Register in the Hub registry BEFORE the write-through sync below. The
+	// node's sync daemon calls back into Hub.AcquireVolumeLease, which requires
+	// the volume to already exist in the registry — otherwise it returns
+	// acquired=false with an empty holder, and the node enters an infinite
+	// retry loop until the outer gRPC deadline fires.
+	s.registry.RegisterVolume(volumeID)
+	s.registry.SetOwner(volumeID, targetNode)
+	s.registry.SetCached(volumeID, targetNode)
+	s.registry.SetVolumeTemplate(volumeID, template, templateHash)
+
 	// Write-through CAS sync for empty volumes (no template). Template-based
 	// volumes are reconstructable from the template already in S3, so the
 	// initial sync is redundant — the sync daemon will pick it up within 15s.
@@ -1223,14 +1233,10 @@ func (s *Server) tryCreateOnNode(ctx context.Context, volumeID, template, target
 			klog.Errorf("CreateVolumeOnNode: initial CAS sync failed for %s on %s: %v — rolling back", volumeID, targetNode, err)
 			_ = client.UntrackVolume(ctx, volumeID)
 			_ = client.DeleteSubvolume(ctx, "volumes/"+volumeID)
+			s.registry.UnregisterVolume(volumeID)
 			return "", fmt.Errorf("initial CAS sync failed (volume rolled back): %w", err)
 		}
 	}
-
-	s.registry.RegisterVolume(volumeID)
-	s.registry.SetOwner(volumeID, targetNode)
-	s.registry.SetCached(volumeID, targetNode)
-	s.registry.SetVolumeTemplate(volumeID, template, templateHash)
 
 	if template != "" {
 		s.registry.RegisterTemplate(template, targetNode)
