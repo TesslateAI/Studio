@@ -1940,6 +1940,11 @@ class UserMcpConfig(Base):
     )
     # Prefixed tool names the user has explicitly disabled, e.g. ["github__delete_repo"].
     disabled_tools = Column(JSON, nullable=True)
+    # Set to True when the manager's tool-discovery call hits a 401/OAuth
+    # failure. Cleared on successful reconnect. UI reads this to show a red
+    # "Reconnect" indicator; the agent context surfaces it as a warning.
+    needs_reauth = Column(Boolean, nullable=False, default=False, server_default="false")
+    last_auth_error = Column(String(500), nullable=True)
     # When a user/team config is overridden at project scope, the project row
     # references the source via this self-FK so the UI can show "Inherited from team".
     parent_config_id = Column(

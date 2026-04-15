@@ -308,16 +308,21 @@ def _make_tool_executor(server_slug: str, mcp_tool_name: str):
             if getattr(result, "isError", False):
                 return {
                     **error_output(
-                        f"MCP tool '{mcp_tool_name}' returned an error.",
-                        details={"output": sanitize_error(output_text)},
+                        f"MCP tool '{mcp_tool_name}' returned an error: {sanitize_error(output_text)}",
                     ),
                     **structured,
                 }
 
+            # Flatten: the raw MCP payload is the primary content. Weak
+            # models (Kimi K2, small OSS, etc.) skip nested `details.output`
+            # and confabulate from priors. Surfacing the payload as both the
+            # top-level `result` field AND inlined in the `message` forces
+            # it into the model's attention when rendering the tool_result
+            # block.
             return {
                 **success_output(
-                    f"MCP tool '{mcp_tool_name}' completed.",
-                    details={"output": output_text},
+                    f"MCP tool '{mcp_tool_name}' result:\n{output_text}",
+                    result=output_text,
                 ),
                 **structured,
             }

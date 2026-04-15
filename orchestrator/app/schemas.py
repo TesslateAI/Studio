@@ -1530,6 +1530,11 @@ class McpConfigResponse(BaseModel):
     # finished). The Library card uses this for the green/grey dot and to
     # decide whether to show "Connect" vs "Reconnect".
     is_connected: bool = False
+    # True when tool discovery last failed with a 401/OAuth error. Cleared on
+    # a successful reconnect. Library card renders a red dot + "Reconnect"
+    # CTA when this is set so the user knows tokens went stale.
+    needs_reauth: bool = False
+    last_auth_error: str | None = None
     disabled_tools: list[str] | None = None
     # Agent ids this connector is currently assigned to (UUIDs serialized as
     # strings). Populated by GET /api/mcp/installed so the Library card's

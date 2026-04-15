@@ -315,6 +315,24 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         len(mcp_tools),
                         agent_model.slug,
                     )
+
+                # Surface connectors that failed discovery (stale OAuth, 401,
+                # etc.) — without this, the agent silently gets an empty tool
+                # list for Notion/Linear/etc and confabulates "I don't have
+                # access" when the user knows they attached it. The UI shows
+                # a red dot via the `needs_reauth` flag; this log gives us a
+                # breadcrumb when debugging reports like "agent says it can't
+                # reach X."
+                unavailable = mcp_context.get("unavailable_servers", [])
+                if unavailable:
+                    logger.warning(
+                        "[WORKER] %d MCP connector(s) unavailable for agent '%s': %s",
+                        len(unavailable),
+                        agent_model.slug,
+                        ", ".join(
+                            f"{u.get('server_slug')}({u.get('reason')})" for u in unavailable
+                        ),
+                    )
             except Exception as mcp_err:
                 logger.warning("[WORKER] MCP context loading failed (non-fatal): %s", mcp_err)
 

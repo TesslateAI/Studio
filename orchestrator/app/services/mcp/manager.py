@@ -207,6 +207,7 @@ class McpManager:
         mcp_configs: dict[str, dict[str, Any]] = {}
         resource_catalog: list[dict[str, Any]] = []
         prompt_catalog: list[dict[str, Any]] = []
+        unavailable_servers: list[dict[str, Any]] = []
 
         for umc in configs:
             agent: MarketplaceAgent | None = umc.marketplace_agent
@@ -214,13 +215,17 @@ class McpManager:
             # (marketplace_agent_id IS NULL) derive server info from the row
             # directly.
             if agent is not None:
-                server_slug = agent.slug
+                # Normalize hyphens to underscores: some model providers
+                # silently rewrite '-' → '_' in function names, which then
+                # fails the registry lookup ('mcp__mcp-linear__x' registered
+                # but agent emits 'mcp__mcp_linear__x').
+                server_slug = agent.slug.replace("-", "_")
                 server_config = dict(agent.config or {})
             else:
                 # Custom connector: synthesize a slug + config from the row.
                 # Server URL lives on the paired McpOAuthConnection and is
                 # loaded lazily below if needed.
-                server_slug = f"custom-{str(umc.id)[:8]}"
+                server_slug = f"custom_{str(umc.id)[:8]}"
                 server_config = {
                     "transport": "streamable-http",
                     "auth_type": "oauth",
@@ -267,12 +272,37 @@ class McpManager:
                         db=db,
                     )
                     await self._set_cached_schemas(cache_key, schemas, cache_ttl)
+                    # Discovery succeeded → clear any stale reauth flag.
+                    if umc.needs_reauth or umc.last_auth_error:
+                        umc.needs_reauth = False
+                        umc.last_auth_error = None
+                        try:
+                            await db.commit()
+                        except Exception:
+                            await db.rollback()
                 except Exception as exc:
+                    msg = str(exc)
+                    is_auth = _is_auth_error(exc, msg)
                     logger.error(
-                        "MCP discovery failed for '%s' (user=%s): %s -- skipping",
+                        "MCP discovery failed for '%s' (user=%s): %s -- skipping%s",
                         server_slug,
                         user_id,
-                        exc,
+                        msg,
+                        " (marking needs_reauth)" if is_auth else "",
+                    )
+                    if is_auth:
+                        umc.needs_reauth = True
+                        umc.last_auth_error = msg[:500]
+                        try:
+                            await db.commit()
+                        except Exception:
+                            await db.rollback()
+                    unavailable_servers.append(
+                        {
+                            "server_slug": server_slug,
+                            "reason": "auth_failed" if is_auth else "discovery_failed",
+                            "error": msg[:200],
+                        }
                     )
                     continue
 
@@ -328,6 +358,7 @@ class McpManager:
             "mcp_configs": mcp_configs,
             "resource_catalog": resource_catalog,
             "prompt_catalog": prompt_catalog,
+            "unavailable_servers": unavailable_servers,
         }
 
     # ------------------------------------------------------------------
@@ -422,3 +453,36 @@ def _coerce_uuid(val: Any) -> UUID:
 def _prefixed_tool_name(server_slug: str, tool: dict[str, Any]) -> str:
     """Build the Tesslate-prefixed tool name for disabled_tools matching."""
     return f"mcp__{server_slug}__{tool.get('name', '')}"
+
+
+_AUTH_ERROR_MARKERS = (
+    "401",
+    "unauthorized",
+    "oauth",
+    "invalid_token",
+    "invalid_grant",
+    "token expired",
+    "expired token",
+    "403",
+    "forbidden",
+)
+
+
+def _is_auth_error(exc: Exception, msg: str) -> bool:
+    """Best-effort detector for auth-failure exceptions raised during discovery.
+
+    MCP SDK errors wrap OAuth 401s inside TaskGroup exceptions whose message
+    contains the transport error, so we match on substrings rather than type.
+    """
+    lowered = msg.lower()
+    if any(m in lowered for m in _AUTH_ERROR_MARKERS):
+        return True
+    # ReauthRequired is the explicit typed case.
+    try:
+        from .oauth_flow import ReauthRequired
+
+        if isinstance(exc, ReauthRequired):
+            return True
+    except ImportError:
+        pass
+    return False

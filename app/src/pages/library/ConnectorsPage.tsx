@@ -46,6 +46,11 @@ export interface InstalledMcpServer {
   // True when the connector actually has working credentials. Distinct
   // from is_active — a row can be enabled but not yet connected.
   is_connected?: boolean;
+  // True when tool discovery last failed with a 401/OAuth error — the
+  // connector was previously authorized but tokens went stale. UI renders a
+  // red dot + "Reconnect" CTA when this flag is set.
+  needs_reauth?: boolean;
+  last_auth_error?: string | null;
   disabled_tools?: string[] | null;
   // Agent ids this connector is currently assigned to. Pre-filled by the
   // list endpoint so the "Add to Agent" button can render its count
@@ -421,7 +426,14 @@ function McpServerListRow({ server }: { server: InstalledMcpServer }) {
             {server.server_name || server.server_slug || 'Connector'}
           </span>
           <span
-            className={`w-1.5 h-1.5 rounded-full shrink-0 ${server.is_active ? 'bg-[var(--status-success)]' : 'bg-[var(--text-subtle)]'}`}
+            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              server.needs_reauth
+                ? 'bg-[var(--status-error)]'
+                : server.is_active
+                  ? 'bg-[var(--status-success)]'
+                  : 'bg-[var(--text-subtle)]'
+            }`}
+            title={server.needs_reauth ? 'Reconnect required' : server.is_active ? 'Active' : 'Inactive'}
           />
         </span>
         <span className="text-[11px] text-[var(--text-subtle)] block truncate font-mono">
@@ -714,12 +726,25 @@ function McpServerCard({
               <span className="text-xs font-semibold text-[var(--text)] truncate">
                 {server.server_name || server.server_slug || 'Connector'}
               </span>
-              {/* Green = actually connected (tokens/creds present);
-                  grey = installed-but-not-connected. Prevents the card
-                  from claiming "Active" when OAuth was never completed. */}
+              {/* Status dot: red = authorized-but-tokens-stale (needs_reauth),
+                  green = actively connected, grey = never connected / no creds.
+                  Red wins over green because a broken token is worse than
+                  not-yet-connected from the user's POV. */}
               <span
-                className={`w-1.5 h-1.5 rounded-full shrink-0 ${server.is_connected ? 'bg-[var(--status-success)]' : 'bg-[var(--text-subtle)]'}`}
-                title={server.is_connected ? 'Connected' : 'Not connected'}
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                  server.needs_reauth
+                    ? 'bg-[var(--status-error)]'
+                    : server.is_connected
+                      ? 'bg-[var(--status-success)]'
+                      : 'bg-[var(--text-subtle)]'
+                }`}
+                title={
+                  server.needs_reauth
+                    ? `Reconnect required${server.last_auth_error ? `: ${server.last_auth_error}` : ''}`
+                    : server.is_connected
+                      ? 'Connected'
+                      : 'Not connected'
+                }
               />
             </span>
             <span className="text-[11px] text-[var(--text-subtle)] block truncate">

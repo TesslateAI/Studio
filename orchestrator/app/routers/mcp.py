@@ -76,6 +76,8 @@ def _build_config_response(
         project_id=config.project_id,
         is_oauth=is_oauth,
         is_connected=is_connected,
+        needs_reauth=bool(getattr(config, "needs_reauth", False)),
+        last_auth_error=getattr(config, "last_auth_error", None),
         disabled_tools=config.disabled_tools,
         assigned_agent_ids=assigned_agent_ids or [],
         icon=agent.icon if agent else None,
@@ -511,6 +513,8 @@ async def uninstall_mcp_server(
     )
     config.credentials = None
     config.disabled_tools = []
+    config.needs_reauth = False
+    config.last_auth_error = None
     config.is_active = False
     await db.commit()
 
@@ -1024,6 +1028,10 @@ async def disconnect_mcp_config(
     # For static-auth connectors, wipe the encrypted env-var blob too so
     # the card flips to "Not connected" uniformly.
     config.credentials = None
+    # Disconnect clears the reauth flag — the connector is now in the "not
+    # connected" state, not "connected but stale."
+    config.needs_reauth = False
+    config.last_auth_error = None
     await db.commit()
     await _invalidate_mcp_cache(user.id, config.id)
 

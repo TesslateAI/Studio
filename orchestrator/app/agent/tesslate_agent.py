@@ -163,16 +163,25 @@ def format_tool_result(result: dict[str, Any]) -> str:
             if "message" in tool_result:
                 parts.append(tool_result["message"])
 
-            for field_name in ("content", "stdout", "output", "preview"):
-                if field_name in tool_result:
-                    output = str(tool_result[field_name])
-                    if len(output) > MAX_TOOL_OUTPUT:
-                        half = MAX_TOOL_OUTPUT // 2
-                        elided = len(output) - MAX_TOOL_OUTPUT
-                        output = (
-                            f"{output[:half]}\n... ({elided} chars truncated) ...\n{output[-half:]}"
-                        )
-                    parts.append(output)
+            # Output fields may live at the top level, under `details` (the
+            # shape produced by success_output(..., details={...})), or under
+            # `result` (the flattened MCP shape). Check all three so payloads
+            # don't get silently dropped — otherwise the model only sees the
+            # `message` ("tool X completed.") and hallucinates.
+            details_dict = tool_result.get("details") if isinstance(tool_result.get("details"), dict) else {}
+            for field_name in ("content", "stdout", "output", "preview", "result"):
+                value = tool_result.get(field_name, details_dict.get(field_name))
+                if value is None:
+                    continue
+                output = str(value)
+                if len(output) > MAX_TOOL_OUTPUT:
+                    half = MAX_TOOL_OUTPUT // 2
+                    elided = len(output) - MAX_TOOL_OUTPUT
+                    output = (
+                        f"{output[:half]}\n... ({elided} chars truncated) ...\n{output[-half:]}"
+                    )
+                parts.append(output)
+                break
 
             if "files" in tool_result and isinstance(tool_result["files"], list):
                 parts.append(
