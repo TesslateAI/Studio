@@ -13,6 +13,9 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
 	"github.com/TesslateAI/tesslate-btrfs-csi/pkg/btrfs"
@@ -404,20 +407,49 @@ func (d *Driver) runHub(ctx context.Context) error {
 		}
 	}
 
-	// NodeResolver discovers CSI node pods via K8s Endpoints API and maps
-	// stable K8s node names → current pod IPs.
-	resolver, err := volumehub.NewNodeResolver("tesslate-btrfs-csi-node-svc", "kube-system", 9741)
+	// Build in-cluster K8s client. rest.InClusterConfig handles projected
+	// service-account token rotation, CA bundle reloading, and TLS — client-go's
+	// bearer-token transport re-reads the token file before expiry, so we do
+	// not cache any credential material ourselves.
+	restCfg, err := rest.InClusterConfig()
 	if err != nil {
-		return fmt.Errorf("create node resolver: %w", err)
+		return fmt.Errorf("in-cluster config: %w", err)
+	}
+	restCfg.UserAgent = "tesslate-volumehub/1.0"
+	k8sClient, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return fmt.Errorf("kubernetes clientset: %w", err)
+	}
+
+	// Two informer factories share the same client (and auth transport):
+	//   - namespaced (kube-system) for the headless service's Endpoints object
+	//   - cluster-scoped for Nodes + Pods (resource headroom math)
+	nsFactory := informers.NewSharedInformerFactoryWithOptions(k8sClient, 10*time.Minute,
+		informers.WithNamespace("kube-system"))
+	clusterFactory := informers.NewSharedInformerFactory(k8sClient, 10*time.Minute)
+
+	resolver := volumehub.NewNodeResolver(nsFactory, "tesslate-btrfs-csi-node-svc", "kube-system", 9741)
+	resWatcher := volumehub.NewResourceWatcher(clusterFactory, 30*time.Second)
+
+	// Start factories and block until caches are hot before serving any RPC.
+	// This replaces the old "read once at startup" list call — informers
+	// manage list+watch with correct bookmarks, 410 Gone handling, and auth.
+	nsFactory.Start(ctx.Done())
+	clusterFactory.Start(ctx.Done())
+	if !resolver.WaitForCacheSync(ctx) {
+		return fmt.Errorf("endpoints informer cache never synced")
+	}
+	if !resWatcher.WaitForCacheSync(ctx) {
+		return fmt.Errorf("node/pod informer cache never synced")
 	}
 
 	// nodeClientFactory resolves K8s node name → pod IP at connection time.
+	// Cache is authoritative once synced; the WaitForCacheSync below is a
+	// defensive no-op in the hot path (returns immediately).
 	nodeClientFactory := func(nodeName string) (*nodeops.Client, error) {
 		addr := resolver.Resolve(nodeName)
 		if addr == "" {
-			if _, refreshErr := resolver.Refresh(ctx); refreshErr != nil {
-				return nil, fmt.Errorf("resolve node %s (refresh failed: %w)", nodeName, refreshErr)
-			}
+			resolver.WaitForCacheSync(ctx)
 			addr = resolver.Resolve(nodeName)
 			if addr == "" {
 				return nil, fmt.Errorf("node %s not found in endpoints", nodeName)
@@ -426,14 +458,6 @@ func (d *Driver) runHub(ctx context.Context) error {
 		return nodeops.NewClient(addr, nil)
 	}
 
-	// Start ResourceWatcher — standalone resource headroom tracker. Polls
-	// K8s node/pod resources every 30s into its own map. No registry dependency.
-	resWatcher := volumehub.NewResourceWatcher(
-		resolver.HTTPClient(),
-		resolver.APIHost(),
-		resolver.Token(),
-		30*time.Second,
-	)
 	go resWatcher.Start(ctx)
 
 	// Start VolumeHub gRPC server with CAS store for manifest reads.

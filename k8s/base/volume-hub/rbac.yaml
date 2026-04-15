@@ -12,10 +12,10 @@ rules:
 - apiGroups: [""]
   resources: ["nodes"]
   verbs: ["get", "list", "watch"]
-# Pod discovery for cache state
+# Pod discovery for cache state (informer watch for per-node headroom math)
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list"]
+  verbs: ["get", "list", "watch"]
 # Endpoints discovery for CSI node pod IP resolution
 - apiGroups: [""]
   resources: ["endpoints"]
