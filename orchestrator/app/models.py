@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -170,7 +171,9 @@ class ProjectSnapshot(Base):
     volume_size_bytes = Column(BigInteger, nullable=True)  # Size of the volume at snapshot time
 
     # Snapshot metadata
-    snapshot_type = Column(String(50), default="hibernation", nullable=False)  # hibernation, manual, sync
+    snapshot_type = Column(
+        String(50), default="hibernation", nullable=False
+    )  # hibernation, manual, sync
     status = Column(String(50), default="pending", nullable=False)  # pending, ready, error, deleted
     label = Column(String(255), nullable=True)  # User-provided label for manual snapshots
     is_latest = Column(Boolean, default=False, nullable=False)  # Track latest snapshot per project
@@ -1394,7 +1397,9 @@ class UserProvider(Base):
     user = relationship("User", back_populates="custom_providers")
 
     # Unique constraint: each team can only have one provider with a given slug
-    __table_args__ = (UniqueConstraint("user_id", "slug", "team_id", name="uq_user_provider_slug_team"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "slug", "team_id", name="uq_user_provider_slug_team"),
+    )
 
 
 # ============================================================================
@@ -1915,6 +1920,23 @@ class UserMcpConfig(Base):
     """
 
     __tablename__ = "user_mcp_configs"
+    __table_args__ = (
+        # Partial unique index — prevents duplicate installs of the same
+        # catalog connector for a given (user, scope, team, project).
+        # Custom connectors (marketplace_agent_id IS NULL) are excluded.
+        # COALESCE maps NULLs to a sentinel UUID so the index treats
+        # (user, agent, "user", NULL, NULL) as a single distinct key.
+        Index(
+            "uq_user_mcp_configs_scope",
+            "user_id",
+            "marketplace_agent_id",
+            "scope_level",
+            text("COALESCE(team_id, '00000000-0000-0000-0000-000000000000')"),
+            text("COALESCE(project_id, '00000000-0000-0000-0000-000000000000')"),
+            unique=True,
+            postgresql_where=text("marketplace_agent_id IS NOT NULL AND is_active = true"),
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(
@@ -2012,8 +2034,8 @@ class McpOAuthConnection(Base):
         unique=True,
     )
     server_url = Column(Text, nullable=False)
-    tokens_encrypted = Column(Text, nullable=False)          # Fernet(json(OAuthToken))
-    client_info_encrypted = Column(Text, nullable=False)     # Fernet(json(OAuthClientInformationFull))
+    tokens_encrypted = Column(Text, nullable=False)  # Fernet(json(OAuthToken))
+    client_info_encrypted = Column(Text, nullable=False)  # Fernet(json(OAuthClientInformationFull))
     token_expires_at = Column(DateTime(timezone=True), nullable=True)
     last_refresh_at = Column(DateTime(timezone=True), nullable=True)
     auth_server_url = Column(Text, nullable=True)

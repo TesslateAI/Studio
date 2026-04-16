@@ -651,10 +651,17 @@ async def assign_mcp_to_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    # Check for existing assignment
-    assignment_ownership = (
-        AgentMcpAssignment.team_id == team_id if team_id else AgentMcpAssignment.user_id == user.id
-    )
+    # Check for existing assignment — use OR-based ownership matching
+    # _get_owned_config to show both personal and team assignments.
+    from sqlalchemy import or_ as _or
+
+    if team_id is not None:
+        assignment_ownership = _or(
+            AgentMcpAssignment.user_id == user.id,
+            AgentMcpAssignment.team_id == team_id,
+        )
+    else:
+        assignment_ownership = AgentMcpAssignment.user_id == user.id
     existing_result = await db.execute(
         select(AgentMcpAssignment).where(
             AgentMcpAssignment.agent_id == agent_id,
@@ -723,11 +730,18 @@ async def unassign_mcp_from_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove an MCP server from a specific agent."""
-    # Resolve active team for ownership scoping
+    # Resolve active team for ownership scoping — OR-based to match
+    # _get_owned_config and avoid hiding personal assignments.
+    from sqlalchemy import or_ as _or
+
     team_id = user.default_team_id
-    ownership_filter = (
-        AgentMcpAssignment.team_id == team_id if team_id else AgentMcpAssignment.user_id == user.id
-    )
+    if team_id is not None:
+        ownership_filter = _or(
+            AgentMcpAssignment.user_id == user.id,
+            AgentMcpAssignment.team_id == team_id,
+        )
+    else:
+        ownership_filter = AgentMcpAssignment.user_id == user.id
 
     result = await db.execute(
         select(AgentMcpAssignment).where(
@@ -752,11 +766,18 @@ async def get_agent_mcp_servers(
     db: AsyncSession = Depends(get_db),
 ):
     """List MCP servers assigned to a specific agent."""
-    # Resolve active team for ownership scoping
+    # Resolve active team for ownership scoping — OR-based to match
+    # _get_owned_config and avoid hiding personal assignments.
+    from sqlalchemy import or_ as _or
+
     team_id = user.default_team_id
-    ownership_filter = (
-        AgentMcpAssignment.team_id == team_id if team_id else AgentMcpAssignment.user_id == user.id
-    )
+    if team_id is not None:
+        ownership_filter = _or(
+            AgentMcpAssignment.user_id == user.id,
+            AgentMcpAssignment.team_id == team_id,
+        )
+    else:
+        ownership_filter = AgentMcpAssignment.user_id == user.id
 
     # Verify agent exists
     agent_result = await db.execute(

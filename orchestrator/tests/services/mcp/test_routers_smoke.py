@@ -117,6 +117,47 @@ def test_start_oauth_request_allows_platform_app_with_slug():
     assert body.marketplace_agent_slug == "mcp-github-oauth"
 
 
+def test_assignment_ownership_uses_or_filter():
+    """Agent assignment endpoints must use OR-based ownership filter.
+
+    When team_id is set, the filter should be (user_id OR team_id),
+    matching _get_owned_config. An exclusive filter (team_id ONLY when
+    set) hides personal assignments and lets any team member modify
+    another member's assignments.
+    """
+    import inspect
+    import textwrap
+
+    from app.routers.mcp import assign_mcp_to_agent, get_agent_mcp_servers, unassign_mcp_from_agent
+
+    for fn in (assign_mcp_to_agent, unassign_mcp_from_agent, get_agent_mcp_servers):
+        source = textwrap.dedent(inspect.getsource(fn))
+        # The old buggy pattern: `X.team_id == team_id if team_id else X.user_id == user.id`
+        # This is an exclusive either/or. The fix should use or_() or _or().
+        assert "if team_id else" not in source, (
+            f"{fn.__name__} still uses exclusive 'if team_id else' ownership "
+            f"filter — must use OR-based filter matching _get_owned_config"
+        )
+
+
+def test_user_mcp_config_has_unique_scope_index():
+    """UserMcpConfig must have a unique index on its scope tuple.
+
+    Without a DB-level constraint, concurrent installs of the same
+    connector can create duplicate rows via the SELECT-then-INSERT
+    upsert pattern in _upsert_user_mcp_config.
+    """
+    from app.models import UserMcpConfig
+
+    table = UserMcpConfig.__table__
+    unique_indexes = [
+        idx for idx in table.indexes if idx.unique and "uq_user_mcp_configs_scope" in idx.name
+    ]
+    assert len(unique_indexes) == 1, (
+        "UserMcpConfig must have a unique index named 'uq_user_mcp_configs_scope'"
+    )
+
+
 def test_require_project_member_is_not_a_noop():
     """_require_project_member must actually check permissions.
 
