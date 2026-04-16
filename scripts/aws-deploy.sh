@@ -565,22 +565,26 @@ case "$COMMAND" in
             ROLLOUT_IMGS+=("${RESTART_NAMES[$i]}")
         done
 
-        # Handle compute image restarts (kube-system: CSI node + Volume Hub)
-        # CSI nodes restart first, Hub restarts LAST (so it rediscovers stable node IPs).
+        # Handle compute image restarts (kube-system: CSI node + Volume Hub).
+        # Hub MUST restart only after the CSI DaemonSet rollout finishes:
+        # restarting Hub while CSI pods are still draining causes the new Hub
+        # to rebuild its registry without the terminating node, which hangs
+        # the in-flight drain RPC on a broken gRPC connection and stalls the
+        # pod for the full 10-minute terminationGracePeriodSeconds.
         for img in $IMAGES; do
             if [ -n "${COMPUTE_RESTART[$img]:-}" ]; then
                 info "[compute] Applying compute manifests..."
                 kubectl apply -k "$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}/compute"
-                info "[compute] Rolling restart CSI node daemonset..."
+                info "[compute] Rolling restart CSI node daemonset (Hub will follow once nodes stable)..."
                 kubectl rollout restart daemonset/tesslate-btrfs-csi-node -n kube-system
-                kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=1800s &
+                (
+                    kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=1800s || exit $?
+                    echo "[compute] CSI nodes stable, restarting Volume Hub..."
+                    kubectl rollout restart deployment/tesslate-volume-hub -n kube-system || exit $?
+                    kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=300s
+                ) &
                 ROLLOUT_PIDS+=($!)
-                ROLLOUT_IMGS+=("csi-node")
-                info "[compute] Rolling restart Volume Hub (after nodes are stable)..."
-                kubectl rollout restart deployment/tesslate-volume-hub -n kube-system
-                kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s &
-                ROLLOUT_PIDS+=($!)
-                ROLLOUT_IMGS+=("volume-hub")
+                ROLLOUT_IMGS+=("compute(csi+hub)")
             fi
         done
 

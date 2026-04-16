@@ -808,6 +808,13 @@ func (a *volumeActor) dispatch(req opRequest) {
 	switch req.op {
 	case opSync:
 		result.err = a.doSync(req.ctx, false) // background: fail-fast lease
+		// Self-heal: if the subvolume vanished, untrack so we stop retrying
+		// every cycle. Spawn a goroutine — UntrackVolume submits an opUntrack
+		// to this same actor and would deadlock if invoked synchronously.
+		if errors.Is(result.err, errVolumeGone) {
+			klog.Infof("background sync: subvolume volumes/%s gone, auto-untracking", a.volumeID)
+			go a.daemon.UntrackVolume(a.volumeID)
+		}
 	case opSyncUser:
 		result.err = a.doSync(req.ctx, true) // user: wait for lease
 	case opDrain:
@@ -1679,10 +1686,23 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 
 	// Generation check for clean volumes — outside the lock since
 	// GetGeneration runs a btrfs subprocess (~1ms each).
+	// staleVols collects tracked volumes whose subvolume vanished from disk
+	// (e.g. cross-node migration left a stale tracked entry behind). Untracked
+	// outside the loop to avoid re-entrant locking.
+	var staleVols []string
 	for _, gc := range genChecks {
 		volGen, volErr := d.btrfs.GetGeneration(ctx, "volumes/"+gc.volumeID)
+		if volErr != nil {
+			// Distinguish "subvolume gone" from transient I/O errors. Only
+			// untrack on confirmed absence — SubvolumeExists does its own
+			// safe stat() and avoids spamming the log on flakes.
+			if !d.btrfs.SubvolumeExists(ctx, "volumes/"+gc.volumeID) {
+				staleVols = append(staleVols, gc.volumeID)
+			}
+			continue
+		}
 		snapGen, snapErr := d.btrfs.GetGeneration(ctx, gc.lastSnapPath)
-		if volErr == nil && snapErr == nil && volGen > snapGen {
+		if snapErr == nil && volGen > snapGen {
 			klog.V(2).Infof("syncAll: %s promoted to dirty (vol gen %d > snap gen %d, direct write detected)",
 				gc.volumeID, volGen, snapGen)
 			d.mu.Lock()
@@ -1695,6 +1715,13 @@ func (d *Daemon) syncAll(ctx context.Context) error {
 			d.mu.Unlock()
 			dirtyVols = append(dirtyVols, gc.volumeID)
 		}
+	}
+
+	// Auto-untrack stale entries. Done in a goroutine so syncAll doesn't
+	// block on per-actor drain (UntrackVolume submits an op and waits).
+	for _, vid := range staleVols {
+		klog.Infof("syncAll: subvolume volumes/%s gone from disk, auto-untracking", vid)
+		go d.UntrackVolume(vid)
 	}
 
 	if len(dirtyVols) == 0 {
