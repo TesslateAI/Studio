@@ -202,27 +202,19 @@ async def _discover_server(
 
         tools = [
             {"name": t.name, "description": t.description, "inputSchema": t.inputSchema}
-            for t in (
-                getattr(tools_result, "tools", None) or []
-            )
+            for t in (getattr(tools_result, "tools", None) or [])
         ]
         resources = [
             {"uri": str(r.uri), "name": r.name, "description": r.description}
-            for r in (
-                getattr(resources_result, "resources", None) or []
-            )
+            for r in (getattr(resources_result, "resources", None) or [])
         ]
         prompts = [
             {"name": p.name, "description": p.description}
-            for p in (
-                getattr(prompts_result, "prompts", None) or []
-            )
+            for p in (getattr(prompts_result, "prompts", None) or [])
         ]
         resource_templates = [
             {"uriTemplate": str(rt.uriTemplate), "name": rt.name, "description": rt.description}
-            for rt in (
-                getattr(resource_templates_result, "resourceTemplates", None) or []
-            )
+            for rt in (getattr(resource_templates_result, "resourceTemplates", None) or [])
         ]
 
         return McpDiscoverResponse(
@@ -342,9 +334,7 @@ async def install_mcp_server(
     # 6. Apply static-auth fields (credentials + capabilities) — these aren't
     #    set by the OAuth helper path.
     server_config = agent.config or {}
-    default_capabilities = server_config.get(
-        "capabilities", ["tools", "resources", "prompts"]
-    )
+    default_capabilities = server_config.get("capabilities", ["tools", "resources", "prompts"])
     if encrypted_creds is not None:
         config.credentials = encrypted_creds
     config.enabled_capabilities = default_capabilities
@@ -444,7 +434,9 @@ async def list_installed_mcp_servers(
             assignments_by_config.setdefault(cfg_id, []).append(agent_id)
 
     return [
-        _build_config_response(config, agent, assigned_agent_ids=assignments_by_config.get(config.id, []))
+        _build_config_response(
+            config, agent, assigned_agent_ids=assignments_by_config.get(config.id, [])
+        )
         for config, agent in rows
     ]
 
@@ -507,9 +499,7 @@ async def uninstall_mcp_server(
         )
     )
     await db.execute(
-        AgentMcpAssignment.__table__.delete().where(
-            AgentMcpAssignment.mcp_config_id == config.id
-        )
+        AgentMcpAssignment.__table__.delete().where(AgentMcpAssignment.mcp_config_id == config.id)
     )
     config.credentials = None
     config.disabled_tools = []
@@ -663,9 +653,7 @@ async def assign_mcp_to_agent(
 
     # Check for existing assignment
     assignment_ownership = (
-        AgentMcpAssignment.team_id == team_id
-        if team_id
-        else AgentMcpAssignment.user_id == user.id
+        AgentMcpAssignment.team_id == team_id if team_id else AgentMcpAssignment.user_id == user.id
     )
     existing_result = await db.execute(
         select(AgentMcpAssignment).where(
@@ -738,9 +726,7 @@ async def unassign_mcp_from_agent(
     # Resolve active team for ownership scoping
     team_id = user.default_team_id
     ownership_filter = (
-        AgentMcpAssignment.team_id == team_id
-        if team_id
-        else AgentMcpAssignment.user_id == user.id
+        AgentMcpAssignment.team_id == team_id if team_id else AgentMcpAssignment.user_id == user.id
     )
 
     result = await db.execute(
@@ -769,9 +755,7 @@ async def get_agent_mcp_servers(
     # Resolve active team for ownership scoping
     team_id = user.default_team_id
     ownership_filter = (
-        AgentMcpAssignment.team_id == team_id
-        if team_id
-        else AgentMcpAssignment.user_id == user.id
+        AgentMcpAssignment.team_id == team_id if team_id else AgentMcpAssignment.user_id == user.id
     )
 
     # Verify agent exists
@@ -857,13 +841,14 @@ class ReconnectResponse(BaseModel):
     flow_id: str
 
 
-def _require_project_member(user: Any, project_id: UUID) -> None:
-    """Stub for project-level permission check. Real check lives in teams/project RBAC.
+async def _require_project_member(user: Any, project_id: UUID, db: AsyncSession) -> None:
+    """Verify the user has edit-level access to the target project.
 
     Raises 403 if the user cannot manage connectors at the project scope.
     """
-    # TODO(permissions): wire into `orchestrator.app.permissions`.
-    return
+    from ..permissions import Permission, get_project_with_access
+
+    await get_project_with_access(db, str(project_id), user.id, Permission.PROJECT_EDIT)
 
 
 @router.get("/catalog", response_model=list[CatalogEntry])
@@ -873,11 +858,13 @@ async def get_mcp_catalog(
 ):
     """List all published MCP servers from the marketplace."""
     result = await db.execute(
-        select(MarketplaceAgent).where(
+        select(MarketplaceAgent)
+        .where(
             MarketplaceAgent.item_type == "mcp_server",
             MarketplaceAgent.is_active.is_(True),
             MarketplaceAgent.is_published.is_(True),
-        ).order_by(MarketplaceAgent.name.asc())
+        )
+        .order_by(MarketplaceAgent.name.asc())
     )
     rows = list(result.scalars().all())
     return [
@@ -935,7 +922,7 @@ async def override_config_for_project(
     client — the new row is inactive-but-present until the user completes
     OAuth (or the override copies credentials for static auth).
     """
-    _require_project_member(user, body.project_id)
+    await _require_project_member(user, body.project_id, db)
 
     source = await _get_owned_config(config_id, user.id, db, team_id=user.default_team_id)
     if source.scope_level == "project":

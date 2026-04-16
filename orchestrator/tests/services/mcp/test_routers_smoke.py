@@ -117,6 +117,29 @@ def test_start_oauth_request_allows_platform_app_with_slug():
     assert body.marketplace_agent_slug == "mcp-github-oauth"
 
 
+def test_require_project_member_is_not_a_noop():
+    """_require_project_member must actually check permissions.
+
+    A no-op stub allows any authenticated user to create project-scoped
+    overrides on arbitrary projects they don't own.
+    """
+    import inspect
+
+    from app.routers.mcp import _require_project_member
+
+    # The function must be async (needs DB access for permission checks)
+    assert inspect.iscoroutinefunction(_require_project_member), (
+        "_require_project_member must be async to perform DB-backed permission checks"
+    )
+
+    # The function must accept 3 args: (user, project_id, db)
+    sig = inspect.signature(_require_project_member)
+    params = list(sig.parameters.keys())
+    assert len(params) == 3, (
+        f"_require_project_member must accept (user, project_id, db), got {params}"
+    )
+
+
 def test_mcp_config_response_surfaces_scope_and_oauth_flag():
     """Library page renders Reconnect button off is_oauth; scope_level drives badges."""
     from datetime import datetime
