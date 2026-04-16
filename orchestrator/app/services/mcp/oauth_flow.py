@@ -83,8 +83,13 @@ class ReauthRequired(Exception):
     Settings → Connectors.
     """
 
-    def __init__(self, *, server_url: str, config_id: UUID | None = None,
-                 message: str = "OAuth re-authorisation required") -> None:
+    def __init__(
+        self,
+        *,
+        server_url: str,
+        config_id: UUID | None = None,
+        message: str = "OAuth re-authorisation required",
+    ) -> None:
         super().__init__(message)
         self.server_url = server_url
         self.config_id = config_id
@@ -185,9 +190,7 @@ async def start_oauth_flow(
         authorize_endpoint = str(as_metadata.authorization_endpoint)
         token_endpoint = str(as_metadata.token_endpoint)
         registration_endpoint = (
-            str(as_metadata.registration_endpoint)
-            if as_metadata.registration_endpoint
-            else None
+            str(as_metadata.registration_endpoint) if as_metadata.registration_endpoint else None
         )
 
     # -------------------- 2. Resolve client_info -------------------------
@@ -233,9 +236,7 @@ async def start_oauth_flow(
             client_secret=platform_app.get("client_secret"),
             redirect_uri=redirect_uri,
             scope=scope,
-            token_endpoint_auth_method=platform_app.get(
-                "auth_method", "client_secret_basic"
-            ),
+            token_endpoint_auth_method=platform_app.get("auth_method", "client_secret_basic"),
         )
     else:
         raise OAuthFlowError(f"unknown registration_method: {registration_method}")
@@ -294,7 +295,10 @@ async def start_oauth_flow(
     authorize_url = f"{authorize_endpoint}?{urlencode(params)}"
     logger.info(
         "MCP OAuth flow started: user=%s server=%s method=%s flow=%s",
-        user_id, server_url, registration_method, flow_id,
+        user_id,
+        server_url,
+        registration_method,
+        flow_id,
     )
     return StartResult(authorize_url=authorize_url, flow_id=flow_id, state=state)
 
@@ -357,7 +361,9 @@ async def complete_oauth_flow(
 
     logger.info(
         "MCP OAuth flow complete: user=%s server=%s config=%s",
-        flow.user_id, flow.server_url, config.id,
+        flow.user_id,
+        flow.server_url,
+        config.id,
     )
     return config
 
@@ -408,9 +414,7 @@ async def _discover_protected_resource(
     return None
 
 
-def _pick_auth_server(
-    prm: ProtectedResourceMetadata | None, server_url: str
-) -> str:
+def _pick_auth_server(prm: ProtectedResourceMetadata | None, server_url: str) -> str:
     """Return the authorization_server URL. Falls back to the server origin."""
     if prm and prm.authorization_servers:
         return str(prm.authorization_servers[0])
@@ -435,17 +439,13 @@ async def _discover_authorization_server(
         if resp.status_code == 404:
             continue
         if resp.status_code != 200:
-            last_err = OAuthFlowError(
-                f"AS metadata discovery returned {resp.status_code} at {url}"
-            )
+            last_err = OAuthFlowError(f"AS metadata discovery returned {resp.status_code} at {url}")
             continue
         try:
             return OAuthMetadata.model_validate(resp.json())
         except Exception as exc:
             last_err = exc
-    raise OAuthFlowError(
-        f"Could not discover AS metadata for {auth_server_url}: {last_err}"
-    )
+    raise OAuthFlowError(f"Could not discover AS metadata for {auth_server_url}: {last_err}")
 
 
 # ---------------------------------------------------------------------------
@@ -453,9 +453,7 @@ async def _discover_authorization_server(
 # ---------------------------------------------------------------------------
 
 
-def _build_client_metadata(
-    *, redirect_uri: str, scope: str | None
-) -> OAuthClientMetadata:
+def _build_client_metadata(*, redirect_uri: str, scope: str | None) -> OAuthClientMetadata:
     return OAuthClientMetadata(
         redirect_uris=[redirect_uri],
         token_endpoint_auth_method="client_secret_basic",
@@ -482,9 +480,7 @@ async def _dynamic_register(
             headers={"content-type": "application/json", "accept": "application/json"},
         )
     if resp.status_code not in (200, 201):
-        raise OAuthFlowError(
-            f"DCR failed: {resp.status_code} {resp.text[:500]}"
-        )
+        raise OAuthFlowError(f"DCR failed: {resp.status_code} {resp.text[:500]}")
     return OAuthClientInformationFull.model_validate(resp.json())
 
 
@@ -513,20 +509,16 @@ def _make_byo_client_info(
 def _lookup_platform_app(settings: Any, server_url: str) -> dict[str, Any] | None:
     """Map a server URL to a Tesslate-owned OAuth app via settings.
 
-    Matches the configured key against the URL *host* (not the full URL) to
-    avoid accidental matches against unrelated domains.
+    Matches the configured key as an **exact** host-part against the URL
+    hostname (split on ``'.'``).  Prefix/suffix matching is intentionally
+    avoided — ``"github"`` must not match ``"githubcopilot.evil.com"`` or an
+    attacker could exfiltrate the platform ``client_secret``.
     """
     apps = getattr(settings, "mcp_platform_oauth_apps", {}) or {}
     host = urlparse(server_url).hostname or ""
-    host = host.lower()
+    parts = host.lower().split(".")
     for key, cfg in apps.items():
-        k = key.lower()
-        parts = host.replace(".", " ").split()
-        if (
-            k in parts
-            or any(p.startswith(k) for p in parts)
-            or any(p.endswith("-" + k) for p in parts)
-        ):
+        if key.lower() in parts:
             return cfg
     return None
 
@@ -604,9 +596,7 @@ async def _exchange_code(
 # ---------------------------------------------------------------------------
 
 
-async def _upsert_user_mcp_config(
-    db: AsyncSession, *, flow: FlowState
-) -> UserMcpConfig:
+async def _upsert_user_mcp_config(db: AsyncSession, *, flow: FlowState) -> UserMcpConfig:
     """Create or update the UserMcpConfig row matching the flow's scope.
 
     Uniqueness key: ``(user_id, marketplace_agent_id|server_url, scope_level,
@@ -615,9 +605,7 @@ async def _upsert_user_mcp_config(
     collide.
     """
     user_id = UUID(flow.user_id)
-    marketplace_agent_id = (
-        UUID(flow.marketplace_agent_id) if flow.marketplace_agent_id else None
-    )
+    marketplace_agent_id = UUID(flow.marketplace_agent_id) if flow.marketplace_agent_id else None
     team_id = UUID(flow.team_id) if flow.team_id else None
     project_id = UUID(flow.project_id) if flow.project_id else None
 
@@ -752,9 +740,7 @@ def _expiry_from_tokens(tokens: OAuthToken) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
-async def resolve_catalog_server(
-    db: AsyncSession, slug: str
-) -> tuple[MarketplaceAgent, str]:
+async def resolve_catalog_server(db: AsyncSession, slug: str) -> tuple[MarketplaceAgent, str]:
     """Return a published MCP MarketplaceAgent and its server URL by slug."""
     result = await db.execute(
         select(MarketplaceAgent).where(

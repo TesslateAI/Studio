@@ -89,6 +89,34 @@ def test_mcp_install_request_rejects_team_scope():
         )
 
 
+def test_start_oauth_request_rejects_platform_app_without_slug():
+    """platform_app registration method must only be used with catalog entries.
+
+    If a user can send registration_method='platform_app' with an arbitrary
+    server_url (no marketplace_agent_slug), they can exfiltrate Tesslate's
+    platform client_secret to their own server.
+    """
+    from app.routers.mcp_oauth import StartOAuthRequest
+
+    with pytest.raises(ValidationError, match="platform_app.*marketplace_agent_slug"):
+        StartOAuthRequest(
+            server_url="https://githubcopilot.evil.com/mcp",
+            registration_method="platform_app",
+        )
+
+
+def test_start_oauth_request_allows_platform_app_with_slug():
+    """platform_app is valid when a catalog slug is provided."""
+    from app.routers.mcp_oauth import StartOAuthRequest
+
+    body = StartOAuthRequest(
+        marketplace_agent_slug="mcp-github-oauth",
+        registration_method="platform_app",
+    )
+    assert body.registration_method == "platform_app"
+    assert body.marketplace_agent_slug == "mcp-github-oauth"
+
+
 def test_mcp_config_response_surfaces_scope_and_oauth_flag():
     """Library page renders Reconnect button off is_oauth; scope_level drives badges."""
     from datetime import datetime

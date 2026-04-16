@@ -10,12 +10,10 @@ import pytest
 from mcp.shared.auth import OAuthClientInformationFull
 
 from app.services.mcp.oauth_flow import (
-    OAuthFlowError,
     _lookup_platform_app,
     _make_byo_client_info,
     _pick_auth_server,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -49,15 +47,33 @@ def test_make_byo_client_info_honours_auth_method():
     assert info.token_endpoint_auth_method == "client_secret_post"
 
 
-def test_lookup_platform_app_matches_substring():
+def test_lookup_platform_app_exact_match():
+    """Platform app lookup must use exact host-part matching, not prefix."""
     apps = {
         "github": {"client_id": "gh-id", "client_secret": "gh-sec"},
         "slack": {"client_id": "sl-id", "client_secret": "sl-sec"},
     }
     s = _Settings(apps)
-    assert _lookup_platform_app(s, "https://api.githubcopilot.com/mcp/")["client_id"] == "gh-id"
+    # Exact part match — "github" is a full part of "api.github.com"
+    assert _lookup_platform_app(s, "https://api.github.com/mcp")["client_id"] == "gh-id"
     assert _lookup_platform_app(s, "https://slack.com/mcp")["client_id"] == "sl-id"
     assert _lookup_platform_app(s, "https://mcp.linear.app") is None
+
+
+def test_lookup_platform_app_rejects_prefix_spoofs():
+    """Attacker-controlled domains with key as prefix must NOT match.
+
+    Without exact matching, 'githubcopilot.evil.com' would leak Tesslate's
+    GitHub client_secret to the attacker's token endpoint.
+    """
+    apps = {
+        "github": {"client_id": "gh-id", "client_secret": "gh-sec"},
+    }
+    s = _Settings(apps)
+    # Prefix spoof — "githubcopilot" starts with "github" but is not "github"
+    assert _lookup_platform_app(s, "https://api.githubcopilot.com/mcp/") is None
+    assert _lookup_platform_app(s, "https://githubevil.example.com/mcp") is None
+    assert _lookup_platform_app(s, "https://github-phishing.attacker.com/mcp") is None
 
 
 def test_pick_auth_server_prefers_prm_first_entry():

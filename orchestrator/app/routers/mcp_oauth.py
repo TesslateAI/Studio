@@ -19,7 +19,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -59,6 +59,21 @@ class StartOAuthRequest(BaseModel):
     byo_client_id: str | None = None
     byo_client_secret: str | None = None
     scope: str | None = None
+
+    @model_validator(mode="after")
+    def _platform_app_requires_catalog_slug(self) -> StartOAuthRequest:
+        """``platform_app`` may only be used with catalog entries.
+
+        Without this guard an attacker could send an arbitrary ``server_url``
+        with ``registration_method='platform_app'`` and exfiltrate Tesslate's
+        platform ``client_secret`` to their own token endpoint.
+        """
+        if self.registration_method == "platform_app" and not self.marketplace_agent_slug:
+            raise ValueError(
+                "platform_app registration requires marketplace_agent_slug — "
+                "custom server URLs must use 'dcr' or 'byo'"
+            )
+        return self
 
 
 class StartOAuthResponse(BaseModel):
@@ -102,15 +117,11 @@ async def start_oauth(
         )
     if body.scope_level == "project":
         if not body.project_id:
-            raise HTTPException(
-                status_code=400, detail="project_id required for project scope"
-            )
+            raise HTTPException(status_code=400, detail="project_id required for project scope")
         # RBAC: caller must be able to edit the target project.
         from ..permissions import Permission, get_project_with_access
 
-        await get_project_with_access(
-            db, str(body.project_id), user.id, Permission.PROJECT_EDIT
-        )
+        await get_project_with_access(db, str(body.project_id), user.id, Permission.PROJECT_EDIT)
 
     marketplace_agent_id: UUID | None = None
     server_url: str
@@ -219,7 +230,9 @@ async def oauth_status(
 def _callback_url(request: Request) -> str:
     """Build the absolute URL of this router's /callback endpoint."""
     settings = get_settings()
-    base = getattr(settings, "public_base_url", "") or f"{request.url.scheme}://{request.url.netloc}"
+    base = (
+        getattr(settings, "public_base_url", "") or f"{request.url.scheme}://{request.url.netloc}"
+    )
     return f"{base.rstrip('/')}/api/mcp/oauth/callback"
 
 
@@ -244,9 +257,7 @@ def _callback_html(
     if message:
         payload["message"] = message
 
-    safe_message = html_mod.escape(
-        message or ("Connected!" if status_ == "success" else "Failed")
-    )
+    safe_message = html_mod.escape(message or ("Connected!" if status_ == "success" else "Failed"))
     payload_js = _safe_json_js(payload)
     origins_js = _safe_json_js(origins)
     body = f"""
