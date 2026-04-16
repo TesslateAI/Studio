@@ -23,7 +23,10 @@ import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { marketplaceApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import { runOAuthPopup } from '../../components/connectors/ConnectorOAuthPopup';
-import { ConnectorPermissionsDrawer, type ConnectorTool } from '../../components/connectors/ConnectorPermissionsDrawer';
+import {
+  ConnectorPermissionsDrawer,
+  type ConnectorTool,
+} from '../../components/connectors/ConnectorPermissionsDrawer';
 import { motion } from 'framer-motion';
 import { staggerContainer, staggerItem } from '../../components/cards';
 import type { LibraryAgent } from './types';
@@ -105,7 +108,7 @@ export default function ConnectorsPage({
   const [showSearch, setShowSearch] = useState(false);
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const [viewMode, setViewMode] = useState<ViewMode>('cards');
+  const [viewMode, _setViewMode] = useState<ViewMode>('cards');
   const [showSortMenu, setShowSortMenu] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -300,38 +303,7 @@ export default function ConnectorsPage({
             )}
           </div>
 
-          {/* Display toggle */}
-          <button
-            onClick={() => setViewMode((v) => (v === 'cards' ? 'list' : 'cards'))}
-            className={`btn btn-icon ${viewMode === 'list' ? 'btn-active' : ''}`}
-          >
-            {viewMode === 'cards' ? (
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
-            ) : (
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <line x1="3" y1="12" x2="21" y2="12" />
-                <line x1="3" y1="18" x2="21" y2="18" />
-              </svg>
-            )}
-          </button>
+          {/* Display toggle — hidden until list view has actions (M8, #347) */}
 
           <div className="w-px h-[22px] bg-[var(--border)] mx-0.5" />
 
@@ -353,9 +325,7 @@ export default function ConnectorsPage({
                 <div className="w-12 h-12 bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius)] flex items-center justify-center mb-4">
                   <Plugs size={20} className="text-[var(--text-subtle)]" />
                 </div>
-                <h3 className="text-xs font-semibold text-[var(--text)] mb-2">
-                  No connectors yet
-                </h3>
+                <h3 className="text-xs font-semibold text-[var(--text)] mb-2">No connectors yet</h3>
                 <p className="text-[11px] text-[var(--text-muted)] max-w-sm mb-6">
                   Connectors give your agents access to external tools, APIs, and data sources
                   (Linear, GitHub, Notion, and more). Browse the marketplace to install one.
@@ -433,7 +403,9 @@ function McpServerListRow({ server }: { server: InstalledMcpServer }) {
                   ? 'bg-[var(--status-success)]'
                   : 'bg-[var(--text-subtle)]'
             }`}
-            title={server.needs_reauth ? 'Reconnect required' : server.is_active ? 'Active' : 'Inactive'}
+            title={
+              server.needs_reauth ? 'Reconnect required' : server.is_active ? 'Active' : 'Inactive'
+            }
           />
         </span>
         <span className="text-[11px] text-[var(--text-subtle)] block truncate font-mono">
@@ -484,10 +456,10 @@ function McpServerCard({
   // refresh; lazy-load on dropdown open is a fallback if the field is
   // absent (older clients / cached responses).
   const [assignedAgentIds, setAssignedAgentIds] = useState<Set<string>>(
-    () => new Set(server.assigned_agent_ids ?? []),
+    () => new Set(server.assigned_agent_ids ?? [])
   );
   const [assignmentsLoaded, setAssignmentsLoaded] = useState(
-    () => server.assigned_agent_ids !== undefined,
+    () => server.assigned_agent_ids !== undefined
   );
   const [agentBusyId, setAgentBusyId] = useState<string | null>(null);
 
@@ -504,11 +476,7 @@ function McpServerCard({
     setReconnecting(true);
     try {
       const { authorize_url, flow_id } = await marketplaceApi.reconnectMcp(server.id);
-      const result = await runOAuthPopup(
-        authorize_url,
-        flow_id,
-        marketplaceApi.getMcpOAuthStatus,
-      );
+      const result = await runOAuthPopup(authorize_url, flow_id, marketplaceApi.getMcpOAuthStatus);
       if (result.status === 'success') {
         toast.success(`Reconnected ${server.server_name || 'connector'}`);
         onReload();
@@ -528,7 +496,7 @@ function McpServerCard({
     const label = server.server_name || server.server_slug || 'connector';
     if (
       !window.confirm(
-        `Disconnect ${label}? Your stored credentials will be removed, but the connector stays installed and its agent assignments are preserved. Click Connect later to re-authorize.`,
+        `Disconnect ${label}? Your stored credentials will be removed, but the connector stays installed and its agent assignments are preserved. Click Connect later to re-authorize.`
       )
     )
       return;
@@ -840,74 +808,72 @@ function McpServerCard({
             from attaching a connector that has no working credentials, which
             would silently fail at agent runtime. */}
         {server.is_active && server.is_connected && (
-        <div ref={dropdownRef} className="relative mt-3">
-          <button
-            onClick={() => {
-              const next = !showDropdown;
-              setShowDropdown(next);
-              if (next) ensureAssignmentsLoaded();
-            }}
-            className="btn btn-sm w-full"
-          >
-            <Plugs size={12} />
-            {assignedAgentIds.size === 0
-              ? 'Add to Agent'
-              : assignedAgentIds.size === 1
-                ? 'Assigned to 1 agent'
-                : `Assigned to ${assignedAgentIds.size} agents`}
-          </button>
-          {showDropdown && (
-            <div
-              className="absolute left-0 right-0 top-full mt-1 z-30 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg max-h-56 overflow-y-auto"
+          <div ref={dropdownRef} className="relative mt-3">
+            <button
+              onClick={() => {
+                const next = !showDropdown;
+                setShowDropdown(next);
+                if (next) ensureAssignmentsLoaded();
+              }}
+              className="btn btn-sm w-full"
             >
-              <div className="px-2 pt-1 pb-1.5 text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                Agents
+              <Plugs size={12} />
+              {assignedAgentIds.size === 0
+                ? 'Add to Agent'
+                : assignedAgentIds.size === 1
+                  ? 'Assigned to 1 agent'
+                  : `Assigned to ${assignedAgentIds.size} agents`}
+            </button>
+            {showDropdown && (
+              <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg max-h-56 overflow-y-auto">
+                <div className="px-2 pt-1 pb-1.5 text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
+                  Agents
+                </div>
+                {enabledAgents.length === 0 ? (
+                  <p className="px-2 py-3 text-[11px] text-[var(--text-muted)] text-center">
+                    No active agents. Enable an agent first.
+                  </p>
+                ) : (
+                  enabledAgents.map((agent) => {
+                    const isAssigned = assignedAgentIds.has(agent.id);
+                    const isBusy = agentBusyId === agent.id;
+                    return (
+                      <button
+                        key={agent.id}
+                        onClick={() => toggleAgentAssignment(agent.id, agent.name)}
+                        disabled={isBusy}
+                        className={`w-full text-left px-2 py-1.5 rounded-[var(--radius-small)] text-xs transition-colors flex items-center gap-2 ${
+                          isAssigned
+                            ? 'bg-[var(--surface-hover)] text-[var(--text)]'
+                            : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                        } ${isBusy ? 'opacity-50' : ''}`}
+                      >
+                        {agent.avatar_url ? (
+                          <img
+                            src={agent.avatar_url}
+                            alt=""
+                            className="w-5 h-5 rounded-[var(--radius-small)] object-cover border border-[var(--border)] shrink-0"
+                          />
+                        ) : (
+                          <div className="w-5 h-5 rounded-[var(--radius-small)] bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0">
+                            <img src="/favicon.svg" alt="" className="w-3 h-3" />
+                          </div>
+                        )}
+                        <span className="truncate font-medium flex-1">{agent.name}</span>
+                        {isAssigned && (
+                          <Check
+                            size={12}
+                            weight="bold"
+                            className="text-[var(--status-success)] shrink-0"
+                          />
+                        )}
+                      </button>
+                    );
+                  })
+                )}
               </div>
-              {enabledAgents.length === 0 ? (
-                <p className="px-2 py-3 text-[11px] text-[var(--text-muted)] text-center">
-                  No active agents. Enable an agent first.
-                </p>
-              ) : (
-                enabledAgents.map((agent) => {
-                  const isAssigned = assignedAgentIds.has(agent.id);
-                  const isBusy = agentBusyId === agent.id;
-                  return (
-                    <button
-                      key={agent.id}
-                      onClick={() => toggleAgentAssignment(agent.id, agent.name)}
-                      disabled={isBusy}
-                      className={`w-full text-left px-2 py-1.5 rounded-[var(--radius-small)] text-xs transition-colors flex items-center gap-2 ${
-                        isAssigned
-                          ? 'bg-[var(--surface-hover)] text-[var(--text)]'
-                          : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
-                      } ${isBusy ? 'opacity-50' : ''}`}
-                    >
-                      {agent.avatar_url ? (
-                        <img
-                          src={agent.avatar_url}
-                          alt=""
-                          className="w-5 h-5 rounded-[var(--radius-small)] object-cover border border-[var(--border)] shrink-0"
-                        />
-                      ) : (
-                        <div className="w-5 h-5 rounded-[var(--radius-small)] bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center shrink-0">
-                          <img src="/favicon.svg" alt="" className="w-3 h-3" />
-                        </div>
-                      )}
-                      <span className="truncate font-medium flex-1">{agent.name}</span>
-                      {isAssigned && (
-                        <Check
-                          size={12}
-                          weight="bold"
-                          className="text-[var(--status-success)] shrink-0"
-                        />
-                      )}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
         )}
 
         {/* Actions row */}
@@ -944,10 +910,7 @@ function McpServerCard({
               )}
             </>
           ) : hasEnvVars ? (
-            <button
-              onClick={() => setShowCredentials(!showCredentials)}
-              className="btn btn-sm"
-            >
+            <button onClick={() => setShowCredentials(!showCredentials)} className="btn btn-sm">
               <Key size={12} />
               Credentials
             </button>
@@ -1066,7 +1029,6 @@ function McpServerCard({
           ) : null}
         </div>
       )}
-
     </motion.div>
   );
 }

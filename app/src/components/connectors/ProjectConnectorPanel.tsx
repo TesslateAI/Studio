@@ -33,14 +33,14 @@ export function ProjectConnectorPanel({ projectId }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await marketplaceApi.getInstalledMcpServers();
+      const list = await marketplaceApi.getInstalledMcpServers({ project_id: projectId });
       setConfigs(list);
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Failed to load connectors'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     load();
@@ -60,7 +60,11 @@ export function ProjectConnectorPanel({ projectId }: Props) {
   };
 
   const removeOverride = async (c: InstalledConfig) => {
-    if (!window.confirm(`Remove project override for ${c.server_name}? Falls back to team/personal default.`)) {
+    if (
+      !window.confirm(
+        `Remove project override for ${c.server_name}? Falls back to team/personal default.`
+      )
+    ) {
       return;
     }
     setWorking(c.id);
@@ -75,7 +79,12 @@ export function ProjectConnectorPanel({ projectId }: Props) {
     }
   };
 
-  if (loading) return <div className="p-6"><LoadingSpinner /></div>;
+  if (loading)
+    return (
+      <div className="p-6">
+        <LoadingSpinner />
+      </div>
+    );
 
   const projectRows = configs.filter((c) => c.scope_level === 'project');
   const inheritedRows = configs.filter((c) => c.scope_level !== 'project');

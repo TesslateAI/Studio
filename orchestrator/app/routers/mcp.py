@@ -375,6 +375,7 @@ async def install_mcp_server(
 
 @router.get("/installed", response_model=list[McpConfigResponse])
 async def list_installed_mcp_servers(
+    project_id: UUID | None = None,
     user=Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -402,7 +403,7 @@ async def list_installed_mcp_servers(
 
     from sqlalchemy.orm import selectinload as _selectin
 
-    result = await db.execute(
+    stmt = (
         select(UserMcpConfig, MarketplaceAgent)
         # Eager-load oauth_connection so _build_config_response can read
         # tokens_encrypted without triggering async lazy-load (MissingGreenlet).
@@ -414,6 +415,11 @@ async def list_installed_mcp_servers(
         )
         .order_by(UserMcpConfig.created_at.desc())
     )
+    # Optional project_id filter for ProjectConnectorPanel — returns only
+    # connectors scoped to a specific project (M9, #347).
+    if project_id is not None:
+        stmt = stmt.where(UserMcpConfig.project_id == project_id)
+    result = await db.execute(stmt)
     rows = result.all()
 
     # Bulk-fetch agent assignments for every config in one query so the

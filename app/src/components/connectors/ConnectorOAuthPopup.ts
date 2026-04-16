@@ -4,6 +4,9 @@
  *
  * Falls back to polling `getMcpOAuthStatus(flowId)` via `statusPoller` if
  * the postMessage never arrives (popup-blocker / cross-origin isolation).
+ *
+ * A 5-minute maximum timeout prevents the promise from hanging indefinitely
+ * when postMessage is blocked and the popup never closes.
  */
 export type OAuthPopupResult = {
   status: 'success' | 'error';
@@ -17,16 +20,18 @@ export type StatusPoller = (flowId: string) => Promise<{
   error?: string | null;
 }>;
 
+const MAX_OAUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 export async function runOAuthPopup(
   authorizeUrl: string,
   flowId: string,
-  statusPoller?: StatusPoller,
+  statusPoller?: StatusPoller
 ): Promise<OAuthPopupResult> {
   return new Promise((resolve, reject) => {
     const popup = window.open(
       authorizeUrl,
       'mcp-oauth',
-      'width=620,height=740,resizable,scrollbars',
+      'width=620,height=740,resizable,scrollbars'
     );
     if (!popup) {
       reject(new Error('Popup blocked'));
@@ -36,10 +41,14 @@ export async function runOAuthPopup(
     const expectedOrigin = window.location.origin;
     let resolved = false;
 
+    // Declared here so the max timeout can be cleared from cleanup.
+    let maxTimeout: ReturnType<typeof setTimeout> | null = null;
+
     const cleanup = () => {
       window.removeEventListener('message', handler);
       clearInterval(closedPoll);
       if (statusInterval) clearInterval(statusInterval);
+      if (maxTimeout) clearTimeout(maxTimeout);
     };
 
     const handler = (ev: MessageEvent) => {
@@ -93,5 +102,20 @@ export async function runOAuthPopup(
         reject(new Error('Popup closed before completion'));
       }
     }, 500);
+
+    // Maximum timeout — if postMessage is blocked AND the popup never
+    // closes (mobile browsers, cross-origin iframe embeds), the promise
+    // would hang indefinitely without this.
+    maxTimeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      try {
+        popup.close();
+      } catch {
+        /* ignore */
+      }
+      reject(new Error('OAuth flow timed out'));
+    }, MAX_OAUTH_TIMEOUT_MS);
   });
 }
