@@ -314,9 +314,11 @@ async def _connect_streamable_http(
         from .oauth_storage import PostgresTokenStorage
 
         # Coerce potential str → UUID; SQLAlchemy + asyncpg are strict about types.
-        config_uuid = user_mcp_config_id if isinstance(
-            user_mcp_config_id, _UUID
-        ) else _UUID(str(user_mcp_config_id))
+        config_uuid = (
+            user_mcp_config_id
+            if isinstance(user_mcp_config_id, _UUID)
+            else _UUID(str(user_mcp_config_id))
+        )
 
         oauth_storage = PostgresTokenStorage(db, config_uuid)
         tokens = await oauth_storage.get_tokens()
@@ -335,7 +337,8 @@ async def _connect_streamable_http(
             stored_client.token_endpoint_auth_method if stored_client else "client_secret_basic"
         )
         stored_redirects = (
-            list(stored_client.redirect_uris) if stored_client and stored_client.redirect_uris
+            list(stored_client.redirect_uris)
+            if stored_client and stored_client.redirect_uris
             else ["https://unused.local/mcp-runtime"]
         )
 
@@ -461,7 +464,8 @@ async def _connect_sse(
             stored_client.token_endpoint_auth_method if stored_client else "client_secret_basic"
         )
         stored_redirects = (
-            list(stored_client.redirect_uris) if stored_client and stored_client.redirect_uris
+            list(stored_client.redirect_uris)
+            if stored_client and stored_client.redirect_uris
             else ["https://unused.local/mcp-runtime"]
         )
 
@@ -501,7 +505,10 @@ async def _connect_sse(
             sse_client(**sse_kwargs) as (read_stream, write_stream),
             ClientSession(read_stream, write_stream, **session_kwargs) as session,
         ):
-            await session.initialize()
+            await asyncio.wait_for(
+                session.initialize(),
+                timeout=timeout or settings.mcp_tool_timeout,
+            )
             logger.info("MCP SSE session initialised for %s", url)
             yield session
     except BaseExceptionGroup as eg:

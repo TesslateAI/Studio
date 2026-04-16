@@ -253,6 +253,8 @@ def _reauth_output(exc: ReauthRequired, server_slug: str) -> dict[str, Any]:
     ReauthBanner linking back to Settings → Connectors.
     """
     return {
+        "success": False,
+        "error": exc.message,
         "_mcp_reauth_required": True,
         "server_slug": server_slug,
         "server_url": exc.server_url,

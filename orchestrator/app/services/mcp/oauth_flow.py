@@ -47,6 +47,7 @@ from mcp.shared.auth import (
 )
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config import get_settings
@@ -669,7 +670,16 @@ async def _upsert_user_mcp_config(db: AsyncSession, *, flow: FlowState) -> UserM
         enabled_capabilities=["tools", "resources", "prompts"],
     )
     db.add(config)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # Concurrent request won the race — the unique index rejected our
+        # INSERT. Roll back the failed flush and return the winner's row.
+        await db.rollback()
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if existing:
+            return existing
+        raise  # should not happen — re-raise if the row vanished
     return config
 
 

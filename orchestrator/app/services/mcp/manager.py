@@ -7,6 +7,7 @@ schemas, and bridging into the agent's tool system.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from typing import Any
@@ -192,7 +193,10 @@ class McpManager:
 
         logger.debug(
             "MCP context resolve: user=%s team=%s project=%s agent=%s",
-            user_uuid, team_uuid, project_uuid, agent_uuid,
+            user_uuid,
+            team_uuid,
+            project_uuid,
+            agent_uuid,
         )
 
         configs: list[UserMcpConfig] = await resolve_mcp_configs(
@@ -273,13 +277,14 @@ class McpManager:
                     )
                     await self._set_cached_schemas(cache_key, schemas, cache_ttl)
                     # Discovery succeeded → clear any stale reauth flag.
+                    # Use flush (not commit) to avoid side-effects on the
+                    # worker's shared session — the worker commits at the
+                    # end of the task lifecycle.
                     if umc.needs_reauth or umc.last_auth_error:
                         umc.needs_reauth = False
                         umc.last_auth_error = None
-                        try:
-                            await db.commit()
-                        except Exception:
-                            await db.rollback()
+                        with contextlib.suppress(Exception):
+                            await db.flush()
                 except Exception as exc:
                     msg = str(exc)
                     is_auth = _is_auth_error(exc, msg)
@@ -293,10 +298,8 @@ class McpManager:
                     if is_auth:
                         umc.needs_reauth = True
                         umc.last_auth_error = msg[:500]
-                        try:
-                            await db.commit()
-                        except Exception:
-                            await db.rollback()
+                        with contextlib.suppress(Exception):
+                            await db.flush()
                     unavailable_servers.append(
                         {
                             "server_slug": server_slug,
@@ -309,7 +312,8 @@ class McpManager:
             # Apply the user's per-tool disabled_tools filter before bridging.
             disabled_tools = set(umc.disabled_tools or [])
             filtered_tools = [
-                t for t in (schemas.get("tools") or [])
+                t
+                for t in (schemas.get("tools") or [])
                 if _prefixed_tool_name(server_slug, t) not in disabled_tools
             ]
 
@@ -332,17 +336,13 @@ class McpManager:
                 resource_tool = bridge_mcp_resources(server_slug, resources, templates)
                 if resource_tool:
                     all_tools.append(resource_tool)
-                resource_catalog.extend(
-                    {**r, "server": server_slug} for r in resources
-                )
+                resource_catalog.extend({**r, "server": server_slug} for r in resources)
 
             if "prompts" in enabled and schemas.get("prompts"):
                 prompt_tool = bridge_mcp_prompts(server_slug, schemas["prompts"])
                 if prompt_tool:
                     all_tools.append(prompt_tool)
-                prompt_catalog.extend(
-                    {**p, "server": server_slug} for p in schemas["prompts"]
-                )
+                prompt_catalog.extend({**p, "server": server_slug} for p in schemas["prompts"])
 
         logger.info(
             "Built MCP context for user %s: %d servers, %d tools, %d resources, %d prompts",
@@ -458,14 +458,15 @@ def _prefixed_tool_name(server_slug: str, tool: dict[str, Any]) -> str:
 _AUTH_ERROR_MARKERS = (
     "401",
     "unauthorized",
-    "oauth",
     "invalid_token",
     "invalid_grant",
     "token expired",
     "expired token",
-    "403",
-    "forbidden",
 )
+
+# 403/forbidden is intentionally excluded — it usually means "authenticated
+# but insufficient permissions" (authZ, not authN). Re-auth won't fix a
+# permissions problem and creates a confusing loop for the user.
 
 
 def _is_auth_error(exc: Exception, msg: str) -> bool:
@@ -473,6 +474,10 @@ def _is_auth_error(exc: Exception, msg: str) -> bool:
 
     MCP SDK errors wrap OAuth 401s inside TaskGroup exceptions whose message
     contains the transport error, so we match on substrings rather than type.
+
+    Only matches authentication failures (expired/invalid tokens, 401), not
+    authorization failures (403/forbidden) which indicate scope issues rather
+    than stale credentials.
     """
     lowered = msg.lower()
     if any(m in lowered for m in _AUTH_ERROR_MARKERS):

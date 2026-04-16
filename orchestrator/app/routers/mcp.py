@@ -532,7 +532,12 @@ async def test_mcp_server(
             )
 
     try:
-        discovery = await _discover_server(agent, credentials)
+        discovery = await _discover_server(
+            agent,
+            credentials,
+            user_mcp_config_id=config.id,
+            db=db,
+        )
         return McpTestResponse(
             success=True,
             tool_count=len(discovery.tools),
