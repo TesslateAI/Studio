@@ -286,6 +286,12 @@ resource "kubernetes_secret" "app_secrets" {
     DIGITALOCEAN_CLIENT_SECRET      = var.digitalocean_client_secret
     DIGITALOCEAN_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/digitalocean/callback"
 
+    # MCP Connector OAuth Apps (platform_app registration method)
+    MCP_OAUTH_APP_GITHUB_CLIENT_ID     = var.mcp_oauth_app_github_client_id
+    MCP_OAUTH_APP_GITHUB_CLIENT_SECRET = var.mcp_oauth_app_github_client_secret
+    MCP_OAUTH_APP_SLACK_CLIENT_ID      = var.mcp_oauth_app_slack_client_id
+    MCP_OAUTH_APP_SLACK_CLIENT_SECRET  = var.mcp_oauth_app_slack_client_secret
+
     # Container Push Configuration
     KANIKO_IMAGE                  = var.kaniko_image
     CONTAINER_PUSH_TIMEOUT        = tostring(var.container_push_timeout)

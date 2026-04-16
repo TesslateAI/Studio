@@ -158,6 +158,21 @@ netlify_client_secret = ""
 deployment_encryption_key = ""
 
 # -----------------------------------------------------------------------------
+# MCP Connector OAuth Apps (Optional - for platform_app connectors)
+# -----------------------------------------------------------------------------
+# Some MCP servers (GitHub Copilot MCP, Slack) require a pre-registered OAuth
+# app. Register at the provider and set the callback URL to:
+#   https://<your-domain>/api/mcp/oauth/callback
+
+# GitHub Copilot MCP: https://github.com/settings/developers
+mcp_oauth_app_github_client_id     = ""
+mcp_oauth_app_github_client_secret = ""
+
+# Slack MCP: https://api.slack.com/apps
+mcp_oauth_app_slack_client_id     = ""
+mcp_oauth_app_slack_client_secret = ""
+
+# -----------------------------------------------------------------------------
 # Stripe Configuration (Optional)
 # -----------------------------------------------------------------------------
 stripe_secret_key            = ""

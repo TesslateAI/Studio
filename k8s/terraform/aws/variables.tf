@@ -390,6 +390,33 @@ variable "deployment_encryption_key" {
   default     = ""
 }
 
+# MCP Connector OAuth Apps (platform_app registration method)
+variable "mcp_oauth_app_github_client_id" {
+  description = "GitHub Copilot MCP OAuth app client ID (register at github.com/settings/developers)"
+  type        = string
+  default     = ""
+}
+
+variable "mcp_oauth_app_github_client_secret" {
+  description = "GitHub Copilot MCP OAuth app client secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "mcp_oauth_app_slack_client_id" {
+  description = "Slack MCP OAuth app client ID (register at api.slack.com/apps)"
+  type        = string
+  default     = ""
+}
+
+variable "mcp_oauth_app_slack_client_secret" {
+  description = "Slack MCP OAuth app client secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "kaniko_image" {
   description = "Kaniko executor image for container builds"
   type        = string
