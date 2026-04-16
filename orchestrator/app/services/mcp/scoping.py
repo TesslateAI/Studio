@@ -61,18 +61,19 @@ async def resolve_mcp_configs(
     ]
     if team_ids:
         conditions.append(
-            (UserMcpConfig.scope_level == "team")
-            & (UserMcpConfig.team_id.in_(team_ids))
+            (UserMcpConfig.scope_level == "team") & (UserMcpConfig.team_id.in_(team_ids))
         )
     if project_id is not None:
         conditions.append(
-            (UserMcpConfig.scope_level == "project")
-            & (UserMcpConfig.project_id == project_id)
+            (UserMcpConfig.scope_level == "project") & (UserMcpConfig.project_id == project_id)
         )
 
     stmt = (
         select(UserMcpConfig)
-        .options(selectinload(UserMcpConfig.marketplace_agent))
+        .options(
+            selectinload(UserMcpConfig.marketplace_agent),
+            selectinload(UserMcpConfig.oauth_connection),
+        )
         .where(UserMcpConfig.is_active.is_(True))
         .where(or_(*conditions))
     )
@@ -83,15 +84,12 @@ async def resolve_mcp_configs(
         # filter by assignment.user_id here — for team-scope MCPs the
         # enablement may have been set up by any team member (typically an
         # admin), and gating on the current user would hide it from peers.
-        stmt = (
-            stmt.join(
-                AgentMcpAssignment,
-                AgentMcpAssignment.mcp_config_id == UserMcpConfig.id,
-            )
-            .where(
-                AgentMcpAssignment.agent_id == agent_id,
-                AgentMcpAssignment.enabled.is_(True),
-            )
+        stmt = stmt.join(
+            AgentMcpAssignment,
+            AgentMcpAssignment.mcp_config_id == UserMcpConfig.id,
+        ).where(
+            AgentMcpAssignment.agent_id == agent_id,
+            AgentMcpAssignment.enabled.is_(True),
         )
 
     rows: list[UserMcpConfig] = list((await db.execute(stmt)).scalars().all())

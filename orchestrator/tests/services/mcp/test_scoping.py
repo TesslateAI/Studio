@@ -14,8 +14,44 @@ import pytest
 
 from app.services.mcp.scoping import _apply_precedence
 
-
 pytestmark = pytest.mark.unit
+
+
+def test_resolve_query_eager_loads_oauth_connection():
+    """resolve_mcp_configs must selectinload oauth_connection.
+
+    Without this, accessing umc.oauth_connection under async SQLAlchemy
+    raises MissingGreenlet — a hard crash for custom OAuth connectors
+    whose URL is hydrated from the paired McpOAuthConnection row.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from app.services.mcp.scoping import resolve_mcp_configs
+
+    # Parse the source of resolve_mcp_configs and look for selectinload
+    # calls that include oauth_connection.
+    source = inspect.getsource(resolve_mcp_configs)
+    # Dedent because inspect.getsource may include leading indentation
+    source = textwrap.dedent(source)
+    tree = ast.parse(source)
+
+    # Walk AST for calls like selectinload(UserMcpConfig.oauth_connection)
+    found_oauth_load = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            # Check the source text of this call node
+            call_src = ast.get_source_segment(source, node)
+            if call_src and "selectinload" in call_src and "oauth_connection" in call_src:
+                found_oauth_load = True
+                break
+
+    assert found_oauth_load, (
+        "resolve_mcp_configs must eagerly load oauth_connection via "
+        "selectinload(UserMcpConfig.oauth_connection) to prevent "
+        "MissingGreenlet crashes on custom OAuth connectors"
+    )
 
 
 def _row(*, scope_level: str, marketplace_agent_id=None):
