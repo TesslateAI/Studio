@@ -43,7 +43,7 @@ from ..models import (
     User,
     UserPurchasedAgent,
 )
-from ..permissions import Permission
+from ..permissions import Permission, get_effective_project_role
 from ..schemas import AgentChatRequest, AgentChatResponse, AgentStepResponse
 from ..schemas import Chat as ChatSchema
 from ..services.agent_context import (
@@ -221,9 +221,7 @@ async def get_user_sessions(
     ]
     # Team-scope: show chats belonging to the active team OR legacy chats with no team
     if current_user.default_team_id:
-        filters.append(
-            or_(Chat.team_id == current_user.default_team_id, Chat.team_id.is_(None))
-        )
+        filters.append(or_(Chat.team_id == current_user.default_team_id, Chat.team_id.is_(None)))
 
     query = (
         select(
@@ -1051,7 +1049,11 @@ async def agent_chat(
             chat = chat_result.scalar_one_or_none()
 
             if not chat:
-                chat = Chat(user_id=current_user.id, project_id=request.project_id, team_id=current_user.default_team_id)
+                chat = Chat(
+                    user_id=current_user.id,
+                    project_id=request.project_id,
+                    team_id=current_user.default_team_id,
+                )
                 db.add(chat)
                 await db.commit()
                 await db.refresh(chat)
@@ -1508,7 +1510,11 @@ async def agent_chat_stream(
                 chat = chat_result.scalar_one_or_none()
 
             if not chat:
-                chat = Chat(user_id=current_user.id, project_id=request.project_id, team_id=current_user.default_team_id)
+                chat = Chat(
+                    user_id=current_user.id,
+                    project_id=request.project_id,
+                    team_id=current_user.default_team_id,
+                )
                 db.add(chat)
                 await db.commit()
                 await db.refresh(chat)
@@ -2181,32 +2187,70 @@ def get_chat_connection_manager() -> ConnectionManager:
     return manager
 
 
+async def _authorize_ws_project_access(
+    db: AsyncSession,
+    user: User,
+    project_id: str | None,
+) -> tuple[Project | None, str | None]:
+    """Verify the WS caller has access to *project_id*.
+
+    Returns ``(project, None)`` when access is granted or ``(None, reason)``
+    when access is denied. The caller should close the WebSocket with code
+    1008 using *reason* when access is denied.
+
+    Security: this is the single gate that stops IDOR on the chat WS. Without
+    it, any authenticated user can read every other user's project files and
+    chat history by supplying the victim's project UUID as the first-frame
+    ``project_id``. See issue #343.
+    """
+    if not project_id:
+        return None, "project_id required"
+    try:
+        proj_uuid = UUID(str(project_id))
+    except (ValueError, TypeError):
+        return None, "invalid project_id"
+
+    result = await db.execute(select(Project).where(Project.id == proj_uuid))
+    project = result.scalar_one_or_none()
+    if project is None:
+        return None, "project not found"
+
+    effective_role = await get_effective_project_role(db, project, user.id)
+    if effective_role is None:
+        return None, "access denied"
+
+    return project, None
+
+
 @router.websocket("/ws/{token}")
 async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession = Depends(get_db)):
     user = None
     project_id = None
     try:
-        # Verify token and get user
-        # Accept both old tokens (no audience) and new fastapi-users tokens (audience: ["fastapi-users:auth"])
-        payload = jwt.decode(
-            token,
-            settings.secret_key,
-            algorithms=[settings.algorithm],
-            options={"verify_aud": False},  # Don't verify audience for backward compatibility
-        )
-        user_id_or_username = payload.get("sub")
-
-        # Try to find user by ID (UUID) first (fastapi-users), then by username (old system)
+        # Verify token and get user. Audience is verified against the
+        # fastapi-users default ("fastapi-users:auth") — legacy tokens without
+        # audience are rejected and users must re-authenticate.
         try:
-            from uuid import UUID
+            payload = jwt.decode(
+                token,
+                settings.secret_key,
+                algorithms=[settings.algorithm],
+                audience="fastapi-users:auth",
+            )
+        except jwt.InvalidTokenError:
+            await websocket.close(code=1008, reason="invalid token")
+            return
+        sub = payload.get("sub")
 
-            user_uuid = UUID(user_id_or_username)
-            result = await db.execute(select(User).where(User.id == user_uuid))
-            user = result.scalar_one_or_none()
+        # fastapi-users always issues UUID-formatted `sub`. Reject anything else.
+        try:
+            user_uuid = UUID(str(sub))
         except (ValueError, TypeError):
-            # Not a valid UUID, try username lookup
-            result = await db.execute(select(User).where(User.username == user_id_or_username))
-            user = result.scalar_one_or_none()
+            await websocket.close(code=1008, reason="invalid token")
+            return
+
+        result = await db.execute(select(User).where(User.id == user_uuid))
+        user = result.scalar_one_or_none()
 
         if not user:
             await websocket.close(code=1008)
@@ -2220,9 +2264,18 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
             first_message = await websocket.receive_json()
             project_id = first_message.get("project_id")
 
-            if not project_id:
-                logger.error("WebSocket: No project_id in first message")
-                await websocket.close(code=1008, reason="project_id required")
+            # ── Authorization gate (fix for #343) ──────────────────────
+            # Verify the caller has access to this project BEFORE we
+            # register the connection or touch any project-scoped data.
+            _project, denial_reason = await _authorize_ws_project_access(db, user, project_id)
+            if denial_reason is not None:
+                logger.warning(
+                    "WS auth denied: user=%s project_id=%s reason=%s",
+                    user.id,
+                    project_id,
+                    denial_reason,
+                )
+                await websocket.close(code=1008, reason=denial_reason)
                 return
 
             # Now register the connection with user_id and project_id
@@ -2310,6 +2363,21 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     container_id = data.get("container_id")  # Get container_id for container-scoped agents
     edit_mode = data.get("edit_mode", "ask")  # Get edit_mode from request, default to ask
     chat_id_from_client = data.get("chat_id")  # Specific chat session from frontend
+
+    # ── Re-verify project access on every message (#343) ──────────────
+    # Prevents an attacker from connecting with project A then switching
+    # to victim project B in a subsequent frame.
+    if project_id:
+        _project, denial_reason = await _authorize_ws_project_access(db, user, project_id)
+        if denial_reason is not None:
+            logger.warning(
+                "WS message auth denied: user=%s project_id=%s reason=%s",
+                user.id,
+                project_id,
+                denial_reason,
+            )
+            await websocket.send_json({"type": "error", "content": "Access denied for project"})
+            return
 
     logger.info(
         f"[WebSocket] Received message - project_id: {project_id}, container_id: {container_id}, agent_id: {agent_id}"
