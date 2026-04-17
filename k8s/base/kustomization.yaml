@@ -66,6 +66,9 @@ images:
   - name: tesslate-devserver
     newName: tesslate-devserver
     newTag: latest
+  - name: tesslate-ast
+    newName: tesslate-ast
+    newTag: latest
 
 # ConfigMap generator for common config
 configMapGenerator:

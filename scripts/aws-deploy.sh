@@ -110,8 +110,11 @@ restart_pods() {
     info "Waiting for rollouts..."
     local ROLLOUT_PIDS=()
     local ROLLOUT_NAMES=()
+    # 300s covers a cold image pull of a 400 MB image on a fresh EKS
+    # node (typically ~60s) plus app startup + probe ramp. Subsequent
+    # rollouts of the same tag are cache-hot (~10s).
     for dep in "${deployments[@]}"; do
-        kubectl rollout status "deployment/${dep}" -n tesslate --timeout=120s &
+        kubectl rollout status "deployment/${dep}" -n tesslate --timeout=300s &
         ROLLOUT_PIDS+=($!)
         ROLLOUT_NAMES+=("$dep")
     done
@@ -352,7 +355,7 @@ case "$COMMAND" in
         info "Waiting for CSI node daemonset..."
         kubectl rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=1800s
         info "Waiting for Volume Hub (includes CSI controller)..."
-        kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
+        kubectl rollout status deployment/tesslate-volume-hub -n kube-system --timeout=300s
         success "✓ Compute infrastructure deployed"
         echo
         info "Verify with: kubectl get pods -n kube-system -l 'app in (tesslate-btrfs-csi-node,tesslate-volume-hub)'"
@@ -392,21 +395,33 @@ case "$COMMAND" in
             [frontend]="app/Dockerfile.prod"
             [devserver]="orchestrator/Dockerfile.devserver"
             [compute]="services/btrfs-csi/Dockerfile"
+            [ast]="services/ast/Dockerfile"
         )
         declare -A BUILD_CONTEXTS=(
             [backend]="orchestrator/"
             [frontend]="app/"
             [devserver]="."
             [compute]="services/btrfs-csi/"
+            [ast]="services/ast/"
         )
         declare -A K8S_LABELS=(
             [backend]="app=tesslate-backend"
             [frontend]="app=tesslate-frontend"
+            # AST rides as a sidecar in the backend pod — rolling the
+            # backend deployment is what picks up a new tesslate-ast image.
+            [ast]="app=tesslate-backend"
         )
         # Additional deployments to restart when a given image is built
         # (e.g., worker uses the same image as backend)
         declare -A ALSO_RESTART=(
             [backend]="tesslate-worker"
+            [ast]="tesslate-worker"
+        )
+        # Override the restart-target deployment name when it differs
+        # from tesslate-${img}. AST pushes to tesslate-ast ECR repo but
+        # the K8s deployment to restart is tesslate-backend.
+        declare -A RESTART_DEPLOY_NAME=(
+            [ast]="tesslate-backend"
         )
         # Compute image uses kube-system namespace (CSI driver + Volume Hub)
         declare -A COMPUTE_RESTART=(
@@ -420,8 +435,8 @@ case "$COMMAND" in
         # Validate image names
         for img in $IMAGES; do
             case "$img" in
-                backend|frontend|devserver|compute) ;;
-                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute" ;;
+                backend|frontend|devserver|compute|ast) ;;
+                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute, ast" ;;
             esac
         done
 
@@ -530,9 +545,17 @@ case "$COMMAND" in
         echo
 
         info "Restarting pods..."
-        # Collect all deployments to restart (primary + additional)
+        # Collect all deployments to restart (primary + additional),
+        # deduplicating by deployment name. Multiple images can target
+        # the same deployment (e.g. `ast` and `backend` both roll the
+        # backend Deployment because AST is a sidecar inside it, and
+        # `backend` + `ast` both trigger worker restart via
+        # ALSO_RESTART). Without dedup we'd queue two sequential
+        # rollouts on the same object, each draining for up to the
+        # full terminationGracePeriodSeconds.
         RESTART_DEPLOYMENTS=()
         RESTART_NAMES=()
+        declare -A SEEN_DEPLOY=()
         for img in $IMAGES; do
             # Compute image restarts are in kube-system, not tesslate
             if [ -n "${COMPUTE_RESTART[$img]:-}" ]; then
@@ -540,13 +563,20 @@ case "$COMMAND" in
             fi
             LABEL="${K8S_LABELS[$img]:-}"
             if [ -n "$LABEL" ]; then
-                RESTART_DEPLOYMENTS+=("tesslate-${img}")
-                RESTART_NAMES+=("$img")
+                DEPLOY_NAME="${RESTART_DEPLOY_NAME[$img]:-tesslate-${img}}"
+                if [ -z "${SEEN_DEPLOY[$DEPLOY_NAME]:-}" ]; then
+                    SEEN_DEPLOY[$DEPLOY_NAME]=1
+                    RESTART_DEPLOYMENTS+=("$DEPLOY_NAME")
+                    RESTART_NAMES+=("$img")
+                fi
             fi
             EXTRA="${ALSO_RESTART[$img]:-}"
             if [ -n "$EXTRA" ]; then
-                RESTART_DEPLOYMENTS+=("$EXTRA")
-                RESTART_NAMES+=("${EXTRA#tesslate-}")
+                if [ -z "${SEEN_DEPLOY[$EXTRA]:-}" ]; then
+                    SEEN_DEPLOY[$EXTRA]=1
+                    RESTART_DEPLOYMENTS+=("$EXTRA")
+                    RESTART_NAMES+=("${EXTRA#tesslate-}")
+                fi
             fi
         done
 
@@ -560,7 +590,7 @@ case "$COMMAND" in
         ROLLOUT_IMGS=()
         for i in "${!RESTART_DEPLOYMENTS[@]}"; do
             info "[${RESTART_NAMES[$i]}] Waiting for rollout..."
-            kubectl rollout status "deployment/${RESTART_DEPLOYMENTS[$i]}" -n tesslate --timeout=120s &
+            kubectl rollout status "deployment/${RESTART_DEPLOYMENTS[$i]}" -n tesslate --timeout=300s &
             ROLLOUT_PIDS+=($!)
             ROLLOUT_IMGS+=("${RESTART_NAMES[$i]}")
         done
@@ -683,7 +713,7 @@ case "$COMMAND" in
         for ks_target in "${KUBE_SYSTEM_TARGETS[@]}"; do
             info "Restarting ${ks_target} in kube-system..."
             kubectl rollout restart "${ks_target}" -n kube-system
-            kubectl rollout status "${ks_target}" -n kube-system --timeout=120s
+            kubectl rollout status "${ks_target}" -n kube-system --timeout=300s
             success "[${ks_target##*/}] ✓ Ready"
         done
         verify_pods

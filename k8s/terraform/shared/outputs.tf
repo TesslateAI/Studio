@@ -25,6 +25,11 @@ output "ecr_devserver_url" {
   value       = aws_ecr_repository.devserver.repository_url
 }
 
+output "ecr_ast_url" {
+  description = "ECR repository URL for the AST sidecar"
+  value       = aws_ecr_repository.ast.repository_url
+}
+
 output "ecr_login_command" {
   description = "Command to login to ECR"
   value       = "aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${split("/", aws_ecr_repository.backend.repository_url)[0]}"

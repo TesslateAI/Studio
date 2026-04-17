@@ -631,6 +631,7 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     from .services.cache_service import close_redis_client
+    from .services.design.ast_client import shutdown_ast_client
     from .services.pubsub import get_pubsub
 
     # Stop Pub/Sub subscriber and forwarding tasks before closing Redis
@@ -638,6 +639,9 @@ async def shutdown():
     if pubsub:
         await pubsub.stop()
         logger.info("Redis Pub/Sub subscriber stopped")
+
+    await shutdown_ast_client()
+    logger.info("AST client channel closed")
 
     await close_redis_client()
     logger.info("Redis connection closed")

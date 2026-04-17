@@ -95,6 +95,32 @@ resource "aws_ecr_repository" "btrfs_csi" {
 }
 
 # -----------------------------------------------------------------------------
+# AST Sidecar ECR Repository
+# -----------------------------------------------------------------------------
+# Node.js gRPC service that runs as a sidecar inside the backend pod —
+# handles JSX/TSX AST transforms for the design panel. Separate image
+# so Node stays out of the backend image and AST can be versioned /
+# rolled back independently at the image level.
+resource "aws_ecr_repository" "ast" {
+  name                 = "${var.project_name}-ast"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = false
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = {
+    Name      = "${var.project_name}-ast"
+    Component = "ast"
+  }
+}
+
+# -----------------------------------------------------------------------------
 # ECR Lifecycle Policy (shared by all repos)
 # -----------------------------------------------------------------------------
 # Note: tagStatus=any rules MUST have the lowest priority (highest number)
@@ -148,6 +174,11 @@ resource "aws_ecr_lifecycle_policy" "devserver" {
 
 resource "aws_ecr_lifecycle_policy" "btrfs_csi" {
   repository = aws_ecr_repository.btrfs_csi.name
+  policy     = local.ecr_lifecycle_policy
+}
+
+resource "aws_ecr_lifecycle_policy" "ast" {
+  repository = aws_ecr_repository.ast.name
   policy     = local.ecr_lifecycle_policy
 }
 

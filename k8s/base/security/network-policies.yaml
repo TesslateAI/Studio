@@ -15,14 +15,18 @@ spec:
   - Ingress
 
 ---
-# Allow ingress from NGINX Ingress Controller
+# Allow ingress from NGINX Ingress Controller — only to the HTTP ports
+# each pod actually serves on. Prevents a compromised nginx from
+# touching sidecars or internal ports (e.g. AST :9000, postgres :5432).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-ingress-controller
+  name: allow-ingress-controller-to-backend
   namespace: tesslate
 spec:
-  podSelector: {}
+  podSelector:
+    matchLabels:
+      app: tesslate-backend
   policyTypes:
   - Ingress
   ingress:
@@ -30,6 +34,29 @@ spec:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller-to-frontend
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: tesslate-frontend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 80
 
 ---
 # Allow backend to receive traffic from frontend (same namespace)

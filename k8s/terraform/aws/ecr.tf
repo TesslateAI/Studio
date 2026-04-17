@@ -13,4 +13,5 @@ locals {
   ecr_backend_url   = "${local.ecr_registry_url}/${var.project_name}-backend"
   ecr_frontend_url  = "${local.ecr_registry_url}/${var.project_name}-frontend"
   ecr_devserver_url = "${local.ecr_registry_url}/${var.project_name}-devserver"
+  ecr_ast_url       = "${local.ecr_registry_url}/${var.project_name}-ast"
 }

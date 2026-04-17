@@ -15,7 +15,7 @@
 #   deploy-k8s         Reapply app manifests and restart pods
 #   deploy-compute     Reapply btrfs-CSI + Volume Hub manifests
 #   rebuild <svc>      Rebuild image, load into minikube, restart pod
-#   rebuild --all      Rebuild all images (backend, frontend, devserver, btrfs-csi)
+#   rebuild --all      Rebuild all images (backend, frontend, devserver, btrfs-csi, ast)
 #   restart [svc]      Restart pod(s) for a service
 #
 # Operations:
@@ -71,6 +71,7 @@ resolve_k8s() {
     backend)  echo "tesslate-backend" ;;
     frontend) echo "tesslate-frontend" ;;
     worker)   echo "tesslate-worker" ;;
+    ast)      echo "tesslate-ast" ;;
     postgres) echo "postgres" ;;
     redis)    echo "redis" ;;
     *)        echo "$name" ;;
@@ -84,6 +85,7 @@ resolve_label() {
     backend)  echo "tesslate-backend" ;;
     frontend) echo "tesslate-frontend" ;;
     worker)   echo "tesslate-worker" ;;
+    ast)      echo "tesslate-ast" ;;
     postgres) echo "postgres" ;;
     redis)    echo "redis" ;;
     *)        echo "$name" ;;
@@ -97,6 +99,7 @@ image_name() {
     frontend)  echo "tesslate-frontend" ;;
     devserver) echo "tesslate-devserver" ;;
     btrfs-csi) echo "tesslate-btrfs-csi" ;;
+    ast)       echo "tesslate-ast" ;;
     *) echo "" ;;
   esac
 }
@@ -107,6 +110,7 @@ image_dockerfile() {
     frontend)  echo "app/Dockerfile.prod" ;;
     devserver) echo "orchestrator/Dockerfile.devserver" ;;
     btrfs-csi) echo "services/btrfs-csi/Dockerfile" ;;
+    ast)       echo "services/ast/Dockerfile" ;;
   esac
 }
 
@@ -116,6 +120,7 @@ image_context() {
     frontend)  echo "app" ;;
     devserver) echo "." ;;
     btrfs-csi) echo "services/btrfs-csi" ;;
+    ast)       echo "services/ast" ;;
   esac
 }
 
@@ -433,14 +438,14 @@ cmd_rebuild() {
   done
 
   if [[ "$target" == "--all" ]]; then
-    for svc in backend frontend devserver btrfs-csi; do
+    for svc in backend frontend devserver btrfs-csi ast; do
       build_and_load "$svc" "$cache_flag"
     done
     info "Restarting all pods..."
     $KC delete pod -n "$NAMESPACE" --all
     $KC delete pod -n kube-system -l app=tesslate-volume-hub
     $KC delete pod -n kube-system -l app=tesslate-btrfs-csi-node
-    wait_for_rollout "tesslate-backend" 180
+    wait_for_rollout "tesslate-backend" 180  # ast sidecar comes up with backend
     wait_for_rollout "tesslate-frontend" 120
     $KC rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
     $KC rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
@@ -449,14 +454,14 @@ cmd_rebuild() {
   fi
 
   if [[ -z "$target" ]]; then
-    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|--all> [--no-cache]"
+    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|ast|--all> [--no-cache]"
     exit 1
   fi
 
   local img
   img=$(image_name "$target")
   if [[ -z "$img" ]]; then
-    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, --all"
+    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, ast, --all"
     exit 1
   fi
 
@@ -471,6 +476,15 @@ cmd_rebuild() {
     $KC rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
     $KC rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
     success "btrfs-csi pods restarted"
+  elif [[ "$target" == "ast" ]]; then
+    # AST runs as a sidecar in the backend pod — restart backend (which
+    # also brings the AST sidecar with it).
+    info "AST is a sidecar in the backend pod — restarting backend..."
+    $KC delete pod -n "$NAMESPACE" -l app=tesslate-backend
+    wait_for_rollout "tesslate-backend" 180
+    info "Also restarting worker (shares backend image)..."
+    $KC delete pod -n "$NAMESPACE" -l app=tesslate-worker
+    wait_for_rollout "tesslate-worker" 120
   else
     local label
     label=$(resolve_label "$target")
@@ -842,7 +856,7 @@ _usage() {
   echo "Deploy:"
   echo "  deploy-k8s         Reapply app manifests and restart pods"
   echo "  deploy-compute     Reapply btrfs-CSI + Volume Hub manifests"
-  echo "  rebuild <svc>      Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|--all)"
+  echo "  rebuild <svc>      Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|ast|--all)"
   echo "  restart [svc]      Restart pod(s) for a service"
   echo ""
   echo "Operations:"

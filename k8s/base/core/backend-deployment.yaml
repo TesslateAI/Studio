@@ -31,6 +31,33 @@ spec:
     spec:
       terminationGracePeriodSeconds: 60  # Allow long SSE streams to drain
       serviceAccountName: tesslate-backend-sa
+      # Pod-wide SA token auto-mount is OFF. The backend needs the
+      # token for cluster-API access; the AST sidecar must not see it.
+      # We project the token explicitly onto the backend container only.
+      automountServiceAccountToken: false
+      volumes:
+      # Replicates the default auto-mount shape (token + ca.crt +
+      # namespace) so python-kubernetes client finds everything it
+      # expects. Kubelet manages the token lifecycle here exactly as it
+      # does for the implicit mount: BoundServiceAccountToken,
+      # audience-bound, refreshed at 80% of expirationSeconds.
+      - name: backend-sa-token
+        projected:
+          defaultMode: 0644
+          sources:
+          - serviceAccountToken:
+              path: token
+              expirationSeconds: 3600
+          - configMap:
+              name: kube-root-ca.crt
+              items:
+              - key: ca.crt
+                path: ca.crt
+          - downwardAPI:
+              items:
+              - path: namespace
+                fieldRef:
+                  fieldPath: metadata.namespace
       containers:
       - name: backend
         lifecycle:
@@ -42,6 +69,10 @@ spec:
         ports:
         - containerPort: 8000
           name: http
+        volumeMounts:
+        - name: backend-sa-token
+          mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          readOnly: true
         env:
         # Core settings
         - name: DEPLOYMENT_MODE
@@ -450,3 +481,83 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 3
+
+      # ────────────────────────────────────────────────────────────────
+      # AST sidecar — stateless Node gRPC service for JSX/TSX transforms
+      # used by the design panel. Lives in the same pod so backend talks
+      # to it via 127.0.0.1:9000; shares lifecycle + resource budget
+      # with backend but has its own container, its own cgroup, its own
+      # image, and its own probe. Fork-in-async bug that caused the
+      # 2026-04-16 outage is impossible by construction — kubelet
+      # spawns both containers, backend never forks to use AST.
+      # ────────────────────────────────────────────────────────────────
+      - name: ast
+        image: tesslate-ast:latest  # Overridden by kustomization images
+        imagePullPolicy: IfNotPresent  # Overridden per overlay
+        ports:
+        - containerPort: 9000
+          name: grpc
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        # Bind to 0.0.0.0 so kubelet's gRPC probe (dials pod IP) works.
+        # Port 9000 cross-pod is blocked by default-deny-ingress + no
+        # allow rule opens it. Intra-pod (backend → 127.0.0.1:9000) is
+        # kernel-local and never leaves the netns.
+        - name: AST_BIND_HOST
+          value: "0.0.0.0"
+        - name: AST_BIND_PORT
+          value: "9000"
+        - name: LOG_LEVEL
+          value: "info"
+        # Piscina thread count — must match the container CPU limit or
+        # threads starve each other. Default = 2 (base). Overlays bump
+        # for bigger limits (prod = 4).
+        - name: AST_POOL_THREADS
+          value: "2"
+        # Per-worker V8 heap cap so a pathological Babel parse can't
+        # eat the container's memory limit. See pool.ts resourceLimits
+        # for the matching codeRangeSize/young gen knobs.
+        - name: AST_WORKER_MAX_OLD_MB
+          value: "256"
+        - name: AST_WORKER_MAX_YOUNG_MB
+          value: "64"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "2000m"
+        # gRPC probes speak the standard grpc.health.v1.Health protocol
+        # — kubelet dials the port and sends Check({service:""}). This
+        # catches hung main threads / deadlocked gRPC servers that a
+        # tcpSocket probe would miss (TCP accept works even if the
+        # server can't serve a single RPC).
+        startupProbe:
+          grpc:
+            port: 9000
+          initialDelaySeconds: 2
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 24
+        livenessProbe:
+          grpc:
+            port: 9000
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          grpc:
+            port: 9000
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop: ["ALL"]

@@ -478,6 +478,29 @@ class Settings(BaseSettings):
 
     fileops_enabled: bool = True  # Feature flag for v2 file operations via CSI
     fileops_timeout: int = 30  # Default gRPC timeout for file operations (seconds)
+
+    # ==========================================================================
+    # AST Service (standalone Node gRPC service for JSX/TSX transforms)
+    # ==========================================================================
+    # When disabled, /design/* endpoints return 503 — backend keeps serving
+    # everything else. Extracted out of the backend to eliminate the
+    # subprocess-fork-from-async-process failure class.
+    ast_service_enabled: bool = True
+    # AST runs as a sidecar container in the backend pod — shared pod
+    # network namespace means localhost is the right default. Override
+    # via env if you ever split it back out into a separate Deployment.
+    ast_service_address: str = "127.0.0.1:9000"
+    ast_service_timeout_seconds: int = 60
+    # Per-process circuit breaker for the ast client.
+    ast_service_circuit_breaker_failures: int = 5
+    ast_service_circuit_breaker_reset_seconds: int = 30
+    # Client-side budgets — mirror the server-side budgets so the backend
+    # rejects oversize requests locally instead of round-tripping to 503.
+    ast_service_max_request_files: int = 1000
+    ast_service_max_request_bytes: int = 52_428_800
+    # On-volume SHA skip-unchanged cache at .tesslate/design-hashes.json.
+    # Disable to force a full parse every time (useful for debugging).
+    ast_service_hash_cache_enabled: bool = True
     compute_max_concurrent_pods: int = (
         5  # Max concurrent compute pods (env-var driven per environment)
     )

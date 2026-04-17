@@ -18,6 +18,24 @@ spec:
             limits:
               cpu: "4000m"
               memory: "4Gi"
+        # Production sidecar gets more Piscina threads (matches the
+        # container's CPU limit) and a larger per-worker heap. Raising
+        # max-old-gen lets bigger projects parse without evicting.
+        - name: ast
+          env:
+          - name: AST_POOL_THREADS
+            value: "4"
+          - name: AST_WORKER_MAX_OLD_MB
+            value: "512"
+          - name: AST_WORKER_MAX_YOUNG_MB
+            value: "128"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "4000m"
+              memory: "2Gi"
 ---
 apiVersion: apps/v1
 kind: Deployment

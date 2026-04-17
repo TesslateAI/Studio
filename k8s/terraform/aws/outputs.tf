@@ -168,6 +168,11 @@ output "ecr_devserver_repository_url" {
   value       = local.ecr_devserver_url
 }
 
+output "ecr_ast_repository_url" {
+  description = "ECR repository URL for the AST sidecar"
+  value       = local.ecr_ast_url
+}
+
 output "ecr_registry_url" {
   description = "ECR registry URL (without repository name)"
   value       = local.ecr_registry_url
@@ -191,6 +196,11 @@ output "frontend_image" {
 output "devserver_image" {
   description = "Full devserver image reference (repo:tag)"
   value       = "${local.ecr_devserver_url}:${local.image_tag}"
+}
+
+output "ast_image" {
+  description = "Full AST sidecar image reference (repo:tag)"
+  value       = "${local.ecr_ast_url}:${local.image_tag}"
 }
 
 # -----------------------------------------------------------------------------
@@ -301,7 +311,7 @@ output "ecr_login_command" {
 
 output "build_and_push_commands" {
   description = "Commands to build and push Docker images"
-  value = <<-EOT
+  value       = <<-EOT
     # Backend
     docker build -t ${local.ecr_backend_url}:${local.image_tag} -f orchestrator/Dockerfile orchestrator/
     docker push ${local.ecr_backend_url}:${local.image_tag}
@@ -313,6 +323,10 @@ output "build_and_push_commands" {
     # Devserver
     docker build -t ${local.ecr_devserver_url}:${local.image_tag} -f orchestrator/Dockerfile.devserver orchestrator/
     docker push ${local.ecr_devserver_url}:${local.image_tag}
+
+    # AST sidecar
+    docker build -t ${local.ecr_ast_url}:${local.image_tag} -f services/ast/Dockerfile services/ast/
+    docker push ${local.ecr_ast_url}:${local.image_tag}
   EOT
 }
 

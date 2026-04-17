@@ -20,6 +20,9 @@ images:
   - name: tesslate-devserver
     newName: <ECR_REGISTRY>/tesslate-devserver
     newTag: production
+  - name: tesslate-ast
+    newName: <ECR_REGISTRY>/tesslate-ast
+    newTag: production
 
 labels:
   - pairs:
