@@ -14,6 +14,7 @@ import { PrivateRoute, PublicOnlyRoute } from './components/RouteGuards';
 import Landing from './pages/Landing';
 import NewLandingPage from './pages/NewLandingPage';
 import Login from './pages/Login';
+import MagicLinkConsume from './pages/MagicLinkConsume';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
@@ -272,6 +273,7 @@ function AppContent() {
           }
         />
         <Route path="/import" element={<ImportRedirect />} />
+        <Route path="/auth/magic" element={<MagicLinkConsume />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/logout" element={<Logout />} />
@@ -370,10 +372,7 @@ function AppContent() {
           <Route path="security" element={<SecuritySettings />} />
           <Route path="deployment" element={<DeploymentSettings />} />
           {/* /settings/connectors moved to Library → Connectors (#307). */}
-          <Route
-            path="connectors"
-            element={<Navigate to="/library?tab=connectors" replace />}
-          />
+          <Route path="connectors" element={<Navigate to="/library?tab=connectors" replace />} />
           <Route path="api-keys" element={<ApiKeysSettings />} />
           <Route path="billing" element={<Navigate to="/settings/team/billing" replace />} />
           <Route path="messaging" element={<ConnectionsSettings />} />

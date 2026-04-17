@@ -31,6 +31,11 @@ spec:
           # No TLS for local dev (use http:// instead of https://)
           - name: K8S_WILDCARD_TLS_SECRET
             value: ""
+          # Mount the test-helpers router (magic-link inbox) for Playwright E2E.
+          # Harmless on minikube; the helpers only mount when this env is set.
+          # NEVER set this in beta/prod overlays.
+          - name: TEST_HELPERS_ENABLED
+            value: "1"
         resources:
           requests:
             memory: "512Mi"

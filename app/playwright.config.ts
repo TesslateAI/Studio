@@ -63,6 +63,21 @@ export default defineConfig({
         storageState: 'tests/e2e/.auth/user.json',
       },
       dependencies: ['setup'],
+      // Auth-flow tests manage their own (unauthenticated) state.
+      testIgnore: /auth\/magic-link\.spec\.ts/,
+    },
+
+    // Magic-link tests run as anonymous users — no setup dependency, no stored
+    // auth state. They target a REAL deployment (minikube locally, a deployed
+    // env in CI), never `vite dev`, because the bug we're guarding against
+    // (CSRF, cookie Secure, SameSite, Ingress routing) only manifests in the
+    // production stack.
+    {
+      name: 'chromium-anon',
+      testMatch: /auth\/magic-link\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+      },
     },
 
     // Uncomment to test on more browsers

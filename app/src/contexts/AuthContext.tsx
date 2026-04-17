@@ -152,12 +152,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
       abortControllerRef.current?.abort();
       abortControllerRef.current = new AbortController();
 
+      // Capture state AT START. If this check fails with 401, we must decide
+      // whether to fire /api/auth/logout based on "was the user authenticated
+      // when this check started", not "is the user authenticated by the time
+      // the 401 comes back" — the latter can be true when a concurrent
+      // checkAuth (e.g. from MagicLinkConsume after /consume 200) has flipped
+      // the state to 'authenticated' in the meantime. Using current state
+      // would then incorrectly revoke the freshly-established session.
+      const statusAtStart = state.status;
+      const tokenAtStart = localStorage.getItem('token');
+
       checkInProgressRef.current = true;
       dispatch({ type: 'AUTH_START' });
 
       try {
         // Check token auth first (faster, synchronous check)
-        const token = localStorage.getItem('token');
+        const token = tokenAtStart;
 
         if (token) {
           const response = await axios.get(`${API_URL}/api/users/me`, {
@@ -216,10 +226,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
           statusCode: authError.statusCode,
         });
 
-        // Clear invalid token and revoke server session if expired
+        // Clear invalid token and revoke server session if expired.
+        //
+        // IMPORTANT: use statusAtStart / tokenAtStart (captured before awaiting
+        // the network call), not the current state, because a concurrent
+        // sign-in flow (OAuth callback, magic-link consume) may have flipped
+        // state → 'authenticated' and written a new token while this check was
+        // in flight. We must not destroy that fresh session.
+        //
+        // Rules:
+        //   - Only revoke the server session if the user was actually
+        //     authenticated when this check started. A 401 from 'initializing'
+        //     or 'unauthenticated' state just means "not logged in yet".
+        //   - Only remove the localStorage token if the value is still the one
+        //     we started with. If it changed mid-flight, a concurrent flow
+        //     wrote a fresh token and we must leave it alone.
         if (shouldLogoutOnError(authError.toAuthError())) {
-          localStorage.removeItem('token');
-          revokeServerSession(); // non-blocking, best-effort
+          const wasAuthenticated = statusAtStart === 'authenticated';
+          const currentToken = localStorage.getItem('token');
+          if (tokenAtStart && currentToken === tokenAtStart) {
+            localStorage.removeItem('token');
+          }
+          if (wasAuthenticated) {
+            revokeServerSession(); // non-blocking, best-effort
+          }
         }
 
         if (mountedRef.current) {

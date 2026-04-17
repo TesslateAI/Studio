@@ -100,6 +100,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         "/api/auth/github/callback",
         "/api/auth/2fa/verify",  # Uses temp_token, not cookie auth
         "/api/auth/2fa/resend",  # Uses temp_token, not cookie auth
+        "/api/auth/magic-link/",  # Passwordless login — anonymous requester has no CSRF token
         "/api/track-landing",  # Referral tracking endpoint
         "/api/webhooks/stripe",  # Stripe webhooks need to bypass CSRF
         "/api/internal/",  # Cluster-internal endpoints (NetworkPolicy protected, no user auth)

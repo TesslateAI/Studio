@@ -6,7 +6,10 @@ import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import { MiniAsteroids } from '../components/MiniAsteroids';
 import { TesslateLogo } from '../components/ui/TesslateLogo';
 import { useTheme } from '../theme/ThemeContext';
+import { useFeatureFlag } from '../contexts/useFeatureFlag';
 import toast from 'react-hot-toast';
+
+type LoginMode = 'password' | 'magic-email' | 'magic-sent' | 'magic-code';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -26,6 +29,29 @@ export default function Login() {
   const [otpCode, setOtpCode] = useState(['', '', '', '', '', '']);
   const [resendCooldown, setResendCooldown] = useState(0);
   const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Magic-link state.
+  // When the feature flag is on, the landing view is the email-link form
+  // ('magic-email'); users explicitly click "Sign in with password" to
+  // reveal the password form. When the flag is off, we fall back to the
+  // classic password form and hide every magic-link affordance.
+  //
+  // Feature flags load asynchronously (FeatureFlagProvider fires a fetch on
+  // mount). If we only read the flag in the useState initializer, the first
+  // render sees `magicLinkEnabled=false` — before the network completes —
+  // and mode gets locked to 'password' even after the flag resolves to
+  // true. So we default to 'magic-email' optimistically and let the effect
+  // below downgrade to 'password' once the flag has actually loaded. We
+  // only overwrite mode if the user hasn't already made their own choice.
+  const magicLinkEnabled = useFeatureFlag('magic_link_login');
+  const [mode, setMode] = useState<LoginMode>('magic-email');
+  const [magicEmail, setMagicEmail] = useState('');
+  const userOverrodeModeRef = useRef(false);
+
+  useEffect(() => {
+    if (userOverrodeModeRef.current) return;
+    setMode(magicLinkEnabled ? 'magic-email' : 'password');
+  }, [magicLinkEnabled]);
 
   // Resend cooldown timer
   useEffect(() => {
@@ -155,6 +181,94 @@ export default function Login() {
     }
   };
 
+  const handleMagicLinkRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!magicEmail) return;
+    setLoading(true);
+    try {
+      await authApi.magicLinkRequest(magicEmail);
+      // Stash the pre-login redirect target so MagicLinkConsume can honor it
+      // after the user clicks the emailed link (which may open in a new tab).
+      // Same browser = same sessionStorage, so round-trip survives.
+      if (redirectTo && redirectTo !== '/home') {
+        sessionStorage.setItem('magic_link_redirect', redirectTo);
+      } else {
+        sessionStorage.removeItem('magic_link_redirect');
+      }
+      setMode('magic-sent');
+      setResendCooldown(60);
+      toast.success('Check your email for a sign-in link');
+    } catch {
+      // Request is designed to always succeed, but handle network errors
+      toast.error('Could not send email. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMagicLinkResend = async () => {
+    if (resendCooldown > 0 || !magicEmail) return;
+    try {
+      await authApi.magicLinkRequest(magicEmail);
+      setResendCooldown(60);
+      toast.success('New sign-in email sent');
+    } catch {
+      toast.error('Could not send email. Please try again.');
+    }
+  };
+
+  const handleMagicLinkVerify = async () => {
+    const code = otpCode.join('');
+    if (code.length !== 6) {
+      toast.error('Please enter all 6 digits');
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await authApi.magicLinkVerify(magicEmail, code);
+      localStorage.setItem('token', response.access_token);
+      await checkAuth({ force: true });
+      refreshUserTheme();
+      toast.success('Logged in successfully!');
+      setLoading(false);
+      navigate(redirectTo);
+    } catch {
+      toast.error('Invalid or expired code');
+      setOtpCode(['', '', '', '', '', '']);
+      otpInputRefs.current[0]?.focus();
+      setLoading(false);
+    }
+  };
+
+  // Switch from magic-link form to password form. Carry the typed email
+  // forward so the user doesn't re-enter it.
+  const handleSwitchToPassword = () => {
+    userOverrodeModeRef.current = true;
+    setFormData((prev) => ({ ...prev, email: magicEmail || prev.email }));
+    setOtpCode(['', '', '', '', '', '']);
+    setResendCooldown(0);
+    setMode('password');
+  };
+
+  // Switch from password form to magic-link form. Carry the email forward.
+  const handleSwitchToMagicEmail = () => {
+    userOverrodeModeRef.current = true;
+    setMagicEmail(formData.email || magicEmail);
+    setFormData((prev) => ({ ...prev, password: '' }));
+    setOtpCode(['', '', '', '', '', '']);
+    setResendCooldown(0);
+    setMode('magic-email');
+  };
+
+  // "Back" button from magic-sent/magic-code — return to the landing
+  // magic-email form with the email preserved, so the user can edit and
+  // retry without starting from scratch.
+  const handleBackToMagicEmail = () => {
+    setOtpCode(['', '', '', '', '', '']);
+    setResendCooldown(0);
+    setMode('magic-email');
+  };
+
   const handleGithubLogin = async () => {
     try {
       setLoading(true);
@@ -267,10 +381,13 @@ export default function Login() {
                 </button>
               </div>
             </div>
-          ) : (
-            /* Normal Login UI */
+          ) : mode === 'magic-email' ? (
+            /* Magic Link — email entry (DEFAULT VIEW, includes OAuth) */
             <>
-              {/* OAuth Buttons First */}
+              {/* OAuth — shown on the landing view so users see every
+                  sign-in option without needing to toggle modes. The
+                  password view deliberately omits these to keep its
+                  single focused purpose. */}
               <div className="space-y-3 mb-6">
                 <button
                   onClick={handleGoogleLogin}
@@ -323,7 +440,139 @@ export default function Login() {
                 <div className="flex-1 border-t border-gray-200"></div>
               </div>
 
-              {/* Email Form */}
+              <form onSubmit={handleMagicLinkRequest} className="space-y-4">
+                <input
+                  type="email"
+                  value={magicEmail}
+                  onChange={(e) => setMagicEmail(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all placeholder:text-gray-400 text-sm"
+                  placeholder="Email address"
+                  required
+                  autoComplete="email"
+                  maxLength={254}
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={loading || !magicEmail}
+                  className="w-full bg-black text-white py-3.5 px-4 rounded-xl hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-200 text-sm"
+                >
+                  {loading ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <PulsingGridSpinner size={18} />
+                      <span>Sending...</span>
+                    </div>
+                  ) : (
+                    'Send sign-in link'
+                  )}
+                </button>
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={handleSwitchToPassword}
+                    className="text-gray-500 hover:text-gray-700 text-sm transition-colors"
+                  >
+                    Sign in with password instead
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : mode === 'magic-sent' ? (
+            /* Magic Link — sent, waiting */
+            <div className="space-y-6">
+              <div className="text-center">
+                <p className="text-gray-600 text-sm">
+                  We sent a sign-in link to <strong>{magicEmail}</strong>. Click the link in your
+                  email, or enter the 6-digit code we emailed.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setOtpCode(['', '', '', '', '', '']);
+                  setMode('magic-code');
+                  setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
+                }}
+                className="w-full bg-black text-white py-3.5 px-4 rounded-xl hover:bg-gray-800 font-semibold transition-all duration-200 text-sm"
+              >
+                Enter code instead
+              </button>
+              <div className="flex items-center justify-between text-sm">
+                <button
+                  onClick={handleBackToMagicEmail}
+                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  Use a different email
+                </button>
+                <button
+                  onClick={handleMagicLinkResend}
+                  disabled={resendCooldown > 0}
+                  className="text-black hover:text-gray-700 font-medium disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend email'}
+                </button>
+              </div>
+            </div>
+          ) : mode === 'magic-code' ? (
+            /* Magic Link — code entry */
+            <div className="space-y-6">
+              <div className="text-center">
+                <p className="text-gray-600 text-sm">
+                  Enter the 6-digit code we sent to <strong>{magicEmail}</strong>
+                </p>
+              </div>
+              <div className="flex justify-center gap-3">
+                {otpCode.map((digit, index) => (
+                  <input
+                    key={index}
+                    ref={(el) => {
+                      otpInputRefs.current[index] = el;
+                    }}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOtpChange(index, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                    onPaste={index === 0 ? handleOtpPaste : undefined}
+                    className="w-12 h-14 text-center text-2xl font-bold bg-gray-50 border-2 border-gray-200 text-gray-900 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
+                  />
+                ))}
+              </div>
+              <button
+                onClick={handleMagicLinkVerify}
+                disabled={loading || otpCode.join('').length !== 6}
+                className="w-full bg-black text-white py-3.5 px-4 rounded-xl hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-200 text-sm"
+              >
+                {loading ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <PulsingGridSpinner size={18} />
+                    <span>Verifying...</span>
+                  </div>
+                ) : (
+                  'Sign in'
+                )}
+              </button>
+              <div className="flex items-center justify-between text-sm">
+                <button
+                  onClick={handleBackToMagicEmail}
+                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  Use a different email
+                </button>
+                <button
+                  onClick={handleMagicLinkResend}
+                  disabled={resendCooldown > 0}
+                  className="text-black hover:text-gray-700 font-medium disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend code'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Password Login UI — no OAuth here; the magic-email landing
+               view is the front door and offers every sign-in option. */
+            <>
+              {/* Email + Password Form */}
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <input
@@ -377,6 +626,20 @@ export default function Login() {
                   )}
                 </button>
               </form>
+
+              {/* Back to magic-link (the default mode when the flag is on) */}
+              {magicLinkEnabled && (
+                <div className="mt-4 text-center">
+                  <button
+                    type="button"
+                    onClick={handleSwitchToMagicEmail}
+                    disabled={loading}
+                    className="text-gray-500 hover:text-gray-700 text-sm transition-colors"
+                  >
+                    Sign in with an email link instead
+                  </button>
+                </div>
+              )}
 
               {/* Sign up link */}
               <div className="mt-6 text-center">

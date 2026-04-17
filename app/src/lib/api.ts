@@ -175,8 +175,21 @@ api.interceptors.response.use(
       const isPasswordResetPage =
         window.location.pathname === '/forgot-password' ||
         window.location.pathname === '/reset-password';
+      // Login-flow endpoints: 401 here means "bad code / expired link / wrong creds",
+      // NOT "session expired". Attempting a refresh is pointless (no session exists yet)
+      // and the resulting redirect to /login hides the real error from the user.
+      const isLoginFlowApi =
+        originalRequest.url?.includes('/api/auth/login') ||
+        originalRequest.url?.includes('/api/auth/2fa/') ||
+        originalRequest.url?.includes('/api/auth/magic-link/');
 
-      if (isMarketplacePage || isPreferencesApi || isGitProvidersApi || isPasswordResetPage) {
+      if (
+        isMarketplacePage ||
+        isPreferencesApi ||
+        isGitProvidersApi ||
+        isPasswordResetPage ||
+        isLoginFlowApi
+      ) {
         return Promise.reject(error);
       }
 
@@ -265,6 +278,25 @@ export const authApi = {
     const response = await api.post('/api/auth/2fa/resend', formData, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
+    return response.data;
+  },
+
+  // Request a magic-link sign-in email. Always returns {ok: true} from server.
+  magicLinkRequest: async (email: string) => {
+    const response = await api.post('/api/auth/magic-link/request', { email });
+    return response.data;
+  },
+
+  // Consume a clicked magic-link token. POST (not GET) to prevent email
+  // security scanners from preflight-consuming the single-use token.
+  magicLinkConsume: async (token: string) => {
+    const response = await api.post('/api/auth/magic-link/consume', { token });
+    return response.data;
+  },
+
+  // Verify a 6-digit magic-link code entered manually.
+  magicLinkVerify: async (email: string, code: string) => {
+    const response = await api.post('/api/auth/magic-link/verify', { email, code });
     return response.data;
   },
 

@@ -517,6 +517,17 @@ class Settings(BaseSettings):
     two_fa_temp_token_expiry_seconds: int = 600  # 10 minutes
 
     # ==========================================================================
+    # Magic Link Login (passwordless)
+    # ==========================================================================
+    magic_link_enabled: bool = False  # Runtime kill switch; also gated by feature flag
+    magic_link_code_length: int = 6
+    magic_link_code_expiry_seconds: int = 600  # 10 minutes
+    magic_link_max_attempts: int = 5
+    magic_link_token_expiry_seconds: int = 600  # 10 minutes
+    magic_link_rate_limit_window_seconds: int = 600  # 10 minutes
+    magic_link_rate_limit_max_requests: int = 5  # 5 requests per window per email
+
+    # ==========================================================================
     # Template Export Configuration
     # ==========================================================================
     template_storage_path: str = "/templates"

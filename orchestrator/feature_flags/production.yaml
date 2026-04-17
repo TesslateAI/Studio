@@ -2,4 +2,5 @@
 # Only list flags that differ from defaults.yaml
 
 two_fa: true
+magic_link_login: true
 enable_landing_page: false

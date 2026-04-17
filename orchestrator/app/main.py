@@ -42,6 +42,7 @@ from .routers import (
     github,
     internal,
     kanban,
+    magic_link,
     marketplace,
     mcp,
     mcp_oauth,
@@ -1120,6 +1121,15 @@ app.include_router(git.router, prefix="/api", tags=["git"])
 app.include_router(git_providers.router, prefix="/api", tags=["git-providers"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(two_fa.router, prefix="/api/auth", tags=["auth"])
+app.include_router(magic_link.router, prefix="/api/auth/magic-link", tags=["auth"])
+
+# Test-only helper endpoints (guarded by TEST_HELPERS_ENABLED env var).
+# When the env var is unset, is_enabled() returns False and every handler 404s,
+# so exposing the router itself carries no risk. Only mount when explicitly on.
+from .routers import test_helpers as _test_helpers  # noqa: E402
+
+if _test_helpers.is_enabled():
+    app.include_router(_test_helpers.router, prefix="/api/__test__", tags=["test-helpers"])
 app.include_router(shell.router, prefix="/api/shell", tags=["shell"])
 app.include_router(secrets.router, prefix="/api/secrets", tags=["secrets"])
 app.include_router(kanban.router, tags=["kanban"])
@@ -1137,7 +1147,7 @@ app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapsh
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)
 app.include_router(desktop_pair.session_router)  # /api/desktop - Session-auth pairing mint
-app.include_router(desktop_pair.public_router)   # /api/v1/desktop - tsk-auth pairing revoke
+app.include_router(desktop_pair.public_router)  # /api/v1/desktop - tsk-auth pairing revoke
 from .routers.public import public_routers  # noqa: E402
 
 for _public_router in public_routers:

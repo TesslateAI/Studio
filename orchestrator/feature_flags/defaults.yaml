@@ -17,6 +17,7 @@
 
 # -- Authentication -----------------------------------------------------------
 two_fa: false
+magic_link_login: false
 
 # -- UI -----------------------------------------------------------------------
 # When false, GET "/" redirects straight to /login instead of rendering the
@@ -40,5 +41,6 @@ agent_apply_patch: true
 # =============================================================================
 public:
   - two_fa
+  - magic_link_login
   - template_builder
   - enable_landing_page

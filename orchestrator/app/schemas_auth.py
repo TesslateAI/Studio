@@ -110,3 +110,16 @@ class TwoFAVerifyRequest(BaseModel):
 
     temp_token: str = Field(..., description="Temporary token from login response")
     code: str = Field(..., min_length=6, max_length=6, description="6-digit verification code")
+
+
+class MagicLinkRequest(BaseModel):
+    """Request body for sending a magic-link login email."""
+
+    email: str = Field(..., max_length=254, description="Email address to send the link to")
+
+
+class MagicLinkVerifyRequest(BaseModel):
+    """Request body for verifying a magic-link OTP code."""
+
+    email: str = Field(..., max_length=254, description="Email the code was sent to")
+    code: str = Field(..., min_length=6, max_length=6, description="6-digit verification code")

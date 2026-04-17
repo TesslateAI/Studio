@@ -97,6 +97,46 @@ class EmailService:
         except Exception as e:
             logger.error(f"Failed to send password reset email to {to_email}: {e}")
 
+    async def send_magic_link(self, to_email: str, link_url: str, code: str) -> None:
+        """
+        Send a passwordless login email containing both a clickable link and a
+        6-digit fallback code.
+
+        If SMTP is not configured, logs the link + code to the console instead.
+        If test helpers are enabled (TEST_HELPERS_ENABLED=1), also captures
+        the entry in an in-memory inbox that Playwright E2E tests can poll.
+        This is non-blocking and safe to fire-and-forget via asyncio.create_task.
+        """
+        subject = "Your Tesslate sign-in link"
+
+        if not self.is_configured:
+            logger.info(
+                f"[EMAIL-DEV] Magic link for {to_email}: {link_url} "
+                f"(code: {code}) (SMTP not configured, printing to console)"
+            )
+            # E2E test hook — no-op unless TEST_HELPERS_ENABLED is set
+            try:
+                from ..routers.test_helpers import capture
+
+                capture(to_email, link_url, code)
+            except Exception:  # noqa: BLE001 — never let test hook break real sends
+                pass
+            return
+
+        try:
+            html = _build_magic_link_html(link_url, code)
+            plain = (
+                "Sign in to your Tesslate account.\n\n"
+                f"Click the link to sign in:\n{link_url}\n\n"
+                f"Or enter this 6-digit code: {code}\n\n"
+                "This link and code expire in 10 minutes.\n"
+                "If you did not request this, you can safely ignore this email."
+            )
+            await self._send(to_email, subject, plain, html)
+            logger.info(f"Magic-link email sent to {to_email}")
+        except Exception as e:
+            logger.error(f"Failed to send magic-link email to {to_email}: {e}")
+
     async def send_team_invite(
         self, to_email: str, invite_url: str, team_name: str, inviter_name: str, role: str
     ) -> None:
@@ -191,6 +231,42 @@ def _build_password_reset_html(reset_url: str) -> str:
         "</div>"
         '<p style="color: #999; font-size: 12px; margin-bottom: 16px;">'
         "If the button doesn&#39;t work, copy and paste this link into your browser:"
+        "</p>"
+        f'<p style="color: #666; font-size: 12px; word-break: break-all;">{safe_url}</p>'
+        '<p style="color: #999; font-size: 12px; margin-top: 24px;">'
+        "If you didn&#39;t request this, you can safely ignore this email."
+        "</p>"
+        "</div>"
+    )
+
+
+def _build_magic_link_html(link_url: str, code: str) -> str:
+    """Build a styled HTML email for magic-link login (link + OTP fallback)."""
+    safe_url = html_escape(link_url, quote=True)
+    safe_code = html_escape(code)
+    return (
+        '<div style="font-family: -apple-system, BlinkMacSystemFont,'
+        " 'Segoe UI', Roboto, sans-serif; max-width: 480px;"
+        ' margin: 0 auto; padding: 40px 20px;">'
+        '<h2 style="color: #111; margin-bottom: 8px;">Sign in to Tesslate</h2>'
+        '<p style="color: #666; font-size: 14px; margin-bottom: 24px;">'
+        "Click the button below to sign in. This link expires in 10 minutes."
+        "</p>"
+        '<div style="text-align: center; margin-bottom: 24px;">'
+        f'<a href="{safe_url}" style="display: inline-block; background: #111;'
+        " color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none;"
+        ' font-weight: 600; font-size: 14px;">Sign in</a>'
+        "</div>"
+        '<p style="color: #999; font-size: 12px; margin-bottom: 8px;">'
+        "Or enter this 6-digit code on the sign-in page:"
+        "</p>"
+        '<div style="background: #f5f5f5; border-radius: 12px; padding: 20px;'
+        ' text-align: center; margin-bottom: 24px;">'
+        '<span style="font-size: 28px; font-weight: 700; letter-spacing: 6px;'
+        f' color: #111;">{safe_code}</span>'
+        "</div>"
+        '<p style="color: #999; font-size: 12px; margin-bottom: 8px;">'
+        "If the button doesn&#39;t work, copy and paste this link:"
         "</p>"
         f'<p style="color: #666; font-size: 12px; word-break: break-all;">{safe_url}</p>'
         '<p style="color: #999; font-size: 12px; margin-top: 24px;">'
