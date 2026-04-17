@@ -81,7 +81,7 @@ function AgentConfigPanel({
         const data = await marketplaceApi.getAvailableModels();
         if (cancelled) return;
         const raw: unknown[] = Array.isArray(data) ? data : data.models || [];
-        const modelList: ModelInfo[] = raw
+        const modelList = raw
           .map((m) => {
             if (typeof m === 'string') return { id: m, pricing: null };
             const obj = m as Record<string, unknown>;
@@ -99,7 +99,7 @@ function AgentConfigPanel({
                 }
               : null;
           })
-          .filter((m): m is ModelInfo => m !== null && !m.disabled);
+          .filter((m) => m !== null && !(m as { disabled?: boolean }).disabled) as ModelInfo[];
         setModels(modelList);
       } catch (err) {
         console.error('Failed to fetch models:', err);

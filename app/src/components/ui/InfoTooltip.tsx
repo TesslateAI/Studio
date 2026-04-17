@@ -16,7 +16,7 @@ export function InfoTooltip({ children, size = 15, side = 'bottom' }: InfoToolti
   const [visible, setVisible] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const show = () => {
     timeoutRef.current = setTimeout(() => {
@@ -38,12 +38,7 @@ export function InfoTooltip({ children, size = 15, side = 'bottom' }: InfoToolti
 
   return (
     <>
-      <div
-        ref={triggerRef}
-        className="inline-flex"
-        onMouseEnter={show}
-        onMouseLeave={hide}
-      >
+      <div ref={triggerRef} className="inline-flex" onMouseEnter={show} onMouseLeave={hide}>
         <Info
           size={size}
           className="text-[var(--text)]/40 hover:text-[var(--text)]/70 transition-colors cursor-help"

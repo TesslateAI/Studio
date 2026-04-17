@@ -20,7 +20,7 @@ interface InviteDetails {
 export default function InviteAcceptPage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { switchTeam, refreshTeams } = useTeam();
   const [loading, setLoading] = useState(true);
   const [invite, setInvite] = useState<InviteDetails | null>(null);
@@ -115,9 +115,7 @@ export default function InviteAcceptPage() {
           <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
             <AlertTriangle size={32} className="text-red-400" />
           </div>
-          <h1 className="text-lg font-semibold text-[var(--text)] mb-2">
-            Invalid Invitation
-          </h1>
+          <h1 className="text-lg font-semibold text-[var(--text)] mb-2">Invalid Invitation</h1>
           <p className="text-sm text-[var(--text-muted)] mb-6">
             {error || 'This invitation link is invalid or has expired.'}
           </p>
@@ -140,11 +138,11 @@ export default function InviteAcceptPage() {
           <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
             <Clock size={32} className="text-amber-400" />
           </div>
-          <h1 className="text-lg font-semibold text-[var(--text)] mb-2">
-            Invitation Expired
-          </h1>
+          <h1 className="text-lg font-semibold text-[var(--text)] mb-2">Invitation Expired</h1>
           <p className="text-sm text-[var(--text-muted)] mb-6">
-            This invitation to join <span className="font-medium text-[var(--text)]">{invite.team_name}</span> has expired or reached its usage limit.
+            This invitation to join{' '}
+            <span className="font-medium text-[var(--text)]">{invite.team_name}</span> has expired
+            or reached its usage limit.
           </p>
           <button
             onClick={() => navigate('/dashboard')}
@@ -168,9 +166,7 @@ export default function InviteAcceptPage() {
           <h1 className="text-lg font-semibold text-[var(--text)] mb-2">
             Welcome to {invite.team_name}!
           </h1>
-          <p className="text-sm text-[var(--text-muted)]">
-            Redirecting to your dashboard...
-          </p>
+          <p className="text-sm text-[var(--text-muted)]">Redirecting to your dashboard...</p>
         </div>
       </div>
     );
@@ -215,9 +211,7 @@ export default function InviteAcceptPage() {
           </div>
           <div className="flex items-center justify-between px-4 py-2.5 bg-white/5 rounded-lg">
             <span className="text-sm text-[var(--text-muted)]">Expires</span>
-            <span className="text-sm text-[var(--text)]">
-              {formatDate(invite.expires_at)}
-            </span>
+            <span className="text-sm text-[var(--text)]">{formatDate(invite.expires_at)}</span>
           </div>
         </div>
 
@@ -230,8 +224,19 @@ export default function InviteAcceptPage() {
           {accepting ? (
             <>
               <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
               </svg>
               Accepting...
             </>

@@ -19,7 +19,6 @@ export function AddCustomConnectorModal({
   onClose,
   onSuccess,
   scopeLevel,
-  teamId,
   projectId,
 }: Props) {
   const [name, setName] = useState('');
@@ -47,18 +46,13 @@ export function AddCustomConnectorModal({
         server_url: serverUrl.trim(),
         registration_method: registrationMethod,
         scope_level: scopeLevel,
-        team_id: teamId,
         project_id: projectId,
         byo_client_id: hasClient ? clientId.trim() : undefined,
         byo_client_secret: clientSecret.trim() || undefined,
         scope: scope.trim() || undefined,
       });
 
-      const result = await runOAuthPopup(
-        authorize_url,
-        flow_id,
-        marketplaceApi.getMcpOAuthStatus,
-      );
+      const result = await runOAuthPopup(authorize_url, flow_id, marketplaceApi.getMcpOAuthStatus);
       if (result.status === 'success') {
         toast.success(`Connected ${name || 'connector'}`);
         onSuccess();
@@ -151,7 +145,10 @@ export function AddCustomConnectorModal({
               Advanced (bring your own OAuth client)
             </button>
             {advancedOpen && (
-              <div className="mt-3 space-y-3 pl-5 border-l-2" style={{ borderColor: 'var(--border)' }}>
+              <div
+                className="mt-3 space-y-3 pl-5 border-l-2"
+                style={{ borderColor: 'var(--border)' }}
+              >
                 <div>
                   <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">
                     OAuth Client ID

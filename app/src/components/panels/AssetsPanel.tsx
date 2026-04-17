@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react';
-import { UploadSimple, GridFour, ListBullets, MagnifyingGlass, Plus, X, FolderOpen, List } from '@phosphor-icons/react';
+import {
+  UploadSimple,
+  GridFour,
+  ListBullets,
+  MagnifyingGlass,
+  Plus,
+  X,
+  FolderOpen,
+  List,
+} from '@phosphor-icons/react';
 import { assetsApi } from '../../lib/api';
 import type { Asset, FrameworkType } from '../../types/assets';
 import { DIRECTORY_PRESETS, getAuthenticatedAssetUrl } from '../../types/assets';
@@ -11,7 +20,7 @@ import { ConfirmDialog } from '../modals/ConfirmDialog';
 import { fileEvents } from '../../utils/fileEvents';
 
 interface AssetsPanelProps {
-  projectSlug: string;  // Changed from projectId to projectSlug
+  projectSlug: string; // Changed from projectId to projectSlug
   readOnly?: boolean;
 }
 
@@ -19,7 +28,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
   const [directories, setDirectories] = useState<string[]>([]);
   const [selectedDirectory, setSelectedDirectory] = useState<string | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [allAssets, setAllAssets] = useState<Asset[]>([]);  // All assets across all directories
+  const [allAssets, setAllAssets] = useState<Asset[]>([]); // All assets across all directories
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -35,10 +44,13 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
   const framework: FrameworkType = 'generic'; // Can be made dynamic later with framework detection
 
   // Compute asset counts per directory
-  const assetCounts = allAssets.reduce((acc, asset) => {
-    acc[asset.directory] = (acc[asset.directory] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const assetCounts = allAssets.reduce(
+    (acc, asset) => {
+      acc[asset.directory] = (acc[asset.directory] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 
   // Load directories on mount
   useEffect(() => {
@@ -133,7 +145,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
       );
       toast.success(`${file.name} uploaded successfully`);
       loadAssets(selectedDirectory);
-      loadAllAssets();  // Refresh counts
+      loadAllAssets(); // Refresh counts
 
       // Notify other components about file change
       const filePath = `${selectedDirectory}/${file.name}`.replace('//', '/');
@@ -184,7 +196,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
       if (selectedDirectory) {
         loadAssets(selectedDirectory);
       }
-      loadAllAssets();  // Refresh counts
+      loadAllAssets(); // Refresh counts
 
       // Notify other components about file deletion
       fileEvents.emit('file-deleted', deletedFilePath);
@@ -210,7 +222,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
       if (selectedDirectory) {
         loadAssets(selectedDirectory);
       }
-      loadAllAssets();  // Refresh counts
+      loadAllAssets(); // Refresh counts
 
       // Notify other components about file change (moved files are like updates)
       fileEvents.emit('file-updated', selectedAsset.file_path);
@@ -307,7 +319,8 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
               </div>
               <h3 className="text-2xl font-bold text-white mb-3">Create Your First Directory</h3>
               <p className="text-gray-400 leading-relaxed mb-6">
-                Click the <Plus size={16} weight="bold" className="inline mx-1" /> button in the sidebar to create a directory, or choose a common preset below.
+                Click the <Plus size={16} weight="bold" className="inline mx-1" /> button in the
+                sidebar to create a directory, or choose a common preset below.
               </p>
 
               {/* Framework Presets */}
@@ -469,7 +482,9 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
                       </div>
                     </div>
                     <h4 className="text-lg font-semibold text-white mb-2">
-                      {searchQuery ? 'No assets match your search' : `Ready to add assets to ${selectedDirectory}`}
+                      {searchQuery
+                        ? 'No assets match your search'
+                        : `Ready to add assets to ${selectedDirectory}`}
                     </h4>
                     <p className="text-gray-500 mb-4 text-sm">
                       {searchQuery
@@ -493,19 +508,31 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
                     <AssetCard
                       key={asset.id}
                       asset={asset}
-                      onRename={readOnly ? undefined : (_id, name) => {
-                        setSelectedAsset(asset);
-                        setNewFilename(name);
-                        setShowRenameModal(true);
-                      }}
-                      onDelete={readOnly ? undefined : () => {
-                        setSelectedAsset(asset);
-                        setShowDeleteConfirm(true);
-                      }}
-                      onMove={readOnly ? undefined : () => {
-                        setSelectedAsset(asset);
-                        setShowMoveModal(true);
-                      }}
+                      onRename={
+                        (readOnly
+                          ? undefined
+                          : (_id, name) => {
+                              setSelectedAsset(asset);
+                              setNewFilename(name);
+                              setShowRenameModal(true);
+                            })!
+                      }
+                      onDelete={
+                        (readOnly
+                          ? undefined
+                          : () => {
+                              setSelectedAsset(asset);
+                              setShowDeleteConfirm(true);
+                            })!
+                      }
+                      onMove={
+                        (readOnly
+                          ? undefined
+                          : () => {
+                              setSelectedAsset(asset);
+                              setShowMoveModal(true);
+                            })!
+                      }
                       onPreview={(asset) => setPreviewAsset(asset)}
                     />
                   ))}
@@ -516,19 +543,31 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
                     <AssetListItem
                       key={asset.id}
                       asset={asset}
-                      onRename={readOnly ? undefined : (_id, name) => {
-                        setSelectedAsset(asset);
-                        setNewFilename(name);
-                        setShowRenameModal(true);
-                      }}
-                      onDelete={readOnly ? undefined : () => {
-                        setSelectedAsset(asset);
-                        setShowDeleteConfirm(true);
-                      }}
-                      onMove={readOnly ? undefined : () => {
-                        setSelectedAsset(asset);
-                        setShowMoveModal(true);
-                      }}
+                      onRename={
+                        (readOnly
+                          ? undefined
+                          : (_id, name) => {
+                              setSelectedAsset(asset);
+                              setNewFilename(name);
+                              setShowRenameModal(true);
+                            })!
+                      }
+                      onDelete={
+                        (readOnly
+                          ? undefined
+                          : () => {
+                              setSelectedAsset(asset);
+                              setShowDeleteConfirm(true);
+                            })!
+                      }
+                      onMove={
+                        (readOnly
+                          ? undefined
+                          : () => {
+                              setSelectedAsset(asset);
+                              setShowMoveModal(true);
+                            })!
+                      }
                       onPreview={(asset) => setPreviewAsset(asset)}
                     />
                   ))}
@@ -545,10 +584,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
 
       {/* Upload Modal */}
       {showUploadModal && selectedDirectory && (
-        <AssetUploadZone
-          onUpload={handleUpload}
-          onClose={() => setShowUploadModal(false)}
-        />
+        <AssetUploadZone onUpload={handleUpload} onClose={() => setShowUploadModal(false)} />
       )}
 
       {/* Rename Modal */}

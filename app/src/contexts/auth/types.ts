@@ -32,14 +32,21 @@ export interface AuthError {
  * Provides consistent error classification from various sources
  */
 export class AuthenticationError extends Error {
+  code: AuthErrorCode;
+  recoverable: boolean;
+  statusCode?: number;
+
   constructor(
-    public code: AuthErrorCode,
+    code: AuthErrorCode,
     message: string,
-    public recoverable: boolean = true,
-    public statusCode?: number
+    recoverable: boolean = true,
+    statusCode?: number
   ) {
     super(message);
     this.name = 'AuthenticationError';
+    this.code = code;
+    this.recoverable = recoverable;
+    this.statusCode = statusCode;
   }
 
   /**

@@ -1,4 +1,12 @@
-import { useState, useRef, useCallback, useMemo, KeyboardEvent, forwardRef, useImperativeHandle } from 'react';
+import {
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+  type KeyboardEvent,
+  forwardRef,
+  useImperativeHandle,
+} from 'react';
 import { MarkerPill } from './MarkerPill';
 import { AVAILABLE_MARKERS } from './MarkerPalette';
 import type { Marker } from './MarkerPalette';
@@ -21,10 +29,13 @@ export interface MarkerEditorHandle {
 const MARKER_REGEX = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
 // Build a map of valid markers for quick lookup
-const MARKER_MAP: Record<string, Marker> = AVAILABLE_MARKERS.reduce((acc, m) => {
-  acc[m.key] = m;
-  return acc;
-}, {} as Record<string, Marker>);
+const MARKER_MAP: Record<string, Marker> = AVAILABLE_MARKERS.reduce(
+  (acc, m) => {
+    acc[m.key] = m;
+    return acc;
+  },
+  {} as Record<string, Marker>
+);
 
 interface TextSegment {
   type: 'text' | 'marker';
@@ -88,45 +99,42 @@ function parseTextToSegments(text: string): TextSegment[] {
   return segments;
 }
 
-export const MarkerEditor = forwardRef<MarkerEditorHandle, MarkerEditorProps>(function MarkerEditor({
-  value,
-  onChange,
-  placeholder = 'Enter text...',
-  rows = 12,
-  className = '',
-  disabled = false,
-}, ref) {
+export const MarkerEditor = forwardRef<MarkerEditorHandle, MarkerEditorProps>(function MarkerEditor(
+  { value, onChange, placeholder = 'Enter text...', rows = 12, className = '', disabled = false },
+  ref
+) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [isFocused, setIsFocused] = useState(false);
 
   // Expose imperative methods
-  useImperativeHandle(ref, () => ({
-    insertMarker: (markerKey: string) => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
+  useImperativeHandle(
+    ref,
+    () => ({
+      insertMarker: (markerKey: string) => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
 
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
 
-      const newValue =
-        value.slice(0, start) +
-        `{${markerKey}}` +
-        value.slice(end);
+        const newValue = value.slice(0, start) + `{${markerKey}}` + value.slice(end);
 
-      onChange(newValue);
+        onChange(newValue);
 
-      // Move cursor after inserted marker
-      setTimeout(() => {
-        textarea.focus();
-        const newPos = start + markerKey.length + 2;
-        textarea.setSelectionRange(newPos, newPos);
-      }, 0);
-    },
-    focus: () => {
-      textareaRef.current?.focus();
-    },
-  }), [value, onChange]);
+        // Move cursor after inserted marker
+        setTimeout(() => {
+          textarea.focus();
+          const newPos = start + markerKey.length + 2;
+          textarea.setSelectionRange(newPos, newPos);
+        }, 0);
+      },
+      focus: () => {
+        textareaRef.current?.focus();
+      },
+    }),
+    [value, onChange]
+  );
 
   // Parse the value into segments
   const segments = useMemo(() => parseTextToSegments(value), [value]);
@@ -164,8 +172,7 @@ export const MarkerEditor = forwardRef<MarkerEditorHandle, MarkerEditorProps>(fu
         if (markerMatch && MARKER_MAP[markerMatch[1]]) {
           e.preventDefault();
           const newValue =
-            value.slice(0, selectionStart - markerMatch[0].length) +
-            value.slice(selectionEnd);
+            value.slice(0, selectionStart - markerMatch[0].length) + value.slice(selectionEnd);
           onChange(newValue);
 
           // Update cursor position
@@ -184,8 +191,7 @@ export const MarkerEditor = forwardRef<MarkerEditorHandle, MarkerEditorProps>(fu
         if (markerMatch && MARKER_MAP[markerMatch[1]]) {
           e.preventDefault();
           const newValue =
-            value.slice(0, selectionStart) +
-            value.slice(selectionStart + markerMatch[0].length);
+            value.slice(0, selectionStart) + value.slice(selectionStart + markerMatch[0].length);
           onChange(newValue);
         }
       }
@@ -196,9 +202,7 @@ export const MarkerEditor = forwardRef<MarkerEditorHandle, MarkerEditorProps>(fu
   // Render segments with proper styling
   const renderSegments = useMemo(() => {
     if (segments.length === 0 && !value) {
-      return (
-        <span className="text-[var(--text)]/40">{placeholder}</span>
-      );
+      return <span className="text-[var(--text)]/40">{placeholder}</span>;
     }
 
     return segments.map((segment, index) => {
@@ -284,10 +288,7 @@ export function insertMarkerAtCursor(
   const start = textarea.selectionStart;
   const end = textarea.selectionEnd;
 
-  const newValue =
-    currentValue.slice(0, start) +
-    `{${markerKey}}` +
-    currentValue.slice(end);
+  const newValue = currentValue.slice(0, start) + `{${markerKey}}` + currentValue.slice(end);
 
   onChange(newValue);
 

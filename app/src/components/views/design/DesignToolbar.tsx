@@ -82,10 +82,8 @@ export function DesignToolbar({
       onInsert(snippet);
       setInsertOpen(false);
     },
-    [onInsert],
+    [onInsert]
   );
-
-  const _activeWidth = BREAKPOINT_WIDTHS[viewportBreakpoint];
 
   return (
     <div className="flex-shrink-0">

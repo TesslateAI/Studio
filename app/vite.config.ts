@@ -1,20 +1,20 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-import path from 'path'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import path from 'path';
 
 // Allow all hosts - security is handled by ingress controller and Cloudflare
 // This is necessary for production K8s with dynamic subdomain previews
-const allowedHosts = true as const
+const allowedHosts = true as const;
 
-console.log('Vite allowed hosts: all (production mode)')
+console.log('Vite allowed hosts: all (production mode)');
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      '@': path.resolve(__dirname, './src'),
     },
   },
   // Expose DEPLOYMENT_MODE to the browser as import.meta.env.DEPLOYMENT_MODE
@@ -36,7 +36,8 @@ export default defineConfig({
       // Use wss:// for HTTPS, ws:// for HTTP
       protocol: process.env.APP_PROTOCOL === 'https' ? 'wss' : 'ws',
       // In production (HTTPS), use standard port 443; in dev use the frontend port
-      port: process.env.APP_PROTOCOL === 'https' ? 443 : parseInt(process.env.FRONTEND_PORT || '5173'),
+      port:
+        process.env.APP_PROTOCOL === 'https' ? 443 : parseInt(process.env.FRONTEND_PORT || '5173'),
     },
     proxy: {
       '/api': {
@@ -49,13 +50,19 @@ export default defineConfig({
           proxy.on('error', (err, _req, _res) => {
             console.log('proxy error', err);
           });
-          proxy.on('proxyReq', (proxyReq, req, _res) => {
-            console.log('Proxying:', req.method, req.url, '→', options.target + req.url);
+          proxy.on('proxyReq', (_proxyReq, req, _res) => {
+            console.log(
+              'Proxying:',
+              req.method,
+              req.url ?? '',
+              '→',
+              (options.target ?? '') + (req.url ?? '')
+            );
           });
-          proxy.on('proxyReqWs', (proxyReq, req, _socket, _head) => {
-            console.log('Proxying WebSocket:', req.url);
+          proxy.on('proxyReqWs', (_proxyReq, req, _socket, _head) => {
+            console.log('Proxying WebSocket:', req.url ?? '');
           });
-        }
+        },
       },
       // Explicit WebSocket proxy for /ws path (if needed)
       '/ws': {
@@ -63,6 +70,6 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
-    }
-  }
-})
+    },
+  },
+});

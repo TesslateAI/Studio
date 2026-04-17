@@ -26,7 +26,10 @@ import { DeploymentTargetNode } from '../DeploymentTargetNode';
 import { GraphCanvas } from '../GraphCanvas';
 import { MarketplaceSidebar } from '../MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../ContainerPropertiesPanel';
-import { ExternalServiceCredentialModal } from '../ExternalServiceCredentialModal';
+import {
+  ExternalServiceCredentialModal,
+  type ExternalServiceItem,
+} from '../ExternalServiceCredentialModal';
 import { ProviderConnectModal } from '../modals/ProviderConnectModal';
 import { ConfirmDialog } from '../modals/ConfirmDialog';
 import api, {
@@ -35,6 +38,7 @@ import api, {
   deploymentCredentialsApi,
   configSyncApi,
   setupApi,
+  type DeploymentTarget,
 } from '../../lib/api';
 import { useTheme } from '../../theme/ThemeContext';
 import { fileEvents } from '../../utils/fileEvents';
@@ -58,12 +62,12 @@ import { appsCanvasNodeTypes, appsCanvasEdgeTypes } from '../canvas/appNodes';
 // Constants
 // ---------------------------------------------------------------------------
 
-const nodeTypes: NodeTypes = {
+const nodeTypes = {
   containerNode: ContainerNode,
   browserPreview: BrowserPreviewNode,
   deploymentTarget: DeploymentTargetNode,
   ...appsCanvasNodeTypes,
-};
+} as unknown as NodeTypes;
 
 const edgeTypes = {
   env_injection: EnvInjectionEdge,
@@ -141,7 +145,15 @@ export interface ArchitectureViewHandle {
 
 const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureViewProps>(
   (
-    { slug, projectId, isActive, onContainersChanged, onNavigateToContainer, onStateChange, readOnly = false },
+    {
+      slug,
+      projectId,
+      isActive,
+      onContainersChanged,
+      onNavigateToContainer,
+      onStateChange,
+      readOnly = false,
+    },
     ref
   ) => {
     const { theme } = useTheme();
@@ -288,29 +300,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
         const browserPreviews = browserPreviewsRes.data || [];
 
         // Fetch deployment targets
-        let deploymentTargets: Array<{
-          id: string;
-          provider: string;
-          environment: string;
-          name?: string;
-          position_x: number;
-          position_y: number;
-          is_connected: boolean;
-          provider_info?: Record<string, unknown>;
-          connected_containers?: Array<{
-            id: string;
-            name: string;
-            framework?: string;
-          }>;
-          deployment_history?: Array<{
-            id: string;
-            version: string;
-            status: string;
-            deployment_url?: string;
-            created_at: string;
-            completed_at?: string;
-          }>;
-        }> = [];
+        let deploymentTargets: DeploymentTarget[] = [];
         try {
           const deploymentTargetsRes = await deploymentTargetsApi.list(slug);
           deploymentTargets = deploymentTargetsRes || [];
@@ -427,12 +417,12 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
         }));
 
         // Add browser preview edges for connected browsers
-        browserPreviews.forEach((preview: Record<string, unknown>) => {
+        (browserPreviews as Array<Record<string, unknown>>).forEach((preview) => {
           if (preview.connected_container_id) {
             flowEdges.push({
-              id: `browser-edge-${preview.id}`,
-              source: preview.connected_container_id,
-              target: preview.id,
+              id: `browser-edge-${preview.id as string}`,
+              source: preview.connected_container_id as string,
+              target: preview.id as string,
               type: 'browser_preview',
               animated: false,
             });
@@ -531,16 +521,18 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
             setNodes((currentNodes) => {
               let hasChanges = false;
               const updatedNodes = currentNodes.map((node) => {
-                const serviceName = node.data.name
+                const serviceName = (node.data.name as string | undefined)
                   ?.toLowerCase()
                   .replace(/[^a-z0-9-]/g, '-')
                   .replace(/-+/g, '-')
                   .replace(/^-|-$/g, '');
-                const containerStatus = statusData.containers[serviceName];
+                const containerStatus = serviceName
+                  ? (statusData.containers as Record<string, Record<string, unknown>>)[serviceName]
+                  : undefined;
 
                 if (containerStatus) {
                   const newStatus = containerStatus.running ? 'running' : 'stopped';
-                  if (node.data.status !== newStatus) {
+                  if ((node.data.status as string | undefined) !== newStatus) {
                     hasChanges = true;
                     return {
                       ...node,
@@ -695,23 +687,14 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
                     ...node,
                     data: {
                       ...node.data,
-                      deploymentHistory: (history || []).map(
-                        (d: {
-                          id: string;
-                          version?: string;
-                          status: string;
-                          deployment_url?: string;
-                          created_at: string;
-                          completed_at?: string;
-                        }) => ({
-                          id: d.id,
-                          version: d.version,
-                          status: d.status,
-                          deployment_url: d.deployment_url,
-                          created_at: d.created_at,
-                          completed_at: d.completed_at,
-                        })
-                      ),
+                      deploymentHistory: (history || []).map((d) => ({
+                        id: d.id,
+                        version: d.version,
+                        status: d.status,
+                        deployment_url: d.deployment_url,
+                        created_at: d.created_at,
+                        completed_at: d.completed_at,
+                      })),
                     },
                   }
                 : node
@@ -837,9 +820,12 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
               if (result.status === 'success') {
                 toast.success('Rollback successful!', { id: `rollback-${deploymentId}` });
               } else {
-                toast.error(`Rollback failed: ${result.error || 'Unknown error'}`, {
-                  id: `rollback-${deploymentId}`,
-                });
+                toast.error(
+                  `Rollback failed: ${((result as Record<string, unknown>).error as string) || result.message || 'Unknown error'}`,
+                  {
+                    id: `rollback-${deploymentId}`,
+                  }
+                );
               }
             } catch (error) {
               console.error('Failed to rollback:', error);
@@ -916,8 +902,8 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
 
         // Browser preview connection
         if (targetNode?.type === 'browserPreview' && sourceNode) {
-          const containerName = sourceNode.data.name;
-          const containerPort = sourceNode.data.port || 3000;
+          const containerName = sourceNode.data.name as string;
+          const containerPort = (sourceNode.data.port as number | undefined) || 3000;
 
           try {
             await api.post(
@@ -964,8 +950,8 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
 
         // Deployment target connection
         if (targetNode?.type === 'deploymentTarget' && sourceNode?.type === 'containerNode') {
-          const containerName = sourceNode.data.name;
-          const provider = targetNode.data.provider;
+          const containerName = sourceNode.data.name as string;
+          const provider = targetNode.data.provider as string;
 
           try {
             const validation = await deploymentTargetsApi.validate(
@@ -981,7 +967,9 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
 
             await deploymentTargetsApi.connect(slug, connection.target!, connection.source!);
 
-            const connectedContainers = targetNode.data.connectedContainers || [];
+            const connectedContainers =
+              (targetNode.data.connectedContainers as Array<Record<string, unknown>> | undefined) ||
+              [];
             setNodes((nds) =>
               nds.map((node) =>
                 node.id === connection.target
@@ -994,7 +982,8 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
                           {
                             id: connection.source,
                             name: containerName,
-                            framework: sourceNode.data.techStack?.[0] || null,
+                            framework:
+                              (sourceNode.data.techStack as string[] | undefined)?.[0] || null,
                           },
                         ],
                       },
@@ -1080,10 +1069,10 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       if (containerNode) {
         setSelectedContainer({
           id: containerId,
-          name: containerNode.data.name,
-          status: containerNode.data.status,
-          port: containerNode.data.port,
-          containerType: containerNode.data.containerType,
+          name: containerNode.data.name as string,
+          status: containerNode.data.status as string,
+          port: containerNode.data.port as number | undefined,
+          containerType: containerNode.data.containerType as 'base' | 'service' | undefined,
         });
       }
     }, []);
@@ -1098,7 +1087,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
     const handleDeleteContainer = useCallback(
       (containerId: string) => {
         const containerNode = nodesRef.current.find((n) => n.id === containerId);
-        const containerName = containerNode?.data?.name || 'this container';
+        const containerName = (containerNode?.data?.name as string | undefined) || 'this container';
         const currentSlug = slugRef.current;
 
         setConfirmDialog({
@@ -1616,7 +1605,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
     }, []);
 
     const handleNodeDragStop = useCallback(
-      async (_event: React.MouseEvent | React.TouchEvent, node: Node) => {
+      async (_event: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent, node: Node) => {
         setIsDragging(false);
 
         if (typeof node.id === 'string' && node.id.startsWith('temp-')) {
@@ -1725,9 +1714,10 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
                         ...node,
                         data: {
                           ...node.data,
-                          connectedContainers: (node.data.connectedContainers || []).filter(
-                            (c: { id: string }) => c.id !== containerId
-                          ),
+                          connectedContainers: (
+                            (node.data.connectedContainers as Array<{ id: string }> | undefined) ||
+                            []
+                          ).filter((c) => c.id !== containerId),
                         },
                       }
                     : node
@@ -1925,16 +1915,16 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
           <GraphCanvas
             nodes={nodes}
             edges={edges}
-            onNodesChange={readOnly ? undefined : onNodesChange}
-            onEdgesChange={readOnly ? undefined : onEdgesChange}
-            onConnect={readOnly ? undefined : onConnect}
-            onDrop={readOnly ? undefined : onDrop}
-            onDragOver={readOnly ? undefined : onDragOver}
+            onNodesChange={(readOnly ? undefined : onNodesChange)!}
+            onEdgesChange={(readOnly ? undefined : onEdgesChange)!}
+            onConnect={(readOnly ? undefined : onConnect)!}
+            onDrop={(readOnly ? undefined : onDrop)!}
+            onDragOver={(readOnly ? undefined : onDragOver)!}
             onInit={() => {}}
             onNodeDragStart={readOnly ? undefined : handleNodeDragStart}
-            onNodeDragStop={readOnly ? undefined : handleNodeDragStop}
+            onNodeDragStop={(readOnly ? undefined : handleNodeDragStop)!}
             onNodeClick={handleNodeClick}
-            onNodeDoubleClick={readOnly ? undefined : handleNodeDoubleClick}
+            onNodeDoubleClick={(readOnly ? undefined : handleNodeDoubleClick)!}
             onEdgeClick={readOnly ? undefined : handleEdgeClick}
             onEdgesDelete={readOnly ? undefined : handleEdgesDelete}
             onBeforeDelete={readOnly ? undefined : handleBeforeDelete}
@@ -1992,7 +1982,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
         {externalServiceModal.item && (
           <ExternalServiceCredentialModal
             isOpen={externalServiceModal.isOpen}
-            item={externalServiceModal.item}
+            item={externalServiceModal.item as unknown as ExternalServiceItem}
             onClose={() => setExternalServiceModal({ isOpen: false, item: null, position: null })}
             onSubmit={handleExternalServiceCredentialSubmit}
           />

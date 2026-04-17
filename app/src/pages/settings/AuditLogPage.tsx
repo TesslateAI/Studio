@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import {
-  FileText,
-  ChevronLeft,
-  ChevronRight,
-  Filter,
-  X,
-  Calendar,
-} from 'lucide-react';
+import { FileText, ChevronLeft, ChevronRight, Filter, X, Calendar } from 'lucide-react';
 import { teamsApi } from '../../lib/api';
 import { useTeam } from '../../contexts/TeamContext';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
@@ -97,7 +90,7 @@ export default function AuditLogPage() {
       if (filters.to_date) params.to_date = new Date(filters.to_date).toISOString();
 
       const data = await teamsApi.getAuditLog(activeTeam.slug, params);
-      setEntries(data);
+      setEntries(data as AuditLogEntry[]);
       setHasMore(data.length === PER_PAGE);
     } catch (error) {
       console.error('Failed to load audit log:', error);
@@ -125,7 +118,8 @@ export default function AuditLogPage() {
     setPage(1);
   };
 
-  const hasActiveFilters = filters.action || filters.user_id || filters.from_date || filters.to_date;
+  const hasActiveFilters =
+    filters.action || filters.user_id || filters.from_date || filters.to_date;
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('en-US', {
@@ -176,194 +170,198 @@ export default function AuditLogPage() {
 
   return (
     <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
-    <SettingsSection
-      title="Audit Log"
-      description="Track all activity and changes within your team"
-    >
-      {/* Filter Bar */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className={`btn btn-sm flex items-center gap-1.5 ${showFilters || hasActiveFilters ? 'btn-active' : ''}`}
-        >
-          <Filter size={14} />
-          Filters
-          {hasActiveFilters && (
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />
-          )}
-        </button>
-        {hasActiveFilters && (
+      <SettingsSection
+        title="Audit Log"
+        description="Track all activity and changes within your team"
+      >
+        {/* Filter Bar */}
+        <div className="flex items-center gap-2">
           <button
-            onClick={clearFilters}
-            className="btn btn-sm flex items-center gap-1"
+            onClick={() => setShowFilters(!showFilters)}
+            className={`btn btn-sm flex items-center gap-1.5 ${showFilters || hasActiveFilters ? 'btn-active' : ''}`}
           >
-            <X size={14} />
-            Clear
+            <Filter size={14} />
+            Filters
+            {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />}
           </button>
-        )}
-        <div className="flex-1" />
-        <span className="text-xs text-[var(--text-muted)]">
-          Page {page}
-        </span>
-      </div>
+          {hasActiveFilters && (
+            <button onClick={clearFilters} className="btn btn-sm flex items-center gap-1">
+              <X size={14} />
+              Clear
+            </button>
+          )}
+          <div className="flex-1" />
+          <span className="text-xs text-[var(--text-muted)]">Page {page}</span>
+        </div>
 
-      {/* Filter Panel */}
-      {showFilters && (
-        <SettingsGroup title="Filters">
-          <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-[var(--text-muted)] mb-1 block">Action</label>
-              <select
-                value={filters.action}
-                onChange={(e) => handleFilterChange('action', e.target.value)}
-                className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
-              >
-                <option value="">All actions</option>
-                <option value="team.created">Team created</option>
-                <option value="team.updated">Team updated</option>
-                <option value="team.deleted">Team deleted</option>
-                <option value="member.invited">Member invited</option>
-                <option value="member.joined">Member joined</option>
-                <option value="member.removed">Member removed</option>
-                <option value="member.role_changed">Role changed</option>
-                <option value="project.created">Project created</option>
-                <option value="project.deleted">Project deleted</option>
-                <option value="project.started">Project started</option>
-                <option value="project.stopped">Project stopped</option>
-                <option value="billing.subscription_changed">Subscription changed</option>
-                <option value="billing.credits_purchased">Credits purchased</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-[var(--text-muted)] mb-1 block">User ID</label>
-              <input
-                type="text"
-                value={filters.user_id}
-                onChange={(e) => handleFilterChange('user_id', e.target.value)}
-                placeholder="Filter by user ID"
-                className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)]"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-[var(--text-muted)] mb-1 block">From Date</label>
-              <div className="relative">
-                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
+        {/* Filter Panel */}
+        {showFilters && (
+          <SettingsGroup title="Filters">
+            <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-1 block">Action</label>
+                <select
+                  value={filters.action}
+                  onChange={(e) => handleFilterChange('action', e.target.value)}
+                  className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
+                >
+                  <option value="">All actions</option>
+                  <option value="team.created">Team created</option>
+                  <option value="team.updated">Team updated</option>
+                  <option value="team.deleted">Team deleted</option>
+                  <option value="member.invited">Member invited</option>
+                  <option value="member.joined">Member joined</option>
+                  <option value="member.removed">Member removed</option>
+                  <option value="member.role_changed">Role changed</option>
+                  <option value="project.created">Project created</option>
+                  <option value="project.deleted">Project deleted</option>
+                  <option value="project.started">Project started</option>
+                  <option value="project.stopped">Project stopped</option>
+                  <option value="billing.subscription_changed">Subscription changed</option>
+                  <option value="billing.credits_purchased">Credits purchased</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-1 block">User ID</label>
                 <input
-                  type="date"
-                  value={filters.from_date}
-                  onChange={(e) => handleFilterChange('from_date', e.target.value)}
-                  className="w-full pl-8 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
+                  type="text"
+                  value={filters.user_id}
+                  onChange={(e) => handleFilterChange('user_id', e.target.value)}
+                  placeholder="Filter by user ID"
+                  className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)]"
                 />
               </div>
-            </div>
-            <div>
-              <label className="text-xs text-[var(--text-muted)] mb-1 block">To Date</label>
-              <div className="relative">
-                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
-                <input
-                  type="date"
-                  value={filters.to_date}
-                  onChange={(e) => handleFilterChange('to_date', e.target.value)}
-                  className="w-full pl-8 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
-                />
-              </div>
-            </div>
-          </div>
-        </SettingsGroup>
-      )}
-
-      {/* Audit Log Table */}
-      <SettingsGroup title="Activity">
-        {loading ? (
-          <div className="px-4 py-8 flex justify-center">
-            <LoadingSpinner size={40} />
-          </div>
-        ) : entries.length === 0 ? (
-          <div className="px-4 py-8 text-center text-[var(--text-muted)]">
-            <FileText size={32} className="mx-auto mb-2 opacity-40" />
-            <p className="text-sm">
-              {hasActiveFilters ? 'No results match your filters' : 'No audit log entries yet'}
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-[var(--border)]">
-            {entries.map((entry) => (
-              <div
-                key={entry.id}
-                className="px-4 py-3 hover:bg-[var(--surface)] transition-colors"
-              >
-                <div className="flex items-start gap-3">
-                  {/* Action badge */}
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-medium mt-0.5 flex-shrink-0 ${getActionColor(entry.action)}`}
-                  >
-                    {getActionCategory(entry.action)}
-                  </span>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-[var(--text)]">
-                      <span className="font-medium">{entry.user_name || 'Unknown user'}</span>
-                      <span className="text-[var(--text-muted)]"> {entry.action.replace('.', ' → ')}</span>
-                      {entry.project_name && (
-                        <span className="text-[var(--text-muted)]">
-                          {' '}in <span className="font-medium text-[var(--text)]">{entry.project_name}</span>
-                        </span>
-                      )}
-                    </p>
-                    {entry.details && Object.keys(entry.details).length > 0 && (
-                      <p className="text-[10px] text-[var(--text-subtle)] mt-0.5 truncate">
-                        {Object.entries(entry.details)
-                          .filter(([, v]) => v != null && v !== '')
-                          .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
-                          .join(' · ')}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Timestamp and IP */}
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-xs text-[var(--text-muted)]">
-                      {formatDate(entry.created_at)}
-                    </p>
-                    {entry.ip_address && (
-                      <p className="text-[10px] text-[var(--text-subtle)] mt-0.5">
-                        {entry.ip_address}
-                      </p>
-                    )}
-                  </div>
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-1 block">From Date</label>
+                <div className="relative">
+                  <Calendar
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]"
+                  />
+                  <input
+                    type="date"
+                    value={filters.from_date}
+                    onChange={(e) => handleFilterChange('from_date', e.target.value)}
+                    className="w-full pl-8 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
+                  />
                 </div>
               </div>
-            ))}
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-1 block">To Date</label>
+                <div className="relative">
+                  <Calendar
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]"
+                  />
+                  <input
+                    type="date"
+                    value={filters.to_date}
+                    onChange={(e) => handleFilterChange('to_date', e.target.value)}
+                    className="w-full pl-8 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
+                  />
+                </div>
+              </div>
+            </div>
+          </SettingsGroup>
+        )}
+
+        {/* Audit Log Table */}
+        <SettingsGroup title="Activity">
+          {loading ? (
+            <div className="px-4 py-8 flex justify-center">
+              <LoadingSpinner size={40} />
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="px-4 py-8 text-center text-[var(--text-muted)]">
+              <FileText size={32} className="mx-auto mb-2 opacity-40" />
+              <p className="text-sm">
+                {hasActiveFilters ? 'No results match your filters' : 'No audit log entries yet'}
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--border)]">
+              {entries.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="px-4 py-3 hover:bg-[var(--surface)] transition-colors"
+                >
+                  <div className="flex items-start gap-3">
+                    {/* Action badge */}
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium mt-0.5 flex-shrink-0 ${getActionColor(entry.action)}`}
+                    >
+                      {getActionCategory(entry.action)}
+                    </span>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-[var(--text)]">
+                        <span className="font-medium">{entry.user_name || 'Unknown user'}</span>
+                        <span className="text-[var(--text-muted)]">
+                          {' '}
+                          {entry.action.replace('.', ' → ')}
+                        </span>
+                        {entry.project_name && (
+                          <span className="text-[var(--text-muted)]">
+                            {' '}
+                            in{' '}
+                            <span className="font-medium text-[var(--text)]">
+                              {entry.project_name}
+                            </span>
+                          </span>
+                        )}
+                      </p>
+                      {entry.details && Object.keys(entry.details).length > 0 && (
+                        <p className="text-[10px] text-[var(--text-subtle)] mt-0.5 truncate">
+                          {Object.entries(entry.details)
+                            .filter(([, v]) => v != null && v !== '')
+                            .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
+                            .join(' · ')}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Timestamp and IP */}
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {formatDate(entry.created_at)}
+                      </p>
+                      {entry.ip_address && (
+                        <p className="text-[10px] text-[var(--text-subtle)] mt-0.5">
+                          {entry.ip_address}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SettingsGroup>
+
+        {/* Pagination */}
+        {(page > 1 || hasMore) && (
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="btn btn-sm flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft size={14} />
+              Previous
+            </button>
+            <span className="text-xs text-[var(--text-muted)]">Page {page}</span>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!hasMore}
+              className="btn btn-sm flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Next
+              <ChevronRight size={14} />
+            </button>
           </div>
         )}
-      </SettingsGroup>
-
-      {/* Pagination */}
-      {(page > 1 || hasMore) && (
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-            className="btn btn-sm flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <ChevronLeft size={14} />
-            Previous
-          </button>
-          <span className="text-xs text-[var(--text-muted)]">
-            Page {page}
-          </span>
-          <button
-            onClick={() => setPage((p) => p + 1)}
-            disabled={!hasMore}
-            className="btn btn-sm flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            Next
-            <ChevronRight size={14} />
-          </button>
-        </div>
-      )}
-    </SettingsSection>
+      </SettingsSection>
     </div>
   );
 }

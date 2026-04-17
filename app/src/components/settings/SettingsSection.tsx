@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { type ReactNode } from 'react';
 
 interface SettingsSectionProps {
   title: string;
@@ -12,9 +12,7 @@ export function SettingsSection({ title, description, children }: SettingsSectio
       {/* Section Header */}
       <div className="mb-5">
         <h1 className="text-sm font-semibold text-[var(--text)]">{title}</h1>
-        {description && (
-          <p className="mt-1 text-[11px] text-[var(--text-muted)]">{description}</p>
-        )}
+        {description && <p className="mt-1 text-[11px] text-[var(--text-muted)]">{description}</p>}
       </div>
 
       {/* Section Content */}

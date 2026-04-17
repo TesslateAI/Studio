@@ -203,19 +203,6 @@ export function DeploymentModal({
     return provider?.display_name || providerName.charAt(0).toUpperCase() + providerName.slice(1);
   };
 
-  const _getProviderColor = (providerName: string) => {
-    switch (providerName.toLowerCase()) {
-      case 'cloudflare':
-        return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
-      case 'vercel':
-        return 'bg-white/20 text-white border-white/30';
-      case 'netlify':
-        return 'bg-teal-500/20 text-teal-400 border-teal-500/30';
-      default:
-        return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
-    }
-  };
-
   const connectedProviders = credentials
     .map((c) => c.provider)
     .filter((p) => !COMING_SOON_PROVIDERS.includes(p.toLowerCase()));

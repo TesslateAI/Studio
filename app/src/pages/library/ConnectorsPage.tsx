@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Plugs,
   Key,
@@ -100,8 +99,6 @@ export default function ConnectorsPage({
   onReload,
   onBrowse,
 }: ConnectorsPageProps) {
-  const _navigate = useNavigate();
-
   // Local state
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -437,11 +434,11 @@ function McpServerCard({
   const [showDropdown, setShowDropdown] = useState(false);
   const [, setAssigning] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const [showDetails] = useState(false);
   const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
   const [savingCredentials, setSavingCredentials] = useState(false);
-  const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
-  const [discovering, setDiscovering] = useState(false);
+  const [discoveryResult] = useState<DiscoveryResult | null>(null);
+  const [discovering] = useState(false);
   const [testingId, setTestingId] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -600,25 +597,6 @@ function McpServerCard({
       toast.error(err.response?.data?.detail || 'Failed to save credentials');
     } finally {
       setSavingCredentials(false);
-    }
-  };
-
-  const _handleDiscover = async () => {
-    if (discoveryResult) {
-      setShowDetails(!showDetails);
-      return;
-    }
-    setShowDetails(true);
-    setDiscovering(true);
-    try {
-      const result = await marketplaceApi.discoverMcpServer(server.id);
-      setDiscoveryResult(result);
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Discovery failed');
-      setShowDetails(false);
-    } finally {
-      setDiscovering(false);
     }
   };
 

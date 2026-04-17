@@ -9,7 +9,7 @@ import {
   Clock,
   CreditCard,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { SettingsSection, SettingsGroup } from '../../components/settings';
 import { billingApi } from '../../lib/api';
 import { useTeam } from '../../contexts/TeamContext';
@@ -747,13 +747,13 @@ function InfoTip({ tip, highlighted }: { tip: string; highlighted: boolean }) {
 }
 
 /* ── Animation variants ── */
-const modalOverlay = {
+const modalOverlay: Variants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { duration: 0.2 } },
   exit: { opacity: 0, transition: { duration: 0.15 } },
 };
 
-const modalContent = {
+const modalContent: Variants = {
   hidden: { opacity: 0, y: 20, scale: 0.98 },
   visible: {
     opacity: 1,
@@ -764,12 +764,12 @@ const modalContent = {
   exit: { opacity: 0, y: 10, scale: 0.98, transition: { duration: 0.15 } },
 };
 
-const stagger = {
+const stagger: Variants = {
   hidden: {},
   visible: { transition: { staggerChildren: 0.07, delayChildren: 0.15 } },
 };
 
-const cardUp = {
+const cardUp: Variants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] } },
 };

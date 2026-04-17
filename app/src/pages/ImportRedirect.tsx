@@ -38,9 +38,9 @@ export default function ImportRedirect() {
     }
 
     if (isAuthenticated) {
-      navigate(`/dashboard?import_repo=${encodeURIComponent(repo)}`, { replace: true });
+      navigate(`/dashboard?import_repo=${encodeURIComponent(repo ?? '')}`, { replace: true });
     } else {
-      const returnPath = `/import?repo=${encodeURIComponent(repo)}`;
+      const returnPath = `/import?repo=${encodeURIComponent(repo ?? '')}`;
       navigate('/login', { state: { from: returnPath }, replace: true });
     }
   }, [isLoading, isAuthenticated, isValidRepo, repo, navigate]);

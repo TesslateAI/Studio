@@ -1,7 +1,7 @@
 """Add runtime, source_path, sync_enabled fields to projects
 
-Revision ID: 0049_project_runtime_fields
-Revises: 0048_project_sync_fields
+Revision ID: 0052_project_runtime_fields
+Revises: 0051_mcp_config_unique_scope
 Create Date: 2026-04-14 00:00:00.000000
 
 Adds three columns to ``projects`` to support the desktop local runtime:
@@ -22,8 +22,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0049_project_runtime_fields"
-down_revision: str | Sequence[str] | None = "0048_project_sync_fields"
+revision: str = "0052_project_runtime_fields"
+down_revision: str | Sequence[str] | None = "0051_mcp_config_unique_scope"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -19,7 +19,8 @@ depends_on = None
 import sqlalchemy as sa  # noqa: E402
 from alembic import op  # noqa: E402
 from sqlalchemy.dialects import postgresql  # noqa: E402
-from app.types.guid import GUID
+
+from app.types.guid import GUID  # noqa: E402
 
 
 def upgrade() -> None:
@@ -216,9 +217,7 @@ def upgrade() -> None:
         )
 
     # users: default_team_id
-    op.add_column(
-        "users", sa.Column("default_team_id", GUID(), nullable=True)
-    )
+    op.add_column("users", sa.Column("default_team_id", GUID(), nullable=True))
     with op.batch_alter_table("users") as batch_op:
         batch_op.create_foreign_key(
             "fk_users_default_team", "teams", ["default_team_id"], ["id"], ondelete="SET NULL"
@@ -232,9 +231,7 @@ def upgrade() -> None:
         )
 
     # credit_purchases: team_id
-    op.add_column(
-        "credit_purchases", sa.Column("team_id", GUID(), nullable=True)
-    )
+    op.add_column("credit_purchases", sa.Column("team_id", GUID(), nullable=True))
     with op.batch_alter_table("credit_purchases") as batch_op:
         batch_op.create_foreign_key(
             "fk_credit_purchases_team_id",
@@ -321,7 +318,8 @@ def upgrade() -> None:
     """)
 
     # ── 8. Make team_id NOT NULL on projects ────────────────────────────
-    op.alter_column("projects", "team_id", nullable=False)
+    with op.batch_alter_table("projects") as batch_op:
+        batch_op.alter_column("team_id", nullable=False)
 
     # ── 9. Add index on projects.team_id ────────────────────────────────
     op.create_index("ix_projects_team_id", "projects", ["team_id"])

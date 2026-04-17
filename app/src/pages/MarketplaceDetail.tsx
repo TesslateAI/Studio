@@ -108,12 +108,14 @@ export default function MarketplaceDetail() {
   const [editingReview, setEditingReview] = useState(false);
 
   // Version state for bases
-  const [versions, setVersions] = useState<Array<{
-    tag: string;
-    sha: string;
-    date: string | null;
-    url: string;
-  }>>([]);
+  const [versions, setVersions] = useState<
+    Array<{
+      tag: string;
+      sha: string;
+      date: string | null;
+      url: string;
+    }>
+  >([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [versionsDefaultBranch, setVersionsDefaultBranch] = useState<string | null>(null);
 
@@ -407,7 +409,8 @@ export default function MarketplaceDetail() {
   useEffect(() => {
     if (item?.item_type === 'base' && item?.git_repo_url && slug) {
       setLoadingVersions(true);
-      marketplaceApi.getBaseVersions(slug)
+      marketplaceApi
+        .getBaseVersions(slug)
         .then((data) => {
           setVersions(data.versions || []);
           setVersionsDefaultBranch(data.default_branch || null);
@@ -448,9 +451,9 @@ export default function MarketplaceDetail() {
     price: item.price || 0,
     pricing_type: item.pricing_type,
     rating: item.rating,
-    review_count: item.review_count,
-    creator_name: item.creator_name,
-    avatar_url: item.avatar_url,
+    review_count: item.reviews_count,
+    creator_name: item.creator_name ?? undefined,
+    avatar_url: item.avatar_url ?? undefined,
     category: item.category,
   });
 
@@ -479,24 +482,25 @@ export default function MarketplaceDetail() {
           'Tesslate',
           ...(item.tags || []),
         ].filter(Boolean)}
-        image={item.avatar_url || item.preview_image}
+        image={(item.avatar_url || item.preview_image) ?? undefined}
         url={`${baseUrl}/marketplace/${item.slug}`}
         type="product"
-        author={item.creator_name}
+        author={item.creator_name ?? undefined}
         structuredData={{
           '@context': 'https://schema.org',
           '@graph': [productStructuredData, breadcrumbData],
         }}
       />
-      <div key={teamSwitchKey} className="h-screen overflow-y-auto bg-[var(--bg)]" style={{ animation: 'fade-in 0.25s ease-out' }}>
+      <div
+        key={teamSwitchKey}
+        className="h-screen overflow-y-auto bg-[var(--bg)]"
+        style={{ animation: 'fade-in 0.25s ease-out' }}
+      >
         {/* Header */}
         <div className="border-b border-[var(--border)] flex-shrink-0">
           <div className="max-w-5xl mx-auto px-6 md:px-12">
             <div className="h-10 flex items-center gap-3">
-              <button
-                onClick={() => navigate(marketplaceBackUrl)}
-                className="btn"
-              >
+              <button onClick={() => navigate(marketplaceBackUrl)} className="btn">
                 <ArrowLeft size={15} />
                 Marketplace
               </button>
@@ -532,7 +536,8 @@ export default function MarketplaceDetail() {
                   {item.name}
                 </h1>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {(item.source_type === 'open' || (item.source_type === 'git' && item.git_repo_url)) && (
+                  {(item.source_type === 'open' ||
+                    (item.source_type === 'git' && item.git_repo_url)) && (
                     <span className="flex items-center gap-1.5 bg-[var(--surface-hover)] border border-[var(--border)] text-[var(--text-muted)] rounded-[var(--radius-small)] text-[10px] px-1.5 py-0.5 font-medium whitespace-nowrap">
                       <GitFork size={14} weight="bold" />
                       Open Source
@@ -554,9 +559,7 @@ export default function MarketplaceDetail() {
               </div>
 
               {/* Description */}
-              <p className="text-xs text-[var(--text-muted)] mb-4">
-                {item.description}
-              </p>
+              <p className="text-xs text-[var(--text-muted)] mb-4">{item.description}</p>
 
               {/* Author */}
               <div className="flex items-center gap-4 mb-6">
@@ -591,9 +594,7 @@ export default function MarketplaceDetail() {
                     </span>
                   </Link>
                 ) : (
-                  <span className="text-[11px] text-[var(--text-muted)]">
-                    By Tesslate
-                  </span>
+                  <span className="text-[11px] text-[var(--text-muted)]">By Tesslate</span>
                 )}
               </div>
 
@@ -630,9 +631,7 @@ export default function MarketplaceDetail() {
                     onClick={handleInstall}
                     disabled={!item.is_active || installing}
                     className={
-                      item.is_active
-                        ? 'btn btn-filled'
-                        : 'btn opacity-50 cursor-not-allowed'
+                      item.is_active ? 'btn btn-filled' : 'btn opacity-50 cursor-not-allowed'
                     }
                   >
                     {installing ? (
@@ -663,11 +662,7 @@ export default function MarketplaceDetail() {
                   isAuthenticated &&
                   item.source_type === 'open' &&
                   item.is_forkable && (
-                    <button
-                      onClick={handleFork}
-                      disabled={forking}
-                      className="btn"
-                    >
+                    <button onClick={handleFork} disabled={forking} className="btn">
                       {forking ? (
                         <>
                           <div className="w-4 h-4 border-2 border-purple-400/30 border-t-purple-400 rounded-full animate-spin" />
@@ -684,9 +679,7 @@ export default function MarketplaceDetail() {
 
                 {/* Price Badge */}
                 {item.pricing_type === 'free' && (
-                  <span className="text-xs text-[var(--text-subtle)]">
-                    Free
-                  </span>
+                  <span className="text-xs text-[var(--text-subtle)]">Free</span>
                 )}
               </div>
             </div>
@@ -701,9 +694,7 @@ export default function MarketplaceDetail() {
         {/* Versions Section (bases with git repos only) */}
         {item.item_type === 'base' && item.git_repo_url && (
           <div className="max-w-5xl mx-auto px-6 md:px-12 mb-8">
-            <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
-              Versions
-            </h2>
+            <h2 className="text-sm font-semibold text-[var(--text)] mb-4">Versions</h2>
             {loadingVersions ? (
               <div className="flex items-center gap-2 py-4 text-xs text-[var(--text-subtle)]">
                 <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -786,9 +777,7 @@ export default function MarketplaceDetail() {
           {/* Long Description */}
           {item.long_description && (
             <section className="mb-8">
-              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
-                About
-              </h2>
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">About</h2>
               <div>
                 <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                   {item.long_description}
@@ -800,16 +789,16 @@ export default function MarketplaceDetail() {
           {/* Features */}
           {item.features && item.features.length > 0 && (
             <section className="mb-8">
-              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
-                Features
-              </h2>
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">Features</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {item.features.map((feature, idx) => (
                   <div key={idx} className="flex items-center gap-3">
-                    <Check size={18} className="text-[var(--status-success)] flex-shrink-0" weight="bold" />
-                    <span className="text-xs text-[var(--text-muted)]">
-                      {feature}
-                    </span>
+                    <Check
+                      size={18}
+                      className="text-[var(--status-success)] flex-shrink-0"
+                      weight="bold"
+                    />
+                    <span className="text-xs text-[var(--text-muted)]">{feature}</span>
                   </div>
                 ))}
               </div>
@@ -819,9 +808,7 @@ export default function MarketplaceDetail() {
           {/* Tools (for agents) */}
           {item.item_type === 'agent' && (
             <section className="mb-8">
-              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
-                Available Tools
-              </h2>
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">Available Tools</h2>
               <div className="flex flex-wrap gap-2">
                 {(item.tools && item.tools.length > 0 ? item.tools : ALL_TOOLS).map(
                   (toolName, idx) => {
@@ -845,9 +832,7 @@ export default function MarketplaceDetail() {
           {/* Tags */}
           {item.tags && item.tags.length > 0 && (
             <section className="mb-8">
-              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">
-                Tags
-              </h2>
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-4">Tags</h2>
               <div className="flex flex-wrap gap-2">
                 {item.tags.map((tag, idx) => (
                   <button
@@ -866,14 +851,9 @@ export default function MarketplaceDetail() {
           {(item.item_type === 'agent' || item.item_type === 'base') && (
             <section className="mb-8">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-sm font-semibold text-[var(--text)]">
-                  Reviews
-                </h2>
+                <h2 className="text-sm font-semibold text-[var(--text)]">Reviews</h2>
                 {item.is_purchased && !showReviewForm && (
-                  <button
-                    onClick={() => setShowReviewForm(true)}
-                    className="btn"
-                  >
+                  <button onClick={() => setShowReviewForm(true)} className="btn">
                     <ChatCircle size={16} weight="fill" />
                     {editingReview ? 'Edit Review' : 'Write a Review'}
                   </button>
@@ -887,14 +867,8 @@ export default function MarketplaceDetail() {
                     <h3 className="font-semibold text-[var(--text)]">
                       {editingReview ? 'Edit Your Review' : 'Write a Review'}
                     </h3>
-                    <button
-                      onClick={() => setShowReviewForm(false)}
-                      className="btn"
-                    >
-                      <X
-                        size={18}
-                        className="text-[var(--text-subtle)]"
-                      />
+                    <button onClick={() => setShowReviewForm(false)} className="btn">
+                      <X size={18} className="text-[var(--text-subtle)]" />
                     </button>
                   </div>
 
@@ -943,10 +917,7 @@ export default function MarketplaceDetail() {
                       )}
                     </button>
                     {editingReview && (
-                      <button
-                        onClick={handleDeleteReview}
-                        className="btn btn-danger"
-                      >
+                      <button onClick={handleDeleteReview} className="btn btn-danger">
                         <Trash size={16} weight="bold" />
                         Delete
                       </button>
@@ -990,9 +961,7 @@ export default function MarketplaceDetail() {
           {/* Related Items */}
           {relatedItems.length > 0 && (
             <section>
-              <h2 className="text-sm font-semibold text-[var(--text)] mb-6">
-                People also like
-              </h2>
+              <h2 className="text-sm font-semibold text-[var(--text)] mb-6">People also like</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {relatedItems.map((relatedItem) => (
                   <AgentCard

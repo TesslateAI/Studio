@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { api } from '../../lib/api';
+import { marketplaceApi } from '../../lib/api';
 
 interface Agent {
   id: string;
@@ -36,11 +36,11 @@ const AgentPurchaseButton: React.FC<AgentPurchaseButtonProps> = ({
       setError(null);
 
       // Call the marketplace agent purchase endpoint
-      const response = await api.post(`/api/marketplace/agents/${agent.id}/purchase`);
+      const response = await marketplaceApi.purchaseAgent(agent.id);
 
       // Redirect to Stripe Checkout
-      if (response.data.checkout_url) {
-        window.location.href = response.data.checkout_url;
+      if (response.checkout_url) {
+        window.location.href = response.checkout_url;
 
         if (onPurchaseSuccess) {
           onPurchaseSuccess();
@@ -111,26 +111,16 @@ const AgentPurchaseButton: React.FC<AgentPurchaseButtonProps> = ({
 
   return (
     <div className={className}>
-      {error && (
-        <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm">
-          {error}
-        </div>
-      )}
+      {error && <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>}
 
       {/* Pricing Display */}
       <div className="mb-3">
-        <div className="text-2xl font-bold text-gray-900">
-          {getPriceDisplay()}
-        </div>
+        <div className="text-2xl font-bold text-gray-900">{getPriceDisplay()}</div>
         {agent.pricing_type === 'api' && (
-          <div className="text-xs text-gray-500 mt-1">
-            Charged based on actual usage
-          </div>
+          <div className="text-xs text-gray-500 mt-1">Charged based on actual usage</div>
         )}
         {agent.pricing_type === 'monthly' && !isPurchased && (
-          <div className="text-xs text-gray-500 mt-1">
-            Recurring monthly subscription
-          </div>
+          <div className="text-xs text-gray-500 mt-1">Recurring monthly subscription</div>
         )}
       </div>
 
@@ -147,11 +137,20 @@ const AgentPurchaseButton: React.FC<AgentPurchaseButtonProps> = ({
       {agent.pricing_type === 'api' && !isPurchased && (
         <div className="mt-3 p-3 bg-blue-50 rounded-lg text-sm">
           <div className="flex items-start space-x-2">
-            <svg className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            <svg
+              className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                clipRule="evenodd"
+              />
             </svg>
             <div className="text-blue-700">
-              <strong>Pay per use:</strong> You'll only be charged for the tokens you use. Credits are deducted first, then your card is charged monthly.
+              <strong>Pay per use:</strong> You'll only be charged for the tokens you use. Credits
+              are deducted first, then your card is charged monthly.
             </div>
           </div>
         </div>
@@ -160,11 +159,20 @@ const AgentPurchaseButton: React.FC<AgentPurchaseButtonProps> = ({
       {agent.pricing_type === 'monthly' && !isPurchased && (
         <div className="mt-3 p-3 bg-yellow-50 rounded-lg text-sm">
           <div className="flex items-start space-x-2">
-            <svg className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            <svg
+              className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                clipRule="evenodd"
+              />
             </svg>
             <div className="text-yellow-700">
-              <strong>Subscription:</strong> Cancel anytime. You'll continue to have access until the end of your billing period.
+              <strong>Subscription:</strong> Cancel anytime. You'll continue to have access until
+              the end of your billing period.
             </div>
           </div>
         </div>
@@ -173,7 +181,11 @@ const AgentPurchaseButton: React.FC<AgentPurchaseButtonProps> = ({
       {isPurchased && (
         <div className="mt-3 flex items-center justify-center space-x-2 text-sm text-green-600">
           <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            <path
+              fillRule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+              clipRule="evenodd"
+            />
           </svg>
           <span className="font-medium">Added to your library</span>
         </div>

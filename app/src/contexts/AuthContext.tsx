@@ -419,7 +419,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
 
     // Case 1: token already injected before React mounted.
-    const win = window as Record<string, unknown>;
+    const win = window as unknown as Record<string, unknown>;
     const existing = win.__TESSLATE_DESKTOP_TOKEN__;
     if (typeof existing === 'string' && existing) {
       applyToken(existing);
@@ -428,7 +428,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // Case 2: token arrives after React mounts (host fetched it async).
     const handler = () => {
-      const t = (window as Record<string, unknown>).__TESSLATE_DESKTOP_TOKEN__;
+      const t = (window as unknown as Record<string, unknown>).__TESSLATE_DESKTOP_TOKEN__;
       if (typeof t === 'string') applyToken(t);
     };
     window.addEventListener('tesslate-desktop-token-ready', handler);

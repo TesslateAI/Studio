@@ -18,24 +18,23 @@ from alembic import op  # noqa: E402
 
 
 def upgrade() -> None:
-    # Rename node_name → cache_node (preserves existing data)
-    op.alter_column("projects", "node_name", new_column_name="cache_node")
-
-    # Drop volume_state — Hub is the source of truth
-    op.drop_column("projects", "volume_state")
+    with op.batch_alter_table("projects") as batch_op:
+        # Rename node_name → cache_node (preserves existing data)
+        batch_op.alter_column("node_name", new_column_name="cache_node")
+        # Drop volume_state — Hub is the source of truth
+        batch_op.drop_column("volume_state")
 
 
 def downgrade() -> None:
-    # Re-add volume_state with default "local" (safe assumption for rollback)
-    op.add_column(
-        "projects",
-        sa.Column(
-            "volume_state",
-            sa.String(50),
-            nullable=False,
-            server_default="local",
-        ),
-    )
-
-    # Rename cache_node → node_name
-    op.alter_column("projects", "cache_node", new_column_name="node_name")
+    with op.batch_alter_table("projects") as batch_op:
+        # Re-add volume_state with default "local" (safe assumption for rollback)
+        batch_op.add_column(
+            sa.Column(
+                "volume_state",
+                sa.String(50),
+                nullable=False,
+                server_default="local",
+            )
+        )
+        # Rename cache_node → node_name
+        batch_op.alter_column("cache_node", new_column_name="node_name")

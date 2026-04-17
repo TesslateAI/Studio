@@ -102,7 +102,7 @@ export default function ConnectionsSettings() {
       ]);
       setIdentities(identitiesRes as Identity[]);
       setStatus(statusRes as GatewayStatus);
-      setPlatforms(platformsRes as Platform[]);
+      setPlatforms(platformsRes as unknown as Platform[]);
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
       toast.error(err.response?.data?.detail || 'Failed to load connections');

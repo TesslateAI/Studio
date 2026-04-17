@@ -1,7 +1,7 @@
 """AgentTask.message_id linking ticket to chat message.
 
-Revision ID: 0052_agent_task_message_id
-Revises: 0051_workspace_directories
+Revision ID: 0055_agent_task_message_id
+Revises: 0054_workspace_directories
 Create Date: 2026-04-14 03:00:00.000000
 
 Adds a nullable ``AgentTask.message_id`` FK so handoff bundles and the
@@ -18,8 +18,8 @@ from alembic import op
 
 from app.types.guid import GUID
 
-revision: str = "0052_agent_task_message_id"
-down_revision: str | None = "0051_workspace_directories"
+revision: str = "0055_agent_task_message_id"
+down_revision: str | None = "0054_workspace_directories"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

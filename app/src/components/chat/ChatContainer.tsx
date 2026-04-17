@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, FileCode, X, List, Plus, Plug } from 'lucide-react';
 import { PencilSimple, Storefront } from '@phosphor-icons/react';
@@ -77,7 +77,7 @@ interface ChatContainerProps {
   className?: string;
   sidebarExpanded?: boolean;
   isDocked?: boolean; // When true, renders as docked panel instead of floating
-  isPointerOverPreviewRef?: React.RefObject<boolean>; // Tracks if mouse is over preview iframe
+  isPointerOverPreviewRef?: RefObject<boolean>; // Tracks if mouse is over preview iframe
   prefillMessage?: string | null;
   onPrefillConsumed?: () => void;
   onExpandedChange?: (expanded: boolean) => void;
@@ -204,7 +204,17 @@ export function ChatContainer({
   const effectiveIsExpanded = isDocked || isExpanded;
 
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<{ id: string; title: string; created_at: string }[]>([]);
+  const [sessions, setSessions] = useState<
+    {
+      id: string;
+      title: string | null;
+      origin: string;
+      status: string;
+      created_at: string;
+      updated_at: string | null;
+      message_count: number;
+    }[]
+  >([]);
   const [showSessionPopover, setShowSessionPopover] = useState(false);
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const [renameTitleValue, setRenameTitleValue] = useState('');
@@ -458,7 +468,7 @@ export function ChatContainer({
                   const steps = orig.agentData.steps || [];
                   const lastMsg = { ...orig };
                   lastMsg.agentData = {
-                    ...lastMsg.agentData,
+                    ...lastMsg.agentData!,
                     steps: [...steps, data.data],
                   };
                   updated[updated.length - 1] = lastMsg;
@@ -493,11 +503,11 @@ export function ChatContainer({
                   const lastMsg = { ...orig };
                   lastMsg.content = finalContent;
                   lastMsg.agentData = {
-                    ...lastMsg.agentData,
+                    ...lastMsg.agentData!,
                     completion_reason: completeData.completion_reason || 'complete',
-                    iterations: completeData.iterations ?? lastMsg.agentData.iterations,
+                    iterations: completeData.iterations ?? lastMsg.agentData!.iterations,
                     tool_calls_made:
-                      completeData.tool_calls_made ?? lastMsg.agentData.tool_calls_made,
+                      completeData.tool_calls_made ?? lastMsg.agentData!.tool_calls_made,
                   };
                   updated[updated.length - 1] = lastMsg;
                 }
@@ -512,7 +522,7 @@ export function ChatContainer({
                   const lastMsg = { ...orig };
                   lastMsg.content = errorMsg;
                   lastMsg.agentData = {
-                    ...lastMsg.agentData,
+                    ...lastMsg.agentData!,
                     completion_reason: 'error',
                   };
                   updated[updated.length - 1] = lastMsg;
@@ -1189,7 +1199,7 @@ export function ChatContainer({
           chat_id: currentChatId || undefined, // Target specific chat session
           message,
           agent_id: currentAgent.backendId?.toString(),
-          max_iterations: null,
+          max_iterations: undefined,
           edit_mode: editMode,
           view_context: viewContext, // UI view context for scoped tools
           attachments,
@@ -1239,12 +1249,12 @@ export function ChatContainer({
             }
           } else if (event.type === 'tool_call') {
             // Per-tool streaming — accumulate into ONE message per iteration
-            const tc = event.data || {};
-            const iterMsgId = `${thinkingMessageId}-iter-${tc.iteration}`;
-            const newTool = {
-              name: tc.name,
-              parameters: tc.parameters,
-              result: tc.result,
+            const tc = event.data as Record<string, unknown>;
+            const iterMsgId = `${thinkingMessageId}-iter-${tc.iteration as number}`;
+            const newTool: import('../../types/agent').ToolCallDetail = {
+              name: tc.name as string,
+              parameters: (tc.parameters as Record<string, unknown>) || {},
+              result: tc.result as import('../../types/agent').ToolCallDetail['result'],
             };
 
             setMessages((prev) => {
@@ -1263,7 +1273,7 @@ export function ChatContainer({
                       {
                         ...existing.agentData!.steps[0],
                         tool_calls: [...currentTools, newTool],
-                      },
+                      } as import('../../types/agent').AgentStep,
                     ],
                     tool_calls_made: currentTools.length + 1,
                   },
@@ -1275,8 +1285,8 @@ export function ChatContainer({
                   type: 'ai',
                   content: '',
                   agentData: {
-                    steps: [{ tool_calls: [newTool] }],
-                    iterations: tc.iteration || 0,
+                    steps: [{ tool_calls: [newTool] } as import('../../types/agent').AgentStep],
+                    iterations: (tc.iteration as number) || 0,
                     tool_calls_made: 1,
                     completion_reason: 'tool_streaming',
                   },
@@ -1289,24 +1299,39 @@ export function ChatContainer({
               return [...withoutThinking, { ...thinkingMessage, id: thinkingMessageId }];
             });
 
-            if (tc.name === 'kanban' && tc.result?.result?.success !== false) {
+            const tcResult = tc.result as Record<string, unknown> | undefined;
+            if (
+              tc.name === 'kanban' &&
+              (tcResult?.result as Record<string, unknown> | undefined)?.success !== false
+            ) {
               window.dispatchEvent(new CustomEvent('kanban-updated'));
             }
           } else if (event.type === 'agent_step') {
             // Finalize iteration message with canonical data from backend
-            const iterMsgId = `${thinkingMessageId}-iter-${event.data.iteration}`;
-            const transformedStep = {
-              ...event.data,
-              tool_calls:
-                event.data.tool_calls?.map(
-                  (tc: { name: string; parameters: unknown }, index: number) => ({
-                    name: tc.name,
-                    parameters: tc.parameters,
-                    result: event.data.tool_results?.[index] || {},
-                  })
-                ) || [],
+            const stepData = event.data as Record<string, unknown>;
+            const iterMsgId = `${thinkingMessageId}-iter-${stepData.iteration as number}`;
+            const rawToolCalls =
+              (stepData.tool_calls as Array<{ name: string; parameters: unknown }> | undefined) ||
+              [];
+            const rawToolResults =
+              (stepData.tool_results as Array<Record<string, unknown>> | undefined) || [];
+            const transformedToolCalls: import('../../types/agent').ToolCallDetail[] =
+              rawToolCalls.map((tc, index) => ({
+                name: tc.name,
+                parameters: (tc.parameters as Record<string, unknown>) || {},
+                result:
+                  (rawToolResults[index] as import('../../types/agent').ToolCallDetail['result']) ||
+                  undefined,
+              }));
+            const {
+              tool_results: _tool_results,
+              tool_calls: _tool_calls,
+              ...restStepData
+            } = stepData;
+            const transformedStep: import('../../types/agent').AgentStep = {
+              ...(restStepData as Omit<import('../../types/agent').AgentStep, 'tool_calls'>),
+              tool_calls: transformedToolCalls,
             };
-            delete transformedStep.tool_results;
 
             const stepMessage: Message = {
               id: iterMsgId,
@@ -1314,8 +1339,8 @@ export function ChatContainer({
               content: '',
               agentData: {
                 steps: [transformedStep],
-                iterations: event.data.iteration || 0,
-                tool_calls_made: event.data.tool_calls?.length || 0,
+                iterations: (stepData.iteration as number) || 0,
+                tool_calls_made: rawToolCalls.length,
                 completion_reason: 'step_complete',
               },
               agentIcon: currentAgent.icon,
@@ -1335,12 +1360,14 @@ export function ChatContainer({
             });
 
             // Side effects
-            const toolCalls = event.data.tool_calls || [];
-            const toolResults = event.data.tool_results || [];
+            const toolCalls = rawToolCalls;
+            const toolResults = rawToolResults;
             if (
               toolCalls.some(
                 (tc: { name: string }, idx: number) =>
-                  tc.name === 'kanban' && toolResults[idx]?.result?.success !== false
+                  tc.name === 'kanban' &&
+                  (toolResults[idx]?.result as Record<string, unknown> | undefined)?.success !==
+                    false
               )
             ) {
               window.dispatchEvent(new CustomEvent('kanban-updated'));
@@ -1393,7 +1420,7 @@ export function ChatContainer({
               toast.error(errorDetail, { duration: 5000 });
             } else {
               // Add final response as part of AgentMessage (not a separate message)
-              const finalContent = event.data.final_response;
+              const finalContent = event.data.final_response as string | undefined;
               if (finalContent && finalContent.trim()) {
                 // Update the last agent message to include the final response
                 setMessages((prev) => {
@@ -1403,7 +1430,7 @@ export function ChatContainer({
                       ...prev.slice(0, -1),
                       {
                         ...lastMsg,
-                        content: finalContent,
+                        content: finalContent ?? '',
                       },
                     ];
                   }
@@ -1413,7 +1440,7 @@ export function ChatContainer({
                     {
                       id: `msg-${Date.now()}-result`,
                       type: 'ai',
-                      content: finalContent,
+                      content: finalContent ?? '',
                       agentData: {
                         steps: [],
                         iterations: 0,
@@ -1442,19 +1469,20 @@ export function ChatContainer({
               })
             );
           } else if (event.type === 'error') {
-            const errorData = event.data || {};
+            const errorData = event.data as Record<string, unknown>;
             // Handle insufficient credits specifically
             if (errorData.code === 'insufficient_credits') {
               toast.error(
-                errorData.message || 'Insufficient credits. Please purchase more to continue.',
+                (errorData.message as string | undefined) ||
+                  'Insufficient credits. Please purchase more to continue.',
                 { duration: 6000 }
               );
               setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
               return;
             }
             const errorMsg =
-              (event as { content?: string; data?: { message?: string } }).content ||
-              event.data?.message ||
+              (event as unknown as { content?: string }).content ||
+              (errorData.message as string | undefined) ||
               'Agent execution failed';
             throw new Error(errorMsg);
           } else if (event.type === 'approval_required') {
@@ -1469,10 +1497,10 @@ export function ChatContainer({
                 id: `approval-${Date.now()}`,
                 type: 'approval_request',
                 content: '',
-                approvalId: event.data.approval_id,
-                toolName: event.data.tool_name,
-                toolParameters: event.data.tool_parameters,
-                toolDescription: event.data.tool_description,
+                approvalId: event.data.approval_id as string,
+                toolName: event.data.tool_name as string,
+                toolParameters: event.data.tool_parameters as Record<string, unknown>,
+                toolDescription: event.data.tool_description as string,
               };
               setMessages((prev) => [...prev, approvalMessage]);
             }
@@ -1554,12 +1582,15 @@ export function ChatContainer({
                 if (data.type === 'agent_step') {
                   setMessages((prev) => {
                     const updated = [...prev];
-                    const orig = updated[updated.length - 1];
+                    const orig = updated[updated.length - 1] as Message | undefined;
                     if (orig?.agentData?.completion_reason === 'in_progress') {
-                      const lastMsg = { ...orig };
+                      const lastMsg = { ...orig } as Message;
                       lastMsg.agentData = {
-                        ...lastMsg.agentData,
-                        steps: [...(lastMsg.agentData.steps || []), data.data],
+                        ...lastMsg.agentData!,
+                        steps: [
+                          ...(lastMsg.agentData!.steps || []),
+                          data.data as import('../../types/agent').AgentStep,
+                        ],
                       };
                       updated[updated.length - 1] = lastMsg;
                     }
@@ -1567,16 +1598,20 @@ export function ChatContainer({
                   });
                 } else if (data.type === 'complete' || data.type === 'done') {
                   if (data.type === 'complete') {
-                    const finalContent = data.data?.final_response || '';
+                    const completePayload = data.data as Record<string, unknown> | undefined;
+                    const finalContent =
+                      (completePayload?.final_response as string | undefined) || '';
                     setMessages((prev) => {
                       const updated = [...prev];
-                      const orig = updated[updated.length - 1];
+                      const orig = updated[updated.length - 1] as Message | undefined;
                       if (orig?.agentData?.completion_reason === 'in_progress') {
-                        const lastMsg = { ...orig };
+                        const lastMsg = { ...orig } as Message;
                         lastMsg.content = finalContent;
                         lastMsg.agentData = {
-                          ...lastMsg.agentData,
-                          completion_reason: data.data?.completion_reason || 'complete',
+                          ...lastMsg.agentData!,
+                          completion_reason:
+                            (completePayload?.completion_reason as string | undefined) ||
+                            'complete',
                         };
                         updated[updated.length - 1] = lastMsg;
                       }
@@ -1588,14 +1623,16 @@ export function ChatContainer({
                   agentTaskIdRef.current = null;
                   refreshSessions();
                 } else if (data.type === 'error') {
-                  const errMsg = data.data?.message || 'Agent execution failed';
+                  const errPayload = data.data as Record<string, unknown> | undefined;
+                  const errMsg =
+                    (errPayload?.message as string | undefined) || 'Agent execution failed';
                   setMessages((prev) => {
                     const updated = [...prev];
-                    const orig = updated[updated.length - 1];
+                    const orig = updated[updated.length - 1] as Message | undefined;
                     if (orig?.agentData?.completion_reason === 'in_progress') {
-                      const lastMsg = { ...orig };
+                      const lastMsg = { ...orig } as Message;
                       lastMsg.content = errMsg;
-                      lastMsg.agentData = { ...lastMsg.agentData, completion_reason: 'error' };
+                      lastMsg.agentData = { ...lastMsg.agentData!, completion_reason: 'error' };
                       updated[updated.length - 1] = lastMsg;
                     }
                     return updated;
@@ -1906,13 +1943,13 @@ export function ChatContainer({
     if (isCurrentlyStreaming) {
       processedContent = processedContent.replace(
         /```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*?```/g,
-        (match, fileName) => {
+        (_match, fileName) => {
           return `[FILE: ${fileName.trim()}]`;
         }
       );
       processedContent = processedContent.replace(
         /```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*$/g,
-        (match, fileName) => {
+        (_match, fileName) => {
           return `[FILE: ${fileName.trim()}]`;
         }
       );
@@ -2290,7 +2327,7 @@ export function ChatContainer({
                   <ApprovalRequestCard
                     approvalId={message.approvalId}
                     toolName={message.toolName || 'unknown'}
-                    toolParameters={message.toolParameters}
+                    toolParameters={message.toolParameters ?? {}}
                     toolDescription={message.toolDescription || 'No description provided'}
                     onRespond={handleApprovalResponse}
                   />
@@ -2370,7 +2407,6 @@ export function ChatContainer({
             onClearHistory={handleClearHistory}
             onUndo={handleUndo}
             onRetry={handleRetry}
-            isExpanded={effectiveIsExpanded}
             editMode={editMode}
             onModeChange={setEditMode}
             onPlanMode={() => setEditMode('plan')}

@@ -46,7 +46,14 @@ export default function DeploymentSettings() {
     confirmText: string;
     variant: 'danger' | 'warning' | 'info';
     onConfirm: () => void;
-  }>({ isOpen: false, title: '', message: '', confirmText: 'Confirm', variant: 'info', onConfirm: () => {} });
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+    variant: 'info',
+    onConfirm: () => {},
+  });
 
   // Use cancellable parallel requests to prevent memory leaks on unmount
   const { executeAll } = useCancellableParallelRequests();
@@ -196,7 +203,7 @@ export default function DeploymentSettings() {
                               <Check size={12} weight="bold" />
                               Connected
                             </span>
-                            {credential.metadata?.account_name && (
+                            {credential.metadata?.account_name != null && (
                               <span className="text-xs text-[var(--text)]/40">
                                 {String(credential.metadata.account_name)}
                               </span>

@@ -31,72 +31,72 @@ export function MarketplacePanel({ projectId: _projectId, onLockToggle }: Market
   const marketplaceItems: Record<MarketplaceTab, MarketplaceItem[]> = {
     bases: [
       {
-        id: 1,
+        id: '1',
         title: 'SaaS Starter',
         description: 'Full auth, billing, dashboard',
         price: '$49',
         badge: 'Owned',
-        gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+        gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       },
       {
-        id: 2,
+        id: '2',
         title: 'E-commerce Kit',
         description: 'Cart, checkout, products',
         price: '$79',
-        gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
-      }
+        gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+      },
     ],
     apis: [
       {
-        id: 1,
+        id: '3',
         title: 'Google APIs',
         description: 'Drive, Calendar, Gmail',
         price: 'Free',
         badge: 'Installed',
-        gradient: 'linear-gradient(135deg, #4285f4 0%, #34a853 100%)'
+        gradient: 'linear-gradient(135deg, #4285f4 0%, #34a853 100%)',
       },
       {
-        id: 2,
+        id: '4',
         title: 'Stripe',
         description: 'Payments & billing',
         price: 'Free',
-        gradient: 'linear-gradient(135deg, #635bff 0%, #1a1f71 100%)'
-      }
+        gradient: 'linear-gradient(135deg, #635bff 0%, #1a1f71 100%)',
+      },
     ],
     agents: [
       {
-        id: 1,
+        id: '5',
         title: 'Security Scan',
         description: 'Pro agent • $9/mo',
         price: 'Subscription',
-        gradient: 'linear-gradient(135deg, rgba(255,107,0,0.3), rgba(255,107,0,0.1))'
+        gradient: 'linear-gradient(135deg, rgba(255,107,0,0.3), rgba(255,107,0,0.1))',
       },
       {
-        id: 2,
+        id: '6',
         title: 'DB Optimizer',
         description: 'Open source • Free',
         price: 'Free',
         badge: 'Active',
-        gradient: 'linear-gradient(135deg, rgba(0,217,255,0.3), rgba(0,217,255,0.1))'
-      }
+        gradient: 'linear-gradient(135deg, rgba(0,217,255,0.3), rgba(0,217,255,0.1))',
+      },
     ],
     components: [
       {
-        id: 1,
+        id: '7',
         title: 'Dashboard UI',
         description: '20+ components',
         price: '$29',
         badge: 'In Library',
-        gradient: 'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)'
+        gradient: 'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)',
       },
       {
-        id: 2,
+        id: '8',
         title: 'Form Builder',
         description: '15+ form components',
         price: '$19',
-        gradient: 'linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%)'
-      }
-    ]
+        gradient: 'linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%)',
+      },
+    ],
   };
 
   return (
@@ -134,10 +134,7 @@ export function MarketplacePanel({ projectId: _projectId, onLockToggle }: Market
             key={item.id}
             className="marketplace-item bg-white/3 border border-white/8 rounded-2xl p-4 transition-all hover:bg-white/5 hover:border-[var(--primary)] hover:-translate-y-0.5 cursor-pointer"
           >
-            <div
-              style={{ background: item.gradient }}
-              className="h-[120px] rounded-xl mb-3"
-            />
+            <div style={{ background: item.gradient }} className="h-[120px] rounded-xl mb-3" />
             <div className="font-semibold text-sm text-white mb-1">{item.title}</div>
             <div className="text-xs text-gray-500 mb-2">{item.description}</div>
             <div className="flex items-center justify-between">

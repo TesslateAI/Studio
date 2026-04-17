@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ChevronDown, ChevronRight, Bug, Copy, Check } from 'lucide-react';
 
 interface DebugData {
@@ -25,7 +25,13 @@ interface AgentDebugPanelProps {
   toolResults?: ToolResult[];
 }
 
-function ContextMessageItem({ index, message }: { index: number; message: { role: string; content: string } }) {
+function ContextMessageItem({
+  index,
+  message,
+}: {
+  index: number;
+  message: { role: string; content: string };
+}) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const roleColors = {
@@ -37,9 +43,8 @@ function ContextMessageItem({ index, message }: { index: number; message: { role
   const roleColor = roleColors[message.role as keyof typeof roleColors] || 'text-gray-400';
 
   // Truncate content for preview
-  const preview = message.content.length > 150
-    ? message.content.substring(0, 150) + '...'
-    : message.content;
+  const preview =
+    message.content.length > 150 ? message.content.substring(0, 150) + '...' : message.content;
 
   return (
     <div className="bg-[var(--surface)] rounded border border-[var(--border-color)]">
@@ -61,9 +66,7 @@ function ContextMessageItem({ index, message }: { index: number; message: { role
             </span>
           </div>
           {!isExpanded && (
-            <div className="text-[var(--text)]/50 text-[10px] truncate">
-              {preview}
-            </div>
+            <div className="text-[var(--text)]/50 text-[10px] truncate">{preview}</div>
           )}
         </div>
       </button>
@@ -78,7 +81,11 @@ function ContextMessageItem({ index, message }: { index: number; message: { role
   );
 }
 
-function formatDebugInfo(iteration: number, debugData: DebugData, toolResults?: ToolResult[]): string {
+function formatDebugInfo(
+  iteration: number,
+  debugData: DebugData,
+  toolResults?: ToolResult[]
+): string {
   const sections: string[] = [];
 
   sections.push('='.repeat(80));
@@ -153,13 +160,17 @@ function formatDebugInfo(iteration: number, debugData: DebugData, toolResults?: 
     sections.push('-'.repeat(80));
     toolResults.forEach((result, idx) => {
       sections.push('');
-      sections.push(`Tool Result #${idx + 1}: ${result.tool} - ${result.success ? 'SUCCESS' : 'FAILED'}`);
+      sections.push(
+        `Tool Result #${idx + 1}: ${result.tool} - ${result.success ? 'SUCCESS' : 'FAILED'}`
+      );
       if (result.error) {
         sections.push(`Error: ${result.error}`);
       }
       if (result.result) {
         sections.push('Result:');
-        sections.push(typeof result.result === 'string' ? result.result : JSON.stringify(result.result, null, 2));
+        sections.push(
+          typeof result.result === 'string' ? result.result : JSON.stringify(result.result, null, 2)
+        );
       }
       sections.push('-'.repeat(40));
     });
@@ -182,7 +193,11 @@ function formatDebugInfo(iteration: number, debugData: DebugData, toolResults?: 
   return sections.join('\n');
 }
 
-export default function AgentDebugPanel({ iteration, debugData, toolResults }: AgentDebugPanelProps) {
+export default function AgentDebugPanel({
+  iteration,
+  debugData,
+  toolResults,
+}: AgentDebugPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -215,9 +230,7 @@ export default function AgentDebugPanel({ iteration, debugData, toolResults }: A
             <ChevronRight size={16} className="text-yellow-500" />
           )}
           <Bug size={14} className="text-yellow-500" />
-          <span className="text-xs font-mono text-yellow-500">
-            DEBUG: Iteration {iteration}
-          </span>
+          <span className="text-xs font-mono text-yellow-500">DEBUG: Iteration {iteration}</span>
         </button>
         <button
           onClick={copyDebugInfo}
@@ -276,7 +289,9 @@ export default function AgentDebugPanel({ iteration, debugData, toolResults }: A
           {/* Conversational Text */}
           {debugData.conversational_text && (
             <div>
-              <div className="text-yellow-500/70 font-semibold mb-1">Conversational Text (Extracted):</div>
+              <div className="text-yellow-500/70 font-semibold mb-1">
+                Conversational Text (Extracted):
+              </div>
               <div className="text-[var(--text)]/70 bg-[var(--surface)] p-2 rounded border border-[var(--border-color)] whitespace-pre-wrap max-h-32 overflow-y-auto">
                 {debugData.conversational_text}
               </div>
@@ -286,7 +301,9 @@ export default function AgentDebugPanel({ iteration, debugData, toolResults }: A
           {/* Display Text */}
           {debugData.display_text && (
             <div>
-              <div className="text-yellow-500/70 font-semibold mb-1">Display Text (Shown to User):</div>
+              <div className="text-yellow-500/70 font-semibold mb-1">
+                Display Text (Shown to User):
+              </div>
               <div className="text-[var(--text)]/70 bg-[var(--surface)] p-2 rounded border border-[var(--border-color)] whitespace-pre-wrap max-h-32 overflow-y-auto">
                 {debugData.display_text}
               </div>
@@ -296,10 +313,15 @@ export default function AgentDebugPanel({ iteration, debugData, toolResults }: A
           {/* Raw Tool Calls */}
           {debugData.raw_tool_calls && debugData.raw_tool_calls.length > 0 && (
             <div>
-              <div className="text-yellow-500/70 font-semibold mb-1">Raw Tool Calls ({debugData.raw_tool_calls.length}):</div>
+              <div className="text-yellow-500/70 font-semibold mb-1">
+                Raw Tool Calls ({debugData.raw_tool_calls.length}):
+              </div>
               <div className="space-y-2">
                 {debugData.raw_tool_calls.map((tc, idx) => (
-                  <div key={idx} className="bg-[var(--surface)] p-2 rounded border border-[var(--border-color)]">
+                  <div
+                    key={idx}
+                    className="bg-[var(--surface)] p-2 rounded border border-[var(--border-color)]"
+                  >
                     <div className="text-blue-400 mb-1">{tc.name}</div>
                     <pre className="text-[var(--text)]/70 text-[10px] overflow-x-auto">
                       {JSON.stringify(tc.params, null, 2)}
@@ -313,7 +335,9 @@ export default function AgentDebugPanel({ iteration, debugData, toolResults }: A
           {/* Tool Results */}
           {toolResults && toolResults.length > 0 && (
             <div>
-              <div className="text-yellow-500/70 font-semibold mb-1">Tool Results ({toolResults.length}):</div>
+              <div className="text-yellow-500/70 font-semibold mb-1">
+                Tool Results ({toolResults.length}):
+              </div>
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {toolResults.map((result, idx) => (
                   <div
@@ -329,15 +353,15 @@ export default function AgentDebugPanel({ iteration, debugData, toolResults }: A
                       <span className="text-blue-400">{result.tool}</span>
                     </div>
                     {result.error && (
-                      <div className="text-red-400/70 text-[10px] mb-1">
-                        Error: {result.error}
-                      </div>
+                      <div className="text-red-400/70 text-[10px] mb-1">Error: {result.error}</div>
                     )}
-                    {result.result && (
+                    {!!result.result && (
                       <pre className="text-[var(--text)]/70 text-[10px] overflow-x-auto whitespace-pre-wrap">
-                        {typeof result.result === 'string'
-                          ? result.result
-                          : JSON.stringify(result.result, null, 2)}
+                        {
+                          (typeof result.result === 'string'
+                            ? result.result
+                            : JSON.stringify(result.result, null, 2)) as string
+                        }
                       </pre>
                     )}
                   </div>

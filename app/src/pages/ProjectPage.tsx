@@ -79,7 +79,7 @@ import { VolumeHealthBanner } from '../components/VolumeHealthBanner';
 // Types
 // ---------------------------------------------------------------------------
 
-type PanelType = 'github' | 'notes' | 'settings' | null;
+type PanelType = 'github' | 'notes' | 'settings' | 'timeline' | null;
 
 const TOOL_LABELS: Record<ToolType, string> = {
   architecture: 'Architecture',
@@ -759,10 +759,14 @@ function ProjectPageInner() {
           const rawDir = foundContainer.directory;
           const dirKey = rawDir && rawDir !== '.' ? sanitizeKey(rawDir) : null;
           const nameKey = foundContainer.name ? sanitizeKey(foundContainer.name as string) : null;
-          const containerStatus =
-            status?.containers?.[dirKey!] ?? status?.containers?.[nameKey!] ?? null;
+          const containersMap = status?.containers as Record<string, unknown> | null | undefined;
+          const containerStatus = (containersMap?.[dirKey!] ??
+            containersMap?.[nameKey!] ??
+            null) as Record<string, unknown> | null;
 
-          const statusContainers = status?.containers ?? null;
+          const statusContainers =
+            (status?.containers as Record<string, Record<string, unknown>> | null | undefined) ??
+            null;
           const previewable = buildPreviewableContainers(
             allContainers,
             statusContainers,
@@ -800,9 +804,9 @@ function ProjectPageInner() {
           if (containerStatus?.running && containerStatus?.url) {
             containerStartup.reset();
             setNeedsContainerStart(false);
-            setDevServerUrl(containerStatus.url);
-            setDevServerUrlWithAuth(containerStatus.url);
-            setCurrentPreviewUrl(containerStatus.url);
+            setDevServerUrl(containerStatus.url as string);
+            setDevServerUrlWithAuth(containerStatus.url as string);
+            setCurrentPreviewUrl(containerStatus.url as string);
             cancelFileRetry();
             loadFilesWithRetry();
             return;
@@ -1431,7 +1435,9 @@ function ProjectPageInner() {
         className={navButtonClass(false)}
       >
         <ArrowLeft size={16} className={inactiveIconClass} />
-        <span className={`${inactiveLabelClass} truncate`}>{project?.name || 'Project'}</span>
+        <span className={`${inactiveLabelClass} truncate`}>
+          {(project?.name as string) || 'Project'}
+        </span>
       </button>
 
       <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
@@ -1456,7 +1462,10 @@ function ProjectPageInner() {
             className={navButtonClass(active)}
             style={def.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
           >
-            {React.cloneElement(def.icon, { className: iconClass(active), size: 16 })}
+            {React.cloneElement(
+              def.icon as React.ReactElement<{ className?: string; size?: number }>,
+              { className: iconClass(active), size: 16 }
+            )}
             <span className={labelClass(active)}>{TOOL_LABELS[def.id]}</span>
             {def.restricted && (
               <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
@@ -1487,7 +1496,9 @@ function ProjectPageInner() {
           className={navButtonClass(item.active)}
           style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
         >
-          {React.cloneElement(item.icon, { className: iconClass(item.active) })}
+          {React.cloneElement(item.icon as React.ReactElement<{ className?: string }>, {
+            className: iconClass(item.active),
+          })}
           <span className={labelClass(item.active)}>{item.title}</span>
           {item.restricted && (
             <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
@@ -1506,7 +1517,7 @@ function ProjectPageInner() {
   const chatViewContext = activeTabType === 'architecture' ? 'graph' : 'builder';
 
   const chatProps = {
-    projectId: project?.id,
+    projectId: project?.id as number,
     containerId: containerId || undefined,
     viewContext: chatViewContext as 'graph' | 'builder',
     agents,
@@ -1514,7 +1525,7 @@ function ProjectPageInner() {
     onSelectAgent: handleAgentSelect,
     onFileUpdate: handleFileUpdate,
     slug: slug!,
-    projectName: project?.name,
+    projectName: project?.name as string | undefined,
     sidebarExpanded: isLeftSidebarExpanded,
     isPointerOverPreviewRef,
     prefillMessage: prefillChatMessage,
@@ -1594,7 +1605,7 @@ function ProjectPageInner() {
     ),
     code: (_tab: TabInstance, _idx: number) => (
       <CodeEditor
-        projectId={project?.id}
+        projectId={project?.id as number}
         slug={slug!}
         fileTree={fileTree}
         containerDir={containerDir}
@@ -1612,7 +1623,7 @@ function ProjectPageInner() {
       project?.id && devServerUrl ? (
         <DesignView
           slug={slug!}
-          projectId={project.id as number}
+          projectId={project?.id as number}
           fileTree={fileTree}
           devServerUrl={devServerUrl}
           devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
@@ -1913,7 +1924,7 @@ function ProjectPageInner() {
       )}
 
       {/* Volume Health Banner — shows when volume is degraded, with recover controls */}
-      {slug && project?.volume_id && (
+      {slug && !!project?.volume_id && (
         <VolumeHealthBanner
           projectSlug={slug}
           pollInterval={30000}
@@ -1948,11 +1959,15 @@ function ProjectPageInner() {
               <button onClick={() => navigate('/dashboard')} className={navButtonClass(false)}>
                 <ArrowLeft size={16} className={inactiveIconClass} />
                 <span className={`${inactiveLabelClass} truncate`}>
-                  {project?.name || 'Project'}
+                  {(project?.name as string) || 'Project'}
                 </span>
               </button>
             ) : (
-              <Tooltip content={project?.name || 'Back to Projects'} side="right" delay={200}>
+              <Tooltip
+                content={(project?.name as string) || 'Back to Projects'}
+                side="right"
+                delay={200}
+              >
                 <button
                   onClick={() => navigate('/dashboard')}
                   className={navButtonClassCollapsed(false)}
@@ -1973,7 +1988,9 @@ function ProjectPageInner() {
                   className={navButtonClass(item.active)}
                   style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
                 >
-                  {React.cloneElement(item.icon, { className: iconClass(item.active) })}
+                  {React.cloneElement(item.icon as React.ReactElement<{ className?: string }>, {
+                    className: iconClass(item.active),
+                  })}
                   <span className={labelClass(item.active)}>{item.title}</span>
                   {item.restricted && (
                     <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
@@ -1993,7 +2010,9 @@ function ProjectPageInner() {
                     className={navButtonClassCollapsed(item.active)}
                     style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
                   >
-                    {React.cloneElement(item.icon, { className: iconClass(item.active) })}
+                    {React.cloneElement(item.icon as React.ReactElement<{ className?: string }>, {
+                      className: iconClass(item.active),
+                    })}
                   </button>
                 </Tooltip>
               )
@@ -2071,9 +2090,9 @@ function ProjectPageInner() {
         defaultSize={{ width: 380, height: 600 }}
       >
         <TimelinePanel
-          projectId={project?.id}
+          projectId={project?.id as string}
           projectSlug={slug!}
-          projectStatus={project?.environment_status || 'stopped'}
+          projectStatus={(project?.environment_status as string) || 'stopped'}
           onRestored={() => {
             loadFilesWithRetry();
             fileEvents.emit('files-changed');
@@ -2094,7 +2113,7 @@ function ProjectPageInner() {
         defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
         defaultSize={{ width: 420, height: 620 }}
       >
-        <GitHubPanel projectId={project?.id} />
+        <GitHubPanel projectId={project?.id as number} />
       </FloatingPanel>
 
       <FloatingPanel

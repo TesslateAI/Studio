@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Activity,
   Server,
@@ -15,7 +15,7 @@ import {
   RotateCw,
   Trash2,
   ChevronRight,
-  Search
+  Search,
 } from 'lucide-react';
 import { getAuthHeaders } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -105,7 +105,7 @@ export default function SystemHealth() {
     try {
       const response = await fetch('/api/admin/health', {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load health data');
@@ -127,7 +127,7 @@ export default function SystemHealth() {
 
       const response = await fetch(`/api/admin/k8s/namespaces?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -168,7 +168,7 @@ export default function SystemHealth() {
     try {
       const response = await fetch(`/api/admin/k8s/namespaces/${namespace}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load namespace details');
@@ -184,10 +184,13 @@ export default function SystemHealth() {
 
   const loadPodLogs = async (namespace: string, pod: string) => {
     try {
-      const response = await fetch(`/api/admin/k8s/namespaces/${namespace}/logs/${pod}?tail_lines=200`, {
-        headers: getAuthHeaders(),
-        credentials: 'include'
-      });
+      const response = await fetch(
+        `/api/admin/k8s/namespaces/${namespace}/logs/${pod}?tail_lines=200`,
+        {
+          headers: getAuthHeaders(),
+          credentials: 'include',
+        }
+      );
 
       if (!response.ok) throw new Error('Failed to load logs');
 
@@ -208,7 +211,7 @@ export default function SystemHealth() {
       const response = await fetch(`/api/admin/k8s/namespaces/${namespace}/pods/${pod}/restart`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to restart pod');
@@ -226,11 +229,14 @@ export default function SystemHealth() {
     if (!reason) return;
 
     try {
-      const response = await fetch(`/api/admin/k8s/namespaces/${namespace}?reason=${encodeURIComponent(reason)}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-        credentials: 'include'
-      });
+      const response = await fetch(
+        `/api/admin/k8s/namespaces/${namespace}?reason=${encodeURIComponent(reason)}`,
+        {
+          method: 'DELETE',
+          headers: getAuthHeaders(),
+          credentials: 'include',
+        }
+      );
 
       if (!response.ok) throw new Error('Failed to delete namespace');
 
@@ -292,14 +298,20 @@ export default function SystemHealth() {
           <Activity className="text-blue-500" size={24} />
           <h2 className="text-2xl font-bold text-white">System Health</h2>
           {health && (
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-              health.overall_status === 'operational' ? 'bg-green-500/20 text-green-400' :
-              health.overall_status === 'degraded' ? 'bg-yellow-500/20 text-yellow-400' :
-              'bg-red-500/20 text-red-400'
-            }`}>
-              {health.overall_status === 'operational' ? 'All Systems Operational' :
-               health.overall_status === 'degraded' ? 'Degraded Performance' :
-               'System Outage'}
+            <span
+              className={`px-3 py-1 rounded-full text-sm font-medium ${
+                health.overall_status === 'operational'
+                  ? 'bg-green-500/20 text-green-400'
+                  : health.overall_status === 'degraded'
+                    ? 'bg-yellow-500/20 text-yellow-400'
+                    : 'bg-red-500/20 text-red-400'
+              }`}
+            >
+              {health.overall_status === 'operational'
+                ? 'All Systems Operational'
+                : health.overall_status === 'degraded'
+                  ? 'Degraded Performance'
+                  : 'System Outage'}
             </span>
           )}
         </div>
@@ -356,21 +368,29 @@ export default function SystemHealth() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Status</span>
-                    <span className={`capitalize ${
-                      service.status === 'up' ? 'text-green-400' :
-                      service.status === 'down' ? 'text-red-400' :
-                      'text-yellow-400'
-                    }`}>
+                    <span
+                      className={`capitalize ${
+                        service.status === 'up'
+                          ? 'text-green-400'
+                          : service.status === 'down'
+                            ? 'text-red-400'
+                            : 'text-yellow-400'
+                      }`}
+                    >
                       {service.status}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Response Time</span>
-                    <span className={`${
-                      service.response_time_ms < 100 ? 'text-green-400' :
-                      service.response_time_ms < 500 ? 'text-yellow-400' :
-                      'text-red-400'
-                    }`}>
+                    <span
+                      className={`${
+                        service.response_time_ms < 100
+                          ? 'text-green-400'
+                          : service.response_time_ms < 500
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
+                      }`}
+                    >
                       {service.response_time_ms}ms
                     </span>
                   </div>
@@ -424,12 +444,18 @@ export default function SystemHealth() {
           {/* Search */}
           <div className="bg-gray-800 rounded-lg p-4 border border-[var(--text)]/15">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                size={18}
+              />
               <input
                 type="text"
                 placeholder="Search namespaces..."
                 value={nsSearch}
-                onChange={(e) => { setNsSearch(e.target.value); setNsPage(1); }}
+                onChange={(e) => {
+                  setNsSearch(e.target.value);
+                  setNsPage(1);
+                }}
                 className="w-full bg-gray-700 text-white rounded-lg pl-10 pr-4 py-2 border border-[var(--text)]/20"
               />
             </div>
@@ -463,12 +489,16 @@ export default function SystemHealth() {
             <table className="w-full">
               <thead className="bg-gray-750 border-b border-[var(--text)]/15">
                 <tr>
-                  <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Namespace</th>
+                  <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">
+                    Namespace
+                  </th>
                   <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Project</th>
                   <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Owner</th>
                   <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Pods</th>
                   <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Storage</th>
-                  <th className="text-right px-6 py-3 text-gray-400 font-medium text-sm">Actions</th>
+                  <th className="text-right px-6 py-3 text-gray-400 font-medium text-sm">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-700">
@@ -488,11 +518,15 @@ export default function SystemHealth() {
                       )}
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`${
-                        ns.pods.startsWith('0/') ? 'text-red-400' :
-                        ns.pods.split('/')[0] === ns.pods.split('/')[1] ? 'text-green-400' :
-                        'text-yellow-400'
-                      }`}>
+                      <span
+                        className={`${
+                          ns.pods.startsWith('0/')
+                            ? 'text-red-400'
+                            : ns.pods.split('/')[0] === ns.pods.split('/')[1]
+                              ? 'text-green-400'
+                              : 'text-yellow-400'
+                        }`}
+                      >
                         {ns.pods}
                       </span>
                     </td>
@@ -536,14 +570,14 @@ export default function SystemHealth() {
                 </span>
                 <div className="flex items-center space-x-2">
                   <button
-                    onClick={() => setNsPage(p => Math.max(1, p - 1))}
+                    onClick={() => setNsPage((p) => Math.max(1, p - 1))}
                     disabled={nsPage === 1}
                     className="p-2 hover:bg-gray-700 rounded disabled:opacity-50"
                   >
                     <ChevronRight size={18} className="rotate-180" />
                   </button>
                   <button
-                    onClick={() => setNsPage(p => Math.min(nsPages, p + 1))}
+                    onClick={() => setNsPage((p) => Math.min(nsPages, p + 1))}
                     disabled={nsPage === nsPages}
                     className="p-2 hover:bg-gray-700 rounded disabled:opacity-50"
                   >
@@ -561,8 +595,13 @@ export default function SystemHealth() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-800 rounded-lg border border-[var(--text)]/15 max-w-3xl w-full max-h-[80vh] overflow-y-auto">
             <div className="p-6 border-b border-[var(--text)]/15 flex items-center justify-between sticky top-0 bg-gray-800">
-              <h3 className="text-xl font-bold text-white font-mono">{selectedNamespace.namespace}</h3>
-              <button onClick={() => setShowNamespaceModal(false)} className="text-gray-400 hover:text-white">
+              <h3 className="text-xl font-bold text-white font-mono">
+                {selectedNamespace.namespace}
+              </h3>
+              <button
+                onClick={() => setShowNamespaceModal(false)}
+                className="text-gray-400 hover:text-white"
+              >
                 ×
               </button>
             </div>
@@ -587,16 +626,21 @@ export default function SystemHealth() {
                 </h4>
                 <div className="space-y-2">
                   {selectedNamespace.pods.map((pod) => (
-                    <div key={pod.name} className="bg-gray-700/50 rounded-lg p-4 flex items-center justify-between">
+                    <div
+                      key={pod.name}
+                      className="bg-gray-700/50 rounded-lg p-4 flex items-center justify-between"
+                    >
                       <div>
                         <div className="text-white font-mono text-sm">{pod.name}</div>
                         <div className="flex items-center space-x-3 text-sm mt-1">
-                          <span className={pod.status === 'Running' ? 'text-green-400' : 'text-yellow-400'}>
+                          <span
+                            className={
+                              pod.status === 'Running' ? 'text-green-400' : 'text-yellow-400'
+                            }
+                          >
                             {pod.status}
                           </span>
-                          <span className="text-gray-500">
-                            {pod.restarts} restarts
-                          </span>
+                          <span className="text-gray-500">{pod.restarts} restarts</span>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
@@ -632,14 +676,19 @@ export default function SystemHealth() {
                   </h4>
                   <div className="space-y-2">
                     {selectedNamespace.pvcs.map((pvc) => (
-                      <div key={pvc.name} className="bg-gray-700/50 rounded-lg p-3 flex items-center justify-between">
+                      <div
+                        key={pvc.name}
+                        className="bg-gray-700/50 rounded-lg p-3 flex items-center justify-between"
+                      >
                         <div>
                           <div className="text-white font-mono text-sm">{pvc.name}</div>
                           <div className="text-gray-500 text-xs">{pvc.storage_class}</div>
                         </div>
                         <div className="text-right">
                           <div className="text-white">{pvc.storage}</div>
-                          <div className={`text-xs ${pvc.status === 'Bound' ? 'text-green-400' : 'text-yellow-400'}`}>
+                          <div
+                            className={`text-xs ${pvc.status === 'Bound' ? 'text-green-400' : 'text-yellow-400'}`}
+                          >
                             {pvc.status}
                           </div>
                         </div>
@@ -658,9 +707,14 @@ export default function SystemHealth() {
                   </h4>
                   <div className="space-y-2">
                     {selectedNamespace.ingresses.map((ing, idx) => (
-                      <div key={idx} className="bg-gray-700/50 rounded-lg p-3 flex items-center justify-between">
+                      <div
+                        key={idx}
+                        className="bg-gray-700/50 rounded-lg p-3 flex items-center justify-between"
+                      >
                         <span className="text-white font-mono text-sm">{ing.host}</span>
-                        <span className={`text-xs ${ing.tls ? 'text-green-400' : 'text-yellow-400'}`}>
+                        <span
+                          className={`text-xs ${ing.tls ? 'text-green-400' : 'text-yellow-400'}`}
+                        >
                           {ing.tls ? 'HTTPS' : 'HTTP'}
                         </span>
                       </div>
@@ -695,12 +749,17 @@ export default function SystemHealth() {
               <h3 className="text-lg font-bold text-white">
                 Logs: <span className="font-mono text-blue-400">{selectedPod.pod}</span>
               </h3>
-              <button onClick={() => setShowLogsModal(false)} className="text-gray-400 hover:text-white">
+              <button
+                onClick={() => setShowLogsModal(false)}
+                className="text-gray-400 hover:text-white"
+              >
                 ×
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4 bg-gray-900">
-              <pre className="text-gray-300 text-sm font-mono whitespace-pre-wrap">{logs || 'No logs available'}</pre>
+              <pre className="text-gray-300 text-sm font-mono whitespace-pre-wrap">
+                {logs || 'No logs available'}
+              </pre>
             </div>
             <div className="p-4 border-t border-[var(--text)]/15 flex justify-end">
               <button

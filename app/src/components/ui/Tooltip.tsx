@@ -1,4 +1,4 @@
-import { useState, useRef, ReactNode } from 'react';
+import { useState, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -10,10 +10,16 @@ interface TooltipProps {
   delay?: number;
 }
 
-export function Tooltip({ content, shortcut, children, side = 'right', delay = 300 }: TooltipProps) {
+export function Tooltip({
+  content,
+  shortcut,
+  children,
+  side = 'right',
+  delay = 300,
+}: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const triggerRef = useRef<HTMLDivElement>(null);
 
   const handleMouseEnter = () => {
@@ -76,13 +82,25 @@ export function Tooltip({ content, shortcut, children, side = 'right', delay = 3
   const getAnimationProps = () => {
     switch (side) {
       case 'top':
-        return { initial: { opacity: 0, y: 3, scale: 0.95 }, animate: { opacity: 1, y: 0, scale: 1 } };
+        return {
+          initial: { opacity: 0, y: 3, scale: 0.95 },
+          animate: { opacity: 1, y: 0, scale: 1 },
+        };
       case 'bottom':
-        return { initial: { opacity: 0, y: -3, scale: 0.95 }, animate: { opacity: 1, y: 0, scale: 1 } };
+        return {
+          initial: { opacity: 0, y: -3, scale: 0.95 },
+          animate: { opacity: 1, y: 0, scale: 1 },
+        };
       case 'left':
-        return { initial: { opacity: 0, x: 3, scale: 0.95 }, animate: { opacity: 1, x: 0, scale: 1 } };
+        return {
+          initial: { opacity: 0, x: 3, scale: 0.95 },
+          animate: { opacity: 1, x: 0, scale: 1 },
+        };
       case 'right':
-        return { initial: { opacity: 0, x: -3, scale: 0.95 }, animate: { opacity: 1, x: 0, scale: 1 } };
+        return {
+          initial: { opacity: 0, x: -3, scale: 0.95 },
+          animate: { opacity: 1, x: 0, scale: 1 },
+        };
     }
   };
 
@@ -115,9 +133,7 @@ export function Tooltip({ content, shortcut, children, side = 'right', delay = 3
 
           <div className="bg-black rounded-md px-2.5 py-1.5 shadow-2xl flex items-center gap-3">
             <span className="text-xs font-medium text-white">{content}</span>
-            {shortcut && (
-              <span className="text-xs text-white/50 font-mono">{shortcut}</span>
-            )}
+            {shortcut && <span className="text-xs text-white/50 font-mono">{shortcut}</span>}
           </div>
 
           {/* Arrow for other sides */}

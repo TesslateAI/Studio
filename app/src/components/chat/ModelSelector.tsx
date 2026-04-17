@@ -187,7 +187,7 @@ export function ModelSelector({
       try {
         const data = await marketplaceApi.getAvailableModels();
         const raw: unknown[] = Array.isArray(data) ? data : data.models || [];
-        const modelList: ModelInfo[] = raw
+        const modelList = raw
           .map((m) => {
             if (typeof m === 'string') return { id: m, pricing: null };
             const obj = m as Record<string, unknown>;
@@ -205,7 +205,7 @@ export function ModelSelector({
                 }
               : null;
           })
-          .filter((m): m is ModelInfo => m !== null);
+          .filter((m) => m !== null) as ModelInfo[];
         setModels(modelList);
         setHasFetched(true);
         lastFetchedAt.current = Date.now();

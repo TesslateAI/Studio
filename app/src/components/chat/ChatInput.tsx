@@ -69,7 +69,6 @@ interface ChatInputProps {
   onClearHistory?: () => void;
   onUndo?: () => void;
   onRetry?: () => void;
-  isExpanded?: boolean;
   editMode?: EditMode;
   onModeChange?: (mode: EditMode) => void;
   onPlanMode?: () => void;
@@ -102,7 +101,6 @@ export function ChatInput({
   onClearHistory,
   onUndo,
   onRetry,
-  _isExpanded = true,
   editMode = 'allow',
   onModeChange,
   onPlanMode,

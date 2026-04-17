@@ -37,6 +37,19 @@ jobs:
         working-directory: orchestrator
         run: python -m ruff check app/
 
+      - name: Lint migrations for SQLite-incompatible schema ops
+        # The following ops at the top-level of upgrade/downgrade (not inside
+        # batch_alter_table) generate ALTER TABLE ... syntax that SQLite rejects.
+        # The desktop sidecar runs on SQLite, so all migrations must be cross-dialect.
+        # Require these ops to live inside `with op.batch_alter_table(...) as batch_op:`
+        run: |
+          if grep -rn "^    op\.\(create_foreign_key\|drop_constraint\|create_unique_constraint\|alter_column\)" \
+               orchestrator/alembic/versions/; then
+            echo "ERROR: Use batch_alter_table() for constraint/alter operations — SQLite (desktop sidecar) requires it."
+            echo "Wrap the call in: with op.batch_alter_table('table_name') as batch_op: ..."
+            exit 1
+          fi
+
       - name: Run unit tests
         working-directory: orchestrator
         run: pytest -m "unit or mocked" --tb=short --maxfail=5
@@ -69,6 +82,10 @@ jobs:
       - name: Run ESLint
         working-directory: app
         run: npm run lint
+
+      - name: TypeScript type check
+        working-directory: app
+        run: npm run typecheck
 
       - name: Run Vitest unit tests
         working-directory: app

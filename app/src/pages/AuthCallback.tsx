@@ -77,7 +77,7 @@ export default function AuthCallback() {
 
     try {
       // Exchange code for token via backend
-      const result = await githubApi.handleOAuthCallback(code, state);
+      const result = (await githubApi.handleOAuthCallback(code, state)) as Record<string, unknown>;
 
       if (result.success) {
         setStatus('success');
@@ -93,7 +93,7 @@ export default function AuthCallback() {
           navigate(returnTo || '/dashboard');
         }, 2000);
       } else {
-        throw new Error(result.message || 'Failed to complete OAuth flow');
+        throw new Error((result.message as string) || 'Failed to complete OAuth flow');
       }
     } catch (error: unknown) {
       const err = error as { message?: string };
@@ -135,21 +135,19 @@ export default function AuthCallback() {
       <div className="max-w-md w-full">
         <div className="bg-[var(--surface)] rounded-3xl p-8 shadow-2xl border border-white/10">
           {/* Status Icon */}
-          <div className="flex justify-center mb-6">
-            {getStatusIcon()}
-          </div>
+          <div className="flex justify-center mb-6">{getStatusIcon()}</div>
 
           {/* Status Message */}
           <h2 className={`text-2xl font-heading font-bold text-center mb-2 ${getStatusColor()}`}>
-            {status === 'processing' ? 'Connecting to GitHub' :
-             status === 'success' ? 'Connected Successfully!' :
-             'Connection Failed'}
+            {status === 'processing'
+              ? 'Connecting to GitHub'
+              : status === 'success'
+                ? 'Connected Successfully!'
+                : 'Connection Failed'}
           </h2>
 
           {/* Detail Message */}
-          <p className="text-center text-[var(--text)]/60 mb-4">
-            {message}
-          </p>
+          <p className="text-center text-[var(--text)]/60 mb-4">{message}</p>
 
           {/* Error Detail (if any) */}
           {errorDetail && (

@@ -26,6 +26,9 @@ def upgrade() -> None:
     # Partial unique index — only enforced on active, catalog-backed rows.
     # Custom connectors (marketplace_agent_id IS NULL) are excluded because
     # multiple BYO servers at the same URL can legitimately coexist.
+    # postgresql_where is ignored on SQLite (no partial-index support), which
+    # is acceptable — the desktop sidecar has low concurrency so race conditions
+    # are theoretical.
     op.create_index(
         _INDEX_NAME,
         "user_mcp_configs",
@@ -40,18 +43,14 @@ def upgrade() -> None:
         postgresql_where=sa.text("marketplace_agent_id IS NOT NULL AND is_active = true"),
     )
 
-    # Also fix the server_default mismatch from 0049 (M3 from review).
-    op.alter_column(
-        "user_mcp_configs",
-        "scope_level",
-        server_default="user",
-    )
+    # Fix the server_default mismatch from 0049.
+    # op.alter_column generates ALTER COLUMN which SQLite doesn't support —
+    # use batch_alter_table (copy-and-move) so it works on both dialects.
+    with op.batch_alter_table("user_mcp_configs") as batch_op:
+        batch_op.alter_column("scope_level", server_default="user")
 
 
 def downgrade() -> None:
-    op.alter_column(
-        "user_mcp_configs",
-        "scope_level",
-        server_default="team",
-    )
+    with op.batch_alter_table("user_mcp_configs") as batch_op:
+        batch_op.alter_column("scope_level", server_default="team")
     op.drop_index(_INDEX_NAME, table_name="user_mcp_configs")

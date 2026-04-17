@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.tesslate.studio",
   "build": {
-    "frontendDist": "../app/dist",
+    "frontendDist": "../../app/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "pnpm --dir ../app dev",
     "beforeBuildCommand": "pnpm --dir ../app build"

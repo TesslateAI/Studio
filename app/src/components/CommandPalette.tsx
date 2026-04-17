@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Command } from 'cmdk';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -26,7 +26,7 @@ import {
   X,
 } from '@phosphor-icons/react';
 import { useTheme } from '../theme/ThemeContext';
-import { useCommands } from '../contexts/CommandContext';
+import { useCommands, type CommandHandlers } from '../contexts/CommandContext';
 import { getContextFromPath, modKey, type AppContext } from '../lib/keyboard-registry';
 
 interface CommandItem {
@@ -328,7 +328,7 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
       // This prevents showing project commands when not in a project
       const handlerName = commandToHandlerMap[cmd.id];
       if (handlerName && cmd.context === 'project') {
-        return isCommandAvailable(handlerName as keyof typeof commandToHandlerMap);
+        return isCommandAvailable(handlerName as keyof CommandHandlers);
       }
 
       return true;

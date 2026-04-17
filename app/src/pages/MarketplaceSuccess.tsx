@@ -22,7 +22,7 @@ export default function MarketplaceSuccess() {
 
       try {
         // Verify the Stripe checkout session and add to library
-        const response = await marketplaceApi.verifyPurchase(sessionId, agentSlug);
+        const response = await marketplaceApi.verifyPurchase(sessionId, agentSlug ?? undefined);
 
         if (response.success) {
           setStatus('success');
@@ -41,7 +41,7 @@ export default function MarketplaceSuccess() {
         setStatus('error');
         setMessage(
           err.response?.data?.detail ||
-          'Failed to verify purchase. Please contact support if you were charged.'
+            'Failed to verify purchase. Please contact support if you were charged.'
         );
       }
     };
@@ -50,12 +50,15 @@ export default function MarketplaceSuccess() {
   }, [searchParams, navigate]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bg-dark)' }}>
+    <div
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{ backgroundColor: 'var(--bg-dark)' }}
+    >
       <div
         className="rounded-2xl shadow-2xl p-8 max-w-md w-full text-center"
         style={{
           backgroundColor: 'var(--surface)',
-          border: '1px solid rgba(255, 107, 0, 0.2)'
+          border: '1px solid rgba(255, 107, 0, 0.2)',
         }}
       >
         {/* Icon */}
@@ -66,9 +69,7 @@ export default function MarketplaceSuccess() {
           {status === 'success' && (
             <CheckCircle size={64} className="text-green-500" weight="fill" />
           )}
-          {status === 'error' && (
-            <XCircle size={64} className="text-red-500" weight="fill" />
-          )}
+          {status === 'error' && <XCircle size={64} className="text-red-500" weight="fill" />}
         </div>
 
         {/* Title */}
@@ -80,7 +81,8 @@ export default function MarketplaceSuccess() {
 
         {/* Message */}
         <p className="mb-6" style={{ color: 'var(--text)' }}>
-          {status === 'loading' && 'Please wait while we confirm your payment and add the agent to your library.'}
+          {status === 'loading' &&
+            'Please wait while we confirm your payment and add the agent to your library.'}
           {status === 'success' && message}
           {status === 'error' && message}
         </p>
@@ -105,7 +107,6 @@ export default function MarketplaceSuccess() {
               className="w-full px-6 py-3 text-white rounded-lg transition font-medium"
               style={{
                 backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                ':hover': { backgroundColor: 'rgba(255, 255, 255, 0.15)' }
               }}
             >
               Back to Marketplace

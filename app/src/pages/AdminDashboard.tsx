@@ -78,7 +78,9 @@ export default function AdminDashboard() {
   const [summary, setSummary] = useState<MetricsSummary | null>(null);
   const [detailedMetrics, setDetailedMetrics] = useState<DetailedMetrics>({});
   const [selectedPeriod, setSelectedPeriod] = useState(7); // Days
-  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('admin-active-tab') || 'overview');
+  const [activeTab, setActiveTab] = useState(
+    () => localStorage.getItem('admin-active-tab') || 'overview'
+  );
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -167,18 +169,19 @@ export default function AdminDashboard() {
     toast.success('Metrics refreshed');
   };
 
-  const formatNumber = (num: number) => {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
+  const formatNumber = (num: number | string | unknown) => {
+    const n = Number(num);
+    if (n >= 1000000) {
+      return (n / 1000000).toFixed(1) + 'M';
+    } else if (n >= 1000) {
+      return (n / 1000).toFixed(1) + 'K';
     }
-    return num.toString();
+    return String(num ?? '');
   };
 
   const renderMetricCard = (
     title: string,
-    value: number | string,
+    value: number | string | unknown,
     change?: number,
     icon?: React.ReactNode,
     suffix?: string
@@ -242,8 +245,12 @@ export default function AdminDashboard() {
   const renderTokenChart = () => {
     if (!detailedMetrics.tokens?.tokens_by_model) return null;
 
-    const models = Object.keys(detailedMetrics.tokens.tokens_by_model);
-    const tokens = models.map((m) => detailedMetrics.tokens.tokens_by_model[m].tokens);
+    const tokensByModel = detailedMetrics.tokens!.tokens_by_model as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const models = Object.keys(tokensByModel);
+    const tokens = models.map((m) => Number(tokensByModel[m].tokens) || 0);
     const totalTokens = tokens.reduce((a, b) => a + b, 0);
 
     const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
@@ -350,7 +357,10 @@ export default function AdminDashboard() {
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => { localStorage.setItem('admin-active-tab', tab.id); setActiveTab(tab.id); }}
+                onClick={() => {
+                  localStorage.setItem('admin-active-tab', tab.id);
+                  setActiveTab(tab.id);
+                }}
                 className={`py-3 px-1 whitespace-nowrap border-b-2 transition-colors ${
                   activeTab === tab.id
                     ? 'border-blue-500 text-blue-500'
@@ -485,7 +495,7 @@ export default function AdminDashboard() {
               {renderMetricCard('New Projects', detailedMetrics.projects.new_projects)}
               {renderMetricCard(
                 'Avg per User',
-                detailedMetrics.projects.avg_projects_per_user.toFixed(1)
+                (detailedMetrics.projects.avg_projects_per_user as number).toFixed(1)
               )}
               {renderMetricCard('Git Enabled', detailedMetrics.projects.git_enabled_projects)}
             </div>
@@ -496,9 +506,11 @@ export default function AdminDashboard() {
                   detailedMetrics.projects.daily_projects as Array<{ date: string; count: number }>
                 )?.map((d, idx: number) => {
                   const maxCount = Math.max(
-                    ...(detailedMetrics.projects.daily_projects as Array<{ count: number }>).map(
-                      (d) => d.count
-                    ),
+                    ...((
+                      detailedMetrics.projects?.daily_projects as
+                        | Array<{ count: number }>
+                        | undefined
+                    )?.map((d) => d.count) ?? [0]),
                     1
                   );
                   return (
@@ -526,11 +538,11 @@ export default function AdminDashboard() {
               {renderMetricCard('Unique Users', detailedMetrics.sessions.unique_users)}
               {renderMetricCard(
                 'Avg per User',
-                detailedMetrics.sessions.avg_sessions_per_user.toFixed(1)
+                (detailedMetrics.sessions.avg_sessions_per_user as number).toFixed(1)
               )}
               {renderMetricCard(
                 'Avg Duration',
-                detailedMetrics.sessions.avg_session_duration.toFixed(0),
+                (detailedMetrics.sessions.avg_session_duration as number).toFixed(0),
                 undefined,
                 undefined,
                 ' min'
@@ -547,9 +559,11 @@ export default function AdminDashboard() {
                     }>
                   )?.map((d, idx: number) => {
                     const maxCount = Math.max(
-                      ...(detailedMetrics.sessions.daily_sessions as Array<{ count: number }>).map(
-                        (d) => d.count
-                      ),
+                      ...((
+                        detailedMetrics.sessions?.daily_sessions as
+                          | Array<{ count: number }>
+                          | undefined
+                      )?.map((d) => d.count) ?? [0]),
                       1
                     );
                     return (
@@ -574,7 +588,9 @@ export default function AdminDashboard() {
                     <div className="flex justify-between mb-1">
                       <span className="text-gray-400">Avg Messages per Session</span>
                       <span className="text-white font-medium">
-                        {detailedMetrics.sessions.avg_messages_per_session?.toFixed(1) || 0}
+                        {(
+                          detailedMetrics.sessions.avg_messages_per_session as number | undefined
+                        )?.toFixed(1) || 0}
                       </span>
                     </div>
                   </div>
@@ -582,7 +598,10 @@ export default function AdminDashboard() {
                     <div className="flex justify-between mb-1">
                       <span className="text-gray-400">Avg Session Duration</span>
                       <span className="text-white font-medium">
-                        {detailedMetrics.sessions.avg_session_duration?.toFixed(0) || 0} min
+                        {(
+                          detailedMetrics.sessions.avg_session_duration as number | undefined
+                        )?.toFixed(0) || 0}{' '}
+                        min
                       </span>
                     </div>
                   </div>
@@ -590,7 +609,7 @@ export default function AdminDashboard() {
                     <div className="flex justify-between mb-1">
                       <span className="text-gray-400">Total Sessions</span>
                       <span className="text-white font-medium">
-                        {detailedMetrics.sessions.total_sessions}
+                        {detailedMetrics.sessions.total_sessions as React.ReactNode}
                       </span>
                     </div>
                   </div>
@@ -606,7 +625,7 @@ export default function AdminDashboard() {
               {renderMetricCard('Total Tokens', detailedMetrics.tokens.total_tokens)}
               {renderMetricCard(
                 'Total Cost',
-                detailedMetrics.tokens.total_cost.toFixed(2),
+                (detailedMetrics.tokens.total_cost as number).toFixed(2),
                 undefined,
                 undefined,
                 '$'
@@ -644,166 +663,181 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {activeTab === 'marketplace' && detailedMetrics.marketplace && (
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {renderMetricCard('Total Items', detailedMetrics.marketplace.total_items)}
-              {renderMetricCard('Total Purchases', detailedMetrics.marketplace.total_purchases)}
-              {renderMetricCard('Recent Purchases', detailedMetrics.marketplace.recent_purchases)}
-              {renderMetricCard(
-                'Total Revenue',
-                detailedMetrics.marketplace.total_revenue.toFixed(2),
-                undefined,
-                undefined,
-                '$'
-              )}
-            </div>
+        {activeTab === 'marketplace' &&
+          detailedMetrics.marketplace &&
+          (() => {
+            const mkt = detailedMetrics.marketplace as Record<string, Record<string, unknown>>;
+            return (
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {renderMetricCard('Total Items', mkt.total_items as unknown)}
+                  {renderMetricCard('Total Purchases', mkt.total_purchases as unknown)}
+                  {renderMetricCard('Recent Purchases', mkt.recent_purchases as unknown)}
+                  {renderMetricCard(
+                    'Total Revenue',
+                    (mkt.total_revenue as unknown as number).toFixed(2),
+                    undefined,
+                    undefined,
+                    '$'
+                  )}
+                </div>
 
-            {/* Agents Section */}
-            <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
-              <h3 className="text-lg font-semibold text-white mb-4">Agents Marketplace</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <div>
-                  <div className="text-gray-400 text-sm">Total Agents</div>
-                  <div className="text-white text-2xl font-bold">
-                    {detailedMetrics.marketplace.agents?.total || 0}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 text-sm">Agent Purchases</div>
-                  <div className="text-white text-2xl font-bold">
-                    {detailedMetrics.marketplace.agents?.total_purchases || 0}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 text-sm">Adoption Rate</div>
-                  <div className="text-white text-2xl font-bold">
-                    {detailedMetrics.marketplace.agents?.adoption_rate?.toFixed(1) || 0}%
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 text-sm">Recent Purchases</div>
-                  <div className="text-white text-2xl font-bold">
-                    {detailedMetrics.marketplace.agents?.recent_purchases || 0}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div>
-                  <h4 className="text-md font-semibold text-white mb-3">
-                    Popular Agents (by purchases)
-                  </h4>
-                  <div className="space-y-2">
-                    {(
-                      detailedMetrics.marketplace.agents?.popular as Array<{
-                        name: string;
-                        slug: string;
-                        purchases: number;
-                        usage_count: number;
-                      }>
-                    )?.map((agent, idx: number) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between bg-gray-700/50 rounded p-3"
-                      >
+                {/* Agents Section */}
+                {(() => {
+                  const agents = mkt.agents as Record<string, unknown> | undefined;
+                  const agentsPopular = agents?.popular as
+                    | Array<{ name: string; slug: string; purchases: number; usage_count: number }>
+                    | undefined;
+                  const agentsMostUsed = agents?.most_used as
+                    | Array<{ name: string; slug: string; usage_count: number }>
+                    | undefined;
+                  return (
+                    <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
+                      <h3 className="text-lg font-semibold text-white mb-4">Agents Marketplace</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                         <div>
-                          <div className="text-white font-medium">{agent.name}</div>
-                          <div className="text-gray-400 text-sm">/{agent.slug}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-white font-medium">{agent.purchases} purchases</div>
-                          <div className="text-gray-400 text-sm">{agent.usage_count} uses</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <h4 className="text-md font-semibold text-white mb-3">Most Used Agents</h4>
-                  <div className="space-y-2">
-                    {detailedMetrics.marketplace.agents?.most_used &&
-                    detailedMetrics.marketplace.agents.most_used.length > 0 ? (
-                      (
-                        detailedMetrics.marketplace.agents.most_used as Array<{
-                          name: string;
-                          slug: string;
-                          usage_count: number;
-                        }>
-                      ).map((agent, idx: number) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between bg-gray-700/50 rounded p-3"
-                        >
-                          <div>
-                            <div className="text-white font-medium">{agent.name}</div>
-                            <div className="text-gray-400 text-sm">/{agent.slug}</div>
+                          <div className="text-gray-400 text-sm">Total Agents</div>
+                          <div className="text-white text-2xl font-bold">
+                            {(agents?.total as React.ReactNode) || 0}
                           </div>
-                          <div className="text-white font-medium">{agent.usage_count} uses</div>
                         </div>
-                      ))
-                    ) : (
-                      <div className="text-gray-400 text-sm">No usage data yet</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Bases Section */}
-            <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
-              <h3 className="text-lg font-semibold text-white mb-4">Bases Marketplace</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div>
-                  <div className="text-gray-400 text-sm">Total Bases</div>
-                  <div className="text-white text-2xl font-bold">
-                    {detailedMetrics.marketplace.bases?.total || 0}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 text-sm">Base Purchases</div>
-                  <div className="text-white text-2xl font-bold">
-                    {detailedMetrics.marketplace.bases?.total_purchases || 0}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 text-sm">Recent Purchases</div>
-                  <div className="text-white text-2xl font-bold">
-                    {detailedMetrics.marketplace.bases?.recent_purchases || 0}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-md font-semibold text-white mb-3">Popular Bases</h4>
-                <div className="space-y-2">
-                  {(
-                    detailedMetrics.marketplace.bases?.popular as Array<{
-                      name: string;
-                      slug: string;
-                      purchases: number;
-                      downloads: number;
-                    }>
-                  )?.map((base, idx: number) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between bg-gray-700/50 rounded p-3"
-                    >
-                      <div>
-                        <div className="text-white font-medium">{base.name}</div>
-                        <div className="text-gray-400 text-sm">/{base.slug}</div>
+                        <div>
+                          <div className="text-gray-400 text-sm">Agent Purchases</div>
+                          <div className="text-white text-2xl font-bold">
+                            {(agents?.total_purchases as React.ReactNode) || 0}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 text-sm">Adoption Rate</div>
+                          <div className="text-white text-2xl font-bold">
+                            {(agents?.adoption_rate as number | undefined)?.toFixed(1) || 0}%
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 text-sm">Recent Purchases</div>
+                          <div className="text-white text-2xl font-bold">
+                            {(agents?.recent_purchases as React.ReactNode) || 0}
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-white font-medium">{base.purchases} purchases</div>
-                        <div className="text-gray-400 text-sm">{base.downloads} downloads</div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div>
+                          <h4 className="text-md font-semibold text-white mb-3">
+                            Popular Agents (by purchases)
+                          </h4>
+                          <div className="space-y-2">
+                            {agentsPopular?.map((agent, idx: number) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between bg-gray-700/50 rounded p-3"
+                              >
+                                <div>
+                                  <div className="text-white font-medium">{agent.name}</div>
+                                  <div className="text-gray-400 text-sm">/{agent.slug}</div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-white font-medium">
+                                    {agent.purchases} purchases
+                                  </div>
+                                  <div className="text-gray-400 text-sm">
+                                    {agent.usage_count} uses
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-md font-semibold text-white mb-3">
+                            Most Used Agents
+                          </h4>
+                          <div className="space-y-2">
+                            {agentsMostUsed && agentsMostUsed.length > 0 ? (
+                              agentsMostUsed.map((agent, idx: number) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between bg-gray-700/50 rounded p-3"
+                                >
+                                  <div>
+                                    <div className="text-white font-medium">{agent.name}</div>
+                                    <div className="text-gray-400 text-sm">/{agent.slug}</div>
+                                  </div>
+                                  <div className="text-white font-medium">
+                                    {agent.usage_count} uses
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-gray-400 text-sm">No usage data yet</div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })()}
+
+                {/* Bases Section */}
+                {(() => {
+                  const bases = mkt.bases as Record<string, unknown> | undefined;
+                  const basesPopular = bases?.popular as
+                    | Array<{ name: string; slug: string; purchases: number; downloads: number }>
+                    | undefined;
+                  return (
+                    <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
+                      <h3 className="text-lg font-semibold text-white mb-4">Bases Marketplace</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div>
+                          <div className="text-gray-400 text-sm">Total Bases</div>
+                          <div className="text-white text-2xl font-bold">
+                            {(bases?.total as React.ReactNode) || 0}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 text-sm">Base Purchases</div>
+                          <div className="text-white text-2xl font-bold">
+                            {(bases?.total_purchases as React.ReactNode) || 0}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 text-sm">Recent Purchases</div>
+                          <div className="text-white text-2xl font-bold">
+                            {(bases?.recent_purchases as React.ReactNode) || 0}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="text-md font-semibold text-white mb-3">Popular Bases</h4>
+                        <div className="space-y-2">
+                          {basesPopular?.map((base, idx: number) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between bg-gray-700/50 rounded p-3"
+                            >
+                              <div>
+                                <div className="text-white font-medium">{base.name}</div>
+                                <div className="text-gray-400 text-sm">/{base.slug}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-white font-medium">
+                                  {base.purchases} purchases
+                                </div>
+                                <div className="text-gray-400 text-sm">
+                                  {base.downloads} downloads
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
-            </div>
-          </div>
-        )}
+            );
+          })()}
 
         {activeTab === 'agents' && <AgentManagement />}
         {activeTab === 'bases' && <BaseManagement />}
@@ -1172,7 +1206,7 @@ function AgentManagement() {
                 <td className="px-6 py-4">
                   <div className="flex items-center justify-end space-x-2">
                     <button
-                      onClick={() => loadAgentDetails(agent.id)}
+                      onClick={() => loadAgentDetails(Number(agent.id))}
                       className="text-blue-400 hover:text-blue-300 text-sm"
                       title={agent.can_edit ? 'Edit agent' : 'View agent'}
                     >
@@ -1742,7 +1776,7 @@ function AgentErrorsFeed() {
 
       const response = await fetch(`/api/admin/agent-runs/errors?${params.toString()}`, {
         headers: getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
       });
 
       if (!response.ok) throw new Error('Failed to load agent errors');
@@ -1773,13 +1807,27 @@ function AgentErrorsFeed() {
   const getReasonBadge = (reason: string) => {
     switch (reason) {
       case 'error':
-        return <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/20 text-red-400">Error</span>;
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/20 text-red-400">Error</span>
+        );
       case 'resource_limit_exceeded':
-        return <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">Resource Limit</span>;
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">
+            Resource Limit
+          </span>
+        );
       case 'credit_deduction_failed':
-        return <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">Credit Failed</span>;
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs bg-orange-500/20 text-orange-400">
+            Credit Failed
+          </span>
+        );
       default:
-        return <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/20 text-gray-400">{reason}</span>;
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/20 text-gray-400">
+            {reason}
+          </span>
+        );
     }
   };
 
@@ -1794,7 +1842,10 @@ function AgentErrorsFeed() {
         <div className="flex items-center space-x-4">
           <select
             value={reasonFilter}
-            onChange={(e) => { setReasonFilter(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setReasonFilter(e.target.value);
+              setPage(1);
+            }}
             className="bg-gray-700 text-white text-sm rounded-lg px-3 py-2 border border-[var(--text)]/15"
           >
             <option value="">All Error Types</option>
@@ -1856,12 +1907,13 @@ function AgentErrorsFeed() {
                   <td className="px-4 py-3 text-gray-300 text-sm">
                     {err.project_name || <span className="text-gray-500 italic">No project</span>}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-400 max-w-xs truncate" title={err.error || ''}>
+                  <td
+                    className="px-4 py-3 text-sm text-gray-400 max-w-xs truncate"
+                    title={err.error || ''}
+                  >
                     {err.error || 'No error message'}
                   </td>
-                  <td className="px-4 py-3">
-                    {getReasonBadge(err.completion_reason)}
-                  </td>
+                  <td className="px-4 py-3">{getReasonBadge(err.completion_reason)}</td>
                   <td className="px-4 py-3 text-gray-400 text-sm whitespace-nowrap">
                     {new Date(err.created_at).toLocaleString()}
                   </td>
@@ -1880,14 +1932,14 @@ function AgentErrorsFeed() {
           </span>
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
               className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Previous
             </button>
             <button
-              onClick={() => setPage(p => Math.min(pages, p + 1))}
+              onClick={() => setPage((p) => Math.min(pages, p + 1))}
               disabled={page >= pages}
               className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -1899,10 +1951,7 @@ function AgentErrorsFeed() {
 
       {/* Agent Run Viewer Modal */}
       {viewingRunId && (
-        <AgentRunViewer
-          messageId={viewingRunId}
-          onClose={() => setViewingRunId(null)}
-        />
+        <AgentRunViewer messageId={viewingRunId} onClose={() => setViewingRunId(null)} />
       )}
     </div>
   );

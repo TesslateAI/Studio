@@ -2,7 +2,7 @@
  * Task Progress Component
  * Shows progress for background tasks
  */
-import React from 'react';
+import { useEffect } from 'react';
 import { useTask } from '../../hooks/useTask';
 import type { Task } from '../../services/taskService';
 
@@ -15,19 +15,19 @@ interface TaskProgressProps {
 export function TaskProgress({ taskId, onComplete, onError }: TaskProgressProps) {
   const { task, loading, error } = useTask(taskId);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (task?.status === 'completed' && onComplete) {
       onComplete(task);
     }
   }, [task?.status, onComplete, task]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (task?.status === 'failed' && onError) {
       onError(task.error || 'Task failed');
     }
   }, [task?.status, onError, task]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (error && onError) {
       onError(error);
     }
@@ -76,19 +76,15 @@ export function TaskProgress({ taskId, onComplete, onError }: TaskProgressProps)
             />
           </div>
           <div className="text-xs text-gray-600">{task.progress.message}</div>
-          <div className="text-xs text-gray-500">
-            {task.progress.percentage}% complete
-          </div>
+          <div className="text-xs text-gray-500">{task.progress.percentage}% complete</div>
         </div>
       )}
 
       {task.status === 'failed' && task.error && (
-        <div className="text-sm text-red-600 bg-red-50 p-2 rounded">
-          {task.error}
-        </div>
+        <div className="text-sm text-red-600 bg-red-50 p-2 rounded">{task.error}</div>
       )}
 
-      {task.status === 'completed' && task.result && (
+      {task.status === 'completed' && task.result != null && (
         <div className="text-sm text-green-600">
           {typeof task.result === 'string' ? task.result : 'Completed successfully'}
         </div>

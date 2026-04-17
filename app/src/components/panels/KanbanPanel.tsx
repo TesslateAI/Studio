@@ -5,7 +5,6 @@ import {
   X,
   Calendar,
   User,
-
   Trash,
   ArrowsDownUp,
   Funnel,
@@ -109,13 +108,20 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
   const [showTaskDetails, setShowTaskDetails] = useState(false);
   const [newComment, setNewComment] = useState('');
 
-  const [newTask, setNewTask] = useState({
+  const [newTask, setNewTask] = useState<{
+    title: string;
+    description: string;
+    priority: 'low' | 'medium' | 'high' | 'critical';
+    task_type: 'feature' | 'bug' | 'task' | 'epic';
+    tags: string[];
+    point_value: number | undefined;
+  }>({
     title: '',
     description: '',
-    priority: 'medium' as const,
-    task_type: 'task' as const,
-    tags: [] as string[],
-    point_value: undefined as number | undefined,
+    priority: 'medium',
+    task_type: 'task',
+    tags: [],
+    point_value: undefined,
   });
 
   useEffect(() => {
@@ -429,7 +435,12 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                       }`}
                     >
                       {column.tasks.map((task, index) => (
-                        <Draggable key={task.id} draggableId={`task-${task.id}`} index={index} isDragDisabled={readOnly}>
+                        <Draggable
+                          key={task.id}
+                          draggableId={`task-${task.id}`}
+                          index={index}
+                          isDragDisabled={readOnly}
+                        >
                           {(provided, snapshot) => (
                             <div
                               ref={provided.innerRef}

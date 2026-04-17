@@ -55,10 +55,13 @@ def upgrade() -> None:
                     migrated.append(scope)
 
         if changed:
-            conn.execute(
-                sa.text("UPDATE external_api_keys SET scopes = :scopes::jsonb WHERE id = :id"),
-                {"scopes": json.dumps(migrated), "id": str(key_id)},
+            is_pg = conn.dialect.name == "postgresql"
+            sql = (
+                "UPDATE external_api_keys SET scopes = :scopes::jsonb WHERE id = :id"
+                if is_pg
+                else "UPDATE external_api_keys SET scopes = :scopes WHERE id = :id"
             )
+            conn.execute(sa.text(sql), {"scopes": json.dumps(migrated), "id": str(key_id)})
 
 
 def downgrade() -> None:
@@ -94,7 +97,10 @@ def downgrade() -> None:
                     reverted.append(scope)
 
         if changed:
-            conn.execute(
-                sa.text("UPDATE external_api_keys SET scopes = :scopes::jsonb WHERE id = :id"),
-                {"scopes": json.dumps(reverted), "id": key_id},
+            is_pg = conn.dialect.name == "postgresql"
+            sql = (
+                "UPDATE external_api_keys SET scopes = :scopes::jsonb WHERE id = :id"
+                if is_pg
+                else "UPDATE external_api_keys SET scopes = :scopes WHERE id = :id"
             )
+            conn.execute(sa.text(sql), {"scopes": json.dumps(reverted), "id": key_id})

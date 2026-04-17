@@ -5,6 +5,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { useTeam } from '../contexts/TeamContext';
 import { MobileMenu, ProjectCard } from '../components/ui';
 import type { Status } from '../components/ui';
+import type { EnvironmentStatus } from '../components/ui/environmentStatus';
 import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
 import { ProjectAccessModal } from '../components/modals/ProjectAccessModal';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
@@ -148,10 +149,12 @@ export default function Dashboard() {
               if (match && match.members.length > 0) {
                 return {
                   ...p,
-                  members: match.members.map((m: { user_name: string | null; user_email: string | null }) => ({
-                    name: m.user_name,
-                    email: m.user_email,
-                  })),
+                  members: match.members.map(
+                    (m: { user_name: string | null; user_email: string | null }) => ({
+                      name: m.user_name,
+                      email: m.user_email,
+                    })
+                  ),
                   memberCount: match.members.length,
                 };
               }
@@ -305,10 +308,6 @@ export default function Dashboard() {
   };
 
   const clearSelection = () => setSelectedProjectIds(new Set());
-
-  const _selectAllProjects = () => {
-    setSelectedProjectIds(new Set(filteredProjects.map((p) => p.id)));
-  };
 
   const confirmBulkDelete = async () => {
     const toDelete = projects.filter((p) => selectedProjectIds.has(p.id));
@@ -755,7 +754,7 @@ export default function Dashboard() {
                   <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
                     Environment
                   </div>
-                  {(['all', 'active', 'hibernated', 'stopped', 'creating'] as const).map(
+                  {(['all', 'running', 'files_ready', 'provisioning', 'agent_active'] as const).map(
                     (envStatus) => (
                       <button
                         key={envStatus}
@@ -771,7 +770,11 @@ export default function Dashboard() {
                       >
                         {envStatus === 'all'
                           ? 'All environments'
-                          : envStatus.charAt(0).toUpperCase() + envStatus.slice(1)}
+                          : envStatus === 'files_ready'
+                            ? 'Ready'
+                            : envStatus === 'agent_active'
+                              ? 'Agent active'
+                              : envStatus.charAt(0).toUpperCase() + envStatus.slice(1)}
                         {filterEnvStatus === envStatus && (
                           <svg className="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
@@ -921,7 +924,11 @@ export default function Dashboard() {
       </div>
 
       {/* Scrollable Content */}
-      <div key={teamSwitchKey} className="flex-1 overflow-auto" style={{ animation: 'fade-in 0.25s ease-out' }}>
+      <div
+        key={teamSwitchKey}
+        className="flex-1 overflow-auto"
+        style={{ animation: 'fade-in 0.25s ease-out' }}
+      >
         {viewMode === 'cards' ? (
           /* ===== CARDS VIEW ===== */
           <div className="p-4 md:p-5">
@@ -1365,9 +1372,7 @@ export default function Dashboard() {
           currentVisibility={accessProject.visibility || 'team'}
           onVisibilityChange={(visibility) => {
             setProjects((prev) =>
-              prev.map((p) =>
-                p.id === accessProject.id ? { ...p, visibility } : p
-              )
+              prev.map((p) => (p.id === accessProject.id ? { ...p, visibility } : p))
             );
             loadProjects();
           }}

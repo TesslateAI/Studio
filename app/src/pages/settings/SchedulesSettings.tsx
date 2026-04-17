@@ -96,7 +96,7 @@ export default function SchedulesSettings() {
         schedulesApi.list(selectedProjectId || undefined),
         projectsApi.getAll(),
       ]);
-      setSchedules(schedulesRes as Schedule[]);
+      setSchedules(schedulesRes as unknown as Schedule[]);
       setProjects(projectsRes as Project[]);
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };

@@ -23,7 +23,7 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
     const maxRetries = 5;
     try {
       setLoading(true);
-      const response = await projectsApi.getDevServerUrl(projectId);
+      const response = await projectsApi.getDevServerUrl(String(projectId));
 
       // Check if server is still starting
       if (response.status === 'starting' && retryCount < maxRetries) {
@@ -62,23 +62,11 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
     }
   };
 
-  const _refresh = () => {
-    if (iframeRef.current && devServerUrl) {
-      iframeRef.current.src = devServerUrl;
-    }
-  };
-
-  const _openInNewTab = () => {
-    if (devServerUrl) {
-      window.open(devServerUrl, '_blank');
-    }
-  };
-
   const restartServer = async () => {
     try {
       setLoading(true);
       toast.loading('Restarting server...', { id: 'restart' });
-      const response = await projectsApi.restartDevServer(projectId);
+      const response = await projectsApi.restartDevServer(String(projectId));
       setDevServerUrl(response.url);
       toast.success('Server restarted successfully', { id: 'restart' });
     } catch (error) {
@@ -99,9 +87,10 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
     const token = localStorage.getItem('token');
     const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
     console.log('[DEBUG] Deployment mode:', deploymentMode, 'All env:', import.meta.env);
-    const authenticatedUrl = token && deploymentMode === 'kubernetes'
-      ? `${devServerUrl}?auth_token=${encodeURIComponent(token)}`
-      : devServerUrl;
+    const authenticatedUrl =
+      token && deploymentMode === 'kubernetes'
+        ? `${devServerUrl}?auth_token=${encodeURIComponent(token)}`
+        : devServerUrl;
 
     // Track iframe load errors and implement retry logic
     let loadErrorCount = 0;
@@ -211,7 +200,6 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
     const tabPreview = document.getElementById('tab-preview');
     const tabCode = document.getElementById('tab-code');
     const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
-    const _urlDisplay = document.getElementById('url-display');
     const liveStatusDot = document.getElementById('live-status-dot');
     const liveStatusText = document.getElementById('live-status-text');
 
@@ -222,7 +210,8 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
 
       if (loadErrorCount <= maxRetries) {
         // Update status indicator
-        if (liveStatusDot) liveStatusDot.className = 'w-2 h-2 bg-yellow-400 rounded-full animate-pulse';
+        if (liveStatusDot)
+          liveStatusDot.className = 'w-2 h-2 bg-yellow-400 rounded-full animate-pulse';
         if (liveStatusText) liveStatusText.textContent = 'Starting...';
 
         // Retry after a delay
@@ -245,7 +234,8 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
       // Reset error count on successful load
       loadErrorCount = 0;
       console.log('[Preview] Iframe loaded successfully');
-      if (liveStatusDot) liveStatusDot.className = 'w-2 h-2 bg-green-400 rounded-full animate-pulse';
+      if (liveStatusDot)
+        liveStatusDot.className = 'w-2 h-2 bg-green-400 rounded-full animate-pulse';
       if (liveStatusText) liveStatusText.textContent = 'Live';
     };
 
@@ -351,7 +341,7 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
           </div>
         </div>
       `;
-      
+
       const restartErrorBtn = document.getElementById('restart-error-btn');
       if (restartErrorBtn) {
         restartErrorBtn.onclick = () => {
@@ -397,12 +387,18 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
       const colorPulseSpeed = 1.0;
 
       const middleEight = [
-        { row: 1, col: 2 }, { row: 2, col: 1 }, { row: 2, col: 3 }, { row: 3, col: 2 },
-        { row: 1, col: 1 }, { row: 1, col: 3 }, { row: 3, col: 1 }, { row: 3, col: 3 }
+        { row: 1, col: 2 },
+        { row: 2, col: 1 },
+        { row: 2, col: 3 },
+        { row: 3, col: 2 },
+        { row: 1, col: 1 },
+        { row: 1, col: 3 },
+        { row: 3, col: 1 },
+        { row: 3, col: 3 },
       ];
 
       const isMiddleEight = (row: number, col: number) => {
-        return middleEight.some(pos => pos.row === row && pos.col === col);
+        return middleEight.some((pos) => pos.row === row && pos.col === col);
       };
 
       function animate(timestamp: number) {
@@ -418,7 +414,7 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
         // Draw center dot (orange)
         ctx.beginPath();
         ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 107, 0, 0.9)";
+        ctx.fillStyle = 'rgba(255, 107, 0, 0.9)';
         ctx.fill();
 
         // Draw grid
@@ -448,12 +444,14 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
             const isMiddle = isMiddleEight(row, col);
             let r, g, b;
             if (isMiddle) {
-              const orangePulse = Math.sin(time * colorPulseSpeed + normalizedDistance * 3) * 0.2 + 0.8;
+              const orangePulse =
+                Math.sin(time * colorPulseSpeed + normalizedDistance * 3) * 0.2 + 0.8;
               r = 255;
               g = Math.floor(107 * orangePulse);
               b = 0;
             } else {
-              const blueAmount = Math.sin(time * colorPulseSpeed + normalizedDistance * 3) * 0.3 + 0.3;
+              const blueAmount =
+                Math.sin(time * colorPulseSpeed + normalizedDistance * 3) * 0.3 + 0.3;
               const whiteness = 1 - blueAmount;
               r = Math.floor(255 * whiteness + 200 * blueAmount);
               g = Math.floor(255 * whiteness + 220 * blueAmount);

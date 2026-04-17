@@ -204,11 +204,20 @@ export function ProjectCard({
               {/* Visibility / Access */}
               {isAdmin && onManageAccess && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); onManageAccess(); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onManageAccess();
+                  }}
                   className={`flex items-center px-1.5 py-0.5 rounded-[var(--radius-small)] hover:bg-[var(--surface)] transition-colors flex-shrink-0 ${
-                    visibility === 'private' ? 'text-[var(--primary)]' : 'text-[var(--text-subtle)] hover:text-[var(--text)]'
+                    visibility === 'private'
+                      ? 'text-[var(--primary)]'
+                      : 'text-[var(--text-subtle)] hover:text-[var(--text)]'
                   }`}
-                  title={visibility === 'private' ? 'Private — manage access' : 'Team visible — manage access'}
+                  title={
+                    visibility === 'private'
+                      ? 'Private — manage access'
+                      : 'Team visible — manage access'
+                  }
                 >
                   {visibility === 'private' ? <EyeSlash size={14} /> : <Eye size={14} />}
                 </button>
@@ -236,8 +245,7 @@ export function ProjectCard({
                   </svg>
                 }
                 name="Add"
-                onClick={(e) => {
-                  e?.stopPropagation();
+                onClick={() => {
                   onAddAgent();
                 }}
               />

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 
 export default function Layout() {
@@ -9,10 +9,10 @@ export default function Layout() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging.current || !containerRef.current) return;
-      
+
       const containerRect = containerRef.current.getBoundingClientRect();
       const newPosition = e.clientX - containerRect.left;
-      
+
       if (newPosition > 200 && newPosition < containerRect.width - 200) {
         setDividerPosition(newPosition);
       }
@@ -44,12 +44,12 @@ export default function Layout() {
       <div style={{ width: `${dividerPosition}px` }} className="flex-shrink-0">
         <Outlet />
       </div>
-      
+
       <div
         className="w-1 bg-gray-700 cursor-col-resize hover:bg-blue-500 transition-colors"
         onMouseDown={handleMouseDown}
       />
-      
+
       <div className="flex-1 bg-gray-800">
         <div id="preview-container" className="h-full" />
       </div>

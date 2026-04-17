@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Terminal,
   FileText,
@@ -64,7 +64,7 @@ const getToolColor = (toolName: string): string => {
   }
 };
 
-const formatParameterValue = (key: string, value: unknown): string => {
+const formatParameterValue = (_key: string, value: unknown): string => {
   if (typeof value === 'string') {
     return value;
   } else if (typeof value === 'object' && value !== null) {
@@ -92,10 +92,9 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   const mcpReauth =
     (result as Record<string, unknown> | undefined)?._mcp_reauth_required ||
     (nested as Record<string, unknown>)?._mcp_reauth_required;
-  const mcpStructured = (
-    ((result as Record<string, unknown> | undefined)?._mcp_structured as Record<string, unknown>) ||
-    (nested._mcp_structured as Record<string, unknown>)
-  ) as Record<string, unknown> | undefined;
+  const mcpStructured = (((result as Record<string, unknown> | undefined)
+    ?._mcp_structured as Record<string, unknown>) ||
+    (nested._mcp_structured as Record<string, unknown>)) as Record<string, unknown> | undefined;
   const citation = mcpStructured?.citation as unknown;
   const reauthInfo = (result || nested) as Record<string, unknown>;
 
@@ -112,36 +111,38 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
 
   if (hasResult && result.result) {
     if (typeof result.result === 'object') {
+      const resultObj = result.result as Record<string, unknown>;
+
       // PRIORITY 1: Show the message field (user-friendly summary)
-      if (result.result.message) {
-        output = result.result.message;
+      if (resultObj.message) {
+        output = resultObj.message as string;
       }
 
       // PRIORITY 2: Show diff preview if available (for patch/edit operations)
-      if (result.result.diff) {
-        diffPreview = result.result.diff;
+      if (resultObj.diff) {
+        diffPreview = resultObj.diff as string;
       }
 
       // PRIORITY 3: Show suggestion if available (for errors)
-      if (result.result.suggestion) {
-        suggestion = result.result.suggestion;
+      if (resultObj.suggestion) {
+        suggestion = resultObj.suggestion as string;
       }
 
       // PRIORITY 4: Show relevant data fields (stdout, content, output, preview, etc.)
-      if (result.result.stdout) {
-        additionalOutput = result.result.stdout;
-      } else if (result.result.stderr) {
-        additionalOutput = result.result.stderr;
-      } else if (result.result.output) {
-        additionalOutput = result.result.output;
-      } else if (result.result.content !== undefined) {
-        additionalOutput = result.result.content;
-      } else if (result.result.preview) {
-        additionalOutput = result.result.preview;
-      } else if (result.result.files) {
+      if (resultObj.stdout) {
+        additionalOutput = resultObj.stdout as string;
+      } else if (resultObj.stderr) {
+        additionalOutput = resultObj.stderr as string;
+      } else if (resultObj.output) {
+        additionalOutput = resultObj.output as string;
+      } else if (resultObj.content !== undefined) {
+        additionalOutput = resultObj.content as string;
+      } else if (resultObj.preview) {
+        additionalOutput = resultObj.preview as string;
+      } else if (resultObj.files) {
         // Directory listing - handle both string arrays and object arrays
-        if (Array.isArray(result.result.files)) {
-          additionalOutput = result.result.files
+        if (Array.isArray(resultObj.files)) {
+          additionalOutput = (resultObj.files as unknown[])
             .map((file: unknown) => {
               if (typeof file === 'object' && file !== null) {
                 const fileObj = file as Record<string, unknown>;
@@ -154,18 +155,18 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
             })
             .join('\n');
         } else {
-          additionalOutput = String(result.result.files);
+          additionalOutput = String(resultObj.files);
         }
       }
 
       // PRIORITY 4: Collect technical details if available
-      if (result.result.details) {
-        technicalDetails = result.result.details;
+      if (resultObj.details) {
+        technicalDetails = resultObj.details as Record<string, unknown>;
       }
 
       // Fallback: If no message, show generic JSON (shouldn't happen with new format)
       if (!output && !additionalOutput) {
-        output = JSON.stringify(result.result, null, 2);
+        output = JSON.stringify(resultObj, null, 2);
       }
     } else {
       output = String(result.result);
@@ -202,7 +203,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
           if (!tier) return null;
           return (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 ml-1">
-              {tier === 'environment' ? 'Dev env' : 'Container'}
+              {(tier as string) === 'environment' ? 'Dev env' : 'Container'}
             </span>
           );
         })()}
@@ -211,7 +212,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
       {/* Main Parameter */}
       {mainParam && (
         <div className="px-3 py-2 border-b border-current/10">
-          <code className="text-xs font-mono break-all">{mainParam}</code>
+          <code className="text-xs font-mono break-all">{mainParam as string}</code>
         </div>
       )}
 

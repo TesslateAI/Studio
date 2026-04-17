@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useTheme } from '../../theme/ThemeContext';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
@@ -18,11 +18,7 @@ export function HelpButton({ className = '' }: HelpButtonProps) {
     (e) => {
       // Don't trigger when typing in inputs
       const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
       }
       e.preventDefault();

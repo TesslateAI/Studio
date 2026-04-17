@@ -1,4 +1,3 @@
-import React from 'react';
 import { Star, Trash, Pencil } from '@phosphor-icons/react';
 import { useTheme } from '../../theme/ThemeContext';
 

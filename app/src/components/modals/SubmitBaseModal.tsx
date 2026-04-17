@@ -135,7 +135,7 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
         await marketplaceApi.updateBase(editBase.id, data);
         toast.success('Base updated successfully');
       } else {
-        await marketplaceApi.submitBase(data);
+        await marketplaceApi.submitBase(data as Parameters<typeof marketplaceApi.submitBase>[0]);
         toast.success('Base submitted successfully!');
       }
       onSuccess();

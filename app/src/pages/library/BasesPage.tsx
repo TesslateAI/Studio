@@ -139,7 +139,7 @@ export default function BasesPage({
   const confirmDelete = () => {
     if (!baseToDelete) return;
     setShowDeleteDialog(false);
-    onDelete(baseToDelete);
+    onDelete?.(baseToDelete);
     setBaseToDelete(null);
   };
 
@@ -161,18 +161,36 @@ export default function BasesPage({
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
       {/* Toolbar */}
-      <div className="h-10 flex items-center justify-between flex-shrink-0" style={{ paddingLeft: '7px', paddingRight: '10px' }}>
+      <div
+        className="h-10 flex items-center justify-between flex-shrink-0"
+        style={{ paddingLeft: '7px', paddingRight: '10px' }}
+      >
         {/* Left: Filter tabs */}
-        <div className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none" style={{ maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)', WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)' }}>
-          <button onClick={() => setFilterStatus('all')} className={`btn ${filterStatus === 'all' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}>
+        <div
+          className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none"
+          style={{
+            maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)',
+            WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)',
+          }}
+        >
+          <button
+            onClick={() => setFilterStatus('all')}
+            className={`btn ${filterStatus === 'all' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}
+          >
             All bases <span className="text-[10px] opacity-50 ml-0.5">{bases.length}</span>
           </button>
           {hasVisibilityData && (
             <>
-              <button onClick={() => setFilterStatus('public')} className={`btn ${filterStatus === 'public' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}>
+              <button
+                onClick={() => setFilterStatus('public')}
+                className={`btn ${filterStatus === 'public' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}
+              >
                 Public <span className="text-[10px] opacity-50 ml-0.5">{publicCount}</span>
               </button>
-              <button onClick={() => setFilterStatus('private')} className={`btn ${filterStatus === 'private' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}>
+              <button
+                onClick={() => setFilterStatus('private')}
+                className={`btn ${filterStatus === 'private' ? 'btn-tab-active' : 'btn-tab'} shrink-0`}
+              >
                 Private <span className="text-[10px] opacity-50 ml-0.5">{privateCount}</span>
               </button>
             </>
@@ -199,45 +217,112 @@ export default function BasesPage({
                 placeholder="Search..."
                 className="bg-transparent border-none outline-none text-xs w-24 sm:w-32 text-[var(--text)]"
               />
-              <button type="button" onClick={() => { setSearchQuery(''); setShowSearch(false); }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setShowSearch(false);
+                }}
+              >
                 <X size={12} className="text-[var(--text-subtle)]" />
               </button>
             </div>
           ) : (
-            <button onClick={() => setShowSearch(true)} className={`btn btn-icon ${searchQuery ? 'btn-active' : ''}`}>
+            <button
+              onClick={() => setShowSearch(true)}
+              className={`btn btn-icon ${searchQuery ? 'btn-active' : ''}`}
+            >
               <MagnifyingGlass size={16} />
             </button>
           )}
 
           {/* Sort */}
           <div ref={sortMenuRef} className="relative">
-            <button onClick={() => setShowSortMenu((v) => !v)} className={`btn ${sortField !== 'name' || sortDir !== 'asc' ? 'btn-active' : ''}`} style={{ gap: '4px' }}>
+            <button
+              onClick={() => setShowSortMenu((v) => !v)}
+              className={`btn ${sortField !== 'name' || sortDir !== 'asc' ? 'btn-active' : ''}`}
+              style={{ gap: '4px' }}
+            >
               {sortDir === 'desc' ? <SortDescending size={16} /> : <SortAscending size={16} />}
               <span className="hidden sm:inline text-xs">{sortLabels[sortField]}</span>
               <CaretDown size={12} className="opacity-50" />
             </button>
             {showSortMenu && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)]" style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}>
-                <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Sort by</div>
+              <div
+                className="absolute right-0 top-full mt-1 z-50 min-w-[180px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)]"
+                style={{ borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)' }}
+              >
+                <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                  Sort by
+                </div>
                 {(['name', 'downloads', 'rating'] as const).map((f) => (
-                  <button key={f} onClick={() => { setSortField(f); setShowSortMenu(false); }} className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${sortField === f ? 'text-[var(--text)] bg-[var(--surface-hover)]' : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)]'}`}>
+                  <button
+                    key={f}
+                    onClick={() => {
+                      setSortField(f);
+                      setShowSortMenu(false);
+                    }}
+                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${sortField === f ? 'text-[var(--text)] bg-[var(--surface-hover)]' : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)]'}`}
+                  >
                     {sortLabels[f]}
                   </button>
                 ))}
                 <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
-                <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">Direction</div>
-                <button onClick={() => { setSortDir('asc'); setShowSortMenu(false); }} className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${sortDir === 'asc' ? 'text-[var(--text)] bg-[var(--surface-hover)]' : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)]'}`}>Ascending</button>
-                <button onClick={() => { setSortDir('desc'); setShowSortMenu(false); }} className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${sortDir === 'desc' ? 'text-[var(--text)] bg-[var(--surface-hover)]' : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)]'}`}>Descending</button>
+                <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                  Direction
+                </div>
+                <button
+                  onClick={() => {
+                    setSortDir('asc');
+                    setShowSortMenu(false);
+                  }}
+                  className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${sortDir === 'asc' ? 'text-[var(--text)] bg-[var(--surface-hover)]' : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)]'}`}
+                >
+                  Ascending
+                </button>
+                <button
+                  onClick={() => {
+                    setSortDir('desc');
+                    setShowSortMenu(false);
+                  }}
+                  className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${sortDir === 'desc' ? 'text-[var(--text)] bg-[var(--surface-hover)]' : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)]'}`}
+                >
+                  Descending
+                </button>
               </div>
             )}
           </div>
 
           {/* Display toggle */}
-          <button onClick={() => setViewMode((v) => v === 'cards' ? 'list' : 'cards')} className={`btn btn-icon ${viewMode === 'list' ? 'btn-active' : ''}`}>
+          <button
+            onClick={() => setViewMode((v) => (v === 'cards' ? 'list' : 'cards'))}
+            className={`btn btn-icon ${viewMode === 'list' ? 'btn-active' : ''}`}
+          >
             {viewMode === 'cards' ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
             ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
             )}
           </button>
 
@@ -265,10 +350,7 @@ export default function BasesPage({
                 <p className="text-[11px] text-[var(--text-muted)] max-w-sm mx-auto mb-6">
                   Browse the marketplace to find project templates and add them to your library.
                 </p>
-                <button
-                  onClick={onBrowse}
-                  className="btn btn-filled"
-                >
+                <button onClick={onBrowse} className="btn btn-filled">
                   <Plus size={14} />
                   Browse Marketplace
                 </button>
@@ -279,20 +361,31 @@ export default function BasesPage({
                 <MagnifyingGlass size={48} className="mx-auto mb-4 text-[var(--text-subtle)]" />
                 <p className="text-[var(--text-muted)] mb-2">No bases match your filters</p>
                 <button
-                  onClick={() => { setFilterStatus('all'); setSearchQuery(''); }}
+                  onClick={() => {
+                    setFilterStatus('all');
+                    setSearchQuery('');
+                  }}
                   className="text-xs text-[var(--primary)] hover:underline"
                 >
                   Clear filters
                 </button>
               </div>
             ) : viewMode === 'cards' ? (
-              <motion.div variants={staggerContainer} initial="initial" animate="animate" className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+              <motion.div
+                variants={staggerContainer}
+                initial="initial"
+                animate="animate"
+                className="grid gap-5"
+                style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}
+              >
                 {filtered.map((base) => (
                   <BaseCard
                     key={base.id}
                     base={base}
                     onEdit={onEdit ? () => onEdit(base) : undefined}
-                    onToggleVisibility={onToggleVisibility ? () => onToggleVisibility(base) : undefined}
+                    onToggleVisibility={
+                      onToggleVisibility ? () => onToggleVisibility(base) : undefined
+                    }
                     onDelete={onDelete ? () => handleDelete(base) : undefined}
                   />
                 ))}
@@ -304,7 +397,9 @@ export default function BasesPage({
                     key={base.id}
                     base={base}
                     onEdit={onEdit ? () => onEdit(base) : undefined}
-                    onToggleVisibility={onToggleVisibility ? () => onToggleVisibility(base) : undefined}
+                    onToggleVisibility={
+                      onToggleVisibility ? () => onToggleVisibility(base) : undefined
+                    }
                     onDelete={onDelete ? () => onDelete(base) : undefined}
                   />
                 ))}
@@ -359,7 +454,9 @@ function BaseListRow({
         <span className="flex items-center gap-1.5">
           <span className="text-xs font-medium text-[var(--text)] truncate">{base.name}</span>
         </span>
-        <span className="text-[11px] text-[var(--text-subtle)] block truncate">{base.description}</span>
+        <span className="text-[11px] text-[var(--text-subtle)] block truncate">
+          {base.description}
+        </span>
       </div>
 
       {/* Category */}
@@ -383,7 +480,10 @@ function BaseListRow({
 
       {/* Actions — visible on hover, only for creator view */}
       {(onToggleVisibility || onEdit || onDelete) && (
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
           {onToggleVisibility && (
             <button onClick={onToggleVisibility} className="btn btn-sm">
               {base.visibility === 'public' ? <Eye size={12} /> : <EyeSlash size={12} />}
@@ -404,7 +504,13 @@ function BaseListRow({
 
       {/* Settings gear (only for creator view) */}
       {onEdit && (
-        <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="shrink-0 p-1 rounded-md hover:bg-[var(--surface)] transition-colors">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          className="shrink-0 p-1 rounded-md hover:bg-[var(--surface)] transition-colors"
+        >
           <Gear size={14} className="text-[var(--text-subtle)]" />
         </button>
       )}
@@ -439,9 +545,7 @@ function BaseCard({
             <span className="text-lg">{base.icon}</span>
           </div>
           <div className="flex-1 min-w-0">
-            <h4 className="text-xs font-semibold text-[var(--text)] line-clamp-1">
-              {base.name}
-            </h4>
+            <h4 className="text-xs font-semibold text-[var(--text)] line-clamp-1">{base.name}</h4>
             <span className="text-[11px] text-[var(--text-subtle)]">{base.category}</span>
           </div>
         </div>
@@ -498,7 +602,10 @@ function BaseCard({
 
         {/* Actions — only shown for creator view */}
         {(onToggleVisibility || onEdit || onDelete) && (
-          <div className="flex items-center gap-1 mt-3 pt-3 border-t border-[var(--border)] opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="flex items-center gap-1 mt-3 pt-3 border-t border-[var(--border)] opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
             {onToggleVisibility && (
               <button
                 onClick={onToggleVisibility}
@@ -514,11 +621,7 @@ function BaseCard({
               </button>
             )}
             {onEdit && (
-              <button
-                onClick={onEdit}
-                aria-label={`Edit ${base.name}`}
-                className="btn btn-sm"
-              >
+              <button onClick={onEdit} aria-label={`Edit ${base.name}`} className="btn btn-sm">
                 <Pencil size={12} />
                 Edit
               </button>

@@ -21,12 +21,8 @@ import ThemesPage from './library/ThemesPage';
 import type { LibraryTheme } from './library/ThemesPage';
 import type { LibraryAgent } from './library/types';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import {
-  MobileMenu,
-} from '../components/ui';
-import {
-  type CustomProvider,
-} from '../components/settings/CustomProviderComponents';
+import { MobileMenu } from '../components/ui';
+import { type CustomProvider } from '../components/settings/CustomProviderComponents';
 import { marketplaceApi, secretsApi, billingApi, appInstallsApi, type AppInstance } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
@@ -120,7 +116,6 @@ interface InstalledMcpServer {
   created_at: string;
   updated_at: string | null;
 }
-
 
 export default function Library() {
   const navigate = useNavigate();
@@ -284,9 +279,7 @@ export default function Library() {
   const loadSkills = async () => {
     try {
       const data = await marketplaceApi.getAllSkills({ limit: 100 });
-      setSkills(
-        (data.skills || []).filter((s: Record<string, unknown>) => s.is_purchased)
-      );
+      setSkills((data.skills || []).filter((s: Record<string, unknown>) => s.is_purchased));
     } catch (err) {
       console.error('Failed to load skills:', err);
       toast.error('Failed to load skills');
@@ -427,7 +420,6 @@ export default function Library() {
     }
   };
 
-
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-[var(--bg)]">
@@ -443,13 +435,25 @@ export default function Library() {
 
       {/* Header */}
       <div className="flex-shrink-0">
-        <div className="h-10 flex items-center justify-between gap-[6px]" style={{ paddingLeft: '18px', paddingRight: '4px', borderBottom: 'var(--border-width) solid var(--border)' }}>
+        <div
+          className="h-10 flex items-center justify-between gap-[6px]"
+          style={{
+            paddingLeft: '18px',
+            paddingRight: '4px',
+            borderBottom: 'var(--border-width) solid var(--border)',
+          }}
+        >
           <button
             onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
             className="mobile-only btn btn-icon mr-1"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
             </svg>
           </button>
           <h2 className="text-xs font-semibold text-[var(--text)] flex-1">
@@ -461,7 +465,11 @@ export default function Library() {
       </div>
 
       {/* Scrollable Content */}
-      <div key={teamSwitchKey} className="flex-1 overflow-hidden flex flex-col" style={{ animation: 'fade-in 0.25s ease-out' }}>
+      <div
+        key={teamSwitchKey}
+        className="flex-1 overflow-hidden flex flex-col"
+        style={{ animation: 'fade-in 0.25s ease-out' }}
+      >
         {activeTab === 'apps' && (
           <div className="flex-1 overflow-y-auto p-4">
             {installedApps.length === 0 ? (
@@ -499,7 +507,7 @@ export default function Library() {
                       }}
                       className="btn btn-primary btn-sm self-start"
                     >
-                      ▶ Run
+                      Run
                     </button>
                   </div>
                 ))}
@@ -507,7 +515,6 @@ export default function Library() {
             )}
           </div>
         )}
-
         {activeTab === 'agents' && (
           <AgentsPage
             agents={agents}
@@ -527,10 +534,10 @@ export default function Library() {
             onTogglePublish={async (agent: LibraryAgent) => {
               try {
                 if (agent.is_published) {
-                  await marketplaceApi.unpublishAgent(agent.id);
+                  await marketplaceApi.unpublishAgent(Number(agent.id));
                   toast.success('Agent unpublished from marketplace');
                 } else {
-                  await marketplaceApi.publishAgent(agent.id);
+                  await marketplaceApi.publishAgent(Number(agent.id));
                   toast.success('Agent published to community marketplace!');
                 }
                 loadLibraryAgents();
@@ -619,8 +626,6 @@ export default function Library() {
           />
         )}
       </div>
-
     </>
   );
 }
-

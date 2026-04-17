@@ -20,7 +20,10 @@ interface UseChatSessionsOptions {
   teamSwitchKey?: number;
 }
 
-export function useChatSessions({ standalone = true, teamSwitchKey = 0 }: UseChatSessionsOptions = {}) {
+export function useChatSessions({
+  standalone = true,
+  teamSwitchKey = 0,
+}: UseChatSessionsOptions = {}) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -73,6 +76,7 @@ export function useChatSessions({ standalone = true, teamSwitchKey = 0 }: UseCha
       title: 'New Chat',
       status: 'active',
       origin: 'standalone',
+      platform: null,
       project_id: null,
       project_name: null,
       created_at: new Date().toISOString(),

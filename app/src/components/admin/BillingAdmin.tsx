@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { DollarSign, CreditCard, TrendingUp, Users, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getAuthHeaders } from '../../lib/api';
 import toast from 'react-hot-toast';

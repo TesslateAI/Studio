@@ -1,7 +1,7 @@
 """Multi-agent orchestration: agent_tasks, agent_budgets, projects.mission
 
-Revision ID: 0050_multi_agent_orchestration
-Revises: 0049_project_runtime_fields
+Revision ID: 0053_multi_agent_orchestration
+Revises: 0052_project_runtime_fields
 Create Date: 2026-04-14 01:00:00.000000
 
 Adds the MVP skeleton for the multi-agent orchestration system:
@@ -26,8 +26,8 @@ from alembic import op
 from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
-revision: str = "0050_multi_agent_orchestration"
-down_revision: str | Sequence[str] | None = "0049_project_runtime_fields"
+revision: str = "0053_multi_agent_orchestration"
+down_revision: str | Sequence[str] | None = "0052_project_runtime_fields"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -86,9 +86,7 @@ def upgrade() -> None:
             server_default="0",
         ),
         sa.Column("reset_at", sa.DateTime(timezone=True), nullable=False),
-        sa.UniqueConstraint(
-            "agent_id", "project_id", name="uq_agent_budgets_agent_project"
-        ),
+        sa.UniqueConstraint("agent_id", "project_id", name="uq_agent_budgets_agent_project"),
     )
     op.create_index("ix_agent_budgets_agent_id", "agent_budgets", ["agent_id"])
 

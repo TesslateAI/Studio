@@ -184,10 +184,6 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
   const providerName =
     data.providerInfo?.display_name || PROVIDER_DISPLAY_NAMES[data.provider] || data.provider;
 
-  // Get the latest deployment (first in history)
-  const latestDeployment = data.deploymentHistory?.[0];
-  const _isLive = latestDeployment?.status === 'success';
-
   // Route deploy action based on provider type
   const deployType = getDeployType(data.provider);
 
@@ -286,42 +282,51 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
         </div>
 
         {/* Not Connected Warning */}
-        {!data.isConnected && (() => {
-          const providerHelp = PROVIDER_CREDENTIAL_HELP[data.provider];
-          const helpFields = providerHelp ? Object.entries(providerHelp) : [];
-          return (
-            <div className="px-3 py-2 bg-yellow-500/10 border-b border-yellow-500/20">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <LinkSimple size={14} className="text-yellow-500" />
-                  <span className="text-xs text-yellow-500">Not Connected</span>
-                  {helpFields.length > 0 && (
-                    <InfoTooltip size={13}>
-                      <p className="font-semibold text-[var(--text)] mb-1.5">How to connect {providerName}</p>
-                      <div className="space-y-1.5">
-                        {helpFields.map(([field, help]) => (
-                          <div key={field}>
-                            <span className="font-medium text-[var(--text)]/70">{field.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}:</span>
-                            <p className="text-[var(--text)]/60 leading-snug">{help}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </InfoTooltip>
-                  )}
+        {!data.isConnected &&
+          (() => {
+            const providerHelp = PROVIDER_CREDENTIAL_HELP[data.provider];
+            const helpFields = providerHelp ? Object.entries(providerHelp) : [];
+            return (
+              <div className="px-3 py-2 bg-yellow-500/10 border-b border-yellow-500/20">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <LinkSimple size={14} className="text-yellow-500" />
+                    <span className="text-xs text-yellow-500">Not Connected</span>
+                    {helpFields.length > 0 && (
+                      <InfoTooltip size={13}>
+                        <p className="font-semibold text-[var(--text)] mb-1.5">
+                          How to connect {providerName}
+                        </p>
+                        <div className="space-y-1.5">
+                          {helpFields.map(([field, help]) => (
+                            <div key={field}>
+                              <span className="font-medium text-[var(--text)]/70">
+                                {field
+                                  .split('_')
+                                  .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                                  .join(' ')}
+                                :
+                              </span>
+                              <p className="text-[var(--text)]/60 leading-snug">{help}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </InfoTooltip>
+                    )}
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      data.onConnect?.(id);
+                    }}
+                    className="px-2 py-0.5 text-xs bg-yellow-500 text-black rounded hover:bg-yellow-400 transition-colors font-medium"
+                  >
+                    Connect
+                  </button>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    data.onConnect?.(id);
-                  }}
-                  className="px-2 py-0.5 text-xs bg-yellow-500 text-black rounded hover:bg-yellow-400 transition-colors font-medium"
-                >
-                  Connect
-                </button>
               </div>
-            </div>
-          );
-        })()}
+            );
+          })()}
 
         {/* Connected Containers Section */}
         <div className="px-3 py-2 border-b border-[var(--border)]">

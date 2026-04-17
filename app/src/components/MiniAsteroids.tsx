@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Vector {
   x: number;
@@ -135,12 +135,13 @@ export function MiniAsteroids() {
       const types: ('normal' | 'fast' | 'heavy')[] = ['normal', 'normal', 'fast', 'heavy'];
       const type = types[Math.floor(Math.random() * types.length)];
 
-      const pos = x !== undefined && y !== undefined
-        ? { x, y }
-        : {
-            x: Math.random() * canvas.width,
-            y: Math.random() * canvas.height,
-          };
+      const pos =
+        x !== undefined && y !== undefined
+          ? { x, y }
+          : {
+              x: Math.random() * canvas.width,
+              y: Math.random() * canvas.height,
+            };
 
       const angle = Math.random() * Math.PI * 2;
       let speed = (40 + Math.random() * 40) * gameStateRef.current.difficulty; // Faster base speed
@@ -187,9 +188,14 @@ export function MiniAsteroids() {
 
     // Create power-up
     const spawnPowerUp = (x: number, y: number) => {
-      if (Math.random() < 0.3) { // 30% chance to spawn
-        const types: ('shield' | 'rapidfire' | 'tripleshot' | 'laser')[] =
-          ['shield', 'rapidfire', 'tripleshot', 'laser'];
+      if (Math.random() < 0.3) {
+        // 30% chance to spawn
+        const types: ('shield' | 'rapidfire' | 'tripleshot' | 'laser')[] = [
+          'shield',
+          'rapidfire',
+          'tripleshot',
+          'laser',
+        ];
         const type = types[Math.floor(Math.random() * types.length)];
 
         gameStateRef.current.powerUps.push({
@@ -230,10 +236,11 @@ export function MiniAsteroids() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Check if we're typing in an input field
       const activeElement = document.activeElement;
-      const isTyping = activeElement instanceof HTMLInputElement ||
-                       activeElement instanceof HTMLTextAreaElement ||
-                       activeElement instanceof HTMLSelectElement ||
-                       (activeElement?.getAttribute('contenteditable') === 'true');
+      const isTyping =
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        activeElement instanceof HTMLSelectElement ||
+        activeElement?.getAttribute('contenteditable') === 'true';
 
       // Only capture keys if game is focused and not typing in a form
       if (!gameFocused || isTyping || !e.key) return;
@@ -242,8 +249,16 @@ export function MiniAsteroids() {
       gameStateRef.current.keys[e.key] = true;
       gameStateRef.current.keys[key] = true;
 
-      if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
-          key === 'w' || key === 'a' || key === 's' || key === 'd') {
+      if (
+        e.key === ' ' ||
+        e.key === 'ArrowUp' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight' ||
+        key === 'w' ||
+        key === 'a' ||
+        key === 's' ||
+        key === 'd'
+      ) {
         e.preventDefault();
       }
     };
@@ -251,10 +266,11 @@ export function MiniAsteroids() {
     const handleKeyUp = (e: KeyboardEvent) => {
       // Check if we're typing in an input field
       const activeElement = document.activeElement;
-      const isTyping = activeElement instanceof HTMLInputElement ||
-                       activeElement instanceof HTMLTextAreaElement ||
-                       activeElement instanceof HTMLSelectElement ||
-                       (activeElement?.getAttribute('contenteditable') === 'true');
+      const isTyping =
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        activeElement instanceof HTMLSelectElement ||
+        activeElement?.getAttribute('contenteditable') === 'true';
 
       // Only capture keys if game is focused and not typing in a form
       if (!gameFocused || isTyping || !e.key) return;
@@ -317,7 +333,9 @@ export function MiniAsteroids() {
     // Game loop
     let animationFrame: number;
     const gameLoop = (timestamp: number) => {
-      const dt = gameStateRef.current.lastTime ? (timestamp - gameStateRef.current.lastTime) / 1000 : 0;
+      const dt = gameStateRef.current.lastTime
+        ? (timestamp - gameStateRef.current.lastTime) / 1000
+        : 0;
       gameStateRef.current.lastTime = timestamp;
 
       if (!ctx || gameOver) return;
@@ -576,7 +594,7 @@ export function MiniAsteroids() {
               const comboMultiplier = Math.min(gameStateRef.current.comboCount, 10);
               const points = 10 * comboMultiplier;
 
-              setScore(s => {
+              setScore((s) => {
                 const newScore = s + points;
                 if (newScore > highScoreRef.current) {
                   setHighScore(newScore);
@@ -590,8 +608,12 @@ export function MiniAsteroids() {
               setTimeout(() => setShowCombo(false), 1000);
 
               // Explosion particles
-              const color = asteroid.type === 'fast' ? '#ff6b00' :
-                           asteroid.type === 'heavy' ? '#ff0066' : '#888888';
+              const color =
+                asteroid.type === 'fast'
+                  ? '#ff6b00'
+                  : asteroid.type === 'heavy'
+                    ? '#ff0066'
+                    : '#888888';
               createParticles(asteroid.pos.x, asteroid.pos.y, color, 30);
 
               gameStateRef.current.shake = 8;
@@ -630,7 +652,7 @@ export function MiniAsteroids() {
             createParticles(ship.pos.x, ship.pos.y, '#ff0000', 40);
             gameStateRef.current.shake = 20;
 
-            setLives(currentLives => {
+            setLives((currentLives) => {
               if (currentLives <= 1) {
                 setGameOver(true);
                 return 0;
@@ -667,7 +689,7 @@ export function MiniAsteroids() {
       }
 
       // Draw smooth trail with gradient fade
-      trail.forEach(t => {
+      trail.forEach((t) => {
         const alpha = t.life / 30;
         ctx.globalAlpha = alpha * 0.5;
         ctx.fillStyle = '#ff6b00';
@@ -678,9 +700,9 @@ export function MiniAsteroids() {
       ctx.globalAlpha = 1;
 
       // Draw asteroids with glow
-      asteroids.forEach(asteroid => {
-        const color = asteroid.type === 'fast' ? '#ff6b00' :
-                     asteroid.type === 'heavy' ? '#ff0066' : '#888888';
+      asteroids.forEach((asteroid) => {
+        const color =
+          asteroid.type === 'fast' ? '#ff6b00' : asteroid.type === 'heavy' ? '#ff0066' : '#888888';
 
         ctx.save();
         ctx.translate(asteroid.pos.x, asteroid.pos.y);
@@ -715,7 +737,7 @@ export function MiniAsteroids() {
       });
 
       // Draw particles with fade
-      particles.forEach(particle => {
+      particles.forEach((particle) => {
         const alpha = particle.life / particle.maxLife;
         ctx.globalAlpha = alpha;
         ctx.fillStyle = particle.color;
@@ -726,7 +748,7 @@ export function MiniAsteroids() {
       ctx.globalAlpha = 1;
 
       // Draw bullets with enhanced glow and trails
-      bullets.forEach(bullet => {
+      bullets.forEach((bullet) => {
         const lifeRatio = bullet.life / 60;
 
         if (bullet.type === 'laser') {
@@ -743,7 +765,13 @@ export function MiniAsteroids() {
           ctx.globalAlpha = 0.3;
           ctx.fillStyle = '#00ffff';
           ctx.beginPath();
-          ctx.arc(bullet.pos.x - bullet.vel.x * dt * 2, bullet.pos.y - bullet.vel.y * dt * 2, 3, 0, Math.PI * 2);
+          ctx.arc(
+            bullet.pos.x - bullet.vel.x * dt * 2,
+            bullet.pos.y - bullet.vel.y * dt * 2,
+            3,
+            0,
+            Math.PI * 2
+          );
           ctx.fill();
         } else if (bullet.type === 'spread') {
           ctx.shadowBlur = 12;
@@ -765,7 +793,13 @@ export function MiniAsteroids() {
           // Bullet trail
           ctx.globalAlpha = 0.4;
           ctx.beginPath();
-          ctx.arc(bullet.pos.x - bullet.vel.x * dt, bullet.pos.y - bullet.vel.y * dt, 1.5, 0, Math.PI * 2);
+          ctx.arc(
+            bullet.pos.x - bullet.vel.x * dt,
+            bullet.pos.y - bullet.vel.y * dt,
+            1.5,
+            0,
+            Math.PI * 2
+          );
           ctx.fill();
         }
         ctx.globalAlpha = 1;
@@ -773,14 +807,19 @@ export function MiniAsteroids() {
       });
 
       // Draw power-ups with pulsing glow
-      powerUps.forEach(powerUp => {
+      powerUps.forEach((powerUp) => {
         ctx.save();
         ctx.translate(powerUp.pos.x, powerUp.pos.y);
         ctx.rotate(powerUp.rotation);
 
-        const color = powerUp.type === 'shield' ? '#00ffff' :
-                     powerUp.type === 'rapidfire' ? '#ffaa00' :
-                     powerUp.type === 'tripleshot' ? '#ff00ff' : '#00ff88';
+        const color =
+          powerUp.type === 'shield'
+            ? '#00ffff'
+            : powerUp.type === 'rapidfire'
+              ? '#ffaa00'
+              : powerUp.type === 'tripleshot'
+                ? '#ff00ff'
+                : '#00ff88';
 
         // Pulsing effect
         const pulse = Math.sin(timestamp * 0.005) * 0.3 + 1;
@@ -935,11 +974,16 @@ export function MiniAsteroids() {
 
   const getPowerUpIcon = (type: string) => {
     switch (type) {
-      case 'shield': return '🛡️';
-      case 'rapidfire': return '⚡';
-      case 'tripleshot': return '✨';
-      case 'laser': return '🔥';
-      default: return '';
+      case 'shield':
+        return '🛡️';
+      case 'rapidfire':
+        return '⚡';
+      case 'tripleshot':
+        return '✨';
+      case 'laser':
+        return '🔥';
+      default:
+        return '';
     }
   };
 
@@ -951,11 +995,13 @@ export function MiniAsteroids() {
   if (ship.laser > 0) activePowerUps.push({ type: 'laser', time: ship.laser });
 
   return (
-    <div className={`relative w-full h-full bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-xl rounded-3xl shadow-2xl overflow-hidden transition-all duration-300 ${
-      gameFocused
-        ? 'border-2 border-orange-500/70 ring-2 ring-orange-500/30'
-        : 'border border-white/10'
-    }`}>
+    <div
+      className={`relative w-full h-full bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-xl rounded-3xl shadow-2xl overflow-hidden transition-all duration-300 ${
+        gameFocused
+          ? 'border-2 border-orange-500/70 ring-2 ring-orange-500/30'
+          : 'border border-white/10'
+      }`}
+    >
       <canvas
         ref={canvasRef}
         className="w-full h-full cursor-pointer"
@@ -972,7 +1018,11 @@ export function MiniAsteroids() {
             High: <span className="text-yellow-400">{highScore}</span>
           </div>
           <div className="text-red-400 text-sm bg-black/60 px-4 py-2 rounded-full backdrop-blur-sm border border-white/20">
-            Lives: <span className="text-red-500">{Array(lives).fill('❤️').join(' ')}{lives === 0 ? '💀' : ''}</span>
+            Lives:{' '}
+            <span className="text-red-500">
+              {Array(lives).fill('❤️').join(' ')}
+              {lives === 0 ? '💀' : ''}
+            </span>
           </div>
           {showCombo && combo > 1 && (
             <div className="text-orange-400 text-xl font-bold bg-black/80 px-4 py-2 rounded-full backdrop-blur-sm border-2 border-orange-400 animate-pulse">
@@ -983,7 +1033,10 @@ export function MiniAsteroids() {
 
         <div className="flex flex-col gap-2">
           {activePowerUps.map((powerUp, i) => (
-            <div key={i} className="text-sm bg-black/60 px-3 py-2 rounded-full backdrop-blur-sm border border-white/20 flex items-center gap-2">
+            <div
+              key={i}
+              className="text-sm bg-black/60 px-3 py-2 rounded-full backdrop-blur-sm border border-white/20 flex items-center gap-2"
+            >
               <span>{getPowerUpIcon(powerUp.type)}</span>
               <span className="text-white">{Math.ceil(powerUp.time / 60)}s</span>
             </div>

@@ -696,7 +696,7 @@ export const projectsApi = {
     }
 
     return {
-      ...completedTask.result,
+      ...(completedTask.result ?? {}),
       message: data.message,
       task_id,
     };
@@ -2532,7 +2532,7 @@ export const deploymentCredentialsApi = {
 
     return deploymentCredentialsApi.create({
       provider,
-      access_token: tokenField,
+      access_token: tokenField!,
       metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     });
   },

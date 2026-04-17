@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { MagnifyingGlass, X } from '@phosphor-icons/react';
 import { useTheme } from '../theme/ThemeContext';

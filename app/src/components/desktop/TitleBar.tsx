@@ -24,7 +24,7 @@ type TauriInternals = {
 };
 
 function getTauriInvoke(): TauriInternals['invoke'] | undefined {
-  return (window as Record<string, unknown> & { __TAURI_INTERNALS__?: TauriInternals })
+  return (window as unknown as Record<string, unknown> & { __TAURI_INTERNALS__?: TauriInternals })
     .__TAURI_INTERNALS__?.invoke;
 }
 

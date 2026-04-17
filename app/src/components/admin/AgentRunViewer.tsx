@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -96,10 +96,11 @@ function stepHasError(step: StepData): boolean {
       return result.toLowerCase().includes('error');
     }
     if (result && typeof result === 'object') {
+      const r = result as Record<string, unknown>;
       return (
-        result.error != null ||
-        result.is_error === true ||
-        (typeof result.content === 'string' && result.content.toLowerCase().includes('error'))
+        r.error != null ||
+        r.is_error === true ||
+        (typeof r.content === 'string' && r.content.toLowerCase().includes('error'))
       );
     }
     return false;
@@ -344,17 +345,21 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
                                   </span>
                                 </div>
                                 <div className="space-y-2">
-                                  {step.tool_calls.map(
-                                    (call: Record<string, unknown>, callIdx: number) => (
+                                  {step.tool_calls.map((rawCall: unknown, callIdx: number) => {
+                                    const call = rawCall as Record<string, unknown>;
+                                    return (
                                       <div
                                         key={callIdx}
                                         className="bg-gray-900 rounded p-3 space-y-2"
                                       >
                                         <div className="text-blue-400 font-mono text-sm">
-                                          {call.name ||
-                                            call.function?.name ||
-                                            call.tool ||
-                                            'unknown'}
+                                          {
+                                            (call.name ||
+                                              (call.function as Record<string, unknown> | undefined)
+                                                ?.name ||
+                                              call.tool ||
+                                              'unknown') as string
+                                          }
                                         </div>
                                         <div className="overflow-x-auto">
                                           <pre className="text-sm font-mono text-gray-300 whitespace-pre-wrap">
@@ -362,7 +367,11 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
                                               call.arguments ||
                                                 call.parameters ||
                                                 call.input ||
-                                                call.function?.arguments ||
+                                                (
+                                                  call.function as
+                                                    | Record<string, unknown>
+                                                    | undefined
+                                                )?.arguments ||
                                                 {},
                                               null,
                                               2
@@ -370,8 +379,8 @@ export default function AgentRunViewer({ messageId, onClose }: AgentRunViewerPro
                                           </pre>
                                         </div>
                                       </div>
-                                    )
-                                  )}
+                                    );
+                                  })}
                                 </div>
                               </div>
                             )}

@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { chatApi } from '../lib/api';
-import type { AgentMessageData, SerializedAttachment } from '../types/agent';
+import type {
+  AgentMessageData,
+  SerializedAttachment,
+  DBMessage,
+  ToolCallDetail,
+  AgentStep,
+} from '../types/agent';
 import type { ChatAgent } from '../types/chat';
 import type { EditMode } from '../components/chat/EditModeStatus';
 import { nodeConfigEvents } from '../utils/nodeConfigEvents';
@@ -186,7 +192,7 @@ export function useAgentChat({
         if (cancelled) return [];
 
         const expandedMessages: ChatMessage[] = [];
-        dbMessages.forEach((msg, idx) => {
+        (dbMessages as DBMessage[]).forEach((msg: DBMessage, idx: number) => {
           const messageType = msg.role === 'assistant' ? 'ai' : 'user';
           if (messageType === 'user' || !msg.message_metadata?.agent_mode) {
             if (msg.content && msg.content.trim()) {
@@ -205,10 +211,11 @@ export function useAgentChat({
           const finalResponse = msg.content && msg.content.trim() ? msg.content : '';
 
           if (msg.message_metadata.steps && msg.message_metadata.steps.length > 0) {
-            msg.message_metadata.steps.forEach((step: Record<string, unknown>, stepIdx: number) => {
+            msg.message_metadata.steps.forEach((step, stepIdx: number) => {
+              const stepRecord = step as unknown as Record<string, unknown>;
               const hasContent =
-                (step.tool_calls && (step.tool_calls as unknown[]).length > 0) ||
-                (step.thought && (step.thought as string).trim());
+                (stepRecord.tool_calls && (stepRecord.tool_calls as unknown[]).length > 0) ||
+                (stepRecord.thought && (stepRecord.thought as string).trim());
               if (!hasContent) return;
 
               expandedMessages.push({
@@ -216,11 +223,11 @@ export function useAgentChat({
                 type: 'ai',
                 content: '',
                 agentData: {
-                  steps: [step],
-                  iterations: (step.iteration as number) || stepIdx + 1,
-                  tool_calls_made: (step.tool_calls as unknown[])?.length || 0,
+                  steps: [stepRecord],
+                  iterations: (stepRecord.iteration as number) || stepIdx + 1,
+                  tool_calls_made: (stepRecord.tool_calls as unknown[])?.length || 0,
                   completion_reason: 'step_complete',
-                } as AgentMessageData,
+                } as unknown as AgentMessageData,
               });
             });
 
@@ -591,7 +598,7 @@ export function useAgentChat({
                 name: tc.name as string,
                 parameters: tc.parameters,
                 result: tc.result,
-              };
+              } as ToolCallDetail;
 
               setMessages((prev) => {
                 const withoutThinking = prev.filter((m) => m.id !== thinkingMessageId);
@@ -608,7 +615,7 @@ export function useAgentChat({
                         {
                           ...existing.agentData!.steps[0],
                           tool_calls: [...currentTools, newTool],
-                        },
+                        } as AgentStep,
                       ],
                       tool_calls_made: currentTools.length + 1,
                     },
@@ -619,7 +626,7 @@ export function useAgentChat({
                     type: 'ai',
                     content: '',
                     agentData: {
-                      steps: [{ tool_calls: [newTool] }],
+                      steps: [{ tool_calls: [newTool] } as AgentStep],
                       iterations: (tc.iteration as number) || 0,
                       tool_calls_made: 1,
                       completion_reason: 'tool_streaming',
@@ -642,11 +649,14 @@ export function useAgentChat({
                     (tc: { name: string; parameters: unknown }, index: number) => ({
                       name: tc.name,
                       parameters: tc.parameters,
-                      result: (event.data.tool_results as unknown[])?.[index] || {},
+                      result:
+                        ((event.data as Record<string, unknown>).tool_results as unknown[])?.[
+                          index
+                        ] || {},
                     })
                   ) || [],
-              };
-              delete transformedStep.tool_results;
+              } as AgentStep;
+              delete (transformedStep as unknown as Record<string, unknown>).tool_results;
 
               const stepMessage: ChatMessage = {
                 id: iterMsgId,

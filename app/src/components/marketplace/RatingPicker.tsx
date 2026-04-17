@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Star } from '@phosphor-icons/react';
 import { useTheme } from '../../theme/ThemeContext';
 
@@ -13,7 +13,7 @@ export function RatingPicker({
   value,
   onChange,
   size = 'md',
-  disabled = false
+  disabled = false,
 }: RatingPickerProps) {
   const { theme } = useTheme();
   const [hoverValue, setHoverValue] = useState(0);
@@ -21,7 +21,7 @@ export function RatingPicker({
   const sizes = {
     sm: 16,
     md: 24,
-    lg: 32
+    lg: 32,
   };
 
   const iconSize = sizes[size];
@@ -42,18 +42,16 @@ export function RatingPicker({
           className={`
             p-1 rounded transition-all
             ${!disabled ? 'hover:scale-110' : ''}
-            ${star <= displayValue
-              ? 'text-yellow-400'
-              : theme === 'light'
-                ? 'text-black/20 hover:text-black/40'
-                : 'text-white/20 hover:text-white/40'
+            ${
+              star <= displayValue
+                ? 'text-yellow-400'
+                : theme === 'light'
+                  ? 'text-black/20 hover:text-black/40'
+                  : 'text-white/20 hover:text-white/40'
             }
           `}
         >
-          <Star
-            size={iconSize}
-            weight={star <= displayValue ? 'fill' : 'regular'}
-          />
+          <Star size={iconSize} weight={star <= displayValue ? 'fill' : 'regular'} />
         </button>
       ))}
     </div>

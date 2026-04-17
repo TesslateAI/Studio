@@ -39,8 +39,8 @@ const DeployButton: React.FC<DeployButtonProps> = ({
         billingApi.getConfig(),
       ]);
 
-      setLimits(limitsRes.data);
-      setConfig(configRes.data);
+      setLimits(limitsRes as DeploymentLimitsResponse);
+      setConfig(configRes);
     } catch (err: unknown) {
       console.error('Failed to load deployment limits:', err);
       const error = err as { response?: { data?: { detail?: string } } };
@@ -136,7 +136,10 @@ const DeployButton: React.FC<DeployButtonProps> = ({
 
   if (loading) {
     return (
-      <button disabled className={`px-4 py-2 bg-gray-300 text-gray-600 rounded cursor-not-allowed ${className}`}>
+      <button
+        disabled
+        className={`px-4 py-2 bg-gray-300 text-gray-600 rounded cursor-not-allowed ${className}`}
+      >
         Loading...
       </button>
     );
@@ -149,18 +152,18 @@ const DeployButton: React.FC<DeployButtonProps> = ({
   return (
     <>
       <div className={className}>
-        {error && (
-          <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm">
-            {error}
-          </div>
-        )}
+        {error && <div className="mb-2 p-2 bg-red-100 text-red-700 rounded text-sm">{error}</div>}
 
         {/* Deploy Status Info */}
         {!isDeployed && (
           <div className="mb-3 text-sm text-gray-600">
             <div className="flex items-center space-x-2">
               <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                  clipRule="evenodd"
+                />
               </svg>
               <span>
                 Deploys used: {limits.current_deploys} / {limits.max_deploys}
@@ -191,7 +194,8 @@ const DeployButton: React.FC<DeployButtonProps> = ({
         {/* Additional Slot Info */}
         {!limits.can_deploy && limits.subscription_tier === 'pro' && (
           <p className="mt-2 text-xs text-gray-600 text-center">
-            You've reached your deploy limit. Purchase additional slots for ${(config.deploy_price / 100).toFixed(2)} each.
+            You've reached your deploy limit. Purchase additional slots for $
+            {(config.deploy_price / 100).toFixed(2)} each.
           </p>
         )}
       </div>
@@ -217,28 +221,34 @@ const DeployButton: React.FC<DeployButtonProps> = ({
             <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-md sm:w-full">
               <div className="bg-white px-6 py-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xl font-bold text-gray-900">
-                    Deploy Limit Reached
-                  </h3>
+                  <h3 className="text-xl font-bold text-gray-900">Deploy Limit Reached</h3>
                   <button
                     onClick={() => setShowPurchaseSlotModal(false)}
                     className="text-gray-400 hover:text-gray-500"
                   >
                     <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </button>
                 </div>
 
                 <p className="text-gray-700 mb-4">
-                  You've deployed {limits.max_deploys} projects (your current limit). Purchase an additional deploy slot to keep this project running 24/7.
+                  You've deployed {limits.max_deploys} projects (your current limit). Purchase an
+                  additional deploy slot to keep this project running 24/7.
                 </p>
 
                 <div className="bg-blue-50 rounded-lg p-4 mb-6">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="font-semibold text-gray-900">Additional Deploy Slot</div>
-                      <div className="text-sm text-gray-600">Keep one more project running 24/7</div>
+                      <div className="text-sm text-gray-600">
+                        Keep one more project running 24/7
+                      </div>
                     </div>
                     <div className="text-2xl font-bold text-gray-900">
                       ${(config.deploy_price / 100).toFixed(2)}
