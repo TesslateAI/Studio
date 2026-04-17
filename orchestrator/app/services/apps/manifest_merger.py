@@ -1,4 +1,4 @@
-"""Publish-time merger: .tesslate/config.json -> app.manifest.json (schema 2025-01).
+"""Publish-time merger: .tesslate/config.json -> app.manifest.json (schema 2025-02).
 
 Consumes a parsed base_config dict (canvas-authored) plus creator-supplied
 ``user_overrides`` (slug, version, billing, etc.) and produces a manifest_dict
@@ -14,7 +14,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..base_config_parser import HostedAgentConfig
-from .app_manifest import MANIFEST_SCHEMA_VERSION
+_PYDANTIC_MIRROR_VERSION = "2025-01"
+# Publish target. Read paths still accept 2025-01 bundles; only emit 2025-02.
+MANIFEST_SCHEMA_VERSION = "2025-02"
 
 _DEFAULT_RUNTIME_API = "1.0"
 _DEFAULT_STUDIO_MIN = "0.1.0"
@@ -89,10 +91,13 @@ def merge_canvas_config(
         connections_raw, container_name_by_id=container_name_by_id
     )
 
+    compute_containers = compute_override.get("containers") or container_dicts
+    _ensure_primary_container(compute_containers, containers_raw)
+
     compute: dict[str, Any] = {
         "tier": compute_override.get("tier", 0),
         "compute_model": compute_override.get("compute_model", "per-invocation"),
-        "containers": compute_override.get("containers") or container_dicts,
+        "containers": compute_containers,
         "connections": connections_manifest,
         "hosted_agents": compute_override.get("hosted_agents") or hosted_agent_dicts,
     }
@@ -199,24 +204,68 @@ def merge_canvas_config(
 # ---------------------------------------------------------------------------
 
 
+_VALID_CONTAINER_KINDS = {"base", "service"}
+
+
+def _ensure_primary_container(
+    container_dicts: list[dict[str, Any]],
+    containers_raw: list[Any],
+) -> None:
+    """2025-02 requires `contains: primary:true` when containers is non-empty.
+
+    If the canvas didn't flag any container, infer one: first UI-role container,
+    else first base-kind container, else the first entry. Mutates in place.
+    """
+    if not container_dicts:
+        return
+    if any(bool(c.get("primary")) for c in container_dicts):
+        return
+    # Prefer a UI-role container based on the raw canvas role hint.
+    pick_idx = 0
+    for idx, raw in enumerate(containers_raw):
+        if isinstance(raw, dict) and (raw.get("role") or "").lower() in _UI_ROLES:
+            if idx < len(container_dicts):
+                pick_idx = idx
+                break
+    else:
+        # Fall back to the first non-service container.
+        for idx, c in enumerate(container_dicts):
+            if c.get("kind", "base") == "base":
+                pick_idx = idx
+                break
+    container_dicts[pick_idx]["primary"] = True
+
+
 def _container_to_dict(container: Any) -> dict[str, Any]:
     if isinstance(container, dict):
-        # Drop canvas-only fields that aren't part of ContainerSpec; keep extras.
-        out = {k: v for k, v in container.items() if k not in {"role", "db_schema", "entrypoint", "url"}}
-        out.setdefault("name", container.get("name", ""))
-        out.setdefault("image", container.get("image", ""))
-        # 2025-02: surface the DB-level is_primary flag into manifest as `primary`.
-        if "primary" not in out and "is_primary" in container:
-            out["primary"] = bool(container["is_primary"])
-            out.pop("is_primary", None)
-        return out
-    # Dataclass-like with to_dict
-    if hasattr(container, "to_dict"):
-        d = container.to_dict()
-        if "primary" not in d and "is_primary" in d:
-            d["primary"] = bool(d.pop("is_primary"))
-        return d
-    raise TypeError(f"unsupported container entry: {type(container).__name__}")
+        src = container
+    elif hasattr(container, "to_dict"):
+        src = container.to_dict()
+    else:
+        raise TypeError(f"unsupported container entry: {type(container).__name__}")
+
+    # Drop canvas-only fields that aren't part of ContainerSpec; keep extras.
+    out = {
+        k: v
+        for k, v in src.items()
+        if k
+        not in {"role", "db_schema", "entrypoint", "url", "is_primary", "container_type"}
+    }
+    out.setdefault("name", src.get("name", ""))
+    out.setdefault("image", src.get("image", ""))
+
+    # 2025-02: surface the DB-level is_primary flag into manifest as `primary`.
+    if "primary" not in out and "is_primary" in src:
+        out["primary"] = bool(src["is_primary"])
+    out.setdefault("primary", out.get("primary", False))
+
+    # 2025-02: emit container `kind` from container_type (defaults to "base").
+    raw_kind = src.get("kind") or src.get("container_type") or "base"
+    if raw_kind not in _VALID_CONTAINER_KINDS:
+        raw_kind = "base"
+    out["kind"] = raw_kind
+
+    return out
 
 
 def _connections_to_manifest(
@@ -280,7 +329,7 @@ def _schedules_to_manifest(schedules: list[Any]) -> list[dict[str, Any]]:
             entrypoint = s.get("entrypoint") or trigger_config.get("entrypoint")
             execution = s.get("execution") or trigger_config.get("execution", "job")
             editable = s.get("editable", True)
-            optional = s.get("optional", True)
+            optional = s.get("optional", False)
         else:
             name = getattr(s, "name", None)
             cron = getattr(s, "cron_expression", None)
@@ -291,7 +340,7 @@ def _schedules_to_manifest(schedules: list[Any]) -> list[dict[str, Any]]:
                 trigger_config.get("execution", "job") if isinstance(trigger_config, dict) else "job"
             )
             editable = True
-            optional = True
+            optional = False
         if not name:
             continue
         entry: dict[str, Any] = {

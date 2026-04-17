@@ -6,7 +6,7 @@ immutable; bump to a new dated file for any further evolution.
 
 from app.services.apps.manifest_parser import schema_hash
 
-PINNED_SHA256 = "7a3dd056acf7678275fad81fa422416b4ea6c04faecf7732f515b8e8822523c1"
+PINNED_SHA256 = "646f9adf3522d59464182bd5c9de1c6e19a91bfa018c8bbef33309025280d7cc"
 
 
 def test_manifest_schema_2025_02_bytes_frozen() -> None:

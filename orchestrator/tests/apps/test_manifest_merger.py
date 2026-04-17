@@ -131,6 +131,9 @@ def test_merge_produces_schema_valid_dict() -> None:
         creator_user_id="11111111-1111-1111-1111-111111111111",
     )
     parsed = parse(deepcopy(result.manifest_dict))
-    assert parsed.manifest.app.slug == "my-app"
-    assert parsed.manifest.compute.hosted_agents[0].id == "a1"
-    assert parsed.manifest.state.model == "stateless"
+    # Merger now emits 2025-02; the Pydantic mirror is still 2025-01-only, so
+    # parsed.manifest is None and we assert against the validated raw dict.
+    assert parsed.schema_version == "2025-02"
+    assert parsed.raw["app"]["slug"] == "my-app"
+    assert parsed.raw["compute"]["hosted_agents"][0]["id"] == "a1"
+    assert parsed.raw["state"]["model"] == "stateless"

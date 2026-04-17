@@ -28,6 +28,7 @@ from .routers import (
     app_installs,
     app_runtime,
     app_runtime_status,
+    app_schedules,
     app_submissions,
     app_triggers,
     app_versions,
@@ -533,6 +534,15 @@ async def startup():
     if is_docker_mode():
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
+
+    # Wave 9 D1: register DB row event listeners (whitelisted tables → Redis Streams).
+    # Idempotent; safe to call once at startup. Producer side only this wave.
+    try:
+        from .services.apps.event_bus import register_db_event_listeners
+
+        register_db_event_listeners()
+    except Exception:
+        logger.exception("Failed to register db_event_bus listeners (non-fatal)")
 
     # Seed database (bases, agents, themes, workflows) — non-blocking background task
     from .seeds import run_all_seeds
@@ -1190,6 +1200,11 @@ app.include_router(
     app_runtime_status.router,
     prefix="/api/app-installs",
     tags=["apps:runtime-status"],
+)
+app.include_router(
+    app_schedules.router,
+    prefix="/api/app-installs",
+    tags=["apps:schedules"],
 )
 app.include_router(app_runtime.router, prefix="/api/apps/runtime", tags=["apps:runtime"])
 app.include_router(app_billing.router, prefix="/api/apps/billing", tags=["apps:billing"])

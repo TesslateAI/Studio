@@ -36,6 +36,10 @@ spec:
           # NEVER set this in beta/prod overlays.
           - name: TEST_HELPERS_ENABLED
             value: "1"
+          # Auto-approve published app versions on minikube so seeded apps land
+          # public immediately. The HTTPS guard in config.py blocks this in prod.
+          - name: TSL_APPS_DEV_AUTO_APPROVE
+            value: "1"
         resources:
           requests:
             memory: "512Mi"

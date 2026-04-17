@@ -8,16 +8,23 @@ app-centric auth model (installer or project editor).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
 import logging
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..auth import get_current_active_user_or_query
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
@@ -30,7 +37,10 @@ from ..models import (
     User,
 )
 from ..permissions import Permission, get_effective_project_role, has_permission
-from ..services.apps.runtime_urls import container_url
+from ..services.apps.runtime_urls import (
+    app_container_url,
+    container_url,
+)
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -90,6 +100,11 @@ def _rollup_state(containers: list[Container]) -> str:
     if not containers:
         return "stopped"
     statuses = [c.status or "stopped" for c in containers]
+    # Headless / job-only apps: every container is invoked as a scheduled K8s
+    # Job, never as a long-running Deployment. Surface this as its own state
+    # so the UI can hide the iframe and direct users to the Schedules tab.
+    if statuses and all(s == "job_only" for s in statuses):
+        return "job_only"
     if any(s == "failed" for s in statuses):
         return "error"
     if any(s in {"starting", "creating"} for s in statuses):
@@ -103,6 +118,9 @@ def _build_runtime_payload(
     project: Project,
     containers: list[Container],
     primary_container_id: UUID | None,
+    *,
+    app_handle: str | None = None,
+    creator_handle: str | None = None,
 ) -> RuntimeStatus:
     settings = get_settings()
     protocol = settings.k8s_container_url_protocol
@@ -118,17 +136,33 @@ def _build_runtime_payload(
     if primary is None and containers:
         primary = next((c for c in containers if c.is_primary), None) or containers[0]
 
+    # When both handles are present, all container URLs use the
+    # creator-branded shape. Single-container apps collapse to
+    # ``{app}-{creator}.{domain}``.
+    only_primary = len(containers) <= 1
+    use_app_url = bool(app_handle and creator_handle)
+
     for c in containers:
         # Use directory when present (matches ingress creation in
         # compute_manager), falling back to sanitized name for service
         # containers that historically lacked a directory.
         dir_or_name = c.directory or c.name
-        url = container_url(
-            project_slug=project.slug,
-            container_dir_or_name=dir_or_name,
-            app_domain=domain,
-            protocol=protocol,
-        )
+        if use_app_url:
+            url = app_container_url(
+                app_handle=app_handle,
+                creator_handle=creator_handle,
+                container_dir=(dir_or_name or "app").lower(),
+                app_domain=domain,
+                protocol=protocol,
+                only_primary=only_primary and (primary is not None and c.id == primary.id),
+            )
+        else:
+            url = container_url(
+                project_slug=project.slug,
+                container_dir_or_name=dir_or_name,
+                app_domain=domain,
+                protocol=protocol,
+            )
         items.append(
             ContainerRuntime(id=c.id, name=c.name, status=c.status or "stopped", url=url)
         )
@@ -142,6 +176,28 @@ def _build_runtime_payload(
         project_slug=project.slug,
         containers=items,
     )
+
+
+async def _load_app_handles(
+    db: AsyncSession, inst: AppInstance
+) -> tuple[str | None, str | None]:
+    """Return ``(app_handle, creator_handle)`` for an AppInstance.
+
+    Either may be None if the row hasn't been backfilled; the caller
+    falls back to the legacy slug-based URL shape.
+    """
+    from ..models import MarketplaceApp
+
+    app_row = await db.get(MarketplaceApp, inst.app_id)
+    if app_row is None:
+        return None, None
+    app_handle = getattr(app_row, "handle", None)
+    creator_handle: str | None = None
+    if app_row.creator_user_id is not None:
+        creator = await db.get(User, app_row.creator_user_id)
+        if creator is not None:
+            creator_handle = getattr(creator, "handle", None)
+    return app_handle, creator_handle
 
 
 async def _load_project_graph(
@@ -185,7 +241,78 @@ async def get_runtime(
     inst = await _load_instance(db, instance_id)
     project = await _authorize(db, inst, user)
     containers, _ = await _load_project_graph(db, project.id)
-    return _build_runtime_payload(project, containers, inst.primary_container_id)
+    _app_h, _creator_h = await _load_app_handles(db, inst)
+    return _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h)
+
+
+@router.get("/{instance_id}/events")
+async def runtime_events(
+    instance_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_active_user_or_query),
+) -> StreamingResponse:
+    """SSE stream of app-runtime lifecycle events for an AppInstance.
+
+    Emits an initial snapshot identical to ``GET /runtime``, then tails the
+    Redis stream populated by ``compute_manager`` pod-lifecycle hooks. A
+    heartbeat comment is sent every 15s to keep proxies from idling out.
+    """
+    inst = await _load_instance(db, instance_id)
+    project = await _authorize(db, inst, user)
+    containers, _ = await _load_project_graph(db, project.id)
+    _app_h, _creator_h = await _load_app_handles(db, inst)
+    snapshot = _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h)
+
+    async def event_stream():
+        from ..services.pubsub import subscribe_app_runtime_events
+
+        # 1. Initial snapshot (so the client can paint immediately).
+        yield f"data: {snapshot.model_dump_json()}\n\n"
+
+        # 2. Tail the Redis stream + heartbeat in parallel.
+        sub = subscribe_app_runtime_events(instance_id, last_id="$")
+        sub_iter = sub.__aiter__()
+
+        next_event_task: asyncio.Task | None = None
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                if next_event_task is None:
+                    next_event_task = asyncio.create_task(sub_iter.__anext__())
+                done, _pending = await asyncio.wait(
+                    {next_event_task}, timeout=15.0
+                )
+                if not done:
+                    # Heartbeat (SSE comment line).
+                    yield ": heartbeat\n\n"
+                    continue
+                try:
+                    _entry_id, event = next_event_task.result()
+                except StopAsyncIteration:
+                    return
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("app_runtime SSE subscriber ended: %s", e)
+                    return
+                finally:
+                    next_event_task = None
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            if next_event_task is not None and not next_event_task.done():
+                next_event_task.cancel()
+            # Best-effort close of the async generator.
+            with contextlib.suppress(Exception):
+                await sub.aclose()
+
+    headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",  # Disable nginx response buffering for SSE.
+    }
+    return StreamingResponse(
+        event_stream(), media_type="text/event-stream", headers=headers
+    )
 
 
 @router.post("/{instance_id}/start", status_code=status.HTTP_202_ACCEPTED)
@@ -205,15 +332,76 @@ async def start_runtime(
         )
 
     # Short-circuit: if already all-running, skip the orchestrator call.
-    current = _build_runtime_payload(project, containers, inst.primary_container_id)
+    _app_h, _creator_h = await _load_app_handles(db, inst)
+    current = _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h)
     if current.state in {"running", "starting"}:
         return current.model_dump(mode="json")
+    # Headless / job-only apps have no Deployments to start — schedules drive
+    # everything. Return 200 with the current rollup so the UI knows to render
+    # the headless surface instead of polling for "running".
+    if current.state == "job_only":
+        return current.model_dump(mode="json")
 
+    # Per-user soft cap on concurrently running apps. Paused apps
+    # (environment_status != "active") do NOT count. Enforced before the
+    # per-project lock so tenant A's cap exhaustion cannot stall tenant B.
+    settings = get_settings()
+    running_cap = settings.tsl_max_running_apps_per_user
+    if running_cap > 0:
+        count_stmt = (
+            select(func.count(AppInstance.id))
+            .join(Project, Project.id == AppInstance.project_id)
+            .where(
+                AppInstance.installer_user_id == user.id,
+                AppInstance.state == "installed",
+                Project.environment_status == "active",
+                AppInstance.id != inst.id,
+            )
+        )
+        running_now = (await db.execute(count_stmt)).scalar_one()
+        if running_now >= running_cap:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "max_running_apps_reached",
+                    "limit": running_cap,
+                    "running": running_now,
+                    "message": (
+                        f"You have {running_now} apps running. Stop one before "
+                        f"starting another (limit: {running_cap})."
+                    ),
+                },
+            )
+
+    from ..services.compute_manager import current_app_instance_id
     from ..services.orchestration import get_orchestrator
 
     orchestrator = get_orchestrator()
+    # Bind app_instance_id for downstream compute_manager so pod-lifecycle
+    # transitions are fanned out to the SSE stream for this AppInstance.
+    token = current_app_instance_id.set(inst.id)
     try:
         await orchestrator.start_project(project, containers, connections, user.id, db)
+    except RuntimeError as e:
+        # Concurrent /start — another request holds the env lock and is already
+        # bringing the environment up. Return the current rollup idempotently.
+        if "is held by another operation" in str(e):
+            logger.info(
+                "app_runtime_status: start_project already in-flight for instance=%s; returning current state",
+                inst.id,
+            )
+            containers, _ = await _load_project_graph(db, project.id)
+            _app_h, _creator_h = await _load_app_handles(db, inst)
+            return _build_runtime_payload(
+                project, containers, inst.primary_container_id,
+                app_handle=_app_h, creator_handle=_creator_h,
+            ).model_dump(mode="json")
+        logger.exception(
+            "app_runtime_status: start_project failed for instance=%s project=%s",
+            inst.id,
+            project.id,
+        )
+        raise HTTPException(status_code=500, detail=f"failed to start app: {e}") from e
     except Exception as e:
         logger.exception(
             "app_runtime_status: start_project failed for instance=%s project=%s",
@@ -221,15 +409,18 @@ async def start_runtime(
             project.id,
         )
         raise HTTPException(status_code=500, detail=f"failed to start app: {e}") from e
+    finally:
+        current_app_instance_id.reset(token)
 
     # Reload container statuses post-start.
     containers, _ = await _load_project_graph(db, project.id)
-    return _build_runtime_payload(project, containers, inst.primary_container_id).model_dump(
+    _app_h, _creator_h = await _load_app_handles(db, inst)
+    return _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h).model_dump(
         mode="json"
     )
 
 
-# --- Schedules (Thread D) ---------------------------------------------------
+# --- Schedules -------------------------------------------------------------
 
 
 class ScheduleRow(BaseModel):
@@ -326,9 +517,6 @@ async def trigger_schedule_manually(
 
     Authenticated UI call; the HMAC check lives on the public webhook path.
     """
-    import uuid as _uuid
-    from datetime import datetime as _dt, timezone as _tz
-
     inst = await _load_instance(db, instance_id)
     await _authorize(db, inst, user)
     sched = (
@@ -343,10 +531,10 @@ async def trigger_schedule_manually(
         raise HTTPException(status_code=404, detail="schedule not found")
 
     event = ScheduleTriggerEvent(
-        id=_uuid.uuid4(),
+        id=uuid.uuid4(),
         schedule_id=sched.id,
         payload=payload or {},
-        received_at=_dt.now(tz=_tz.utc),
+        received_at=datetime.now(tz=timezone.utc),
     )
     db.add(event)
     await db.commit()
@@ -366,6 +554,14 @@ async def stop_runtime(
     inst = await _load_instance(db, instance_id)
     project = await _authorize(db, inst, user)
 
+    # job-only apps have no Deployments to stop — return current rollup as 200.
+    containers, _ = await _load_project_graph(db, project.id)
+    _app_h, _creator_h = await _load_app_handles(db, inst)
+    current = _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h)
+    if current.state == "job_only":
+        return current.model_dump(mode="json")
+
+    from ..services.compute_manager import _emit_app_runtime
     from ..services.orchestration import get_orchestrator
 
     orchestrator = get_orchestrator()
@@ -379,7 +575,20 @@ async def stop_runtime(
         )
         raise HTTPException(status_code=500, detail=f"failed to stop app: {e}") from e
 
+    # Reload post-stop so we see the compute_manager's DB writes
+    # (environment_status=stopped, container.status=stopped), then fan out
+    # a terminal "stopped" event to any live SSE subscribers. Emit at the
+    # router level (not inside compute_manager) so we don't depend on
+    # ContextVar propagation through the orchestrator's fresh session.
+    # expunge_all() clears the identity map so subsequent SELECT queries
+    # return fresh rows (compute_manager wrote via a different session).
+    db.expunge_all()
+    project = await db.get(Project, project.id)
     containers, _ = await _load_project_graph(db, project.id)
-    return _build_runtime_payload(project, containers, inst.primary_container_id).model_dump(
+    _app_h, _creator_h = await _load_app_handles(db, inst)
+    await _emit_app_runtime(
+        inst.id, "stopped", containers=containers, message="Environment stopped"
+    )
+    return _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h).model_dump(
         mode="json"
     )

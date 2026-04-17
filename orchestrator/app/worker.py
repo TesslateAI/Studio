@@ -1162,6 +1162,47 @@ async def process_schedule_triggers_cron(ctx: dict) -> dict:
         return {"processed": 0, "failed": 0, "skipped": 0, "error": True}
 
 
+async def reap_orphaned_install_attempts_cron(ctx: dict) -> dict:
+    """Wave 9 A2 cron: free Hub volumes orphaned by crashed installs.
+
+    Cheap when idle (single indexed scan on ``app_install_attempts`` where
+    ``state='hub_created'``). 60s cadence; grace window 15 min before an
+    attempt is eligible for reaping.
+    """
+    from .config import get_settings
+    from .services.apps.install_reaper import reap_orphaned_install_attempts
+    from .services.hub_client import HubClient
+
+    hub = HubClient(get_settings().volume_hub_address)
+    try:
+        return await reap_orphaned_install_attempts(hub)
+    except Exception:
+        logger.exception("reap_orphaned_install_attempts_cron failed")
+        return {"scanned": 0, "reaped": 0, "failed": 0, "error": True}
+    finally:
+        close = getattr(hub, "close", None)
+        if callable(close):
+            try:
+                await close()
+            except Exception:
+                pass
+
+
+async def db_event_dispatcher_cron(ctx: dict) -> dict:
+    """Wave 9 D1 cron: drain tesslate:db_events:* streams into ScheduleTriggerEvent.
+
+    No-op while no AgentSchedule has trigger_kind='db_event'. Wave 10 lights
+    consumers up; the rails ship now so schema/topology are stable.
+    """
+    from .services.apps.db_event_dispatcher import db_event_dispatcher
+
+    try:
+        return await db_event_dispatcher(ctx)
+    except Exception:
+        logger.exception("db_event_dispatcher_cron failed")
+        return {"streams": 0, "events": 0, "inserted": 0, "error": True}
+
+
 async def startup(ctx: dict):
     """Worker startup hook — initialize logging."""
     logging.basicConfig(
@@ -1278,6 +1319,31 @@ def _build_cron_jobs():
         )
     )
 
+    # Tesslate Apps (Wave 9 A2): orphaned install-attempt reaper. 60s cadence.
+    # Grace window is 15 min inside the reaper; keep cron cheap and frequent.
+    jobs.append(
+        cron(
+            reap_orphaned_install_attempts_cron,
+            minute=set(range(0, 60)),
+            timeout=120,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
+    # Tesslate Apps (Wave 9 D1): DB-event stream drain → ScheduleTriggerEvent.
+    # 5-second cadence — DB events should feel near-real-time to Apps. The
+    # cron is cheap when no streams exist (single SCAN, returns immediately).
+    jobs.append(
+        cron(
+            db_event_dispatcher_cron,
+            second=set(range(0, 60, 5)),
+            timeout=60,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
     return jobs
 
 
@@ -1301,6 +1367,8 @@ class WorkerSettings:
         run_stage2_eval_task,
         run_monitoring_sweep_task,
         process_schedule_triggers_cron,
+        db_event_dispatcher_cron,
+        reap_orphaned_install_attempts_cron,
         invoke_app_instance_task,
     ]
     cron_jobs = _build_cron_jobs()

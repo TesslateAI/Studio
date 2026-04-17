@@ -1,6 +1,11 @@
 # Research repos
 research/
 terminal_bench/
+
+# Agent-run trajectories (local debug artifacts, never commit)
+.tesslate/
+orchestrator/.tesslate/
+
 # Python
 __pycache__/
 *.py[cod]

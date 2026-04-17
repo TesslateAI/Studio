@@ -116,7 +116,7 @@ image_dockerfile() {
 
 image_context() {
   case "$1" in
-    backend)   echo "orchestrator" ;;
+    backend)   echo "." ;;
     frontend)  echo "app" ;;
     devserver) echo "." ;;
     btrfs-csi) echo "services/btrfs-csi" ;;

@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 # Kubernetes DNS-1123 name limit
 _K8S_NAME_MAX = 63
 
+# Env vars reserved by the dev container (set explicitly further down) —
+# filter these out of user-supplied extra_env so they can't be overridden.
+_RESERVED_DEV_ENV_KEYS = frozenset({"HOST", "PORT", "NODE_ENV"})
+
 
 def _k8s_name(prefix: str, directory: str) -> str:
     """Build a K8s resource name like 'dev-{directory}', truncated to 63 chars."""
@@ -324,7 +328,7 @@ def create_container_deployment(
 
     # Filter out reserved keys, then resolve ${secret:name/key} references
     # to V1EnvVar(valueFrom=secretKeyRef(...)) — never plaintext in pod spec.
-    _filtered = {k: v for k, v in (extra_env or {}).items() if k not in {"HOST", "PORT", "NODE_ENV"}}
+    _filtered = {k: v for k, v in (extra_env or {}).items() if k not in _RESERVED_DEV_ENV_KEYS}
     env_vars.extend(resolve_env_for_pod(_filtered))
 
     dev_container = client.V1Container(
@@ -472,6 +476,7 @@ def create_ingress_manifest(
     domain: str,
     ingress_class: str = "nginx",
     tls_secret: str = None,
+    hostname: str | None = None,
 ) -> client.V1Ingress:
     """
     Create Ingress manifest for a dev container.
@@ -491,8 +496,11 @@ def create_ingress_manifest(
         V1Ingress manifest
     """
     ingress_name = _k8s_name("dev-", container_directory)
-    # Single subdomain level for wildcard cert compatibility (*.domain)
-    host = f"{project_slug}-{container_directory}.{domain}"
+    # Single subdomain level for wildcard cert compatibility (*.domain).
+    # Caller may supply a precomputed creator-branded hostname for
+    # AppInstance containers; non-app projects fall back to
+    # ``{project_slug}-{container_directory}.{domain}``.
+    host = hostname or f"{project_slug}-{container_directory}.{domain}"
     service_name = _k8s_name("dev-", container_directory)
 
     # Build ingress spec
@@ -1357,7 +1365,7 @@ def create_v2_dev_deployment(
     ]
     # Filter out reserved keys, then resolve ${secret:name/key} references
     # to V1EnvVar(valueFrom=secretKeyRef(...)) — never plaintext in pod spec.
-    _filtered = {k: v for k, v in (extra_env or {}).items() if k not in {"HOST", "PORT", "NODE_ENV"}}
+    _filtered = {k: v for k, v in (extra_env or {}).items() if k not in _RESERVED_DEV_ENV_KEYS}
     env_vars.extend(resolve_env_for_pod(_filtered))
 
     dev_container = client.V1Container(

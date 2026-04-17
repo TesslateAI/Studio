@@ -287,14 +287,23 @@ class DockerOrchestrator(BaseOrchestrator):
             raise
 
     async def stop_project(self, project_slug: str, project_id: UUID, user_id: UUID) -> None:
-        """Stop all containers for a project using Docker Compose."""
+        """Pause a project (HF-Spaces-style sleep).
+
+        Runs ``docker compose stop`` which stops the containers but keeps
+        them and the project network intact. A subsequent ``start_project``
+        (``docker compose up -d``) resumes in seconds without recreating
+        anything. Mirrors K8s scale-to-zero semantics.
+
+        Full teardown (remove containers, network, volumes) lives in
+        ``delete_project_namespace`` and is only called on uninstall.
+        """
         compose_file_path = self._get_compose_file_path(project_slug)
 
         if not os.path.exists(compose_file_path):
             logger.warning(f"[DOCKER] Compose file not found for {project_slug}")
             return
 
-        logger.info(f"[DOCKER] Stopping project {project_slug}...")
+        logger.info(f"[DOCKER] Pausing project {project_slug}...")
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -304,8 +313,7 @@ class DockerOrchestrator(BaseOrchestrator):
                 compose_file_path,
                 "-p",
                 project_slug,
-                "down",
-                "--remove-orphans",
+                "stop",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -317,14 +325,61 @@ class DockerOrchestrator(BaseOrchestrator):
                 logger.error(f"[DOCKER] Failed to stop project: {error_msg}")
                 raise RuntimeError(f"Docker Compose failed: {error_msg}")
 
-            logger.info(f"[DOCKER] Project {project_slug} stopped successfully")
+            logger.info(f"[DOCKER] Project {project_slug} paused successfully")
 
-            # Disconnect Traefik from project network
+            # Disconnect Traefik from project network — safe even with
+            # `compose stop` since we re-attach on the next start_project.
             await self._disconnect_traefik_from_network(project_slug)
 
         except Exception as e:
             logger.error(f"[DOCKER] Error stopping project: {e}", exc_info=True)
             raise
+
+    async def delete_project_namespace(self, project_id: UUID, user_id: UUID) -> None:
+        """Docker analogue of the K8s namespace delete: full teardown.
+
+        Called on uninstall. Runs ``docker compose down`` (removes
+        containers + network) and deletes the project directory. No-op if
+        the project slug can't be resolved (caller handles via best-effort
+        try/except).
+        """
+        _ = user_id  # interface parity with K8s orchestrator
+        project_slug = await self._get_project_slug(project_id)
+        if project_slug is None:
+            logger.warning(
+                "[DOCKER] delete_project_namespace: no slug for project %s", project_id
+            )
+            return
+
+        compose_file_path = self._get_compose_file_path(project_slug)
+        if os.path.exists(compose_file_path):
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    "docker",
+                    "compose",
+                    "-f",
+                    compose_file_path,
+                    "-p",
+                    project_slug,
+                    "down",
+                    "--remove-orphans",
+                    "--volumes",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await process.communicate()
+            except Exception:
+                logger.exception(
+                    "[DOCKER] compose down failed for %s (continuing)", project_slug
+                )
+
+        try:
+            await self.delete_project_directory(project_slug)
+        except Exception:
+            logger.exception(
+                "[DOCKER] delete_project_directory failed for %s (continuing)",
+                project_slug,
+            )
 
     async def restart_project(
         self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession

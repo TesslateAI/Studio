@@ -13,7 +13,7 @@ RUN go mod download
 COPY services/tsinit/ .
 RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o /tsinit .
 
-FROM node:22-alpine
+FROM node:24-alpine
 
 # Install system dependencies for Node.js, Python, and Go development
 # zip/unzip needed for project archiving (S3 ops handled securely by backend)

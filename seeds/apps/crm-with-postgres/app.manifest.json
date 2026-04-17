@@ -1,0 +1,88 @@
+{
+  "manifest_schema_version": "2025-02",
+  "app": {
+    "id": "com.tesslate.crm-with-postgres",
+    "slug": "crm-with-postgres",
+    "name": "Tesslate CRM with Postgres",
+    "version": "0.1.0",
+    "description": "Matrix demo app exercising the full platform container toolbox: Next.js web surface + Node API + Postgres service container with a CSI-backed volume, secrets, and env_injection wiring.",
+    "category": "productivity",
+    "forkable": "true"
+  },
+  "compatibility": {
+    "studio": {"min": "0.0.0"},
+    "manifest_schema": "2025-02",
+    "runtime_api": "^1.0",
+    "required_features": []
+  },
+  "compute": {
+    "tier": 1,
+    "model": "always-on",
+    "compute_model": "per-installer",
+    "containers": [
+      {
+        "name": "web",
+        "primary": true,
+        "kind": "base",
+        "image": "tesslate-devserver:latest",
+        "ports": [3000],
+        "directory": "/app/web",
+        "startup_command": "sh -c 'cd /app/web && (test -d node_modules || npm install) && npm run dev'",
+        "env": {
+          "NODE_ENV": "development",
+          "API_URL": "http://dev-api.${NAMESPACE}.svc.cluster.local:3001"
+        }
+      },
+      {
+        "name": "api",
+        "kind": "base",
+        "image": "tesslate-devserver:latest",
+        "ports": [3001],
+        "directory": "/app/api",
+        "startup_command": "sh -c 'cd /app/api && (test -d node_modules || npm install) && node server.js'",
+        "env": {
+          "PORT": "3001"
+        }
+      },
+      {
+        "name": "db",
+        "kind": "service",
+        "image": "postgres:16-alpine",
+        "ports": [5432],
+        "directory": "/app/db",
+        "volumes": ["/var/lib/postgresql/data"],
+        "env": {
+          "POSTGRES_USER": "crm",
+          "POSTGRES_PASSWORD": "${secret:pg-creds/password}",
+          "POSTGRES_DB": "crm"
+        }
+      }
+    ],
+    "connections": [
+      {
+        "source_container": "db",
+        "target_container": "api",
+        "connector_type": "env_injection",
+        "config": {
+          "env_mapping": {
+            "DATABASE_URL": "postgresql://crm:${secret:pg-creds/password}@dev-db.${NAMESPACE}.svc.cluster.local:5432/crm"
+          }
+        }
+      }
+    ]
+  },
+  "surfaces": [
+    {"kind": "ui", "entrypoint": "/"}
+  ],
+  "state": {
+    "model": "per-install-volume",
+    "volume_size": "2Gi"
+  },
+  "schedules": [],
+  "billing": {
+    "ai_compute": {"payer": "installer", "markup_pct": 0},
+    "general_compute": {"payer": "platform"},
+    "platform_fee": {"model": "free"}
+  },
+  "listing": {"visibility": "public"}
+}

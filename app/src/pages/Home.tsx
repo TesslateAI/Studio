@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FolderPlus, GitBranch, Storefront, Folder, FolderOpen, ArrowRight } from '@phosphor-icons/react';
+import { FolderPlus, GitBranch, SquaresFour, Folder, FolderOpen, ArrowRight } from '@phosphor-icons/react';
 import { TesslateLogo } from '../components/ui/TesslateLogo';
 import { MoodyFace } from '../components/ui/MoodyFace';
 import { CreateProjectModal, RepoImportModal } from '../components/modals';
@@ -425,7 +425,7 @@ export default function Home() {
         <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
           <ActionCard
             icon={<FolderPlus size={20} weight="duotone" />}
-            title="New Project"
+            title="New Workspace"
             tooltip="Create a fresh workspace — name it, pick a template, and start building."
             onClick={() => setShowCreateDialog(true)}
           />
@@ -436,17 +436,16 @@ export default function Home() {
             onClick={() => setShowImportDialog(true)}
           />
           <ActionCard
-            icon={<Storefront size={20} weight="duotone" />}
+            icon={<SquaresFour size={20} weight="duotone" />}
             title="Apps"
-            tooltip="Coming soon — prebuilt apps you can install into a workspace."
-            disabled
-            badge="Soon"
+            tooltip="Install and launch prebuilt apps into your workspace."
+            onClick={() => navigate('/apps/installed')}
           />
           <ActionCard
             icon={<MoodyFace size={20} animate trackPointer />}
             title="Agents"
-            tooltip="Browse marketplace agents to automate workflows in your projects."
-            onClick={() => navigate('/marketplace/browse/agent')}
+            tooltip="Chat with agents to automate workflows in your projects."
+            onClick={() => navigate('/chat')}
           />
           <ConnectorsCard onClick={() => navigate('/marketplace/browse/mcp_server')} />
         </div>
@@ -461,7 +460,7 @@ export default function Home() {
               id="recent-projects-heading"
               className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"
             >
-              Recent Projects
+              Recent Workspaces
             </h2>
             {recent.length > 0 && (
               <button
@@ -488,7 +487,7 @@ export default function Home() {
               <FolderOpen size={24} className="text-[var(--text-subtle)]" />
               <p className="text-sm text-[var(--text-muted)]">No workspaces yet</p>
               <p className="text-xs text-[var(--text-subtle)]">
-                Click <span className="text-[var(--text-muted)]">New Project</span> above to create your first one.
+                Click <span className="text-[var(--text-muted)]">New Workspace</span> above to create your first one.
               </p>
             </div>
           ) : (

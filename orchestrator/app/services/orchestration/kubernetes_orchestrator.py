@@ -794,6 +794,20 @@ fi
         from ..compute_manager import get_compute_manager, resolve_k8s_container_dir
 
         container_dir = resolve_k8s_container_dir(container)
+        # job-only containers never become Deployments — they're invoked as
+        # K8s Jobs by schedules. Return a benign status so callers don't bail.
+        if getattr(container, "status", None) == "job_only":
+            logger.info(
+                "[K8S] start_container: container %s is job-only — skipping Deployment creation",
+                container.name,
+            )
+            return {
+                "status": "job_only",
+                "container_name": container.name,
+                "container_directory": container_dir,
+                "url": None,
+                "namespace": f"proj-{project.id}",
+            }
         urls = await get_compute_manager().start_environment(
             project, all_containers, connections, user_id, db
         )
@@ -962,11 +976,16 @@ fi
     async def start_project(
         self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession
     ) -> dict[str, Any]:
-        """Start all containers for a project via ComputeManager."""
+        """Start all containers for a project via ComputeManager.
+
+        job-only containers (apps with compute.model="job-only") are skipped:
+        they only ever run as schedule-invoked K8s Jobs, never as Deployments.
+        """
         from ..compute_manager import get_compute_manager
 
+        runtime_containers = [c for c in containers if (getattr(c, "status", None) != "job_only")]
         urls = await get_compute_manager().start_environment(
-            project, containers, connections, user_id, db
+            project, runtime_containers, connections, user_id, db
         )
         return {
             "status": "running",
@@ -990,37 +1009,53 @@ fi
 
     async def delete_project_namespace(self, project_id: UUID, user_id: UUID) -> None:
         """
-        Delete the entire Kubernetes namespace for a project.
-
-        This completely removes all resources (pods, services, ingresses, PVCs)
-        and should only be called when permanently deleting a project.
+        Delete the entire Kubernetes namespace for a project, plus its
+        cluster-scoped PVs (``Retain`` policy keeps btrfs subvolumes intact
+        for later restore via CAS). Should only be called when permanently
+        deleting a project — Stop uses scale-to-zero instead.
         """
         _ = user_id  # Retained for interface consistency; unused in K8s mode
 
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
 
-        logger.info(f"[K8S] Deleting namespace {namespace}")
+        logger.info(f"[K8S] Deleting namespace {namespace} + project PVs")
 
         try:
-            # Check if namespace exists
             try:
                 await asyncio.to_thread(self.k8s_client.core_v1.read_namespace, name=namespace)
             except ApiException as e:
-                if e.status == 404:
-                    logger.info(f"[K8S] Namespace {namespace} does not exist, nothing to delete")
-                    return
-                raise
-
-            # Delete the namespace (this cascades to all resources in it)
-            await asyncio.to_thread(self.k8s_client.core_v1.delete_namespace, name=namespace)
-
-            logger.info(f"[K8S] Namespace {namespace} deleted successfully")
-
+                if e.status != 404:
+                    raise
+                logger.info(f"[K8S] Namespace {namespace} does not exist, skipping")
+            else:
+                await asyncio.to_thread(self.k8s_client.core_v1.delete_namespace, name=namespace)
+                logger.info(f"[K8S] Namespace {namespace} deleted")
         except ApiException as e:
             if e.status != 404:
                 logger.error(f"[K8S] Error deleting namespace {namespace}: {e}")
                 raise
+
+        # Drop cluster-scoped PVs for this project. Retain policy → btrfs
+        # subvolumes persist; next install starts with fresh PV names.
+        try:
+            v1 = self.k8s_client.core_v1
+            pv_list = await asyncio.to_thread(
+                v1.list_persistent_volume,
+                label_selector=f"tesslate.io/project-id={project_id}",
+            )
+            for pv in pv_list.items or []:
+                pv_name = pv.metadata.name
+                try:
+                    await asyncio.to_thread(v1.delete_persistent_volume, name=pv_name)
+                    logger.info(f"[K8S] Deleted PV {pv_name}")
+                except ApiException as e:
+                    if e.status != 404:
+                        logger.warning(
+                            f"[K8S] Failed to delete PV {pv_name}: {e.reason}"
+                        )
+        except ApiException as e:
+            logger.warning(f"[K8S] Failed to list PVs for project {project_id}: {e.reason}")
 
     async def restart_project(
         self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession

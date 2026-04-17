@@ -25,9 +25,78 @@ logger = logging.getLogger(__name__)
 
 CHANNEL_PREFIX = "tesslate:ws:"
 AGENT_STREAM_PREFIX = "tesslate:agent:stream:"
+APP_RUNTIME_STREAM_PREFIX = "tesslate:app_runtime:"
 PROJECT_LOCK_PREFIX = "tesslate:project:lock:"
 CHAT_LOCK_PREFIX = "tesslate:chat:lock:"
 CANCEL_KEY_PREFIX = "tesslate:agent:cancel:"
+
+
+def APP_RUNTIME_STREAM_KEY(app_instance_id) -> str:  # noqa: N802
+    """Redis Stream key for app-instance runtime events."""
+    return f"{APP_RUNTIME_STREAM_PREFIX}{app_instance_id}"
+
+
+async def publish_app_runtime_event(app_instance_id, payload: dict) -> None:
+    """Publish an app-runtime lifecycle event to its Redis Stream.
+
+    Best-effort: swallows all errors so the pod-lifecycle caller is never
+    blocked by Redis hiccups. Uses XADD with MAXLEN ~ 1000 to cap stream size.
+    """
+    from .cache_service import get_redis_client
+
+    try:
+        redis = await get_redis_client()
+        if not redis:
+            return
+        stream_key = APP_RUNTIME_STREAM_KEY(app_instance_id)
+        await redis.xadd(
+            stream_key,
+            {"data": json.dumps(payload)},
+            maxlen=1000,
+            approximate=True,
+        )
+        # Auto-expire after terminal state to avoid leaking keys
+        if payload.get("state") in ("running", "error", "stopped"):
+            with contextlib.suppress(Exception):
+                await redis.expire(stream_key, 3600)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"publish_app_runtime_event ignored error: {e}")
+
+
+async def subscribe_app_runtime_events(app_instance_id, *, last_id: str = "$"):
+    """Subscribe to app-runtime events for an app instance.
+
+    Yields ``(event_id, payload_dict)`` tuples. Defaults to ``$`` (only new
+    events from subscribe time forward); pass ``"0"`` to replay history.
+    """
+    from .cache_service import get_redis_client
+
+    redis = await get_redis_client()
+    if not redis:
+        return
+
+    stream_key = APP_RUNTIME_STREAM_KEY(app_instance_id)
+    cur = last_id
+    try:
+        while True:
+            results = await redis.xread({stream_key: cur}, block=1000, count=100)
+            if not results:
+                await asyncio.sleep(0.01)
+                continue
+            for _stream, entries in results:
+                for entry_id, fields in entries:
+                    cur = entry_id
+                    try:
+                        event = json.loads(fields.get("data") or fields.get(b"data"))
+                        yield entry_id, event
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        logger.warning(
+                            f"Invalid data in app_runtime stream entry: {entry_id}"
+                        )
+    except asyncio.CancelledError:
+        logger.debug(f"App runtime subscription cancelled: {stream_key}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"App runtime subscription error: {e}")
 
 # Lua script: extend lock only if we hold it
 _EXTEND_LOCK_SCRIPT = """

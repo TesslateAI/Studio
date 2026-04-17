@@ -31,11 +31,11 @@ _UNRUNNABLE_APP_STATES = frozenset({"yanked", "deprecated"})
 _RUNNABLE_INSTANCE_STATE = "installed"
 
 
-class RuntimeError_(Exception):
+class AppRuntimeError(Exception):
     """Base class for runtime service errors."""
 
 
-class AppNotRunnableError(RuntimeError_):
+class AppNotRunnableError(AppRuntimeError):
     """Raised when an AppInstance cannot be started (wrong state, yanked, missing)."""
 
 

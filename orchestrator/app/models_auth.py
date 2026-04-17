@@ -47,6 +47,13 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
         String, unique=True, index=True, nullable=False
     )  # URL-safe identifier
 
+    # Creator-branded handle used in app runtime URLs
+    # (``{container}-{app_handle}-{user_handle}.{app_domain}``). Nullable
+    # until backfilled; unique once populated.
+    handle: Mapped[str | None] = mapped_column(
+        String(32), unique=True, index=True, nullable=True
+    )
+
     # Subscription & billing
     subscription_tier: Mapped[str] = mapped_column(
         String, default="free"

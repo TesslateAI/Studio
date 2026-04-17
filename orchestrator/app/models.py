@@ -257,6 +257,14 @@ class Container(Base):
     dockerfile_path = Column(String, nullable=True)  # Relative path to Dockerfile
     volume_name = Column(String, nullable=True)  # Docker volume name for container files
 
+    # Explicit container image override (set by Apps installer from manifest
+    # compute.containers[].image, or by creators who pick a specific base image
+    # for a service container). When NULL, the deployment falls back to
+    # settings.k8s_devserver_image for dev containers, or to the service
+    # catalog image for container_type="service". Added in migration 0060 to
+    # replace the TSL_CONTAINER_IMAGE env-var smuggling hack.
+    image = Column(String, nullable=True)
+
     # Container type: 'base' (user app from marketplace base) or 'service' (infra service like postgres)
     container_type = Column(String, default="base", nullable=False)
     service_slug = Column(
@@ -1729,6 +1737,10 @@ class MarketplaceApp(Base):
         nullable=False,
     )
 
+    # Creator-branded handle; (creator_user_id, handle) is unique so one
+    # creator cannot publish two apps with the same handle.
+    handle = Column(String(48), nullable=True)
+
     creator = relationship("User", foreign_keys=[creator_user_id])
     versions = relationship(
         "AppVersion", back_populates="app", cascade="all, delete-orphan"
@@ -1742,6 +1754,12 @@ class MarketplaceApp(Base):
         remote_side="MarketplaceApp.id",
         foreign_keys=[forked_from],
         backref="forks",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "creator_user_id", "handle", name="uq_marketplace_apps_creator_handle"
+        ),
     )
 
 
@@ -1857,6 +1875,57 @@ class AppInstance(Base):
     consents = relationship(
         "McpConsentRecord", back_populates="app_instance", cascade="all, delete-orphan"
     )
+
+
+class AppInstallAttempt(Base):
+    """Append-only ledger for the Apps installer saga.
+
+    The installer mints a row here in an independent session **immediately
+    after** the Hub-side volume is materialized, so every Hub volume has a
+    persistent marker that predates any downstream DB writes. If the rest of
+    the install succeeds the row is flipped to ``state='committed'`` and
+    linked to the resulting ``AppInstance``. If the install crashes (worker
+    SIGKILL, flush fails, commit fails), the row stays at ``state='hub_created'``
+    with no linked instance, and the orphan reaper picks it up, calls
+    ``hub_client.delete_volume``, and marks it ``reaped``.
+    """
+
+    __tablename__ = "app_install_attempts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    marketplace_app_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("marketplace_apps.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    app_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    installer_user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # hub_created | committed | reaped | reap_failed
+    state = Column(
+        String(32), nullable=False, default="hub_created", server_default="hub_created"
+    )
+    volume_id = Column(String, nullable=True)
+    node_name = Column(String, nullable=True)
+    bundle_hash = Column(String, nullable=True)
+    app_instance_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("app_instances.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    committed_at = Column(DateTime(timezone=True), nullable=True)
+    reaped_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
 
 
 class McpConsentRecord(Base):
@@ -2856,9 +2925,9 @@ class AgentSchedule(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    # Wave 7: trigger kind + config. Default 'cron' keeps existing schedules
-    # behaviourally identical. Non-cron kinds are fired via
-    # ``schedule_trigger_events`` by the process_schedule_triggers worker.
+    # Trigger kind + config. Default 'cron' keeps legacy schedules identical.
+    # Non-cron kinds are fired via ``schedule_trigger_events`` by the
+    # process_schedule_triggers worker.
     trigger_kind = Column(
         String(16), nullable=False, default="cron", server_default="cron"
     )  # cron | webhook | mcp_event | app_invocation

@@ -1,0 +1,48 @@
+{
+  "manifest_schema_version": "2025-02",
+  "app": {
+    "id": "com.666ghj.mirofish",
+    "slug": "mirofish",
+    "name": "MiroFish",
+    "version": "0.1.0",
+    "description": "Swarm-intelligence multi-agent prediction engine. Uploads a seed report or novel, runs thousands of persona-driven agents in a simulated world, and returns a prediction report. Requires an OpenAI-compatible LLM API key.",
+    "category": "research",
+    "forkable": "restricted"
+  },
+  "compatibility": {
+    "studio": {"min": "0.0.0"},
+    "manifest_schema": "2025-02",
+    "runtime_api": "^1.0",
+    "required_features": []
+  },
+  "compute": {
+    "tier": 2,
+    "model": "always-on",
+    "compute_model": "per-installer",
+    "containers": [
+      {
+        "name": "web",
+        "primary": true,
+        "image": "ghcr.io/666ghj/mirofish:latest",
+        "ports": [3000, 5001],
+        "startup_command": "npm run dev",
+        "env": {
+          "LLM_API_KEY": "${secret:llama-api-credentials/api_key}",
+          "LLM_BASE_URL": "https://api.llama.com/compat/v1/",
+          "LLM_MODEL_NAME": "Llama-4-Maverick-17B-128E-Instruct-FP8"
+        }
+      }
+    ],
+    "connections": []
+  },
+  "surfaces": [
+    {"kind": "ui", "entrypoint": "/"}
+  ],
+  "state": {"model": "per-install-volume", "volume_size": "2Gi"},
+  "billing": {
+    "ai_compute": {"payer": "installer", "markup_pct": 0},
+    "general_compute": {"payer": "installer"},
+    "platform_fee": {"model": "free"}
+  },
+  "listing": {"visibility": "public"}
+}

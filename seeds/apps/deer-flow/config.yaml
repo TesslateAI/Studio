@@ -1,0 +1,19 @@
+# DeerFlow bootstrap config — references $LLM_API_KEY / $LLM_BASE_URL so the
+# same container can target any OpenAI-compatible endpoint (Meta Llama,
+# OpenAI, OpenRouter, Qwen/Bailian, etc.) purely via env.
+
+models:
+  - name: primary
+    display_name: Tesslate LLM
+    use: langchain_openai:ChatOpenAI
+    model: ${LLM_MODEL:-Llama-4-Maverick-17B-128E-Instruct-FP8}
+    api_key: ${LLM_API_KEY}
+    base_url: ${LLM_BASE_URL:-https://api.llama.com/compat/v1/}
+
+default_model: primary
+
+web_search:
+  provider: none
+
+sandbox:
+  mode: disabled

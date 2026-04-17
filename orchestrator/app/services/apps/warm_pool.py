@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,9 +65,9 @@ async def _load_manifest_hosted_agents(
 async def _count_unclaimed(
     db: AsyncSession, app_instance_id: UUID, agent_id: str
 ) -> int:
-    rows = (
+    return (
         await db.execute(
-            select(LiteLLMKeyLedger.key_id).where(
+            select(func.count()).select_from(LiteLLMKeyLedger).where(
                 and_(
                     LiteLLMKeyLedger.state == KeyState.ACTIVE.value,
                     LiteLLMKeyLedger.app_instance_id == app_instance_id,
@@ -75,8 +75,7 @@ async def _count_unclaimed(
                 )
             )
         )
-    ).scalars().all()
-    return len(rows)
+    ).scalar_one()
 
 
 async def _mint_one_warm(

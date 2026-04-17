@@ -1,4 +1,5 @@
-# Main application
+# Main application. Built with build context = repo root so the Apps-primitive
+# seed trees at /seeds/apps/<slug>/ are copied into the image.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -22,13 +23,18 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y docker-ce-cli \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
-COPY app ./app
+COPY orchestrator/pyproject.toml ./
+COPY orchestrator/app ./app
 
 RUN pip install --no-cache-dir -e .
 
-# Copy rest of application
-COPY . .
+# Orchestrator source (scripts, alembic, etc.).
+COPY orchestrator/ ./
+
+# Seed trees (Apps primitive). Lives outside orchestrator/ so large Next.js
+# fixtures don't pollute every backend diff. Resolved by seed_*.py at
+# /app/seeds/apps/<slug>/.
+COPY seeds ./seeds
 
 EXPOSE 8000
 

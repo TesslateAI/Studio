@@ -54,6 +54,15 @@ rules:
     - statefulsets
   verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
+# Scale subresource — required for HF-Spaces-style Stop/Start that scales
+# project Deployments to 0/1 replicas instead of deleting the namespace.
+- apiGroups: ["apps"]
+  resources:
+    - deployments/scale
+    - statefulsets/scale
+    - replicasets/scale
+  verbs: ["get", "patch", "update"]
+
 # Networking (ingresses, networkpolicies)
 - apiGroups: ["networking.k8s.io"]
   resources:

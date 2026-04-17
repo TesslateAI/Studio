@@ -3826,6 +3826,43 @@ export interface UninstallResult {
   uninstalled_at: string;
 }
 
+export interface AppContainerConnectionRow {
+  source: string;
+  target: string;
+  connector_type: string | null;
+}
+
+export interface AppContainerRow {
+  id: string;
+  name: string;
+  directory: string | null;
+  image: string | null;
+  container_type: string;
+  kind: 'base' | 'service' | string;
+  port: number | null;
+  status: string;
+  is_primary: boolean;
+  connections: AppContainerConnectionRow[];
+}
+
+export interface AppScheduleDetailRow {
+  id: string;
+  name: string;
+  trigger_kind: string;
+  cron_expression: string | null;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  is_active: boolean;
+}
+
+export interface AppInstanceDetail extends AppInstance {
+  project_slug: string | null;
+  primary_container_id: string | null;
+  compute_model: 'always-on' | 'job-only' | string | null;
+  containers: AppContainerRow[];
+  schedules: AppScheduleDetailRow[];
+}
+
 export const appInstallsApi = {
   async install(body: InstallRequest): Promise<InstallResult> {
     const response = await api.post('/api/app-installs/install', body);
@@ -3835,6 +3872,10 @@ export const appInstallsApi = {
     params: { limit?: number; offset?: number } = {}
   ): Promise<Paginated<AppInstance>> {
     const response = await api.get('/api/app-installs/mine', { params });
+    return response.data;
+  },
+  async getDetail(appInstanceId: string): Promise<AppInstanceDetail> {
+    const response = await api.get(`/api/app-installs/${appInstanceId}`);
     return response.data;
   },
   async uninstall(appInstanceId: string): Promise<UninstallResult> {

@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ... import config_features
 from ...models import (
     AgentSchedule,
+    AppInstallAttempt,
     AppInstance,
     AppVersion,
     Container,
@@ -232,6 +233,22 @@ async def install_app(
         bundle_hash=av.bundle_hash,
     )
 
+    # 5a) Saga ledger: record the Hub-side volume in an INDEPENDENT session
+    # and commit immediately, so every volume has a persistent marker that
+    # predates any downstream DB writes. If the rest of this function
+    # crashes (worker SIGKILL, flush fails, caller's commit fails), the
+    # orphan reaper (see install_reaper.py) picks up this row and frees the
+    # volume. The ``attempt_id`` is linked to the resulting AppInstance at
+    # step 9 below via a second independent commit.
+    attempt_id = await _record_install_attempt(
+        marketplace_app_id=app_row.id,
+        app_version_id=av.id,
+        installer_user_id=installer_user_id,
+        volume_id=volume_id,
+        node_name=node_name,
+        bundle_hash=av.bundle_hash,
+    )
+
     # 6) Create the app_instance Project.
     factory = project_factory or _default_project_factory
     project = await factory(
@@ -251,6 +268,14 @@ async def install_app(
     # 7) Materialize Containers + Connections from manifest.compute.
     compute = manifest_json.get("compute") or {}
     container_specs = list(compute.get("containers") or [])
+    compute_model = str(compute.get("model") or "always-on")
+    if compute_model == "job-only":
+        logger.info(
+            "install_app: app=%s version=%s is job-only — containers will be marked status=job_only",
+            app_row.id,
+            av.id,
+        )
+    initial_status = "job_only" if compute_model == "job-only" else "stopped"
     containers_by_name: dict[str, Container] = {}
     primary_container: Container | None = None
 
@@ -273,12 +298,6 @@ async def install_app(
         is_primary = bool(entry.get("primary", False))
 
         env_in = dict(entry.get("env") or {})
-        # Container has no ``image`` column (user projects use
-        # settings.k8s_devserver_image). Surface the manifest-declared image
-        # via a reserved env key so future pod-spec builders can honor it
-        # without a schema change; resolve_env_for_pod drops/ignores this.
-        if image:
-            env_in.setdefault("TSL_CONTAINER_IMAGE", str(image))
 
         c = Container(
             project_id=project.id,
@@ -289,7 +308,8 @@ async def install_app(
             internal_port=port,
             startup_command=entry.get("startup_command"),
             environment_vars=env_in,
-            status="stopped",
+            image=str(image),
+            status=initial_status,
             container_type=("service" if entry.get("kind") == "service" else "base"),
             is_primary=is_primary,
         )
@@ -332,10 +352,6 @@ async def install_app(
                 label=conn.get("label"),
             )
         )
-
-    # (Container model has no ``image`` column; the dev image is resolved by
-    # orchestrator/pod-spec builders. We stash the manifest image into
-    # environment_vars as TSL_CONTAINER_IMAGE for downstream resolution.)
 
     # 8) Insert AppInstance + McpConsentRecord rows.
     now = datetime.now(timezone.utc)
@@ -392,9 +408,19 @@ async def install_app(
             "entrypoint": sched.get("entrypoint"),
         }
         if trigger_kind == "webhook":
-            # Generate a URL-safe shared secret. Never regenerated on reinstall
-            # because the Container row is new anyway.
-            trigger_config["webhook_secret"] = _secrets.token_urlsafe(32)
+            # Per-schedule HMAC secrets are stored as a kid-keyed list so they
+            # can be rotated and revoked without losing back-compat for callers
+            # mid-flight. The verifier in routers/app_triggers.py also accepts
+            # the legacy single-key shape ({"webhook_secret": "..."}) for one
+            # release; new installs always emit the list form.
+            trigger_config["webhook_secrets"] = [
+                {
+                    "kid": "v1",
+                    "secret": _secrets.token_urlsafe(32),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "revoked_at": None,
+                }
+            ]
         db.add(
             AgentSchedule(
                 user_id=installer_user_id,
@@ -413,12 +439,22 @@ async def install_app(
     await db.flush()
 
     logger.info(
-        "install_app: app=%s version=%s installer=%s project=%s volume=%s",
+        "install_app: app=%s version=%s installer=%s project=%s volume=%s attempt=%s",
         app_row.id,
         av.id,
         installer_user_id,
         project.id,
         volume_id,
+        attempt_id,
+    )
+
+    # Saga ledger: flip the attempt row to committed in a second independent
+    # session. If this call fails the reaper still converges — it joins on
+    # volume_id / app_instance_id and skips rows that already have a live
+    # AppInstance.
+    await _mark_attempt_committed(
+        attempt_id=attempt_id,
+        app_instance_id=instance.id,
     )
 
     return InstallResult(
@@ -427,3 +463,80 @@ async def install_app(
         volume_id=volume_id,
         node_name=node_name,
     )
+
+
+async def _record_install_attempt(
+    *,
+    marketplace_app_id: UUID,
+    app_version_id: UUID,
+    installer_user_id: UUID,
+    volume_id: str,
+    node_name: str | None,
+    bundle_hash: str | None,
+) -> UUID:
+    """Insert an AppInstallAttempt in an independent session and commit.
+
+    Runs OUTSIDE the caller's transaction so the row survives even if the
+    caller rolls back. Best-effort: if the insert fails, log and return a
+    nil UUID — the install still proceeds (we just lose reaper coverage
+    for this particular attempt). This is a ledger, not a gate.
+    """
+    from ...database import AsyncSessionLocal
+
+    attempt_id = uuid.uuid4()
+    try:
+        async with AsyncSessionLocal() as session:
+            session.add(
+                AppInstallAttempt(
+                    id=attempt_id,
+                    marketplace_app_id=marketplace_app_id,
+                    app_version_id=app_version_id,
+                    installer_user_id=installer_user_id,
+                    state="hub_created",
+                    volume_id=volume_id,
+                    node_name=node_name,
+                    bundle_hash=bundle_hash,
+                )
+            )
+            await session.commit()
+    except Exception:
+        logger.exception(
+            "install_app: failed to record install attempt (volume=%s); "
+            "continuing without reaper coverage for this attempt",
+            volume_id,
+        )
+    return attempt_id
+
+
+async def _mark_attempt_committed(
+    *,
+    attempt_id: UUID,
+    app_instance_id: UUID,
+) -> None:
+    """Flip AppInstallAttempt to state='committed' in an independent session.
+
+    Best-effort: failure here is non-fatal. The reaper's convergence rule
+    (skip attempt whose volume_id matches a live AppInstance.volume_id) still
+    protects the volume.
+    """
+    from ...database import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            row = (
+                await session.execute(
+                    select(AppInstallAttempt).where(AppInstallAttempt.id == attempt_id)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            row.state = "committed"
+            row.app_instance_id = app_instance_id
+            row.committed_at = datetime.now(timezone.utc)
+            await session.commit()
+    except Exception:
+        logger.exception(
+            "install_app: failed to mark install attempt committed "
+            "(attempt_id=%s)",
+            attempt_id,
+        )

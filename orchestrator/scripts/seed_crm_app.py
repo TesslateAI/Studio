@@ -39,7 +39,36 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message
 logger = logging.getLogger("seed_crm")
 
 SLUG = "crm-demo"
-ASSETS_DIR = Path(__file__).parent / "seed_assets" / "crm"
+# Seed assets live at the repo root under seeds/apps/ (moved in Wave 9 to
+# keep the orchestrator service tree free of large Next.js fixtures). When
+# running inside the container, the user can `docker cp seeds /app/seeds`
+# (or `kubectl cp`) before invoking the script. The resolver tries, in order:
+#   1. TESSLATE_SEEDS_DIR env override (absolute path to seeds/apps/<slug>).
+#   2. Repo-root layout: <repo>/seeds/apps/<slug>.
+#   3. Pod-colocated layout: /app/seeds/apps/<slug>.
+_SEEDS_SLUG = "crm"
+
+
+def _resolve_assets_dir() -> Path:
+    import os
+    override = os.environ.get("TESSLATE_SEEDS_DIR")
+    if override:
+        p = Path(override) / _SEEDS_SLUG
+        if p.is_dir():
+            return p
+    candidates = [
+        Path(__file__).resolve().parents[2] / "seeds" / "apps" / _SEEDS_SLUG,
+        Path("/app/seeds/apps") / _SEEDS_SLUG,
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c
+    # Fall back to the first candidate so the error message points at the
+    # canonical repo layout even when seeds/ is missing entirely.
+    return candidates[0]
+
+
+ASSETS_DIR = _resolve_assets_dir()
 MANIFEST_FILENAME = "app.manifest.json"
 
 # File patterns to skip when walking the asset tree.

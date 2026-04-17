@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ... import config_features
 from ...models import AppSubmission, AppVersion, MarketplaceApp, Project
+from ...utils.slug_generator import slugify
 from ..hub_client import HubClient
 from . import compatibility
 from .manifest_parser import ManifestValidationError, parse as parse_manifest
@@ -140,9 +141,16 @@ async def publish_version(
         # First publish — create the hub row.
         app_slug = (manifest.app.slug if manifest else app_dict.get("slug")) or ""
         app_name = (manifest.app.name if manifest else app_dict.get("name")) or ""
+        # Auto-derive handle from slug; (creator_user_id, handle) unique
+        # constraint catches in-creator duplicates via IntegrityError below.
+        from .reserved_handles import is_reserved as _is_reserved_handle
+        derived_handle = slugify(app_slug, max_length=48) if app_slug else ""
+        if _is_reserved_handle(derived_handle):
+            derived_handle = f"{derived_handle[:40]}-app"
         new_app = MarketplaceApp(
             slug=app_slug,
             name=app_name,
+            handle=derived_handle or None,
             creator_user_id=creator_user_id,
             description=(manifest.app.description if manifest else app_dict.get("description")),
             category=(manifest.app.category if manifest else app_dict.get("category")),

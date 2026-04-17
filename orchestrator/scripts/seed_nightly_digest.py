@@ -34,7 +34,27 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message
 logger = logging.getLogger("seed_digest")
 
 SLUG = "nightly-digest"
-ASSETS_DIR = Path(__file__).parent / "seed_assets" / "nightly_digest"
+_SEEDS_SLUG = "nightly_digest"
+
+
+def _resolve_assets_dir() -> Path:
+    import os
+    override = os.environ.get("TESSLATE_SEEDS_DIR")
+    if override:
+        p = Path(override) / _SEEDS_SLUG
+        if p.is_dir():
+            return p
+    candidates = [
+        Path(__file__).resolve().parents[2] / "seeds" / "apps" / _SEEDS_SLUG,
+        Path("/app/seeds/apps") / _SEEDS_SLUG,
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c
+    return candidates[0]
+
+
+ASSETS_DIR = _resolve_assets_dir()
 MANIFEST_FILENAME = "app.manifest.json"
 
 SKIP_DIR_NAMES = {"node_modules", ".git", "dist", "__pycache__"}

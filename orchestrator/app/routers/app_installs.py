@@ -14,7 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..database import get_db
-from ..models import AppInstance, AppVersion, MarketplaceApp, User
+from ..models import (
+    AgentSchedule,
+    AppInstance,
+    AppVersion,
+    Container,
+    ContainerConnection,
+    MarketplaceApp,
+    Project,
+    User,
+)
 from ..services.apps.installer import (
     AlreadyInstalledError,
     ConsentRejectedError,
@@ -39,7 +48,7 @@ class InstallRequest(BaseModel):
 
 class InstallResponse(BaseModel):
     app_instance_id: UUID
-    project_id: UUID | None
+    project_id: UUID
     volume_id: str
     node_name: str
 
@@ -68,6 +77,43 @@ class InstallListEnvelope(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class AppContainerConnectionRow(BaseModel):
+    source: str
+    target: str
+    connector_type: str | None = None
+
+
+class AppContainerRow(BaseModel):
+    id: UUID
+    name: str
+    directory: str | None = None
+    image: str | None = None
+    container_type: str
+    kind: str  # "base" or "service"
+    port: int | None = None
+    status: str
+    is_primary: bool
+    connections: list[AppContainerConnectionRow] = Field(default_factory=list)
+
+
+class AppScheduleDetailRow(BaseModel):
+    id: UUID
+    name: str
+    trigger_kind: str
+    cron_expression: str | None = None
+    next_run_at: datetime | None = None
+    last_run_at: datetime | None = None
+    is_active: bool
+
+
+class AppInstanceDetail(AppInstanceSummary):
+    project_slug: str | None = None
+    primary_container_id: UUID | None = None
+    compute_model: str | None = None  # "always-on" | "job-only" | None
+    containers: list[AppContainerRow] = Field(default_factory=list)
+    schedules: list[AppScheduleDetailRow] = Field(default_factory=list)
 
 
 class UninstallResponse(BaseModel):
@@ -194,6 +240,171 @@ async def list_my_installs(
     )
 
 
+@router.get("/{app_instance_id}", response_model=AppInstanceDetail)
+async def get_install_detail(
+    app_instance_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_active_user),
+) -> AppInstanceDetail:
+    """Detail view: AppInstance summary + containers + connections + schedules.
+
+    Used by the Apps Dashboard's per-card "Details" drawer. Read-only;
+    lifecycle mutations remain on ``app_runtime_status``.
+    """
+    row = (
+        await db.execute(
+            select(
+                AppInstance,
+                MarketplaceApp.slug,
+                MarketplaceApp.name,
+                AppVersion.version,
+                AppVersion.manifest_json,
+            )
+            .join(MarketplaceApp, MarketplaceApp.id == AppInstance.app_id)
+            .join(AppVersion, AppVersion.id == AppInstance.app_version_id)
+            .where(AppInstance.id == app_instance_id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="app_instance not found")
+    inst, slug, name, version, manifest_json = row
+
+    # Auth: installer always; team members with PROJECT_EDIT on the underlying
+    # project; superuser. Mirrors app_runtime_status._authorize.
+    if inst.installer_user_id != user.id and not getattr(user, "is_superuser", False):
+        if inst.project_id is None:
+            raise HTTPException(status_code=404, detail="app_instance not found")
+        from ..permissions import (
+            Permission,
+            get_effective_project_role,
+            has_permission,
+        )
+
+        project_for_auth = await db.get(Project, inst.project_id)
+        if project_for_auth is None:
+            raise HTTPException(status_code=404, detail="app_instance not found")
+        role = await get_effective_project_role(db, project_for_auth, user.id)
+        if role is None or not has_permission(role, Permission.PROJECT_EDIT):
+            raise HTTPException(status_code=404, detail="app_instance not found")
+
+    project_slug: str | None = None
+    containers_out: list[AppContainerRow] = []
+    schedules_out: list[AppScheduleDetailRow] = []
+
+    if inst.project_id is not None:
+        project = await db.get(Project, inst.project_id)
+        project_slug = project.slug if project else None
+
+        containers = (
+            (
+                await db.execute(
+                    select(Container)
+                    .where(Container.project_id == inst.project_id)
+                    .order_by(Container.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        connections = (
+            (
+                await db.execute(
+                    select(ContainerConnection).where(
+                        ContainerConnection.project_id == inst.project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # Build a name lookup so connections can refer to containers by name
+        # (matches manifest semantics) even when the FE only has IDs.
+        by_id = {c.id: c for c in containers}
+        for c in containers:
+            kind = "service" if (c.container_type or "base") == "service" else "base"
+            cxn_rows: list[AppContainerConnectionRow] = []
+            for cn in connections:
+                if cn.source_container_id != c.id:
+                    continue
+                tgt = by_id.get(cn.target_container_id)
+                cxn_rows.append(
+                    AppContainerConnectionRow(
+                        source=c.name,
+                        target=tgt.name if tgt else str(cn.target_container_id),
+                        connector_type=cn.connector_type,
+                    )
+                )
+            containers_out.append(
+                AppContainerRow(
+                    id=c.id,
+                    name=c.name,
+                    directory=c.directory,
+                    image=c.image,
+                    container_type=c.container_type or "base",
+                    kind=kind,
+                    port=c.port,
+                    status=c.status or "stopped",
+                    is_primary=bool(c.is_primary),
+                    connections=cxn_rows,
+                )
+            )
+
+        sched_rows = (
+            (
+                await db.execute(
+                    select(AgentSchedule)
+                    .where(AgentSchedule.app_instance_id == app_instance_id)
+                    .order_by(AgentSchedule.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for s in sched_rows:
+            schedules_out.append(
+                AppScheduleDetailRow(
+                    id=s.id,
+                    name=s.name,
+                    trigger_kind=s.trigger_kind,
+                    cron_expression=s.cron_expression,
+                    next_run_at=s.next_run_at,
+                    last_run_at=s.last_run_at,
+                    is_active=bool(s.is_active),
+                )
+            )
+
+    # Manifest compute.model — used by the FE to know whether to expect an
+    # always-on surface or hide Start/Stop in favour of Schedules.
+    compute_model: str | None = None
+    if isinstance(manifest_json, dict):
+        compute = manifest_json.get("compute")
+        if isinstance(compute, dict):
+            model = compute.get("model")
+            if isinstance(model, str):
+                compute_model = model
+
+    return AppInstanceDetail(
+        id=inst.id,
+        app_id=inst.app_id,
+        app_version_id=inst.app_version_id,
+        project_id=inst.project_id,
+        state=inst.state,
+        update_policy=inst.update_policy,
+        volume_id=inst.volume_id,
+        installed_at=inst.installed_at,
+        uninstalled_at=inst.uninstalled_at,
+        created_at=inst.created_at,
+        app_slug=slug,
+        app_name=name,
+        app_version=version,
+        project_slug=project_slug,
+        primary_container_id=inst.primary_container_id,
+        compute_model=compute_model,
+        containers=containers_out,
+        schedules=schedules_out,
+    )
+
+
 @router.post("/{app_instance_id}/uninstall", response_model=UninstallResponse)
 async def uninstall_endpoint(
     app_instance_id: UUID,
@@ -210,6 +421,10 @@ async def uninstall_endpoint(
     if inst.state == "uninstalled":
         raise HTTPException(status_code=409, detail="already uninstalled")
 
+    # Capture project_id before we null it out on the instance — the K8s
+    # namespace is keyed by project_id and we need it for the cleanup call.
+    project_id_for_cleanup = inst.project_id
+
     now = datetime.now(timezone.utc)
     inst.state = "uninstalled"
     inst.uninstalled_at = now
@@ -217,6 +432,23 @@ async def uninstall_endpoint(
     inst.project_id = None
     await db.flush()
     await db.commit()
+
+    # Best-effort K8s cleanup. DB is the source of truth; if this fails the
+    # orphan-namespace reaper will eventually clean up. Non-blocking so a
+    # slow K8s API doesn't block the user's uninstall click.
+    if project_id_for_cleanup is not None:
+        try:
+            from ..services.orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+            await orchestrator.delete_project_namespace(
+                project_id_for_cleanup, user.id
+            )
+        except Exception:
+            logger.exception(
+                "uninstall: namespace cleanup failed for project=%s (continuing)",
+                project_id_for_cleanup,
+            )
 
     return UninstallResponse(
         app_instance_id=inst.id,

@@ -9,22 +9,6 @@ The scheduler worker enqueues :func:`invoke_app_instance_task` whenever a
   install's persistent volume, and capture stdout/stderr into the event row.
 * ``"http-post"`` — resolve the primary container's runtime URL and POST the
   event payload with an invocation-key Bearer token.
-
-On completion this updates ``ScheduleTriggerEvent.result_status`` and
-``AgentSchedule.last_*`` bookkeeping, and appends a zero-amount spend row via
-:func:`billing_dispatcher.record_spend` for traceability.
-
-Thread A dependencies (imported lazily so this module loads regardless of
-Thread A merge order):
-
-* ``app.services.apps.env_resolver.resolve_env_for_pod`` — translates
-  ``Container.environment_vars`` into a list of ``V1EnvVar`` with
-  ``valueFrom.secretKeyRef`` for secret-ref strings.
-* ``app.services.apps.runtime_urls.container_url`` — resolves a primary
-  container's externally-reachable URL.
-* ``app.services.litellm_keys.mint_invocation`` — invocation-tier key mint
-  helper. If Thread A hasn't merged yet, this module falls back to
-  :func:`litellm_keys.mint` with ``tier="invocation"``.
 """
 
 from __future__ import annotations
@@ -61,9 +45,9 @@ async def _mint_invocation_key(
 ) -> str | None:
     """Mint an invocation-tier LiteLLM key, returning the ``key_id``.
 
-    Prefers ``litellm_keys.mint_invocation`` (Thread A). Falls back to the
-    generic ``mint`` helper on the ``invocation`` tier if the specialized
-    helper isn't present yet.
+    Prefers ``litellm_keys.mint_invocation``; falls back to the generic
+    ``mint`` helper on the ``invocation`` tier if the specialized helper
+    isn't present yet.
     """
     from ...services import litellm_keys
     from ...services.litellm_service import LiteLLMService
@@ -99,25 +83,15 @@ async def _mint_invocation_key(
 
 
 async def _resolve_env(container: Container) -> list[Any]:
-    """Translate Container.environment_vars into pod env vars.
+    """Translate Container.environment_vars into pod env vars via env_resolver.
 
-    Uses Thread A's ``env_resolver`` if available; otherwise emits plain
-    key/value pairs compatible with ``kubernetes.client.V1EnvVar``.
+    Any ``${secret:…}`` refs are rewritten to ``valueFrom.secretKeyRef`` — we
+    fail hard if resolution errors rather than leak plaintext refs into the pod.
     """
+    from .env_resolver import resolve_env_for_pod
+
     env_map: dict[str, str] = dict(container.environment_vars or {})
-    try:
-        from .env_resolver import resolve_env_for_pod  # type: ignore
-
-        return resolve_env_for_pod(env_map)
-    except Exception:
-        # Thread A not merged yet — emit plain V1EnvVar entries so the Job
-        # still boots. Secret-ref strings will appear verbatim as values.
-        try:
-            from kubernetes import client as k8s_client  # type: ignore
-
-            return [k8s_client.V1EnvVar(name=k, value=v) for k, v in env_map.items()]
-        except Exception:
-            return [{"name": k, "value": v} for k, v in env_map.items()]
+    return resolve_env_for_pod(env_map)
 
 
 def _resolve_primary_url(
@@ -125,8 +99,8 @@ def _resolve_primary_url(
 ) -> str | None:
     """Resolve the externally-reachable URL for the primary container.
 
-    Uses Thread A's :func:`runtime_urls.container_url` (kept in lockstep with
-    ingress creation).
+    Uses :func:`runtime_urls.container_url` to stay in lockstep with
+    ingress creation.
     """
     try:
         from ...config import get_settings
@@ -323,31 +297,22 @@ async def invoke_app_instance_task(
                     error = f"http {resp.status_code}"
             else:
                 # Job execution path.
-                from ...config import get_settings
+                from kubernetes import client as k8s_client
                 from ...services.orchestration.kubernetes.client import (
                     KubernetesClient,
                 )
 
-                settings = get_settings()
-                namespace = (
-                    getattr(project, "namespace", None)
-                    or f"proj-{project.id}"
-                )
+                k8s = KubernetesClient()
+                namespace = k8s.get_project_namespace(str(project.id))
                 ts = int(datetime.now(tz=timezone.utc).timestamp())
                 job_name = f"app-inv-{schedule_id[:8]}-{ts}"
 
-                env_vars = await _resolve_env(primary_ctr)
-                try:
-                    from kubernetes import client as k8s_client  # type: ignore
-
-                    extra = [
-                        k8s_client.V1EnvVar(name="INVOCATION_ID", value=invocation_key_id or ""),
-                        k8s_client.V1EnvVar(name="SCHEDULE_ID", value=schedule_id),
-                        k8s_client.V1EnvVar(name="EVENT_ID", value=event_id),
-                    ]
-                    env_vars = list(env_vars) + extra
-                except Exception:
-                    pass
+                env_vars = list(await _resolve_env(primary_ctr))
+                env_vars.extend([
+                    k8s_client.V1EnvVar(name="INVOCATION_ID", value=invocation_key_id or ""),
+                    k8s_client.V1EnvVar(name="SCHEDULE_ID", value=schedule_id),
+                    k8s_client.V1EnvVar(name="EVENT_ID", value=event_id),
+                ])
 
                 image = getattr(primary_ctr, "image", None)
                 if not image and getattr(primary_ctr, "base", None) is not None:
@@ -357,7 +322,7 @@ async def invoke_app_instance_task(
                 if not image:
                     raise RuntimeError(
                         "primary container has no resolvable image "
-                        "(requires Thread A installer to populate Container.image)"
+                        "(installer must populate Container.image)"
                     )
 
                 job = _build_job_manifest(
@@ -369,7 +334,6 @@ async def invoke_app_instance_task(
                     timeout_seconds=_DEFAULT_JOB_TIMEOUT_SECONDS,
                 )
 
-                k8s = KubernetesClient()
                 created = await k8s.create_job(namespace, job)
                 if created is None:
                     raise RuntimeError(f"job {job_name} create returned None")

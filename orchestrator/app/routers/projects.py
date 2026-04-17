@@ -89,6 +89,39 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _resolve_container_url(
+    db: AsyncSession,
+    project: Project,
+    container: Container | None,
+    *,
+    fallback_dir: str,
+    protocol: str,
+    app_domain: str,
+) -> str:
+    """Compute a public URL for a container, branching on app_role.
+
+    Installed AppInstance projects render as
+    ``{dir}-{app_handle}-{creator_handle}.{domain}`` (or
+    ``{app_handle}-{creator_handle}.{domain}`` for single-container apps).
+    Non-app user projects keep the legacy ``{project_slug}-{dir}.{domain}``.
+    """
+    from ..services.apps.runtime_urls import (
+        container_url as _legacy_url,
+        resolve_app_url_for_container,
+    )
+
+    if container is not None and getattr(project, "app_role", "none") == "app_instance":
+        url = await resolve_app_url_for_container(db, container, protocol=protocol)
+        if url:
+            return url
+    return _legacy_url(
+        project_slug=project.slug,
+        container_dir_or_name=fallback_dir,
+        app_domain=app_domain,
+        protocol=protocol,
+    )
+
+
 async def _validate_git_repo_accessible(
     repo_url: str,
     *,
@@ -318,7 +351,8 @@ async def get_projects(
 
     # Hide installed-app instance projects from the normal Projects list —
     # those are rendered in Library > Apps instead. Forks (app_source) remain.
-    app_role_filter = or_(Project.app_role.is_(None), Project.app_role == "app_source")
+    from ..services.apps.project_scopes import exclude_app_instances_clause
+    app_role_filter = exclude_app_instances_clause()
 
     # Admins / superusers see all projects in the team
     if (member and member.role == "admin") or getattr(current_user, "is_superuser", False):
@@ -1202,7 +1236,14 @@ async def get_container_status(
                     .replace(".", "-")
                 )
                 protocol = settings.k8s_container_url_protocol
-                container_url = f"{protocol}://{container_dir}.{project_slug}.{settings.app_domain}"
+                container_url = await _resolve_container_url(
+                    db,
+                    project,
+                    first_container,
+                    fallback_dir=container_dir,
+                    protocol=protocol,
+                    app_domain=settings.app_domain,
+                )
 
             return {
                 "status": "ready" if readiness["ready"] else "starting",
@@ -5376,12 +5417,19 @@ async def _start_container_background_task(
             if not container_url:
                 settings = get_settings()
                 svc = container.container_directory or container.name
-                if settings.deployment_mode == "docker":
-                    # Docker mode always uses HTTP on localhost
-                    container_url = f"http://{project.slug}-{svc}.{settings.app_domain}"
-                else:
-                    protocol = settings.k8s_container_url_protocol
-                    container_url = f"{protocol}://{project.slug}-{svc}.{settings.app_domain}"
+                protocol = (
+                    "http"
+                    if settings.deployment_mode == "docker"
+                    else settings.k8s_container_url_protocol
+                )
+                container_url = await _resolve_container_url(
+                    db,
+                    project,
+                    container,
+                    fallback_dir=svc,
+                    protocol=protocol,
+                    app_domain=settings.app_domain,
+                )
             task.add_log(f"Container '{container.name}' is already running at {container_url}")
             logger.info(f"[COMPOSE] Container {container.name} already running, skipping startup")
 
@@ -5458,10 +5506,21 @@ async def _start_container_background_task(
             task.update_progress(85, 100, "Waiting for pod to be ready")
             task.add_log("Pod readiness check completed")
 
-            container_url = result.get(
-                "url",
-                f"{settings.k8s_container_url_protocol}://{result.get('hostname', 'unknown')}",
-            )
+            container_url = result.get("url")
+            if not container_url:
+                fallback_dir = (
+                    container.container_directory
+                    or container.directory
+                    or container.name
+                )
+                container_url = await _resolve_container_url(
+                    db,
+                    project,
+                    container,
+                    fallback_dir=fallback_dir,
+                    protocol=settings.k8s_container_url_protocol,
+                    app_domain=settings.app_domain,
+                )
 
         else:
             # Docker mode: Use Docker Compose orchestrator
@@ -5496,14 +5555,19 @@ async def _start_container_background_task(
                 sanitized_name = "".join(
                     c for c in sanitized_name if c.isalnum() or c == "-"
                 ).strip("-")
-                if settings.deployment_mode == "docker":
-                    # Docker mode always uses HTTP on localhost
-                    container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
-                else:
-                    protocol = settings.k8s_container_url_protocol
-                    container_url = (
-                        f"{protocol}://{project.slug}-{sanitized_name}.{settings.app_domain}"
-                    )
+                protocol = (
+                    "http"
+                    if settings.deployment_mode == "docker"
+                    else settings.k8s_container_url_protocol
+                )
+                container_url = await _resolve_container_url(
+                    db,
+                    project,
+                    container,
+                    fallback_dir=sanitized_name,
+                    protocol=protocol,
+                    app_domain=settings.app_domain,
+                )
 
             # Give container a moment to fully initialize
             await asyncio.sleep(2)

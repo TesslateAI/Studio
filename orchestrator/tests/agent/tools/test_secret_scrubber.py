@@ -60,14 +60,49 @@ def test_scrubs_multiple_keys_in_same_text() -> None:
 
 
 def test_overlapping_secrets_longest_replaced_first() -> None:
-    # "alphabetagamma" contains "alphabetagamma" itself and "betagamma"
+    # Both >= _SCRUB_MIN_LEN and decent entropy so they pass the new filters.
     scrub_map = {
-        "alphabetagamma": "LONG",
-        "betagamma": "SHORT",
+        "alphabetagamma1234": "LONG",
+        "betagamma12": "SHORT",
     }
-    out = scrub_text("value: alphabetagamma done", scrub_map)
+    out = scrub_text("value: alphabetagamma1234 done", scrub_map)
     # Longest-first ordering means the whole match wins.
     assert out == "value: «secret:LONG» done"
+
+
+def test_low_entropy_short_value_not_redacted() -> None:
+    # "password" is 8 chars (below _SCRUB_MIN_LEN=12) AND low entropy.
+    scrub_map = {"password": "DB_PASSWORD"}
+    out = scrub_text("the password field is empty", scrub_map)
+    assert out == "the password field is empty"
+
+
+def test_high_entropy_long_value_redacted() -> None:
+    secret = "fake_secret_abcdefghijklmnopqrstuvwxyz1234567890"
+    scrub_map = {secret: "STRIPE_KEY"}
+    out = scrub_text(f"leak: {secret} end", scrub_map)
+    assert secret not in out
+    assert "«secret:STRIPE_KEY»" in out
+
+
+def test_mid_length_mid_entropy_uses_word_boundary() -> None:
+    secret = "correcthorse1234"  # 16 chars, entropy ~3.33
+    scrub_map = {secret: "PASSPHRASE"}
+    # Exact match — should be redacted.
+    assert scrub_text(secret, scrub_map) == "«secret:PASSPHRASE»"
+    # Embedded inside a larger token without word boundaries — NOT redacted.
+    embedded = f"a{secret}b"
+    assert scrub_text(embedded, scrub_map) == embedded
+
+
+def test_longest_first_ordering_with_shared_prefix() -> None:
+    # Both values pass length+entropy filters; longer one must win.
+    scrub_map = {
+        "abc123def456": "LONG_KEY",
+        "abc123ghi789": "OTHER_KEY",
+    }
+    out = scrub_text("token abc123def456 here", scrub_map)
+    assert out == "token «secret:LONG_KEY» here"
 
 
 def test_non_string_output_passes_through_unchanged() -> None:

@@ -236,6 +236,7 @@ class Container(ContainerBase):
     environment_vars: dict[str, Any] | None = None
     env_var_keys: list[str] | None = None
     env_vars_count: int | None = None
+    image: str | None = None
     container_type: str = "base"
     service_slug: str | None = None
     service_type: str | None = None

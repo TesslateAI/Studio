@@ -15,7 +15,21 @@ import re
 
 from kubernetes.client import V1EnvVar, V1EnvVarSource, V1SecretKeySelector
 
-__all__ = ["SECRET_REF_RE", "resolve_env_for_pod"]
+__all__ = ["SECRET_REF_RE", "resolve_env_for_pod", "extract_secret_refs"]
+
+
+def extract_secret_refs(env: dict[str, str] | None) -> set[str]:
+    """Return the set of unique secret names referenced by ${secret:name/key} values."""
+    if not env:
+        return set()
+    names: set[str] = set()
+    for raw in env.values():
+        if raw is None:
+            continue
+        m = SECRET_REF_RE.match(str(raw))
+        if m:
+            names.add(m.group(1))
+    return names
 
 # Match the full string (no leading/trailing chars) to avoid partial matches.
 SECRET_REF_RE = re.compile(r"^\$\{secret:([^/}]+)/([^}]+)\}$")

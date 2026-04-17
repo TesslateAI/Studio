@@ -23,7 +23,7 @@ import {
   X,
   Funnel,
   Lightning,
-  Cube,
+  SquaresFour,
 } from '@phosphor-icons/react';
 import { MobileMenu } from '../components/ui';
 import {
@@ -31,7 +31,9 @@ import {
   SkeletonCard,
   type MarketplaceItem,
 } from '../components/marketplace';
-import { marketplaceApi } from '../lib/api';
+import { marketplaceApi, marketplaceAppsApi, type MarketplaceApp } from '../lib/api';
+import { AppInstallWizard } from '../components/apps/AppInstallWizard';
+import { useApps } from '../contexts/AppsContext';
 import toast from 'react-hot-toast';
 import { isCanceledError } from '../lib/utils';
 import { useTheme } from '../theme/ThemeContext';
@@ -62,6 +64,103 @@ const categories = [
   { id: 'mobile', label: 'Mobile', description: 'iOS and Android apps' },
 ];
 
+// Deterministic colour per app — matches MyAppsPage homescreen palette.
+const APP_TILE_PALETTE: Array<{ from: string; to: string }> = [
+  { from: '#6366f1', to: '#8b5cf6' },
+  { from: '#ec4899', to: '#f43f5e' },
+  { from: '#f59e0b', to: '#ef4444' },
+  { from: '#10b981', to: '#06b6d4' },
+  { from: '#3b82f6', to: '#0ea5e9' },
+  { from: '#14b8a6', to: '#22c55e' },
+  { from: '#8b5cf6', to: '#d946ef' },
+  { from: '#f97316', to: '#eab308' },
+];
+
+function appTileColor(seed: string): { from: string; to: string } {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return APP_TILE_PALETTE[h % APP_TILE_PALETTE.length];
+}
+
+function appTileInitials(name: string): string {
+  const s = name.trim();
+  if (!s) return 'A';
+  const w = s.split(/\s+/).filter(Boolean);
+  if (w.length === 1) return w[0].slice(0, 2).toUpperCase();
+  return (w[0][0] + w[1][0]).toUpperCase();
+}
+
+interface AppMarketplaceCardProps {
+  app: MarketplaceApp;
+  installed: boolean;
+  onOpen: (app: MarketplaceApp) => void;
+  onInstall: (app: MarketplaceApp) => void;
+  onOpenWorkspace: () => void;
+}
+
+function AppMarketplaceCard({
+  app,
+  installed,
+  onOpen,
+  onInstall,
+  onOpenWorkspace,
+}: AppMarketplaceCardProps) {
+  const { from, to } = appTileColor(app.slug || app.id);
+  return (
+    <div
+      onClick={() => onOpen(app)}
+      className="flex flex-col gap-3 p-4 rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-colors cursor-pointer"
+      role="article"
+      aria-label={`App ${app.name}`}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className="h-12 w-12 rounded-[14px] flex items-center justify-center text-white font-semibold text-base shadow-[0_4px_10px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.18)]"
+          style={{ backgroundImage: `linear-gradient(145deg, ${from} 0%, ${to} 100%)` }}
+          aria-hidden="true"
+        >
+          {appTileInitials(app.name)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-sm text-[var(--text)] truncate">{app.name}</h3>
+          <p className="text-[11px] text-[var(--text-subtle)]">
+            {app.category ?? 'uncategorized'}
+          </p>
+        </div>
+      </div>
+      <p className="text-xs text-[var(--text-muted)] line-clamp-3 min-h-[3em]">
+        {app.description ?? 'No description provided.'}
+      </p>
+      <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
+        <span className="text-[10px] uppercase tracking-wide text-[var(--text-subtle)]">
+          {app.creator_user_id ? 'Community' : 'Official'}
+        </span>
+        {installed ? (
+          <button
+            className="btn btn-active"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenWorkspace();
+            }}
+          >
+            Installed
+          </button>
+        ) : (
+          <button
+            className="btn btn-filled"
+            onClick={(e) => {
+              e.stopPropagation();
+              onInstall(app);
+            }}
+          >
+            Install
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Marketplace() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -74,11 +173,9 @@ export default function Marketplace() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // State - Filters
-  const [selectedItemType, setSelectedItemType] = useState<ItemType>(() => {
-    const t = searchParams.get('type') as ItemType | null;
-    if (t === 'app') return 'agent';
-    return t || 'agent';
-  });
+  const [selectedItemType, setSelectedItemType] = useState<ItemType>(
+    () => (searchParams.get('type') as ItemType | null) || 'app'
+  );
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [sortBy, setSortBy] = useState<SortOption>(
     (searchParams.get('sort') as SortOption) || 'featured'
@@ -91,11 +188,23 @@ export default function Marketplace() {
 
   // State - Data
   const [items, setItems] = useState<MarketplaceItem[]>([]);
+  const [appItems, setAppItems] = useState<MarketplaceApp[]>([]);
   const [_page, setPage] = useState(1);
 
   // State - Loading (isolated for non-blocking UI)
   const [initialLoading, setInitialLoading] = useState(true);
   const [filtering, setFiltering] = useState(false);
+
+  // Install wizard (app flow)
+  const [installTargetVersionId, setInstallTargetVersionId] = useState<string | null>(null);
+  const { myInstalls, refresh: refreshInstalls } = useApps();
+  const installedAppIds = useMemo(
+    () =>
+      new Set(
+        myInstalls.filter((i) => i.state !== 'uninstalled').map((i) => i.app_id)
+      ),
+    [myInstalls]
+  );
 
   // "/" keyboard shortcut to focus search (like GitHub, Slack, etc.)
   // Using native event listener because useHotkeys doesn't reliably handle "/" key
@@ -173,7 +282,7 @@ export default function Marketplace() {
   };
 
   const itemTypes: { id: ItemType; label: string; icon: React.ReactNode }[] = [
-    { id: 'app', label: 'Apps', icon: <Cube size={16} weight="fill" /> },
+    { id: 'app', label: 'Apps', icon: <SquaresFour size={16} weight="fill" /> },
     { id: 'agent', label: 'Agents', icon: <Cpu size={16} /> },
     { id: 'base', label: 'Bases', icon: <Package size={16} /> },
     { id: 'tool', label: 'Tools', icon: <Wrench size={16} /> },
@@ -222,6 +331,23 @@ export default function Marketplace() {
 
       try {
         let data: MarketplaceItem[];
+
+        if (itemType === 'app') {
+          const result = await marketplaceAppsApi.list({
+            q: search || undefined,
+            category: category !== 'all' ? category : undefined,
+            limit: ITEMS_PER_PAGE,
+            offset: (pageNum - 1) * ITEMS_PER_PAGE,
+          });
+          setAppItems(result.items);
+          setItems([]); // clear non-app grid
+          setInitialLoading(false);
+          setFiltering(false);
+          return;
+        }
+
+        // Switching away from apps — clear the apps grid
+        setAppItems([]);
 
         if (itemType === 'agent') {
           const result = await marketplaceApi.getAllAgents(
@@ -367,7 +493,7 @@ export default function Marketplace() {
 
     // Update URL params (category is handled by dedicated category pages)
     const params = new URLSearchParams();
-    if (selectedItemType !== 'agent') params.set('type', selectedItemType);
+    if (selectedItemType !== 'app') params.set('type', selectedItemType);
     if (searchQuery) params.set('search', searchQuery);
     if (sortBy !== 'featured') params.set('sort', sortBy);
     if (pricingFilter !== 'all') params.set('pricing', pricingFilter);
@@ -396,6 +522,21 @@ export default function Marketplace() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItemType, searchQuery, sortBy, pricingFilter]);
+
+  const handleInstallApp = async (app: MarketplaceApp) => {
+    try {
+      const versions = await marketplaceAppsApi.listVersions(app.id, { limit: 1 });
+      const latest = versions.items[0];
+      if (!latest) {
+        toast.error('This app has no approved versions yet');
+        return;
+      }
+      setInstallTargetVersionId(latest.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load versions';
+      toast.error(msg);
+    }
+  };
 
   const handleInstall = async (item: MarketplaceItem) => {
     if (item.is_purchased) {
@@ -442,10 +583,6 @@ export default function Marketplace() {
 
   // Handle item type change
   const handleItemTypeChange = (type: ItemType) => {
-    if (type === 'app') {
-      navigate('/apps');
-      return;
-    }
     setSelectedItemType(type);
     setPage(1);
   };
@@ -718,6 +855,35 @@ export default function Marketplace() {
                   </div>
                 </section>
               </>
+            ) : selectedItemType === 'app' ? (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-semibold text-[var(--text)]">
+                    {searchQuery ? `Results for "${searchQuery}"` : 'All Apps'}
+                  </h3>
+                </div>
+                {appItems.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {appItems.map((app) => (
+                      <AppMarketplaceCard
+                        key={app.id}
+                        app={app}
+                        installed={installedAppIds.has(app.id)}
+                        onOpen={(a) => navigate(`/apps/${a.id}`)}
+                        onInstall={handleInstallApp}
+                        onOpenWorkspace={() => navigate('/apps/installed')}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 rounded-[var(--radius)] bg-[var(--surface)]">
+                    <Package size={36} className="mx-auto mb-3 text-[var(--text-subtle)]" />
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {searchQuery ? `No apps matching "${searchQuery}"` : 'No apps available yet'}
+                    </p>
+                  </div>
+                )}
+              </section>
             ) : (
               <>
                 {/* Featured Section */}
@@ -832,6 +998,19 @@ export default function Marketplace() {
           </div>
         </div>
       </div>
+
+      {installTargetVersionId && (
+        <AppInstallWizard
+          appVersionId={installTargetVersionId}
+          onClose={() => setInstallTargetVersionId(null)}
+          onDone={(instanceId) => {
+            setInstallTargetVersionId(null);
+            void refreshInstalls();
+            toast.success('App installed');
+            navigate(`/apps/installed/${instanceId}/workspace`);
+          }}
+        />
+      )}
     </>
   );
 }

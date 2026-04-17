@@ -30,6 +30,15 @@ RUN echo 'server { \
     server_name _; \
     root /usr/share/nginx/html; \
     index index.html; \
+    location = /index.html { \
+        add_header Cache-Control "no-store, must-revalidate" always; \
+        add_header Pragma "no-cache" always; \
+        expires 0; \
+    } \
+    location = /config.js { \
+        add_header Cache-Control "no-store, must-revalidate" always; \
+        expires 0; \
+    } \
     location / { \
         try_files $uri $uri/ /index.html; \
     } \

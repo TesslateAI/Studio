@@ -7,6 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import User
+from ..services.apps.reserved_handles import (
+    is_reserved as is_reserved_handle,
+    is_valid_handle_format,
+)
 from ..username_validation import normalize_username, validate_username
 from ..users import current_active_user
 
@@ -144,6 +148,52 @@ async def update_user_preferences(
         raise HTTPException(
             status_code=500, detail=f"Failed to update preferences: {str(e)}"
         ) from e
+
+
+class UserHandleUpdate(BaseModel):
+    handle: str
+
+    @field_validator("handle")
+    @classmethod
+    def _normalize(cls, v: str) -> str:
+        return (v or "").lower().strip()
+
+
+@router.patch("/me/handle")
+async def update_user_handle(
+    payload: UserHandleUpdate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the creator-branded handle used in app runtime URLs.
+
+    Returns 409 when the requested handle is reserved or already taken.
+    Format: ``^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$``.
+    """
+    handle = payload.handle
+    if not is_valid_handle_format(handle, max_length=32):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Handle must be 3-32 chars, lowercase alphanumeric or hyphens, "
+                "starting and ending with an alphanumeric character."
+            ),
+        )
+    if is_reserved_handle(handle):
+        raise HTTPException(status_code=409, detail="Handle is not available")
+
+    existing = await db.execute(
+        select(User.id).where(
+            func.lower(User.handle) == handle, User.id != current_user.id
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Handle is already taken")
+
+    current_user.handle = handle
+    await db.commit()
+    await db.refresh(current_user)
+    return {"handle": current_user.handle}
 
 
 @router.get("/profile")

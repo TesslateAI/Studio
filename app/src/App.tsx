@@ -60,7 +60,6 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import MarketplaceSuccess from './pages/MarketplaceSuccess';
 import UserProfilePage from './pages/UserProfile';
 // Tesslate Apps (Waves 4-5)
-import AppsMarketplacePage from './pages/AppsMarketplacePage';
 import AppDetailPage from './pages/AppDetailPage';
 import BundleDetailPage from './pages/BundleDetailPage';
 import MyAppsPage from './pages/MyAppsPage';
@@ -342,7 +341,7 @@ function AppContent() {
           <Route path="/feedback" element={<Feedback />} />
 
           {/* Tesslate Apps — browse/detail/install (order matters: bundles and installed before :appId) */}
-          <Route path="/apps" element={<AppsMarketplacePage />} />
+          <Route path="/apps" element={<Navigate to="/marketplace?type=app" replace />} />
           <Route path="/apps/bundles/:bundleId" element={<BundleDetailPage />} />
           <Route path="/apps/installed" element={<MyAppsPage />} />
           <Route path="/apps/installed/:appInstanceId/workspace" element={<AppWorkspacePage />} />
@@ -364,6 +363,15 @@ function AppContent() {
         </Route>
 
         {/* Standalone Routes */}
+        {/* Embeddable app workspace: no NavigationSidebar chrome, iframe-friendly. */}
+        <Route
+          path="/apps/embed/:appInstanceId"
+          element={
+            <PrivateRoute>
+              <AppWorkspacePage />
+            </PrivateRoute>
+          }
+        />
         <Route
           path="/project/:slug"
           element={

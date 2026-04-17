@@ -20,7 +20,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { MoodyFace } from './MoodyFace';
-import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Plus } from '@phosphor-icons/react';
+import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Plus, Package, SquaresFour } from '@phosphor-icons/react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
 import { billingApi, chatApi, projectsApi, teamsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -33,6 +33,7 @@ interface NavigationSidebarProps {
   activePage:
     | 'home'
     | 'chat'
+    | 'apps'
     | 'dashboard'
     | 'marketplace'
     | 'library'
@@ -707,7 +708,23 @@ export function NavigationSidebar({
               </button>
             </Tooltip>
 
-            <Tooltip content="Projects" shortcut={`${modKey} D`} side="right" delay={200}>
+            <Tooltip content="Apps" side="right" delay={200}>
+              <button
+                onClick={() => navigate('/apps/installed')}
+                className={
+                  isExpanded
+                    ? navButtonClass(activePage === 'apps')
+                    : navButtonClassCollapsed(activePage === 'apps')
+                }
+              >
+                <SquaresFour size={16} className={iconClass(activePage === 'apps')} />
+                {isExpanded && (
+                  <span className={labelClass(activePage === 'apps')}>Apps</span>
+                )}
+              </button>
+            </Tooltip>
+
+            <Tooltip content="Workspaces" shortcut={`${modKey} D`} side="right" delay={200}>
               <button
                 onClick={() => navigate('/dashboard')}
                 className={
@@ -718,21 +735,21 @@ export function NavigationSidebar({
               >
                 <FolderOpen size={16} className={iconClass(activePage === 'dashboard')} />
                 {isExpanded && (
-                  <span className={labelClass(activePage === 'dashboard')}>Projects</span>
+                  <span className={labelClass(activePage === 'dashboard')}>Workspaces</span>
                 )}
               </button>
             </Tooltip>
 
             <Tooltip content="Marketplace" shortcut={`${modKey} M`} side="right" delay={200}>
               <button
-                onClick={() => navigate('/marketplace')}
+                onClick={() => navigate('/marketplace?type=app')}
                 className={
                   isExpanded
                     ? navButtonClass(activePage === 'marketplace')
                     : navButtonClassCollapsed(activePage === 'marketplace')
                 }
               >
-                <Boxes size={16} className={iconClass(activePage === 'marketplace')} />
+                <Package size={16} className={iconClass(activePage === 'marketplace')} />
                 {isExpanded && (
                   <span className={labelClass(activePage === 'marketplace')}>Marketplace</span>
                 )}

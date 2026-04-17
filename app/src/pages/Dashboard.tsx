@@ -550,7 +550,7 @@ export default function Dashboard() {
     left: [
       {
         icon: <Folder className="w-5 h-5" weight="fill" />,
-        title: 'Projects',
+        title: 'Workspaces',
         onClick: () => {},
         active: true,
       },
@@ -638,7 +638,7 @@ export default function Dashboard() {
             </svg>
           </button>
 
-          <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Projects</h2>
+          <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Workspaces</h2>
 
           {canCreateProject && (
             <button

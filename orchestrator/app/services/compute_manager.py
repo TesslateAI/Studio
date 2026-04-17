@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -24,6 +25,75 @@ from kubernetes.client.rest import ApiException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# Per-request app_instance_id, set by callers (e.g. app_runtime_status.start)
+# so compute lifecycle events can be fanned out to the SSE stream for the
+# corresponding AppInstance. None for non-app-backed projects.
+current_app_instance_id: ContextVar["UUID | None"] = ContextVar(
+    "current_app_instance_id", default=None
+)
+
+
+async def _persist_failed_state(project_id: UUID, container_ids: list[UUID]) -> None:
+    """Best-effort persist of failed compute state in a fresh DB session.
+
+    Used from ``start_environment``'s exception handler where the caller's
+    session may be mid-rollback. Independent session avoids piggybacking
+    on a poisoned transaction.
+    """
+    try:
+        from sqlalchemy import update
+
+        from ..database import AsyncSessionLocal
+        from ..models import Container, Project
+
+        async with AsyncSessionLocal() as db:
+            proj = await db.get(Project, project_id)
+            if proj is not None:
+                proj.environment_status = "error"
+                proj.active_compute_pod = None
+            if container_ids:
+                await db.execute(
+                    update(Container)
+                    .where(Container.id.in_(container_ids))
+                    .values(status="failed")
+                )
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.debug("persist_failed_state ignored error", exc_info=True)
+
+
+async def _emit_app_runtime(
+    app_instance_id: UUID | None,
+    state: str,
+    *,
+    containers: list | None = None,
+    message: str | None = None,
+) -> None:
+    """Best-effort emit of an app-runtime lifecycle event."""
+    if app_instance_id is None:
+        return
+    try:
+        from .pubsub import publish_app_runtime_event
+
+        payload = {
+            "state": state,
+            "ts": datetime.now(UTC).isoformat(),
+        }
+        if message is not None:
+            payload["message"] = message
+        if containers is not None:
+            payload["containers"] = [
+                {
+                    "id": str(getattr(c, "id", "")),
+                    "name": getattr(c, "name", None),
+                    "status": getattr(c, "status", None) or "stopped",
+                }
+                for c in containers
+            ]
+        await publish_app_runtime_event(app_instance_id, payload)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("emit_app_runtime ignored error: %s", e)
 
 
 def _sanitize_k8s_name(name: str) -> str:
@@ -829,6 +899,8 @@ class ComputeManager:
         user_id: UUID,
         db: AsyncSession,
         progress_queue: asyncio.Queue | None = None,
+        *,
+        app_instance_id: UUID | None = None,
     ) -> dict[str, str]:
         """Create namespace + deployments + services + ingress for a v2 project.
 
@@ -839,11 +911,35 @@ class ComputeManager:
         """
         from .distributed_lock import get_distributed_lock
 
+        # Fall back to the contextvar if no explicit kwarg given, so callers
+        # that go through orchestrator.start_project (which can't pass kwargs)
+        # still get app-runtime fanout.
+        effective_app_instance = app_instance_id or current_app_instance_id.get()
+
         lock = get_distributed_lock()
         async with lock.hold(f"env:{project.id}", ttl_seconds=600):
-            return await self._start_environment_inner(
-                project, containers, connections, user_id, db, progress_queue
-            )
+            try:
+                return await self._start_environment_inner(
+                    project,
+                    containers,
+                    connections,
+                    user_id,
+                    db,
+                    progress_queue,
+                    app_instance_id=effective_app_instance,
+                )
+            except Exception as exc:
+                await _emit_app_runtime(
+                    effective_app_instance,
+                    "error",
+                    containers=containers,
+                    message=str(exc),
+                )
+                # Persist failed state in a fresh session so /runtime polls
+                # converge with the SSE emit instead of advertising stale
+                # "running" state.
+                await _persist_failed_state(project.id, [c.id for c in containers])
+                raise
 
     async def _start_environment_inner(
         self,
@@ -853,10 +949,34 @@ class ComputeManager:
         user_id: UUID,
         db: AsyncSession,
         progress_queue: asyncio.Queue | None = None,
+        *,
+        app_instance_id: UUID | None = None,
     ) -> dict[str, str]:
         """Inner start logic, called under the per-project lock."""
+        await _emit_app_runtime(
+            app_instance_id, "pending", containers=containers, message="Acquired lock"
+        )
         if project.environment_status == "provisioning":
             raise RuntimeError("Cannot start environment: project is still being provisioned")
+
+        # Skip job-only containers — they're invoked as K8s Jobs by schedules,
+        # never as long-running Deployments. Filter early so downstream sizing,
+        # placement, and deployment loops never see them.
+        containers = [c for c in containers if (getattr(c, "status", None) != "job_only")]
+
+        # Persist "starting" so late-joining SSE snapshots (which read
+        # Container.status via _build_runtime_payload) see the transition
+        # instead of a stale "stopped" that racing auto-start logic could
+        # re-trigger.
+        for c in containers:
+            c.status = "starting"
+        await db.commit()
+        if not containers:
+            logger.info(
+                "[COMPUTE-T2] start_environment: project %s has only job-only containers — no Deployments to create",
+                project.id,
+            )
+            return {}
 
         from ..config import get_settings
         from .orchestration.kubernetes.helpers import (
@@ -884,6 +1004,16 @@ class ComputeManager:
 
         ws_manager = get_chat_connection_manager()
 
+        # Map internal phases to coarse app-runtime states for SSE consumers.
+        _phase_to_state = {
+            "migrating": "starting",
+            "creating_namespace": "starting",
+            "starting_services": "pulling",
+            "starting_dev_servers": "pulling",
+            "verifying_pods": "starting",
+            "ready": "running",
+        }
+
         async def send_progress(phase: str, message: str, progress: int, **kwargs):
             try:
                 status = {
@@ -901,6 +1031,157 @@ class ComputeManager:
                     await progress_queue.put(
                         {"phase": phase, "message": message, "progress": progress}
                     )
+            # App-runtime SSE fanout (best-effort, never blocks).
+            mapped = _phase_to_state.get(phase)
+            if mapped is not None:
+                await _emit_app_runtime(
+                    app_instance_id,
+                    mapped,
+                    containers=containers,
+                    message=message,
+                )
+
+        # 0. Warm-start fast path (HF-Spaces-style wake):
+        #    If the namespace is already Active with Deployments, just
+        #    scale replicas back to 1 and wait for Ready. This avoids the
+        #    60-120s namespace-terminate race and keeps the ingress URL
+        #    stable across Stop→Start cycles.
+        v1 = self._api()
+        ns_phase: str | None = None
+        try:
+            ns_obj = await asyncio.to_thread(v1.read_namespace, name=namespace)
+            ns_phase = ((ns_obj.status.phase or "").lower()) if ns_obj.status else None
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+
+        if ns_phase == "terminating":
+            # Previous teardown still in progress (e.g., hand-deleted
+            # namespace, reaper). Wait briefly for GC to finish, then fall
+            # through to cold bootstrap on the next iteration.
+            logger.info(
+                "[COMPUTE-T2] Namespace %s is Terminating — waiting up to 30s", namespace
+            )
+            for _ in range(15):
+                await asyncio.sleep(2)
+                try:
+                    await asyncio.to_thread(v1.read_namespace, name=namespace)
+                except ApiException as exc:
+                    if exc.status == 404:
+                        ns_phase = None
+                        break
+                    raise
+            else:
+                raise RuntimeError(
+                    f"Namespace {namespace} stuck Terminating — retry shortly"
+                )
+
+        if ns_phase == "active":
+            await send_progress("creating_namespace", "Waking environment...", 20)
+            patched = await self._scale_project_deployments(
+                namespace, project.id, replicas=1
+            )
+            if patched > 0:
+                logger.info(
+                    "[COMPUTE-T2] Warm-start: scaled %d deployments in %s to 1",
+                    patched,
+                    namespace,
+                )
+                await send_progress(
+                    "verifying_pods", "Waking container...", 60
+                )
+
+                # Wait for at least one dev pod to reach Running (same
+                # polling loop as cold bootstrap). Up to 60s.
+                for _attempt in range(30):
+                    await asyncio.sleep(2)
+                    pod_list = await asyncio.to_thread(
+                        v1.list_namespaced_pod,
+                        namespace,
+                        label_selector=(
+                            "tesslate.io/tier=2,tesslate.io/component=dev-container"
+                        ),
+                    )
+                    pods = pod_list.items or []
+                    if any(
+                        (p.status.phase or "").lower() == "running"
+                        and not any(
+                            cs.state
+                            and cs.state.waiting
+                            and cs.state.waiting.reason
+                            in (
+                                "ImagePullBackOff",
+                                "ErrImagePull",
+                                "CrashLoopBackOff",
+                            )
+                            for cs in (p.status.container_statuses or [])
+                        )
+                        for p in pods
+                    ):
+                        break
+                else:
+                    raise RuntimeError(
+                        f"Warm-start: pods in {namespace} did not reach Running in 60s"
+                    )
+
+                # Re-derive container URLs deterministically (same logic
+                # as cold bootstrap — the ingress host is an immutable
+                # function of project.slug + container directory, or the
+                # creator-branded app handle for AppInstance projects).
+                from ..config import get_settings
+                from .apps.runtime_urls import (
+                    container_url as _container_url,
+                    resolve_app_url_for_container,
+                )
+
+                _settings = get_settings()
+                container_urls: dict[str, str] = {}
+                dev_containers_for_urls = [
+                    c
+                    for c in containers
+                    if getattr(c, "container_type", "base") != "service"
+                ]
+                for c in dev_containers_for_urls:
+                    cdir = resolve_k8s_container_dir(c)
+                    preview: str | None = None
+                    if getattr(project, "app_role", "none") == "app_instance":
+                        preview = await resolve_app_url_for_container(
+                            db,
+                            c,
+                            protocol=_settings.k8s_container_url_protocol,
+                        )
+                    if preview is None:
+                        preview = _container_url(
+                            project_slug=project.slug,
+                            container_dir_or_name=cdir,
+                            app_domain=_settings.app_domain,
+                            protocol=_settings.k8s_container_url_protocol,
+                        )
+                    container_urls[cdir] = preview
+
+                project.compute_tier = "environment"
+                project.environment_status = "active"
+                project.hibernated_at = None
+                project.last_activity = datetime.now(UTC)
+                for c in containers:
+                    c.status = "running"
+                await db.commit()
+
+                await send_progress(
+                    "ready", "Environment is ready!", 100, container_status="ready"
+                )
+                logger.info(
+                    "[COMPUTE-T2] Warm-start complete for project %s (%d deployments)",
+                    project.slug,
+                    patched,
+                )
+                return container_urls
+            # Namespace exists but has no Deployments (drift) — fall through
+            # to cold bootstrap below to recreate from manifests.
+            logger.info(
+                "[COMPUTE-T2] Namespace %s exists but has no deployments — cold bootstrap",
+                namespace,
+            )
 
         # 1. Calculate placement budget for the entire placement unit.
         budget = placement_budget(containers)
@@ -925,14 +1206,6 @@ class ComputeManager:
             budget_cpu=budget.cpu_millicores,
             budget_mem=budget.memory_mib * 1024 * 1024,  # MiB → bytes for Hub
         )
-
-        # 3. Idempotent start: clean up any existing namespace before
-        #    creating fresh. This replaces the old _migrate_placement_unit
-        #    flow — no separate migration code path. The Hub already moved
-        #    the data in ensure_cached; we just manage K8s resources.
-        if project.compute_tier == "environment":
-            await send_progress("migrating", "Cleaning up old environment...", 5)
-            await self._stop_environment_inner(project, db)
 
         # 3. Separate service and dev containers
         service_containers = [
@@ -976,6 +1249,18 @@ class ComputeManager:
             if e.status != 409:  # Already exists — fine on restart
                 raise
             logger.debug("[COMPUTE-T2] PV pv-%s already exists", volume_id)
+            # Retain-policy PVs from a previous namespace linger in
+            # Released state with a stale claimRef. A new PVC can't bind
+            # until we clear it. Safe to clear: volume data is intact and
+            # we're about to bind a new PVC that matches the same volume.
+            try:
+                await self._clear_released_pv_claimref(f"pv-{volume_id}")
+            except Exception:
+                logger.debug(
+                    "[COMPUTE-T2] Unable to clear claimRef on pv-%s (non-fatal)",
+                    volume_id,
+                    exc_info=True,
+                )
         await k8s.create_pvc(project_pvc, namespace)
 
         container_urls: dict[str, str] = {}
@@ -1028,13 +1313,16 @@ class ComputeManager:
             merged_env = {**service_def.environment_vars, **extra_env}
             svc_port = service_def.internal_port or service_def.default_port or 5432
 
+            # Apps-installed service containers may override the catalog image
+            # via manifest compute.containers[].image → Container.image.
+            effective_svc_image = svc_container.image or service_def.docker_image
             deployment = create_v2_service_deployment(
                 namespace=namespace,
                 project_id=project.id,
                 user_id=user_id,
                 container_id=svc_container.id,
                 container_directory=svc_dir,
-                image=service_def.docker_image,
+                image=effective_svc_image,
                 port=svc_port,
                 environment_vars=merged_env,
                 volumes=service_def.volumes,
@@ -1107,16 +1395,39 @@ class ComputeManager:
                 extra_env.setdefault(f"{sib_name}_URL", sib_url)
                 extra_env.setdefault(f"VITE_{sib_name}_URL", sib_url)
 
-            # Tesslate Apps: manifest-declared image stashed in env by installer.
-            # If present, use it as the pod image instead of the default devserver.
+            # Prefer the explicit Container.image column; fall back to the
+            # legacy TSL_CONTAINER_IMAGE env-smuggle for any install that
+            # pre-dates the 0060 migration backfill.
             container_env = container.environment_vars or {}
-            manifest_image = container_env.get("TSL_CONTAINER_IMAGE")
-            effective_image = manifest_image or settings.k8s_devserver_image
-            # Don't leak the sentinel into pod env
-            if manifest_image:
+            legacy_env_image = container_env.get("TSL_CONTAINER_IMAGE")
+            effective_image = (
+                container.image
+                or legacy_env_image
+                or settings.k8s_devserver_image
+            )
+            # Defensive strip: never let the legacy sentinel reach the pod.
+            if legacy_env_image:
                 container_env = {k: v for k, v in container_env.items() if k != "TSL_CONTAINER_IMAGE"}
-                # Also drop from extra_env if ComputeManager already merged it
                 extra_env = {k: v for k, v in extra_env.items() if k != "TSL_CONTAINER_IMAGE"}
+
+            # Propagate any ${secret:name/key} refs from the platform ns into
+            # this project's ns (secretKeyRef is namespace-local). Idempotent.
+            try:
+                from .apps.env_resolver import extract_secret_refs
+                from .apps.secret_propagator import propagate_secrets
+                combined = {**(container_env or {}), **(extra_env or {})}
+                refs = extract_secret_refs(combined)
+                if refs:
+                    await asyncio.to_thread(
+                        propagate_secrets,
+                        k8s.core_v1,
+                        refs,
+                        settings.k8s_default_namespace,
+                        namespace,
+                    )
+            except Exception as e:
+                logger.warning("secret propagation failed for project %s: %s", project.id, e)
+
             deployment = create_v2_dev_deployment(
                 namespace=namespace,
                 project_id=project.id,
@@ -1145,6 +1456,26 @@ class ComputeManager:
             )
             await k8s.create_service(service, namespace)
 
+            # Installed AppInstance projects use creator-branded hostnames
+            # (``{dir}-{app}-{creator}.{domain}`` or ``{app}-{creator}.{domain}``
+            # for single-container apps). Non-app projects and apps without
+            # handles fall back to the legacy slug-based shape.
+            from .apps.runtime_urls import (
+                app_container_url,
+                container_url as _container_url,
+                resolve_app_url_for_container,
+            )
+
+            preview_url: str | None = None
+            ingress_hostname: str | None = None
+            if getattr(project, "app_role", "none") == "app_instance":
+                preview_url = await resolve_app_url_for_container(
+                    db, container, protocol=settings.k8s_container_url_protocol
+                )
+                if preview_url:
+                    # Strip ``{protocol}://`` to get just the hostname for the ingress rule.
+                    ingress_hostname = preview_url.split("://", 1)[-1]
+
             ingress = create_ingress_manifest(
                 namespace=namespace,
                 project_id=project.id,
@@ -1155,17 +1486,17 @@ class ComputeManager:
                 domain=settings.app_domain,
                 ingress_class=settings.k8s_ingress_class,
                 tls_secret=settings.k8s_wildcard_tls_secret or None,
+                hostname=ingress_hostname,
             )
             await k8s.create_ingress(ingress, namespace)
 
-            from .apps.runtime_urls import container_url as _container_url
-
-            preview_url = _container_url(
-                project_slug=project.slug,
-                container_dir_or_name=container_directory,
-                app_domain=settings.app_domain,
-                protocol=settings.k8s_container_url_protocol,
-            )
+            if preview_url is None:
+                preview_url = _container_url(
+                    project_slug=project.slug,
+                    container_dir_or_name=container_directory,
+                    app_domain=settings.app_domain,
+                    protocol=settings.k8s_container_url_protocol,
+                )
             container_urls[container_directory] = preview_url
 
             logger.info("[COMPUTE-T2] Dev container %s → %s", container_directory, preview_url)
@@ -1223,11 +1554,15 @@ class ComputeManager:
                     f"check events: kubectl get events -n {namespace}"
                 )
 
-        # 9. Update project state
+        # 9. Update project + container state. Persisted alongside the
+        # SSE "running" emit below so late-joining clients and
+        # polling-fallback GET /runtime agree with the live pods.
         project.compute_tier = "environment"
         project.environment_status = "active"
         project.hibernated_at = None
         project.last_activity = datetime.now(UTC)
+        for c in containers:
+            c.status = "running"
         await db.commit()
 
         # 10. Transfer ownership to the node where pods are running.
@@ -1266,55 +1601,147 @@ class ComputeManager:
         async with lock.hold(f"env:{project.id}", ttl_seconds=600):
             await self._stop_environment_inner(project, db)
 
+    async def _clear_released_pv_claimref(self, pv_name: str) -> None:
+        """If the named PV is in ``Released`` state, clear its ``claimRef``
+        so a new PVC can bind. No-op if the PV is Available/Bound/absent.
+
+        Needed on cold bootstrap after an out-of-band namespace delete
+        (reaper, operator, uninstall). The btrfs subvolume behind the PV
+        is intact (Retain policy); we just need the PV to be bindable.
+        """
+        v1 = self._api()
+        try:
+            pv = await asyncio.to_thread(v1.read_persistent_volume, name=pv_name)
+        except ApiException as exc:
+            if exc.status == 404:
+                return
+            raise
+        phase = (pv.status.phase or "") if pv.status else ""
+        if phase != "Released":
+            return
+        # Clear claimRef via JSON patch (strategic merge doesn't remove
+        # the field; JSON Merge Patch with null removes it).
+        await asyncio.to_thread(
+            v1.patch_persistent_volume,
+            name=pv_name,
+            body={"spec": {"claimRef": None}},
+        )
+        logger.info("[COMPUTE-T2] Cleared stale claimRef on Released PV %s", pv_name)
+
+    async def _scale_project_deployments(
+        self, namespace: str, project_id: UUID, replicas: int
+    ) -> int:
+        """Patch all project Deployments' ``spec.replicas`` via the scale
+        subresource. Returns the count actually patched.
+
+        Targets only Deployments labelled ``tesslate.io/project-id=<id>``
+        so sibling namespaces (should there ever be any) stay untouched.
+        Idempotent: 404s on individual Deployments are swallowed.
+        """
+        from kubernetes import client as _k8s
+
+        v1 = self._api()
+        apps_v1 = _k8s.AppsV1Api(v1.api_client)
+
+        try:
+            dep_list = await asyncio.to_thread(
+                apps_v1.list_namespaced_deployment,
+                namespace,
+                label_selector=f"tesslate.io/project-id={project_id}",
+            )
+        except ApiException as exc:
+            if exc.status == 404:
+                return 0
+            raise
+
+        patched = 0
+        body = {"spec": {"replicas": replicas}}
+        for dep in dep_list.items or []:
+            name = dep.metadata.name
+            try:
+                await asyncio.to_thread(
+                    apps_v1.patch_namespaced_deployment_scale,
+                    name=name,
+                    namespace=namespace,
+                    body=body,
+                )
+                patched += 1
+            except ApiException as exc:
+                if exc.status == 404:
+                    continue
+                logger.warning(
+                    "[COMPUTE-T2] Failed to scale %s/%s → %d: %s",
+                    namespace,
+                    name,
+                    replicas,
+                    exc.reason,
+                )
+        return patched
+
     async def _stop_environment_inner(self, project, db: AsyncSession) -> None:
-        """Inner stop logic. Call directly when already holding the env lock."""
-        # Sync volume to CAS before tearing down compute (non-blocking on failure).
+        """Scale project Deployments to zero. Namespace, PVC, PV, Service,
+        Ingress, and NetworkPolicy all stay in place so a subsequent Start
+        can warm-resume in ~5s (HF-Spaces-style sleep).
+
+        Call directly when already holding the env lock. Full teardown
+        (namespace delete) belongs to ``delete_project_namespace`` on
+        uninstall, not here.
+        """
+        # Sync volume to CAS before scaling down (non-blocking on failure).
+        # Useful even with scale-to-zero: if the cache node dies before the
+        # next start, the next ensure_cached() can restore from CAS.
         if getattr(project, "volume_id", None):
             try:
                 from .volume_manager import get_volume_manager
 
                 vm = get_volume_manager()
                 await vm.trigger_sync(project.volume_id)
-                logger.info("[COMPUTE-T2] Volume %s synced before stop", project.volume_id)
+                logger.info("[COMPUTE-T2] Volume %s synced before sleep", project.volume_id)
             except Exception as e:
-                logger.warning("[COMPUTE-T2] Volume sync before stop failed (non-fatal): %s", e)
+                logger.warning("[COMPUTE-T2] Volume sync before sleep failed (non-fatal): %s", e)
 
         namespace = f"proj-{project.id}"
-        k8s = self._k8s_client()
+
+        # Confirm the namespace still exists before trying to scale. If it
+        # was already hand-deleted (reaper, operator), stop is a no-op for
+        # K8s state and we just converge the DB below.
         v1 = self._api()
-
-        # Delete namespace — cascades all namespace-scoped resources (PVCs, deployments, etc.)
+        ns_exists = True
         try:
-            await asyncio.to_thread(k8s.core_v1.delete_namespace, name=namespace)
-            logger.info("[COMPUTE-T2] Namespace %s deleted", namespace)
+            await asyncio.to_thread(v1.read_namespace, name=namespace)
         except ApiException as exc:
-            if exc.status != 404:
-                logger.error(
-                    "[COMPUTE-T2] Failed to delete namespace %s: %s", namespace, exc.reason
-                )
+            if exc.status == 404:
+                ns_exists = False
+            else:
                 raise
-            logger.debug("[COMPUTE-T2] Namespace %s already gone", namespace)
 
-        # Delete cluster-scoped PVs (Retain policy keeps btrfs subvolumes intact)
-        try:
-            pv_list = await asyncio.to_thread(
-                v1.list_persistent_volume,
-                label_selector=f"tesslate.io/project-id={project.id}",
+        if ns_exists:
+            patched = await self._scale_project_deployments(namespace, project.id, replicas=0)
+            logger.info(
+                "[COMPUTE-T2] Scaled %d deployments to 0 in namespace %s", patched, namespace
             )
-            for pv in pv_list.items or []:
-                pv_name = pv.metadata.name
-                try:
-                    await asyncio.to_thread(v1.delete_persistent_volume, name=pv_name)
-                    logger.info("[COMPUTE-T2] Deleted PV %s", pv_name)
-                except ApiException as e:
-                    if e.status != 404:
-                        logger.warning("[COMPUTE-T2] Failed to delete PV %s: %s", pv_name, e.reason)
-        except ApiException as e:
-            logger.warning(
-                "[COMPUTE-T2] Failed to list PVs for project %s: %s", project.id, e.reason
-            )
+        else:
+            logger.debug("[COMPUTE-T2] Namespace %s already gone — stop is DB-only", namespace)
 
         project.compute_tier = "none"
+        project.environment_status = "stopped"
+        project.active_compute_pod = None
+
+        # Reset container rows so the UI rollup converges on "stopped"
+        # without a subsequent compute_manager invocation. Skip job-only
+        # containers: they're headless and carry their own status enum.
+        from sqlalchemy import update
+
+        from ..models import Container
+
+        await db.execute(
+            update(Container)
+            .where(
+                Container.project_id == project.id,
+                Container.status != "job_only",
+            )
+            .values(status="stopped")
+        )
         await db.commit()
 
 

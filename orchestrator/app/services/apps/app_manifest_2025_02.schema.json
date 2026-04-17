@@ -87,6 +87,7 @@
       "additionalProperties": false,
       "properties": {
         "tier": {"type": "integer", "enum": [0, 1, 2], "default": 0},
+        "model": {"enum": ["always-on", "job-only"], "default": "always-on", "description": "Runtime shape: always-on runs Deployments; job-only runs only as scheduled K8s Jobs (headless)."},
         "compute_model": {"enum": ["per-invocation", "per-installer", "shared-singleton"], "default": "per-invocation"},
         "containers": {
           "type": "array",

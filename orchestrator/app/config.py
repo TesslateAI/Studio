@@ -266,10 +266,11 @@ class Settings(BaseSettings):
     signup_bonus_expiry_days: int = 60  # 2 months
 
     # Project Limits per Tier
-    tier_max_projects_free: int = 3
-    tier_max_projects_basic: int = 7
-    tier_max_projects_pro: int = 15
-    tier_max_projects_ultra: int = 40
+    # Effectively unlimited — kept as tunable knobs in case we re-introduce quotas.
+    tier_max_projects_free: int = 999999
+    tier_max_projects_basic: int = 999999
+    tier_max_projects_pro: int = 999999
+    tier_max_projects_ultra: int = 999999
 
     # Deploy Limits per Tier
     tier_max_deploys_free: int = 1
@@ -511,6 +512,12 @@ class Settings(BaseSettings):
     compute_pod_timeout: int = 600  # Seconds to wait for compute pod readiness
     compute_reaper_interval_seconds: int = 60  # How often the orphaned-pod reaper runs
     compute_reaper_max_age_seconds: int = 900  # 15 min — max pod age before reaping
+
+    # Per-user soft cap on concurrently running (scale=1) app environments.
+    # Paused environments (scale=0) do NOT count. Prevents one user from
+    # exhausting cluster CPU/memory and starving other tenants.
+    # Per-user, not global: tenant A hitting the cap does not affect tenant B.
+    tsl_max_running_apps_per_user: int = 10
 
     # ==========================================================================
     # Email Compliance

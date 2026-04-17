@@ -24,6 +24,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -38,6 +39,7 @@ from ..services.deployment_encryption import (
     get_deployment_encryption_service,
 )
 from ..services.node_config_presets import FormSchema, resolve_schema
+from ..services.rate_limit import rate_limited
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -360,6 +362,22 @@ async def reveal_container_secret(
     request: Request,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
+    _rl_burst: User = Depends(
+        rate_limited(
+            "reveal_secret_burst",
+            capacity=10,
+            window_seconds=300,
+            audit_action="secret_reveal_rate_limited_burst",
+        )
+    ),
+    _rl_daily: User = Depends(
+        rate_limited(
+            "reveal_secret_daily",
+            capacity=100,
+            window_seconds=86400,
+            audit_action="secret_reveal_rate_limited_daily",
+        )
+    ),
 ):
     # Defense in depth: reject any caller whose principal was resolved via an
     # external API key. Plan invariant: reveal is never reachable via the agent
@@ -393,7 +411,16 @@ async def reveal_container_secret(
         )
         await db.commit()
 
-    return {"value": plaintext}
+    # Surface rate-limit state from the daily bucket (the broader cap).
+    headers: dict[str, str] = {}
+    rl_state = getattr(request.state, "rate_limit", None) or {}
+    daily = rl_state.get("reveal_secret_daily")
+    if daily:
+        headers["X-RateLimit-Limit"] = str(daily["limit"])
+        headers["X-RateLimit-Remaining"] = str(daily["remaining"])
+        headers["X-RateLimit-Reset"] = str(daily["reset"])
+
+    return JSONResponse(content={"value": plaintext}, headers=headers)
 
 
 # Expose AuditLog import so it is not elided by linters for downstream edits

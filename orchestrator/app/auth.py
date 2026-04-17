@@ -2,7 +2,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -118,6 +118,41 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+
+async def get_current_active_user_or_query(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Resolve the active user from Authorization header, ``tesslate_auth``
+    cookie, or ``?access_token=`` query parameter.
+
+    Browser ``EventSource`` cannot attach custom headers, so SSE routes
+    need a query-param fallback. Cookie auth works if set by fastapi-users'
+    CookieTransport; otherwise the frontend appends ``?access_token=<jwt>``
+    sourced from localStorage.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    token: str | None = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip() or None
+    if not token:
+        token = request.cookies.get("tesslate_auth")
+    if not token:
+        token = request.query_params.get("access_token")
+    if not token:
+        raise credentials_exception
+
+    user = await verify_token_for_user(token, db)
+    if user is None or not user.is_active:
+        raise credentials_exception
+    return user
 
 
 async def verify_token_for_user(token: str, db: AsyncSession) -> User | None:
