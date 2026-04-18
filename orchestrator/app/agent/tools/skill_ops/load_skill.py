@@ -60,7 +60,7 @@ async def load_skill_executor(params: dict[str, Any], context: dict[str, Any]) -
         )
 
     try:
-        if skill.source == "db":
+        if skill.source in ("db", "builtin"):
             body = await _fetch_skill_body_from_db(skill.skill_id, context)
         elif skill.source == "file":
             body = await _read_skill_from_container(skill.file_path, context)
@@ -72,6 +72,16 @@ async def load_skill_executor(params: dict[str, Any], context: dict[str, Any]) -
                 message=f"Skill '{skill_name}' has no instructions body",
                 suggestion="The skill may be corrupted or incomplete",
             )
+
+        # Built-in skill bodies are marker templates — resolve them against
+        # live Python sources (Pydantic models, service catalog, validation
+        # constants). Regular DB/file skills pass through unchanged because
+        # their bodies contain no markers.
+        if skill.source == "builtin":
+            from ....services.skill_markers import get_rendered_body
+
+            cache_key = f"skill:{skill.skill_id}" if skill.skill_id else f"skill-name:{skill_name}"
+            body = get_rendered_body(cache_key, body)
 
         result = {
             "message": f"Loaded skill '{skill_name}'",

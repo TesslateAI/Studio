@@ -30,10 +30,14 @@ This context provides information about Tesslate Studio's agent tool system, inc
   - `shell.py` - Open shell in container
   - `__init__.py` - Registration
 
-- `orchestrator/app/agent/tools/project_ops/` - Project metadata and lifecycle
+- `orchestrator/app/agent/tools/project_ops/` - Project metadata, config graph, lifecycle
   - `metadata.py` - get_project_info
-  - `project_control.py` - project_control (container lifecycle management)
+  - `setup_config.py` - apply_setup_config (write `.tesslate/config.json` + replace full graph atomically)
+  - `project_lifecycle.py` - project_start, project_stop, project_restart
+  - `container_lifecycle.py` - container_start, container_stop, container_restart
+  - `project_control.py` - project_control (observation only: status, container_logs, health_check)
   - `kanban.py` - kanban (board/task/column management with TSK-NNNN refs)
+  - `_helpers.py` - shared lookup helpers (lookup_container_by_name, fetch_project, etc.)
 
 - `orchestrator/app/agent/tools/planning_ops/` - Task planning
   - `todos.py` - todo_read, todo_write
@@ -65,7 +69,7 @@ This context provides information about Tesslate Studio's agent tool system, inc
 |----------|-------|-------|
 | **File Operations** | 4 | `file_ops/read_write.py`, `file_ops/edit.py` |
 | **Shell Operations** | 4 | `shell_ops/bash.py`, `shell_ops/session.py`, `shell_ops/execute.py` |
-| **Project Operations** | 3 | `project_ops/metadata.py`, `project_ops/project_control.py`, `project_ops/kanban.py` |
+| **Project Operations** | 9 | `project_ops/metadata.py`, `project_ops/setup_config.py`, `project_ops/project_lifecycle.py`, `project_ops/container_lifecycle.py`, `project_ops/project_control.py`, `project_ops/kanban.py` |
 | **Planning Operations** | 2 | `planning_ops/todos.py` |
 | **Web Operations** | 3 | `web_ops/fetch.py`, `web_ops/search.py`, `web_ops/send_message.py` |
 | **Skill Operations** | 1 | `skill_ops/load_skill.py` |

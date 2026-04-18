@@ -621,13 +621,14 @@ TESSLATE_SKILLS = [
     {
         "name": "Project Architecture",
         "slug": "project-architecture",
-        "description": "Understand and modify .tesslate/config.json — project containers, services, connections, env vars, and lifecycle control",
+        "description": "Full reference for .tesslate/config.json — schema, validation rules, service catalog, connections, deployments, and lifecycle tools",
         "long_description": (
-            "Tesslate skill that teaches agents the full .tesslate/config.json schema, "
-            "how to safely modify project architecture (add services, change ports, "
-            "wire connections), and control container lifecycle (restart, status, logs). "
-            "Loaded on-demand when users ask about project structure, containers, "
-            "ports, services, databases, or environment configuration."
+            "Canonical reference for Tesslate's project architecture: the "
+            ".tesslate/config.json schema (generated live from Pydantic), "
+            "startup-command validation rules, the infrastructure service "
+            "catalog, connection semantics, deployment provider compatibility, "
+            "URL patterns, and the agent's lifecycle-tool surface. Built-in "
+            "skill — always available to every agent, no install required."
         ),
         "category": "infrastructure",
         "item_type": "skill",
@@ -639,273 +640,90 @@ TESSLATE_SKILLS = [
         "is_featured": True,
         "is_active": True,
         "is_published": True,
+        "is_builtin": True,
         "downloads": 0,
         "rating": 5.0,
         "tags": ["infrastructure", "containers", "config", "architecture", "lifecycle"],
         "features": [
-            "Config.json schema reference",
-            "Service management (add/remove/modify)",
-            "Container lifecycle control",
-            "Environment variable management",
-            "Connection wiring",
+            "Config.json JSON Schema (live, from Pydantic)",
+            "Startup command validation rules",
+            "Infrastructure service catalog",
+            "Connection + deployment semantics",
+            "Lifecycle tool reference",
         ],
+        # Body is a marker template. Every ``{{MARKER}}`` is substituted with a
+        # live block rendered from the authoritative Python module at load time
+        # (see orchestrator/app/services/skill_markers.py). Editing the body
+        # here and redeploying is the only way to change what the agent reads.
         "skill_body": (
-            "# Project Architecture — .tesslate/config.json\n\n"
-            "This skill covers the full `.tesslate/config.json` schema, how to safely\n"
-            "modify project architecture, and how to control container lifecycle.\n\n"
+            "# Project Architecture\n\n"
+            "Canonical reference for `.tesslate/config.json`, the file that "
+            "defines a project's containers, connections, deployment targets, "
+            "and preview nodes. Load this skill before authoring or editing "
+            "config; it pairs with the `apply_setup_config` agent tool.\n\n"
             "---\n\n"
-            "## 1. Schema Reference\n\n"
-            "`.tesslate/config.json` is the single source of truth for a project's\n"
-            "services, infrastructure, connections, and deployment targets.\n\n"
-            "### Top-Level Structure\n\n"
-            "```json\n"
-            "{\n"
-            '  "apps": { ... },\n'
-            '  "infrastructure": { ... },\n'
-            '  "connections": [ ... ],\n'
-            '  "deployments": { ... },\n'
-            '  "previews": { ... },\n'
-            '  "primaryApp": "frontend"\n'
-            "}\n"
-            "```\n\n"
-            "### `apps` — Application Services\n\n"
-            "Each key is the service name. Fields:\n\n"
-            "| Field | Type | Default | Description |\n"
-            "|-------|------|---------|-------------|\n"
-            "| `directory` | string | `\".\"` | Working directory relative to project root |\n"
-            "| `port` | int or null | `3000` | Port the app listens on |\n"
-            "| `start` | string | `\"\"` | Startup command (validated for security) |\n"
-            "| `build` | string or null | `null` | Build command (e.g. `npm run build`) |\n"
-            "| `output` | string or null | `null` | Build output directory |\n"
-            "| `framework` | string or null | `null` | Framework hint (e.g. `nextjs`, `vite`) |\n"
-            "| `env` | object | `{}` | Environment variables as key-value pairs |\n"
-            "| `exports` | object | `{}` | Values exported to other services via connections |\n"
-            "| `x`, `y` | float or null | `null` | Canvas position (UI layout only) |\n\n"
-            "### `infrastructure` — Infrastructure Services\n\n"
-            "Databases, caches, message queues, and external services.\n\n"
-            "| Field | Type | Default | Description |\n"
-            "|-------|------|---------|-------------|\n"
-            "| `image` | string | `\"\"` | Docker image (e.g. `postgres:16-alpine`) |\n"
-            "| `port` | int | `5432` | Service port |\n"
-            "| `env` | object | `{}` | Environment variables |\n"
-            "| `exports` | object | `{}` | Values exported to connected services |\n"
-            "| `type` | string | `\"container\"` | `\"container\"` or `\"external\"` |\n"
-            "| `provider` | string or null | `null` | For external services (e.g. `supabase`) |\n"
-            "| `endpoint` | string or null | `null` | For external services |\n"
-            "| `x`, `y` | float or null | `null` | Canvas position |\n\n"
-            "### `connections` — Service Wiring\n\n"
-            "Array of `{\"from\": \"<source>\", \"to\": \"<target>\"}` objects.\n"
-            "Connections declare dependencies and control startup ordering.\n\n"
-            "### `deployments` — Deployment Targets\n\n"
-            "| Field | Type | Description |\n"
-            "|-------|------|-------------|\n"
-            "| `provider` | string | `vercel`, `netlify`, `cloudflare` |\n"
-            "| `targets` | string[] | App names to deploy |\n"
-            "| `env` | object | Deployment-specific env vars |\n"
-            "| `x`, `y` | float or null | Canvas position |\n\n"
-            "### `previews` — Browser Preview Nodes\n\n"
-            "| Field | Type | Description |\n"
-            "|-------|------|-------------|\n"
-            "| `target` | string | App name to preview |\n"
-            "| `x`, `y` | float or null | Canvas position |\n\n"
-            "### `primaryApp`\n\n"
-            "String. Name of the default app (must exist in `apps`). Used as the\n"
-            "main preview target. If missing or invalid, the first app is used.\n\n"
-            "### Full Example — Multi-Service Project\n\n"
-            "```json\n"
-            "{\n"
-            '  "apps": {\n'
-            '    "frontend": {\n'
-            '      "directory": ".",\n'
-            '      "port": 3000,\n'
-            '      "start": "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000",\n'
-            '      "build": "npm run build",\n'
-            '      "output": ".next/standalone",\n'
-            '      "framework": "nextjs",\n'
-            '      "env": {\n'
-            '        "DATABASE_URL": "postgresql://postgres:postgres@postgres:5432/app",\n'
-            '        "REDIS_URL": "redis://redis:6379"\n'
-            "      }\n"
-            "    },\n"
-            '    "api": {\n'
-            '      "directory": "api",\n'
-            '      "port": 8000,\n'
-            '      "start": "pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000",\n'
-            '      "framework": "fastapi",\n'
-            '      "env": {\n'
-            '        "DATABASE_URL": "postgresql://postgres:postgres@postgres:5432/app"\n'
-            "      }\n"
-            "    }\n"
-            "  },\n"
-            '  "infrastructure": {\n'
-            '    "postgres": {\n'
-            '      "image": "postgres:16-alpine",\n'
-            '      "port": 5432,\n'
-            '      "env": {\n'
-            '        "POSTGRES_USER": "postgres",\n'
-            '        "POSTGRES_PASSWORD": "postgres",\n'
-            '        "POSTGRES_DB": "app"\n'
-            "      }\n"
-            "    },\n"
-            '    "redis": {\n'
-            '      "image": "redis:7-alpine",\n'
-            '      "port": 6379\n'
-            "    }\n"
-            "  },\n"
-            '  "connections": [\n'
-            '    {"from": "frontend", "to": "postgres"},\n'
-            '    {"from": "frontend", "to": "redis"},\n'
-            '    {"from": "api", "to": "postgres"}\n'
-            "  ],\n"
-            '  "primaryApp": "frontend"\n'
-            "}\n"
-            "```\n\n"
+            "## 1. Config shape\n\n"
+            "Full JSON Schema (generated from the Pydantic request model — "
+            "matches exactly what `apply_setup_config` accepts):\n\n"
+            "{{TESSLATE_CONFIG_SCHEMA}}\n\n"
             "---\n\n"
-            "## 2. Validation Rules\n\n"
-            "All `start` commands are security-validated before execution.\n\n"
-            "### Blocked Dangerous Patterns\n\n"
-            "The following patterns are **always rejected**:\n\n"
-            "- `rm -rf /` — filesystem destruction\n"
-            "- `curl|sh`, `wget|sh` — download-and-execute\n"
-            "- `nc -l` — netcat listener / reverse shell\n"
-            "- `dd if=/dev/zero` — disk fill\n"
-            "- `eval $(...)` — eval with command substitution\n"
-            "- `sudo`, `su` — privilege escalation\n"
-            "- `docker` — docker-in-docker\n"
-            "- `chmod 777 /`, `chown ... /` — system file permission changes\n"
-            "- `$(curl`, `$(wget` — command substitution with network\n"
-            "- `> /dev/sda`, `> /proc/` — device/proc writes\n"
-            "- `iptables`, `setuid`, `passwd` — system modification\n"
-            "- Fork bombs, `/dev/tcp/`, `mkfifo...nc` — shell exploits\n\n"
-            "### Safe Command Prefixes (Whitelist)\n\n"
-            "Commands must start with one of these prefixes:\n\n"
-            "- **Node.js**: `npm`, `node`, `npx`, `yarn`, `pnpm`, `bun`, `bunx`\n"
-            "- **Python**: `python`, `python3`, `pip`, `pip3`, `uv`, `uvicorn`, "
-            "`gunicorn`, `flask`, `poetry`\n"
-            "- **Go**: `go`, `air`\n"
-            "- **Rust**: `cargo`, `rustc`\n"
-            "- **Java**: `java`, `mvn`, `gradle`\n"
-            "- **.NET**: `dotnet`\n"
-            "- **Ruby**: `ruby`, `bundle`, `rails`\n"
-            "- **PHP**: `php`, `composer`\n"
-            "- **Shell**: `cd`, `ls`, `echo`, `sleep`, `cat`, `mkdir`, `cp`, `mv`\n"
-            "- **Control flow**: `if`, `for`, `while`, `test`, `[`\n\n"
-            "### Other Constraints\n\n"
-            "- Max command length: **10,000 characters**\n"
-            "- All `start` commands **MUST bind to `0.0.0.0`** (not `localhost` or "
-            "`127.0.0.1`), otherwise the service is unreachable from outside the container.\n"
-            "- Commands are split on `&&`, `||`, `;`, `|` and each segment is validated.\n\n"
+            "## 2. Container types\n\n"
+            "{{CONTAINER_TYPES}}\n\n"
             "---\n\n"
-            "## 3. Modification Workflow\n\n"
-            "Follow these steps to modify project architecture:\n\n"
-            "1. **Read current config:**\n"
-            "   ```\n"
-            '   read_file(".tesslate/config.json")\n'
-            "   ```\n\n"
-            "2. **Plan changes** — decide what to add/modify/remove.\n\n"
-            "3. **Write updated config:**\n"
-            "   ```\n"
-            '   write_file(".tesslate/config.json", updated_json)\n'
-            "   ```\n"
-            "   Writing the config auto-syncs Container database records via the\n"
-            "   `setup-config` endpoint.\n\n"
-            "4. **Restart affected containers:**\n"
-            "   ```\n"
-            '   project_control(action="restart_container", container_name="api")\n'
-            "   ```\n\n"
-            "5. **Verify health:**\n"
-            "   ```\n"
-            '   project_control(action="health_check", container_name="api")\n'
-            "   ```\n\n"
-            "**Important:** Always read before writing. Never blindly overwrite the config.\n\n"
+            "## 3. Startup command validation\n\n"
+            "{{STARTUP_COMMAND_RULES}}\n\n"
             "---\n\n"
-            "## 4. Common Operations\n\n"
-            "### Adding a Database (PostgreSQL)\n\n"
-            "1. Add to `infrastructure`:\n"
-            "   ```json\n"
-            '   "postgres": {\n'
-            '     "image": "postgres:16-alpine",\n'
-            '     "port": 5432,\n'
-            '     "env": {\n'
-            '       "POSTGRES_USER": "postgres",\n'
-            '       "POSTGRES_PASSWORD": "postgres",\n'
-            '       "POSTGRES_DB": "mydb"\n'
-            "     }\n"
-            "   }\n"
-            "   ```\n"
-            "2. Add connection: `{\"from\": \"frontend\", \"to\": \"postgres\"}`\n"
-            "3. Add env var to app:\n"
-            '   `"DATABASE_URL": "postgresql://postgres:postgres@postgres:5432/mydb"`\n'
-            "4. Restart the app container.\n\n"
-            "### Adding Redis\n\n"
-            "1. Add to `infrastructure`:\n"
-            "   ```json\n"
-            '   "redis": {\n'
-            '     "image": "redis:7-alpine",\n'
-            '     "port": 6379\n'
-            "   }\n"
-            "   ```\n"
-            "2. Add connection from the consuming app.\n"
-            "3. Add `REDIS_URL` env var: `\"redis://redis:6379\"`\n\n"
-            "### Changing a Startup Command\n\n"
-            "1. Update the `start` field in the app.\n"
-            "2. Ensure the command binds to `0.0.0.0`.\n"
-            "3. Restart the container.\n\n"
-            "### Modifying Environment Variables\n\n"
-            "1. Update the `env` object in the app or infrastructure service.\n"
-            "2. Restart the affected container.\n\n"
-            "### Changing Ports\n\n"
-            "1. Update the `port` field.\n"
-            "2. Update any `start` command that references the port.\n"
-            "3. Update env vars in connected services that reference the old port.\n"
-            "4. Restart the container.\n\n"
-            "### Adding a Connection\n\n"
-            "1. Add `{\"from\": \"<source>\", \"to\": \"<target>\"}` to `connections`.\n"
-            "2. Add relevant env vars to the source service so it knows how to reach\n"
-            "   the target (e.g., connection string, host/port).\n\n"
-            "### Adding a New App Service\n\n"
-            "1. Add to `apps` with `directory`, `port`, `start`, and `framework`.\n"
-            "2. Wire connections to any infrastructure it depends on.\n"
-            "3. Add env vars for connection strings.\n"
-            "4. Consider updating `primaryApp` if this should be the default.\n\n"
+            "## 4. Infrastructure service catalog\n\n"
+            "{{SERVICE_CATALOG}}\n\n"
             "---\n\n"
-            "## 5. Lifecycle Control\n\n"
-            "Use the `project_control` tool to manage running containers.\n\n"
-            "| Action | Description | Example |\n"
-            "|--------|-------------|---------|\n"
-            '| `status` | Get all container statuses and URLs | `project_control(action="status")` |\n'
-            '| `restart_container` | Restart a single container by name | `project_control(action="restart_container", container_name="api")` |\n'
-            '| `restart_all` | Restart all containers in the project | `project_control(action="restart_all")` |\n'
-            '| `reload_config` | Re-sync config.json to database | `project_control(action="reload_config")` |\n'
-            '| `container_logs` | View last 100 lines of logs | `project_control(action="container_logs", container_name="api")` |\n'
-            '| `health_check` | HTTP health check on a container | `project_control(action="health_check", container_name="api")` |\n\n'
-            "**Typical workflow after config changes:**\n"
-            "1. Write updated config.json\n"
-            "2. `reload_config` to sync DB records\n"
-            "3. `restart_container` for each affected service\n"
-            "4. `health_check` to verify services are healthy\n"
-            "5. `container_logs` if health check fails\n\n"
+            "## 5. Connection semantics\n\n"
+            "{{CONNECTION_SEMANTICS}}\n\n"
             "---\n\n"
-            "## 6. Dependency Ordering\n\n"
-            "- Infrastructure services (databases, caches) start **before** app services.\n"
-            "- The platform uses `connections` to determine startup order automatically.\n"
-            "- When adding a new dependency, **always add the connection** so the platform\n"
-            "  knows to start the dependency first.\n"
-            "- If an app fails to start because a database is not ready, the platform\n"
-            "  retries with backoff based on the connection graph.\n\n"
+            "## 6. Deployment target compatibility\n\n"
+            "{{DEPLOYMENT_COMPATIBILITY}}\n\n"
             "---\n\n"
-            "## 7. Platform Notes\n\n"
-            "- Config works identically in Docker and Kubernetes modes. Do not add\n"
-            "  platform-specific conditional logic.\n"
-            "- URLs are auto-generated by the platform (e.g., `<container>.localhost`\n"
-            "  in Docker, `<container>.<domain>` in Kubernetes). Never hardcode URLs.\n"
-            "- Infrastructure service names in config become the hostname for\n"
-            "  inter-container networking (e.g., `postgres` resolves to the PostgreSQL\n"
-            "  container).\n"
-            "- The `exports` field lets a service expose values to connected services\n"
-            "  for automatic env-var injection.\n"
-            "- The `x` and `y` fields are for the visual architecture canvas only;\n"
-            "  they have no effect on runtime behavior.\n"
+            "## 7. URL patterns\n\n"
+            "{{URL_PATTERNS}}\n\n"
+            "---\n\n"
+            "## 8. Lifecycle tools\n\n"
+            "{{LIFECYCLE_TOOLS}}\n\n"
+            "---\n\n"
+            "## 9. Common workflows\n\n"
+            "### Add a database to an existing app\n\n"
+            "1. Load this skill (you're here).\n"
+            "2. Pick the service from the catalog — usually `postgres` or `redis`.\n"
+            "3. Call `apply_setup_config` with the updated config:\n"
+            "   - Add the service under `infrastructure`.\n"
+            "   - Add a `connections` entry from the app to the service.\n"
+            "4. Call `container_start` (or `project_start` if nothing is running) "
+            "to bring the service online.\n"
+            "5. Call `container_restart(container_name=<app>)` so the app picks "
+            "up the injected env vars.\n"
+            "6. Verify with `project_control(action=\"health_check\", "
+            "container_name=<app>)`.\n\n"
+            "### Change a startup command\n\n"
+            "1. Read `.tesslate/config.json` to get the current config.\n"
+            "2. Modify the `apps.<name>.start` field. **Bind to `0.0.0.0`**, "
+            "use only whitelisted command prefixes, stay under 10,000 chars.\n"
+            "3. Call `apply_setup_config` with the full updated config.\n"
+            "4. Call `container_restart(container_name=<app>)`.\n\n"
+            "### Full-stack restart after env var changes\n\n"
+            "1. `apply_setup_config` with updated `env` values.\n"
+            "2. `project_restart()` — one call does stop + start for every "
+            "container.\n\n"
+            "---\n\n"
+            "## 10. Rules of thumb\n\n"
+            "- **Read the current config before editing.** Never blindly write "
+            "a full config from memory — you'll drop fields the user added.\n"
+            "- **`apply_setup_config` replaces the full graph.** Containers/"
+            "connections/deployments/previews not present in the payload are "
+            "deleted. Always pass the complete desired state.\n"
+            "- **Never hard-code URLs.** The orchestrator derives them from "
+            "container names + app domain (see URL patterns above). Use the "
+            "injected env vars (from `connection_template`) instead.\n"
+            "- **`x` and `y` are canvas-only.** They don't affect runtime.\n"
+            "- **`primaryApp` must match an entry in `apps`** — Pydantic "
+            "validator rejects mismatches.\n"
         ),
     },
 ]

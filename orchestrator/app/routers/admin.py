@@ -970,6 +970,10 @@ async def update_agent(
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
 
+        # Built-in skills are seed-managed — no UI edit path.
+        from .marketplace import _reject_if_builtin
+        _reject_if_builtin(agent)
+
         # Check if admin can edit this agent
         if not can_edit_agent(agent):
             raise HTTPException(
@@ -977,8 +981,13 @@ async def update_agent(
                 detail="Cannot edit user-created or forked agents. Only Tesslate-created agents can be edited.",
             )
 
-        # Update fields that were provided
+        # Update fields that were provided. Strip ``is_builtin`` defensively:
+        # the AgentUpdate Pydantic schema doesn't declare the field (Pydantic
+        # v2 default ``extra='ignore'`` drops unknown keys), but in case
+        # ``exclude_unset`` ever leaks a value we pop it before the setattr
+        # loop so admin payloads can't flip the flag.
         update_data = agent_data.dict(exclude_unset=True)
+        update_data.pop("is_builtin", None)
         for field, value in update_data.items():
             setattr(agent, field, value)
 
@@ -1019,6 +1028,11 @@ async def delete_agent(
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
 
+        # Built-in skills are seed-managed — they cannot be deleted from the
+        # UI. Re-run the seed to remove or edit.
+        from .marketplace import _reject_if_builtin
+        _reject_if_builtin(agent)
+
         # Check if admin can delete this agent
         if not can_edit_agent(agent):
             raise HTTPException(
@@ -1056,6 +1070,12 @@ async def remove_from_marketplace(
 
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Built-in skills are seed-managed — toggling them from the UI would
+        # desync the deployed catalog from the seed template until the next
+        # orchestrator restart.
+        from .marketplace import _reject_if_builtin
+        _reject_if_builtin(agent)
 
         agent.is_active = False
         agent.updated_at = datetime.utcnow()
@@ -1096,6 +1116,10 @@ async def restore_to_marketplace(
 
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Built-in skills' is_active is owned by seed code.
+        from .marketplace import _reject_if_builtin
+        _reject_if_builtin(agent)
 
         agent.is_active = True
         agent.updated_at = datetime.utcnow()

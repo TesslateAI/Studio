@@ -296,7 +296,12 @@ def render_skills_catalog(skills) -> str:
     lines.append("Use the load_skill tool when a task matches a skill's description.")
     for s in skills:
         if hasattr(s, "source"):
-            tag = "(installed)" if s.source == "db" else f"(project: {s.file_path})"
+            if s.source == "builtin" or getattr(s, "is_builtin", False):
+                tag = "[built-in]"
+            elif s.source == "db":
+                tag = "(installed)"
+            else:
+                tag = f"(project: {s.file_path})"
         else:
             tag = ""
         lines.append(f"- {s.name}: {s.description} {tag}")

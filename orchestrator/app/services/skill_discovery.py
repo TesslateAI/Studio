@@ -1,9 +1,12 @@
 """
 Skill Discovery Service
 
-Discovers available skills from two sources:
-1. Database (MarketplaceAgent with item_type='skill', attached via AgentSkillAssignment)
-2. Project files (.agents/skills/SKILL.md in the user's container)
+Discovers available skills from three sources:
+1. Built-in skills — seeded with ``is_builtin=True`` and auto-available to every
+   agent regardless of AgentSkillAssignment state (e.g. the project-architecture
+   reference skill). Body contains live markers resolved by skill_markers.
+2. Database (MarketplaceAgent with item_type='skill', attached via AgentSkillAssignment)
+3. Project files (.agents/skills/SKILL.md in the user's container)
 
 Only loads name + description for progressive disclosure.
 Full skill body is loaded on-demand by the load_skill tool.
@@ -26,9 +29,10 @@ class SkillCatalogEntry:
     """Lightweight skill entry for progressive disclosure catalog."""
     name: str
     description: str
-    source: str  # "db" or "file"
+    source: str  # "builtin" | "db" | "file"
     skill_id: UUID | None = None
     file_path: str | None = None
+    is_builtin: bool = False
 
 
 async def discover_skills(
@@ -52,13 +56,26 @@ async def discover_skills(
         List of SkillCatalogEntry (name + description only, no body)
     """
     skills: list[SkillCatalogEntry] = []
+    seen_ids: set[UUID] = set()
 
-    # Source A: DB skills attached to this agent via AgentSkillAssignment
+    # Source A (priority): built-in skills — always available to every agent.
+    builtin_skills = await _discover_builtin_skills(db)
+    for s in builtin_skills:
+        skills.append(s)
+        if s.skill_id is not None:
+            seen_ids.add(s.skill_id)
+
+    # Source B: DB skills attached to this agent via AgentSkillAssignment.
+    # De-dupe against built-ins — a user who explicitly installed a built-in
+    # appears in both sources; show it once (with the built-in marker).
     if agent_id:
         db_skills = await _discover_db_skills(agent_id, user_id, db)
-        skills.extend(db_skills)
+        for s in db_skills:
+            if s.skill_id is not None and s.skill_id in seen_ids:
+                continue
+            skills.append(s)
 
-    # Source B: Project file-based skills from container
+    # Source C: Project file-based skills from container
     if container_name and project_id:
         file_skills = await _discover_file_skills(user_id, project_id, container_name)
         skills.extend(file_skills)
@@ -66,11 +83,50 @@ async def discover_skills(
     if skills:
         logger.info(
             f"Discovered {len(skills)} skills "
-            f"({sum(1 for s in skills if s.source == 'db')} DB, "
+            f"({sum(1 for s in skills if s.source == 'builtin')} built-in, "
+            f"{sum(1 for s in skills if s.source == 'db')} DB, "
             f"{sum(1 for s in skills if s.source == 'file')} file)"
         )
 
     return skills
+
+
+async def _discover_builtin_skills(db: AsyncSession) -> list[SkillCatalogEntry]:
+    """Discover every skill seeded with ``is_builtin=True``.
+
+    Safe by construction: the column is only written by ``seeds/skills.py``.
+    No user-facing Pydantic request schema exposes the field, so user payloads
+    can't flip it, and mutation endpoints reject attempts to edit built-in
+    rows via ``_reject_if_builtin``.
+    """
+    try:
+        from ..models import MarketplaceAgent
+
+        result = await db.execute(
+            select(
+                MarketplaceAgent.id,
+                MarketplaceAgent.name,
+                MarketplaceAgent.description,
+            ).where(
+                MarketplaceAgent.is_builtin.is_(True),
+                MarketplaceAgent.is_active.is_(True),
+                MarketplaceAgent.item_type == "skill",
+            )
+        )
+        rows = result.all()
+        return [
+            SkillCatalogEntry(
+                name=row.name,
+                description=row.description,
+                source="builtin",
+                skill_id=row.id,
+                is_builtin=True,
+            )
+            for row in rows
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to discover built-in skills: {e}")
+        return []
 
 
 async def _discover_db_skills(

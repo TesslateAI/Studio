@@ -12,7 +12,7 @@ Load this context when:
 - Modifying how project containers are configured or started
 - Debugging container creation or startup failures
 - Changing the config parsing or validation logic
-- Working on the agent's auto-sync behavior for config writes
+- Changing the graph-sync flow invoked by `apply_setup_config` or the `POST /setup-config` route
 
 ## Schema Reference
 
@@ -102,10 +102,12 @@ Load this context when:
 | File | Purpose |
 |------|---------|
 | `orchestrator/app/services/base_config_parser.py` | Parsing, validation, security checks |
+| `orchestrator/app/services/config_sync.py` | `sync_project_config()` — full-graph DB sync used by both the HTTP route and the agent tool |
 | `orchestrator/app/services/project_setup/config_resolver.py` | Multi-source resolution (filesystem, volume, LLM, fallback) |
-| `orchestrator/app/routers/projects.py` | GET/POST `/setup-config` endpoints |
-| `orchestrator/app/agent/tools/file_ops/read_write.py` | Agent `write_file` auto-sync (lines 158-212) |
-| `orchestrator/app/agent/tools/project_ops/project_control.py` | Agent lifecycle tool with `reload_config` action |
+| `orchestrator/app/routers/projects.py` | GET/POST `/setup-config` endpoints (thin wrapper over `sync_project_config`) |
+| `orchestrator/app/agent/tools/project_ops/setup_config.py` | Agent `apply_setup_config` tool — the canonical way for agents to edit config. `config` parameter carries `TesslateConfigCreate.model_json_schema()` directly. |
+| `orchestrator/app/services/skill_markers.py` | Live marker renderers used by the built-in `project-architecture` skill (schema, service catalog, validation rules, deployment matrix, URL patterns, lifecycle tools). |
+| `orchestrator/app/seeds/skills.py` | Built-in `project-architecture` skill — `is_builtin=True`, body contains `{{MARKER}}` tokens resolved at load time. |
 
 ## Data Flow
 
@@ -115,17 +117,17 @@ Load this context when:
 4. Orchestrator reads Container records to generate Docker Compose YAML or K8s Deployments + Services
 5. Containers started with `startup_command` from config (prefixed with dependency install check)
 
-## Auto-Sync Behavior
+## Graph-Sync Behavior
 
-When the agent writes `.tesslate/config.json` via the `write_file` tool, Container records are automatically synced to the database inline during the write operation. The sync logic in `read_write.py` (lines 158-212):
+The canonical path for mutating the project graph is `sync_project_config()` in `orchestrator/app/services/config_sync.py`. Both the HTTP route (`POST /{slug}/setup-config`) and the agent tool (`apply_setup_config`) call it. A single call atomically:
 
-1. Detects the file path ends with `.tesslate/config.json`
-2. Parses the written content with `parse_tesslate_config()`
-3. Upserts Container records for each app and infrastructure entry
-4. Deletes orphaned Container records no longer in the config
-5. Commits the transaction
+1. Validates every startup command (`validate_startup_command`)
+2. Writes `.tesslate/config.json` to the project filesystem (docker: direct; K8s: via orchestrator FileOps)
+3. Upserts app + infrastructure containers; deletes orphans not in the config
+4. Full-replaces `ContainerConnection`, `DeploymentTarget`, `DeploymentTargetConnection`, and `BrowserPreview` records
+5. Commits in one transaction and returns the resulting container IDs
 
-The `reload_config` action in `project_control.py` provides a manual trigger for the same sync when the config was written outside the agent.
+Agents **must not** use `write_file` for `.tesslate/config.json` — the previous silent auto-sync only touched app containers (skipping infra/connections/deployments/previews) and swallowed validation errors, so it was removed. `write_file` now just writes the file; use `apply_setup_config` to commit graph changes.
 
 ## Security Validation
 
@@ -149,4 +151,4 @@ All startup commands pass through `validate_startup_command()`:
 
 - [skill-discovery.md](skill-discovery.md) -- Skill system that includes "Project Architecture" skill
 - [orchestration.md](orchestration.md) -- Container orchestration (Docker and K8s)
-- [../agent/tools/project-control.md](../agent/tools/project-control.md) -- Agent lifecycle tool with `reload_config`
+- [../agent/tools/project-control.md](../agent/tools/project-control.md) -- Agent lifecycle & config tools (`apply_setup_config`, `project_start/stop/restart`, `container_start/stop/restart`, observation-only `project_control`)

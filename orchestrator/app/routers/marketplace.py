@@ -45,6 +45,32 @@ def _resolve_display_name(user: User) -> str:
     return resolve_display_name(user.name, user.username, user.email)
 
 
+def _reject_if_builtin(agent: MarketplaceAgent) -> None:
+    """Guard — refuse to mutate built-in skill rows via user/admin endpoints.
+
+    Built-in skills (``is_builtin=True``) are managed exclusively by seed
+    code (``orchestrator/app/seeds/skills.py``). Any edit to a built-in via
+    the UI would (a) be silently overwritten on the next orchestrator
+    startup when the idempotent seed reruns, or (b) drift the deployed
+    state away from what the seed template + live marker renderers produce.
+
+    Callers that allow forking (which creates a NEW row with
+    ``is_builtin=False``) should still call this on the *source* row before
+    the user-owned path — the fork endpoint itself already handles this
+    correctly by not mutating the parent.
+    """
+    if getattr(agent, "is_builtin", False):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Built-in skills are managed in seed code "
+                "(orchestrator/app/seeds/skills.py). Edit the seed and "
+                "redeploy. Users can fork built-in skills to create editable "
+                "copies."
+            ),
+        )
+
+
 # Cache TTL for LiteLLM models (5 minutes - models rarely change)
 _MODELS_CACHE_TTL = 300
 
@@ -1254,6 +1280,7 @@ async def fork_agent(
         is_featured=False,
         is_active=True,
         is_published=False,  # Not published to marketplace by default
+        is_builtin=False,  # Forks are never built-ins; built-ins are seed-only
     )
 
     db.add(forked_agent)
@@ -1365,12 +1392,21 @@ async def update_custom_agent(
     Update a custom or forked agent.
     For open source agents not owned by user, creates a fork with the changes.
     """
+    # Security: strip out fields that must only be set by trusted server code.
+    # ``is_builtin`` is a seed-only flag; even if a future refactor splats
+    # ``update_data`` into ``setattr()`` we guarantee user payloads cannot
+    # flip it.
+    update_data.pop("is_builtin", None)
+
     # Get the agent
     result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
     agent = result.scalar_one_or_none()
 
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Built-in skills are immutable via the UI — edits live in seed code.
+    _reject_if_builtin(agent)
 
     # Check if user owns this agent (created/forked by them)
     is_owner = agent.forked_by_user_id == current_user.id
@@ -1428,6 +1464,7 @@ async def update_custom_agent(
                 is_featured=False,
                 is_active=True,
                 is_published=False,
+                is_builtin=False,  # Forks are never built-ins; built-ins are seed-only
             )
 
             db.add(forked_agent)
@@ -2100,6 +2137,9 @@ async def delete_custom_agent(
 
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Built-ins are seed-managed; refuse deletion regardless of ownership.
+    _reject_if_builtin(agent)
 
     # Verify ownership
     if agent.forked_by_user_id != current_user.id:

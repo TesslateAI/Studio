@@ -1030,6 +1030,12 @@ class MarketplaceAgent(Base):
     # Skill-specific field (item_type='skill')
     skill_body = Column(Text, nullable=True)  # Full SKILL.md body (after frontmatter)
 
+    # Built-in flag — True only for rows created by seed code. Users cannot set
+    # this field (no Pydantic schema exposes it). Built-ins are immutable via
+    # user/admin UI endpoints and are auto-discovered for every agent regardless
+    # of AgentSkillAssignment. See services/skill_discovery.py + seeds/skills.py.
+    is_builtin = Column(Boolean, nullable=False, server_default="false", default=False)
+
 
 class AgentSkillAssignment(Base):
     """Tracks which skills are attached to which agents per user."""
