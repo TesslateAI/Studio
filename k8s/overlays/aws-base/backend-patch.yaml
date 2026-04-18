@@ -83,6 +83,11 @@ spec:
             # Feature flags
             - name: DEPLOYMENT_ENV
               value: "production"
+            # Tesslate Apps — short image names in manifests (e.g.
+            # "tesslate-markitdown:latest") get prefixed with this ECR host so
+            # EKS nodes can pull. Minikube leaves this empty.
+            - name: APP_IMAGE_REGISTRY_PREFIX
+              value: "<ECR_REGISTRY>"
             # Cookies
             - name: COOKIE_SECURE
               value: "true"

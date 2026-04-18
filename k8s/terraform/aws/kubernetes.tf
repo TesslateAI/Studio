@@ -206,6 +206,26 @@ resource "kubernetes_secret" "s3_credentials" {
 }
 
 # -----------------------------------------------------------------------------
+# Llama API credentials — shared by seeded Tesslate Apps (crm-demo,
+# crm-with-postgres, deer-flow, mirofish) that call an OpenAI-compatible
+# LLM gateway directly. Referenced from app manifests via
+# ${secret:llama-api-credentials/api_key} and propagated into the project
+# namespace at compute time by secret_propagator.py.
+# -----------------------------------------------------------------------------
+resource "kubernetes_secret" "llama_api_credentials" {
+  metadata {
+    name      = "llama-api-credentials"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  data = {
+    api_key = var.llama_api_key
+  }
+
+  type = "Opaque"
+}
+
+# -----------------------------------------------------------------------------
 # Application Secrets
 # -----------------------------------------------------------------------------
 resource "kubernetes_secret" "app_secrets" {

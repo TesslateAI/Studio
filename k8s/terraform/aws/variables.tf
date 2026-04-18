@@ -663,6 +663,13 @@ variable "azure_api_version" {
   default     = "2024-12-01-preview"
 }
 
+variable "llama_api_key" {
+  description = "Llama API key for seeded Tesslate Apps that call LLMs directly (crm-demo, crm-with-postgres, deer-flow, mirofish). Stored as the llama-api-credentials k8s secret in the tesslate namespace. Leave empty to skip — those seeded apps will not have a usable LLM key."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # -----------------------------------------------------------------------------
 # Redis / ElastiCache Configuration
 # -----------------------------------------------------------------------------

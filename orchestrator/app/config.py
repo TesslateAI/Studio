@@ -689,6 +689,14 @@ class Settings(BaseSettings):
     # auto-yank is skipped and the failure is logged instead.
     platform_admin_user_id: str = ""
 
+    # Tesslate Apps — registry prefix applied to short image names in app
+    # manifests (e.g. "tesslate-markitdown:latest"). Empty on minikube where
+    # images live in the node's docker daemon directly. On AWS/other clouds
+    # set to e.g. "<ECR_REGISTRY>" so the
+    # cluster can pull from ECR. Images that already contain "/" (registry
+    # path) are left untouched.
+    app_image_registry_prefix: str = ""
+
     class Config:
         # For Docker Compose: environment variables are passed directly
         # For native development: looks for .env in parent directory (project root)
@@ -718,5 +726,5 @@ def _assert_no_auto_approve_in_prod(settings: "Settings") -> None:
     if is_auto_approve_enabled():
         raise RuntimeError(
             "TSL_APPS_DEV_AUTO_APPROVE must not be set in HTTPS/production "
-            "deployments (app_base_url=%r)." % settings.app_base_url
+            f"deployments (app_base_url={settings.app_base_url!r})."
         )

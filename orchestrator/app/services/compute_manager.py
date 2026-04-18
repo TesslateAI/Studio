@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Per-request app_instance_id, set by callers (e.g. app_runtime_status.start)
 # so compute lifecycle events can be fanned out to the SSE stream for the
 # corresponding AppInstance. None for non-app-backed projects.
-current_app_instance_id: ContextVar["UUID | None"] = ContextVar(
+current_app_instance_id: ContextVar[UUID | None] = ContextVar(
     "current_app_instance_id", default=None
 )
 
@@ -54,9 +54,7 @@ async def _persist_failed_state(project_id: UUID, container_ids: list[UUID]) -> 
                 proj.active_compute_pod = None
             if container_ids:
                 await db.execute(
-                    update(Container)
-                    .where(Container.id.in_(container_ids))
-                    .values(status="failed")
+                    update(Container).where(Container.id.in_(container_ids)).values(status="failed")
                 )
             await db.commit()
     except Exception:  # noqa: BLE001
@@ -1059,9 +1057,7 @@ class ComputeManager:
             # Previous teardown still in progress (e.g., hand-deleted
             # namespace, reaper). Wait briefly for GC to finish, then fall
             # through to cold bootstrap on the next iteration.
-            logger.info(
-                "[COMPUTE-T2] Namespace %s is Terminating — waiting up to 30s", namespace
-            )
+            logger.info("[COMPUTE-T2] Namespace %s is Terminating — waiting up to 30s", namespace)
             for _ in range(15):
                 await asyncio.sleep(2)
                 try:
@@ -1072,24 +1068,18 @@ class ComputeManager:
                         break
                     raise
             else:
-                raise RuntimeError(
-                    f"Namespace {namespace} stuck Terminating — retry shortly"
-                )
+                raise RuntimeError(f"Namespace {namespace} stuck Terminating — retry shortly")
 
         if ns_phase == "active":
             await send_progress("creating_namespace", "Waking environment...", 20)
-            patched = await self._scale_project_deployments(
-                namespace, project.id, replicas=1
-            )
+            patched = await self._scale_project_deployments(namespace, project.id, replicas=1)
             if patched > 0:
                 logger.info(
                     "[COMPUTE-T2] Warm-start: scaled %d deployments in %s to 1",
                     patched,
                     namespace,
                 )
-                await send_progress(
-                    "verifying_pods", "Waking container...", 60
-                )
+                await send_progress("verifying_pods", "Waking container...", 60)
 
                 # Wait for at least one dev pod to reach Running (same
                 # polling loop as cold bootstrap). Up to 60s.
@@ -1098,9 +1088,7 @@ class ComputeManager:
                     pod_list = await asyncio.to_thread(
                         v1.list_namespaced_pod,
                         namespace,
-                        label_selector=(
-                            "tesslate.io/tier=2,tesslate.io/component=dev-container"
-                        ),
+                        label_selector=("tesslate.io/tier=2,tesslate.io/component=dev-container"),
                     )
                     pods = pod_list.items or []
                     if any(
@@ -1131,15 +1119,15 @@ class ComputeManager:
                 from ..config import get_settings
                 from .apps.runtime_urls import (
                     container_url as _container_url,
+                )
+                from .apps.runtime_urls import (
                     resolve_app_url_for_container,
                 )
 
                 _settings = get_settings()
                 container_urls: dict[str, str] = {}
                 dev_containers_for_urls = [
-                    c
-                    for c in containers
-                    if getattr(c, "container_type", "base") != "service"
+                    c for c in containers if getattr(c, "container_type", "base") != "service"
                 ]
                 for c in dev_containers_for_urls:
                     cdir = resolve_k8s_container_dir(c)
@@ -1167,9 +1155,7 @@ class ComputeManager:
                     c.status = "running"
                 await db.commit()
 
-                await send_progress(
-                    "ready", "Environment is ready!", 100, container_status="ready"
-                )
+                await send_progress("ready", "Environment is ready!", 100, container_status="ready")
                 logger.info(
                     "[COMPUTE-T2] Warm-start complete for project %s (%d deployments)",
                     project.slug,
@@ -1316,6 +1302,11 @@ class ComputeManager:
             # Apps-installed service containers may override the catalog image
             # via manifest compute.containers[].image → Container.image.
             effective_svc_image = svc_container.image or service_def.docker_image
+            # Same registry-prefix rule as primary containers below: short
+            # manifest names resolve via ECR on AWS, pass-through on minikube.
+            svc_prefix = (settings.app_image_registry_prefix or "").strip()
+            if svc_prefix and effective_svc_image and "/" not in effective_svc_image:
+                effective_svc_image = f"{svc_prefix.rstrip('/')}/{effective_svc_image}"
             deployment = create_v2_service_deployment(
                 namespace=namespace,
                 project_id=project.id,
@@ -1400,21 +1391,29 @@ class ComputeManager:
             # pre-dates the 0060 migration backfill.
             container_env = container.environment_vars or {}
             legacy_env_image = container_env.get("TSL_CONTAINER_IMAGE")
-            effective_image = (
-                container.image
-                or legacy_env_image
-                or settings.k8s_devserver_image
-            )
+            effective_image = container.image or legacy_env_image or settings.k8s_devserver_image
             # Defensive strip: never let the legacy sentinel reach the pod.
             if legacy_env_image:
-                container_env = {k: v for k, v in container_env.items() if k != "TSL_CONTAINER_IMAGE"}
+                container_env = {
+                    k: v for k, v in container_env.items() if k != "TSL_CONTAINER_IMAGE"
+                }
                 extra_env = {k: v for k, v in extra_env.items() if k != "TSL_CONTAINER_IMAGE"}
+
+            # App manifests ship short image names (e.g. "tesslate-markitdown:latest")
+            # that minikube resolves from the node's docker daemon. On AWS the node
+            # can't pull a short name, so prepend the ECR registry prefix when
+            # configured. Images that already include a registry path ("/") are
+            # left alone (ghcr.io/*, public/*, full ECR refs, etc.).
+            prefix = (settings.app_image_registry_prefix or "").strip()
+            if prefix and effective_image and "/" not in effective_image:
+                effective_image = f"{prefix.rstrip('/')}/{effective_image}"
 
             # Propagate any ${secret:name/key} refs from the platform ns into
             # this project's ns (secretKeyRef is namespace-local). Idempotent.
             try:
                 from .apps.env_resolver import extract_secret_refs
                 from .apps.secret_propagator import propagate_secrets
+
                 combined = {**(container_env or {}), **(extra_env or {})}
                 refs = extract_secret_refs(combined)
                 if refs:
@@ -1461,8 +1460,9 @@ class ComputeManager:
             # for single-container apps). Non-app projects and apps without
             # handles fall back to the legacy slug-based shape.
             from .apps.runtime_urls import (
-                app_container_url,
                 container_url as _container_url,
+            )
+            from .apps.runtime_urls import (
                 resolve_app_url_for_container,
             )
 

@@ -396,13 +396,21 @@ case "$COMMAND" in
             [devserver]="orchestrator/Dockerfile.devserver"
             [compute]="services/btrfs-csi/Dockerfile"
             [ast]="services/ast/Dockerfile"
+            # Seeded Tesslate Apps — external images mirrored to ECR so EKS
+            # nodes can pull (short names in manifests get prefixed via
+            # APP_IMAGE_REGISTRY_PREFIX at install time). mirofish is pulled
+            # directly from public ghcr.io and doesn't need a build entry.
+            [markitdown]="seeds/apps/markitdown/Dockerfile"
+            [deerflow]="seeds/apps/deer-flow/Dockerfile"
         )
         declare -A BUILD_CONTEXTS=(
-            [backend]="orchestrator/"
+            [backend]="."
             [frontend]="app/"
             [devserver]="."
             [compute]="services/btrfs-csi/"
             [ast]="services/ast/"
+            [markitdown]="seeds/apps/markitdown/"
+            [deerflow]="seeds/apps/deer-flow/"
         )
         declare -A K8S_LABELS=(
             [backend]="app=tesslate-backend"
@@ -431,12 +439,19 @@ case "$COMMAND" in
         declare -A ECR_REPO_NAME=(
             [compute]="tesslate-btrfs-csi"
         )
+        # Tag override — seed app manifests hardcode ":latest" (they're content
+        # fixtures, not rolled per-env), so push them as :latest instead of
+        # :$ENVIRONMENT. App/backend images still use the env-specific tag.
+        declare -A IMAGE_TAG=(
+            [markitdown]="latest"
+            [deerflow]="latest"
+        )
 
         # Validate image names
         for img in $IMAGES; do
             case "$img" in
-                backend|frontend|devserver|compute|ast) ;;
-                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute, ast" ;;
+                backend|frontend|devserver|compute|ast|markitdown|deerflow) ;;
+                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute, ast, markitdown, deerflow" ;;
             esac
         done
 
@@ -475,7 +490,8 @@ case "$COMMAND" in
 
             for img in $IMAGES; do
                 REPO_NAME="${ECR_REPO_NAME[$img]:-tesslate-${img}}"
-                FULL_TAG="${ECR_REGISTRY}/${REPO_NAME}:${ENVIRONMENT}"
+                TAG="${IMAGE_TAG[$img]:-$ENVIRONMENT}"
+                FULL_TAG="${ECR_REGISTRY}/${REPO_NAME}:${TAG}"
                 DOCKERFILE="${DOCKERFILES[$img]}"
                 CONTEXT="${BUILD_CONTEXTS[$img]}"
                 LOG_FILE="$BUILD_TMPDIR/${img}.log"
@@ -519,7 +535,8 @@ case "$COMMAND" in
             # Single image — build inline with live output
             for img in $IMAGES; do
                 REPO_NAME="${ECR_REPO_NAME[$img]:-tesslate-${img}}"
-                FULL_TAG="${ECR_REGISTRY}/${REPO_NAME}:${ENVIRONMENT}"
+                TAG="${IMAGE_TAG[$img]:-$ENVIRONMENT}"
+                FULL_TAG="${ECR_REGISTRY}/${REPO_NAME}:${TAG}"
                 DOCKERFILE="${DOCKERFILES[$img]}"
                 CONTEXT="${BUILD_CONTEXTS[$img]}"
 
@@ -631,6 +648,26 @@ case "$COMMAND" in
         if [ "$FAILED" -ne 0 ]; then
             error "One or more rollouts failed. Check: kubectl get pods -n tesslate -n kube-system"
         fi
+
+        # Seed / upsert the Tesslate Apps registry — mirrors what
+        # scripts/seed_all_apps.sh does on minikube. Runs only when the
+        # backend was rolled (the image the seeder runs in was just
+        # rebuilt, so manifest changes land with their deploy). Idempotent:
+        # the runner upserts rows by slug+version and skips unchanged apps.
+        # Skipped entirely if backend wasn't in the build set (e.g. when
+        # the invoker only rebuilt `ast` or `compute`).
+        case " $IMAGES " in
+            *" backend "*)
+                info "Seeding Tesslate Apps registry..."
+                if kubectl exec -n tesslate deploy/tesslate-backend -- \
+                    python -m scripts.seed_apps; then
+                    success "✓ Apps registry seeded"
+                else
+                    warning "Apps registry seed reported failures — inspect backend logs"
+                fi
+                echo
+                ;;
+        esac
 
         verify_pods
         success "✓ Build and deploy complete for $ENVIRONMENT!"

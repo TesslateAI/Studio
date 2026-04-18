@@ -121,6 +121,51 @@ resource "aws_ecr_repository" "ast" {
 }
 
 # -----------------------------------------------------------------------------
+# Seed Tesslate Apps — images pulled by EKS nodes at app install time.
+# Short names in app manifests (e.g. "tesslate-markitdown:latest") are
+# prefixed with this registry host by the orchestrator via
+# APP_IMAGE_REGISTRY_PREFIX. New seed-app images get their own repo here
+# so ECR lifecycle policy + IAM are applied uniformly.
+# -----------------------------------------------------------------------------
+resource "aws_ecr_repository" "markitdown" {
+  name                 = "${var.project_name}-markitdown"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = false
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = {
+    Name      = "${var.project_name}-markitdown"
+    Component = "seed-app"
+  }
+}
+
+resource "aws_ecr_repository" "deerflow" {
+  name                 = "${var.project_name}-deerflow"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = false
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = {
+    Name      = "${var.project_name}-deerflow"
+    Component = "seed-app"
+  }
+}
+
+# -----------------------------------------------------------------------------
 # ECR Lifecycle Policy (shared by all repos)
 # -----------------------------------------------------------------------------
 # Note: tagStatus=any rules MUST have the lowest priority (highest number)
@@ -179,6 +224,16 @@ resource "aws_ecr_lifecycle_policy" "btrfs_csi" {
 
 resource "aws_ecr_lifecycle_policy" "ast" {
   repository = aws_ecr_repository.ast.name
+  policy     = local.ecr_lifecycle_policy
+}
+
+resource "aws_ecr_lifecycle_policy" "markitdown" {
+  repository = aws_ecr_repository.markitdown.name
+  policy     = local.ecr_lifecycle_policy
+}
+
+resource "aws_ecr_lifecycle_policy" "deerflow" {
+  repository = aws_ecr_repository.deerflow.name
   policy     = local.ecr_lifecycle_policy
 }
 
