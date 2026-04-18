@@ -95,32 +95,38 @@ resolve_label() {
 # Image build config
 image_name() {
   case "$1" in
-    backend)   echo "tesslate-backend" ;;
-    frontend)  echo "tesslate-frontend" ;;
-    devserver) echo "tesslate-devserver" ;;
-    btrfs-csi) echo "tesslate-btrfs-csi" ;;
-    ast)       echo "tesslate-ast" ;;
+    backend)    echo "tesslate-backend" ;;
+    frontend)   echo "tesslate-frontend" ;;
+    devserver)  echo "tesslate-devserver" ;;
+    btrfs-csi)  echo "tesslate-btrfs-csi" ;;
+    ast)        echo "tesslate-ast" ;;
+    markitdown) echo "tesslate-markitdown" ;;
+    deerflow)   echo "tesslate-deerflow" ;;
     *) echo "" ;;
   esac
 }
 
 image_dockerfile() {
   case "$1" in
-    backend)   echo "orchestrator/Dockerfile" ;;
-    frontend)  echo "app/Dockerfile.prod" ;;
-    devserver) echo "orchestrator/Dockerfile.devserver" ;;
-    btrfs-csi) echo "services/btrfs-csi/Dockerfile" ;;
-    ast)       echo "services/ast/Dockerfile" ;;
+    backend)    echo "orchestrator/Dockerfile" ;;
+    frontend)   echo "app/Dockerfile.prod" ;;
+    devserver)  echo "orchestrator/Dockerfile.devserver" ;;
+    btrfs-csi)  echo "services/btrfs-csi/Dockerfile" ;;
+    ast)        echo "services/ast/Dockerfile" ;;
+    markitdown) echo "seeds/apps/markitdown/Dockerfile" ;;
+    deerflow)   echo "seeds/apps/deer-flow/Dockerfile" ;;
   esac
 }
 
 image_context() {
   case "$1" in
-    backend)   echo "." ;;
-    frontend)  echo "app" ;;
-    devserver) echo "." ;;
-    btrfs-csi) echo "services/btrfs-csi" ;;
-    ast)       echo "services/ast" ;;
+    backend)    echo "." ;;
+    frontend)   echo "app" ;;
+    devserver)  echo "." ;;
+    btrfs-csi)  echo "services/btrfs-csi" ;;
+    ast)        echo "services/ast" ;;
+    markitdown) echo "seeds/apps/markitdown" ;;
+    deerflow)   echo "seeds/apps/deer-flow" ;;
   esac
 }
 
@@ -454,14 +460,14 @@ cmd_rebuild() {
   fi
 
   if [[ -z "$target" ]]; then
-    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|ast|--all> [--no-cache]"
+    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|ast|markitdown|deerflow|--all> [--no-cache]"
     exit 1
   fi
 
   local img
   img=$(image_name "$target")
   if [[ -z "$img" ]]; then
-    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, ast, --all"
+    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, ast, markitdown, deerflow, --all"
     exit 1
   fi
 
@@ -470,6 +476,16 @@ cmd_rebuild() {
   # Restart relevant pods
   if [[ "$target" == "devserver" ]]; then
     success "Devserver image rebuilt and loaded (no pods to restart)"
+  elif [[ "$target" == "markitdown" || "$target" == "deerflow" ]]; then
+    # Seed-app images are pulled by user-project pods on install, not by
+    # any platform deployment — nothing to restart at the cluster level.
+    # Re-seed the apps registry so the manifest's container image points
+    # at the freshly-built tag; safe to run repeatedly.
+    info "Seed-app image rebuilt and loaded — re-running apps seed"
+    $KC -n "$NAMESPACE" exec deploy/tesslate-backend -- \
+      env TSL_APPS_DEV_AUTO_APPROVE=1 python -m scripts.seed_apps || \
+      warn "seed_apps reported failures — inspect backend logs"
+    success "$target image rebuilt and loaded"
   elif [[ "$target" == "btrfs-csi" ]]; then
     $KC delete pod -n kube-system -l app=tesslate-volume-hub
     $KC delete pod -n kube-system -l app=tesslate-btrfs-csi-node
