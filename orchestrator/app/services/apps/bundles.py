@@ -14,7 +14,7 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -86,9 +86,7 @@ async def create_bundle(
     av_ids = [it.app_version_id for it in items]
     rows = (
         await db.execute(
-            select(AppVersion.id, AppVersion.manifest_hash).where(
-                AppVersion.id.in_(av_ids)
-            )
+            select(AppVersion.id, AppVersion.manifest_hash).where(AppVersion.id.in_(av_ids))
         )
     ).all()
     found = {row.id: row.manifest_hash for row in rows}
@@ -135,9 +133,7 @@ async def create_bundle(
 
 async def _load_bundle(db: AsyncSession, bundle_id: UUID) -> AppBundle:
     row = (
-        await db.execute(
-            select(AppBundle).where(AppBundle.id == bundle_id).with_for_update()
-        )
+        await db.execute(select(AppBundle).where(AppBundle.id == bundle_id).with_for_update())
     ).scalar_one_or_none()
     if row is None:
         raise BundleNotFoundError(str(bundle_id))
@@ -158,12 +154,16 @@ async def publish_bundle(
         raise BundleError("cannot publish a yanked bundle")
 
     states = (
-        await db.execute(
-            select(AppVersion.approval_state)
-            .join(AppBundleItem, AppBundleItem.app_version_id == AppVersion.id)
-            .where(AppBundleItem.bundle_id == bundle_id)
+        (
+            await db.execute(
+                select(AppVersion.approval_state)
+                .join(AppBundleItem, AppBundleItem.app_version_id == AppVersion.id)
+                .where(AppBundleItem.bundle_id == bundle_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if not states:
         raise BundleError("bundle has no items")
@@ -171,11 +171,9 @@ async def publish_bundle(
         raise BundleError("cannot publish bundle with unapproved items")
 
     bundle.status = "approved"
-    bundle.updated_at = datetime.now(tz=timezone.utc)
+    bundle.updated_at = datetime.now(tz=UTC)
     await db.flush()
-    logger.info(
-        "bundle.publish bundle_id=%s actor=%s", bundle_id, actor_user_id
-    )
+    logger.info("bundle.publish bundle_id=%s actor=%s", bundle_id, actor_user_id)
 
 
 async def yank_bundle(
@@ -190,7 +188,7 @@ async def yank_bundle(
     if bundle.status == "yanked":
         return
     bundle.status = "yanked"
-    bundle.updated_at = datetime.now(tz=timezone.utc)
+    bundle.updated_at = datetime.now(tz=UTC)
     await db.flush()
     logger.info(
         "bundle.yank bundle_id=%s actor=%s reason=%s",
@@ -209,12 +207,16 @@ async def get_bundle(db: AsyncSession, *, bundle_id: UUID) -> dict:
         raise BundleNotFoundError(str(bundle_id))
 
     items = (
-        await db.execute(
-            select(AppBundleItem)
-            .where(AppBundleItem.bundle_id == bundle_id)
-            .order_by(AppBundleItem.order_index)
+        (
+            await db.execute(
+                select(AppBundleItem)
+                .where(AppBundleItem.bundle_id == bundle_id)
+                .order_by(AppBundleItem.order_index)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return {
         "id": bundle.id,

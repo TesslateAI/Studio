@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -54,9 +54,7 @@ class AlreadyDecidedError(YankError):
 async def _load(db: AsyncSession, yank_request_id: UUID) -> YankRequest:
     row = (
         await db.execute(
-            select(YankRequest)
-            .where(YankRequest.id == yank_request_id)
-            .with_for_update()
+            select(YankRequest).where(YankRequest.id == yank_request_id).with_for_update()
         )
     ).scalar_one_or_none()
     if row is None:
@@ -95,19 +93,15 @@ async def request_yank(
     return yank_id
 
 
-async def _finalize_approved(
-    db: AsyncSession, yank: YankRequest, admin_user_id: UUID
-) -> None:
+async def _finalize_approved(db: AsyncSession, yank: YankRequest, admin_user_id: UUID) -> None:
     """Common path: flip yank.status='approved' and cascade to AppVersion."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     yank.status = "approved"
     yank.decided_at = now
 
     av = (
         await db.execute(
-            select(AppVersion)
-            .where(AppVersion.id == yank.app_version_id)
-            .with_for_update()
+            select(AppVersion).where(AppVersion.id == yank.app_version_id).with_for_update()
         )
     ).scalar_one_or_none()
     if av is not None:
@@ -162,9 +156,7 @@ async def approve_yank(
         return {"needs_second_admin": True}
 
     if yank.primary_admin_id == admin_user_id:
-        raise NeedsSecondAdminError(
-            "critical yank requires a second distinct admin"
-        )
+        raise NeedsSecondAdminError("critical yank requires a second distinct admin")
 
     yank.secondary_admin_id = admin_user_id
     await _finalize_approved(db, yank, admin_user_id)
@@ -192,13 +184,11 @@ async def reject_yank(
     if yank.status == "approved":
         raise AlreadyDecidedError("cannot reject an approved yank")
     yank.status = "rejected"
-    yank.decided_at = datetime.now(tz=timezone.utc)
+    yank.decided_at = datetime.now(tz=UTC)
     if yank.primary_admin_id is None:
         yank.primary_admin_id = admin_user_id
     await db.flush()
-    logger.info(
-        "yank.reject id=%s admin=%s note=%s", yank_request_id, admin_user_id, note
-    )
+    logger.info("yank.reject id=%s admin=%s note=%s", yank_request_id, admin_user_id, note)
 
 
 async def file_appeal(

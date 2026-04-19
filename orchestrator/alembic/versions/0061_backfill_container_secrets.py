@@ -82,15 +82,21 @@ def _secret_keys_for_row(row) -> set[str]:
 
 
 def upgrade() -> None:
-    # Import lazily — alembic is invoked from orchestrator/ with app on sys.path
-    from app.services.deployment_encryption import get_deployment_encryption_service
-
-    enc = get_deployment_encryption_service()
-
     bind = op.get_bind()
     rows = bind.execute(
         _sql_select("SELECT id, service_slug, environment_vars, encrypted_secrets FROM containers")
     ).fetchall()
+
+    # Nothing to backfill — skip enc service init so the migration succeeds on
+    # fresh databases (CI, new installs) where no key is configured yet.
+    if not rows:
+        logger.info("[0061] No container rows found — backfill skipped")
+        return
+
+    # Lazy init: only require the encryption key when there is actual data.
+    from app.services.deployment_encryption import get_deployment_encryption_service
+
+    enc = get_deployment_encryption_service()
 
     total_rows = 0
     total_keys = 0

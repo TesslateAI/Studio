@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -46,9 +46,7 @@ async def ingest_trigger_event(
         )
     )
     await db.flush()
-    logger.info(
-        "schedule_trigger.ingest event=%s schedule=%s", event_id, schedule_id
-    )
+    logger.info("schedule_trigger.ingest event=%s schedule=%s", event_id, schedule_id)
     return event_id
 
 
@@ -132,23 +130,19 @@ async def process_trigger_events_batch(
             try:
                 schedule = (
                     await db.execute(
-                        select(AgentSchedule).where(
-                            AgentSchedule.id == event.schedule_id
-                        )
+                        select(AgentSchedule).where(AgentSchedule.id == event.schedule_id)
                     )
                 ).scalar_one_or_none()
                 if schedule is None or not schedule.is_active:
-                    event.processed_at = datetime.now(tz=timezone.utc)
+                    event.processed_at = datetime.now(tz=UTC)
                     event.result_status = "skipped"
-                    event.error = (
-                        "schedule missing" if schedule is None else "schedule inactive"
-                    )
+                    event.error = "schedule missing" if schedule is None else "schedule inactive"
                     skipped += 1
                     await savepoint.commit()
                     continue
 
                 if pool is None:
-                    event.processed_at = datetime.now(tz=timezone.utc)
+                    event.processed_at = datetime.now(tz=UTC)
                     event.result_status = "failed"
                     event.error = "no arq pool available"
                     failed += 1
@@ -165,18 +159,16 @@ async def process_trigger_events_batch(
                         str(event.id),
                         event.payload or {},
                     )
-                    event.processed_at = datetime.now(tz=timezone.utc)
+                    event.processed_at = datetime.now(tz=UTC)
                     event.result_status = "enqueued"
                     event.error = None
                     processed += 1
                     await savepoint.commit()
                     continue
 
-                payload = await _build_agent_payload(
-                    db, schedule=schedule, event=event
-                )
+                payload = await _build_agent_payload(db, schedule=schedule, event=event)
                 if payload is None:
-                    event.processed_at = datetime.now(tz=timezone.utc)
+                    event.processed_at = datetime.now(tz=UTC)
                     event.result_status = "failed"
                     event.error = "project not found"
                     failed += 1
@@ -184,21 +176,19 @@ async def process_trigger_events_batch(
                     continue
 
                 await pool.enqueue_job("execute_agent_task", payload)
-                event.processed_at = datetime.now(tz=timezone.utc)
+                event.processed_at = datetime.now(tz=UTC)
                 event.result_status = "enqueued"
                 event.error = None
                 processed += 1
                 await savepoint.commit()
             except Exception as exc:  # pragma: no cover - defensive
                 await savepoint.rollback()
-                logger.exception(
-                    "schedule_trigger.process failed event=%s", event.id
-                )
+                logger.exception("schedule_trigger.process failed event=%s", event.id)
                 # Mark the row failed in a fresh savepoint so we don't retry it
                 # immediately in the next sweep with the same error.
                 sp2 = await db.begin_nested()
                 try:
-                    event.processed_at = datetime.now(tz=timezone.utc)
+                    event.processed_at = datetime.now(tz=UTC)
                     event.result_status = "failed"
                     event.error = repr(exc)[:1000]
                     failed += 1

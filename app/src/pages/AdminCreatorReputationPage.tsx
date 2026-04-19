@@ -37,9 +37,9 @@ function newRow(userId = ''): Row {
 
 export default function AdminCreatorReputationPage() {
   const { user } = useAuth();
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
-
   const [rows, setRows] = useState<Row[]>([newRow()]);
+
+  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
 
   const update = (idx: number, patch: Partial<Row>) => {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -78,8 +78,8 @@ export default function AdminCreatorReputationPage() {
       <header className="border-b border-[var(--border)] px-8 py-5">
         <h1 className="text-2xl font-semibold">Creator Reputation</h1>
         <p className="text-sm text-[var(--text-muted)] mt-1">
-          Adjust reputation deltas. Aggregate listing endpoint not yet
-          available — enter user ids manually.
+          Adjust reputation deltas. Aggregate listing endpoint not yet available — enter user ids
+          manually.
         </p>
       </header>
 
@@ -133,9 +133,7 @@ export default function AdminCreatorReputationPage() {
               </button>
               {rows.length > 1 && (
                 <button
-                  onClick={() =>
-                    setRows((prev) => prev.filter((_, i) => i !== idx))
-                  }
+                  onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
                   className="px-3 py-1.5 rounded border border-[var(--border)] text-sm"
                 >
                   Remove
@@ -161,13 +159,7 @@ function parseIntSafe(v: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function LabeledField({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
       <span className="block text-xs uppercase tracking-wide text-[var(--text-muted)] mb-1">
@@ -178,13 +170,7 @@ function LabeledField({
   );
 }
 
-function NumberInput({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function NumberInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <input
       type="number"

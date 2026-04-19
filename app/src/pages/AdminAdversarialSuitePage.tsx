@@ -27,14 +27,14 @@ interface RecentRun {
 
 export default function AdminAdversarialSuitePage() {
   const { user } = useAuth();
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
-
   const [suiteId, setSuiteId] = useState('');
   const [appVersionId, setAppVersionId] = useState('');
   const [score, setScore] = useState('');
   const [findings, setFindings] = useState('{}');
   const [busy, setBusy] = useState(false);
   const [recent, setRecent] = useState<RecentRun[]>([]);
+
+  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
 
   const submit = async () => {
     if (!suiteId || !appVersionId) {
@@ -85,19 +85,15 @@ export default function AdminAdversarialSuitePage() {
       <header className="border-b border-[var(--border)] px-8 py-5">
         <h1 className="text-2xl font-semibold">Adversarial Suite</h1>
         <p className="text-sm text-[var(--text-muted)] mt-1">
-          Record adversarial runs against an approved AppVersion. Suite listing
-          endpoint is not yet available.
+          Record adversarial runs against an approved AppVersion. Suite listing endpoint is not yet
+          available.
         </p>
       </header>
 
       <main className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
         <section className="space-y-3">
           <Field label="Suite id" value={suiteId} onChange={setSuiteId} />
-          <Field
-            label="App version id"
-            value={appVersionId}
-            onChange={setAppVersionId}
-          />
+          <Field label="App version id" value={appVersionId} onChange={setAppVersionId} />
           <Field label="Score (optional)" value={score} onChange={setScore} />
           <label className="block text-sm">
             <span className="block text-xs uppercase tracking-wide text-[var(--text-muted)] mb-1">
@@ -124,22 +120,14 @@ export default function AdminAdversarialSuitePage() {
             Recent runs (this session)
           </h2>
           {recent.length === 0 && (
-            <p className="text-sm text-[var(--text-muted)]">
-              No runs submitted this session.
-            </p>
+            <p className="text-sm text-[var(--text-muted)]">No runs submitted this session.</p>
           )}
           <ul className="space-y-2">
             {recent.map((r) => (
-              <li
-                key={r.run_id}
-                className="rounded border border-[var(--border)] p-3 text-sm"
-              >
-                <div className="font-mono text-xs text-[var(--text-muted)]">
-                  {r.run_id}
-                </div>
+              <li key={r.run_id} className="rounded border border-[var(--border)] p-3 text-sm">
+                <div className="font-mono text-xs text-[var(--text-muted)]">{r.run_id}</div>
                 <div>
-                  <span className="text-[var(--text-muted)]">score:</span>{' '}
-                  {r.score ?? '—'}
+                  <span className="text-[var(--text-muted)]">score:</span> {r.score ?? '—'}
                 </div>
                 <pre className="text-xs mt-1 overflow-auto">
                   {JSON.stringify(r.findings, null, 2)}

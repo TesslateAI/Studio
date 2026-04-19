@@ -532,45 +532,60 @@ class TestComputeManagerTier2:
     def _sync_to_thread(func, *args, **kwargs):
         return func(*args, **kwargs)
 
-    async def test_stop_environment_deletes_namespace_and_pvs(
+    async def test_stop_environment_scales_to_zero_and_hibernates(
         self, cm, mock_v1, mock_k8s_client, mock_settings
     ):
-        """stop_environment deletes namespace, PVs, and sets compute_tier to 'none'."""
-        project_id = uuid4()
+        """stop_environment scales deployments to zero and sets compute_tier to 'none'.
 
+        Namespace and PVs are preserved for fast warm-resume (hibernate model).
+        Full teardown only happens via delete_project_namespace on uninstall.
+        """
+        from unittest.mock import MagicMock
+
+        from kubernetes import client as _k8s
+
+        project_id = uuid4()
         project = Mock()
         project.id = project_id
         project.compute_tier = "environment"
+        project.volume_id = None  # no volume sync needed
 
         db = AsyncMock()
-
         namespace = f"proj-{project_id}"
 
-        # Mock namespace deletion (via KubernetesClient wrapper)
-        mock_k8s_client.core_v1.delete_namespace.return_value = None
+        # Namespace exists
+        mock_v1.read_namespace.return_value = MagicMock()
 
-        # Mock PV listing and deletion (via raw CoreV1Api)
-        pv1 = _make_pv("pv-vol-abc123")
-        pv2 = _make_pv("pv-vol-abc123-postgres")
-        mock_v1.list_persistent_volume.return_value = _make_pv_list([pv1, pv2])
-        mock_v1.delete_persistent_volume.return_value = None
+        # Two deployments to scale down
+        dep1 = MagicMock()
+        dep1.metadata.name = "frontend"
+        dep2 = MagicMock()
+        dep2.metadata.name = "backend"
+        dep_list = MagicMock()
+        dep_list.items = [dep1, dep2]
 
-        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+        apps_v1_mock = MagicMock()
+        apps_v1_mock.list_namespaced_deployment.return_value = dep_list
+        apps_v1_mock.patch_namespaced_deployment_scale.return_value = None
+
+        with (
+            patch("asyncio.to_thread", side_effect=self._sync_to_thread),
+            patch.object(_k8s, "AppsV1Api", return_value=apps_v1_mock),
+        ):
             await cm.stop_environment(project, db)
 
-        # Namespace deleted
-        mock_k8s_client.core_v1.delete_namespace.assert_called_once_with(name=namespace)
+        # Namespace must NOT be deleted
+        mock_k8s_client.core_v1.delete_namespace.assert_not_called()
 
-        # PVs listed by project label
-        mock_v1.list_persistent_volume.assert_called_once_with(
-            label_selector=f"tesslate.io/project-id={project_id}"
+        # Deployments listed with project label
+        apps_v1_mock.list_namespaced_deployment.assert_called_once_with(
+            namespace, label_selector=f"tesslate.io/project-id={project_id}"
         )
 
-        # Both PVs deleted
-        assert mock_v1.delete_persistent_volume.call_count == 2
-        mock_v1.delete_persistent_volume.assert_any_call(name="pv-vol-abc123")
-        mock_v1.delete_persistent_volume.assert_any_call(name="pv-vol-abc123-postgres")
+        # Both deployments scaled to zero
+        assert apps_v1_mock.patch_namespaced_deployment_scale.call_count == 2
 
-        # Project state updated
+        # Project state converged
         assert project.compute_tier == "none"
+        assert project.environment_status == "stopped"
         db.commit.assert_awaited_once()

@@ -9,6 +9,8 @@ from ..database import get_db
 from ..models import User
 from ..services.apps.reserved_handles import (
     is_reserved as is_reserved_handle,
+)
+from ..services.apps.reserved_handles import (
     is_valid_handle_format,
 )
 from ..username_validation import normalize_username, validate_username
@@ -74,9 +76,7 @@ async def get_user_preferences(
     if current_user.default_team_id:
         from ..models_team import Team
 
-        team_result = await db.execute(
-            select(Team).where(Team.id == current_user.default_team_id)
-        )
+        team_result = await db.execute(select(Team).where(Team.id == current_user.default_team_id))
         team = team_result.scalar_one_or_none()
         if team and team.theme_preset:
             theme = team.theme_preset
@@ -183,9 +183,7 @@ async def update_user_handle(
         raise HTTPException(status_code=409, detail="Handle is not available")
 
     existing = await db.execute(
-        select(User.id).where(
-            func.lower(User.handle) == handle, User.id != current_user.id
-        )
+        select(User.id).where(func.lower(User.handle) == handle, User.id != current_user.id)
     )
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Handle is already taken")

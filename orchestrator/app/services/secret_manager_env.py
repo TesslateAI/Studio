@@ -49,7 +49,7 @@ def _try_legacy_base64(value: str) -> str | None:
 
     Transitional helper — kept until everyone has run migration 0058.
     """
-    if not value or len(value) < 8 or len(value) % 4 != 0:
+    if not value or len(value) < 4 or len(value) % 4 != 0:
         return None
     if not _LEGACY_BASE64_RE.match(value):
         return None
@@ -97,9 +97,7 @@ def _decode_env_map(
     return out
 
 
-def _merge_decrypted_secrets(
-    container: "Container", env_map: dict[str, str]
-) -> dict[str, str]:
+def _merge_decrypted_secrets(container: "Container", env_map: dict[str, str]) -> dict[str, str]:
     """Overlay decrypted ``encrypted_secrets`` on top of *env_map*."""
     encrypted = getattr(container, "encrypted_secrets", None) or {}
     if not encrypted:
@@ -170,9 +168,7 @@ def resolve_connection_env_vars(
         context["internal_port"] = str(service_def.internal_port)
     for key, value in (service_def.environment_vars or {}).items():
         context[key] = value
-    if source_container.environment_vars or getattr(
-        source_container, "encrypted_secrets", None
-    ):
+    if source_container.environment_vars or getattr(source_container, "encrypted_secrets", None):
         context.update(container_env(source_container))
     if decrypted_credentials:
         context.update(decrypted_credentials)
@@ -195,11 +191,7 @@ def _resolve_via_exports(source_container: "Container") -> dict[str, str]:
     from .export_resolver import resolve_node_exports
 
     decoded_env = container_env(source_container)
-    effective_port = (
-        source_container.internal_port
-        or source_container.port
-        or 3000
-    )
+    effective_port = source_container.internal_port or source_container.port or 3000
     return resolve_node_exports(
         node_name=source_container.container_name or source_container.name or "",
         exports=source_container.exports,
@@ -311,9 +303,7 @@ async def build_env_overrides(
     plus decrypted secrets, merged with any connection-template injections."""
     from ..models import Container, ContainerConnection
 
-    overrides: dict[UUID, dict[str, str]] = {
-        c.id: container_env(c) for c in containers
-    }
+    overrides: dict[UUID, dict[str, str]] = {c.id: container_env(c) for c in containers}
 
     result = await db.execute(
         select(ContainerConnection).where(

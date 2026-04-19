@@ -113,13 +113,15 @@ async def fork_app(
         except Exception:
             logger.exception(
                 "apps.fork: create_volume_from_bundle failed for app=%s version=%s",
-                parent.id, source_version.id,
+                parent.id,
+                source_version.id,
             )
-            raise ForkError("failed to provision fork volume from bundle")
+            raise ForkError("failed to provision fork volume from bundle") from None
         suffix = uuid.uuid4().hex[:8]
-        base = "".join(
-            c if c.isalnum() or c in "-_" else "-" for c in new_name.lower()
-        ).strip("-") or "app"
+        base = (
+            "".join(c if c.isalnum() or c in "-_" else "-" for c in new_name.lower()).strip("-")
+            or "app"
+        )
         project_slug = f"{base}-{suffix}"
         project = Project(
             name=new_name,
@@ -143,7 +145,11 @@ async def fork_app(
 
     logger.info(
         "apps.fork new_app=%s parent=%s from_version=%s forker=%s project=%s",
-        new_id, parent.id, source_version.id, forker_user_id, project_id,
+        new_id,
+        parent.id,
+        source_version.id,
+        forker_user_id,
+        project_id,
     )
     return ForkResult(
         new_app_id=new_id,

@@ -14,14 +14,10 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useRequiredAdmin } from '../contexts/AdminContext';
-import {
-  appSubmissionsApi,
-  type SubmissionDetail,
-  type SubmissionCheck,
-} from '../lib/api';
+import { appSubmissionsApi, type SubmissionDetail, type SubmissionCheck } from '../lib/api';
 
 // Mirrors backend VALID_TRANSITIONS. Keep in sync.
-export const VALID_TRANSITIONS: Record<string, readonly string[]> = {
+const VALID_TRANSITIONS: Record<string, readonly string[]> = {
   stage0: ['stage1', 'rejected'],
   stage1: ['stage2', 'rejected'],
   stage2: ['stage3', 'rejected'],
@@ -36,8 +32,6 @@ export default function AdminSubmissionWorkbenchPage() {
   const { user } = useAuth();
   const { submissionId } = useParams<{ submissionId: string }>();
   const navigate = useNavigate();
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
-
   const admin = useRequiredAdmin();
   const [submission, setSubmission] = useState<SubmissionDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,6 +59,8 @@ export default function AdminSubmissionWorkbenchPage() {
     if (!submission) return [];
     return VALID_TRANSITIONS[submission.stage] ?? [];
   }, [submission]);
+
+  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
 
   const onAdvance = async (toStage: string) => {
     if (!submission) return;
@@ -101,8 +97,7 @@ export default function AdminSubmissionWorkbenchPage() {
             </span>
           </h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">
-            Stage <code>{submission.stage}</code> · Decision{' '}
-            <code>{submission.decision}</code>
+            Stage <code>{submission.stage}</code> · Decision <code>{submission.decision}</code>
           </p>
         </div>
       </header>
@@ -235,9 +230,7 @@ function DecisionColumn(props: DecisionColumnProps) {
                 disabled={busy}
                 onClick={() => void onAdvance(s)}
                 className={`px-3 py-1.5 rounded text-sm disabled:opacity-50 ${
-                  isReject
-                    ? 'bg-red-600 text-white'
-                    : 'bg-[var(--primary)] text-white'
+                  isReject ? 'bg-red-600 text-white' : 'bg-[var(--primary)] text-white'
                 }`}
               >
                 {isReject ? 'Reject' : `Advance → ${s}`}

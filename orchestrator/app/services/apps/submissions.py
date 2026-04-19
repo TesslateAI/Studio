@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -62,9 +62,7 @@ VALID_TRANSITIONS: dict[Stage, set[Stage]] = {
 def _assert_valid(from_stage: str, to_stage: str) -> None:
     allowed = VALID_TRANSITIONS.get(from_stage)  # type: ignore[arg-type]
     if allowed is None or to_stage not in allowed:
-        raise InvalidTransitionError(
-            f"cannot transition {from_stage!r} -> {to_stage!r}"
-        )
+        raise InvalidTransitionError(f"cannot transition {from_stage!r} -> {to_stage!r}")
 
 
 async def advance_stage(
@@ -82,9 +80,7 @@ async def advance_stage(
     """
     row = (
         await db.execute(
-            select(AppSubmission)
-            .where(AppSubmission.id == submission_id)
-            .with_for_update()
+            select(AppSubmission).where(AppSubmission.id == submission_id).with_for_update()
         )
     ).scalar_one_or_none()
     if row is None:
@@ -92,7 +88,7 @@ async def advance_stage(
 
     _assert_valid(row.stage, to_stage)
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     row.stage = to_stage
     row.stage_entered_at = now
     if reviewer_user_id is not None:
@@ -105,15 +101,11 @@ async def advance_stage(
     if to_stage in ("approved", "rejected"):
         av = (
             await db.execute(
-                select(AppVersion)
-                .where(AppVersion.id == row.app_version_id)
-                .with_for_update()
+                select(AppVersion).where(AppVersion.id == row.app_version_id).with_for_update()
             )
         ).scalar_one_or_none()
         if av is not None:
-            av.approval_state = (
-                "stage2_approved" if to_stage == "approved" else "rejected"
-            )
+            av.approval_state = "stage2_approved" if to_stage == "approved" else "rejected"
 
     await db.flush()
     logger.info(

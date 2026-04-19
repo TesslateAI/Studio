@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
 from uuid import UUID
 
 from sqlalchemy import select
@@ -65,9 +65,7 @@ def _matches_any(path: str, patterns: tuple[str, ...] | list[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, pat) for pat in patterns)
 
 
-async def _is_installer(
-    db: AsyncSession, *, viewer_user_id: UUID, app_id: UUID
-) -> bool:
+async def _is_installer(db: AsyncSession, *, viewer_user_id: UUID, app_id: UUID) -> bool:
     row = (
         await db.execute(
             select(AppInstance.id)
@@ -94,7 +92,7 @@ async def list_files(
         raise SourceAccessError(f"app_version {app_version_id} not found")
 
     manifest = av.manifest_json or {}
-    policy = (manifest.get("source_visibility") or {})
+    policy = manifest.get("source_visibility") or {}
     level = (policy.get("level") or "private").lower()
     excluded_manifest: list[str] = list(policy.get("excluded_paths") or [])
     manifest_always_public: bool = bool(policy.get("manifest_always_public", False))
@@ -105,9 +103,7 @@ async def list_files(
         if viewer_user_id is None or not await _is_installer(
             db, viewer_user_id=viewer_user_id, app_id=av.app_id
         ):
-            raise InstallerOnlySourceError(
-                "source visibility restricted to installers"
-            )
+            raise InstallerOnlySourceError("source visibility restricted to installers")
     elif level != "public":
         raise SourceAccessError(f"unknown source_visibility level: {level!r}")
 
@@ -116,7 +112,11 @@ async def list_files(
 
     filtered = [p for p in raw if not _matches_any(p, exclusions)]
 
-    if manifest_always_public and _MANIFEST_ROOT_FILE in raw and _MANIFEST_ROOT_FILE not in filtered:
+    if (
+        manifest_always_public
+        and _MANIFEST_ROOT_FILE in raw
+        and _MANIFEST_ROOT_FILE not in filtered
+    ):
         filtered.append(_MANIFEST_ROOT_FILE)
 
     return SourceListing(files=filtered, manifest_always_public=manifest_always_public)

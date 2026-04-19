@@ -16,7 +16,7 @@ Secrets are labelled `tesslate.io/managed-by=apps-installer` for GC/audit.
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 from kubernetes import client as k8s_client
 from kubernetes.client.rest import ApiException
@@ -47,7 +47,8 @@ def propagate_secrets(
             if e.status == 404:
                 logger.warning(
                     "secret_propagator: source secret %s not found in ns=%s; skipping",
-                    name, source_namespace,
+                    name,
+                    source_namespace,
                 )
                 continue
             raise

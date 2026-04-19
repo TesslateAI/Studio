@@ -42,6 +42,17 @@ setup('authenticate', async ({ page, request }) => {
   await page.goto('/login');
 
   await page.fill('input[type="email"]', TEST_EMAIL);
+
+  // When magic_link_login is enabled, password is behind a toggle.
+  const passwordInput = page.locator('input[type="password"]');
+  const isPasswordVisible = await passwordInput.isVisible({ timeout: 2000 }).catch(() => false);
+  if (!isPasswordVisible) {
+    await page.click('button:has-text("Sign in with password instead")');
+    await page.waitForSelector('input[type="password"]', { timeout: 5000 });
+    // Re-fill email since switching modes may clear it
+    await page.fill('input[type="email"]', TEST_EMAIL);
+  }
+
   await page.fill('input[type="password"]', TEST_PASSWORD);
   await page.click('button[type="submit"]');
 

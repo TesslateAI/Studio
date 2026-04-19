@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -109,29 +109,44 @@ async def admin_queue(
     db: AsyncSession = Depends(get_db),
 ) -> QueueListOut:
     cc = (
-        select(SubmissionCheck.submission_id.label("sid"),
-               func.count(SubmissionCheck.id).label("cnt"))
-        .group_by(SubmissionCheck.submission_id).subquery()
+        select(
+            SubmissionCheck.submission_id.label("sid"), func.count(SubmissionCheck.id).label("cnt")
+        )
+        .group_by(SubmissionCheck.submission_id)
+        .subquery()
     )
     stmt = (
-        select(AppSubmission.id, AppSubmission.app_version_id, AppSubmission.stage,
-               AppSubmission.sla_deadline_at, AppSubmission.stage_entered_at,
-               AppVersion.app_id, AppVersion.version, MarketplaceApp.name,
-               func.coalesce(cc.c.cnt, 0))
+        select(
+            AppSubmission.id,
+            AppSubmission.app_version_id,
+            AppSubmission.stage,
+            AppSubmission.sla_deadline_at,
+            AppSubmission.stage_entered_at,
+            AppVersion.app_id,
+            AppVersion.version,
+            MarketplaceApp.name,
+            func.coalesce(cc.c.cnt, 0),
+        )
         .join(AppVersion, AppVersion.id == AppSubmission.app_version_id)
         .join(MarketplaceApp, MarketplaceApp.id == AppVersion.app_id)
         .outerjoin(cc, cc.c.sid == AppSubmission.id)
         .where(AppSubmission.stage.in_(IN_FLIGHT_STAGES))
-        .order_by(asc(AppSubmission.sla_deadline_at.is_(None)),
-                  asc(AppSubmission.sla_deadline_at))
-        .limit(limit).offset(offset)
+        .order_by(asc(AppSubmission.sla_deadline_at.is_(None)), asc(AppSubmission.sla_deadline_at))
+        .limit(limit)
+        .offset(offset)
     )
     rows = (await db.execute(stmt)).all()
     items = [
         QueueItemOut(
-            submission_id=r[0], app_version_id=r[1], stage=r[2],
-            sla_deadline_at=r[3], stage_entered_at=r[4], app_id=r[5],
-            version=r[6], app_name=r[7], check_count=int(r[8] or 0),
+            submission_id=r[0],
+            app_version_id=r[1],
+            stage=r[2],
+            sla_deadline_at=r[3],
+            stage_entered_at=r[4],
+            app_id=r[5],
+            version=r[6],
+            app_name=r[7],
+            check_count=int(r[8] or 0),
         )
         for r in rows
     ]
@@ -155,12 +170,14 @@ async def yank_queue(
         select(YankRequest)
         .where(YankRequest.status == "pending")
         .order_by(desc(severity_rank), asc(YankRequest.created_at))
-        .limit(limit).offset(offset)
+        .limit(limit)
+        .offset(offset)
     )
     rows = (await db.execute(stmt)).scalars().all()
     return YankQueueOut(
         items=[YankQueueItemOut.model_validate(r) for r in rows],
-        limit=limit, offset=offset,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -171,7 +188,9 @@ async def start_monitoring(
     db: AsyncSession = Depends(get_db),
 ) -> RunCreatedOut:
     run_id = await monitoring_svc.start_monitoring_run(
-        db, app_version_id=body.app_version_id, kind=body.kind,  # type: ignore[arg-type]
+        db,
+        app_version_id=body.app_version_id,
+        kind=body.kind,  # type: ignore[arg-type]
     )
     return RunCreatedOut(run_id=run_id)
 
@@ -185,10 +204,13 @@ async def finish_monitoring(
 ) -> Response:
     try:
         await monitoring_svc.finish_monitoring_run(
-            db, run_id=run_id, status=body.status, findings=body.findings,  # type: ignore[arg-type]
+            db,
+            run_id=run_id,
+            status=body.status,
+            findings=body.findings,  # type: ignore[arg-type]
         )
     except LookupError:
-        raise HTTPException(status_code=404, detail="monitoring run not found")
+        raise HTTPException(status_code=404, detail="monitoring run not found") from None
     return Response(status_code=204)
 
 
@@ -199,8 +221,11 @@ async def adversarial_run(
     db: AsyncSession = Depends(get_db),
 ) -> RunCreatedOut:
     run_id = await monitoring_svc.record_adversarial_run(
-        db, suite_id=body.suite_id, app_version_id=body.app_version_id,
-        score=body.score, findings=body.findings,
+        db,
+        suite_id=body.suite_id,
+        app_version_id=body.app_version_id,
+        score=body.score,
+        findings=body.findings,
     )
     return RunCreatedOut(run_id=run_id)
 
@@ -213,8 +238,11 @@ async def reputation_upsert(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     await monitoring_svc.upsert_creator_reputation(
-        db, user_id=user_id,
-        delta_score=Decimal(str(body.delta_score)) if body.delta_score is not None else Decimal("0"),
+        db,
+        user_id=user_id,
+        delta_score=Decimal(str(body.delta_score))
+        if body.delta_score is not None
+        else Decimal("0"),
         delta_approvals=body.delta_approvals,
         delta_yanks=body.delta_yanks,
         delta_critical_yanks=body.delta_critical_yanks,
@@ -227,19 +255,30 @@ async def stats(
     _user: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> StatsOut:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     cutoff = now - timedelta(hours=24)
+
     async def _count(stmt):
         return (await db.execute(stmt)).scalar_one()
+
     apps_total = await _count(select(func.count(MarketplaceApp.id)))
-    apps_approved = await _count(select(func.count(MarketplaceApp.id)).where(MarketplaceApp.state == "approved"))
-    apps_pending = await _count(select(func.count(MarketplaceApp.id)).where(
-        MarketplaceApp.state.in_(("pending_stage1", "pending_stage2", "draft"))))
-    yanks_pending = await _count(select(func.count(YankRequest.id)).where(YankRequest.status == "pending"))
+    apps_approved = await _count(
+        select(func.count(MarketplaceApp.id)).where(MarketplaceApp.state == "approved")
+    )
+    apps_pending = await _count(
+        select(func.count(MarketplaceApp.id)).where(
+            MarketplaceApp.state.in_(("pending_stage1", "pending_stage2", "draft"))
+        )
+    )
+    yanks_pending = await _count(
+        select(func.count(YankRequest.id)).where(YankRequest.status == "pending")
+    )
     submissions_in_flight = await _count(
-        select(func.count(AppSubmission.id)).where(AppSubmission.stage.in_(IN_FLIGHT_STAGES)))
+        select(func.count(AppSubmission.id)).where(AppSubmission.stage.in_(IN_FLIGHT_STAGES))
+    )
     monitoring_runs_24h = await _count(
-        select(func.count(MonitoringRun.id)).where(and_(MonitoringRun.created_at >= cutoff)))
+        select(func.count(MonitoringRun.id)).where(and_(MonitoringRun.created_at >= cutoff))
+    )
     return StatsOut(
         apps_total=int(apps_total or 0),
         apps_approved=int(apps_approved or 0),

@@ -14,7 +14,7 @@ The scheduler worker enqueues :func:`invoke_app_instance_task` whenever a
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -76,9 +76,7 @@ async def _mint_invocation_key(
             )
         return row.key_id
     except Exception:
-        logger.exception(
-            "app_invocations.mint failed instance=%s", app_instance_id
-        )
+        logger.exception("app_invocations.mint failed instance=%s", app_instance_id)
         return None
 
 
@@ -94,9 +92,7 @@ async def _resolve_env(container: Container) -> list[Any]:
     return resolve_env_for_pod(env_map)
 
 
-def _resolve_primary_url(
-    project: Project, container: Container
-) -> str | None:
+def _resolve_primary_url(project: Project, container: Container) -> str | None:
     """Resolve the externally-reachable URL for the primary container.
 
     Uses :func:`runtime_urls.container_url` to stay in lockstep with
@@ -147,9 +143,7 @@ def _build_job_manifest(
                 ),
             )
         )
-        volume_mounts.append(
-            k8s_client.V1VolumeMount(name="app-data", mount_path="/app")
-        )
+        volume_mounts.append(k8s_client.V1VolumeMount(name="app-data", mount_path="/app"))
 
     container = k8s_client.V1Container(
         name="runner",
@@ -192,9 +186,7 @@ async def invoke_app_instance_task(
 
     async with AsyncSessionLocal() as db:
         schedule = (
-            await db.execute(
-                select(AgentSchedule).where(AgentSchedule.id == UUID(schedule_id))
-            )
+            await db.execute(select(AgentSchedule).where(AgentSchedule.id == UUID(schedule_id)))
         ).scalar_one_or_none()
         if schedule is None or schedule.app_instance_id is None:
             logger.warning(
@@ -204,17 +196,13 @@ async def invoke_app_instance_task(
             return {**result, "status": "skipped", "reason": "missing_schedule"}
 
         instance = (
-            await db.execute(
-                select(AppInstance).where(AppInstance.id == schedule.app_instance_id)
-            )
+            await db.execute(select(AppInstance).where(AppInstance.id == schedule.app_instance_id))
         ).scalar_one_or_none()
         if instance is None or instance.project_id is None:
             return {**result, "status": "failed", "reason": "missing_instance_project"}
 
         project = (
-            await db.execute(
-                select(Project).where(Project.id == instance.project_id)
-            )
+            await db.execute(select(Project).where(Project.id == instance.project_id))
         ).scalar_one_or_none()
         if project is None:
             return {**result, "status": "failed", "reason": "missing_project"}
@@ -225,9 +213,7 @@ async def invoke_app_instance_task(
         primary_id = getattr(instance, "primary_container_id", None)
         if primary_id is not None:
             primary_ctr = (
-                await db.execute(
-                    select(Container).where(Container.id == primary_id)
-                )
+                await db.execute(select(Container).where(Container.id == primary_id))
             ).scalar_one_or_none()
         if primary_ctr is None:
             primary_ctr = (
@@ -239,12 +225,16 @@ async def invoke_app_instance_task(
             ).scalar_one_or_none()
         if primary_ctr is None:
             primary_ctr = (
-                await db.execute(
-                    select(Container)
-                    .where(Container.project_id == project.id)
-                    .order_by(Container.created_at.asc())
+                (
+                    await db.execute(
+                        select(Container)
+                        .where(Container.project_id == project.id)
+                        .order_by(Container.created_at.asc())
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
         if primary_ctr is None:
             return {**result, "status": "failed", "reason": "no_primary_container"}
 
@@ -298,21 +288,24 @@ async def invoke_app_instance_task(
             else:
                 # Job execution path.
                 from kubernetes import client as k8s_client
+
                 from ...services.orchestration.kubernetes.client import (
                     KubernetesClient,
                 )
 
                 k8s = KubernetesClient()
                 namespace = k8s.get_project_namespace(str(project.id))
-                ts = int(datetime.now(tz=timezone.utc).timestamp())
+                ts = int(datetime.now(tz=UTC).timestamp())
                 job_name = f"app-inv-{schedule_id[:8]}-{ts}"
 
                 env_vars = list(await _resolve_env(primary_ctr))
-                env_vars.extend([
-                    k8s_client.V1EnvVar(name="INVOCATION_ID", value=invocation_key_id or ""),
-                    k8s_client.V1EnvVar(name="SCHEDULE_ID", value=schedule_id),
-                    k8s_client.V1EnvVar(name="EVENT_ID", value=event_id),
-                ])
+                env_vars.extend(
+                    [
+                        k8s_client.V1EnvVar(name="INVOCATION_ID", value=invocation_key_id or ""),
+                        k8s_client.V1EnvVar(name="SCHEDULE_ID", value=schedule_id),
+                        k8s_client.V1EnvVar(name="EVENT_ID", value=event_id),
+                    ]
+                )
 
                 image = getattr(primary_ctr, "image", None)
                 if not image and getattr(primary_ctr, "base", None) is not None:
@@ -367,7 +360,7 @@ async def invoke_app_instance_task(
                 ).scalar_one_or_none()
                 if event is not None:
                     event.result_status = status
-                    event.processed_at = datetime.now(tz=timezone.utc)
+                    event.processed_at = datetime.now(tz=UTC)
                     if error:
                         event.error = error
                     payload_update = dict(event.payload or {})
@@ -380,7 +373,7 @@ async def invoke_app_instance_task(
                     )
                 ).scalar_one_or_none()
                 if sched2 is not None:
-                    sched2.last_run_at = datetime.now(tz=timezone.utc)
+                    sched2.last_run_at = datetime.now(tz=UTC)
                     sched2.last_status = status
                     sched2.last_error = error
                     sched2.runs_completed = (sched2.runs_completed or 0) + 1

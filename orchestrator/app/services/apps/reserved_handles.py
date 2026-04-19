@@ -88,6 +88,4 @@ def is_valid_handle_format(handle: str, *, max_length: int = 32) -> bool:
         return False
     if not HANDLE_REGEX.match(handle):
         return False
-    if "--" in handle:
-        return False
-    return True
+    return "--" not in handle

@@ -17,12 +17,12 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import LiteLLMKeyLedger
@@ -148,11 +148,9 @@ async def mint(
 
     if ttl_seconds is None:
         ttl_seconds = (
-            TTL_SESSION_IDLE_SECONDS
-            if tier_enum == KeyTier.SESSION
-            else TTL_INVOCATION_MAX_SECONDS
+            TTL_SESSION_IDLE_SECONDS if tier_enum == KeyTier.SESSION else TTL_INVOCATION_MAX_SECONDS
         )
-    ttl_at = datetime.now(tz=timezone.utc) + timedelta(seconds=ttl_seconds)
+    ttl_at = datetime.now(tz=UTC) + timedelta(seconds=ttl_seconds)
 
     call_meta: dict[str, Any] = {
         "tier": tier_enum.value,
@@ -233,9 +231,7 @@ async def record_spend(
         seen.add(cursor)
         row = (
             await db.execute(
-                select(LiteLLMKeyLedger)
-                .where(LiteLLMKeyLedger.key_id == cursor)
-                .with_for_update()
+                select(LiteLLMKeyLedger).where(LiteLLMKeyLedger.key_id == cursor).with_for_update()
             )
         ).scalar_one_or_none()
         if row is None:
@@ -301,9 +297,7 @@ async def finalize_settlement(
     return row
 
 
-async def mark_failed(
-    db: AsyncSession, *, key_id: str, reason: str
-) -> LiteLLMKeyLedger:
+async def mark_failed(db: AsyncSession, *, key_id: str, reason: str) -> LiteLLMKeyLedger:
     """Terminal failure. Only callers that know the key is unrecoverable
     should invoke this (mint errors, reconciliation-lost keys)."""
     row = await _lock_row(db, key_id)
@@ -337,12 +331,16 @@ async def cascade_revoke(
     while frontier:
         next_frontier: list[str] = []
         children = (
-            await db.execute(
-                select(LiteLLMKeyLedger)
-                .where(LiteLLMKeyLedger.parent_key_id.in_(frontier))
-                .with_for_update()
+            (
+                await db.execute(
+                    select(LiteLLMKeyLedger)
+                    .where(LiteLLMKeyLedger.parent_key_id.in_(frontier))
+                    .with_for_update()
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for child in children:
             if child.key_id in visited:
                 continue
@@ -375,14 +373,9 @@ async def await_children_terminal(
     until this returns True before calling finalize_settlement on the parent.
     """
     result = await db.execute(
-        select(LiteLLMKeyLedger.state).where(
-            LiteLLMKeyLedger.parent_key_id == parent_key_id
-        )
+        select(LiteLLMKeyLedger.state).where(LiteLLMKeyLedger.parent_key_id == parent_key_id)
     )
-    for (state,) in result.all():
-        if not is_terminal(state):
-            return False
-    return True
+    return all(is_terminal(state) for (state,) in result.all())
 
 
 # ---------------------------------------------------------------------------
@@ -398,17 +391,23 @@ async def select_idle_session_keys(
 ) -> list[str]:
     """Select up to `limit` session-tier keys past their idle TTL. Caller
     enqueues begin_settlement for each."""
-    now_ts = now or datetime.now(tz=timezone.utc)
+    now_ts = now or datetime.now(tz=UTC)
     rows = (
-        await db.execute(
-            select(LiteLLMKeyLedger.key_id).where(
-                LiteLLMKeyLedger.state == KeyState.ACTIVE.value,
-                LiteLLMKeyLedger.tier == KeyTier.SESSION.value,
-                LiteLLMKeyLedger.ttl_at.is_not(None),
-                LiteLLMKeyLedger.ttl_at <= now_ts,
-            ).limit(limit)
+        (
+            await db.execute(
+                select(LiteLLMKeyLedger.key_id)
+                .where(
+                    LiteLLMKeyLedger.state == KeyState.ACTIVE.value,
+                    LiteLLMKeyLedger.tier == KeyTier.SESSION.value,
+                    LiteLLMKeyLedger.ttl_at.is_not(None),
+                    LiteLLMKeyLedger.ttl_at <= now_ts,
+                )
+                .limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
@@ -423,7 +422,7 @@ async def bump_session_ttl(
     if row is None or is_terminal(row.state):
         return row
     delta = extend_seconds if extend_seconds is not None else TTL_SESSION_IDLE_SECONDS
-    row.ttl_at = datetime.now(tz=timezone.utc) + timedelta(seconds=delta)
+    row.ttl_at = datetime.now(tz=UTC) + timedelta(seconds=delta)
     await db.flush()
     return row
 
@@ -436,8 +435,6 @@ async def bump_session_ttl(
 async def _lock_row(db: AsyncSession, key_id: str) -> LiteLLMKeyLedger | None:
     return (
         await db.execute(
-            select(LiteLLMKeyLedger)
-            .where(LiteLLMKeyLedger.key_id == key_id)
-            .with_for_update()
+            select(LiteLLMKeyLedger).where(LiteLLMKeyLedger.key_id == key_id).with_for_update()
         )
     ).scalar_one_or_none()

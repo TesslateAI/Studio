@@ -13,7 +13,7 @@ import contextlib
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -163,9 +163,7 @@ def _build_runtime_payload(
                 app_domain=domain,
                 protocol=protocol,
             )
-        items.append(
-            ContainerRuntime(id=c.id, name=c.name, status=c.status or "stopped", url=url)
-        )
+        items.append(ContainerRuntime(id=c.id, name=c.name, status=c.status or "stopped", url=url))
         if primary is not None and c.id == primary.id:
             primary_url = url
 
@@ -178,9 +176,7 @@ def _build_runtime_payload(
     )
 
 
-async def _load_app_handles(
-    db: AsyncSession, inst: AppInstance
-) -> tuple[str | None, str | None]:
+async def _load_app_handles(db: AsyncSession, inst: AppInstance) -> tuple[str | None, str | None]:
     """Return ``(app_handle, creator_handle)`` for an AppInstance.
 
     Either may be None if the row hasn't been backfilled; the caller
@@ -218,9 +214,7 @@ async def _load_project_graph(
     connections = (
         (
             await db.execute(
-                select(ContainerConnection).where(
-                    ContainerConnection.project_id == project_id
-                )
+                select(ContainerConnection).where(ContainerConnection.project_id == project_id)
             )
         )
         .scalars()
@@ -242,7 +236,9 @@ async def get_runtime(
     project = await _authorize(db, inst, user)
     containers, _ = await _load_project_graph(db, project.id)
     _app_h, _creator_h = await _load_app_handles(db, inst)
-    return _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h)
+    return _build_runtime_payload(
+        project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h
+    )
 
 
 @router.get("/{instance_id}/events")
@@ -262,7 +258,9 @@ async def runtime_events(
     project = await _authorize(db, inst, user)
     containers, _ = await _load_project_graph(db, project.id)
     _app_h, _creator_h = await _load_app_handles(db, inst)
-    snapshot = _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h)
+    snapshot = _build_runtime_payload(
+        project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h
+    )
 
     async def event_stream():
         from ..services.pubsub import subscribe_app_runtime_events
@@ -281,9 +279,7 @@ async def runtime_events(
                     return
                 if next_event_task is None:
                     next_event_task = asyncio.create_task(sub_iter.__anext__())
-                done, _pending = await asyncio.wait(
-                    {next_event_task}, timeout=15.0
-                )
+                done, _pending = await asyncio.wait({next_event_task}, timeout=15.0)
                 if not done:
                     # Heartbeat (SSE comment line).
                     yield ": heartbeat\n\n"
@@ -310,9 +306,7 @@ async def runtime_events(
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",  # Disable nginx response buffering for SSE.
     }
-    return StreamingResponse(
-        event_stream(), media_type="text/event-stream", headers=headers
-    )
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
 
 
 @router.post("/{instance_id}/start", status_code=status.HTTP_202_ACCEPTED)
@@ -333,7 +327,9 @@ async def start_runtime(
 
     # Short-circuit: if already all-running, skip the orchestrator call.
     _app_h, _creator_h = await _load_app_handles(db, inst)
-    current = _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h)
+    current = _build_runtime_payload(
+        project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h
+    )
     if current.state in {"running", "starting"}:
         return current.model_dump(mode="json")
     # Headless / job-only apps have no Deployments to start — schedules drive
@@ -393,8 +389,11 @@ async def start_runtime(
             containers, _ = await _load_project_graph(db, project.id)
             _app_h, _creator_h = await _load_app_handles(db, inst)
             return _build_runtime_payload(
-                project, containers, inst.primary_container_id,
-                app_handle=_app_h, creator_handle=_creator_h,
+                project,
+                containers,
+                inst.primary_container_id,
+                app_handle=_app_h,
+                creator_handle=_creator_h,
             ).model_dump(mode="json")
         logger.exception(
             "app_runtime_status: start_project failed for instance=%s project=%s",
@@ -415,9 +414,9 @@ async def start_runtime(
     # Reload container statuses post-start.
     containers, _ = await _load_project_graph(db, project.id)
     _app_h, _creator_h = await _load_app_handles(db, inst)
-    return _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h).model_dump(
-        mode="json"
-    )
+    return _build_runtime_payload(
+        project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h
+    ).model_dump(mode="json")
 
 
 # --- Schedules -------------------------------------------------------------
@@ -463,18 +462,20 @@ async def list_schedules(
     inst = await _load_instance(db, instance_id)
     await _authorize(db, inst, user)
     rows = (
-        await db.execute(
-            select(AgentSchedule)
-            .where(AgentSchedule.app_instance_id == instance_id)
-            .order_by(AgentSchedule.created_at.asc())
+        (
+            await db.execute(
+                select(AgentSchedule)
+                .where(AgentSchedule.app_instance_id == instance_id)
+                .order_by(AgentSchedule.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [_schedule_to_row(s) for s in rows]
 
 
-@router.patch(
-    "/{instance_id}/schedules/{schedule_id}", response_model=ScheduleRow
-)
+@router.patch("/{instance_id}/schedules/{schedule_id}", response_model=ScheduleRow)
 async def patch_schedule(
     instance_id: UUID,
     schedule_id: UUID,
@@ -534,13 +535,15 @@ async def trigger_schedule_manually(
         id=uuid.uuid4(),
         schedule_id=sched.id,
         payload=payload or {},
-        received_at=datetime.now(tz=timezone.utc),
+        received_at=datetime.now(tz=UTC),
     )
     db.add(event)
     await db.commit()
     logger.info(
         "app_runtime_status.trigger_schedule_manually schedule=%s event=%s user=%s",
-        schedule_id, event.id, user.id,
+        schedule_id,
+        event.id,
+        user.id,
     )
     return TriggerEnqueued(event_id=event.id, status="enqueued")
 
@@ -557,7 +560,9 @@ async def stop_runtime(
     # job-only apps have no Deployments to stop — return current rollup as 200.
     containers, _ = await _load_project_graph(db, project.id)
     _app_h, _creator_h = await _load_app_handles(db, inst)
-    current = _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h)
+    current = _build_runtime_payload(
+        project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h
+    )
     if current.state == "job_only":
         return current.model_dump(mode="json")
 
@@ -589,6 +594,6 @@ async def stop_runtime(
     await _emit_app_runtime(
         inst.id, "stopped", containers=containers, message="Environment stopped"
     )
-    return _build_runtime_payload(project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h).model_dump(
-        mode="json"
-    )
+    return _build_runtime_payload(
+        project, containers, inst.primary_container_id, app_handle=_app_h, creator_handle=_creator_h
+    ).model_dump(mode="json")

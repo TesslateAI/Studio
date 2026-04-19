@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..models import AppSubmission, SubmissionCheck, User
+from ..models import AppSubmission, User
 from ..services.apps import submissions as submissions_svc
 from ..users import current_active_user, current_superuser
 
@@ -100,9 +100,7 @@ async def list_submissions(
     if not getattr(user, "is_superuser", False):
         stmt = stmt.where(AppSubmission.submitter_user_id == user.id)
     stmt = stmt.order_by(AppSubmission.stage_entered_at.desc())
-    rows = (
-        (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
-    )
+    rows = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
     return SubmissionListOut(
         items=[SubmissionOut.model_validate(r) for r in rows],
         limit=limit,
@@ -155,14 +153,12 @@ async def advance_submission(
             decision_notes=body.decision_notes,
         )
     except submissions_svc.SubmissionNotFoundError:
-        raise HTTPException(status_code=404, detail="submission not found")
+        raise HTTPException(status_code=404, detail="submission not found") from None
     except submissions_svc.InvalidTransitionError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
     row = (
-        await db.execute(
-            select(AppSubmission).where(AppSubmission.id == submission_id)
-        )
+        await db.execute(select(AppSubmission).where(AppSubmission.id == submission_id))
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="submission not found")
@@ -178,9 +174,7 @@ async def add_check(
 ) -> CheckCreatedOut:
     # Ensure submission exists for a clean 404.
     exists = (
-        await db.execute(
-            select(AppSubmission.id).where(AppSubmission.id == submission_id)
-        )
+        await db.execute(select(AppSubmission.id).where(AppSubmission.id == submission_id))
     ).scalar_one_or_none()
     if exists is None:
         raise HTTPException(status_code=404, detail="submission not found")

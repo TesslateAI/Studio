@@ -46,6 +46,8 @@ def mock_settings(monkeypatch):
     settings.app_domain = "example.com"
     settings.compute_max_concurrent_pods = 10
     settings.deployment_mode = "kubernetes"
+    settings.database_url = "sqlite+aiosqlite:///:memory:"
+    settings.database_ssl = False
     monkeypatch.setattr("app.config.get_settings", lambda: settings)
     return settings
 

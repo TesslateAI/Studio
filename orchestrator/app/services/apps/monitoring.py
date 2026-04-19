@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -45,7 +45,7 @@ async def start_monitoring_run(
 ) -> UUID:
     """Insert a MonitoringRun in status='running'."""
     run_id = uuid.uuid4()
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     db.add(
         MonitoringRun(
             id=run_id,
@@ -69,16 +69,12 @@ async def finish_monitoring_run(
 ) -> None:
     """Close out a MonitoringRun with a terminal status."""
     row = (
-        await db.execute(
-            select(MonitoringRun)
-            .where(MonitoringRun.id == run_id)
-            .with_for_update()
-        )
+        await db.execute(select(MonitoringRun).where(MonitoringRun.id == run_id).with_for_update())
     ).scalar_one_or_none()
     if row is None:
         raise LookupError(f"monitoring_run {run_id} not found")
     row.status = status
-    row.finished_at = datetime.now(tz=timezone.utc)
+    row.finished_at = datetime.now(tz=UTC)
     if findings is not None:
         row.findings = findings
     await db.flush()
@@ -117,7 +113,7 @@ async def upsert_creator_reputation(
     delta_critical_yanks: int = 0,
 ) -> None:
     """UPSERT into creator_reputation accumulating the supplied deltas."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     stmt = pg_insert(CreatorReputation).values(
         user_id=user_id,
         score=Decimal(delta_score),
@@ -130,15 +126,10 @@ async def upsert_creator_reputation(
         index_elements=[CreatorReputation.user_id],
         set_={
             "score": CreatorReputation.score + stmt.excluded.score,
-            "approvals_count": (
-                CreatorReputation.approvals_count + stmt.excluded.approvals_count
-            ),
-            "yanks_count": (
-                CreatorReputation.yanks_count + stmt.excluded.yanks_count
-            ),
+            "approvals_count": (CreatorReputation.approvals_count + stmt.excluded.approvals_count),
+            "yanks_count": (CreatorReputation.yanks_count + stmt.excluded.yanks_count),
             "critical_yanks_count": (
-                CreatorReputation.critical_yanks_count
-                + stmt.excluded.critical_yanks_count
+                CreatorReputation.critical_yanks_count + stmt.excluded.critical_yanks_count
             ),
             "updated_at": now,
         },

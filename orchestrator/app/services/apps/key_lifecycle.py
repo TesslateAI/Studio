@@ -14,17 +14,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Final, Protocol
 
 
-class KeyTier(str, Enum):
+class KeyTier(StrEnum):
     SESSION = "session"
     INVOCATION = "invocation"
     NESTED = "nested"
 
 
-class KeyState(str, Enum):
+class KeyState(StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
     SETTLING = "settling"
@@ -115,15 +115,11 @@ def assert_can_mint_nested(
     the root session/invocation).
     """
     if req.ancestor_chain_len > max_depth:
-        raise KeyMintError(
-            f"nested depth {req.ancestor_chain_len} exceeds max {max_depth}"
-        )
+        raise KeyMintError(f"nested depth {req.ancestor_chain_len} exceeds max {max_depth}")
 
     parent_state = KeyState(req.parent.state)
     if parent_state != KeyState.ACTIVE:
-        raise KeyMintError(
-            f"parent key must be active, is {parent_state.value}"
-        )
+        raise KeyMintError(f"parent key must be active, is {parent_state.value}")
 
     if req.requested_budget_usd <= Decimal("0"):
         raise KeyMintError(f"requested budget must be positive, got {req.requested_budget_usd}")

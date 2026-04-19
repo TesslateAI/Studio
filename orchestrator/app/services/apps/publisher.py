@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -26,7 +26,8 @@ from ...models import AppSubmission, AppVersion, MarketplaceApp, Project
 from ...utils.slug_generator import slugify
 from ..hub_client import HubClient
 from . import compatibility
-from .manifest_parser import ManifestValidationError, parse as parse_manifest
+from .manifest_parser import ManifestValidationError
+from .manifest_parser import parse as parse_manifest
 
 __all__ = [
     "PublishError",
@@ -97,16 +98,17 @@ async def publish_version(
     if not version_str:
         raise PublishError("manifest.app.version must be non-empty")
     required_features = (
-        list(manifest.compatibility.required_features) if manifest
+        list(manifest.compatibility.required_features)
+        if manifest
         else list(compat_dict.get("required_features") or [])
     )
     manifest_schema_str = (
-        manifest.compatibility.manifest_schema if manifest
+        manifest.compatibility.manifest_schema
+        if manifest
         else compat_dict.get("manifest_schema", "")
     )
     manifest_schema_version = (
-        manifest.manifest_schema_version if manifest
-        else raw.get("manifest_schema_version", "")
+        manifest.manifest_schema_version if manifest else raw.get("manifest_schema_version", "")
     )
 
     # 2) Compat check vs server feature set.
@@ -144,6 +146,7 @@ async def publish_version(
         # Auto-derive handle from slug; (creator_user_id, handle) unique
         # constraint catches in-creator duplicates via IntegrityError below.
         from .reserved_handles import is_reserved as _is_reserved_handle
+
         derived_handle = slugify(app_slug, max_length=48) if app_slug else ""
         if _is_reserved_handle(derived_handle):
             derived_handle = f"{derived_handle[:40]}-app"
@@ -155,8 +158,14 @@ async def publish_version(
             description=(manifest.app.description if manifest else app_dict.get("description")),
             category=(manifest.app.category if manifest else app_dict.get("category")),
             icon_ref=(manifest.app.icon_ref if manifest else app_dict.get("icon_ref")),
-            forkable=(manifest.app.forkable if manifest else app_dict.get("forkable", "restricted")),
-            visibility=(manifest.listing.visibility if manifest else listing_dict.get("visibility", "private")),
+            forkable=(
+                manifest.app.forkable if manifest else app_dict.get("forkable", "restricted")
+            ),
+            visibility=(
+                manifest.listing.visibility
+                if manifest
+                else listing_dict.get("visibility", "private")
+            ),
             state="draft",
         )
         db.add(new_app)
@@ -164,9 +173,7 @@ async def publish_version(
             await db.flush()
         except IntegrityError as e:
             await db.rollback()
-            raise DuplicateVersionError(
-                f"slug already taken: {app_slug!r}"
-            ) from e
+            raise DuplicateVersionError(f"slug already taken: {app_slug!r}") from e
         app_row = new_app
     else:
         app_row = (
@@ -175,9 +182,7 @@ async def publish_version(
         if app_row is None:
             raise PublishError(f"MarketplaceApp {app_id} not found")
         if app_row.creator_user_id != creator_user_id:
-            raise PublishError(
-                f"user {creator_user_id} is not the creator of app {app_id}"
-            )
+            raise PublishError(f"user {creator_user_id} is not the creator of app {app_id}")
 
     # 5) Guard duplicate (app_id, version).
     existing = (
@@ -188,9 +193,7 @@ async def publish_version(
         )
     ).scalar_one_or_none()
     if existing is not None:
-        raise DuplicateVersionError(
-            f"app {app_row.id} already has version {version_str!r}"
-        )
+        raise DuplicateVersionError(f"app {app_row.id} already has version {version_str!r}")
 
     # 6) Publish bundle via Hub (CAS). Outside the DB round-trip loop.
     bundle_hash = await hub_client.publish_bundle(
@@ -200,7 +203,7 @@ async def publish_version(
     )
 
     # 7) Insert AppVersion.
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     manifest_hash = parsed.canonical_hash
     version_row = AppVersion(
         app_id=app_row.id,
@@ -226,9 +229,7 @@ async def publish_version(
         await db.flush()
     except IntegrityError as e:
         await db.rollback()
-        raise DuplicateVersionError(
-            f"app {app_row.id} already has version {version_str!r}"
-        ) from e
+        raise DuplicateVersionError(f"app {app_row.id} already has version {version_str!r}") from e
 
     # 8) Insert AppSubmission (stage0) for the approval pipeline.
     submission = AppSubmission(

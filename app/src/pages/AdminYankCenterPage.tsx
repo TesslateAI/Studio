@@ -17,8 +17,6 @@ import { appYanksApi, type YankRequest, type YankSeverity } from '../lib/api';
 
 export default function AdminYankCenterPage() {
   const { user } = useAuth();
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
-
   const admin = useRequiredAdmin();
   const [rows, setRows] = useState<YankRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +37,8 @@ export default function AdminYankCenterPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
 
   const onApprove = async (row: YankRequest) => {
     setBusyId(row.id);
@@ -104,9 +104,7 @@ export default function AdminYankCenterPage() {
                   data-testid={`yank-row-${row.id}`}
                   className="border-b border-[var(--border)] align-top"
                 >
-                  <td className="py-2 pr-4 font-mono text-xs">
-                    {row.app_version_id.slice(0, 8)}
-                  </td>
+                  <td className="py-2 pr-4 font-mono text-xs">{row.app_version_id.slice(0, 8)}</td>
                   <td className="py-2 pr-4 font-mono text-xs">
                     {row.requester_user_id?.slice(0, 8) ?? '—'}
                   </td>

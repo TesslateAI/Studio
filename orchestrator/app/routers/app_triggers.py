@@ -26,7 +26,7 @@ import hashlib
 import hmac
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -206,7 +206,7 @@ async def webhook_trigger(
         id=uuid.uuid4(),
         schedule_id=sched.id,
         payload=payload if isinstance(payload, dict) else {"_payload": payload},
-        received_at=datetime.now(tz=timezone.utc),
+        received_at=datetime.now(tz=UTC),
     )
     db.add(event)
 
@@ -237,6 +237,9 @@ async def webhook_trigger(
 
     logger.info(
         "app_triggers.webhook_trigger instance=%s trigger=%s event=%s kid=%s",
-        instance_id, trigger_name, event.id, matched_kid,
+        instance_id,
+        trigger_name,
+        event.id,
+        matched_kid,
     )
     return TriggerAccepted(event_id=event.id, status="enqueued")

@@ -20,11 +20,11 @@ from ...models import Project
 def exclude_app_instances_clause() -> ColumnElement[bool]:
     """Return a WHERE clause that filters out AppInstance-backed projects.
 
-    Matches projects whose `app_role` is NULL (legacy / user-authored) or
-    `"app_source"` (canvas draft of an app the user is creating) — both of
-    those belong in the Projects dashboard. Excludes `"app_instance"`.
+    Keeps projects whose `app_role` is NULL (legacy), `"none"` (regular
+    user project), or `"app_source"` (creator studio draft). Excludes
+    `"app_instance"` (installed app runtime mounts, shown in /apps instead).
     """
-    return or_(Project.app_role.is_(None), Project.app_role == "app_source")
+    return or_(Project.app_role.is_(None), Project.app_role != "app_instance")
 
 
 def only_app_instances_clause() -> ColumnElement[bool]:

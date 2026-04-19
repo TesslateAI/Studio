@@ -71,8 +71,8 @@ def app_container_url(
 
 
 async def resolve_app_url_for_container(
-    db: "AsyncSession",
-    container: "Container",
+    db: AsyncSession,
+    container: Container,
     *,
     protocol: str = "http",
 ) -> str | None:
@@ -97,9 +97,7 @@ async def resolve_app_url_for_container(
         return None
 
     inst = (
-        await db.execute(
-            select(AppInstance).where(AppInstance.project_id == project.id).limit(1)
-        )
+        await db.execute(select(AppInstance).where(AppInstance.project_id == project.id).limit(1))
     ).scalar_one_or_none()
     if inst is None:
         return None
@@ -131,9 +129,7 @@ async def resolve_app_url_for_container(
         from ...models import Container as _Container
 
         sibling_count = (
-            await db.execute(
-                select(_Container.id).where(_Container.project_id == project.id)
-            )
+            await db.execute(select(_Container.id).where(_Container.project_id == project.id))
         ).all()
         if len(sibling_count) <= 1:
             only_primary = True

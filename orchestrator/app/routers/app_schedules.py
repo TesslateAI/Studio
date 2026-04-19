@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import secrets as _secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -74,9 +74,7 @@ async def _load_instance(db: AsyncSession, instance_id: UUID) -> AppInstance:
     return inst
 
 
-async def _authorize(
-    db: AsyncSession, inst: AppInstance, user: User
-) -> Project:
+async def _authorize(db: AsyncSession, inst: AppInstance, user: User) -> Project:
     project = await db.get(Project, inst.project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
@@ -111,7 +109,7 @@ async def _load_webhook_schedule(
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_secrets_list(trig_cfg: dict[str, Any]) -> list[dict[str, Any]]:

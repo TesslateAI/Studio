@@ -9,7 +9,7 @@ self-FK, and the partial TTL index).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -17,14 +17,12 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import AsyncSessionLocal
 from app.services import litellm_keys
 from app.services.apps.key_lifecycle import (
     KeyMintError,
     KeyState,
     KeyTier,
 )
-
 
 pytestmark = pytest.mark.integration
 
@@ -52,7 +50,12 @@ class FakeDelegate:
         self._counter += 1
         key_id = f"test-key-{self._counter}-{uuid.uuid4().hex[:8]}"
         self.minted.append(
-            {"key_id": key_id, "tier": tier, "budget_usd": Decimal(budget_usd), "metadata": metadata}
+            {
+                "key_id": key_id,
+                "tier": tier,
+                "budget_usd": Decimal(budget_usd),
+                "metadata": metadata,
+            }
         )
         return {"key_id": key_id, "api_key": f"sk-fake-{key_id}"}
 
@@ -64,9 +67,20 @@ class FakeDelegate:
 
 @pytest_asyncio.fixture
 async def db() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
+    import os
+
+    from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    url = os.environ.get(
+        "DATABASE_URL", "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test"
+    )
+    engine = create_async_engine(url, pool_pre_ping=True)
+    factory = async_sessionmaker(engine, class_=_AsyncSession, expire_on_commit=False)
+    async with factory() as session:
         yield session
         await session.rollback()
+    await engine.dispose()
 
 
 @pytest.fixture
@@ -90,7 +104,7 @@ async def test_mint_session_key_writes_active_ledger_row(db, delegate) -> None:
     assert row.tier == KeyTier.SESSION.value
     assert row.budget_usd == Decimal("1.000000")
     assert row.spent_usd == Decimal("0")
-    assert row.ttl_at is not None and row.ttl_at > datetime.now(tz=timezone.utc)
+    assert row.ttl_at is not None and row.ttl_at > datetime.now(tz=UTC)
     assert len(delegate.minted) == 1
     assert delegate.minted[0]["tier"] == "session"
 
@@ -157,17 +171,29 @@ async def test_mint_depth_limit_enforced(db, delegate, monkeypatch) -> None:
         db, delegate=delegate, tier=KeyTier.SESSION, user_id=None, budget_usd=Decimal("10")
     )
     p2 = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("1"), parent_key_id=p1.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("1"),
+        parent_key_id=p1.key_id,
     )
     p3 = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("0.5"), parent_key_id=p2.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("0.5"),
+        parent_key_id=p2.key_id,
     )
     with pytest.raises(KeyMintError, match="depth"):
         await litellm_keys.mint(
-            db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-            budget_usd=Decimal("0.1"), parent_key_id=p3.key_id,
+            db,
+            delegate=delegate,
+            tier=KeyTier.NESTED,
+            user_id=None,
+            budget_usd=Decimal("0.1"),
+            parent_key_id=p3.key_id,
         )
 
 
@@ -175,7 +201,10 @@ async def test_mint_failure_at_litellm_leaves_no_row(db, delegate) -> None:
     delegate.fail_on_mint = True
     with pytest.raises(RuntimeError):
         await litellm_keys.mint(
-            db, delegate=delegate, tier=KeyTier.SESSION, user_id=None,
+            db,
+            delegate=delegate,
+            tier=KeyTier.SESSION,
+            user_id=None,
             budget_usd=Decimal("1.0"),
         )
     assert delegate.minted == []
@@ -197,12 +226,20 @@ async def test_record_spend_cascades_to_ancestors(db, delegate) -> None:
         db, delegate=delegate, tier=KeyTier.SESSION, user_id=None, budget_usd=Decimal("10")
     )
     p2 = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("5"), parent_key_id=p1.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("5"),
+        parent_key_id=p1.key_id,
     )
     p3 = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("1"), parent_key_id=p2.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("1"),
+        parent_key_id=p2.key_id,
     )
     await litellm_keys.record_spend(db, key_id=p3.key_id, delta_usd=Decimal("0.5"))
 
@@ -271,21 +308,31 @@ async def test_cascade_revoke_hits_all_descendants(db, delegate) -> None:
         db, delegate=delegate, tier=KeyTier.SESSION, user_id=None, budget_usd=Decimal("10")
     )
     child_a = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("1"), parent_key_id=parent.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("1"),
+        parent_key_id=parent.key_id,
     )
     child_b = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("1"), parent_key_id=parent.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("1"),
+        parent_key_id=parent.key_id,
     )
     grandchild = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("0.5"), parent_key_id=child_a.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("0.5"),
+        parent_key_id=child_a.key_id,
     )
 
-    revoked = await litellm_keys.cascade_revoke(
-        db, delegate=delegate, parent_key_id=parent.key_id
-    )
+    revoked = await litellm_keys.cascade_revoke(db, delegate=delegate, parent_key_id=parent.key_id)
     assert set(revoked) == {child_a.key_id, child_b.key_id, grandchild.key_id}
     await db.refresh(parent)
     assert parent.state == KeyState.ACTIVE.value, "cascade does not revoke the parent itself"
@@ -296,17 +343,19 @@ async def test_cascade_revoke_skips_already_terminal(db, delegate) -> None:
         db, delegate=delegate, tier=KeyTier.SESSION, user_id=None, budget_usd=Decimal("5")
     )
     child = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("1"), parent_key_id=parent.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("1"),
+        parent_key_id=parent.key_id,
     )
     # pre-settle the child
     await litellm_keys.begin_settlement(db, delegate=delegate, key_id=child.key_id)
     await litellm_keys.finalize_settlement(db, key_id=child.key_id)
 
     before = len(delegate.revoked)
-    revoked = await litellm_keys.cascade_revoke(
-        db, delegate=delegate, parent_key_id=parent.key_id
-    )
+    revoked = await litellm_keys.cascade_revoke(db, delegate=delegate, parent_key_id=parent.key_id)
     assert child.key_id not in revoked
     assert len(delegate.revoked) == before  # no new revokes issued
 
@@ -326,8 +375,12 @@ async def test_await_children_terminal_false_with_active_child(db, delegate) -> 
         db, delegate=delegate, tier=KeyTier.SESSION, user_id=None, budget_usd=Decimal("1")
     )
     await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.NESTED, user_id=None,
-        budget_usd=Decimal("0.1"), parent_key_id=parent.key_id,
+        db,
+        delegate=delegate,
+        tier=KeyTier.NESTED,
+        user_id=None,
+        budget_usd=Decimal("0.1"),
+        parent_key_id=parent.key_id,
     )
     assert not await litellm_keys.await_children_terminal(db, parent_key_id=parent.key_id)
 
@@ -337,11 +390,15 @@ async def test_await_children_terminal_false_with_active_child(db, delegate) -> 
 
 async def test_select_idle_session_keys_returns_keys_past_ttl(db, delegate) -> None:
     row = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.SESSION, user_id=None,
-        budget_usd=Decimal("1"), ttl_seconds=60,
+        db,
+        delegate=delegate,
+        tier=KeyTier.SESSION,
+        user_id=None,
+        budget_usd=Decimal("1"),
+        ttl_seconds=60,
     )
     # Force TTL into the past.
-    row.ttl_at = datetime.now(tz=timezone.utc) - timedelta(seconds=5)
+    row.ttl_at = datetime.now(tz=UTC) - timedelta(seconds=5)
     await db.flush()
 
     idle = await litellm_keys.select_idle_session_keys(db)
@@ -350,10 +407,14 @@ async def test_select_idle_session_keys_returns_keys_past_ttl(db, delegate) -> N
 
 async def test_select_idle_session_keys_skips_invocation_tier(db, delegate) -> None:
     row = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.INVOCATION, user_id=None,
-        budget_usd=Decimal("1"), ttl_seconds=60,
+        db,
+        delegate=delegate,
+        tier=KeyTier.INVOCATION,
+        user_id=None,
+        budget_usd=Decimal("1"),
+        ttl_seconds=60,
     )
-    row.ttl_at = datetime.now(tz=timezone.utc) - timedelta(seconds=5)
+    row.ttl_at = datetime.now(tz=UTC) - timedelta(seconds=5)
     await db.flush()
 
     idle = await litellm_keys.select_idle_session_keys(db)
@@ -362,13 +423,17 @@ async def test_select_idle_session_keys_skips_invocation_tier(db, delegate) -> N
 
 async def test_bump_session_ttl_defers_reaping(db, delegate) -> None:
     row = await litellm_keys.mint(
-        db, delegate=delegate, tier=KeyTier.SESSION, user_id=None,
-        budget_usd=Decimal("1"), ttl_seconds=60,
+        db,
+        delegate=delegate,
+        tier=KeyTier.SESSION,
+        user_id=None,
+        budget_usd=Decimal("1"),
+        ttl_seconds=60,
     )
-    row.ttl_at = datetime.now(tz=timezone.utc) - timedelta(seconds=5)
+    row.ttl_at = datetime.now(tz=UTC) - timedelta(seconds=5)
     await db.flush()
 
     bumped = await litellm_keys.bump_session_ttl(db, key_id=row.key_id)
-    assert bumped.ttl_at > datetime.now(tz=timezone.utc)
+    assert bumped.ttl_at > datetime.now(tz=UTC)
     idle = await litellm_keys.select_idle_session_keys(db)
     assert row.key_id not in idle

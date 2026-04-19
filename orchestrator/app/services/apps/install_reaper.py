@@ -27,10 +27,10 @@ multiple worker pods.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models import AppInstallAttempt, AppInstance
@@ -46,7 +46,7 @@ async def _find_candidates(
     max_age_seconds: int,
     limit: int,
 ) -> list[AppInstallAttempt]:
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
+    cutoff = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
     stmt = (
         select(AppInstallAttempt)
         .where(
@@ -107,9 +107,7 @@ async def reap_orphaned_install_attempts(
     counters = {"scanned": 0, "converged": 0, "reaped": 0, "failed": 0}
     async with AsyncSessionLocal() as db:
         try:
-            candidates = await _find_candidates(
-                db, max_age_seconds=max_age_seconds, limit=limit
-            )
+            candidates = await _find_candidates(db, max_age_seconds=max_age_seconds, limit=limit)
         except Exception:
             logger.exception("install_reaper: failed to fetch candidates")
             await db.rollback()
@@ -121,14 +119,14 @@ async def reap_orphaned_install_attempts(
             if converged is not None:
                 attempt.state = "committed"
                 attempt.app_instance_id = converged.id
-                attempt.committed_at = datetime.now(timezone.utc)
+                attempt.committed_at = datetime.now(UTC)
                 counters["converged"] += 1
                 continue
 
             if not attempt.volume_id:
                 # No volume id means nothing to reap; just close the ledger.
                 attempt.state = "reaped"
-                attempt.reaped_at = datetime.now(timezone.utc)
+                attempt.reaped_at = datetime.now(UTC)
                 continue
 
             try:
@@ -145,7 +143,7 @@ async def reap_orphaned_install_attempts(
                 continue
 
             attempt.state = "reaped"
-            attempt.reaped_at = datetime.now(timezone.utc)
+            attempt.reaped_at = datetime.now(UTC)
             counters["reaped"] += 1
             logger.info(
                 "install_reaper: reaped volume=%s attempt=%s",

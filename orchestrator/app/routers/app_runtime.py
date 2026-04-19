@@ -64,9 +64,7 @@ async def _assert_installer_or_superuser(
     db: AsyncSession, app_instance_id: UUID, user: User
 ) -> AppInstance:
     instance = (
-        await db.execute(
-            select(AppInstance).where(AppInstance.id == app_instance_id).limit(1)
-        )
+        await db.execute(select(AppInstance).where(AppInstance.id == app_instance_id).limit(1))
     ).scalar_one_or_none()
     if instance is None:
         raise HTTPException(status_code=404, detail="app_instance not found")
@@ -112,7 +110,7 @@ async def create_session(
             ttl_seconds=body.ttl_seconds,
         )
     except runtime_svc.AppNotRunnableError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     return _to_response(handle)
 
 
@@ -155,7 +153,7 @@ async def create_invocation(
             ttl_seconds=body.ttl_seconds,
         )
     except runtime_svc.AppNotRunnableError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     return _to_response(handle)
 
 
@@ -165,7 +163,5 @@ async def delete_invocation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_active_user),
 ) -> Response:
-    await runtime_svc.end_invocation(
-        db, session_id=session_id, delegate=litellm_service
-    )
+    await runtime_svc.end_invocation(db, session_id=session_id, delegate=litellm_service)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -533,16 +533,18 @@ class LiteLLMService:
             "team_id": self.team_id,
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
                 f"{self.management_base_url}/key/generate",
                 headers=self.headers,
                 json=payload,
-            ) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    raise RuntimeError(f"LiteLLM /key/generate failed: {resp.status} {text}")
-                data = await resp.json()
+            ) as resp,
+        ):
+            if resp.status != 200:
+                text = await resp.text()
+                raise RuntimeError(f"LiteLLM /key/generate failed: {resp.status} {text}")
+            data = await resp.json()
 
         return {"key_id": key_id, "api_key": data.get("key", "")}
 

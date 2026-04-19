@@ -35,10 +35,9 @@ const PAGE_SIZE = 20;
 export default function AdminMarketplaceReviewPage() {
   const { user } = useAuth();
   const [tab, setTab] = useState<TabKey>('submissions');
+  const admin = useRequiredAdmin();
 
   if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
-
-  const admin = useRequiredAdmin();
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
@@ -127,18 +126,12 @@ function SubmissionsTab({ items }: { items: SubmissionQueueItem[] }) {
               key={row.submission_id}
               data-testid={`submission-row-${row.submission_id}`}
               className="border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-hover)]"
-              onClick={() =>
-                navigate(`/admin/marketplace/submissions/${row.submission_id}`)
-              }
+              onClick={() => navigate(`/admin/marketplace/submissions/${row.submission_id}`)}
             >
-              <td className="py-2 pr-4 font-mono text-xs">
-                {row.app_id.slice(0, 8)}
-              </td>
+              <td className="py-2 pr-4 font-mono text-xs">{row.app_id.slice(0, 8)}</td>
               <td className="py-2 pr-4">
                 {row.app_name || row.app_id}
-                <span className="text-[var(--text-muted)] ml-2">
-                  {row.version ?? '—'}
-                </span>
+                <span className="text-[var(--text-muted)] ml-2">{row.version ?? '—'}</span>
               </td>
               <td className="py-2 pr-4">
                 <StageBadge stage={row.stage} />
@@ -186,9 +179,7 @@ function StageBadge({ stage }: { stage: string }) {
   };
   const cls = colors[stage] ?? 'bg-[var(--surface-hover)] text-[var(--text-muted)]';
   return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
-      {stage}
-    </span>
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{stage}</span>
   );
 }
 
@@ -262,9 +253,7 @@ function StatsTab({ stats }: { stats: AdminStats | null }) {
           key={c.label}
           className="rounded-xl border border-[var(--border)] p-4 bg-[var(--surface)]"
         >
-          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wide">
-            {c.label}
-          </div>
+          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wide">{c.label}</div>
           <div className="text-3xl font-semibold mt-1">{c.value}</div>
         </div>
       ))}
@@ -303,15 +292,11 @@ function MonitoringTab() {
   return (
     <div className="max-w-xl">
       <p className="text-sm text-[var(--text-muted)] mb-4">
-        Trigger monitoring runs manually. A list of recent runs requires a
-        backend endpoint that is not yet exposed.
+        Trigger monitoring runs manually. A list of recent runs requires a backend endpoint that is
+        not yet exposed.
       </p>
       <div className="space-y-3">
-        <LabeledInput
-          label="App version id"
-          value={appVersionId}
-          onChange={setAppVersionId}
-        />
+        <LabeledInput label="App version id" value={appVersionId} onChange={setAppVersionId} />
         <LabeledInput label="Kind" value={kind} onChange={setKind} />
         <button
           disabled={busy}

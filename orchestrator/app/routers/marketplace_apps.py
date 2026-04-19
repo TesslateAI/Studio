@@ -12,9 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..database import get_db
 from ..models import AppInstance, AppVersion, MarketplaceApp, User
-from ..config import get_settings
 from ..services.apps.fork import ForkError, NotForkableError, fork_app
 from ..services.hub_client import HubClient
 from ..users import current_active_user
@@ -90,9 +90,7 @@ def _get_hub_client() -> HubClient:
     return HubClient(settings.volume_hub_address)
 
 
-async def _user_can_see_app(
-    db: AsyncSession, app_row: MarketplaceApp, user: User
-) -> bool:
+async def _user_can_see_app(db: AsyncSession, app_row: MarketplaceApp, user: User) -> bool:
     if user.is_superuser:
         return True
     if app_row.creator_user_id == user.id:
@@ -225,9 +223,7 @@ async def fork_marketplace_app(
     # Ensure the source version belongs to the declared app (caller-supplied
     # source_app_version_id is the authoritative fork root per service API).
     src = (
-        await db.execute(
-            select(AppVersion).where(AppVersion.id == payload.source_app_version_id)
-        )
+        await db.execute(select(AppVersion).where(AppVersion.id == payload.source_app_version_id))
     ).scalar_one_or_none()
     if src is None or src.app_id != app_id:
         raise HTTPException(status_code=404, detail="source app_version not found for app")

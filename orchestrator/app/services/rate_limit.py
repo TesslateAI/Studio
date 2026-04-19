@@ -14,8 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
-from typing import Awaitable
+from collections.abc import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, Request
 
@@ -222,15 +221,11 @@ def rate_limited(
                             async with AsyncSessionLocal() as audit_db:
                                 proj = (
                                     await audit_db.execute(
-                                        select(Project).where(
-                                            Project.id == project_id
-                                        )
+                                        select(Project).where(Project.id == project_id)
                                     )
                                 ).scalar_one_or_none()
                                 team_id = (
-                                    getattr(proj, "team_id", None)
-                                    if proj is not None
-                                    else None
+                                    getattr(proj, "team_id", None) if proj is not None else None
                                 )
                                 if team_id is not None:
                                     await log_event(
@@ -250,13 +245,10 @@ def rate_limited(
                                     await audit_db.commit()
                         except Exception:
                             logger.exception(
-                                "rate_limit: failed to write rejection audit "
-                                "(non-blocking)"
+                                "rate_limit: failed to write rejection audit (non-blocking)"
                             )
                 except Exception:
-                    logger.exception(
-                        "rate_limit: audit setup failed (non-blocking)"
-                    )
+                    logger.exception("rate_limit: audit setup failed (non-blocking)")
 
             raise HTTPException(
                 status_code=429,

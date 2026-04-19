@@ -1250,12 +1250,6 @@ async def drain_warm_pool_task(ctx: dict, app_instance_id: str) -> dict:
             raise
 
 
-from .services.apps.app_invocations import invoke_app_instance_task  # noqa: E402
-from .services.apps.settlement_worker import (  # noqa: E402
-    settle_spend_batch as settle_spend_batch_cron,
-)
-
-
 async def run_stage1_scan_task(ctx: dict, submission_id: str) -> dict:
     """Wave 7: run the Stage1 structural scan on a submission."""
     from uuid import UUID as _UUID

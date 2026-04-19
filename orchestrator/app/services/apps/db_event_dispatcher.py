@@ -113,8 +113,8 @@ async def _fanout_event(db, evt: dict[str, str]) -> int:
 
 async def db_event_dispatcher(ctx: dict) -> dict:
     """ARQ cron entrypoint. Drains all db_event streams once."""
-    from ..cache_service import get_redis_client
     from ...database import AsyncSessionLocal
+    from ..cache_service import get_redis_client
 
     redis = await get_redis_client()
     if not redis:

@@ -37,9 +37,7 @@ def is_auto_approve_enabled() -> bool:
     """Return True if the apps dev auto-approve flag is set via either env."""
     if _truthy(os.environ.get(_PRIMARY_ENV)):
         return True
-    if _truthy(os.environ.get(_DEPRECATED_ENV)):
-        return True
-    return False
+    return bool(_truthy(os.environ.get(_DEPRECATED_ENV)))
 
 
 __all__ = ["is_auto_approve_enabled"]

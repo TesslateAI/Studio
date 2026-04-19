@@ -124,20 +124,27 @@ async def create_bundle_endpoint(
 ) -> CreateBundleResponse:
     specs = [
         bundles_svc.BundleItemSpec(
-            app_version_id=i.app_version_id, order_index=i.order_index,
-            default_enabled=i.default_enabled, required=i.required,
-        ) for i in body.items
+            app_version_id=i.app_version_id,
+            order_index=i.order_index,
+            default_enabled=i.default_enabled,
+            required=i.required,
+        )
+        for i in body.items
     ]
     try:
         bid = await bundles_svc.create_bundle(
-            db, owner_user_id=current_user.id, slug=body.slug,
-            display_name=body.display_name, items=specs,
-            summary=body.summary, description=body.description,
+            db,
+            owner_user_id=current_user.id,
+            slug=body.slug,
+            display_name=body.display_name,
+            items=specs,
+            summary=body.summary,
+            description=body.description,
         )
     except bundles_svc.BundleSlugTakenError:
-        raise HTTPException(status_code=409, detail=f"slug '{body.slug}' is taken")
+        raise HTTPException(status_code=409, detail=f"slug '{body.slug}' is taken") from None
     except bundles_svc.BundleError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return CreateBundleResponse(bundle_id=bid)
 
 
@@ -164,12 +171,16 @@ async def list_bundles_endpoint(
             raise HTTPException(status_code=400, detail="invalid status filter")
         stmt = stmt.where(AppBundle.status == status_filter)
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
-    rows = (await db.execute(
-        stmt.order_by(AppBundle.created_at.desc()).limit(limit).offset(offset)
-    )).scalars().all()
+    rows = (
+        (await db.execute(stmt.order_by(AppBundle.created_at.desc()).limit(limit).offset(offset)))
+        .scalars()
+        .all()
+    )
     return BundleListResponse(
         items=[BundleListItem.model_validate(r) for r in rows],
-        total=int(total), limit=limit, offset=offset,
+        total=int(total),
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -179,18 +190,21 @@ async def get_bundle_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ) -> BundleOut:
-    header = (await db.execute(
-        select(AppBundle).where(AppBundle.id == bundle_id)
-    )).scalar_one_or_none()
+    header = (
+        await db.execute(select(AppBundle).where(AppBundle.id == bundle_id))
+    ).scalar_one_or_none()
     if header is None:
         raise HTTPException(status_code=404, detail="bundle not found")
-    if not (header.owner_user_id == current_user.id or _is_admin(current_user)
-            or header.status == "approved"):
+    if not (
+        header.owner_user_id == current_user.id
+        or _is_admin(current_user)
+        or header.status == "approved"
+    ):
         raise HTTPException(status_code=404, detail="bundle not found")
     try:
         data = await bundles_svc.get_bundle(db, bundle_id=bundle_id)
     except bundles_svc.BundleNotFoundError:
-        raise HTTPException(status_code=404, detail="bundle not found")
+        raise HTTPException(status_code=404, detail="bundle not found") from None
     return BundleOut(**data)
 
 
@@ -203,39 +217,45 @@ async def publish_bundle_endpoint(
     try:
         await bundles_svc.publish_bundle(db, bundle_id=bundle_id, actor_user_id=current_user.id)
     except bundles_svc.BundleNotFoundError:
-        raise HTTPException(status_code=404, detail="bundle not found")
+        raise HTTPException(status_code=404, detail="bundle not found") from None
     except bundles_svc.BundleError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return Response(status_code=204)
 
 
 @router.post("/{bundle_id}/yank", status_code=204)
 async def yank_bundle_endpoint(
-    bundle_id: UUID, body: YankBundleRequest,
+    bundle_id: UUID,
+    body: YankBundleRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_superuser),
 ) -> Response:
     try:
         await bundles_svc.yank_bundle(
-            db, bundle_id=bundle_id, actor_user_id=current_user.id, reason=body.reason,
+            db,
+            bundle_id=bundle_id,
+            actor_user_id=current_user.id,
+            reason=body.reason,
         )
     except bundles_svc.BundleNotFoundError:
-        raise HTTPException(status_code=404, detail="bundle not found")
+        raise HTTPException(status_code=404, detail="bundle not found") from None
     except bundles_svc.BundleError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return Response(status_code=204)
 
 
 @router.post("/{bundle_id}/install")
 async def install_bundle_endpoint(
-    bundle_id: UUID, body: BundleInstallRequest, response: Response,
+    bundle_id: UUID,
+    body: BundleInstallRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ) -> BundleInstallResponse:
     try:
         bundle = await bundles_svc.get_bundle(db, bundle_id=bundle_id)
     except bundles_svc.BundleNotFoundError:
-        raise HTTPException(status_code=404, detail="bundle not found")
+        raise HTTPException(status_code=404, detail="bundle not found") from None
     consents_by_av = {i.app_version_id: i for i in body.installs}
     hub = HubClient(get_settings().volume_hub_address)
     succeeded: list[InstalledItem] = []
@@ -252,14 +272,21 @@ async def install_bundle_endpoint(
             continue
         try:
             result = await installer_svc.install_app(
-                db, installer_user_id=current_user.id, app_version_id=av_id,
-                hub_client=hub, wallet_mix_consent=consent.wallet_mix_consent,
-                mcp_consents=consent.mcp_consents, team_id=body.team_id,
+                db,
+                installer_user_id=current_user.id,
+                app_version_id=av_id,
+                hub_client=hub,
+                wallet_mix_consent=consent.wallet_mix_consent,
+                mcp_consents=consent.mcp_consents,
+                team_id=body.team_id,
             )
-            succeeded.append(InstalledItem(
-                app_version_id=av_id, app_instance_id=result.app_instance_id,
-                project_id=result.project_id,
-            ))
+            succeeded.append(
+                InstalledItem(
+                    app_version_id=av_id,
+                    app_instance_id=result.app_instance_id,
+                    project_id=result.project_id,
+                )
+            )
         except installer_svc.InstallError as e:
             failed.append(FailedItem(app_version_id=av_id, error=str(e)))
         except Exception as e:  # defensive
@@ -268,8 +295,11 @@ async def install_bundle_endpoint(
     note: str | None = None
     if failed:
         response.status_code = status.HTTP_207_MULTI_STATUS
-        note = ("partial success; earlier installs were NOT rolled back"
-                if succeeded else "all items failed")
+        note = (
+            "partial success; earlier installs were NOT rolled back"
+            if succeeded
+            else "all items failed"
+        )
     else:
         response.status_code = status.HTTP_200_OK
     return BundleInstallResponse(succeeded=succeeded, failed=failed, note=note)

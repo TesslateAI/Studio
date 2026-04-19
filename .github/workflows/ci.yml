@@ -234,6 +234,7 @@ jobs:
           DEPLOYMENT_MODE: docker
           LITELLM_API_BASE: http://localhost:4000/v1
           LITELLM_MASTER_KEY: test-key
+          TEST_HELPERS_ENABLED: "1"
 
       - name: Start frontend dev server
         working-directory: app

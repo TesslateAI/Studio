@@ -17,9 +17,10 @@ from __future__ import annotations
 import logging
 import secrets as _secrets
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -177,9 +178,7 @@ async def install_app(
             f"AppVersion {app_version_id} has approval_state={av.approval_state!r}"
         )
     if app_row.state in {"yanked", "deprecated"}:
-        raise IncompatibleAppError(
-            f"MarketplaceApp {app_row.id} is {app_row.state}"
-        )
+        raise IncompatibleAppError(f"MarketplaceApp {app_row.id} is {app_row.state}")
 
     # 2) Compat re-check against the current server feature set.
     manifest_json = av.manifest_json or {}
@@ -284,14 +283,10 @@ async def install_app(
             continue
         name = str(entry.get("name") or "").strip()
         if not name:
-            raise IncompatibleAppError(
-                "manifest compute.containers entry missing 'name'"
-            )
+            raise IncompatibleAppError("manifest compute.containers entry missing 'name'")
         image = entry.get("image")
         if not image:
-            raise IncompatibleAppError(
-                f"manifest compute.containers[{name}] missing 'image'"
-            )
+            raise IncompatibleAppError(f"manifest compute.containers[{name}] missing 'image'")
         ports = entry.get("ports") or []
         port = ports[0] if ports else None
         directory = entry.get("directory") or "/app"
@@ -354,7 +349,7 @@ async def install_app(
         )
 
     # 8) Insert AppInstance + McpConsentRecord rows.
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     instance = AppInstance(
         app_id=app_row.id,
         app_version_id=av.id,
@@ -382,9 +377,7 @@ async def install_app(
     for consent in mcp_consents:
         server_id = consent.get("mcp_server_id")
         if not server_id:
-            raise ConsentRejectedError(
-                "mcp_consents entry missing 'mcp_server_id'"
-            )
+            raise ConsentRejectedError("mcp_consents entry missing 'mcp_server_id'")
         db.add(
             McpConsentRecord(
                 app_instance_id=instance.id,
@@ -417,7 +410,7 @@ async def install_app(
                 {
                     "kid": "v1",
                     "secret": _secrets.token_urlsafe(32),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "revoked_at": None,
                 }
             ]
@@ -532,11 +525,10 @@ async def _mark_attempt_committed(
                 return
             row.state = "committed"
             row.app_instance_id = app_instance_id
-            row.committed_at = datetime.now(timezone.utc)
+            row.committed_at = datetime.now(UTC)
             await session.commit()
     except Exception:
         logger.exception(
-            "install_app: failed to mark install attempt committed "
-            "(attempt_id=%s)",
+            "install_app: failed to mark install attempt committed (attempt_id=%s)",
             attempt_id,
         )

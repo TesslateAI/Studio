@@ -30,6 +30,7 @@ import hashlib
 import logging
 import time
 import uuid
+from datetime import UTC
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -110,13 +111,11 @@ async def find_or_create_wallet(
     if owner_user_id is None:
         where = and_(Wallet.owner_type == owner_type, Wallet.owner_user_id.is_(None))
     else:
-        where = and_(
-            Wallet.owner_type == owner_type, Wallet.owner_user_id == owner_user_id
-        )
+        where = and_(Wallet.owner_type == owner_type, Wallet.owner_user_id == owner_user_id)
 
     rows = (
-        await db.execute(select(Wallet).where(where).order_by(Wallet.created_at))
-    ).scalars().all()
+        (await db.execute(select(Wallet).where(where).order_by(Wallet.created_at))).scalars().all()
+    )
 
     if rows:
         if owner_type == "platform" and len(rows) > 1:
@@ -157,9 +156,7 @@ async def _apply_ledger(
 ) -> WalletLedgerEntry:
     """Lock wallet row, apply delta, insert ledger entry."""
     locked = (
-        await db.execute(
-            select(Wallet).where(Wallet.id == wallet.id).with_for_update()
-        )
+        await db.execute(select(Wallet).where(Wallet.id == wallet.id).with_for_update())
     ).scalar_one()
     locked.balance_usd = _q(Decimal(locked.balance_usd) + delta)
     entry = WalletLedgerEntry(
@@ -186,7 +183,7 @@ async def settle_one_spend(db: AsyncSession, spend: SpendRecord) -> dict:
 
     Returns a small dict for logging/telemetry.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     gross = _q(Decimal(spend.amount_usd))
     markup_pct = Decimal("0")
@@ -195,16 +192,12 @@ async def settle_one_spend(db: AsyncSession, spend: SpendRecord) -> dict:
     # Resolve creator + markup from the AppInstance + MarketplaceApp.
     if spend.app_instance_id is not None:
         inst = (
-            await db.execute(
-                select(AppInstance).where(AppInstance.id == spend.app_instance_id)
-            )
+            await db.execute(select(AppInstance).where(AppInstance.id == spend.app_instance_id))
         ).scalar_one_or_none()
         if inst is not None:
             creator_user_id = (
                 await db.execute(
-                    select(MarketplaceApp.creator_user_id).where(
-                        MarketplaceApp.id == inst.app_id
-                    )
+                    select(MarketplaceApp.creator_user_id).where(MarketplaceApp.id == inst.app_id)
                 )
             ).scalar_one_or_none()
             entry = (inst.wallet_mix or {}).get(spend.dimension) or {}
@@ -217,7 +210,7 @@ async def settle_one_spend(db: AsyncSession, spend: SpendRecord) -> dict:
     # BYOK + ai_compute: no wallet movement, but still mark settled.
     if spend.payer == "byok" and spend.dimension == "ai_compute":
         spend.settled = True
-        spend.settled_at = datetime.now(tz=timezone.utc)
+        spend.settled_at = datetime.now(tz=UTC)
         spend.meta = {**(spend.meta or {}), "settlement_reason": "byok_no_op"}
         await db.flush()
         logger.info(
@@ -237,20 +230,14 @@ async def settle_one_spend(db: AsyncSession, spend: SpendRecord) -> dict:
         )
     elif spend.payer == "creator":
         if creator_user_id is None:
-            raise RuntimeError(
-                f"spend {spend.id}: creator payer but no creator_user_id"
-            )
+            raise RuntimeError(f"spend {spend.id}: creator payer but no creator_user_id")
         payer_wallet = await find_or_create_wallet(
             db, owner_type="creator", owner_user_id=creator_user_id
         )
     elif spend.payer == "platform":
-        payer_wallet = await find_or_create_wallet(
-            db, owner_type="platform", owner_user_id=None
-        )
+        payer_wallet = await find_or_create_wallet(db, owner_type="platform", owner_user_id=None)
     else:
-        raise RuntimeError(
-            f"spend {spend.id}: unexpected payer {spend.payer!r}"
-        )
+        raise RuntimeError(f"spend {spend.id}: unexpected payer {spend.payer!r}")
 
     await _apply_ledger(
         db,
@@ -267,11 +254,7 @@ async def settle_one_spend(db: AsyncSession, spend: SpendRecord) -> dict:
 
     # 2. Credit creator wallet net amount (skip if payer IS creator — they
     # eat their own declared cost; skip if no creator_user_id is knowable).
-    if (
-        spend.payer != "creator"
-        and creator_user_id is not None
-        and net_creator_amount > 0
-    ):
+    if spend.payer != "creator" and creator_user_id is not None and net_creator_amount > 0:
         creator_wallet = await find_or_create_wallet(
             db, owner_type="creator", owner_user_id=creator_user_id
         )
@@ -292,9 +275,7 @@ async def settle_one_spend(db: AsyncSession, spend: SpendRecord) -> dict:
     # platform, the markup is a round-trip on its own wallet — skip to avoid
     # noisy zero-net entries.
     if spend.payer != "platform" and markup_amount > 0:
-        platform_wallet = await find_or_create_wallet(
-            db, owner_type="platform", owner_user_id=None
-        )
+        platform_wallet = await find_or_create_wallet(db, owner_type="platform", owner_user_id=None)
         await _apply_ledger(
             db,
             platform_wallet,
@@ -309,7 +290,7 @@ async def settle_one_spend(db: AsyncSession, spend: SpendRecord) -> dict:
         )
 
     spend.settled = True
-    spend.settled_at = datetime.now(tz=timezone.utc)
+    spend.settled_at = datetime.now(tz=UTC)
     await db.flush()
 
     logger.info(
@@ -346,14 +327,18 @@ async def settle_spend_batch(ctx: dict, *, limit: int = 500) -> dict:
 
     async with AsyncSessionLocal() as db:
         rows = (
-            await db.execute(
-                select(SpendRecord)
-                .where(SpendRecord.settled.is_(False))
-                .order_by(SpendRecord.created_at.asc())
-                .limit(limit)
-                .with_for_update(skip_locked=True)
+            (
+                await db.execute(
+                    select(SpendRecord)
+                    .where(SpendRecord.settled.is_(False))
+                    .order_by(SpendRecord.created_at.asc())
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         for spend in rows:
             try:
@@ -362,9 +347,7 @@ async def settle_spend_batch(ctx: dict, *, limit: int = 500) -> dict:
                 processed += 1
             except Exception:
                 errors += 1
-                logger.exception(
-                    "settle_spend_batch: failed to settle spend=%s", spend.id
-                )
+                logger.exception("settle_spend_batch: failed to settle spend=%s", spend.id)
 
         await db.commit()
 

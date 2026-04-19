@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..base_config_parser import HostedAgentConfig
+
 _PYDANTIC_MIRROR_VERSION = "2025-01"
 # Publish target. Read paths still accept 2025-01 bundles; only emit 2025-02.
 MANIFEST_SCHEMA_VERSION = "2025-02"
@@ -82,11 +83,7 @@ def merge_canvas_config(
         if isinstance(c, dict) and c.get("id") and c.get("name"):
             container_name_by_id[str(c["id"])] = str(c["name"])
 
-    connections_raw = (
-        compute_override.get("connections")
-        or base_config.get("connections")
-        or []
-    )
+    connections_raw = compute_override.get("connections") or base_config.get("connections") or []
     connections_manifest = _connections_to_manifest(
         connections_raw, container_name_by_id=container_name_by_id
     )
@@ -146,9 +143,7 @@ def merge_canvas_config(
                 byo["connection_env"] = db_container["connection_env"]
             if byo:
                 state["byo_database"] = byo
-            inferred["state.model"] = (
-                f"inferred:db-container={db_container.get('name', '?')}"
-            )
+            inferred["state.model"] = f"inferred:db-container={db_container.get('name', '?')}"
         elif _has_persistent_volume(containers_raw):
             state = {"model": "per-install-volume"}
             inferred["state.model"] = "inferred:persistent-volume-detected"
@@ -223,10 +218,13 @@ def _ensure_primary_container(
     # Prefer a UI-role container based on the raw canvas role hint.
     pick_idx = 0
     for idx, raw in enumerate(containers_raw):
-        if isinstance(raw, dict) and (raw.get("role") or "").lower() in _UI_ROLES:
-            if idx < len(container_dicts):
-                pick_idx = idx
-                break
+        if (
+            isinstance(raw, dict)
+            and (raw.get("role") or "").lower() in _UI_ROLES
+            and idx < len(container_dicts)
+        ):
+            pick_idx = idx
+            break
     else:
         # Fall back to the first non-service container.
         for idx, c in enumerate(container_dicts):
@@ -248,8 +246,7 @@ def _container_to_dict(container: Any) -> dict[str, Any]:
     out = {
         k: v
         for k, v in src.items()
-        if k
-        not in {"role", "db_schema", "entrypoint", "url", "is_primary", "container_type"}
+        if k not in {"role", "db_schema", "entrypoint", "url", "is_primary", "container_type"}
     }
     out.setdefault("name", src.get("name", ""))
     out.setdefault("image", src.get("image", ""))
@@ -281,8 +278,13 @@ def _connections_to_manifest(
     out: list[dict[str, Any]] = []
     container_name_by_id = container_name_by_id or {}
     valid_kinds = {
-        "env_injection", "http_api", "database", "cache",
-        "message_queue", "websocket", "depends_on",
+        "env_injection",
+        "http_api",
+        "database",
+        "cache",
+        "message_queue",
+        "websocket",
+        "depends_on",
     }
     for conn in connections or ():
         if isinstance(conn, dict):
@@ -303,12 +305,14 @@ def _connections_to_manifest(
             continue
         if kind not in valid_kinds:
             continue
-        out.append({
-            "source_container": src,
-            "target_container": tgt,
-            "connector_type": kind,
-            "config": dict(cfg) if isinstance(cfg, dict) else {},
-        })
+        out.append(
+            {
+                "source_container": src,
+                "target_container": tgt,
+                "connector_type": kind,
+                "config": dict(cfg) if isinstance(cfg, dict) else {},
+            }
+        )
     return out
 
 
@@ -335,9 +339,13 @@ def _schedules_to_manifest(schedules: list[Any]) -> list[dict[str, Any]]:
             cron = getattr(s, "cron_expression", None)
             trigger_kind = getattr(s, "trigger_kind", "cron")
             trigger_config = getattr(s, "trigger_config", None) or {}
-            entrypoint = trigger_config.get("entrypoint") if isinstance(trigger_config, dict) else None
+            entrypoint = (
+                trigger_config.get("entrypoint") if isinstance(trigger_config, dict) else None
+            )
             execution = (
-                trigger_config.get("execution", "job") if isinstance(trigger_config, dict) else "job"
+                trigger_config.get("execution", "job")
+                if isinstance(trigger_config, dict)
+                else "job"
             )
             editable = True
             optional = False

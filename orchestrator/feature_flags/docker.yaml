@@ -1,0 +1,4 @@
+# Docker overrides — local dev and CI environments
+# Only list flags that differ from defaults.yaml
+
+magic_link_login: true

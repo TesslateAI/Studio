@@ -191,7 +191,7 @@ class TestProjectControlRegistration:
         register_project_control_tools(registry)
         tool = registry.get("project_control")
         actions = tool.parameters["properties"]["action"]["enum"]
-        assert set(actions) == {"status", "container_logs", "health_check"}
+        assert set(actions) == {"status", "tier_status", "container_logs", "health_check"}
 
 
 @pytest.mark.unit

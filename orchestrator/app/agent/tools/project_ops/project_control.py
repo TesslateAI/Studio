@@ -24,7 +24,6 @@ from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 from ._helpers import (
     fetch_all_containers,
-    fetch_project,
     lookup_container_by_name,
     require_project_context,
     resolve_container_dir,

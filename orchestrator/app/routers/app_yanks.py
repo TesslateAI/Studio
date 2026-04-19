@@ -111,17 +111,15 @@ async def approve(
             db, yank_request_id=yank_request_id, admin_user_id=user.id
         )
     except yanks_svc.NeedsSecondAdminError:
-        raise HTTPException(status_code=409, detail="second admin required")
+        raise HTTPException(status_code=409, detail="second admin required") from None
     except yanks_svc.AlreadyDecidedError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except yanks_svc.YankNotFoundError:
-        raise HTTPException(status_code=404, detail="yank not found")
+        raise HTTPException(status_code=404, detail="yank not found") from None
 
     # Reload for admin ids to mirror back to caller.
     row = (
-        await db.execute(
-            select(YankRequest).where(YankRequest.id == yank_request_id)
-        )
+        await db.execute(select(YankRequest).where(YankRequest.id == yank_request_id))
     ).scalar_one_or_none()
     primary = row.primary_admin_id if row is not None else None
     secondary = row.secondary_admin_id if row is not None else None
@@ -157,9 +155,9 @@ async def reject(
             note=note,
         )
     except yanks_svc.AlreadyDecidedError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except yanks_svc.YankNotFoundError:
-        raise HTTPException(status_code=404, detail="yank not found")
+        raise HTTPException(status_code=404, detail="yank not found") from None
     return YankRejectOut(status="rejected")
 
 
@@ -193,9 +191,9 @@ async def appeal(
             reason=body.reason,
         )
     except yanks_svc.YankNotFoundError:
-        raise HTTPException(status_code=404, detail="yank not found")
+        raise HTTPException(status_code=404, detail="yank not found") from None
     except yanks_svc.YankError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     return YankAppealOut(appeal_id=appeal_id)
 
 
@@ -231,9 +229,7 @@ async def list_yanks(
         )
 
     stmt = stmt.order_by(YankRequest.created_at.desc())
-    rows = (
-        (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
-    )
+    rows = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
     return YankListOut(
         items=[YankOut.model_validate(r) for r in rows],
         limit=limit,

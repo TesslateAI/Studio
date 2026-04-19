@@ -132,9 +132,9 @@ export default function ProjectSetup() {
         primaryApp: 'workspace',
       };
       await setupApi.saveConfig(slug, defaultConfig);
-      navigate(`/project/${slug}`);
+      navigate(`/project/${slug}/builder`);
     } catch {
-      navigate(`/project/${slug}`);
+      navigate(`/project/${slug}/builder`);
     } finally {
       setIsSaving(false);
     }

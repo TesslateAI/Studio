@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -425,7 +425,7 @@ async def uninstall_endpoint(
     # namespace is keyed by project_id and we need it for the cleanup call.
     project_id_for_cleanup = inst.project_id
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inst.state = "uninstalled"
     inst.uninstalled_at = now
     # Release the partial UNIQUE on project_id so the project slot is free.
@@ -441,9 +441,7 @@ async def uninstall_endpoint(
             from ..services.orchestration import get_orchestrator
 
             orchestrator = get_orchestrator()
-            await orchestrator.delete_project_namespace(
-                project_id_for_cleanup, user.id
-            )
+            await orchestrator.delete_project_namespace(project_id_for_cleanup, user.id)
         except Exception:
             logger.exception(
                 "uninstall: namespace cleanup failed for project=%s (continuing)",

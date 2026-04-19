@@ -16,6 +16,10 @@ vi.mock('../../lib/api', () => ({
   },
 }));
 
+vi.mock('../../contexts/TeamContext', () => ({
+  useTeam: () => ({ activeTeam: null }),
+}));
+
 import { ForkModal } from '../../components/apps/ForkModal';
 
 describe('ForkModal', () => {
@@ -43,12 +47,7 @@ describe('ForkModal', () => {
 
     const onForked = vi.fn();
     render(
-      <ForkModal
-        appId="app-src"
-        sourceAppVersionId="v1"
-        onClose={() => {}}
-        onForked={onForked}
-      />
+      <ForkModal appId="app-src" sourceAppVersionId="v1" onClose={() => {}} onForked={onForked} />
     );
 
     const nameInput = screen.getByPlaceholderText('My forked app') as HTMLInputElement;
