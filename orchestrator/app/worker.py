@@ -22,6 +22,9 @@ from uuid import UUID
 
 from arq.connections import RedisSettings
 
+from .services.apps.app_invocations import invoke_app_instance_task
+from .services.apps.settlement_worker import settle_spend_batch as settle_spend_batch_cron
+
 logger = logging.getLogger(__name__)
 
 
@@ -687,22 +690,22 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             # 14b. Enqueue webhook callback if configured
             if payload.webhook_callback_url:
                 try:
-                    arq_redis = ctx.get("redis")
-                    if arq_redis:
-                        await arq_redis.enqueue_job(
-                            "send_webhook_callback",
-                            payload.webhook_callback_url,
-                            {
-                                "task_id": task_id,
-                                "status": completion_reason,
-                                "final_response": final_response,
-                                "chat_id": payload.chat_id,
-                                "project_id": project_id,
-                                "iterations": iterations,
-                                "tool_calls_made": tool_calls_made,
-                            },
-                        )
-                        logger.info(f"[WORKER] Enqueued webhook callback for task {task_id}")
+                    from .services.task_queue import get_task_queue
+
+                    await get_task_queue().enqueue(
+                        "send_webhook_callback",
+                        payload.webhook_callback_url,
+                        {
+                            "task_id": task_id,
+                            "status": completion_reason,
+                            "final_response": final_response,
+                            "chat_id": payload.chat_id,
+                            "project_id": project_id,
+                            "iterations": iterations,
+                            "tool_calls_made": tool_calls_made,
+                        },
+                    )
+                    logger.info(f"[WORKER] Enqueued webhook callback for task {task_id}")
                 except Exception as wh_err:
                     logger.warning(f"[WORKER] Failed to enqueue webhook callback: {wh_err}")
 

@@ -395,7 +395,9 @@ async def webhook_inbound(
     )
 
     try:
-        await arq_pool.enqueue_job("execute_agent_task", payload_obj.to_dict())
+        from ..services.task_queue import get_task_queue
+
+        await get_task_queue().enqueue("execute_agent_task", payload_obj.to_dict())
         logger.info(
             f"[WEBHOOK] Enqueued agent task {task_id} for config {config_id} (jid={inbound.jid})"
         )

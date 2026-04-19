@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # Empty string → resolved per-OS at runtime via services.desktop_paths.resolve_studio_home().
     tesslate_studio_home: str = ""
 
+    # Local runtime: inclusive TCP port range for per-container host ports.
+    # The allocator (services.orchestration.local_ports) reserves ports from this
+    # window and persists assignments under $TESSLATE_STUDIO_HOME/cache/ports.json.
+    local_port_range_start: int = 42000
+    local_port_range_end: int = 42999
+
     @property
     def is_docker_mode(self) -> bool:
         """Check if running in Docker deployment mode."""

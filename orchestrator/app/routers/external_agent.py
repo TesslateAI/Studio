@@ -227,7 +227,9 @@ async def invoke_agent(
         api_key_scopes=api_key_scopes,
     )
 
-    await arq_pool.enqueue_job("execute_agent_task", payload.to_dict())
+    from ..services.task_queue import get_task_queue
+
+    await get_task_queue().enqueue("execute_agent_task", payload.to_dict())
     logger.info(f"[EXT-AGENT] Enqueued agent task {agent_task_id} to ARQ worker")
 
     # Register task with TaskManager for status tracking
@@ -478,11 +480,13 @@ async def list_available_scopes(
     for perm in Permission:
         if perm in owner_permissions and perm.value in SCOPE_LABELS:
             info = SCOPE_LABELS[perm.value]
-            scopes.append(ScopeOption(
-                value=perm.value,
-                label=info["label"],
-                category=info["category"],
-            ))
+            scopes.append(
+                ScopeOption(
+                    value=perm.value,
+                    label=info["label"],
+                    category=info["category"],
+                )
+            )
     return scopes
 
 

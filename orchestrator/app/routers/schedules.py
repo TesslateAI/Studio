@@ -321,13 +321,9 @@ async def trigger_schedule(
 
     # Enqueue
     try:
-        from ..routers.channels import _get_arq_pool
+        from ..services.task_queue import get_task_queue
 
-        arq_pool = await _get_arq_pool()
-        if arq_pool:
-            await arq_pool.enqueue_job("execute_agent_task", payload.to_dict())
-        else:
-            raise HTTPException(status_code=503, detail="Task queue unavailable")
+        await get_task_queue().enqueue("execute_agent_task", payload.to_dict())
     except HTTPException:
         raise
     except Exception as e:

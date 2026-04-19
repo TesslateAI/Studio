@@ -379,7 +379,9 @@ class GatewayRunner:
                 session_key=session_key,
             )
 
-            await self._arq_pool.enqueue_job("execute_agent_task", payload.to_dict())
+            from ..task_queue import get_task_queue
+
+            await get_task_queue().enqueue("execute_agent_task", payload.to_dict())
             self._active_sessions[session_key] = task_id
 
             # Fire-and-forget stream watcher for real-time status

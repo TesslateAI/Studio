@@ -43,6 +43,7 @@ from .routers import (
     deployment_targets,
     deployments,
     design,
+    desktop,
     desktop_pair,
     external_agent,
     feature_flags,
@@ -1174,6 +1175,7 @@ app.include_router(design.router)  # /api/projects/{slug}/design/* — OID index
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 app.include_router(external_agent.router)  # /api/external - External agent API (API key auth)
+app.include_router(desktop.router)  # /api/desktop - Runtime probe + tray state
 app.include_router(desktop_pair.session_router)  # /api/desktop - Session-auth pairing mint
 app.include_router(desktop_pair.public_router)  # /api/v1/desktop - tsk-auth pairing revoke
 from .routers.public import public_routers  # noqa: E402
@@ -1190,10 +1192,14 @@ app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 app.include_router(internal.router, prefix="/api")  # /api/internal - Cluster-internal endpoints
 app.include_router(feature_flags.router, tags=["feature-flags"])  # /api/feature-flags
-app.include_router(version.router, prefix="/api", tags=["version"])  # /api/version - Deployment metadata + compat check
+app.include_router(
+    version.router, prefix="/api", tags=["version"]
+)  # /api/version - Deployment metadata + compat check
 
 # --- Tesslate Apps (Waves 1-3) ---------------------------------------------
-app.include_router(marketplace_apps.router, prefix="/api/marketplace-apps", tags=["apps:marketplace"])
+app.include_router(
+    marketplace_apps.router, prefix="/api/marketplace-apps", tags=["apps:marketplace"]
+)
 app.include_router(app_versions.router, prefix="/api/app-versions", tags=["apps:versions"])
 app.include_router(app_installs.router, prefix="/api/app-installs", tags=["apps:installs"])
 app.include_router(
@@ -1210,7 +1216,9 @@ app.include_router(app_runtime.router, prefix="/api/apps/runtime", tags=["apps:r
 app.include_router(app_billing.router, prefix="/api/apps/billing", tags=["apps:billing"])
 app.include_router(app_submissions.router, prefix="/api/app-submissions", tags=["apps:submissions"])
 app.include_router(app_yanks.router, prefix="/api/app-yanks", tags=["apps:yanks"])
-app.include_router(app_triggers.router, tags=["apps:triggers"])  # /api/app-instances/{id}/trigger/{name} — HMAC auth
+app.include_router(
+    app_triggers.router, tags=["apps:triggers"]
+)  # /api/app-instances/{id}/trigger/{name} — HMAC auth
 app.include_router(admin_marketplace.router, prefix="/api/admin-marketplace", tags=["apps:admin"])
 app.include_router(app_bundles.router, prefix="/api/app-bundles", tags=["apps:bundles"])
 

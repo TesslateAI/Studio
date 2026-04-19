@@ -154,7 +154,9 @@ class CronScheduler:
                         channel_type=schedule.origin_platform,
                     )
 
-                    await arq_pool.enqueue_job("execute_agent_task", payload.to_dict())
+                    from ..task_queue import get_task_queue
+
+                    await get_task_queue().enqueue("execute_agent_task", payload.to_dict())
 
                     # Update schedule state
                     schedule.last_run_at = now

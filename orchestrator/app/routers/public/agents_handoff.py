@@ -9,6 +9,7 @@ Agent session handoff endpoints — local ↔ cloud continuity for desktop.
 State serialization lives in `services.public.handoff_service`. Heavy
 rate limit on upload — each call enqueues a worker job.
 """
+
 from __future__ import annotations
 
 import logging
@@ -104,7 +105,9 @@ async def _enqueue_from_bundle(
         project_slug=project.slug,
         api_key_scopes=api_key_scopes,
     )
-    await arq_pool.enqueue_job("execute_agent_task", payload)
+    from ...services.task_queue import get_task_queue
+
+    await get_task_queue().enqueue("execute_agent_task", payload)
 
     tm = get_task_manager()
     tm.create_task(

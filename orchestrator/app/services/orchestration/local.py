@@ -63,13 +63,45 @@ EXCLUDED_TREE_DIRS: frozenset[str] = frozenset(
 )
 
 
-def _get_project_root() -> Path:
+def _get_project_root(project: Any | None = None) -> Path:
     """
-    Resolve the local project root from environment.
+    Resolve the local project root.
+
+    Resolution order:
+
+    1. If a ``project`` row is supplied AND the app is running under
+       ``DEPLOYMENT_MODE=desktop``, the root is
+       ``$TESSLATE_STUDIO_HOME/projects/{slug}-{id}`` so multi-project
+       desktop shells can host many projects simultaneously. The directory
+       is NOT created here — the importer / setup path is responsible for
+       materializing it.
+    2. ``$PROJECT_ROOT`` env var (legacy single-project / benchmark mode).
+    3. ``os.getcwd()`` as a final fallback.
+
+    Args:
+        project: Optional SQLAlchemy ``Project`` row. When provided under
+            desktop mode, its ``slug`` and ``id`` are used to form a
+            per-project directory. Ignored otherwise.
 
     Returns:
-        Absolute, resolved Path pointing at the local project root.
+        Absolute, resolved Path pointing at the project root.
     """
+    if project is not None:
+        try:
+            from ...config import get_settings
+
+            settings = get_settings()
+            if settings.deployment_mode.lower() == "desktop":
+                from ..desktop_paths import ensure_studio_home
+
+                home = ensure_studio_home(settings.tesslate_studio_home or None)
+                slug = getattr(project, "slug", None) or "project"
+                pid = getattr(project, "id", None)
+                dir_name = f"{slug}-{pid}" if pid is not None else slug
+                return (home / "projects" / dir_name).resolve()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[LOCAL] per-project root resolution failed: %s", exc)
+
     raw = os.environ.get("PROJECT_ROOT") or os.getcwd()
     return Path(raw).resolve()
 

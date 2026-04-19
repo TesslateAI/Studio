@@ -57,6 +57,11 @@ build/
 .next/
 out/
 
+# Tauri / Rust build artifacts
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/
+
 # IDE
 .vscode/
 .idea/

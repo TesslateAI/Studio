@@ -1730,6 +1730,7 @@ async def agent_chat_stream(
 
                 from ..services.agent_task import AgentTaskPayload
                 from ..services.pubsub import get_pubsub
+                from ..services.task_queue import get_task_queue
 
                 agent_task_id = str(_uuid.uuid4())
                 payload = AgentTaskPayload(
@@ -1752,7 +1753,7 @@ async def agent_chat_stream(
                 )
 
                 # Enqueue the job
-                await arq_pool.enqueue_job("execute_agent_task", payload.to_dict())
+                await get_task_queue().enqueue("execute_agent_task", payload.to_dict())
                 logger.info(f"[SSE-AGENT] Enqueued agent task {agent_task_id} to ARQ worker")
 
                 # Register task with TaskManager for cross-pod visibility
