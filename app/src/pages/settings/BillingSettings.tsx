@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Coins, AlertTriangle, Zap, ArrowUpRight, TrendingUp, Clock, CreditCard } from 'lucide-react';
+import {
+  Coins,
+  AlertTriangle,
+  Zap,
+  ArrowUpRight,
+  TrendingUp,
+  Clock,
+  CreditCard,
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SettingsSection, SettingsGroup } from '../../components/settings';
 import { billingApi } from '../../lib/api';
@@ -168,11 +176,18 @@ export default function BillingSettings() {
   if (loading) {
     return (
       <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
-      <SettingsSection title="Billing" description={canManage ? "Manage your subscription and credits" : "View your subscription and credits"}>
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--primary)]"></div>
-        </div>
-      </SettingsSection>
+        <SettingsSection
+          title="Billing"
+          description={
+            canManage
+              ? 'Manage your subscription and credits'
+              : 'View your subscription and credits'
+          }
+        >
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--primary)]"></div>
+          </div>
+        </SettingsSection>
       </div>
     );
   }
@@ -186,241 +201,267 @@ export default function BillingSettings() {
 
   return (
     <div key={teamSwitchKey} style={{ animation: 'fade-in 0.25s ease-out' }}>
-    <SettingsSection title="Billing" description={canManage ? "Manage your subscription and credits" : "View your subscription and credits"}>
-      {/* Current Plan Card */}
-      <SettingsGroup title="Current Plan">
-        <div className="p-5 md:p-6">
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <h3 className="text-2xl font-bold text-[var(--text)]">
-                  {SUBSCRIPTION_TIER_LABELS[tier]}
-                </h3>
-                {tier !== 'free' ? (
-                  <span className="px-2.5 py-0.5 bg-emerald-500/15 text-emerald-400 text-xs font-medium rounded-full">
-                    Active
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-0.5 bg-white/5 text-[var(--text)]/50 text-xs font-medium rounded-full">
-                    Free
-                  </span>
-                )}
-              </div>
-
-              {tier !== 'free' && (
-                <p className="text-sm text-[var(--text)]/50">
-                  ${SUBSCRIPTION_TIER_PRICES[tier]}/month
-                  {subscription?.current_period_end && (
-                    <span className="mx-1.5 text-[var(--text)]/20">|</span>
-                  )}
-                  {subscription?.current_period_end && (
-                    <span>
-                      {subscription.cancel_at_period_end
-                        ? `Cancels ${formatDate(subscription.current_period_end)}`
-                        : `Renews ${formatDate(subscription.current_period_end)}`}
+      <SettingsSection
+        title="Billing"
+        description={
+          canManage ? 'Manage your subscription and credits' : 'View your subscription and credits'
+        }
+      >
+        {/* Current Plan Card */}
+        <SettingsGroup title="Current Plan">
+          <div className="p-5 md:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2">
+                  <h3 className="text-2xl font-bold text-[var(--text)]">
+                    {SUBSCRIPTION_TIER_LABELS[tier]}
+                  </h3>
+                  {tier !== 'free' ? (
+                    <span className="px-2.5 py-0.5 bg-emerald-500/15 text-emerald-400 text-xs font-medium rounded-full">
+                      Active
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 bg-white/5 text-[var(--text)]/50 text-xs font-medium rounded-full">
+                      Free
                     </span>
                   )}
-                </p>
-              )}
-
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-3 text-sm text-[var(--text)]/40">
-                <span>{SUBSCRIPTION_TIER_PROJECTS[tier]} projects</span>
-                <span>{tierCreditsLabel} credits</span>
-              </div>
-            </div>
-
-            {canManage && (
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => setShowPlanModal(true)}
-                  className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
-                >
-                  {tier === 'free' ? (
-                    <>
-                      <Zap size={14} />
-                      Upgrade
-                    </>
-                  ) : (
-                    'Change Plan'
-                  )}
-                </button>
-                {tier !== 'free' && !subscription?.cancel_at_period_end && (
-                  <button
-                    onClick={handleCancelSubscription}
-                    className="px-4 py-2 text-[var(--text)]/40 hover:text-red-400 text-sm transition-colors"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </SettingsGroup>
-
-      {/* Credits Balance */}
-      <SettingsGroup title="Credits">
-        <div className="p-5 md:p-6">
-          <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
-            {/* Balance display */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2.5 mb-4">
-                <div className={`p-1.5 rounded-lg ${isEmpty ? 'bg-red-500/10' : isLowBalance ? 'bg-amber-500/10' : 'bg-[var(--primary)]/10'}`}>
-                  <Coins size={18} className={isEmpty ? 'text-red-400' : isLowBalance ? 'text-amber-400' : 'text-[var(--primary)]'} />
                 </div>
-                <div className="flex items-baseline gap-2">
-                  <span className={`text-3xl font-bold tabular-nums ${isEmpty ? 'text-red-400' : isLowBalance ? 'text-amber-400' : 'text-[var(--text)]'}`}>
-                    {formatCredits(totalCredits)}
-                  </span>
-                  <span className="text-sm text-[var(--text)]/40">credits</span>
-                </div>
-              </div>
 
-              {/* Segmented credit bar */}
-              <CreditUsageBar credits={credits} />
-
-              {credits?.credits_reset_date && (
-                <p className="text-xs text-[var(--text)]/30 mt-3 flex items-center gap-1.5">
-                  <Clock size={12} />
-                  Resets to {tierCreditsLabel} on {formatDate(credits.credits_reset_date)}
-                </p>
-              )}
-
-              {isLowBalance && (
-                <div className="flex items-center gap-2 mt-3 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-lg text-amber-400">
-                  <AlertTriangle size={14} />
-                  <span className="text-xs">Low balance &mdash; consider topping up</span>
-                </div>
-              )}
-              {isEmpty && (
-                <div className="flex items-center gap-2 mt-3 px-3 py-2 bg-red-500/5 border border-red-500/10 rounded-lg text-red-400">
-                  <AlertTriangle size={14} />
-                  <span className="text-xs">No credits remaining</span>
-                </div>
-              )}
-            </div>
-
-            {/* Top Up packages — admin only */}
-            {canManage && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-2 lg:w-auto lg:shrink-0">
-                {creditPackages.map((pkg) => (
-                  <button
-                    key={pkg.key}
-                    onClick={() => handlePurchaseCredits(pkg.key)}
-                    disabled={purchasing !== null}
-                    className={`relative flex flex-col items-center gap-1 px-4 py-3 rounded-lg text-sm transition-all disabled:opacity-50 min-w-[100px] ${
-                      pkg.popular
-                        ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white ring-1 ring-[var(--primary)]'
-                        : 'bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] text-[var(--text)]'
-                    }`}
-                  >
-                    {pkg.popular && (
-                      <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-px bg-[var(--primary)] text-[9px] font-semibold uppercase tracking-wider rounded-full text-white border border-white/20">
-                        Popular
+                {tier !== 'free' && (
+                  <p className="text-sm text-[var(--text)]/50">
+                    ${SUBSCRIPTION_TIER_PRICES[tier]}/month
+                    {subscription?.current_period_end && (
+                      <span className="mx-1.5 text-[var(--text)]/20">|</span>
+                    )}
+                    {subscription?.current_period_end && (
+                      <span>
+                        {subscription.cancel_at_period_end
+                          ? `Cancels ${formatDate(subscription.current_period_end)}`
+                          : `Renews ${formatDate(subscription.current_period_end)}`}
                       </span>
                     )}
-                    <span className="font-semibold text-base tabular-nums">
-                      {purchasing === pkg.key ? '...' : `+${pkg.label}`}
-                    </span>
-                    <span className={`text-xs ${pkg.popular ? 'text-white/70' : 'text-[var(--text)]/40'}`}>
-                      ${pkg.price}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </SettingsGroup>
+                  </p>
+                )}
 
-      {/* Usage This Month */}
-      <SettingsGroup title="Usage This Month">
-        <div className="p-5 md:p-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              {
-                label: 'Requests',
-                value: usage?.total_requests.toLocaleString() || '0',
-                icon: <TrendingUp size={14} />,
-              },
-              {
-                label: 'Input Tokens',
-                value: `${((usage?.total_tokens_input || 0) / 1000).toFixed(1)}K`,
-                icon: <ArrowUpRight size={14} />,
-              },
-              {
-                label: 'Output Tokens',
-                value: `${((usage?.total_tokens_output || 0) / 1000).toFixed(1)}K`,
-                icon: <ArrowUpRight size={14} />,
-              },
-              {
-                label: 'Credits Used',
-                value: `${usage?.total_cost_cents || 0}`,
-                icon: <Coins size={14} />,
-              },
-            ].map((stat) => (
-              <div key={stat.label} className="bg-white/[0.02] rounded-lg p-3.5">
-                <div className="flex items-center gap-1.5 text-[var(--text)]/30 mb-1.5">
-                  {stat.icon}
-                  <span className="text-xs">{stat.label}</span>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-3 text-sm text-[var(--text)]/40">
+                  <span>{SUBSCRIPTION_TIER_PROJECTS[tier]} projects</span>
+                  <span>{tierCreditsLabel} credits</span>
                 </div>
-                <div className="text-xl font-bold text-[var(--text)] tabular-nums">{stat.value}</div>
               </div>
-            ))}
-          </div>
-        </div>
-      </SettingsGroup>
 
-      {/* Recent Transactions — admin only */}
-      {canManage && (
-        <SettingsGroup title="Recent Transactions">
-          {transactions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-10 text-[var(--text)]/30">
-              <CreditCard size={24} className="mb-2" />
-              <span className="text-sm">No transactions yet</span>
+              {canManage && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setShowPlanModal(true)}
+                    className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
+                  >
+                    {tier === 'free' ? (
+                      <>
+                        <Zap size={14} />
+                        Upgrade
+                      </>
+                    ) : (
+                      'Change Plan'
+                    )}
+                  </button>
+                  {tier !== 'free' && !subscription?.cancel_at_period_end && (
+                    <button
+                      onClick={handleCancelSubscription}
+                      className="px-4 py-2 text-[var(--text)]/40 hover:text-red-400 text-sm transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="divide-y divide-white/[0.04]">
-              {transactions.map((transaction) => (
-                <div
-                  key={transaction.id}
-                  className="flex items-center justify-between px-5 md:px-6 py-3.5"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-white/[0.04] flex items-center justify-center shrink-0">
-                      {getTransactionIcon(transaction.type)}
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-[var(--text)]">
-                        {getTransactionLabel(transaction.type)}
-                      </div>
-                      <div className="text-xs text-[var(--text)]/35">
-                        {formatDate(transaction.created_at)}
-                      </div>
-                    </div>
+          </div>
+        </SettingsGroup>
+
+        {/* Credits Balance */}
+        <SettingsGroup title="Credits">
+          <div className="p-5 md:p-6">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+              {/* Balance display */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2.5 mb-4">
+                  <div
+                    className={`p-1.5 rounded-lg ${isEmpty ? 'bg-red-500/10' : isLowBalance ? 'bg-amber-500/10' : 'bg-[var(--primary)]/10'}`}
+                  >
+                    <Coins
+                      size={18}
+                      className={
+                        isEmpty
+                          ? 'text-red-400'
+                          : isLowBalance
+                            ? 'text-amber-400'
+                            : 'text-[var(--primary)]'
+                      }
+                    />
                   </div>
-                  <div className={`text-sm font-medium tabular-nums ${
-                    transaction.type === 'credit_purchase' ? 'text-emerald-400' : 'text-[var(--text)]'
-                  }`}>
-                    {transaction.type === 'credit_purchase' ? '+' : ''}
-                    {transaction.amount_cents.toLocaleString()} credits
+                  <div className="flex items-baseline gap-2">
+                    <span
+                      className={`text-3xl font-bold tabular-nums ${isEmpty ? 'text-red-400' : isLowBalance ? 'text-amber-400' : 'text-[var(--text)]'}`}
+                    >
+                      {formatCredits(totalCredits)}
+                    </span>
+                    <span className="text-sm text-[var(--text)]/40">credits</span>
+                  </div>
+                </div>
+
+                {/* Segmented credit bar */}
+                <CreditUsageBar credits={credits} />
+
+                {credits?.credits_reset_date && (
+                  <p className="text-xs text-[var(--text)]/30 mt-3 flex items-center gap-1.5">
+                    <Clock size={12} />
+                    Resets to {tierCreditsLabel} on {formatDate(credits.credits_reset_date)}
+                  </p>
+                )}
+
+                {isLowBalance && (
+                  <div className="flex items-center gap-2 mt-3 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-lg text-amber-400">
+                    <AlertTriangle size={14} />
+                    <span className="text-xs">Low balance &mdash; consider topping up</span>
+                  </div>
+                )}
+                {isEmpty && (
+                  <div className="flex items-center gap-2 mt-3 px-3 py-2 bg-red-500/5 border border-red-500/10 rounded-lg text-red-400">
+                    <AlertTriangle size={14} />
+                    <span className="text-xs">No credits remaining</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Top Up packages — admin only */}
+              {canManage && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-2 lg:w-auto lg:shrink-0">
+                  {creditPackages.map((pkg) => (
+                    <button
+                      key={pkg.key}
+                      onClick={() => handlePurchaseCredits(pkg.key)}
+                      disabled={purchasing !== null}
+                      className={`relative flex flex-col items-center gap-1 px-4 py-3 rounded-lg text-sm transition-all disabled:opacity-50 min-w-[100px] ${
+                        pkg.popular
+                          ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white ring-1 ring-[var(--primary)]'
+                          : 'bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] text-[var(--text)]'
+                      }`}
+                    >
+                      {pkg.popular && (
+                        <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-px bg-[var(--primary)] text-[9px] font-semibold uppercase tracking-wider rounded-full text-white border border-white/20">
+                          Popular
+                        </span>
+                      )}
+                      <span className="font-semibold text-base tabular-nums">
+                        {purchasing === pkg.key ? '...' : `+${pkg.label}`}
+                      </span>
+                      <span
+                        className={`text-xs ${pkg.popular ? 'text-white/70' : 'text-[var(--text)]/40'}`}
+                      >
+                        ${pkg.price}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </SettingsGroup>
+
+        {/* Usage This Month */}
+        <SettingsGroup title="Usage This Month">
+          <div className="p-5 md:p-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                {
+                  label: 'Requests',
+                  value: usage?.total_requests.toLocaleString() || '0',
+                  icon: <TrendingUp size={14} />,
+                },
+                {
+                  label: 'Input Tokens',
+                  value: `${((usage?.total_tokens_input || 0) / 1000).toFixed(1)}K`,
+                  icon: <ArrowUpRight size={14} />,
+                },
+                {
+                  label: 'Output Tokens',
+                  value: `${((usage?.total_tokens_output || 0) / 1000).toFixed(1)}K`,
+                  icon: <ArrowUpRight size={14} />,
+                },
+                {
+                  label: 'Credits Used',
+                  value: `${usage?.total_cost_cents || 0}`,
+                  icon: <Coins size={14} />,
+                },
+              ].map((stat) => (
+                <div key={stat.label} className="bg-white/[0.02] rounded-lg p-3.5">
+                  <div className="flex items-center gap-1.5 text-[var(--text)]/30 mb-1.5">
+                    {stat.icon}
+                    <span className="text-xs">{stat.label}</span>
+                  </div>
+                  <div className="text-xl font-bold text-[var(--text)] tabular-nums">
+                    {stat.value}
                   </div>
                 </div>
               ))}
             </div>
-          )}
+          </div>
         </SettingsGroup>
-      )}
 
-      {/* Plan Selection Modal */}
-      {showPlanModal && (
-        <PlanSelectionModal
-          currentTier={tier}
-          onSelect={handleUpgrade}
-          onClose={() => setShowPlanModal(false)}
-        />
-      )}
-    </SettingsSection>
+        {/* Recent Transactions — admin only */}
+        {canManage && (
+          <SettingsGroup title="Recent Transactions">
+            {transactions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-[var(--text)]/30">
+                <CreditCard size={24} className="mb-2" />
+                <span className="text-sm">No transactions yet</span>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/[0.04]">
+                {transactions.map((transaction) => (
+                  <div
+                    key={transaction.id}
+                    className="flex items-center justify-between px-5 md:px-6 py-3.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-white/[0.04] flex items-center justify-center shrink-0">
+                        {getTransactionIcon(transaction.type)}
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-[var(--text)]">
+                          {getTransactionLabel(transaction.type)}
+                        </div>
+                        <div className="text-xs text-[var(--text)]/35">
+                          {formatDate(transaction.created_at)}
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      className={`text-sm font-medium tabular-nums ${
+                        transaction.type === 'credit_purchase'
+                          ? 'text-emerald-400'
+                          : 'text-[var(--text)]'
+                      }`}
+                    >
+                      {transaction.type === 'credit_purchase' ? '+' : ''}
+                      {transaction.amount_cents.toLocaleString()} credits
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SettingsGroup>
+        )}
+
+        {/* Plan Selection Modal */}
+        {showPlanModal && (
+          <PlanSelectionModal
+            currentTier={tier}
+            onSelect={handleUpgrade}
+            onClose={() => setShowPlanModal(false)}
+          />
+        )}
+      </SettingsSection>
     </div>
   );
 }
@@ -450,9 +491,10 @@ function CreditUsageBar({
   const usedPct = Math.min((used / capacity) * 100, 100);
 
   // Remaining segments in grey shades (right side of bar)
-  const greySegments = CREDIT_SEGMENTS
-    .map((seg) => ({ ...seg, value: credits[seg.key] || 0 }))
-    .filter((seg) => seg.value > 0);
+  const greySegments = CREDIT_SEGMENTS.map((seg) => ({
+    ...seg,
+    value: credits[seg.key] || 0,
+  })).filter((seg) => seg.value > 0);
 
   if (compact) {
     return (
@@ -513,10 +555,7 @@ function CreditUsageBar({
         {/* Remaining segments */}
         {greySegments.map((seg) => (
           <div key={seg.key} className="flex items-center gap-1.5">
-            <span
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: seg.greyShade }}
-            />
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: seg.greyShade }} />
             <span className="text-xs text-[var(--text)]/45">{seg.label}</span>
             <span className="text-xs font-medium text-[var(--text)]/60 tabular-nums">
               {seg.value.toLocaleString()}
@@ -585,7 +624,7 @@ const planDefs: PlanDef[] = [
     features: [
       {
         text: `${SUBSCRIPTION_TIER_PROJECTS.free} projects`,
-        tip: 'Create up to 3 separate development projects',
+        tip: 'Create as many separate development projects as you need',
       },
       {
         text: 'All AI models',

@@ -301,11 +301,11 @@ export const SUBSCRIPTION_TIER_CREDITS: Record<SubscriptionTier, string> = {
   ultra: '8,000',
 };
 
-export const SUBSCRIPTION_TIER_PROJECTS: Record<SubscriptionTier, number> = {
-  free: 3,
-  basic: 7,
-  pro: 15,
-  ultra: 40,
+export const SUBSCRIPTION_TIER_PROJECTS: Record<SubscriptionTier, string> = {
+  free: 'Unlimited',
+  basic: 'Unlimited',
+  pro: 'Unlimited',
+  ultra: 'Unlimited',
 };
 
 export const SUBSCRIPTION_TIER_DEPLOYS: Record<SubscriptionTier, number> = {

@@ -191,7 +191,7 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({
                     </div>
                     <div className="flex items-center gap-1 text-[var(--text)]/60">
                       <Check className="w-3 h-3 text-green-400" />
-                      {tier === 'ultra' ? 'Unlimited' : SUBSCRIPTION_TIER_PROJECTS[tier]} projects
+                      {SUBSCRIPTION_TIER_PROJECTS[tier]} projects
                     </div>
                     <div className="flex items-center gap-1 text-[var(--text)]/60">
                       <Check className="w-3 h-3 text-green-400" />
