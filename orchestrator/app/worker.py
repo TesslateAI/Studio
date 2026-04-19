@@ -411,6 +411,12 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             }
             active_plan = await PlanManager.get_plan(payload_context)
 
+            # Tier snapshot for agent context (compute_tier-aware tools read these).
+            from .services.agent_context import build_tier_snapshot
+
+            _tier_snapshot = await build_tier_snapshot(project, db)
+            _tier_containers = _tier_snapshot.get("containers", [])
+
             # 8. Build execution context (same structure as chat.py)
             context = {
                 "user_id": UUID(payload.user_id),
@@ -440,6 +446,9 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 # placement; cache_node is NOT passed (dead DB field).
                 "volume_id": project.volume_id if project else None,
                 "compute_tier": project.compute_tier if project else None,
+                "active_compute_pod": project.active_compute_pod if project else None,
+                "environment_status": project.environment_status if project else None,
+                "containers": _tier_containers,
             }
 
             # Inject MCP server configs so bridge executors can connect per-call
@@ -1017,10 +1026,10 @@ async def refill_warm_pools_cron(ctx: dict) -> dict:
     async with AsyncSessionLocal() as db:
         try:
             instance_ids = (
-                await db.execute(
-                    select(AppInstance.id).where(AppInstance.state == "installed")
-                )
-            ).scalars().all()
+                (await db.execute(select(AppInstance.id).where(AppInstance.state == "installed")))
+                .scalars()
+                .all()
+            )
         except Exception:
             logger.exception("refill_warm_pools_cron: scan failed")
             return {"scanned": 0, "refilled": 0}
@@ -1037,9 +1046,7 @@ async def refill_warm_pools_cron(ctx: dict) -> dict:
                     refilled += 1
             except Exception:
                 await db.rollback()
-                logger.exception(
-                    "refill_warm_pools_cron: instance %s failed", instance_id
-                )
+                logger.exception("refill_warm_pools_cron: instance %s failed", instance_id)
     return {"scanned": len(instance_ids), "refilled": refilled}
 
 
@@ -1085,8 +1092,10 @@ async def drain_warm_pool_task(ctx: dict, app_instance_id: str) -> dict:
             raise
 
 
-from .services.apps.settlement_worker import settle_spend_batch as settle_spend_batch_cron  # noqa: E402
 from .services.apps.app_invocations import invoke_app_instance_task  # noqa: E402
+from .services.apps.settlement_worker import (  # noqa: E402
+    settle_spend_batch as settle_spend_batch_cron,
+)
 
 
 async def run_stage1_scan_task(ctx: dict, submission_id: str) -> dict:
@@ -1098,9 +1107,7 @@ async def run_stage1_scan_task(ctx: dict, submission_id: str) -> dict:
 
     async with AsyncSessionLocal() as db:
         try:
-            out = await stage1_scanner.run_stage1_scan(
-                db, submission_id=_UUID(submission_id)
-            )
+            out = await stage1_scanner.run_stage1_scan(db, submission_id=_UUID(submission_id))
             await db.commit()
             return out
         except Exception:
@@ -1118,9 +1125,7 @@ async def run_stage2_eval_task(ctx: dict, submission_id: str) -> dict:
 
     async with AsyncSessionLocal() as db:
         try:
-            out = await stage2_sandbox.run_stage2_eval(
-                db, submission_id=_UUID(submission_id)
-            )
+            out = await stage2_sandbox.run_stage2_eval(db, submission_id=_UUID(submission_id))
             await db.commit()
             return out
         except Exception:
@@ -1145,9 +1150,7 @@ async def run_monitoring_sweep_task(ctx: dict, app_version_id: str) -> dict:
             return out
         except Exception:
             await db.rollback()
-            logger.exception(
-                "run_monitoring_sweep_task: %s failed", app_version_id
-            )
+            logger.exception("run_monitoring_sweep_task: %s failed", app_version_id)
             raise
 
 
@@ -1182,10 +1185,8 @@ async def reap_orphaned_install_attempts_cron(ctx: dict) -> dict:
     finally:
         close = getattr(hub, "close", None)
         if callable(close):
-            try:
+            with contextlib.suppress(Exception):
                 await close()
-            except Exception:
-                pass
 
 
 async def db_event_dispatcher_cron(ctx: dict) -> dict:

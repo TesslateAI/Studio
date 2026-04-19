@@ -9,8 +9,25 @@ Executes shell commands for the agent. Behavior depends on deployment mode:
   ``is_background=True`` fire-and-forget, and output-token truncation.
 - **Docker mode**: delegates to the orchestrator's ``execute_command``
   (asyncio subprocess into the container).
-- **Kubernetes mode**: Tier 1 (ephemeral) or Tier 2 (environment) exec
-  into the user's dev pod, unchanged from the pre-upgrade implementation.
+- **Kubernetes mode**: routes to Tier 1 (ephemeral one-shot pod) or
+  Tier 2 (running project dev container) based on the agent-supplied
+  ``tier`` param or the project's current ``compute_tier``. When
+  Tier 2 is requested but not running, a structured error points the
+  agent at ``project_start`` — there is no auto-wake.
+
+Required context keys (Kubernetes mode):
+
+    volume_id           — Project.volume_id, required for pod scheduling
+    cache_node          — Project.cache_node (hint; Hub is source of truth)
+    compute_tier        — Project.compute_tier, used for ``tier="auto"``
+    active_compute_pod  — Project.active_compute_pod, agent visibility
+    environment_status  — Project.environment_status, agent visibility
+    containers          — list of {name,status,ready,is_primary,container_type}
+    container_name      — default target container (overridable by param)
+
+Populated today by ``routers/chat.py`` (3 sites) and ``worker.py`` via
+``services/agent_context.build_tier_snapshot``. See
+``docs/orchestrator/agent/tools/compute-tiers.md`` for the full contract.
 """
 
 import contextlib
@@ -32,6 +49,52 @@ _TRUNCATION_MARKER = "\n[truncated]\n"
 def _has_volume_hints(context: dict[str, Any]) -> bool:
     """Check if the context includes volume routing hints (required for K8s execution)."""
     return context.get("volume_id") is not None
+
+
+async def _audit_tier_override(
+    context: dict[str, Any],
+    requested_tier: str,
+    actual_tier: str,
+    command: str,
+) -> None:
+    """Write an AuditLog row when the agent picks a tier that differs from
+    the project's current ``compute_tier``. Non-blocking — never raises.
+
+    Emits action=``agent.exec.tier_override`` so prod telemetry can see
+    when agents are bypassing the implicit routing.
+    """
+    try:
+        from ....database import AsyncSessionLocal
+        from ....models import Project
+        from ....services.audit_service import log_event
+
+        project_id = context.get("project_id")
+        user_id = context.get("user_id")
+        if not project_id or not user_id:
+            return
+
+        async with AsyncSessionLocal() as db:
+            project = await db.get(Project, project_id)
+            if project is None:
+                return
+            await log_event(
+                db=db,
+                team_id=project.team_id,
+                user_id=user_id,
+                action="agent.exec.tier_override",
+                resource_type="project",
+                resource_id=project_id,
+                project_id=project_id,
+                details={
+                    "requested_tier": requested_tier,
+                    "actual_tier": actual_tier,
+                    "command_preview": command[:200],
+                    "task_id": str(context.get("task_id")) if context.get("task_id") else None,
+                },
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("[BASH] Failed to audit tier override (non-blocking)")
 
 
 async def _run_ephemeral(context: dict[str, Any], command: str, timeout: int) -> dict[str, Any]:
@@ -132,10 +195,15 @@ def _get_k8s_api():
     return _get_k8s_api._v1
 
 
-async def _find_dev_pod(context: dict[str, Any]) -> tuple[Any | None, dict[str, Any] | None]:
+async def _find_dev_pod(
+    context: dict[str, Any], container_override: str | None = None
+) -> tuple[Any | None, dict[str, Any] | None]:
     """Find the running dev container pod for a project.
 
-    Returns (pod, None) on success or (None, error_dict) on failure.
+    When *container_override* is provided it overrides the context-level
+    ``container_name`` default so the agent can target a specific service
+    container in a multi-container project via the bash_exec ``container``
+    param. Returns (pod, None) on success or (None, error_dict) on failure.
     """
     import asyncio
 
@@ -143,7 +211,7 @@ async def _find_dev_pod(context: dict[str, Any]) -> tuple[Any | None, dict[str, 
 
     project_id = context["project_id"]
     namespace = f"proj-{project_id}"
-    container_name = context.get("container_name")
+    container_name = container_override or context.get("container_name")
 
     v1 = _get_k8s_api()
 
@@ -162,9 +230,18 @@ async def _find_dev_pod(context: dict[str, Any]) -> tuple[Any | None, dict[str, 
     except K8sApiException as exc:
         if exc.status == 404:
             return None, error_output(
-                message="Project namespace not found — environment may not be started",
-                suggestion="Start the project environment first",
-                details={"namespace": namespace, "tier": "environment"},
+                message="Tier 2 environment is not running",
+                suggestion=(
+                    "Call project_start to start the environment, then retry "
+                    "bash_exec. project_start blocks until pods are Ready "
+                    "(~5s warm, ~60s cold)."
+                ),
+                details={
+                    "tier": "environment",
+                    "next_tool": "project_start",
+                    "namespace": namespace,
+                    "reason": "namespace_not_found",
+                },
             )
         raise
 
@@ -183,9 +260,20 @@ async def _find_dev_pod(context: dict[str, Any]) -> tuple[Any | None, dict[str, 
 
     if not pods:
         return None, error_output(
-            message="No running dev container found in the environment",
-            suggestion="Start the project environment or wait for pods to be ready",
-            details={"namespace": namespace, "tier": "environment"},
+            message="Tier 2 environment is not running",
+            suggestion=(
+                "Call project_start to start the environment, then retry "
+                "bash_exec. project_start blocks until pods are Ready "
+                "(~5s warm, ~60s cold). To run commands without waking the "
+                "environment, use tier='ephemeral'."
+            ),
+            details={
+                "tier": "environment",
+                "next_tool": "project_start",
+                "namespace": namespace,
+                "reason": "no_running_dev_pod",
+                "requested_container": container_name,
+            },
         )
 
     return pods[0], None
@@ -206,13 +294,20 @@ async def _run_via_tsinit(pod_ip: str, command: str, timeout: int) -> tuple[str,
     return await client.run(cmd=command, tty=False, timeout=timeout)
 
 
-async def _run_environment(context: dict[str, Any], command: str, timeout: int) -> dict[str, Any]:
+async def _run_environment(
+    context: dict[str, Any],
+    command: str,
+    timeout: int,
+    container_override: str | None = None,
+) -> dict[str, Any]:
     """Execute a command in a running Tier 2 dev container.
 
     Tries tsinit WebSocket first (structured exit codes, clean stdout/stderr
-    separation). Falls back to kubectl exec if tsinit is not reachable.
+    separation). Falls back to kubectl exec if tsinit is not reachable. When
+    *container_override* is set, the dev pod for that specific named service
+    container is targeted.
     """
-    pod, err = await _find_dev_pod(context)
+    pod, err = await _find_dev_pod(context, container_override=container_override)
     if err is not None:
         return err
 
@@ -679,11 +774,26 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
     max_output_tokens = int(params.get("max_output_tokens", 16384))
     is_background = bool(params.get("is_background", False))
     idle_timeout_ms = int(params.get("idle_timeout_ms", 0))
+    tier_param = (params.get("tier") or "auto").lower()
+    container_param = params.get("container")
+
+    if tier_param not in ("auto", "ephemeral", "environment"):
+        return error_output(
+            message=f"Invalid tier '{tier_param}'",
+            suggestion="tier must be one of: auto, ephemeral, environment",
+            details={"command": command},
+        )
 
     if not command:
         raise ValueError("command parameter is required")
 
-    logger.info(f"[BASH] Executing: {command[:100]}... (bg={is_background})")
+    logger.info(
+        "[BASH] Executing: %s... (bg=%s, tier=%s, container=%s)",
+        command[:100],
+        is_background,
+        tier_param,
+        container_param,
+    )
 
     from ....config import get_settings
 
@@ -713,6 +823,9 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
         )
 
     if settings.is_docker_mode:
+        # Docker mode has no tiering — tier / container params are accepted
+        # for forward-compat but ignored here (all containers reachable via
+        # the orchestrator's execute_command path).
         return await _run_docker(context, command, timeout)
 
     # K8s mode: requires volume routing hints for pod scheduling
@@ -723,8 +836,30 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
             details={"command": command},
         )
 
-    if context.get("compute_tier") == "environment":
-        return await _run_environment(context, command, timeout)
+    actual_tier = context.get("compute_tier")
+
+    if tier_param == "environment":
+        resolved_tier = "environment"
+    elif tier_param == "ephemeral":
+        resolved_tier = "ephemeral"
+    else:  # auto
+        resolved_tier = "environment" if actual_tier == "environment" else "ephemeral"
+
+    # Audit tier override — when the agent explicitly chose a tier that
+    # disagrees with what the project is currently in.
+    if tier_param != "auto" and actual_tier and tier_param != actual_tier:
+        await _audit_tier_override(
+            context=context,
+            requested_tier=tier_param,
+            actual_tier=actual_tier,
+            command=command,
+        )
+
+    if resolved_tier == "environment":
+        return await _run_environment(context, command, timeout, container_override=container_param)
+
+    # Ephemeral path ignores container_param — one-shot pods run in the
+    # generic ephemeral image, not a specific service container.
     return await _run_ephemeral(context, command, timeout)
 
 
@@ -735,10 +870,17 @@ def register_bash_tools(registry):
         Tool(
             name="bash_exec",
             description=(
-                "Execute a bash/sh command and return its output. In local mode the "
-                "command runs under a PTY, supports soft yielding via yield_time_ms, "
-                "idle detection via idle_timeout_ms, background spawning via "
-                "is_background=True, and output truncation via max_output_tokens."
+                "Execute a bash/sh command and return its output. In local mode "
+                "the command runs under a PTY with yield/idle/background/"
+                "truncation controls. In Kubernetes mode the command is routed "
+                "to one of two compute tiers: Tier 1 'ephemeral' spawns a "
+                "short-lived isolated pod (fast, stateless, no services "
+                "reachable); Tier 2 'environment' execs into the running "
+                "project dev container (services + network reachable but "
+                "requires project_start first). Use the 'tier' param to pick "
+                "explicitly, or leave it 'auto' to follow the project's "
+                "current compute_tier. If Tier 2 is requested but not running, "
+                "the tool returns a structured error pointing at project_start."
             ),
             category=ToolCategory.SHELL,
             parameters={
@@ -791,6 +933,31 @@ def register_bash_tools(registry):
                         ),
                         "default": 0,
                     },
+                    "tier": {
+                        "type": "string",
+                        "enum": ["auto", "ephemeral", "environment"],
+                        "description": (
+                            "K8s compute tier to execute in. 'ephemeral' (Tier 1) "
+                            "spawns a short-lived pod for isolated one-shot commands "
+                            "— fast to cold-start, no services reachable. "
+                            "'environment' (Tier 2) execs into the running project "
+                            "dev container — services and network reachable but "
+                            "requires project_start first. 'auto' (default) follows "
+                            "the project's current compute_tier. Ignored in local "
+                            "and docker modes."
+                        ),
+                        "default": "auto",
+                    },
+                    "container": {
+                        "type": "string",
+                        "description": (
+                            "Name of the service container to exec into (Tier 2 "
+                            "environment only). Use for multi-container projects "
+                            "to target e.g. 'backend' instead of the default dev "
+                            "container. Ignored in ephemeral mode. Omit to use "
+                            "the project's primary dev container."
+                        ),
+                    },
                 },
                 "required": ["command"],
             },
@@ -800,6 +967,9 @@ def register_bash_tools(registry):
                 '{"tool_name": "bash_exec", "parameters": {"command": "ls -la", "timeout": 30}}',
                 '{"tool_name": "bash_exec", "parameters": {"command": "npm run dev", "is_background": true}}',
                 '{"tool_name": "bash_exec", "parameters": {"command": "pytest -x", "yield_time_ms": 5000, "idle_timeout_ms": 2000}}',
+                '{"tool_name": "bash_exec", "parameters": {"command": "curl localhost:3000/health", "tier": "environment"}}',
+                '{"tool_name": "bash_exec", "parameters": {"command": "cat package.json", "tier": "ephemeral"}}',
+                '{"tool_name": "bash_exec", "parameters": {"command": "ps aux", "tier": "environment", "container": "backend"}}',
             ],
         )
     )

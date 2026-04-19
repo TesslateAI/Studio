@@ -592,3 +592,40 @@ async def _build_cross_platform_context(
     except Exception as e:
         logger.warning("[CROSS-PLATFORM] Failed to build context: %s", e)
         return None
+
+
+async def build_tier_snapshot(project: Project | None, db: AsyncSession) -> dict:
+    """Compact view of the project's compute-tier state for agent context.
+
+    Shape consumed by bash_exec / shell_open / project_control tier_status.
+    Returns empty dict when project is None so callers can spread safely.
+    """
+    if project is None:
+        return {}
+
+    try:
+        result = await db.execute(select(Container).where(Container.project_id == project.id))
+        containers = result.scalars().all()
+    except Exception as e:
+        logger.warning("[TIER-SNAPSHOT] Failed to load containers: %s", e)
+        containers = []
+
+    return {
+        "compute_tier": project.compute_tier,
+        "active_compute_pod": project.active_compute_pod,
+        "environment_status": project.environment_status,
+        "last_activity": (
+            project.last_activity.isoformat() if project.last_activity is not None else None
+        ),
+        "namespace": f"proj-{project.id}" if project.compute_tier == "environment" else None,
+        "containers": [
+            {
+                "name": c.name,
+                "status": c.status,
+                "ready": c.status == "running",
+                "is_primary": c.is_primary is True,
+                "container_type": c.container_type,
+            }
+            for c in containers
+        ],
+    }

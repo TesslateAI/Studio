@@ -24,6 +24,7 @@ from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 from ._helpers import (
     fetch_all_containers,
+    fetch_project,
     lookup_container_by_name,
     require_project_context,
     resolve_container_dir,
@@ -82,9 +83,51 @@ async def _action_status(context: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-async def _action_container_logs(
-    container_name: str, context: dict[str, Any]
-) -> dict[str, Any]:
+async def _action_tier_status(context: dict[str, Any]) -> dict[str, Any]:
+    """Report compute-tier state: which tier, pod name, env status, containers.
+
+    Read-only snapshot of ``Project.compute_tier`` + ``active_compute_pod`` +
+    ``environment_status`` + ``last_activity`` plus the per-container status
+    list. No K8s API calls — everything comes from the DB.
+    """
+    db = context["db"]
+    project_id = context["project_id"]
+
+    project = await fetch_project(db, project_id)
+    if project is None:
+        return error_output(
+            message="Project not found",
+            suggestion="Ensure the tool is called within a valid project session",
+        )
+
+    containers = await fetch_all_containers(db, project_id)
+    container_list = [
+        {
+            "name": c.name,
+            "directory": c.directory,
+            "status": c.status,
+            "ready": c.status == "running",
+            "is_primary": c.is_primary is True,
+            "container_type": c.container_type,
+        }
+        for c in containers
+    ]
+
+    namespace = f"proj-{project_id}" if project.compute_tier == "environment" else None
+    last_activity = project.last_activity.isoformat() if project.last_activity is not None else None
+
+    return success_output(
+        message=f"Compute tier: {project.compute_tier}",
+        compute_tier=project.compute_tier,
+        active_compute_pod=project.active_compute_pod,
+        environment_status=project.environment_status,
+        last_activity=last_activity,
+        namespace=namespace,
+        containers=container_list,
+    )
+
+
+async def _action_container_logs(container_name: str, context: dict[str, Any]) -> dict[str, Any]:
     db = context["db"]
     project_id = context["project_id"]
     project_slug = context.get("project_slug", "")
@@ -143,9 +186,7 @@ async def _action_container_logs(
     )
 
 
-async def _action_health_check(
-    container_name: str, context: dict[str, Any]
-) -> dict[str, Any]:
+async def _action_health_check(container_name: str, context: dict[str, Any]) -> dict[str, Any]:
     db = context["db"]
     project_id = context["project_id"]
     project_slug = context.get("project_slug", "")
@@ -211,8 +252,11 @@ parameters = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["status", "container_logs", "health_check"],
-            "description": "Observation action to perform.",
+            "enum": ["status", "container_logs", "health_check", "tier_status"],
+            "description": (
+                "Observation action. 'tier_status' reports compute-tier state "
+                "(none / ephemeral / environment) plus pod + container readiness."
+            ),
         },
         "container_name": {
             "type": "string",
@@ -254,6 +298,8 @@ async def project_control_executor(
     try:
         if action == "status":
             return await _action_status(context)
+        elif action == "tier_status":
+            return await _action_tier_status(context)
         elif action == "container_logs":
             assert container_name is not None
             return await _action_container_logs(container_name, context)
@@ -264,15 +310,14 @@ async def project_control_executor(
             return error_output(
                 message=f"Unknown action '{action}'",
                 suggestion=(
-                    "Choose one of: status, container_logs, health_check. "
-                    "For lifecycle actions use project_start/stop/restart, "
-                    "container_start/stop/restart, or apply_setup_config."
+                    "Choose one of: status, tier_status, container_logs, "
+                    "health_check. For lifecycle actions use project_start/"
+                    "stop/restart, container_start/stop/restart, or "
+                    "apply_setup_config."
                 ),
             )
     except Exception as exc:
-        logger.error(
-            "project_control action '%s' failed: %s", action, exc, exc_info=True
-        )
+        logger.error("project_control action '%s' failed: %s", action, exc, exc_info=True)
         return error_output(
             message=f"Action '{action}' failed: {exc}",
             suggestion="Check container configuration and try again",
@@ -290,10 +335,15 @@ def register_project_control_tools(registry):
         Tool(
             name="project_control",
             description=(
-                "Observe the project's containers: status, logs, and health checks. "
-                "For starting/stopping/restarting use project_start/project_stop/"
-                "project_restart or container_start/container_stop/container_restart. "
-                "For config changes use apply_setup_config."
+                "Observe the project's containers and compute tier. Actions: "
+                "'status' (list containers + URLs), 'tier_status' (report "
+                "compute_tier / active_compute_pod / environment_status / "
+                "per-container readiness — call this before bash_exec with "
+                "tier='environment' to confirm the env is up), "
+                "'container_logs' (tail 100 lines), 'health_check' (HTTP "
+                "probe). For starting/stopping use project_start/project_stop/"
+                "project_restart or container_start/container_stop/"
+                "container_restart. For config changes use apply_setup_config."
             ),
             category=ToolCategory.PROJECT,
             parameters=parameters,

@@ -7,7 +7,7 @@ Tools for managing persistent shell sessions in dev containers.
 import logging
 from typing import Any
 
-from ..output_formatter import success_output
+from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,9 @@ async def shell_open_executor(params: dict[str, Any], context: dict[str, Any]) -
     user_id = context["user_id"]
     db = context["db"]
 
-    # Get container info for multi-container projects
-    container_name = context.get("container_name")
+    # Get container info for multi-container projects. Agent may override via
+    # the `container` param for multi-container projects.
+    container_name = params.get("container") or context.get("container_name")
 
     session_manager = get_shell_session_manager()
 
@@ -63,8 +64,24 @@ async def shell_open_executor(params: dict[str, Any], context: dict[str, Any]) -
             )
 
             raise ValueError(error_msg) from e
-        else:
-            raise
+        if e.status_code == 400 and "not running" in (e.detail or "").lower():
+            # Dev container isn't up — agent should call project_start first.
+            return error_output(
+                message="Tier 2 environment is not running",
+                suggestion=(
+                    "Call project_start to start the environment, then retry "
+                    "shell_open. project_start blocks until pods are Ready "
+                    "(~5s warm, ~60s cold). For one-shot isolated commands "
+                    "without starting the env, use bash_exec with tier='ephemeral'."
+                ),
+                details={
+                    "tier": "environment",
+                    "next_tool": "project_start",
+                    "reason": "dev_container_not_running",
+                    "requested_container": container_name,
+                },
+            )
+        raise
 
 
 async def shell_close_executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -86,7 +103,16 @@ def register_session_tools(registry):
     registry.register(
         Tool(
             name="shell_open",
-            description="Open an interactive shell session in the current project's dev container. Returns session_id for subsequent operations. MUST be called before shell_exec. The shell remains open until explicitly closed with shell_close.",
+            description=(
+                "Open an interactive shell session in the project's running "
+                "dev container (Tier 2 environment only). Returns session_id "
+                "for shell_exec. The shell remains open until closed with "
+                "shell_close. If the environment is not running, the tool "
+                "returns a structured error pointing at project_start — there "
+                "is no ephemeral/Tier 1 persistent shell yet. For one-shot "
+                "isolated commands without waking the environment, use "
+                "bash_exec with tier='ephemeral'."
+            ),
             category=ToolCategory.SHELL,
             parameters={
                 "type": "object",
@@ -95,6 +121,14 @@ def register_session_tools(registry):
                         "type": "string",
                         "description": "Shell command to run (default: /bin/sh). The shell starts in the project directory with all your source files.",
                     },
+                    "container": {
+                        "type": "string",
+                        "description": (
+                            "Name of the service container to attach to in "
+                            "multi-container projects. Omit to use the "
+                            "project's primary dev container."
+                        ),
+                    },
                 },
                 "required": [],
             },
@@ -102,6 +136,7 @@ def register_session_tools(registry):
             examples=[
                 '{"tool_name": "shell_open", "parameters": {}}',
                 '{"tool_name": "shell_open", "parameters": {"command": "/bin/sh"}}',
+                '{"tool_name": "shell_open", "parameters": {"container": "backend"}}',
             ],
         )
     )

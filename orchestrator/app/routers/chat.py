@@ -1121,6 +1121,9 @@ async def agent_chat(
                 )
 
         # Prepare context for tool execution
+        from ..services.agent_context import build_tier_snapshot
+
+        _tier_snapshot = await build_tier_snapshot(project, db)
         context = {
             "user_id": current_user.id,
             "project_id": request.project_id,
@@ -1140,6 +1143,10 @@ async def agent_chat(
             "volume_id": project.volume_id,
             "cache_node": project.cache_node,
             "compute_tier": project.compute_tier,
+            # Tier snapshot for bash_exec / shell_open / project_control
+            "active_compute_pod": project.active_compute_pod,
+            "environment_status": project.environment_status,
+            "containers": _tier_snapshot.get("containers", []),
         }
 
         # Get project context
@@ -1680,6 +1687,9 @@ async def agent_chat_stream(
 
             # Prepare execution context
             # Note: container_directory was already captured during initial container lookup above
+            from ..services.agent_context import build_tier_snapshot
+
+            _tier_snapshot = await build_tier_snapshot(project, db)
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
@@ -1698,6 +1708,9 @@ async def agent_chat_stream(
                 "volume_id": project.volume_id if project else None,
                 "cache_node": project.cache_node if project else None,
                 "compute_tier": project.compute_tier if project else None,
+                "active_compute_pod": project.active_compute_pod if project else None,
+                "environment_status": project.environment_status if project else None,
+                "containers": _tier_snapshot.get("containers", []),
                 "attachments": [a.model_dump() for a in request.attachments]
                 if request.attachments
                 else [],
@@ -2689,6 +2702,9 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         return
 
     # 4. Prepare execution context
+    from ..services.agent_context import build_tier_snapshot
+
+    _tier_snapshot = await build_tier_snapshot(project, db)
     execution_context = {
         "user": user,
         "user_id": user.id,
@@ -2707,6 +2723,9 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         "volume_id": project.volume_id if project else None,
         "cache_node": project.cache_node if project else None,
         "compute_tier": project.compute_tier if project else None,
+        "active_compute_pod": project.active_compute_pod if project else None,
+        "environment_status": project.environment_status if project else None,
+        "containers": _tier_snapshot.get("containers", []),
     }
 
     # Add project context if available

@@ -86,6 +86,7 @@ This context relates to:
 - **Channel Service** (`orchestrator/app/services/channels/`) - Channel implementations used by `send_message` reply channel
 - **Gateway Service** (`orchestrator/app/services/gateway/`) - Schedule parser and scheduler used by `manage_schedule` tool
 - **MCP Service** (`orchestrator/app/services/mcp/`) - MCP tools dynamically registered on agent before task execution
+- **[Compute Tiers](compute-tiers.md)** — `bash_exec` / `shell_open` / `project_control tier_status` routing between Tier 1 ephemeral and Tier 2 environment pods, and the required context keys
 
 ## Quick Reference
 
