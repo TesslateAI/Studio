@@ -129,14 +129,17 @@ def _safe_handle(candidate: str, *, user_id_hex: str, max_len: int) -> str:
 
 def upgrade() -> None:
     bind = op.get_bind()
+    is_pg = bind.dialect.name == "postgresql"
 
     # 1. Add nullable columns.
     op.add_column("users", sa.Column("handle", sa.String(32), nullable=True))
     op.add_column("marketplace_apps", sa.Column("handle", sa.String(48), nullable=True))
 
     # 2. Backfill users.handle.
+    # PostgreSQL UUIDs need ::text cast; SQLite stores them as TEXT already.
+    _id_cast = "::text" if is_pg else ""
     user_rows = bind.execute(
-        sa.text("SELECT id::text AS id, username, email FROM users WHERE handle IS NULL")
+        sa.text(f"SELECT id{_id_cast} AS id, username, email FROM users WHERE handle IS NULL")
     ).fetchall()
     used: set[str] = set()
     # Pre-seed with anything already present (none after add_column, but defensive).
@@ -171,14 +174,14 @@ def upgrade() -> None:
     # 3. Backfill marketplace_apps.handle (uniqueness scoped per creator).
     app_rows = bind.execute(
         sa.text(
-            "SELECT id::text AS id, slug, creator_user_id::text AS creator_user_id "
+            f"SELECT id{_id_cast} AS id, slug, creator_user_id{_id_cast} AS creator_user_id "
             "FROM marketplace_apps WHERE handle IS NULL"
         )
     ).fetchall()
     used_per_creator: dict[str, set[str]] = {}
     for row in bind.execute(
         sa.text(
-            "SELECT creator_user_id::text AS creator, handle FROM marketplace_apps "
+            f"SELECT creator_user_id{_id_cast} AS creator, handle FROM marketplace_apps "
             "WHERE handle IS NOT NULL AND creator_user_id IS NOT NULL"
         )
     ).fetchall():

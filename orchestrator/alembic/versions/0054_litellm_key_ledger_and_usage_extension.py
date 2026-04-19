@@ -41,7 +41,7 @@ def upgrade() -> None:
         "litellm_key_ledger",
         sa.Column(
             "id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             primary_key=True,
         ),
         sa.Column("key_id", sa.Text(), nullable=False, unique=True),
@@ -62,12 +62,20 @@ def upgrade() -> None:
         ),  # session | invocation | nested
         sa.Column(
             "user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
-        sa.Column("app_instance_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column(
+            "app_instance_id",
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
+            nullable=True,
+        ),
+        sa.Column(
+            "session_id",
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
+            nullable=True,
+        ),
         sa.Column("budget_usd", sa.Numeric(12, 6), nullable=False),
         sa.Column(
             "spent_usd",
@@ -97,9 +105,9 @@ def upgrade() -> None:
         ),
         sa.Column(
             "meta",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
     )
     op.create_index(
@@ -131,18 +139,12 @@ def upgrade() -> None:
     )
 
     # -- usage_logs extension -------------------------------------------------
+    _is_sqlite = op.get_bind().dialect.name == "sqlite"
+    _uuid_type = postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite")
+    _installer_fk = [] if _is_sqlite else [sa.ForeignKey("users.id", ondelete="SET NULL")]
+    op.add_column("usage_logs", sa.Column("session_id", _uuid_type, nullable=True))
     op.add_column(
-        "usage_logs",
-        sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=True),
-    )
-    op.add_column(
-        "usage_logs",
-        sa.Column(
-            "installer_user_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("users.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
+        "usage_logs", sa.Column("installer_user_id", _uuid_type, *_installer_fk, nullable=True)
     )
     op.add_column(
         "usage_logs",
@@ -154,14 +156,8 @@ def upgrade() -> None:
         ),
         # ai_compute | general_compute | storage | egress | mcp_tool_call | platform_fee
     )
-    op.add_column(
-        "usage_logs",
-        sa.Column("app_instance_id", postgresql.UUID(as_uuid=True), nullable=True),
-    )
-    op.add_column(
-        "usage_logs",
-        sa.Column("litellm_key_id", sa.Text(), nullable=True),
-    )
+    op.add_column("usage_logs", sa.Column("app_instance_id", _uuid_type, nullable=True))
+    op.add_column("usage_logs", sa.Column("litellm_key_id", sa.Text(), nullable=True))
 
     op.create_index(
         "ix_usage_logs_app_instance_created",

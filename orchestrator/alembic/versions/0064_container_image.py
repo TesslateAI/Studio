@@ -40,38 +40,62 @@ def upgrade() -> None:
     )
 
     bind = op.get_bind()
-    # Backfill: copy environment_vars->>'TSL_CONTAINER_IMAGE' into image,
-    # then remove the key. Both operations in one pass.
-    # environment_vars is a JSON (not JSONB) column — the `?` operator and the
-    # `-` operator are JSONB-only, so cast before reading/removing, then cast
-    # back to JSON for the UPDATE. The cast-round-trip is idempotent on the
-    # value shape.
-    bind.execute(
-        sa.text(
-            """
-            UPDATE containers
-            SET
-                image = (environment_vars::jsonb)->>'TSL_CONTAINER_IMAGE',
-                environment_vars = ((environment_vars::jsonb) - 'TSL_CONTAINER_IMAGE')::json
-            WHERE (environment_vars::jsonb) ? 'TSL_CONTAINER_IMAGE'
-              AND image IS NULL
-            """
+    dialect = bind.dialect.name
+    if dialect == "postgresql":
+        bind.execute(
+            sa.text(
+                """
+                UPDATE containers
+                SET
+                    image = (environment_vars::jsonb)->>'TSL_CONTAINER_IMAGE',
+                    environment_vars = ((environment_vars::jsonb) - 'TSL_CONTAINER_IMAGE')::json
+                WHERE (environment_vars::jsonb) ? 'TSL_CONTAINER_IMAGE'
+                  AND image IS NULL
+                """
+            )
         )
-    )
+    else:
+        # SQLite: json_extract / json_remove are available since 3.38.
+        # Desktop installs are fresh — no legacy TSL_CONTAINER_IMAGE rows.
+        bind.execute(
+            sa.text(
+                """
+                UPDATE containers
+                SET
+                    image = json_extract(environment_vars, '$.TSL_CONTAINER_IMAGE'),
+                    environment_vars = json_remove(environment_vars, '$.TSL_CONTAINER_IMAGE')
+                WHERE json_extract(environment_vars, '$.TSL_CONTAINER_IMAGE') IS NOT NULL
+                  AND image IS NULL
+                """
+            )
+        )
 
 
 def downgrade() -> None:
-    # Best-effort: push the image value back into environment_vars so
-    # compute_manager's legacy read path still works.
     bind = op.get_bind()
-    bind.execute(
-        sa.text(
-            """
-            UPDATE containers
-            SET environment_vars = (COALESCE(environment_vars::jsonb, '{}'::jsonb)
-                                    || jsonb_build_object('TSL_CONTAINER_IMAGE', image))::json
-            WHERE image IS NOT NULL
-            """
+    dialect = bind.dialect.name
+    if dialect == "postgresql":
+        bind.execute(
+            sa.text(
+                """
+                UPDATE containers
+                SET environment_vars = (COALESCE(environment_vars::jsonb, '{}'::jsonb)
+                                        || jsonb_build_object('TSL_CONTAINER_IMAGE', image))::json
+                WHERE image IS NOT NULL
+                """
+            )
         )
-    )
+    else:
+        bind.execute(
+            sa.text(
+                """
+                UPDATE containers
+                SET environment_vars = json_patch(
+                    COALESCE(environment_vars, '{}'),
+                    json_object('TSL_CONTAINER_IMAGE', image)
+                )
+                WHERE image IS NOT NULL
+                """
+            )
+        )
     op.drop_column("containers", "image")

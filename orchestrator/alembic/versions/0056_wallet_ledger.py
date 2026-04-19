@@ -34,7 +34,9 @@ def upgrade() -> None:
     # -- wallets -------------------------------------------------------------
     op.create_table(
         "wallets",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "owner_type",
             sa.String(16),
@@ -42,7 +44,7 @@ def upgrade() -> None:
         ),  # creator | platform | installer
         sa.Column(
             "owner_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=True,
         ),
@@ -87,10 +89,12 @@ def upgrade() -> None:
     # -- wallet_ledger_entries ----------------------------------------------
     op.create_table(
         "wallet_ledger_entries",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "wallet_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("wallets.id", ondelete="RESTRICT"),
             nullable=False,
         ),
@@ -101,12 +105,16 @@ def upgrade() -> None:
             nullable=False,
         ),  # credit | debit | transfer | settlement | adjustment
         sa.Column("reference_type", sa.String(32), nullable=True),
-        sa.Column("reference_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column(
+            "reference_id",
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
+            nullable=True,
+        ),
         sa.Column(
             "meta",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "created_at",
@@ -129,13 +137,23 @@ def upgrade() -> None:
     # -- spend_records -------------------------------------------------------
     op.create_table(
         "spend_records",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         # No FK to app_instances this wave — avoid circular / ordering concern.
-        sa.Column("app_instance_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column(
+            "app_instance_id",
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
+            nullable=True,
+        ),
+        sa.Column(
+            "session_id",
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
+            nullable=True,
+        ),
         sa.Column(
             "installer_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -151,7 +169,7 @@ def upgrade() -> None:
         ),  # creator | platform | installer | byok
         sa.Column(
             "payer_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -159,7 +177,7 @@ def upgrade() -> None:
         sa.Column("litellm_key_id", sa.Text(), nullable=True),
         sa.Column(
             "usage_log_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("usage_logs.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -172,9 +190,9 @@ def upgrade() -> None:
         sa.Column("settled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "meta",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "created_at",

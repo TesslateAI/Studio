@@ -50,12 +50,14 @@ def upgrade() -> None:
     )
 
     # 2) app_instances.primary_container_id
+    _is_sqlite = op.get_bind().dialect.name == "sqlite"
+    _ctr_fk = [] if _is_sqlite else [sa.ForeignKey("containers.id", ondelete="SET NULL")]
     op.add_column(
         "app_instances",
         sa.Column(
             "primary_container_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("containers.id", ondelete="SET NULL"),
+            sa.dialects.postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
+            *_ctr_fk,
             nullable=True,
         ),
     )
@@ -64,28 +66,53 @@ def upgrade() -> None:
     # Idempotent: skip any project that already has a primary. For the rest,
     # pick the container with port=3000 if any, else the earliest created_at.
     bind = op.get_bind()
-    bind.execute(
-        sa.text(
-            """
-            WITH candidates AS (
-                SELECT DISTINCT ON (c.project_id) c.id, c.project_id
-                FROM containers c
-                WHERE c.project_id NOT IN (
-                    SELECT project_id FROM containers WHERE is_primary
+    if bind.dialect.name == "postgresql":
+        bind.execute(
+            sa.text(
+                """
+                WITH candidates AS (
+                    SELECT DISTINCT ON (c.project_id) c.id, c.project_id
+                    FROM containers c
+                    WHERE c.project_id NOT IN (
+                        SELECT project_id FROM containers WHERE is_primary
+                    )
+                    ORDER BY
+                        c.project_id,
+                        CASE WHEN c.port = 3000 THEN 0 ELSE 1 END,
+                        c.created_at ASC,
+                        c.id ASC
                 )
-                ORDER BY
-                    c.project_id,
-                    CASE WHEN c.port = 3000 THEN 0 ELSE 1 END,
-                    c.created_at ASC,
-                    c.id ASC
+                UPDATE containers
+                SET is_primary = TRUE
+                FROM candidates
+                WHERE containers.id = candidates.id
+                """
             )
-            UPDATE containers
-            SET is_primary = TRUE
-            FROM candidates
-            WHERE containers.id = candidates.id
-            """
         )
-    )
+    else:
+        # SQLite: no DISTINCT ON or UPDATE FROM; use a subquery approach
+        bind.execute(
+            sa.text(
+                """
+                UPDATE containers
+                SET is_primary = TRUE
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT c.id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY c.project_id
+                                   ORDER BY CASE WHEN c.port = 3000 THEN 0 ELSE 1 END,
+                                            c.created_at ASC, c.id ASC
+                               ) AS rn
+                        FROM containers c
+                        WHERE c.project_id NOT IN (
+                            SELECT project_id FROM containers WHERE is_primary = TRUE
+                        )
+                    ) sub WHERE rn = 1
+                )
+                """
+            )
+        )
 
 
 def downgrade() -> None:

@@ -35,12 +35,14 @@ def upgrade() -> None:
     # -- marketplace_apps ----------------------------------------------------
     op.create_table(
         "marketplace_apps",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column("slug", sa.Text(), nullable=False, unique=True),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column(
             "creator_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -55,7 +57,7 @@ def upgrade() -> None:
         ),  # true | restricted | no
         sa.Column(
             "forked_from",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("marketplace_apps.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -73,9 +75,9 @@ def upgrade() -> None:
         ),  # draft | pending_stage1 | pending_stage2 | approved | deprecated | yanked
         sa.Column(
             "reputation",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "created_at",
@@ -99,10 +101,12 @@ def upgrade() -> None:
     # -- app_versions --------------------------------------------------------
     op.create_table(
         "app_versions",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "app_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("marketplace_apps.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -110,7 +114,7 @@ def upgrade() -> None:
         sa.Column("manifest_schema_version", sa.String(16), nullable=False),
         sa.Column(
             "manifest_json",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
         ),
         sa.Column("manifest_hash", sa.Text(), nullable=False),
@@ -118,9 +122,9 @@ def upgrade() -> None:
         sa.Column("feature_set_hash", sa.Text(), nullable=False),
         sa.Column(
             "required_features",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'[]'::jsonb"),
+            server_default=sa.text("'[]'"),
         ),
         sa.Column(
             "approval_state",
@@ -130,15 +134,15 @@ def upgrade() -> None:
         ),  # pending_stage1 | stage1_approved | pending_stage2 | stage2_approved | rejected | yanked
         sa.Column(
             "approval_meta",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column("yanked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("yanked_reason", sa.Text(), nullable=True),
         sa.Column(
             "yanked_by_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -150,7 +154,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "yanked_second_admin_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -174,28 +178,30 @@ def upgrade() -> None:
     # -- app_instances -------------------------------------------------------
     op.create_table(
         "app_instances",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "app_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("marketplace_apps.id", ondelete="RESTRICT"),
             nullable=False,
         ),
         sa.Column(
             "app_version_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_versions.id", ondelete="RESTRICT"),
             nullable=False,
         ),
         sa.Column(
             "installer_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "project_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("projects.id", ondelete="CASCADE"),
             nullable=True,
         ),
@@ -207,15 +213,15 @@ def upgrade() -> None:
         ),  # installing | installed | upgrading | uninstalled | error
         sa.Column(
             "consent_record",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "wallet_mix",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "update_policy",
@@ -259,19 +265,21 @@ def upgrade() -> None:
     # -- mcp_consent_records -------------------------------------------------
     op.create_table(
         "mcp_consent_records",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "app_instance_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_instances.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("mcp_server_id", sa.Text(), nullable=False),
         sa.Column(
             "scopes",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'[]'::jsonb"),
+            server_default=sa.text("'[]'"),
         ),
         sa.Column(
             "granted_at",
@@ -282,9 +290,9 @@ def upgrade() -> None:
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "meta",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
     )
     op.create_index(

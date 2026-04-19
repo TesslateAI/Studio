@@ -38,17 +38,19 @@ def upgrade() -> None:
     # -- app_submissions -----------------------------------------------------
     op.create_table(
         "app_submissions",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "app_version_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_versions.id", ondelete="CASCADE"),
             nullable=False,
             unique=True,
         ),
         sa.Column(
             "submitter_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -67,7 +69,7 @@ def upgrade() -> None:
         sa.Column("sla_deadline_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "reviewer_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -99,10 +101,12 @@ def upgrade() -> None:
     # -- submission_checks ---------------------------------------------------
     op.create_table(
         "submission_checks",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "submission_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_submissions.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -115,9 +119,9 @@ def upgrade() -> None:
         ),  # passed | failed | warning | errored
         sa.Column(
             "details",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "created_at",
@@ -135,16 +139,18 @@ def upgrade() -> None:
     # -- yank_requests -------------------------------------------------------
     op.create_table(
         "yank_requests",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "app_version_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_versions.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "requester_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -158,13 +164,13 @@ def upgrade() -> None:
         ),  # pending | approved | rejected | appealed
         sa.Column(
             "primary_admin_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
         sa.Column(
             "secondary_admin_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -191,17 +197,19 @@ def upgrade() -> None:
     # -- yank_appeals --------------------------------------------------------
     op.create_table(
         "yank_appeals",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "yank_request_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("yank_requests.id", ondelete="CASCADE"),
             nullable=False,
             unique=True,
         ),
         sa.Column(
             "appellant_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -214,7 +222,7 @@ def upgrade() -> None:
         ),  # pending | upheld | overturned
         sa.Column(
             "reviewer_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -231,10 +239,12 @@ def upgrade() -> None:
     # -- monitoring_runs -----------------------------------------------------
     op.create_table(
         "monitoring_runs",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "app_version_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_versions.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -248,9 +258,9 @@ def upgrade() -> None:
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "findings",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "created_at",
@@ -268,7 +278,9 @@ def upgrade() -> None:
     # -- adversarial_suites --------------------------------------------------
     op.create_table(
         "adversarial_suites",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column("name", sa.Text(), nullable=False, unique=True),
         sa.Column("version", sa.Text(), nullable=False),
         sa.Column("suite_yaml_cas_hash", sa.Text(), nullable=False),
@@ -284,25 +296,27 @@ def upgrade() -> None:
     # -- adversarial_runs ----------------------------------------------------
     op.create_table(
         "adversarial_runs",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "suite_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("adversarial_suites.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "app_version_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_versions.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("score", sa.Numeric(6, 3), nullable=True),
         sa.Column(
             "findings",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "created_at",
@@ -323,7 +337,7 @@ def upgrade() -> None:
         "creator_reputation",
         sa.Column(
             "user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             primary_key=True,
         ),

@@ -37,30 +37,27 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # -- agent_schedules additive columns -----------------------------------
+    _is_sqlite = op.get_bind().dialect.name == "sqlite"
+    _app_instance_fk = [] if _is_sqlite else [sa.ForeignKey("app_instances.id", ondelete="CASCADE")]
     op.add_column(
         "agent_schedules",
-        sa.Column(
-            "trigger_kind",
-            sa.String(16),
-            nullable=False,
-            server_default="cron",
-        ),
+        sa.Column("trigger_kind", sa.String(16), nullable=False, server_default="cron"),
     )
     op.add_column(
         "agent_schedules",
         sa.Column(
             "trigger_config",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
     )
     op.add_column(
         "agent_schedules",
         sa.Column(
             "app_instance_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("app_instances.id", ondelete="CASCADE"),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
+            *_app_instance_fk,
             nullable=True,
         ),
     )
@@ -73,18 +70,20 @@ def upgrade() -> None:
     # -- schedule_trigger_events --------------------------------------------
     op.create_table(
         "schedule_trigger_events",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "schedule_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("agent_schedules.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "payload",
-            postgresql.JSONB(astext_type=sa.Text()),
+            postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite"),
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=sa.text("'{}'"),
         ),
         sa.Column(
             "received_at",

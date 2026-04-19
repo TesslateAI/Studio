@@ -31,11 +31,13 @@ def upgrade() -> None:
     # -- app_bundles ---------------------------------------------------------
     op.create_table(
         "app_bundles",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column("slug", sa.Text(), nullable=False, unique=True),
         sa.Column(
             "owner_user_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -69,16 +71,18 @@ def upgrade() -> None:
     # -- app_bundle_items ----------------------------------------------------
     op.create_table(
         "app_bundle_items",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"), primary_key=True
+        ),
         sa.Column(
             "bundle_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_bundles.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "app_version_id",
-            postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True).with_variant(sa.Text(), "sqlite"),
             sa.ForeignKey("app_versions.id", ondelete="RESTRICT"),
             nullable=False,
         ),
