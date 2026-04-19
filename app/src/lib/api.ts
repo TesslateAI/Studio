@@ -1070,9 +1070,7 @@ export const nodeConfigApi = {
     projectId: string,
     containerId: string
   ): Promise<ContainerConfigResponse> => {
-    const response = await api.get(
-      `/api/projects/${projectId}/containers/${containerId}/config`
-    );
+    const response = await api.get(`/api/projects/${projectId}/containers/${containerId}/config`);
     return response.data;
   },
 
@@ -1087,10 +1085,7 @@ export const nodeConfigApi = {
       mode?: NodeConfigMode;
     }
   ): Promise<void> => {
-    await api.patch(
-      `/api/projects/${projectId}/containers/${containerId}/config`,
-      body
-    );
+    await api.patch(`/api/projects/${projectId}/containers/${containerId}/config`, body);
   },
 
   /** Reveal the plaintext of a single encrypted secret (user-scoped). */
@@ -3886,7 +3881,7 @@ export const appInstallsApi = {
 
 // --- App Runtime Status (lifecycle for installed-app pods) -----------------
 
-export type AppRuntimeState = 'stopped' | 'starting' | 'running' | 'error';
+export type AppRuntimeState = 'stopped' | 'starting' | 'running' | 'error' | 'job_only';
 
 export interface AppRuntimeContainer {
   id: string;
@@ -3923,22 +3918,22 @@ export const appRuntimeStatusApi = {
   async patchSchedule(
     appInstanceId: string,
     scheduleId: string,
-    body: { enabled?: boolean },
+    body: { enabled?: boolean }
   ): Promise<AppScheduleRow> {
     const response = await api.patch(
       `/api/app-installs/${appInstanceId}/schedules/${scheduleId}`,
-      body,
+      body
     );
     return response.data;
   },
   async runSchedule(
     appInstanceId: string,
     scheduleId: string,
-    payload: Record<string, unknown> = {},
+    payload: Record<string, unknown> = {}
   ): Promise<{ event_id: string; status: string }> {
     const response = await api.post(
       `/api/app-installs/${appInstanceId}/schedules/${scheduleId}/trigger`,
-      payload,
+      payload
     );
     return response.data;
   },

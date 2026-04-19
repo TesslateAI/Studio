@@ -21,9 +21,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_deep_link::init())
-        // Updater plugin requires a `plugins.updater` config block (release
-        // manifest URL + signing pubkey) that we don't ship yet. Wire it
-        // back when the release pipeline + signing keys exist.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle();
 
@@ -43,6 +41,7 @@ fn main() {
             app.manage(sidecar_handle.clone());
 
             deep_link::register(handle);
+            updater::check_in_background(handle.clone());
 
             if let Err(e) = tray::install(handle) {
                 eprintln!("[host] tray install failed: {e}");

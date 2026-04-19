@@ -123,16 +123,15 @@ Push composes `push() → upload_to_cloud()`. Pull composes
 `download_from_cloud() → pull()`. Project-level file-tree sync is a separate
 flow — see `/docs/desktop/sync.md`.
 
-## `tesslate-agent` bridge
+## `tesslate-agent` adapter
 
-File: `/orchestrator/app/services/tesslate_agent_bridge.py`.
+File: `/orchestrator/app/services/tesslate_agent_adapter.py`.
 
-`TesslateAgentBridge` is the single seam between the orchestrator's in-tree
-runner and the `packages/tesslate-agent` submodule. Routers and services
-should import `TesslateAgentBridge` from here rather than the submodule
-directly so the eventual runner cutover is a one-file change.
-`BridgeContext(project_id, user_id, goal_ancestry, extra)` is the minimal
-invocation context; nothing else changes today.
+`TesslateAgentAdapter` is the single seam between the orchestrator and the
+`packages/tesslate-agent` submodule. Routers and services should import
+`TesslateAgentAdapter` from here rather than the submodule directly.
+`AgentAdapterContext(project_id, user_id, goal_ancestry, extra)` is the
+minimal invocation context.
 
 ## Open-in-IDE (planned)
 

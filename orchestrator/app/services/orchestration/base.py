@@ -37,6 +37,27 @@ class BaseOrchestrator(ABC):
         pass
 
     # =========================================================================
+    # CAPABILITY FLAGS
+    # Callers should branch on these instead of probing deployment_mode so
+    # that new orchestrator backends get the right behavior automatically.
+    # =========================================================================
+
+    @property
+    def supports_init_container(self) -> bool:
+        """True if the orchestrator can run an init container to bootstrap project files."""
+        return False
+
+    @property
+    def supports_volume_mount(self) -> bool:
+        """True if the orchestrator uses a shared volume for project file persistence."""
+        return False
+
+    @property
+    def writes_project_files_via_fs(self) -> bool:
+        """True if the orchestrator writes project files via the local filesystem."""
+        return False
+
+    # =========================================================================
     # PROJECT LIFECYCLE
     # =========================================================================
 

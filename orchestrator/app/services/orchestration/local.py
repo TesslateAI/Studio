@@ -601,6 +601,18 @@ class LocalOrchestrator(BaseOrchestrator):
         return DeploymentMode.LOCAL
 
     @property
+    def supports_init_container(self) -> bool:
+        return False
+
+    @property
+    def supports_volume_mount(self) -> bool:
+        return False
+
+    @property
+    def writes_project_files_via_fs(self) -> bool:
+        return True
+
+    @property
     def root(self) -> Path:
         """
         Return a fresh view of the default project root.
@@ -688,11 +700,35 @@ class LocalOrchestrator(BaseOrchestrator):
         db: AsyncSession,
     ) -> dict[str, Any]:
         slug = getattr(project, "slug", None) or "local"
-        logger.info("[LOCAL] start_project no-op for project=%s", slug)
+        logger.info("[LOCAL] start_project for project=%s (%d containers)", slug, len(containers))
+        from ...services.compute_manager import resolve_k8s_container_dir
+
+        container_results: dict[str, Any] = {}
+        for container in containers:
+            try:
+                result = await self.start_container(
+                    project, container, containers, connections, user_id, db
+                )
+                dir_key = resolve_k8s_container_dir(container)
+                container_results[dir_key] = {
+                    "container_id": str(getattr(container, "id", "") or ""),
+                    "running": result.get("status") == "running",
+                    "url": result.get("url", ""),
+                    "name": getattr(container, "name", ""),
+                }
+            except Exception as exc:
+                logger.warning(
+                    "[LOCAL] start_container failed for %s: %s",
+                    getattr(container, "name", "?"),
+                    exc,
+                )
+        all_running = (
+            all(c["running"] for c in container_results.values()) if container_results else False
+        )
         return {
-            "status": "running",
+            "status": "running" if all_running else "partial",
             "project_slug": slug,
-            "containers": {},
+            "containers": container_results,
             "mode": "local",
         }
 
@@ -715,10 +751,50 @@ class LocalOrchestrator(BaseOrchestrator):
         return await self.start_project(project, containers, connections, user_id, db)
 
     async def get_project_status(self, project_slug: str, project_id: UUID) -> dict[str, Any]:
+        from sqlalchemy import select
+
+        from ...database import AsyncSessionLocal
+        from ...models import Container
+        from ...services.compute_manager import resolve_k8s_container_dir
+
+        containers: dict[str, Any] = {}
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(Container).where(Container.project_id == project_id)
+                )
+                db_containers = result.scalars().all()
+
+            for container in db_containers:
+                cid = str(container.id)
+                dir_key = resolve_k8s_container_dir(container)
+                sid = _LOCAL_DEV_SERVERS.get(cid) or _LOCAL_DEV_SERVERS.get(container.name)
+                running = False
+                if sid:
+                    try:
+                        info = PTY_SESSIONS.status(sid)
+                        running = info.get("status") == "running"
+                    except KeyError:
+                        pass
+                port = getattr(container, "port", None) or getattr(
+                    container, "effective_port", None
+                )
+                url = f"http://localhost:{port}" if port else ""
+                containers[dir_key] = {
+                    "container_id": cid,
+                    "running": running,
+                    "url": url,
+                    "name": container.name,
+                }
+        except Exception as exc:
+            logger.warning("[LOCAL] get_project_status DB lookup failed: %s", exc)
+
+        any_running = any(c.get("running") for c in containers.values())
+        all_running = bool(containers) and all(c.get("running") for c in containers.values())
         return {
-            "status": "running",
+            "status": "running" if all_running else ("partial" if any_running else "stopped"),
             "project_slug": project_slug,
-            "containers": {},
+            "containers": containers,
             "mode": "local",
         }
 
@@ -905,8 +981,16 @@ class LocalOrchestrator(BaseOrchestrator):
         container_name: str,
         user_id: UUID,
     ) -> dict[str, Any]:
+        sid = _LOCAL_DEV_SERVERS.get(container_name)
+        running = False
+        if sid:
+            try:
+                info = PTY_SESSIONS.status(sid)
+                running = info.get("status") == "running"
+            except KeyError:
+                pass
         return {
-            "status": "running",
+            "status": "running" if running else "stopped",
             "container_name": container_name,
             "url": "",
             "mode": "local",

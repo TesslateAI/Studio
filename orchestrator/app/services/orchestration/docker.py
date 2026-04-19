@@ -143,6 +143,18 @@ class DockerOrchestrator(BaseOrchestrator):
     def deployment_mode(self) -> DeploymentMode:
         return DeploymentMode.DOCKER
 
+    @property
+    def supports_init_container(self) -> bool:
+        return True
+
+    @property
+    def supports_volume_mount(self) -> bool:
+        return True
+
+    @property
+    def writes_project_files_via_fs(self) -> bool:
+        return True
+
     # =========================================================================
     # INTERNAL HELPERS
     # =========================================================================
@@ -346,9 +358,7 @@ class DockerOrchestrator(BaseOrchestrator):
         _ = user_id  # interface parity with K8s orchestrator
         project_slug = await self._get_project_slug(project_id)
         if project_slug is None:
-            logger.warning(
-                "[DOCKER] delete_project_namespace: no slug for project %s", project_id
-            )
+            logger.warning("[DOCKER] delete_project_namespace: no slug for project %s", project_id)
             return
 
         compose_file_path = self._get_compose_file_path(project_slug)
@@ -369,9 +379,7 @@ class DockerOrchestrator(BaseOrchestrator):
                 )
                 await process.communicate()
             except Exception:
-                logger.exception(
-                    "[DOCKER] compose down failed for %s (continuing)", project_slug
-                )
+                logger.exception("[DOCKER] compose down failed for %s (continuing)", project_slug)
 
         try:
             await self.delete_project_directory(project_slug)

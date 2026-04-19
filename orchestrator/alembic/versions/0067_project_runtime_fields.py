@@ -22,8 +22,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0052_project_runtime_fields"
-down_revision: str | Sequence[str] | None = "0051_mcp_config_unique_scope"
+revision: str = "0067_project_runtime_fields"
+down_revision: str | Sequence[str] | None = "0066_user_handle_app_handle"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

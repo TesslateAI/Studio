@@ -40,8 +40,6 @@ from ..models import (
     Container,
     ContainerConnection,
     DeploymentCredential,
-    DeploymentTarget,
-    DeploymentTargetConnection,
     MarketplaceBase,
     Project,
     ProjectAsset,
@@ -107,6 +105,8 @@ async def _resolve_container_url(
     """
     from ..services.apps.runtime_urls import (
         container_url as _legacy_url,
+    )
+    from ..services.apps.runtime_urls import (
         resolve_app_url_for_container,
     )
 
@@ -352,6 +352,7 @@ async def get_projects(
     # Hide installed-app instance projects from the normal Projects list —
     # those are rendered in Library > Apps instead. Forks (app_source) remain.
     from ..services.apps.project_scopes import exclude_app_instances_clause
+
     app_role_filter = exclude_app_instances_clause()
 
     # Admins / superusers see all projects in the team
@@ -2441,7 +2442,10 @@ async def set_project_app_role(
     await db.refresh(project)
     logger.info(
         "project %s app_role: %s -> %s (user=%s)",
-        project.id, current, requested, current_user.id,
+        project.id,
+        current,
+        requested,
+        current_user.id,
     )
     return ProjectSchema.model_validate(project)
 
@@ -2525,12 +2529,20 @@ async def export_project_as_template(
         try:
             task.update_progress(5, 100, "Preparing export...")
 
-            # Determine the project path
-            use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
-            if settings.deployment_mode == "docker" and use_volumes:
-                project_path = f"/projects/{proj_slug}"
+            # Determine the project path.
+            # docker/desktop: use the on-disk project root via get_project_fs_path.
+            # K8s: no host-accessible volume — reconstruct from DB file rows.
+            from ..models import Project as _ProjectModel
+            from ..services.project_fs import get_project_fs_path as _get_fs_path
+
+            async with AsyncSessionLocal() as _path_db:
+                _proj_for_path = await _path_db.get(_ProjectModel, proj_id)
+                _fs_path = _get_fs_path(_proj_for_path) if _proj_for_path else None
+
+            if _fs_path is not None:
+                project_path = str(_fs_path)
             elif settings.deployment_mode == "kubernetes":
-                # K8s: We need to reconstruct from DB files
+                # K8s: reconstruct from DB files into a temp directory
                 import tempfile
 
                 project_path = tempfile.mkdtemp(prefix=f"export-{proj_slug}-")
@@ -3170,17 +3182,18 @@ async def upload_asset(
         safe_filename = sanitize_filename(file.filename)
         file_type = get_file_type(mime_type)
 
-        # Get project path
-        settings = get_settings()
-        if settings.deployment_mode == "docker":
-            project_path = _get_docker_asset_path(project_slug)
-        else:
-            project_path = get_project_path(current_user.id, project_id)
+        # Get project path — works for docker and desktop; None on K8s.
+        from ..services.project_fs import get_project_fs_path
+
+        project_path_obj = get_project_fs_path(project)
+        project_path = str(project_path_obj) if project_path_obj is not None else None
 
         # Create assets directory path
-        assets_dir = os.path.join(project_path, directory)
+        assets_dir = os.path.join(project_path, directory) if project_path else None
         file_path_relative = f"{directory}/{safe_filename}".lstrip("/")
-        file_path_absolute = os.path.join(project_path, file_path_relative)
+        file_path_absolute = (
+            os.path.join(project_path, file_path_relative) if project_path else None
+        )
 
         # Check for duplicate filename
         existing_asset = await db.scalar(
@@ -3208,35 +3221,27 @@ async def upload_asset(
                 )
                 counter += 1
 
-        # Write file to filesystem or pod
-        if settings.deployment_mode == "docker":
-            # Create directory if it doesn't exist
+        # Write file to filesystem (docker/desktop) or container (K8s)
+        if project_path_obj is not None:
             os.makedirs(assets_dir, exist_ok=True)
-
-            # Write file
             with open(file_path_absolute, "wb") as f:
                 f.write(content)
-
             logger.info(f"[ASSETS] Saved file to: {file_path_absolute}")
         else:
-            # Kubernetes mode - write to container
+            # Kubernetes mode — write to container via orchestrator
             from ..services.orchestration import get_orchestrator
 
             orchestrator = get_orchestrator()
-
-            # Write binary file to container using tar streaming
-            # (echo|base64 approach breaks for files >100KB due to ARG_MAX)
             await orchestrator.write_binary_to_container(
                 project_id=project_id,
                 file_path=file_path_relative,
                 data=content,
             )
-
             logger.info(f"[ASSETS] Saved file to container: {file_path_relative}")
 
-        # Get image dimensions if it's an image
+        # Get image dimensions if it's an image (filesystem path available)
         width, height = None, None
-        if file_type == "image" and settings.deployment_mode == "docker":
+        if file_type == "image" and file_path_absolute is not None:
             width, height = await get_image_dimensions(file_path_absolute)
 
         # Create database record
@@ -3425,21 +3430,20 @@ async def delete_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     try:
-        # Delete file from filesystem or container
-        from ..services.orchestration import is_docker_mode
+        # Delete file from filesystem (docker/desktop) or container (K8s)
+        from ..services.project_fs import get_project_fs_path
 
-        if is_docker_mode():
-            project_path = _get_docker_asset_path(project_slug)
-            file_path = os.path.join(project_path, asset.file_path)
+        project_path_obj = get_project_fs_path(project)
+        if project_path_obj is not None:
+            file_path = os.path.join(str(project_path_obj), asset.file_path)
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"[ASSETS] Deleted file: {file_path}")
         else:
-            # Kubernetes mode - delete from container
+            # Kubernetes mode — delete from container
             from ..services.orchestration import get_orchestrator
 
             orchestrator = get_orchestrator()
-
             await orchestrator.execute_command(
                 user_id=current_user.id,
                 project_id=project.id,
@@ -3501,22 +3505,24 @@ async def rename_asset(
         )
 
     try:
-        # Rename file in filesystem or container
-        from ..services.orchestration import get_orchestrator, is_docker_mode
+        # Rename file in filesystem (docker/desktop) or container (K8s)
+        from ..services.project_fs import get_project_fs_path
 
         new_file_path_relative = f"{asset.directory.strip('/')}/{new_filename}".lstrip("/")
+        project_path_obj = get_project_fs_path(project)
 
-        if is_docker_mode():
-            project_path = _get_docker_asset_path(project_slug)
+        if project_path_obj is not None:
+            project_path = str(project_path_obj)
             old_file_path = os.path.join(project_path, asset.file_path)
             new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
             if os.path.exists(old_file_path):
                 os.rename(old_file_path, new_file_path_absolute)
                 logger.info(f"[ASSETS] Renamed file: {old_file_path} -> {new_file_path_absolute}")
         else:
-            # Kubernetes mode
-            orchestrator = get_orchestrator()
+            # Kubernetes mode — rename inside container
+            from ..services.orchestration import get_orchestrator
 
+            orchestrator = get_orchestrator()
             await orchestrator.execute_command(
                 user_id=current_user.id,
                 project_id=project.id,
@@ -3585,26 +3591,27 @@ async def move_asset(
         return {"message": "Asset is already in this directory"}
 
     try:
-        # Move file in filesystem or container
-        from ..services.orchestration import get_orchestrator, is_docker_mode
+        # Move file in filesystem (docker/desktop) or container (K8s)
+        from ..services.project_fs import get_project_fs_path
 
         new_file_path_relative = f"{new_directory.strip('/')}/{asset.filename}".lstrip("/")
+        project_path_obj = get_project_fs_path(project)
 
-        if is_docker_mode():
-            project_path = _get_docker_asset_path(project_slug)
+        if project_path_obj is not None:
+            project_path = str(project_path_obj)
             old_file_path = os.path.join(project_path, asset.file_path)
             new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
 
-            # Ensure new directory exists (async to avoid blocking)
             new_dir_absolute = os.path.dirname(new_file_path_absolute)
             await asyncio.to_thread(os.makedirs, new_dir_absolute, exist_ok=True)
 
             if os.path.exists(old_file_path):
-                # Use async to avoid blocking on large files
                 await asyncio.to_thread(shutil.move, old_file_path, new_file_path_absolute)
                 logger.info(f"[ASSETS] Moved file: {old_file_path} -> {new_file_path_absolute}")
         else:
-            # Kubernetes mode
+            # Kubernetes mode — move inside container
+            from ..services.orchestration import get_orchestrator
+
             orchestrator = get_orchestrator()
 
             # Ensure directory exists and move file
@@ -5633,9 +5640,7 @@ async def _start_container_background_task(
             container_url = result.get("url")
             if not container_url:
                 fallback_dir = (
-                    container.container_directory
-                    or container.directory
-                    or container.name
+                    container.container_directory or container.directory or container.name
                 )
                 container_url = await _resolve_container_url(
                     db,
@@ -5679,34 +5684,23 @@ async def _start_container_background_task(
                 sanitized_name = "".join(
                     c for c in sanitized_name if c.isalnum() or c == "-"
                 ).strip("-")
-<<<<<<< HEAD
-                protocol = (
-                    "http"
-                    if settings.deployment_mode == "docker"
-                    else settings.k8s_container_url_protocol
-                )
-                container_url = await _resolve_container_url(
-                    db,
-                    project,
-                    container,
-                    fallback_dir=sanitized_name,
-                    protocol=protocol,
-                    app_domain=settings.app_domain,
-                )
-=======
                 if settings.deployment_mode == "desktop":
-                    # Desktop mode: containers run as local processes on the host
                     port = getattr(container, "effective_port", None)
                     container_url = f"http://localhost:{port}" if port else "http://localhost"
-                elif settings.deployment_mode == "docker":
-                    # Docker mode always uses HTTP via Traefik on the app domain
-                    container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
                 else:
-                    protocol = settings.k8s_container_url_protocol
-                    container_url = (
-                        f"{protocol}://{project.slug}-{sanitized_name}.{settings.app_domain}"
+                    protocol = (
+                        "http"
+                        if settings.deployment_mode == "docker"
+                        else settings.k8s_container_url_protocol
                     )
->>>>>>> 96a03822 (feat(desktop): sidecar restart-on-crash, Rust token store, auto-login flow, and runtime hardening)
+                    container_url = await _resolve_container_url(
+                        db,
+                        project,
+                        container,
+                        fallback_dir=sanitized_name,
+                        protocol=protocol,
+                        app_domain=settings.app_domain,
+                    )
 
             # Give container a moment to fully initialize
             await asyncio.sleep(2)

@@ -26,6 +26,13 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://your-domain.com/desktop/releases/latest.json"],
+      "pubkey": "PLACEHOLDER — replace with output of `cargo tauri signer generate` once the release keypair is created; store the private key as CI secret TAURI_SIGNING_PRIVATE_KEY",
+      "dialog": false
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

@@ -2,7 +2,7 @@
 Orchestrator Agent Package
 
 The inline agent runner has been removed. The active runner is the
-tesslate-agent submodule, accessed via services/tesslate_agent_bridge.py.
+tesslate-agent submodule, accessed via services/tesslate_agent_adapter.py.
 
 Orchestrator-specific agent tools remain in the tools/ subdirectory.
 """

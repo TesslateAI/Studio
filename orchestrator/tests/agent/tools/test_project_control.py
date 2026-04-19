@@ -46,6 +46,7 @@ _ORCH_IS_K8S = "app.services.orchestration.is_kubernetes_mode"
 _ORCH_MODE = "app.services.orchestration.get_deployment_mode"
 _SYNC_PROJECT_CONFIG = "app.services.config_sync.sync_project_config"
 _GET_SETTINGS = "app.config.get_settings"
+_ASYNC_SESSION = "app.database.AsyncSessionLocal"
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +104,18 @@ def project_ops_context(mock_user, mock_project_live, mock_db):
     }
 
 
+@pytest.fixture
+def project_control_context(mock_user, mock_project_live, mock_db):
+    """Context for project_control tool (includes project_slug at top level)."""
+    return {
+        "user": mock_user,
+        "user_id": mock_user.id,
+        "project_id": mock_project_live.id,
+        "project_slug": mock_project_live.slug,
+        "db": mock_db,
+    }
+
+
 def _result(scalars=None, one_or_none=None, one=None):
     r = Mock()
     if scalars is not None:
@@ -132,6 +145,27 @@ def _scalar_one(item):
     r = Mock()
     r.scalar_one.return_value = item
     return r
+
+
+def _mock_scalar_one_or_none(item):
+    """Create a mock result chain for db.execute -> .scalar_one_or_none()."""
+    result_mock = Mock()
+    result_mock.scalar_one_or_none.return_value = item
+    return result_mock
+
+
+def _mock_rows_all(rows):
+    """Create a mock result chain for db.execute -> .all() returning row tuples."""
+    result_mock = Mock()
+    result_mock.all.return_value = rows
+    return result_mock
+
+
+def _mock_scalar_one(item):
+    """Create a mock result chain for db.execute -> .scalar_one()."""
+    result_mock = Mock()
+    result_mock.scalar_one.return_value = item
+    return result_mock
 
 
 # ---------------------------------------------------------------------------
@@ -170,9 +204,7 @@ class TestProjectControlValidation:
 
     @pytest.mark.asyncio
     async def test_unknown_action(self, project_ops_context):
-        result = await project_control_executor(
-            {"action": "explode"}, project_ops_context
-        )
+        result = await project_control_executor({"action": "explode"}, project_ops_context)
         assert result["success"] is False
         assert "Unknown action" in result["message"]
 
@@ -206,17 +238,13 @@ class TestStatusAction:
         )
 
         with patch(_ORCH_GET, return_value=mock_orch):
-            result = await project_control_executor(
-                {"action": "status"}, project_ops_context
-            )
+            result = await project_control_executor({"action": "status"}, project_ops_context)
 
         assert result["success"] is True
         assert result["containers"] == []
 
     @pytest.mark.asyncio
-    async def test_status_with_containers(
-        self, project_ops_context, container_a, container_b
-    ):
+    async def test_status_with_containers(self, project_ops_context, container_a, container_b):
         project_ops_context["db"].execute = AsyncMock(
             return_value=_scalars_all([container_a, container_b])
         )
@@ -241,9 +269,7 @@ class TestStatusAction:
         )
 
         with patch(_ORCH_GET, return_value=mock_orch):
-            result = await project_control_executor(
-                {"action": "status"}, project_ops_context
-            )
+            result = await project_control_executor({"action": "status"}, project_ops_context)
 
         assert result["success"] is True
         assert len(result["containers"]) == 2
@@ -317,17 +343,13 @@ class TestApplySetupConfig:
             return_value=_scalar_one_or_none(mock_project_live)
         )
 
-        result = await apply_setup_config_executor(
-            {"config": "not-a-dict"}, project_ops_context
-        )
+        result = await apply_setup_config_executor({"config": "not-a-dict"}, project_ops_context)
         assert result["success"] is False
         assert "object" in result["message"].lower()
 
     @pytest.mark.asyncio
     async def test_project_not_found(self, project_ops_context):
-        project_ops_context["db"].execute = AsyncMock(
-            return_value=_scalar_one_or_none(None)
-        )
+        project_ops_context["db"].execute = AsyncMock(return_value=_scalar_one_or_none(None))
         result = await apply_setup_config_executor(
             {"config": {"apps": {}, "primaryApp": ""}}, project_ops_context
         )
@@ -335,9 +357,7 @@ class TestApplySetupConfig:
         assert "not found" in result["message"].lower()
 
     @pytest.mark.asyncio
-    async def test_invalid_pydantic_payload(
-        self, project_ops_context, mock_project_live
-    ):
+    async def test_invalid_pydantic_payload(self, project_ops_context, mock_project_live):
         """primaryApp must be in apps — Pydantic validator catches this."""
         project_ops_context["db"].execute = AsyncMock(
             return_value=_scalar_one_or_none(mock_project_live)
@@ -355,9 +375,7 @@ class TestApplySetupConfig:
         assert "invalid" in result["message"].lower() or "primaryApp" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_config_sync_error_surfaces(
-        self, project_ops_context, mock_project_live
-    ):
+    async def test_config_sync_error_surfaces(self, project_ops_context, mock_project_live):
         from app.services.config_sync import ConfigSyncError
 
         project_ops_context["db"].execute = AsyncMock(
@@ -371,9 +389,7 @@ class TestApplySetupConfig:
             result = await apply_setup_config_executor(
                 {
                     "config": {
-                        "apps": {
-                            "frontend": {"directory": ".", "start": "npm run dev"}
-                        },
+                        "apps": {"frontend": {"directory": ".", "start": "npm run dev"}},
                         "primaryApp": "frontend",
                     }
                 },
@@ -399,9 +415,7 @@ class TestApplySetupConfig:
             result = await apply_setup_config_executor(
                 {
                     "config": {
-                        "apps": {
-                            "frontend": {"directory": ".", "start": "npm run dev"}
-                        },
+                        "apps": {"frontend": {"directory": ".", "start": "npm run dev"}},
                         "primaryApp": "frontend",
                     }
                 },
@@ -430,9 +444,7 @@ class TestProjectLifecycle:
         assert registry.get("project_restart") is not None
 
     @pytest.mark.asyncio
-    async def test_start_requires_containers(
-        self, project_ops_context, mock_project_live
-    ):
+    async def test_start_requires_containers(self, project_ops_context, mock_project_live):
         project_ops_context["db"].execute = AsyncMock(
             side_effect=[
                 _scalar_one_or_none(mock_project_live),
@@ -444,9 +456,7 @@ class TestProjectLifecycle:
         assert "no containers" in result["message"].lower()
 
     @pytest.mark.asyncio
-    async def test_start_happy_path(
-        self, project_ops_context, mock_project_live, container_a
-    ):
+    async def test_start_happy_path(self, project_ops_context, mock_project_live, container_a):
         project_ops_context["db"].execute = AsyncMock(
             side_effect=[
                 _scalar_one_or_none(mock_project_live),
@@ -476,9 +486,7 @@ class TestProjectLifecycle:
         mock_orch.start_project.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_stop_closes_sessions(
-        self, project_ops_context, mock_project_live
-    ):
+    async def test_stop_closes_sessions(self, project_ops_context, mock_project_live):
         project_ops_context["db"].execute = AsyncMock(
             side_effect=[
                 _scalar_one_or_none(mock_project_live),  # fetch_project
@@ -505,9 +513,7 @@ class TestProjectLifecycle:
         assert mock_project_live.environment_status == "stopped"
 
     @pytest.mark.asyncio
-    async def test_restart_happy_path(
-        self, project_ops_context, mock_project_live, container_a
-    ):
+    async def test_restart_happy_path(self, project_ops_context, mock_project_live, container_a):
         project_ops_context["db"].execute = AsyncMock(
             side_effect=[
                 _scalar_one_or_none(mock_project_live),
@@ -527,9 +533,7 @@ class TestProjectLifecycle:
         mock_orch.restart_project.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_provisioning_blocks_start(
-        self, project_ops_context, mock_project_live
-    ):
+    async def test_provisioning_blocks_start(self, project_ops_context, mock_project_live):
         mock_project_live.environment_status = "provisioning"
         project_ops_context["db"].execute = AsyncMock(
             return_value=_scalar_one_or_none(mock_project_live)
@@ -562,18 +566,14 @@ class TestContainerLifecycle:
         assert "container_name" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_start_container_not_found(
-        self, project_ops_context, mock_project_live
-    ):
+    async def test_start_container_not_found(self, project_ops_context, mock_project_live):
         project_ops_context["db"].execute = AsyncMock(
             side_effect=[
                 _scalar_one_or_none(mock_project_live),  # fetch_project
                 _scalar_one_or_none(None),  # lookup_container_by_name
             ]
         )
-        result = await _container_start_executor(
-            {"container_name": "ghost"}, project_ops_context
-        )
+        result = await _container_start_executor({"container_name": "ghost"}, project_ops_context)
         assert result["success"] is False
         assert "not found" in result["message"]
 
@@ -607,9 +607,7 @@ class TestContainerLifecycle:
         assert result["already_running"] is True
 
     @pytest.mark.asyncio
-    async def test_stop_happy_path(
-        self, project_ops_context, mock_project_live, container_a
-    ):
+    async def test_stop_happy_path(self, project_ops_context, mock_project_live, container_a):
         project_ops_context["db"].execute = AsyncMock(
             side_effect=[
                 _scalar_one_or_none(container_a),  # lookup_container_by_name
@@ -648,9 +646,7 @@ class TestContainerLifecycle:
 
         mock_orch = Mock()
         mock_orch.stop_container = AsyncMock(side_effect=RuntimeError("already gone"))
-        mock_orch.start_container = AsyncMock(
-            return_value={"url": "http://frontend.localhost"}
-        )
+        mock_orch.start_container = AsyncMock(return_value={"url": "http://frontend.localhost"})
 
         with (
             patch(_ORCH_GET, return_value=mock_orch),
@@ -665,7 +661,115 @@ class TestContainerLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# Skill seed validation (updated for new tool surface)
+# Action: health_check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestHealthCheckAction:
+    """Tests for action=health_check."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_container_not_found(self, project_control_context):
+        project_control_context["db"].execute = AsyncMock(
+            side_effect=[
+                _mock_scalar_one_or_none(None),  # container lookup → not found
+                _mock_rows_all([]),  # _get_available_names → empty list
+            ]
+        )
+
+        result = await project_control_executor(
+            {"action": "health_check", "container_name": "ghost"},
+            project_control_context,
+        )
+
+        assert result["success"] is False
+        assert "not found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy(self, project_control_context, container_a):
+        project_control_context["db"].execute = AsyncMock(
+            return_value=_mock_scalar_one_or_none(container_a)
+        )
+
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(_ORCH_IS_K8S, return_value=False),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await project_control_executor(
+                {"action": "health_check", "container_name": "frontend"},
+                project_control_context,
+            )
+
+        assert result["success"] is True
+        assert result["healthy"] is True
+        assert result["status_code"] == 200
+
+    @pytest.mark.asyncio
+    async def test_health_check_unhealthy_500(self, project_control_context, container_a):
+        project_control_context["db"].execute = AsyncMock(
+            return_value=_mock_scalar_one_or_none(container_a)
+        )
+
+        mock_resp = Mock()
+        mock_resp.status_code = 500
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(_ORCH_IS_K8S, return_value=False),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await project_control_executor(
+                {"action": "health_check", "container_name": "frontend"},
+                project_control_context,
+            )
+
+        assert result["success"] is True
+        assert result["healthy"] is False
+        assert result["status_code"] == 500
+
+    @pytest.mark.asyncio
+    async def test_health_check_connection_refused(self, project_control_context, container_a):
+        import httpx
+
+        project_control_context["db"].execute = AsyncMock(
+            return_value=_mock_scalar_one_or_none(container_a)
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(_ORCH_IS_K8S, return_value=False),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await project_control_executor(
+                {"action": "health_check", "container_name": "frontend"},
+                project_control_context,
+            )
+
+        assert result["success"] is True
+        assert result["healthy"] is False
+        assert result["status_code"] is None
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Skill seed validation
 # ---------------------------------------------------------------------------
 
 

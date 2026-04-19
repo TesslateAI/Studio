@@ -18,8 +18,8 @@ from alembic import op
 
 from app.types.guid import GUID
 
-revision: str = "0055_agent_task_message_id"
-down_revision: str | None = "0054_workspace_directories"
+revision: str = "0070_agent_task_message_id"
+down_revision: str | None = "0069_workspace_directories"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

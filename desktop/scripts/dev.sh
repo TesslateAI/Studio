@@ -30,6 +30,15 @@ if [ ! -f "$BIN" ]; then
 elif [ "$SIDECAR_DIR/entrypoint.py" -nt "$BIN" ] \
   || [ "$SIDECAR_DIR/spec/_common.py" -nt "$BIN" ]; then
   need_rebuild=1
+else
+  # Rebuild if any alembic migration is newer than the frozen binary so
+  # that the bundled DB schema stays in sync with the live versions dir.
+  while IFS= read -r f; do
+    if [ "$f" -nt "$BIN" ]; then
+      need_rebuild=1
+      break
+    fi
+  done < <(find "$REPO_ROOT/orchestrator/alembic/versions" -name "*.py" 2>/dev/null)
 fi
 
 if [ "$need_rebuild" = "1" ]; then

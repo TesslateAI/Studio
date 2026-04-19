@@ -160,6 +160,18 @@ class KubernetesOrchestrator(BaseOrchestrator):
     def deployment_mode(self) -> DeploymentMode:
         return DeploymentMode.KUBERNETES
 
+    @property
+    def supports_init_container(self) -> bool:
+        return True
+
+    @property
+    def supports_volume_mount(self) -> bool:
+        return True
+
+    @property
+    def writes_project_files_via_fs(self) -> bool:
+        return False
+
     def _sanitize_name(self, name: str) -> str:
         """Sanitize a name for Kubernetes (DNS-1123 compliant).
 
@@ -1051,9 +1063,7 @@ fi
                     logger.info(f"[K8S] Deleted PV {pv_name}")
                 except ApiException as e:
                     if e.status != 404:
-                        logger.warning(
-                            f"[K8S] Failed to delete PV {pv_name}: {e.reason}"
-                        )
+                        logger.warning(f"[K8S] Failed to delete PV {pv_name}: {e.reason}")
         except ApiException as e:
             logger.warning(f"[K8S] Failed to list PVs for project {project_id}: {e.reason}")
 

@@ -26,8 +26,8 @@ from alembic import op
 from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
-revision: str = "0053_multi_agent_orchestration"
-down_revision: str | Sequence[str] | None = "0052_project_runtime_fields"
+revision: str = "0068_multi_agent_orchestration"
+down_revision: str | Sequence[str] | None = "0067_project_runtime_fields"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

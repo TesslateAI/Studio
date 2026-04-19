@@ -92,13 +92,6 @@ class Settings(BaseSettings):
     local_port_range_start: int = 42000
     local_port_range_end: int = 42999
 
-    # Agent runner selector. "bridge" uses the packages/tesslate-agent submodule
-    # runner via services/tesslate_agent_bridge (default). "inline" falls back
-    # to the in-tree app/agent/ runner. Set AGENT_RUNNER=inline to revert while
-    # verifying parity.
-    agent_runner: str = "bridge"
-
-
     @property
     def is_docker_mode(self) -> bool:
         """Check if running in Docker deployment mode."""

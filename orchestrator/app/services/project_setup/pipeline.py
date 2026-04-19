@@ -79,7 +79,7 @@ async def _build_source_spec(
         # Ensure user has the base in their library (auto-add free ones)
         await _ensure_user_has_base(base_repo, project_data, db, db_project)
 
-        # Template snapshot path (instant btrfs clone)
+        # Template snapshot path (instant btrfs clone — Kubernetes only)
         if settings.deployment_mode == "kubernetes" and base_repo.template_slug:
             return SourceSpec(
                 kind="template_snapshot",
@@ -88,6 +88,23 @@ async def _build_source_spec(
                 base_id=base_repo.id,
                 git_url=base_repo.git_repo_url,
             )
+
+        # Desktop / local fast-path: check warm cache before any network I/O.
+        # This mirrors the k8s template_snapshot shortcut and avoids a full git
+        # clone when the user has created a project from this base before.
+        if settings.deployment_mode in ("desktop", "local"):
+            from ...services.base_cache_manager import get_base_cache_manager
+
+            cache_mgr = get_base_cache_manager()
+            cached = await cache_mgr.get_base_path(base_repo.slug)
+            if cached and os.path.exists(cached):
+                return SourceSpec(
+                    kind="cache",
+                    cache_path=cached,
+                    base_slug=base_repo.slug,
+                    base_id=base_repo.id,
+                    git_url=base_repo.git_repo_url,
+                )
 
         # Archive-based template
         if base_repo.source_type == "archive" and base_repo.archive_path:
@@ -98,7 +115,7 @@ async def _build_source_spec(
                 base_id=base_repo.id,
             )
 
-        # Git-based base — try local cache first
+        # Git-based base — try local cache first (docker / other modes)
         from ...services.base_cache_manager import get_base_cache_manager
 
         cache_mgr = get_base_cache_manager()

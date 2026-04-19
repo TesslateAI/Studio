@@ -1012,8 +1012,8 @@ async def agent_chat(
                 status_code=500, detail=f"Error creating model adapter: {str(e)}"
             ) from e
 
-        # 4. Create agent via bridge runner
-        logger.info("[HTTP-AGENT] Creating agent via bridge runner")
+        # 4. Create agent via adapter
+        logger.info("[HTTP-AGENT] Creating agent via adapter")
         try:
             from ..config import get_settings as _gs
             from ..worker import _create_agent_runner
@@ -1660,7 +1660,7 @@ async def agent_chat_stream(
                     f"[SSE-AGENT] Created view-scoped registry for view: {view_context.value}"
                 )
 
-            # 5. Create agent runner (bridge or inline based on settings.agent_runner)
+            # 5. Create agent via adapter
             from ..config import get_settings as _get_settings
             from ..worker import _create_agent_runner
 
@@ -2691,7 +2691,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             )
             logger.info("[UNIFIED-CHAT] Created model adapter for IterativeAgent")
 
-        # Create the agent via bridge runner
+        # Create the agent via adapter
         from ..config import get_settings as _gs
         from ..worker import _create_agent_runner
 

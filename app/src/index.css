@@ -128,7 +128,12 @@
   --duration-normal: 200ms;
   --duration-slow: 300ms;
   --easing: cubic-bezier(0.4, 0, 0.2, 1);
-  --easing-layout: cubic-bezier(0.45, 0, 0.55, 1); /* Symmetric ease-in-out for layout transitions */
+  --easing-layout: cubic-bezier(
+    0.45,
+    0,
+    0.55,
+    1
+  ); /* Symmetric ease-in-out for layout transitions */
 
   /* Legacy utility variables */
   --hue1: 25;
@@ -198,6 +203,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   word-spacing: normal;
+}
+
+/* In the Tauri desktop shell the window is frameless+transparent so the
+   body must be transparent — the themed background is applied on the inner
+   content div which is clipped by border-radius, preventing the body colour
+   from bleeding through the rounded corners into the OS compositor layer. */
+body.tauri-shell {
+  background: transparent !important;
 }
 
 /* === BUTTON SYSTEM — pill buttons with border and fill === */
@@ -563,9 +576,10 @@ textarea {
 
 /* Layout transitions — 0.45s symmetric for structural changes */
 .app-panel {
-  transition: margin 0.45s var(--easing-layout),
-              border-radius 0.45s var(--easing-layout),
-              border-color 0.45s var(--easing-layout);
+  transition:
+    margin 0.45s var(--easing-layout),
+    border-radius 0.45s var(--easing-layout),
+    border-color 0.45s var(--easing-layout);
 }
 
 /* Mobile: full-bleed content, no floating panel */

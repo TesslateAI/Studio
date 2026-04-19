@@ -78,6 +78,11 @@ import AdminAdversarialSuitePage from './pages/AdminAdversarialSuitePage';
 
 const IS_TAURI = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
 
+// In Tauri the window is frameless+transparent; body must be transparent so
+// the themed background div's border-radius clips cleanly without the body
+// colour bleeding through the corners into the OS compositor layer.
+if (IS_TAURI) document.body.classList.add('tauri-shell');
+
 function CategoryRedirect() {
   const { category } = useParams();
   return <Navigate to={`/marketplace/browse/agent?category=${category}`} replace />;
@@ -359,7 +364,10 @@ function AppContent() {
 
           {/* Admin Marketplace */}
           <Route path="/admin/marketplace" element={<AdminMarketplaceReviewPage />} />
-          <Route path="/admin/marketplace/submissions/:submissionId" element={<AdminSubmissionWorkbenchPage />} />
+          <Route
+            path="/admin/marketplace/submissions/:submissionId"
+            element={<AdminSubmissionWorkbenchPage />}
+          />
           <Route path="/admin/marketplace/yanks" element={<AdminYankCenterPage />} />
           <Route path="/admin/marketplace/reputation" element={<AdminCreatorReputationPage />} />
           <Route path="/admin/marketplace/adversarial" element={<AdminAdversarialSuitePage />} />
@@ -472,6 +480,12 @@ function App() {
               }
             `}</style>
                       <BrowserRouter>
+                        {/*
+                    Desktop shell — wraps everything in a flex column so the
+                    TitleBar (36px) consumes its own row and the remaining
+                    height is given to the route content.  Non-Tauri builds
+                    skip the bar entirely and the inner div fills 100vh.
+                  */}
                         <div
                           style={{
                             height: '100vh',
@@ -479,6 +493,9 @@ function App() {
                             flexDirection: 'column',
                             overflow: 'hidden',
                             borderRadius: IS_TAURI ? 10 : 0,
+                            // In Tauri the body is transparent; apply the background
+                            // here so border-radius clips the themed colour cleanly.
+                            backgroundColor: IS_TAURI ? 'var(--bg)' : undefined,
                           }}
                         >
                           {IS_TAURI && <TitleBar />}

@@ -162,12 +162,11 @@ def _build_submodule_registry(in_tree_registry):
 async def _create_agent_runner(agent_model, model_adapter, tools_override, settings):
     """Return an object with a ``.run(message, context)`` async-generator method.
 
-    Uses the submodule's TesslateAgent runner via TesslateAgentBridge.
+    Uses the submodule's TesslateAgent runner via TesslateAgentAdapter.
     Satisfies the ``run(message, context)`` interface.
     """
-    from .services.tesslate_agent_bridge import TesslateAgentBridge
+    from .services.tesslate_agent_adapter import TesslateAgentAdapter
 
-    # Build the tool registry for the bridge.
     if tools_override is not None:
         sub_registry = _build_submodule_registry(tools_override)
     else:
@@ -178,7 +177,7 @@ async def _create_agent_runner(agent_model, model_adapter, tools_override, setti
     if sub_registry is None:
         raise RuntimeError("tesslate-agent submodule is unavailable; cannot create agent runner")
 
-    # Build compaction adapter from agent config.
+    # Build compaction model adapter from agent config.
     compaction_adapter = None
     agent_config = getattr(agent_model, "config", None) or {}
     compaction_model_name = (
@@ -196,15 +195,14 @@ async def _create_agent_runner(agent_model, model_adapter, tools_override, setti
         except Exception as ca_err:
             logger.warning("[WORKER] Compaction adapter failed (non-fatal): %s", ca_err)
 
-    bridge = TesslateAgentBridge(
+    adapter = TesslateAgentAdapter(
         system_prompt=agent_model.system_prompt,
         tools=sub_registry,
         model=model_adapter,
         compaction_adapter=compaction_adapter,
     )
-    # Return the inner submodule agent — it has the .run() + .tools interface
-    # the caller expects. The bridge wrapper is not needed once constructed.
-    return bridge.inner
+    # Return the inner submodule agent — it has the .run() + .tools interface.
+    return adapter.inner
 
 
 async def execute_agent_task(ctx: dict, payload_dict: dict):
@@ -390,7 +388,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         container_id=(UUID(payload.container_id) if payload.container_id else None),
                     )
 
-            # 7. Create agent runner — bridge (submodule) or inline (in-tree)
+            # 7. Create agent via adapter (submodule runner)
             agent_run_obj = await _create_agent_runner(
                 agent_model=agent_model,
                 model_adapter=model_adapter,
@@ -558,7 +556,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "containers": _tier_containers,
             }
 
-            # Inject MCP server configs so bridge executors can connect per-call
+            # Inject MCP server configs so adapter executors can connect per-call
             if mcp_context and mcp_context.get("mcp_configs"):
                 context["mcp_configs"] = mcp_context["mcp_configs"]
 
