@@ -57,7 +57,7 @@ When I have an issue, fix it for the next time it happens in a general, scalable
 
 ## What is Tesslate Studio?
 
-AI-powered web application builder that lets users create, edit, deploy, and manage full-stack apps using natural language. Users describe what they want, an AI agent writes the code, and the platform handles containerized deployment.
+AI-powered web application builder that lets users create, edit, deploy, and manage full-stack apps using natural language. Users describe what they want, an AI agent writes the code, and the platform handles containerized deployment. Projects can be published as distributable Apps on the Tesslate marketplace.
 
 ## Architecture Overview
 
@@ -65,21 +65,29 @@ AI-powered web application builder that lets users create, edit, deploy, and man
 ┌─────────────────────────────────────────────────────────────┐
 │                    Tesslate Studio                          │
 ├─────────────────────────────────────────────────────────────┤
-│  Frontend (app/)           │   Orchestrator (orchestrator/) │
-│  React + Vite + TypeScript │   FastAPI + Python             │
-│  - Monaco Editor           │   - Auth (JWT/OAuth)           │
-│  - Live Preview            │   - Project Management         │
-│  - Chat UI                 │   - AI Agent System            │
-│  - File Browser            │   - Container Orchestration    │
+│  Desktop (desktop/)        │  Frontend (app/)               │
+│  Tauri v2 shell            │  React + Vite + TypeScript     │
+│  - PyInstaller sidecar     │  - Monaco Editor               │
+│  - System tray             │  - Live Preview / Chat UI      │
+│  - Stronghold token store  │  - Architecture Panel          │
 ├─────────────────────────────────────────────────────────────┤
-│  Redis                │  ARQ Worker                          │
-│  - Pub/Sub + Streams  │  - Distributed agent execution       │
-│  - Task queue (ARQ)   │  - Progressive step persistence      │
-│  - Distributed locks  │  - Webhook callbacks                 │
+│  Orchestrator (orchestrator/)                               │
+│  FastAPI + Python                                           │
+│  - Auth (JWT/OAuth)        - AI Agent System                │
+│  - Project Management      - Container Orchestration        │
+│  - Tesslate Apps pipeline  - Gateway / Channels             │
 ├─────────────────────────────────────────────────────────────┤
-│  PostgreSQL        │  Docker/Kubernetes Container Manager   │
-│  (User data,       │  (User project environments)           │
-│   projects, chat)  │  - Per-project isolation               │
+│  Task Queue / Pub-Sub                                       │
+│  Cloud: Redis 7.x + ARQ (ArqTaskQueue + RedisPubSub)        │
+│  Desktop: asyncio.Queue + apscheduler (LocalTaskQueue +     │
+│           LocalPubSub)                                      │
+├─────────────────────────────────────────────────────────────┤
+│  PostgreSQL (cloud)  │  SQLite (desktop, aiosqlite)         │
+│  User data, projects │  Same models, GUID TypeDecorator     │
+├─────────────────────────────────────────────────────────────┤
+│  Docker/Kubernetes/Local Container Manager                  │
+│  - Per-project isolation    - Per-project runtime column    │
+│  - factory.py resolves orchestrator per project.runtime     │
 ├─────────────────────────────────────────────────────────────┤
 │  Volume Hub (services/btrfs-csi)                            │
 │  - btrfs CSI driver (per-node subvolume mgmt)               │
@@ -94,14 +102,17 @@ AI-powered web application builder that lets users create, edit, deploy, and man
 | Layer | Tech |
 |-------|------|
 | Frontend | React 19, TypeScript, Vite, Tailwind, Monaco Editor |
+| Desktop shell | Tauri v2 (Rust), tauri-plugin-stronghold, tray, deep-link, updater |
 | Backend | FastAPI, Python 3.11, SQLAlchemy, LiteLLM |
-| Database | PostgreSQL (asyncpg) |
-| Task Queue | Redis 7.x, ARQ |
-| Containers | Docker Compose (dev), Kubernetes (prod) |
+| Agent runner | `packages/tesslate-agent` (Python submodule) |
+| Database | PostgreSQL/asyncpg (cloud), SQLite/aiosqlite (desktop) |
+| Task Queue | Redis 7.x + ARQ (cloud), asyncio + apscheduler (desktop) |
+| Containers | Docker Compose (dev), Kubernetes (prod), Local subprocesses (desktop) |
 | Storage | btrfs CSI + Volume Hub (Go), S3/CAS persistence |
-| Routing | Traefik (Docker), NGINX Ingress (K8s) |
-| AI | LiteLLM → OpenAI/Anthropic models |
+| Routing | Traefik (Docker), NGINX Ingress (K8s), direct 127.0.0.1 (desktop) |
+| AI | LiteLLM → OpenAI/Anthropic models; cloud proxy via `cloud_client.py` |
 | Payments | Stripe |
+| Apps SDK | `packages/tesslate-app-sdk` (Python), `packages/tesslate-embed-sdk` (TypeScript) |
 
 ## Key Code Paths
 
@@ -203,6 +214,16 @@ Gateway runner → services/gateway/runner.py
 
 ```
 tesslate-studio/
+├── desktop/                  # Tauri v2 desktop shell
+│   ├── src-tauri/            # Rust: sidecar, tray, tokens, deep-link, updater
+│   ├── sidecar/              # PyInstaller build scripts + entrypoint
+│   └── scripts/              # build-all.sh, dev.sh
+│
+├── packages/                 # Versioned Python/TS submodules
+│   ├── tesslate-agent/       # Primary agent runner (replaces inline stream_agent.py)
+│   ├── tesslate-app-sdk/     # Python SDK for apps built on the platform
+│   └── tesslate-embed-sdk/   # TypeScript SDK for embedding Studio externally
+│
 ├── orchestrator/              # FastAPI backend
 │   └── app/
 │       ├── main.py           # App entry, middleware setup
@@ -223,19 +244,61 @@ tesslate-studio/
 │       │   ├── mcp.py        # User MCP server management
 │       │   ├── mcp_server.py # MCP server marketplace catalog
 │       │   ├── teams.py      # Team CRUD, members, invitations, project access, audit log
+│       │   ├── marketplace_apps.py  # Tesslate Apps marketplace listing
+│       │   ├── marketplace_local.py # Desktop dual-source marketplace (local + cloud)
+│       │   ├── app_versions.py      # AppVersion CRUD + publish
+│       │   ├── app_submissions.py   # Approval pipeline admin
+│       │   ├── app_installs.py      # App install flow
+│       │   ├── app_runtime.py       # App instance runtime control
+│       │   ├── app_billing.py       # App billing configuration
+│       │   ├── app_yanks.py         # Yank/unpublish workflow
+│       │   ├── app_bundles.py       # App bundle management
+│       │   ├── desktop/             # Desktop-only endpoints
+│       │   │   ├── auth.py          # Pairing + deep-link callback
+│       │   │   ├── projects.py      # Import folder, runtime probe
+│       │   │   ├── tray.py          # Tray state feed
+│       │   │   ├── tickets.py       # Agent task tickets
+│       │   │   ├── sessions.py      # Agent sessions feed
+│       │   │   ├── handoff.py       # Local ↔ cloud agent handoff
+│       │   │   └── directories.py   # Connected directories CRUD
 │       │   └── ...
 │       ├── services/
 │       │   ├── docker_compose_orchestrator.py  # Docker container mgmt
 │       │   ├── orchestration/
 │       │   │   ├── kubernetes_orchestrator.py  # K8s container mgmt
+│       │   │   ├── local.py                    # Local subprocess orchestrator (desktop)
+│       │   │   ├── k8s_remote_client.py        # K8s-remote via cloud API (desktop auth)
+│       │   │   ├── factory.py                  # Per-project runtime dispatch
 │       │   │   └── kubernetes/
 │       │   │       ├── client.py               # K8s API client wrapper
 │       │   │       └── helpers.py              # Deployment manifests
-│       │   ├── snapshot_manager.py             # K8s VolumeSnapshot for project persistence
-│       │   ├── volume_manager.py              # Volume Hub thin client (create, delete, cache, sync)
-│       │   ├── hub_client.py                  # Hub gRPC/JSON client (VolumeHub RPC calls)
-│       │   ├── litellm_service.py              # AI model routing
-│       │   ├── pubsub.py                   # Cross-pod Redis pub/sub + streams
+│       │   ├── task_queue/                 # TaskQueue protocol + backends
+│       │   │   ├── base.py                 # Abstract protocol
+│       │   │   ├── arq_queue.py            # Cloud: ARQ + Redis
+│       │   │   └── local_queue.py          # Desktop: asyncio + apscheduler
+│       │   ├── pubsub/                     # Pub/sub backends
+│       │   │   ├── base.py                 # Abstract interface
+│       │   │   ├── redis_pubsub.py         # Cloud: Redis Streams
+│       │   │   └── local_pubsub.py         # Desktop: in-process asyncio
+│       │   ├── apps/                       # Tesslate Apps services
+│       │   │   ├── installer.py            # App install saga
+│       │   │   ├── publisher.py            # Publish AppVersion + CAS bundle
+│       │   │   ├── submissions.py          # Staged approval pipeline
+│       │   │   ├── yanks.py               # Yank/unpublish workflow
+│       │   │   ├── bundles.py             # App bundle management
+│       │   │   ├── runtime.py             # App instance runtime
+│       │   │   ├── stage1_scanner.py      # Automated security/manifest scan
+│       │   │   ├── stage2_sandbox.py      # Sandbox execution testing
+│       │   │   └── schedule_triggers.py   # Cron + webhook trigger dispatch
+│       │   ├── cloud_client.py             # httpx wrapper for cloud APIs (desktop)
+│       │   ├── sync_client.py              # Local ↔ cloud project sync
+│       │   ├── runtime_probe.py            # Detect Docker/K8s availability (desktop)
+│       │   ├── agent_handlers.py           # Agent task handler bodies (ARQ + local)
+│       │   ├── permission_store.py         # .tesslate/permissions.json read/write
+│       │   ├── snapshot_manager.py         # K8s VolumeSnapshot for project persistence
+│       │   ├── volume_manager.py          # Volume Hub thin client (create, delete, cache, sync)
+│       │   ├── hub_client.py              # Hub gRPC/JSON client (VolumeHub RPC calls)
+│       │   ├── litellm_service.py          # AI model routing
 │       │   ├── distributed_lock.py         # Redis-based distributed locks
 │       │   ├── agent_context.py            # Agent execution context builder
 │       │   ├── agent_task.py               # Agent task payload serialization
@@ -261,9 +324,9 @@ tesslate-studio/
 │       ├── seeds/            # Database seed data
 │       │   ├── skills.py     # Marketplace skills (15+ skills)
 │       │   └── marketplace_agents.py # Official + community agents
-│       ├── worker.py         # ARQ worker for agent tasks
+│       ├── worker.py         # ARQ worker (cloud); handlers in agent_handlers.py
 │       ├── auth_external.py  # API key authentication
-│       └── agent/            # AI agent system
+│       └── agent/            # Legacy inline agent (cloud path; desktop uses packages/tesslate-agent)
 │           ├── base.py       # Abstract agent interface
 │           ├── stream_agent.py # Streaming agent implementation
 │           ├── factory.py    # Agent instantiation
@@ -363,7 +426,7 @@ tesslate-studio/
 ## Key Database Models (models.py)
 
 - **User**: Auth, profile, subscription tier, theme_preset
-- **Project**: Name, slug, owner, files, containers, `volume_id`, `cache_node`, `compute_tier` (none/ephemeral/environment), `active_compute_pod`, `last_sync_at`, `template_storage_class`, `team_id`, `visibility` (team/private)
+- **Project**: Name, slug, owner, files, containers, `volume_id`, `cache_node`, `compute_tier` (none/ephemeral/environment), `active_compute_pod`, `last_sync_at`, `template_storage_class`, `team_id`, `visibility` (team/private), `runtime` (local|docker|k8s), `sync_enabled`, `app_role` (none/app_source/app_instance)
 - **ProjectSnapshot**: VolumeSnapshot records for project versioning/timeline
 - **Container**: Individual service in a project (frontend, backend, db); includes `startup_command`
 - **ContainerConnection**: Dependencies between containers
@@ -386,6 +449,20 @@ tesslate-studio/
 - **AuditLog**: Team + project scoped event trail, action, resource_type, details JSON
 - **PlatformIdentity**: Platform account linking for gateway (user_id nullable for unlinked)
 - **AgentSchedule**: Cron schedules with timezone, repeat count, delivery target
+- **Directory**: Connected local/docker/k8s directories for desktop unified workspace (path, runtime, project_id, git_root)
+
+### Tesslate Apps Models
+
+- **MarketplaceApp**: App identity anchor (slug, handle, category, state, creator_id, forkable, reputation)
+- **AppVersion**: Immutable published version (manifest JSON, CAS bundle address, approval_state, semver)
+- **AppInstance**: Per-user app install (installer_user_id, project_id, wallet_mix, update_policy: auto/manual/pinned)
+- **AppInstallAttempt**: Saga ledger for idempotent install; records volume_id for reaper cleanup on crash
+- **AppSubmission**: Staged approval pipeline row (stage0→stage1→stage2→stage3→approved|rejected)
+- **SubmissionCheck**: Individual per-stage check result (passed/failed/warning/errored)
+- **YankRequest**: Unpublish request with severity (low/medium/critical); critical requires 2-admin approval
+- **YankAppeal**: Creator appeal against a yank decision
+- **AppBundle**: Curated collection of AppVersions (e.g., "Tesslate Starter Pack")
+- **AppBundleItem**: Ordered membership of AppVersion in a bundle
 
 ## Agent Tools (orchestrator/app/agent/tools/)
 
@@ -470,6 +547,15 @@ Each `CLAUDE.md` file contains:
 |------|------------|
 | Desktop client (Tauri shell) | `docs/desktop/CLAUDE.md` |
 | Desktop dev environment setup | `docs/desktop/development.md` |
+| Desktop runtimes (local/docker/k8s) | `docs/desktop/runtimes.md` |
+| Desktop notification dispatch | `docs/desktop/notifications.md` |
+| Desktop agent permission system | `docs/desktop/permissions.md` |
+| Desktop TUI (headless agent) | `docs/desktop/tui.md` |
+| Local ↔ cloud project sync | `docs/desktop/sync.md` |
+| Tesslate Apps feature | `docs/apps/CLAUDE.md` |
+| packages/ submodules (agent, app-sdk, embed-sdk) | `docs/packages/CLAUDE.md` |
+| Task queue (ARQ vs local) | `docs/orchestrator/services/task-queue.md` |
+| Cloud client + sync service | `docs/orchestrator/services/cloud-client.md` |
 | Docker setup from scratch | `docs/guides/docker-setup.md` |
 | Database seeding | `docker-dev` skill |
 | Database migrations | `docs/guides/database-migrations.md` |
@@ -481,6 +567,8 @@ Each `CLAUDE.md` file contains:
 | Kubernetes deployment | `docs/infrastructure/kubernetes/CLAUDE.md` |
 | Database models | `docs/orchestrator/models/CLAUDE.md` |
 | Payment integration | `docs/orchestrator/services/stripe.md` |
+| Stripe payments rebuild (tiers, UX, security) | `docs/guides/stripe-payments-rebuild.md` |
+| Enterprise observability (OTel, structured logging) | `docs/guides/enterprise-observability.md` |
 | Theme system | `docs/guides/theme-system.md` |
 | Keyboard shortcuts & commands | `docs/app/keyboard-shortcuts/CLAUDE.md` |
 | Settings pages | `docs/app/pages/settings.md` |
@@ -505,6 +593,15 @@ Each `CLAUDE.md` file contains:
 | Agent scheduling | `docs/orchestrator/agent/tools/CLAUDE.md` → schedule_ops |
 
 ## Deployment Modes
+
+### Desktop (`DEPLOYMENT_MODE=desktop`)
+- Tauri v2 shell spawns a PyInstaller-frozen FastAPI sidecar on a random loopback port
+- SQLite replaces PostgreSQL; asyncio queue + LocalPubSub replace Redis/ARQ
+- Per-project `runtime` column: `local` (host OS subprocesses), `docker` (Docker Compose), `k8s` (remote cloud cluster via authenticated API)
+- System tray keeps sidecar alive when main window is closed
+- Token stored in Stronghold; cloud features (marketplace, sync, K8s) require `tsk_` API key pairing
+
+**For desktop development setup, see: [docs/desktop/CLAUDE.md](docs/desktop/CLAUDE.md)**
 
 ### Docker (Local Dev)
 - `DEPLOYMENT_MODE=docker` in config

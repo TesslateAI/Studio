@@ -44,6 +44,9 @@ Tesslate Studio consists of four major systems:
 | [orchestrator/CLAUDE.md](orchestrator/CLAUDE.md) | Backend development, API changes |
 | [app/CLAUDE.md](app/CLAUDE.md) | Frontend development, UI changes |
 | [infrastructure/CLAUDE.md](infrastructure/CLAUDE.md) | Kubernetes, Docker, deployment |
+| [desktop/CLAUDE.md](desktop/CLAUDE.md) | Tauri shell, sidecar, tray, desktop runtimes |
+| [apps/CLAUDE.md](apps/CLAUDE.md) | Tesslate Apps — publish, install, approval pipeline |
+| [packages/CLAUDE.md](packages/CLAUDE.md) | tesslate-agent, tesslate-app-sdk, tesslate-embed-sdk |
 
 ## Quick Reference
 
@@ -53,6 +56,7 @@ Tesslate Studio consists of four major systems:
 |------|--------------|----------|
 | Docker | `DEPLOYMENT_MODE=docker` | Local development |
 | Kubernetes | `DEPLOYMENT_MODE=kubernetes` | Production (Minikube, EKS) |
+| Desktop | `DEPLOYMENT_MODE=desktop` | Tauri app (SQLite + local queue, per-project runtime) |
 
 ### Key Environment Variables
 
@@ -152,6 +156,8 @@ Load this root CLAUDE.md when:
 | Add a new tool for the agent | [orchestrator/agent/tools/CLAUDE.md](orchestrator/agent/tools/CLAUDE.md) |
 | Change container behavior | [orchestrator/orchestration/CLAUDE.md](orchestrator/orchestration/CLAUDE.md) |
 | Credit system & billing | [orchestrator/services/credit-system.md](orchestrator/services/credit-system.md) |
+| Stripe payments rebuild (tiers, UX, security) | [guides/stripe-payments-rebuild.md](guides/stripe-payments-rebuild.md) |
+| Enterprise observability (OTel, audit export) | [guides/enterprise-observability.md](guides/enterprise-observability.md) |
 | Model pricing | [orchestrator/services/model-pricing.md](orchestrator/services/model-pricing.md) |
 | Modify the chat UI | [app/components/chat/CLAUDE.md](app/components/chat/CLAUDE.md) |
 | Change the code editor | [app/components/editor/CLAUDE.md](app/components/editor/CLAUDE.md) |
@@ -168,6 +174,16 @@ Load this root CLAUDE.md when:
 | MCP server integration | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → mcp.py, mcp_server.py |
 | Web search tool | [orchestrator/agent/tools/CLAUDE.md](orchestrator/agent/tools/CLAUDE.md) |
 | Universal project setup | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) → projects.py setup-config |
+| Desktop client (Tauri shell) | [desktop/CLAUDE.md](desktop/CLAUDE.md) |
+| Desktop runtimes (local/docker/k8s) | [desktop/runtimes.md](desktop/runtimes.md) |
+| Desktop agent notifications | [desktop/notifications.md](desktop/notifications.md) |
+| Desktop permission system | [desktop/permissions.md](desktop/permissions.md) |
+| Desktop TUI / headless agent | [desktop/tui.md](desktop/tui.md) |
+| Local ↔ cloud sync | [desktop/sync.md](desktop/sync.md) |
+| Tesslate Apps (publish/install/approval) | [apps/CLAUDE.md](apps/CLAUDE.md) |
+| packages/ submodules | [packages/CLAUDE.md](packages/CLAUDE.md) |
+| Task queue (cloud vs desktop) | [orchestrator/services/task-queue.md](orchestrator/services/task-queue.md) |
+| Cloud client + project sync service | [orchestrator/services/cloud-client.md](orchestrator/services/cloud-client.md) |
 
 ## Important Notes
 

@@ -249,7 +249,7 @@ const sendMessage = (message: string) => {
 };
 ```
 
-**Real-Time Agent Events (via Redis)**: Agent execution events from worker pods are forwarded through Redis Streams to WebSocket connections. New event types include `agent_task_started`, `agent_step`, `agent_task_completed`, and `agent_task_error`. These complement the existing SSE-based streaming for inline agent execution.
+**Real-Time Agent Events (via Redis)**: Agent execution events from worker pods are forwarded through Redis Streams to WebSocket connections. New event types include `agent_task_started`, `agent_step`, `agent_task_completed`, and `agent_task_error`. These are the primary streaming path; `packages/tesslate-agent` is the canonical agent runner on both cloud and desktop.
 
 ### 3. File Events
 
