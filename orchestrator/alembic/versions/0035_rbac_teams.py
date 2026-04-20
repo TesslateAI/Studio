@@ -259,8 +259,8 @@ def upgrade() -> None:
         )
         SELECT
             gen_random_uuid(),
-            u.name || '''s Team',
-            u.slug || '-team',
+            LEFT(u.name, 93) || '''s Team',
+            LEFT(u.slug, 95) || '-team',
             true,
             u.id,
             COALESCE(u.subscription_tier, 'free'),

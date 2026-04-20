@@ -34,6 +34,9 @@ spec:
         image: tesslate-backend:latest  # Same image as API pod
         imagePullPolicy: IfNotPresent
         command: ["python", "-m", "app.gateway"]
+        envFrom:
+        - secretRef:
+            name: tesslate-app-secrets
         env:
         # Core settings
         - name: DEPLOYMENT_MODE
