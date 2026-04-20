@@ -84,7 +84,9 @@ services:
     command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru --appendonly yes
 
   orchestrator:
-    build: ./orchestrator
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
     container_name: tesslate-orchestrator
     restart: unless-stopped
     ports:
@@ -245,7 +247,9 @@ services:
       start_period: 10s
 
   worker:
-    build: ./orchestrator
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
     container_name: tesslate-worker
     restart: unless-stopped
     command: ["arq", "app.worker.WorkerSettings"]
@@ -334,7 +338,9 @@ services:
       start_period: 30s
 
   gateway:
-    build: ./orchestrator
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
     container_name: tesslate-gateway
     restart: unless-stopped
     command: ["python", "-m", "app.gateway"]

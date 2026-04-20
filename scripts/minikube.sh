@@ -163,6 +163,19 @@ wait_for_backend_ready() {
     --timeout=120s
 }
 
+# Ensure git submodules are present on disk. The orchestrator Dockerfile
+# COPYs packages/tesslate-agent into the image; an uninitialized submodule
+# ships an empty directory and fails every agent run with
+# "No module named 'tesslate_agent'". Idempotent — no-op when already synced.
+_ensure_submodules() {
+  if [[ -f "$PROJECT_ROOT/.gitmodules" ]]; then
+    if ! (cd "$PROJECT_ROOT" && git submodule update --init --recursive); then
+      error "Failed to initialize git submodules. Check network and .gitmodules."
+      exit 1
+    fi
+  fi
+}
+
 # Build image and load into minikube.
 # Uses Docker layer cache by default. Pass --no-cache as $2 to bust cache.
 build_and_load() {
@@ -174,6 +187,8 @@ build_and_load() {
   dockerfile=$(image_dockerfile "$svc")
   local context
   context=$(image_context "$svc")
+
+  _ensure_submodules
 
   if [[ "$cache_flag" == "--no-cache" ]]; then
     info "Rebuilding $img (no cache)..."

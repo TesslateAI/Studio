@@ -26,6 +26,14 @@ RUN apt-get update && apt-get install -y \
 COPY orchestrator/pyproject.toml ./
 COPY orchestrator/app ./app
 
+# tesslate-agent submodule: the primary agent runner, imported at module
+# load time by services/tesslate_agent_adapter.py and agent/tools/
+# delegation_ops/task_tool.py. Installing it before the orchestrator's own
+# pip install keeps import resolution deterministic and lets this layer
+# cache independently of orchestrator source changes.
+COPY packages/tesslate-agent ./packages/tesslate-agent
+RUN pip install --no-cache-dir -e ./packages/tesslate-agent
+
 RUN pip install --no-cache-dir -e .
 
 # Orchestrator source (scripts, alembic, etc.).
