@@ -43,6 +43,36 @@ func (s *Server) PublishBundleForVolume(ctx context.Context, volumeID, appID, ve
 	if err != nil {
 		return "", fmt.Errorf("publish bundle for %s: %w", volumeID, err)
 	}
+
+	// Snapshot the source volume's manifest into a bundle manifest so a
+	// fresh node can reconstruct the full parent chain at install time.
+	// CreateSnapshotForVolume stores each layer blob in CAS but only records
+	// the lineage on the source volume's manifest, which a receiving node
+	// has no reason to fetch. Copying the relevant sub-DAG into a
+	// bundle-scoped manifest decouples install from the source volume.
+	//
+	// This MUST happen before the template-index pointer below — the index
+	// is what makes the bundle discoverable by name, so publishing that
+	// pointer before the manifest risks a receiver finding the bundle but
+	// having no restore recipe.
+	srcManifest, err := s.cas.GetManifest(ctx, volumeID)
+	if err != nil {
+		return "", fmt.Errorf("load source volume manifest for bundle %s: %w", cas.ShortHash(hash), err)
+	}
+	chain, err := srcManifest.AncestorsOf(hash)
+	if err != nil {
+		return "", fmt.Errorf("build chain for bundle %s: %w", cas.ShortHash(hash), err)
+	}
+	bundleManifest := cas.BundleManifest{
+		Head:         hash,
+		SourceVolume: volumeID,
+		TemplateName: srcManifest.TemplateName,
+		Chain:        chain,
+	}
+	if err := s.cas.PutBundleManifest(ctx, bundleManifest); err != nil {
+		return "", fmt.Errorf("put bundle manifest %s: %w", cas.ShortHash(hash), err)
+	}
+
 	// Record bundle hash in CAS template index so CreateVolumeFromBundle can
 	// reuse the existing template download path. Non-fatal on error — the
 	// caller can retry registration by republishing or via CreateVolumeFromBundle
@@ -50,8 +80,8 @@ func (s *Server) PublishBundleForVolume(ctx context.Context, volumeID, appID, ve
 	if err := s.cas.SetTemplateHash(ctx, bundleTemplateName(hash), hash); err != nil {
 		klog.Warningf("PublishBundleForVolume: set template hash failed (non-fatal): %v", err)
 	}
-	klog.Infof("PublishBundleForVolume: volume=%s app=%s version=%s → %s",
-		volumeID, appID, version, cas.ShortHash(hash))
+	klog.Infof("PublishBundleForVolume: volume=%s app=%s version=%s → %s (chain_depth=%d, template=%q)",
+		volumeID, appID, version, cas.ShortHash(hash), len(chain), bundleManifest.TemplateName)
 	return hash, nil
 }
 
