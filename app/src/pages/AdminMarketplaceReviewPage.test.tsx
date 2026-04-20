@@ -20,6 +20,8 @@ const adminValue = {
   error: null,
   refreshAll: vi.fn().mockResolvedValue(undefined),
   advanceSubmission: vi.fn(),
+  runStage1Scan: vi.fn(),
+  runStage2Eval: vi.fn(),
   approveYank: vi.fn(),
   rejectYank: vi.fn(),
 };

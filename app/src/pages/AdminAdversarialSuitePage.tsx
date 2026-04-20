@@ -26,7 +26,7 @@ interface RecentRun {
 }
 
 export default function AdminAdversarialSuitePage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [suiteId, setSuiteId] = useState('');
   const [appVersionId, setAppVersionId] = useState('');
   const [score, setScore] = useState('');
@@ -34,7 +34,9 @@ export default function AdminAdversarialSuitePage() {
   const [busy, setBusy] = useState(false);
   const [recent, setRecent] = useState<RecentRun[]>([]);
 
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
+  if (authLoading || !user)
+    return <div className="p-8 text-sm text-[var(--text-muted)]">Loading…</div>;
+  if (!user.is_superuser) return <Navigate to="/dashboard" replace />;
 
   const submit = async () => {
     if (!suiteId || !appVersionId) {
@@ -81,8 +83,8 @@ export default function AdminAdversarialSuitePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
-      <header className="border-b border-[var(--border)] px-8 py-5">
+    <div className="h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
+      <header className="border-b border-[var(--border)] px-8 py-5 shrink-0">
         <h1 className="text-2xl font-semibold">Adversarial Suite</h1>
         <p className="text-sm text-[var(--text-muted)] mt-1">
           Record adversarial runs against an approved AppVersion. Suite listing endpoint is not yet
@@ -90,7 +92,7 @@ export default function AdminAdversarialSuitePage() {
         </p>
       </header>
 
-      <main className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <main className="flex-1 min-h-0 overflow-y-auto p-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
         <section className="space-y-3">
           <Field label="Suite id" value={suiteId} onChange={setSuiteId} />
           <Field label="App version id" value={appVersionId} onChange={setAppVersionId} />

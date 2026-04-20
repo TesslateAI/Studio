@@ -29,7 +29,7 @@ const VALID_TRANSITIONS: Record<string, readonly string[]> = {
 type CheckStatus = 'passed' | 'failed' | 'warning' | 'errored';
 
 export default function AdminSubmissionWorkbenchPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { submissionId } = useParams<{ submissionId: string }>();
   const navigate = useNavigate();
   const admin = useRequiredAdmin();
@@ -60,7 +60,13 @@ export default function AdminSubmissionWorkbenchPage() {
     return VALID_TRANSITIONS[submission.stage] ?? [];
   }, [submission]);
 
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
+  // Wait for AuthContext to resolve the user before deciding. AuthContext uses
+  // an optimistic `status: 'authenticated'` when a token exists (user still
+  // null until /api/users/me returns), so `isLoading` is false too early —
+  // gating on `!user` is the only reliable signal that user data isn't ready.
+  if (authLoading || !user)
+    return <div className="p-8 text-sm text-[var(--text-muted)]">Loading…</div>;
+  if (!user.is_superuser) return <Navigate to="/dashboard" replace />;
 
   const onAdvance = async (toStage: string) => {
     if (!submission) return;
@@ -77,12 +83,40 @@ export default function AdminSubmissionWorkbenchPage() {
     }
   };
 
+  const onRunStage1Scan = async () => {
+    if (!submission) return;
+    setBusy(true);
+    try {
+      const out = await admin.runStage1Scan(submission.id);
+      setSubmission(out.submission);
+      toast.success(`Stage 1 scan → ${out.submission.stage}`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRunStage2Eval = async () => {
+    if (!submission) return;
+    setBusy(true);
+    try {
+      const out = await admin.runStage2Eval(submission.id);
+      setSubmission(out.submission);
+      toast.success(`Stage 2 eval → ${out.submission.stage}`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) return <div className="p-8 text-sm text-[var(--text-muted)]">Loading…</div>;
   if (!submission) return <div className="p-8 text-sm">Submission not found.</div>;
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
-      <header className="border-b border-[var(--border)] px-8 py-5 flex items-center justify-between">
+    <div className="h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
+      <header className="border-b border-[var(--border)] px-8 py-5 flex items-center justify-between shrink-0">
         <div>
           <button
             onClick={() => navigate('/admin/marketplace')}
@@ -102,7 +136,7 @@ export default function AdminSubmissionWorkbenchPage() {
         </div>
       </header>
 
-      <main className="grid grid-cols-1 lg:grid-cols-2 gap-8 p-8">
+      <main className="flex-1 min-h-0 overflow-y-auto grid grid-cols-1 lg:grid-cols-2 gap-8 p-8">
         <ManifestColumn submission={submission} />
         <DecisionColumn
           submission={submission}
@@ -111,6 +145,8 @@ export default function AdminSubmissionWorkbenchPage() {
           onNotesChange={setNotes}
           busy={busy}
           onAdvance={onAdvance}
+          onRunStage1Scan={onRunStage1Scan}
+          onRunStage2Eval={onRunStage2Eval}
           onChecksChanged={loadSubmission}
         />
       </main>
@@ -154,11 +190,22 @@ interface DecisionColumnProps {
   onNotesChange: (v: string) => void;
   busy: boolean;
   onAdvance: (toStage: string) => Promise<void>;
+  onRunStage1Scan: () => Promise<void>;
+  onRunStage2Eval: () => Promise<void>;
   onChecksChanged: () => Promise<void>;
 }
 
 function DecisionColumn(props: DecisionColumnProps) {
-  const { submission, nextStages, notes, onNotesChange, busy, onAdvance } = props;
+  const {
+    submission,
+    nextStages,
+    notes,
+    onNotesChange,
+    busy,
+    onAdvance,
+    onRunStage1Scan,
+    onRunStage2Eval,
+  } = props;
 
   const checksByStage = useMemo(() => {
     const acc: Record<string, SubmissionCheck[]> = {};
@@ -203,6 +250,45 @@ function DecisionColumn(props: DecisionColumnProps) {
         currentStage={submission.stage}
         onCreated={props.onChecksChanged}
       />
+
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-3">
+          Scanners
+        </h2>
+        <p className="text-xs text-[var(--text-muted)] mb-3">
+          Stage 1 runs structural checks (manifest, features, disclosure, billing). Stage 2 runs the
+          adversarial sandbox eval. Each scanner advances the submission automatically on pass, or
+          moves it to <code>rejected</code> on a hard failure.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            data-testid="run-stage1-scan"
+            disabled={busy || submission.stage !== 'stage1'}
+            onClick={() => void onRunStage1Scan()}
+            className="px-3 py-1.5 rounded text-sm bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+            title={
+              submission.stage !== 'stage1'
+                ? 'Submission must be at stage1 — use Advance → stage1 first'
+                : 'Run the deterministic Stage 1 scanner'
+            }
+          >
+            Run Stage 1 scan
+          </button>
+          <button
+            data-testid="run-stage2-eval"
+            disabled={busy || submission.stage !== 'stage2'}
+            onClick={() => void onRunStage2Eval()}
+            className="px-3 py-1.5 rounded text-sm bg-[var(--surface)] border border-[var(--border)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+            title={
+              submission.stage !== 'stage2'
+                ? 'Submission must be at stage2'
+                : 'Run the Stage 2 sandbox eval'
+            }
+          >
+            Run Stage 2 eval
+          </button>
+        </div>
+      </div>
 
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-3">

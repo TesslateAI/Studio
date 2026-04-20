@@ -14,6 +14,8 @@ vi.mock('../contexts/AuthContext', () => ({
 }));
 
 const advanceSubmission = vi.fn().mockResolvedValue(undefined);
+const runStage1Scan = vi.fn();
+const runStage2Eval = vi.fn();
 vi.mock('../contexts/AdminContext', () => ({
   useRequiredAdmin: () => ({
     submissionQueue: [],
@@ -23,6 +25,8 @@ vi.mock('../contexts/AdminContext', () => ({
     error: null,
     refreshAll: vi.fn(),
     advanceSubmission,
+    runStage1Scan,
+    runStage2Eval,
     approveYank: vi.fn(),
     rejectYank: vi.fn(),
   }),

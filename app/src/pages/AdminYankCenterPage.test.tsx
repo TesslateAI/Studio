@@ -22,6 +22,8 @@ vi.mock('../contexts/AdminContext', () => ({
     error: null,
     refreshAll: vi.fn(),
     advanceSubmission: vi.fn(),
+    runStage1Scan: vi.fn(),
+    runStage2Eval: vi.fn(),
     approveYank: vi.fn(),
     rejectYank: vi.fn(),
   }),
@@ -66,8 +68,6 @@ describe('AdminYankCenterPage', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByTestId('needs-second-y1')).toHaveTextContent(
-      'Needs second admin'
-    );
+    expect(await screen.findByTestId('needs-second-y1')).toHaveTextContent('Needs second admin');
   });
 });

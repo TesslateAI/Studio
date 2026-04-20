@@ -288,14 +288,14 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="h-full bg-gray-900 flex items-center justify-center">
         <LoadingSpinner message="Loading admin dashboard..." size={80} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900">
+    <div className="h-full overflow-y-auto bg-gray-900">
       {/* Header */}
       <div className="bg-gray-800 border-b border-[var(--text)]/15">
         <div className="container mx-auto px-4 py-4">
@@ -669,6 +669,38 @@ export default function AdminDashboard() {
             const mkt = detailedMetrics.marketplace as Record<string, Record<string, unknown>>;
             return (
               <div className="space-y-8">
+                {/* Quick links into marketplace moderation tools.
+                    Counterpart entry points (submission rows, yank queue, reputation)
+                    are inside AdminMarketplaceReviewPage itself. */}
+                <div className="rounded-lg border border-blue-500/40 bg-blue-500/10 p-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-white font-semibold">Marketplace Moderation</div>
+                    <div className="text-sm text-gray-300 mt-1">
+                      Review pending app submissions, run Stage 1 / Stage 2 scans, and handle yanks.
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => navigate('/admin/marketplace')}
+                      className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm hover:bg-blue-500"
+                    >
+                      Open Review Queue
+                    </button>
+                    <button
+                      onClick={() => navigate('/admin/marketplace/yanks')}
+                      className="bg-gray-700 text-white rounded-lg px-4 py-2 text-sm hover:bg-gray-600"
+                    >
+                      Yank Center
+                    </button>
+                    <button
+                      onClick={() => navigate('/admin/marketplace/reputation')}
+                      className="bg-gray-700 text-white rounded-lg px-4 py-2 text-sm hover:bg-gray-600"
+                    >
+                      Reputation
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   {renderMetricCard('Total Items', mkt.total_items as unknown)}
                   {renderMetricCard('Total Purchases', mkt.total_purchases as unknown)}

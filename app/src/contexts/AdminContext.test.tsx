@@ -19,11 +19,17 @@ vi.mock('../lib/api', () => ({
     getYankQueue: (...a: unknown[]) => getYankQueue(...a),
     getStats: (...a: unknown[]) => getStats(...a),
   },
-  appSubmissionsApi: { advance: vi.fn() },
+  appSubmissionsApi: {
+    advance: vi.fn(),
+    runStage1Scan: vi.fn(),
+    runStage2Eval: vi.fn(),
+  },
   appYanksApi: { approve: vi.fn(), reject: vi.fn() },
 }));
 
-const authState = { user: { id: 'u1', is_superuser: true } as { id: string; is_superuser: boolean } | null };
+const authState = {
+  user: { id: 'u1', is_superuser: true } as { id: string; is_superuser: boolean } | null,
+};
 vi.mock('./AuthContext', () => ({
   useAuth: () => ({ user: authState.user }),
 }));
@@ -55,7 +61,15 @@ describe('AdminContext', () => {
 
   it('populates queues + stats for superusers', async () => {
     getQueue.mockResolvedValue({
-      items: [{ submission_id: 's1', app_version_id: 'v1', app_id: 'a1', stage: 'review', check_count: 0 }],
+      items: [
+        {
+          submission_id: 's1',
+          app_version_id: 'v1',
+          app_id: 'a1',
+          stage: 'review',
+          check_count: 0,
+        },
+      ],
       limit: 100,
       offset: 0,
     });

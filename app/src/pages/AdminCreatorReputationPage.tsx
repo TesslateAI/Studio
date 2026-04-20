@@ -36,10 +36,12 @@ function newRow(userId = ''): Row {
 }
 
 export default function AdminCreatorReputationPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [rows, setRows] = useState<Row[]>([newRow()]);
 
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
+  if (authLoading || !user)
+    return <div className="p-8 text-sm text-[var(--text-muted)]">Loading…</div>;
+  if (!user.is_superuser) return <Navigate to="/dashboard" replace />;
 
   const update = (idx: number, patch: Partial<Row>) => {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -74,8 +76,8 @@ export default function AdminCreatorReputationPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
-      <header className="border-b border-[var(--border)] px-8 py-5">
+    <div className="h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
+      <header className="border-b border-[var(--border)] px-8 py-5 shrink-0">
         <h1 className="text-2xl font-semibold">Creator Reputation</h1>
         <p className="text-sm text-[var(--text-muted)] mt-1">
           Adjust reputation deltas. Aggregate listing endpoint not yet available — enter user ids
@@ -83,7 +85,7 @@ export default function AdminCreatorReputationPage() {
         </p>
       </header>
 
-      <main className="p-8 space-y-4">
+      <main className="flex-1 min-h-0 overflow-y-auto p-8 space-y-4">
         {rows.map((row, idx) => (
           <div
             key={idx}

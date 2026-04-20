@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import AppSubmission, User
+from ..services.apps import stage1_scanner, stage2_sandbox
 from ..services.apps import submissions as submissions_svc
 from ..users import current_active_user, current_superuser
 
@@ -75,6 +76,18 @@ class RecordCheckIn(BaseModel):
 
 class CheckCreatedOut(BaseModel):
     check_id: UUID
+
+
+class ScanRunOut(BaseModel):
+    """Result of a synchronous scanner run.
+
+    ``submission`` carries the post-scan stage so the UI can refresh without a
+    second round-trip. ``result`` is the scanner's own return dict (check
+    counts, failure list, score, etc.) — opaque to the router.
+    """
+
+    submission: SubmissionDetailOut
+    result: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +168,11 @@ async def advance_submission(
     except submissions_svc.SubmissionNotFoundError:
         raise HTTPException(status_code=404, detail="submission not found") from None
     except submissions_svc.InvalidTransitionError as e:
+        await db.rollback()
         raise HTTPException(status_code=409, detail=str(e)) from e
+    # advance_stage only flushes; without an explicit commit the transaction
+    # rolls back on session close and the stage change is silently lost.
+    await db.commit()
 
     row = (
         await db.execute(select(AppSubmission).where(AppSubmission.id == submission_id))
@@ -187,4 +204,100 @@ async def add_check(
         status=body.status,  # type: ignore[arg-type]
         details=body.details,
     )
+    # record_check only flushes; same persistence pitfall as advance.
+    await db.commit()
     return CheckCreatedOut(check_id=check_id)
+
+
+async def _load_submission_detail(db: AsyncSession, submission_id: UUID) -> SubmissionDetailOut:
+    """Re-read a submission + checks after a mutating action, fresh from the DB."""
+    row = (
+        await db.execute(
+            select(AppSubmission)
+            .where(AppSubmission.id == submission_id)
+            .options(selectinload(AppSubmission.checks))
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="submission not found")
+    return SubmissionDetailOut.model_validate(row)
+
+
+@router.post("/{submission_id}/scan/stage1", response_model=ScanRunOut)
+async def run_stage1_scan_endpoint(
+    submission_id: UUID,
+    _user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> ScanRunOut:
+    """Run the Stage1 structural scanner on a submission.
+
+    Preconditions: the submission must currently be at ``stage1``. The
+    scanner records per-check rows, then advances stage1 → stage2 on all-pass
+    or stage1 → rejected on any hard failure. Use the manual ``/advance``
+    endpoint to move stage0 → stage1 first.
+    """
+    current = (
+        await db.execute(select(AppSubmission.stage).where(AppSubmission.id == submission_id))
+    ).scalar_one_or_none()
+    if current is None:
+        raise HTTPException(status_code=404, detail="submission not found")
+    if current != "stage1":
+        raise HTTPException(
+            status_code=409,
+            detail=f"submission is at {current!r}; scan requires 'stage1'",
+        )
+
+    try:
+        result = await stage1_scanner.run_stage1_scan(db, submission_id=submission_id)
+    except submissions_svc.SubmissionNotFoundError:
+        raise HTTPException(status_code=404, detail="submission not found") from None
+    except submissions_svc.InvalidTransitionError as e:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except Exception:
+        await db.rollback()
+        raise
+
+    await db.commit()
+    detail = await _load_submission_detail(db, submission_id)
+    return ScanRunOut(submission=detail, result=result)
+
+
+@router.post("/{submission_id}/scan/stage2", response_model=ScanRunOut)
+async def run_stage2_eval_endpoint(
+    submission_id: UUID,
+    _user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> ScanRunOut:
+    """Run the Stage2 sandbox eval on a submission.
+
+    Preconditions: the submission must currently be at ``stage2``. On pass,
+    advances stage2 → stage3. On fail, stage2 → rejected. If no
+    ``AdversarialSuite`` is configured the scanner records a warning and
+    advances to stage3 so the queue doesn't block.
+    """
+    current = (
+        await db.execute(select(AppSubmission.stage).where(AppSubmission.id == submission_id))
+    ).scalar_one_or_none()
+    if current is None:
+        raise HTTPException(status_code=404, detail="submission not found")
+    if current != "stage2":
+        raise HTTPException(
+            status_code=409,
+            detail=f"submission is at {current!r}; eval requires 'stage2'",
+        )
+
+    try:
+        result = await stage2_sandbox.run_stage2_eval(db, submission_id=submission_id)
+    except submissions_svc.SubmissionNotFoundError:
+        raise HTTPException(status_code=404, detail="submission not found") from None
+    except submissions_svc.InvalidTransitionError as e:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except Exception:
+        await db.rollback()
+        raise
+
+    await db.commit()
+    detail = await _load_submission_detail(db, submission_id)
+    return ScanRunOut(submission=detail, result=result)

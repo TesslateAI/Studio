@@ -33,22 +33,27 @@ const TABS: Array<{ key: TabKey; label: string }> = [
 const PAGE_SIZE = 20;
 
 export default function AdminMarketplaceReviewPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [tab, setTab] = useState<TabKey>('submissions');
   const admin = useRequiredAdmin();
 
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
+  // AuthContext uses optimistic auth (status='authenticated' when a token is
+  // present but user is still null until /api/users/me returns). isLoading
+  // flips false before user is populated, so gate on `!user` as well.
+  if (authLoading || !user)
+    return <div className="p-8 text-sm text-[var(--text-muted)]">Loading…</div>;
+  if (!user.is_superuser) return <Navigate to="/dashboard" replace />;
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
-      <header className="border-b border-[var(--border)] px-8 py-5">
+    <div className="h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
+      <header className="border-b border-[var(--border)] px-8 py-5 shrink-0">
         <h1 className="text-2xl font-semibold">Marketplace Review</h1>
         <p className="text-sm text-[var(--text-muted)] mt-1">
           Submission queue, yanks, monitoring, and creator reputation.
         </p>
       </header>
 
-      <div className="flex gap-6 px-8 border-b border-[var(--border)]">
+      <div className="flex gap-6 px-8 border-b border-[var(--border)] shrink-0">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -74,7 +79,7 @@ export default function AdminMarketplaceReviewPage() {
         </div>
       </div>
 
-      <main className="p-8">
+      <main className="flex-1 min-h-0 overflow-y-auto p-8">
         {admin.error && (
           <div className="mb-4 rounded-md border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             {admin.error}

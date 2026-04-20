@@ -97,6 +97,8 @@ async def create_yank(
         severity=body.severity,  # type: ignore[arg-type]
         reason=body.reason,
     )
+    # Service only flushes; commit so the yank row persists past request teardown.
+    await db.commit()
     return YankRequestCreatedOut(yank_request_id=yid)
 
 
@@ -116,6 +118,7 @@ async def approve(
         raise HTTPException(status_code=409, detail=str(e)) from e
     except yanks_svc.YankNotFoundError:
         raise HTTPException(status_code=404, detail="yank not found") from None
+    await db.commit()
 
     # Reload for admin ids to mirror back to caller.
     row = (
@@ -158,6 +161,7 @@ async def reject(
         raise HTTPException(status_code=409, detail=str(e)) from e
     except yanks_svc.YankNotFoundError:
         raise HTTPException(status_code=404, detail="yank not found") from None
+    await db.commit()
     return YankRejectOut(status="rejected")
 
 
@@ -194,6 +198,7 @@ async def appeal(
         raise HTTPException(status_code=404, detail="yank not found") from None
     except yanks_svc.YankError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    await db.commit()
     return YankAppealOut(appeal_id=appeal_id)
 
 

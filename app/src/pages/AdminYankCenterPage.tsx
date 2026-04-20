@@ -16,7 +16,7 @@ import { useRequiredAdmin } from '../contexts/AdminContext';
 import { appYanksApi, type YankRequest, type YankSeverity } from '../lib/api';
 
 export default function AdminYankCenterPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const admin = useRequiredAdmin();
   const [rows, setRows] = useState<YankRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,7 +38,9 @@ export default function AdminYankCenterPage() {
     void load();
   }, [load]);
 
-  if (!user?.is_superuser) return <Navigate to="/dashboard" replace />;
+  if (authLoading || !user)
+    return <div className="p-8 text-sm text-[var(--text-muted)]">Loading…</div>;
+  if (!user.is_superuser) return <Navigate to="/dashboard" replace />;
 
   const onApprove = async (row: YankRequest) => {
     setBusyId(row.id);
@@ -71,15 +73,15 @@ export default function AdminYankCenterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
-      <header className="border-b border-[var(--border)] px-8 py-5">
+    <div className="h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
+      <header className="border-b border-[var(--border)] px-8 py-5 shrink-0">
         <h1 className="text-2xl font-semibold">Yank Center</h1>
         <p className="text-sm text-[var(--text-muted)] mt-1">
           Review, approve, or reject yank requests.
         </p>
       </header>
 
-      <main className="p-8">
+      <main className="flex-1 min-h-0 overflow-y-auto p-8">
         {loading && <p className="text-sm text-[var(--text-muted)]">Loading…</p>}
         {!loading && rows.length === 0 && (
           <p className="text-sm text-[var(--text-muted)]">No yank requests.</p>

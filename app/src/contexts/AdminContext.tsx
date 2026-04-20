@@ -12,6 +12,7 @@ import {
   appSubmissionsApi,
   appYanksApi,
   type AdminStats,
+  type ScanRunResult,
   type SubmissionQueueItem,
   type YankQueueItem,
 } from '../lib/api';
@@ -32,11 +33,9 @@ export interface AdminContextValue {
   isLoading: boolean;
   error: string | null;
   refreshAll: () => Promise<void>;
-  advanceSubmission: (
-    submissionId: string,
-    toStage: string,
-    notes?: string
-  ) => Promise<void>;
+  advanceSubmission: (submissionId: string, toStage: string, notes?: string) => Promise<void>;
+  runStage1Scan: (submissionId: string) => Promise<ScanRunResult>;
+  runStage2Eval: (submissionId: string) => Promise<ScanRunResult>;
   approveYank: (yankRequestId: string) => Promise<{ needsSecondAdmin: boolean }>;
   rejectYank: (yankRequestId: string, note?: string) => Promise<void>;
 }
@@ -115,6 +114,34 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [refreshAll]
   );
 
+  const runStage1Scan = useCallback(
+    async (submissionId: string) => {
+      try {
+        const out = await appSubmissionsApi.runStage1Scan(submissionId);
+        await refreshAll();
+        return out;
+      } catch (err) {
+        setError(extractError(err, 'Stage 1 scan failed'));
+        throw err;
+      }
+    },
+    [refreshAll]
+  );
+
+  const runStage2Eval = useCallback(
+    async (submissionId: string) => {
+      try {
+        const out = await appSubmissionsApi.runStage2Eval(submissionId);
+        await refreshAll();
+        return out;
+      } catch (err) {
+        setError(extractError(err, 'Stage 2 eval failed'));
+        throw err;
+      }
+    },
+    [refreshAll]
+  );
+
   const approveYank = useCallback(
     async (yankRequestId: string) => {
       try {
@@ -151,6 +178,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       error,
       refreshAll,
       advanceSubmission,
+      runStage1Scan,
+      runStage2Eval,
       approveYank,
       rejectYank,
     }),
@@ -162,6 +191,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       error,
       refreshAll,
       advanceSubmission,
+      runStage1Scan,
+      runStage2Eval,
       approveYank,
       rejectYank,
     ]

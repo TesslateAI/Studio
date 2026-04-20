@@ -26,11 +26,7 @@ import {
   SquaresFour,
 } from '@phosphor-icons/react';
 import { MobileMenu } from '../components/ui';
-import {
-  AgentCard,
-  SkeletonCard,
-  type MarketplaceItem,
-} from '../components/marketplace';
+import { AgentCard, SkeletonCard, type MarketplaceItem } from '../components/marketplace';
 import { marketplaceApi, marketplaceAppsApi, type MarketplaceApp } from '../lib/api';
 import { AppInstallWizard } from '../components/apps/AppInstallWizard';
 import { useApps } from '../contexts/AppsContext';
@@ -39,8 +35,18 @@ import { isCanceledError } from '../lib/utils';
 import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateMarketplaceStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
+import { useAuth } from '../contexts/AuthContext';
+import { ShieldCheck } from '@phosphor-icons/react';
 
-type ItemType = 'app' | 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
+type ItemType =
+  | 'app'
+  | 'agent'
+  | 'base'
+  | 'theme'
+  | 'tool'
+  | 'integration'
+  | 'skill'
+  | 'mcp_server';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -123,9 +129,7 @@ function AppMarketplaceCard({
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-sm text-[var(--text)] truncate">{app.name}</h3>
-          <p className="text-[11px] text-[var(--text-subtle)]">
-            {app.category ?? 'uncategorized'}
-          </p>
+          <p className="text-[11px] text-[var(--text-subtle)]">{app.category ?? 'uncategorized'}</p>
         </div>
       </div>
       <p className="text-xs text-[var(--text-muted)] line-clamp-3 min-h-[3em]">
@@ -166,6 +170,8 @@ export default function Marketplace() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { theme, toggleTheme } = useTheme();
   const { isAuthenticated } = useMarketplaceAuth();
+  const { user } = useAuth();
+  const isSuperuser = Boolean(user?.is_superuser);
   const { teamSwitchKey } = useTeam();
 
   // Refs
@@ -199,10 +205,7 @@ export default function Marketplace() {
   const [installTargetVersionId, setInstallTargetVersionId] = useState<string | null>(null);
   const { myInstalls, refresh: refreshInstalls } = useApps();
   const installedAppIds = useMemo(
-    () =>
-      new Set(
-        myInstalls.filter((i) => i.state !== 'uninstalled').map((i) => i.app_id)
-      ),
+    () => new Set(myInstalls.filter((i) => i.state !== 'uninstalled').map((i) => i.app_id)),
     [myInstalls]
   );
 
@@ -644,6 +647,19 @@ export default function Marketplace() {
               </svg>
             </button>
             <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Marketplace</h2>
+            {/* Admin-only: jump to the moderation queue. Rendered here (not in the
+                sidebar) because this is the natural context-switch point — an admin
+                reviewing the marketplace drops into review without leaving chrome. */}
+            {isSuperuser && (
+              <button
+                onClick={() => navigate('/admin/marketplace')}
+                className="btn btn-sm shrink-0 mr-1"
+                title="Open marketplace review queue (admin only)"
+              >
+                <ShieldCheck size={14} weight="fill" />
+                Admin
+              </button>
+            )}
           </div>
 
           {/* Tab Bar — type tabs left, filter/sort right */}
@@ -833,7 +849,11 @@ export default function Marketplace() {
         </div>
 
         {/* Scrollable Content */}
-        <div key={teamSwitchKey} className="flex-1 overflow-y-auto overflow-x-hidden" style={{ animation: 'fade-in 0.25s ease-out' }}>
+        <div
+          key={teamSwitchKey}
+          className="flex-1 overflow-y-auto overflow-x-hidden"
+          style={{ animation: 'fade-in 0.25s ease-out' }}
+        >
           <div className={`px-5 py-5 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
             {/* Initial Loading - Skeleton */}
             {initialLoading ? (

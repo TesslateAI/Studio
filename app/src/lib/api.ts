@@ -4116,6 +4116,11 @@ export interface SubmissionDetail extends Submission {
   checks: SubmissionCheck[];
 }
 
+export interface ScanRunResult {
+  submission: SubmissionDetail;
+  result: Record<string, unknown>;
+}
+
 export const appSubmissionsApi = {
   async list(
     params: {
@@ -4149,6 +4154,14 @@ export const appSubmissionsApi = {
     }
   ): Promise<{ check_id: string }> {
     const response = await api.post(`/api/app-submissions/${submissionId}/checks`, body);
+    return response.data;
+  },
+  async runStage1Scan(submissionId: string): Promise<ScanRunResult> {
+    const response = await api.post(`/api/app-submissions/${submissionId}/scan/stage1`);
+    return response.data;
+  },
+  async runStage2Eval(submissionId: string): Promise<ScanRunResult> {
+    const response = await api.post(`/api/app-submissions/${submissionId}/scan/stage2`);
     return response.data;
   },
 };
