@@ -15,6 +15,7 @@ from .marketplace_agents import (
     seed_marketplace_agents,
 )
 from .marketplace_bases import seed_marketplace_bases
+from .mcp_servers import seed_mcp_servers
 from .opensource_agents import seed_opensource_agents
 from .skills import seed_skills
 from .themes import seed_themes
@@ -27,6 +28,7 @@ __all__ = [
     "seed_marketplace_bases",
     "seed_community_bases",
     "seed_marketplace_agents",
+    "seed_mcp_servers",
     "seed_opensource_agents",
     "seed_skills",
     "seed_themes",
@@ -102,6 +104,14 @@ async def run_all_seeds():
             logger.info("Seed skills: %d new", count)
         except Exception:
             logger.exception("Failed to seed skills")
+            await db.rollback()
+
+        # 6. MCP servers / connectors (item_type='mcp_server')
+        try:
+            count = await seed_mcp_servers(db)
+            logger.info("Seed MCP servers: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed MCP servers")
             await db.rollback()
 
         # 7. Themes
