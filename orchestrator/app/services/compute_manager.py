@@ -201,6 +201,14 @@ class ComputeQuotaExceeded(Exception):
     """Raised when the concurrent compute pod limit is reached."""
 
 
+_TIER1_LABEL_SELECTOR = "tesslate.io/tier=1"
+_TIER2_DEV_LABEL_SELECTOR = "tesslate.io/tier=2,tesslate.io/component=dev-container"
+_COMPUTE_PRIORITY_CLASS = "tesslate-ephemeral"
+_COMPUTE_RUN_AS_UID = 1000  # user, group, and fs_group for all compute pods
+_COMPUTE_POD_CPU_LIMIT = "2000m"
+_COMPUTE_POD_MEM_LIMIT = "4Gi"
+
+
 class ComputeManager:
     """Manages ephemeral pods (Tier 1) and full environments (Tier 2)."""
 
@@ -341,6 +349,9 @@ class ComputeManager:
 
     async def _apply_compute_resource_quota(self, namespace: str) -> None:
         """Apply the compute-pool ResourceQuota. Idempotent (create or patch)."""
+        from ..config import get_settings
+
+        s = get_settings()
         quota = k8s_client.V1ResourceQuota(
             metadata=k8s_client.V1ObjectMeta(
                 name="compute-pool-quota",
@@ -348,12 +359,12 @@ class ComputeManager:
             ),
             spec=k8s_client.V1ResourceQuotaSpec(
                 hard={
-                    "pods": "10",
-                    "requests.cpu": "500m",
-                    "requests.memory": "2560Mi",
-                    "limits.cpu": "20",
-                    "limits.memory": "40Gi",
-                    "persistentvolumeclaims": "10",
+                    "pods": str(s.compute_pool_max_pods),
+                    "requests.cpu": s.compute_pool_cpu_request,
+                    "requests.memory": s.compute_pool_memory_request,
+                    "limits.cpu": s.compute_pool_cpu_limit,
+                    "limits.memory": s.compute_pool_memory_limit,
+                    "persistentvolumeclaims": str(s.compute_pool_max_pvcs),
                 }
             ),
         )
@@ -413,6 +424,10 @@ class ComputeManager:
             if exc.status != 404:
                 raise
 
+        from ..config import get_settings
+
+        pvc_size = get_settings().compute_pool_pvc_size
+
         if not pv_exists:
             pv = k8s_client.V1PersistentVolume(
                 metadata=k8s_client.V1ObjectMeta(
@@ -423,7 +438,7 @@ class ComputeManager:
                     },
                 ),
                 spec=k8s_client.V1PersistentVolumeSpec(
-                    capacity={"storage": "10Gi"},
+                    capacity={"storage": pvc_size},
                     access_modes=["ReadWriteOnce"],
                     persistent_volume_reclaim_policy="Retain",
                     storage_class_name="",
@@ -446,7 +461,7 @@ class ComputeManager:
                 access_modes=["ReadWriteOnce"],
                 storage_class_name="",
                 volume_name=pv_name,
-                resources=k8s_client.V1ResourceRequirements(requests={"storage": "10Gi"}),
+                resources=k8s_client.V1ResourceRequirements(requests={"storage": pvc_size}),
             ),
         )
         try:
@@ -468,7 +483,7 @@ class ComputeManager:
         pod_list = await asyncio.to_thread(
             v1.list_namespaced_pod,
             ns,
-            label_selector="tesslate.io/tier=1",
+            label_selector=_TIER1_LABEL_SELECTOR,
             field_selector="status.phase!=Succeeded,status.phase!=Failed",
         )
         return len(pod_list.items or [])
@@ -668,7 +683,7 @@ class ComputeManager:
         def _list_pods() -> k8s_client.V1PodList:
             return v1.list_namespaced_pod(
                 ns,
-                label_selector="tesslate.io/tier=1",
+                label_selector=_TIER1_LABEL_SELECTOR,
             )
 
         try:
@@ -719,6 +734,112 @@ class ComputeManager:
         results = await asyncio.gather(*[_delete_pod(name, age) for name, age in to_reap])
         return sum(1 for r in results if r)
 
+    async def reap_orphaned_pvcs(self, grace_seconds: int = 900) -> int:
+        """Delete PVCs in compute-pool that have no active pod referencing them.
+
+        Run after reap_orphaned_pods() in the reaper loop. Deletes PVCs (and
+        their backing PVs) that are older than grace_seconds and have no
+        Running or Pending pod using them. Returns count of PVCs deleted.
+        """
+        from datetime import datetime
+
+        ns = self._namespace()
+        v1 = self._api()
+        now = datetime.now(UTC)
+
+        try:
+            pvc_list = await asyncio.to_thread(v1.list_namespaced_persistent_volume_claim, ns)
+        except ApiException as exc:
+            if exc.status == 404:
+                return 0
+            raise
+
+        if not pvc_list.items:
+            return 0
+
+        try:
+            pod_list = await asyncio.to_thread(
+                v1.list_namespaced_pod,
+                ns,
+                label_selector=_TIER1_LABEL_SELECTOR,
+            )
+        except ApiException as exc:
+            if exc.status == 404:
+                return 0
+            raise
+
+        # Build set of PVC names held by Running or Pending pods
+        active_pvc_names: set[str] = set()
+        for pod in pod_list.items:
+            pod_phase = (pod.status.phase or "") if pod.status else ""
+            if pod_phase in ("Running", "Pending"):
+                for volume in pod.spec.volumes or []:
+                    if volume.persistent_volume_claim:
+                        active_pvc_names.add(volume.persistent_volume_claim.claim_name)
+
+        reaped = 0
+        for pvc in pvc_list.items:
+            pvc_name = pvc.metadata.name
+            if pvc_name in active_pvc_names:
+                continue
+
+            creation = pvc.metadata.creation_timestamp
+            if creation is None:
+                continue
+            age = (now - creation).total_seconds()
+            if age < grace_seconds:
+                continue
+
+            pv_name = (pvc.spec.volume_name or "") if pvc.spec else ""
+
+            try:
+                await asyncio.to_thread(v1.delete_namespaced_persistent_volume_claim, pvc_name, ns)
+                logger.warning("[COMPUTE] Reaped orphaned PVC %s (age: %.0fs)", pvc_name, age)
+                reaped += 1
+            except ApiException as exc:
+                if exc.status != 404:
+                    logger.warning("[COMPUTE] Failed to reap PVC %s: %s", pvc_name, exc.reason)
+                continue
+
+            if pv_name:
+                try:
+                    await asyncio.to_thread(v1.delete_persistent_volume, pv_name)
+                    logger.warning("[COMPUTE] Deleted orphaned PV %s", pv_name)
+                except ApiException as exc:
+                    if exc.status != 404:
+                        logger.warning("[COMPUTE] Failed to delete PV %s: %s", pv_name, exc.reason)
+
+        return reaped
+
+    async def delete_compute_pool_pvc(self, volume_id: str) -> None:
+        """Delete the compute-pool PVC and PV for a project volume on deletion.
+
+        Called from the project deletion flow to prevent quota exhaustion.
+        Swallows 404 — safe to call even if no compute pod was ever run.
+        """
+        ns = self._namespace()
+        v1 = self._api()
+        pvc_name = f"vol-pvc-{volume_id}"
+        pv_name = f"vol-pv-{volume_id}"
+
+        try:
+            await asyncio.to_thread(v1.delete_namespaced_persistent_volume_claim, pvc_name, ns)
+            logger.info("[COMPUTE] Deleted compute-pool PVC %s for volume %s", pvc_name, volume_id)
+        except ApiException as exc:
+            if exc.status != 404:
+                logger.warning(
+                    "[COMPUTE] Failed to delete compute-pool PVC %s: %s", pvc_name, exc.reason
+                )
+
+        try:
+            await asyncio.to_thread(v1.delete_persistent_volume, pv_name)
+            logger.info("[COMPUTE] Deleted compute-pool PV %s for volume %s", pv_name, volume_id)
+        except ApiException as exc:
+            if exc.status != 404:
+                logger.warning(
+                    "[COMPUTE] Failed to delete compute-pool PV %s: %s", pv_name, exc.reason
+                )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -745,16 +866,16 @@ class ComputeManager:
                 },
             ),
             spec=k8s_client.V1PodSpec(
-                priority_class_name="tesslate-ephemeral",
+                priority_class_name=_COMPUTE_PRIORITY_CLASS,
                 restart_policy="Never",
                 active_deadline_seconds=timeout + 30,  # K8s safety net slightly after app timeout
                 termination_grace_period_seconds=5,
                 automount_service_account_token=False,
                 security_context=k8s_client.V1PodSecurityContext(
-                    run_as_user=1000,
-                    run_as_group=1000,
+                    run_as_user=_COMPUTE_RUN_AS_UID,
+                    run_as_group=_COMPUTE_RUN_AS_UID,
                     run_as_non_root=True,
-                    fs_group=1000,
+                    fs_group=_COMPUTE_RUN_AS_UID,
                     seccomp_profile=k8s_client.V1SeccompProfile(type="RuntimeDefault"),
                 ),
                 containers=[
@@ -771,12 +892,18 @@ class ComputeManager:
                             ),
                         ],
                         resources=k8s_client.V1ResourceRequirements(
-                            requests={"cpu": "50m", "memory": "256Mi"},
-                            limits={"cpu": "2000m", "memory": "4Gi"},
+                            requests={
+                                "cpu": _DEV_CONTAINER_CPU_REQUEST,
+                                "memory": _DEV_CONTAINER_MEM_REQUEST,
+                            },
+                            limits={
+                                "cpu": _COMPUTE_POD_CPU_LIMIT,
+                                "memory": _COMPUTE_POD_MEM_LIMIT,
+                            },
                         ),
                         security_context=k8s_client.V1SecurityContext(
-                            run_as_user=1000,
-                            run_as_group=1000,
+                            run_as_user=_COMPUTE_RUN_AS_UID,
+                            run_as_group=_COMPUTE_RUN_AS_UID,
                             allow_privilege_escalation=False,
                             capabilities=k8s_client.V1Capabilities(drop=["ALL"]),
                             seccomp_profile=k8s_client.V1SeccompProfile(type="RuntimeDefault"),
@@ -1088,7 +1215,7 @@ class ComputeManager:
                     pod_list = await asyncio.to_thread(
                         v1.list_namespaced_pod,
                         namespace,
-                        label_selector=("tesslate.io/tier=2,tesslate.io/component=dev-container"),
+                        label_selector=_TIER2_DEV_LABEL_SELECTOR,
                     )
                     pods = pod_list.items or []
                     if any(
@@ -1510,7 +1637,7 @@ class ComputeManager:
                 pod_list = await asyncio.to_thread(
                     v1.list_namespaced_pod,
                     namespace,
-                    label_selector="tesslate.io/tier=2,tesslate.io/component=dev-container",
+                    label_selector=_TIER2_DEV_LABEL_SELECTOR,
                 )
                 pods = pod_list.items or []
                 if any(
@@ -1537,7 +1664,7 @@ class ComputeManager:
                     rs_list = await asyncio.to_thread(
                         apps_v1.list_namespaced_replica_set,
                         namespace,
-                        label_selector="tesslate.io/tier=2,tesslate.io/component=dev-container",
+                        label_selector=_TIER2_DEV_LABEL_SELECTOR,
                     )
                     for rs in rs_list.items or []:
                         for cond in rs.status.conditions or []:

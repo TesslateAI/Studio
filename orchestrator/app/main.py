@@ -385,11 +385,16 @@ async def _compute_pod_reaper_loop():
         await asyncio.sleep(settings.compute_reaper_interval_seconds)
         try:
             compute = get_compute_manager()
-            reaped = await compute.reap_orphaned_pods(
+            reaped_pods = await compute.reap_orphaned_pods(
                 max_age_seconds=settings.compute_reaper_max_age_seconds,
             )
-            if reaped:
-                logger.warning("[COMPUTE-REAPER] Reaped %d orphaned pod(s)", reaped)
+            if reaped_pods:
+                logger.warning("[COMPUTE-REAPER] Reaped %d orphaned pod(s)", reaped_pods)
+            reaped_pvcs = await compute.reap_orphaned_pvcs(
+                grace_seconds=settings.compute_reaper_pvc_grace_seconds,
+            )
+            if reaped_pvcs:
+                logger.warning("[COMPUTE-REAPER] Reaped %d orphaned PVC(s)", reaped_pvcs)
         except Exception:
             logger.exception("[COMPUTE-REAPER] Error during reap cycle")
 

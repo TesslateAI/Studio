@@ -1736,6 +1736,8 @@ async def _perform_project_deletion(
             # Get project to access slug
             project_result = await db.execute(select(Project).where(Project.id == project_id))
             project = project_result.scalar_one_or_none()
+            # Capture volume_id now — project row is deleted later in step 3
+            volume_id: str | None = getattr(project, "volume_id", None) if project else None
 
             if project:
                 try:
@@ -1889,6 +1891,17 @@ async def _perform_project_deletion(
                 )
             except Exception as e:
                 logger.warning(f"[DELETE] Error deleting K8s resources: {e}")
+
+            # 4c. Delete compute-pool PVC/PV for this volume (prevents quota exhaustion)
+            if volume_id:
+                try:
+                    from ..services.compute_manager import get_compute_manager
+
+                    await get_compute_manager().delete_compute_pool_pvc(volume_id)
+                except Exception as e:
+                    logger.warning(
+                        f"[DELETE] Error deleting compute-pool PVC for volume {volume_id}: {e}"
+                    )
 
         task.update_progress(100, 100, "Project deleted successfully")
         logger.info(f"[DELETE] Successfully deleted project {project_id}")

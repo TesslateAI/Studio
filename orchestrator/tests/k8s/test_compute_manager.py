@@ -589,3 +589,332 @@ class TestComputeManagerTier2:
         assert project.compute_tier == "none"
         assert project.environment_status == "stopped"
         db.commit.assert_awaited_once()
+
+
+# ===========================================================================
+# ComputeManager — reap_orphaned_pvcs (Option 1: reaper-based PVC cleanup)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestReapOrphanedPvcs:
+    """reap_orphaned_pvcs() — clean up PVCs with no active pod after a grace period."""
+
+    @pytest.fixture(autouse=True)
+    def reset_singleton(self):
+        import app.services.compute_manager as cm_module
+
+        cm_module._instance = None
+        yield
+        cm_module._instance = None
+
+    @pytest.fixture
+    def mock_v1(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def cm(self, mock_v1, mock_settings):
+        manager = ComputeManager()
+        manager._v1 = mock_v1
+        return manager
+
+    @staticmethod
+    def _sync_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    def _make_pvc(
+        self,
+        name: str,
+        volume_name: str = "",
+        creation_timestamp: datetime | None = None,
+    ) -> Mock:
+        pvc = Mock()
+        pvc.metadata = Mock()
+        pvc.metadata.name = name
+        pvc.metadata.creation_timestamp = creation_timestamp or datetime.now(UTC)
+        pvc.spec = Mock()
+        pvc.spec.volume_name = volume_name
+        return pvc
+
+    def _make_pvc_list(self, pvcs: list) -> Mock:
+        lst = Mock()
+        lst.items = pvcs
+        return lst
+
+    def _make_pod_with_pvc(self, pod_name: str, pvc_name: str, phase: str = "Running") -> Mock:
+        pod = Mock()
+        pod.metadata = Mock()
+        pod.metadata.name = pod_name
+        pod.status = Mock()
+        pod.status.phase = phase
+        volume = Mock()
+        volume.persistent_volume_claim = Mock()
+        volume.persistent_volume_claim.claim_name = pvc_name
+        pod.spec = Mock()
+        pod.spec.volumes = [volume]
+        return pod
+
+    async def test_reaps_pvc_and_pv_with_no_active_pod(self, cm, mock_v1, mock_settings):
+        """Deletes a PVC (and its PV) when no active pod references it and it is past grace."""
+        old_time = datetime.now(UTC) - timedelta(minutes=10)
+        pvc = self._make_pvc(
+            "vol-pvc-vol-abc123", volume_name="vol-pv-vol-abc123", creation_timestamp=old_time
+        )
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list([pvc])
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([])
+        mock_v1.delete_namespaced_persistent_volume_claim.return_value = None
+        mock_v1.delete_persistent_volume.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 1
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_called_once_with(
+            "vol-pvc-vol-abc123", mock_settings.compute_pool_namespace
+        )
+        mock_v1.delete_persistent_volume.assert_called_once_with("vol-pv-vol-abc123")
+
+    async def test_skips_pvc_within_grace_period(self, cm, mock_v1, mock_settings):
+        """Does NOT delete a PVC that is younger than grace_seconds."""
+        recent_time = datetime.now(UTC) - timedelta(minutes=2)
+        pvc = self._make_pvc(
+            "vol-pvc-vol-recent", volume_name="vol-pv-vol-recent", creation_timestamp=recent_time
+        )
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list([pvc])
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([])
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 0
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_not_called()
+
+    async def test_skips_pvc_with_active_running_pod(self, cm, mock_v1, mock_settings):
+        """Does NOT delete a PVC that a Running pod is currently using."""
+        old_time = datetime.now(UTC) - timedelta(hours=1)
+        pvc = self._make_pvc(
+            "vol-pvc-vol-abc123", volume_name="vol-pv-vol-abc123", creation_timestamp=old_time
+        )
+        active_pod = self._make_pod_with_pvc("t1-abc123-xyz", "vol-pvc-vol-abc123", phase="Running")
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list([pvc])
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([active_pod])
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 0
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_not_called()
+
+    async def test_skips_pvc_with_pending_pod(self, cm, mock_v1, mock_settings):
+        """Does NOT delete a PVC that a Pending pod is currently using."""
+        old_time = datetime.now(UTC) - timedelta(hours=1)
+        pvc = self._make_pvc(
+            "vol-pvc-vol-abc123", volume_name="vol-pv-vol-abc123", creation_timestamp=old_time
+        )
+        pending_pod = self._make_pod_with_pvc(
+            "t1-abc123-xyz", "vol-pvc-vol-abc123", phase="Pending"
+        )
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list([pvc])
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([pending_pod])
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 0
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_not_called()
+
+    async def test_reaps_only_unreferenced_pvcs(self, cm, mock_v1, mock_settings):
+        """Reaps only PVCs with no active pod; skips PVC that is in use."""
+        old_time = datetime.now(UTC) - timedelta(hours=1)
+        orphaned_pvc = self._make_pvc(
+            "vol-pvc-vol-orphan", volume_name="vol-pv-vol-orphan", creation_timestamp=old_time
+        )
+        active_pvc = self._make_pvc(
+            "vol-pvc-vol-active", volume_name="vol-pv-vol-active", creation_timestamp=old_time
+        )
+        active_pod = self._make_pod_with_pvc("t1-active-xyz", "vol-pvc-vol-active", phase="Running")
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list(
+            [orphaned_pvc, active_pvc]
+        )
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([active_pod])
+        mock_v1.delete_namespaced_persistent_volume_claim.return_value = None
+        mock_v1.delete_persistent_volume.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 1
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_called_once_with(
+            "vol-pvc-vol-orphan", mock_settings.compute_pool_namespace
+        )
+        mock_v1.delete_persistent_volume.assert_called_once_with("vol-pv-vol-orphan")
+
+    async def test_returns_zero_when_no_pvcs(self, cm, mock_v1, mock_settings):
+        """Returns 0 immediately when there are no PVCs in the namespace."""
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list([])
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 0
+        mock_v1.list_namespaced_pod.assert_not_called()
+
+    async def test_returns_zero_on_namespace_404(self, cm, mock_v1, mock_settings):
+        """Returns 0 gracefully when the namespace does not exist yet."""
+        mock_v1.list_namespaced_persistent_volume_claim.side_effect = _api_exception(404)
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 0
+
+    async def test_skips_pvc_deletion_on_404_continues(self, cm, mock_v1, mock_settings):
+        """Swallows 404 on PVC delete and continues to next PVC."""
+        old_time = datetime.now(UTC) - timedelta(hours=1)
+        pvc1 = self._make_pvc(
+            "vol-pvc-vol-gone", volume_name="vol-pv-vol-gone", creation_timestamp=old_time
+        )
+        pvc2 = self._make_pvc(
+            "vol-pvc-vol-real", volume_name="vol-pv-vol-real", creation_timestamp=old_time
+        )
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list(
+            [pvc1, pvc2]
+        )
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([])
+        mock_v1.delete_namespaced_persistent_volume_claim.side_effect = [
+            _api_exception(404),
+            None,
+        ]
+        mock_v1.delete_persistent_volume.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        # pvc1 got 404 (counts as 0), pvc2 succeeded (counts as 1)
+        assert reaped == 1
+
+    async def test_completed_pod_does_not_protect_pvc(self, cm, mock_v1, mock_settings):
+        """A Succeeded/Failed pod does NOT protect its PVC — only Running/Pending do."""
+        old_time = datetime.now(UTC) - timedelta(hours=1)
+        pvc = self._make_pvc(
+            "vol-pvc-vol-done", volume_name="vol-pv-vol-done", creation_timestamp=old_time
+        )
+        completed_pod = self._make_pod_with_pvc(
+            "t1-done-xyz", "vol-pvc-vol-done", phase="Succeeded"
+        )
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list([pvc])
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([completed_pod])
+        mock_v1.delete_namespaced_persistent_volume_claim.return_value = None
+        mock_v1.delete_persistent_volume.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 1
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_called_once_with(
+            "vol-pvc-vol-done", mock_settings.compute_pool_namespace
+        )
+
+    async def test_reaps_pvc_without_pv_name(self, cm, mock_v1, mock_settings):
+        """Deletes PVC even when spec.volume_name is empty; skips PV delete safely."""
+        old_time = datetime.now(UTC) - timedelta(hours=1)
+        pvc = self._make_pvc("vol-pvc-vol-nopv", volume_name="", creation_timestamp=old_time)
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list([pvc])
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([])
+        mock_v1.delete_namespaced_persistent_volume_claim.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        assert reaped == 1
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_called_once()
+        mock_v1.delete_persistent_volume.assert_not_called()
+
+    async def test_pv_delete_non_404_error_does_not_raise(self, cm, mock_v1, mock_settings):
+        """PVC deleted successfully but PV delete returns 500 — logs warning, does not raise."""
+        old_time = datetime.now(UTC) - timedelta(hours=1)
+        pvc = self._make_pvc(
+            "vol-pvc-vol-abc123", volume_name="vol-pv-vol-abc123", creation_timestamp=old_time
+        )
+
+        mock_v1.list_namespaced_persistent_volume_claim.return_value = self._make_pvc_list([pvc])
+        mock_v1.list_namespaced_pod.return_value = _make_pod_list([])
+        mock_v1.delete_namespaced_persistent_volume_claim.return_value = None
+        mock_v1.delete_persistent_volume.side_effect = _api_exception(500, "Internal Server Error")
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            reaped = await cm.reap_orphaned_pvcs(grace_seconds=300)
+
+        # PVC was counted as reaped; PV failure is best-effort
+        assert reaped == 1
+
+
+# ===========================================================================
+# ComputeManager — delete_compute_pool_pvc (Option 3: deletion-triggered cleanup)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestDeleteComputePoolPvc:
+    """delete_compute_pool_pvc() — explicit cleanup on project deletion."""
+
+    @pytest.fixture(autouse=True)
+    def reset_singleton(self):
+        import app.services.compute_manager as cm_module
+
+        cm_module._instance = None
+        yield
+        cm_module._instance = None
+
+    @pytest.fixture
+    def mock_v1(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def cm(self, mock_v1, mock_settings):
+        manager = ComputeManager()
+        manager._v1 = mock_v1
+        return manager
+
+    @staticmethod
+    def _sync_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    async def test_deletes_pvc_and_pv_for_volume(self, cm, mock_v1, mock_settings):
+        """Deletes vol-pvc-{volume_id} from compute-pool and vol-pv-{volume_id} cluster-wide."""
+        mock_v1.delete_namespaced_persistent_volume_claim.return_value = None
+        mock_v1.delete_persistent_volume.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            await cm.delete_compute_pool_pvc("vol-abc123def456")
+
+        mock_v1.delete_namespaced_persistent_volume_claim.assert_called_once_with(
+            "vol-pvc-vol-abc123def456", mock_settings.compute_pool_namespace
+        )
+        mock_v1.delete_persistent_volume.assert_called_once_with("vol-pv-vol-abc123def456")
+
+    async def test_swallows_404_on_pvc_not_found(self, cm, mock_v1, mock_settings):
+        """Does not raise when PVC was never created (project never ran a compute pod)."""
+        mock_v1.delete_namespaced_persistent_volume_claim.side_effect = _api_exception(404)
+        mock_v1.delete_persistent_volume.side_effect = _api_exception(404)
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            await cm.delete_compute_pool_pvc("vol-never-existed")
+
+    async def test_swallows_404_pvc_deleted_pv_still_deleted(self, cm, mock_v1, mock_settings):
+        """Still attempts PV delete even if PVC returns 404 (PVC may already be gone)."""
+        mock_v1.delete_namespaced_persistent_volume_claim.side_effect = _api_exception(404)
+        mock_v1.delete_persistent_volume.return_value = None
+
+        with patch("asyncio.to_thread", side_effect=self._sync_to_thread):
+            await cm.delete_compute_pool_pvc("vol-partial")
+
+        mock_v1.delete_persistent_volume.assert_called_once_with("vol-pv-vol-partial")

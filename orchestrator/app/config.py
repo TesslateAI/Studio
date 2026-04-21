@@ -537,6 +537,17 @@ class Settings(BaseSettings):
     compute_pod_timeout: int = 600  # Seconds to wait for compute pod readiness
     compute_reaper_interval_seconds: int = 60  # How often the orphaned-pod reaper runs
     compute_reaper_max_age_seconds: int = 900  # 15 min — max pod age before reaping
+    compute_reaper_pvc_grace_seconds: int = (
+        900  # matches pod max age — PVC never reaped while a pod could still be running
+    )
+    # Resource quota for tesslate-compute-pool namespace
+    compute_pool_max_pods: int = 10
+    compute_pool_cpu_request: str = "500m"
+    compute_pool_memory_request: str = "2560Mi"
+    compute_pool_cpu_limit: str = "20"
+    compute_pool_memory_limit: str = "40Gi"
+    compute_pool_max_pvcs: int = 10
+    compute_pool_pvc_size: str = "10Gi"
 
     # Per-user soft cap on concurrently running (scale=1) app environments.
     # Paused environments (scale=0) do NOT count. Prevents one user from

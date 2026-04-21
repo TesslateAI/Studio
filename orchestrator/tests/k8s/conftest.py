@@ -45,6 +45,15 @@ def mock_settings(monkeypatch):
     settings.k8s_max_snapshots_per_project = 5
     settings.app_domain = "example.com"
     settings.compute_max_concurrent_pods = 10
+    settings.compute_pool_namespace = "tesslate-compute-pool"
+    settings.compute_reaper_pvc_grace_seconds = 900
+    settings.compute_pool_max_pods = 10
+    settings.compute_pool_cpu_request = "500m"
+    settings.compute_pool_memory_request = "2560Mi"
+    settings.compute_pool_cpu_limit = "20"
+    settings.compute_pool_memory_limit = "40Gi"
+    settings.compute_pool_max_pvcs = 10
+    settings.compute_pool_pvc_size = "10Gi"
     settings.deployment_mode = "kubernetes"
     settings.database_url = "sqlite+aiosqlite:///:memory:"
     settings.database_ssl = False
