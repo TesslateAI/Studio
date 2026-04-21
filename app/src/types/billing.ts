@@ -45,6 +45,15 @@ export interface BillingConfig {
 // Subscription Types
 // ============================================================================
 
+// Any tier cap above this is treated as effectively unlimited in the UI.
+// Backend currently ships 999,999 as the sentinel (see PR #318); keep this
+// threshold well above the largest legitimate per-tier cap (<100) and below
+// the unlimited sentinel so both sides stay comfortably separated.
+export const UNLIMITED_PROJECT_THRESHOLD = 1000;
+
+export const isUnlimitedProjects = (max: number): boolean =>
+  max > UNLIMITED_PROJECT_THRESHOLD;
+
 export type SubscriptionTier = 'free' | 'basic' | 'pro' | 'ultra';
 
 export interface SubscriptionResponse {

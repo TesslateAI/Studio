@@ -6,7 +6,7 @@ import type {
   CreditBalanceResponse,
   SubscriptionTier,
 } from '../../types/billing';
-import { SUBSCRIPTION_TIER_LABELS } from '../../types/billing';
+import { SUBSCRIPTION_TIER_LABELS, isUnlimitedProjects } from '../../types/billing';
 
 interface SubscriptionStatusProps {
   compact?: boolean;
@@ -146,7 +146,7 @@ const SubscriptionStatus: React.FC<SubscriptionStatusProps> = ({
           <div className="bg-white/5 rounded-lg p-2">
             <div className="text-[var(--text)]/50 text-xs">Projects</div>
             <div className="font-semibold text-[var(--text)]">
-              {subscription.max_projects === 999 ? '∞' : subscription.max_projects}
+              {isUnlimitedProjects(subscription.max_projects) ? '∞' : subscription.max_projects}
             </div>
           </div>
           <div className="bg-white/5 rounded-lg p-2">
