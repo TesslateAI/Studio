@@ -2,7 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { billingApi } from '../../lib/api';
 import type { SubscriptionResponse, SubscriptionTier } from '../../types/billing';
-import { SUBSCRIPTION_TIER_LABELS, SUBSCRIPTION_TIER_PROJECTS } from '../../types/billing';
+import {
+  SUBSCRIPTION_TIER_LABELS,
+  SUBSCRIPTION_TIER_PROJECTS,
+  isUnlimitedProjects,
+} from '../../types/billing';
 
 interface ProjectLimitBannerProps {
   currentProjectCount: number;
@@ -39,6 +43,13 @@ const ProjectLimitBanner: React.FC<ProjectLimitBannerProps> = ({
   }
 
   const maxProjects = subscription.max_projects;
+
+  // Effectively unlimited tiers don't need a usage banner — the count/limit
+  // ratio is always ~0 and the upgrade CTA is meaningless.
+  if (isUnlimitedProjects(maxProjects)) {
+    return null;
+  }
+
   const usagePercentage = (currentProjectCount / maxProjects) * 100;
   const isNearLimit = usagePercentage >= 80;
   const isAtLimit = currentProjectCount >= maxProjects;

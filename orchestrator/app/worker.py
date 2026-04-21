@@ -704,7 +704,60 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     f"iterations={iterations}, tool_calls={tool_calls_made}"
                 )
 
-                # 10b. Create CAS checkpoint snapshot (bounded, shutdown-safe)
+                # 11. Increment usage count
+                agent_model.usage_count = (agent_model.usage_count or 0) + 1
+                db.add(agent_model)
+
+                # 12. Finalize the placeholder Message with summary metadata.
+                #
+                # Re-SELECT by id rather than mutating the long-held ORM object:
+                # the frontend can delete the placeholder while the agent is
+                # running (follow-up message, regenerate, clear chat), and
+                # blindly UPDATE-ing a vanished PK raises StaleDataError mid-
+                # flush — which poisons the session and also takes down the
+                # chat-status UPDATE below.
+                stale_msg = (
+                    await db.execute(select(Message).where(Message.id == message_id))
+                ).scalar_one_or_none()
+
+                if stale_msg is None:
+                    logger.warning(
+                        "[WORKER] Placeholder message %s deleted during task %s — "
+                        "skipping Message finalize (agent work preserved in agent_steps)",
+                        message_id,
+                        task_id,
+                    )
+                else:
+                    stale_msg.content = final_response or "Agent task completed."
+                    stale_msg.message_metadata = {
+                        "agent_mode": True,
+                        "agent_type": agent_model.agent_type,
+                        "iterations": iterations,
+                        "tool_calls_made": tool_calls_made,
+                        "completion_reason": completion_reason,
+                        "session_id": session_id,
+                        "executed_by": "worker",
+                        "task_id": task_id,
+                        "checkpoint_hash": checkpoint_hash,
+                        "trajectory_path": (
+                            f".tesslate/trajectories/trajectory_{session_id}.json"
+                            if session_id
+                            else None
+                        ),
+                        # Steps are now in agent_steps table, not here
+                        "steps_table": True,
+                    }
+                    db.add(stale_msg)
+
+                # Update chat status
+                if chat:
+                    chat.status = "completed" if completion_reason != "cancelled" else "active"
+                await db.commit()
+
+                # 12b. CAS checkpoint snapshot — runs AFTER the finalize commit
+                # so a stuck FileOps / Volume Hub gRPC can't widen the
+                # placeholder-deletion race window. Checkpoint is best-effort;
+                # the 5s cap is tight because we're now off the critical path.
                 if (
                     project
                     and getattr(project, "volume_id", None)
@@ -716,39 +769,8 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 project.volume_id,
                                 final_response or "Agent task completed",
                             ),
-                            timeout=35.0,
+                            timeout=5.0,
                         )
-
-                # 11. Increment usage count
-                agent_model.usage_count = (agent_model.usage_count or 0) + 1
-                db.add(agent_model)
-
-                # 12. Finalize the placeholder Message with summary metadata
-                assistant_message.content = final_response or "Agent task completed."
-                assistant_message.message_metadata = {
-                    "agent_mode": True,
-                    "agent_type": agent_model.agent_type,
-                    "iterations": iterations,
-                    "tool_calls_made": tool_calls_made,
-                    "completion_reason": completion_reason,
-                    "session_id": session_id,
-                    "executed_by": "worker",
-                    "task_id": task_id,
-                    "checkpoint_hash": checkpoint_hash,
-                    "trajectory_path": (
-                        f".tesslate/trajectories/trajectory_{session_id}.json"
-                        if session_id
-                        else None
-                    ),
-                    # Steps are now in agent_steps table, not here
-                    "steps_table": True,
-                }
-                db.add(assistant_message)
-
-                # Update chat status
-                if chat:
-                    chat.status = "completed" if completion_reason != "cancelled" else "active"
-                await db.commit()
 
             # 13. Auto-generate chat title on first message (non-blocking)
             if completion_reason != "cancelled":
