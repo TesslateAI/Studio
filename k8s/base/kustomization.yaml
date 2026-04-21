@@ -34,6 +34,7 @@ resources:
   - database/postgres-deployment.yaml
   - database/postgres-service.yaml
   - database/postgres-pvc.yaml
+  - database/postgres-pdb.yaml
 
   # PriorityClasses (cluster-scoped, apply manually):
   #   kubectl apply -f k8s/base/core/priority-classes.yaml

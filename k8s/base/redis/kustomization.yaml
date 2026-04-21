@@ -5,3 +5,4 @@ resources:
   - redis-pvc.yaml
   - redis-deployment.yaml
   - redis-service.yaml
+  - redis-pdb.yaml

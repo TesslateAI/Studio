@@ -22,7 +22,10 @@ spec:
       labels:
         app: postgres
         component: database
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
     spec:
+      priorityClassName: tesslate-system
       containers:
       - name: postgres
         image: postgres:15-alpine

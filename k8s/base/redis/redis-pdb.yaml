@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: tesslate
+  labels:
+    app: redis
+    component: cache
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis
+      component: cache

@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  namespace: tesslate
+  labels:
+    app: postgres
+    component: database
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: postgres
