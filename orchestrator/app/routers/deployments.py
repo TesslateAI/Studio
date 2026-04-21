@@ -785,10 +785,14 @@ async def deploy_all_containers(
                 provider, creds["token"], creds["metadata"]
             )
 
-            # Auto-derive git repo URL for source-mode providers
+            # Auto-derive git repo URL for source-mode providers — inject token at runtime
             deploy_env_vars: dict[str, str] = {}
             if deployment_mode == "source" and project.git_remote_url:
-                deploy_env_vars[ENV_REPO_URL] = project.git_remote_url
+                from ..services.git_providers.url_utils import build_authenticated_git_url
+
+                deploy_env_vars[ENV_REPO_URL] = await build_authenticated_git_url(
+                    project.git_remote_url, current_user.id, db
+                )
 
             config = DeploymentConfig(
                 project_id=str(project.id),
@@ -1488,10 +1492,14 @@ async def deploy_single_container_endpoint(
             provider_name, decrypted_token, credential.provider_metadata
         )
 
-        # Auto-derive git repo URL for source-mode providers
+        # Auto-derive git repo URL for source-mode providers — inject token at runtime
         deploy_env_vars: dict[str, str] = {}
         if deployment_mode == "source" and project.git_remote_url:
-            deploy_env_vars[ENV_REPO_URL] = project.git_remote_url
+            from ..services.git_providers.url_utils import build_authenticated_git_url
+
+            deploy_env_vars[ENV_REPO_URL] = await build_authenticated_git_url(
+                project.git_remote_url, current_user.id, db
+            )
 
         config = DeploymentConfig(
             project_id=str(project.id),

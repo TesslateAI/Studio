@@ -44,6 +44,7 @@ from ..models import (
     UserPurchasedAgent,
     UserPurchasedBase,
 )
+from ..services.git_providers.url_utils import strip_git_credentials as _strip_git_credentials
 from ..services.litellm_service import litellm_service
 from ..users import current_superuser
 
@@ -972,6 +973,7 @@ async def update_agent(
 
         # Built-in skills are seed-managed — no UI edit path.
         from .marketplace import _reject_if_builtin
+
         _reject_if_builtin(agent)
 
         # Check if admin can edit this agent
@@ -1031,6 +1033,7 @@ async def delete_agent(
         # Built-in skills are seed-managed — they cannot be deleted from the
         # UI. Re-run the seed to remove or edit.
         from .marketplace import _reject_if_builtin
+
         _reject_if_builtin(agent)
 
         # Check if admin can delete this agent
@@ -1075,6 +1078,7 @@ async def remove_from_marketplace(
         # desync the deployed catalog from the seed template until the next
         # orchestrator restart.
         from .marketplace import _reject_if_builtin
+
         _reject_if_builtin(agent)
 
         agent.is_active = False
@@ -1119,6 +1123,7 @@ async def restore_to_marketplace(
 
         # Built-in skills' is_active is owned by seed code.
         from .marketplace import _reject_if_builtin
+
         _reject_if_builtin(agent)
 
         agent.is_active = True
@@ -3523,7 +3528,7 @@ async def get_admin_project_detail(
             "deploy_type": project.deploy_type,
             "deployed_at": project.deployed_at.isoformat() if project.deployed_at else None,
             "has_git_repo": project.has_git_repo,
-            "git_remote_url": project.git_remote_url,
+            "git_remote_url": _strip_git_credentials(project.git_remote_url),
             "network_name": project.network_name,
             "volume_name": project.volume_name,
             "file_count": file_count or 0,
@@ -4434,7 +4439,9 @@ async def get_user_agent_runs(
                     "project_slug": row.project_slug,
                     "created_at": msg.created_at.isoformat(),
                     "completion_reason": meta.get("completion_reason"),
-                    "error": meta.get("error"),  # TODO: fix worker.py to persist error from complete_data into message_metadata
+                    "error": meta.get(
+                        "error"
+                    ),  # TODO: fix worker.py to persist error from complete_data into message_metadata
                     "iterations": meta.get("iterations", 0),
                     "tool_calls_made": meta.get("tool_calls_made", 0),
                     "agent_type": meta.get("agent_type"),
@@ -4532,7 +4539,9 @@ async def get_agent_run_errors(
                     "user_id": str(row.uid),
                     "project_name": row.project_name,
                     "project_slug": row.project_slug,
-                    "error": meta.get("error"),  # TODO: fix worker.py to persist error from complete_data into message_metadata
+                    "error": meta.get(
+                        "error"
+                    ),  # TODO: fix worker.py to persist error from complete_data into message_metadata
                     "completion_reason": meta.get("completion_reason"),
                     "created_at": msg.created_at.isoformat(),
                 }
@@ -4624,7 +4633,9 @@ async def get_agent_run_steps(
                 "chat_id": str(message.chat_id),
                 "created_at": message.created_at.isoformat(),
                 "completion_reason": meta.get("completion_reason"),
-                "error": meta.get("error"),  # TODO: fix worker.py to persist error from complete_data into message_metadata
+                "error": meta.get(
+                    "error"
+                ),  # TODO: fix worker.py to persist error from complete_data into message_metadata
                 "iterations": meta.get("iterations", 0),
                 "tool_calls_made": meta.get("tool_calls_made", 0),
                 "agent_type": meta.get("agent_type"),
@@ -4675,7 +4686,6 @@ async def build_all_official_templates(
     if not settings.template_build_enabled:
         raise HTTPException(status_code=400, detail="Template building is disabled")
 
-
     # Query bases that need templates (non-blocking — just the query)
     from ..models import MarketplaceBase
 
@@ -4725,13 +4735,10 @@ async def build_template_for_base(
     if not settings.template_build_enabled:
         raise HTTPException(status_code=400, detail="Template building is disabled")
 
-
     # Verify the base exists before queuing
     from ..models import MarketplaceBase
 
-    base = await db.scalar(
-        select(MarketplaceBase).where(MarketplaceBase.slug == slug)
-    )
+    base = await db.scalar(select(MarketplaceBase).where(MarketplaceBase.slug == slug))
     if not base:
         raise HTTPException(status_code=404, detail=f"Base not found: {slug}")
 

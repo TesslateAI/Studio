@@ -184,14 +184,23 @@ async def _build_git_provider_spec(
         except Exception:
             pass  # Use "main" as fallback
 
-    # Build authenticated URL
-    authenticated_url = provider_class.format_clone_url(
-        repo_info["owner"], repo_info["repo"], access_token
+    # Two URLs are built intentionally: clean_url is token-free and written to
+    # the DB (git_url column) so it remains valid after the OAuth token rotates.
+    # authenticated_url embeds the current access token for the clone subprocess
+    # and is discarded after setup — it is never persisted.
+    clean_url = provider_class.format_clone_url(repo_info["owner"], repo_info["repo"])
+    # Public repos have no token, so fall back to clean_url rather than
+    # producing an unauthenticated URL with a None token embedded.
+    authenticated_url = (
+        provider_class.format_clone_url(repo_info["owner"], repo_info["repo"], access_token)
+        if access_token
+        else clean_url
     )
 
     return SourceSpec(
         kind="git_clone",
-        git_url=authenticated_url,
+        git_url=clean_url,
+        git_clone_url=authenticated_url,
         git_branch=branch,
     )
 

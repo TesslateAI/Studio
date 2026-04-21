@@ -1,3 +1,17 @@
+"""Source acquisition layer for the project setup pipeline.
+
+Responsible for materialising project source files from four origins:
+- ``template_snapshot`` — instant btrfs clone via the Volume Hub (K8s only)
+- ``cache``             — warm local cache hit (desktop/local modes)
+- ``git_clone``         — shallow clone from GitHub / GitLab / Bitbucket
+- ``archive``           — tar/zip retrieved from template storage
+
+The ``SourceSpec`` dataclass keeps the *stored* URL (``git_url``, token-free)
+separate from the *ephemeral* clone URL (``git_clone_url``, may carry an OAuth
+token).  Only ``git_url`` ever leaves this module; ``git_clone_url`` is
+consumed here and discarded.
+"""
+
 import asyncio
 import logging
 import os
@@ -8,12 +22,15 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
-SKIP_DIRS = frozenset({".git", "node_modules", ".next", "__pycache__", ".venv", "venv", "dist", "build"})
+SKIP_DIRS = frozenset(
+    {".git", "node_modules", ".next", "__pycache__", ".venv", "venv", "dist", "build"}
+)
 
 
 @dataclass
 class SourceSpec:
     """Describes where to get source files."""
+
     kind: str  # "template_snapshot", "cache", "git_clone", "archive"
 
     # For template_snapshot
@@ -23,7 +40,12 @@ class SourceSpec:
     cache_path: str | None = None
 
     # For git_clone
+    # git_url is the canonical, token-free URL written to the DB and returned
+    # via the API — safe to store long-term.
     git_url: str | None = None
+    # git_clone_url carries an embedded OAuth token for the actual git clone
+    # subprocess; it is ephemeral and must never be persisted or logged.
+    git_clone_url: str | None = None
     git_branch: str = "main"
 
     # For archive
@@ -37,9 +59,10 @@ class SourceSpec:
 @dataclass
 class AcquiredSource:
     """Result of source acquisition."""
+
     local_path: str | None = None  # Temp dir path for git_clone/archive, cache path for cache
-    volume_id: str | None = None   # For template_snapshot (v2)
-    node_name: str | None = None   # For template_snapshot (v2)
+    volume_id: str | None = None  # For template_snapshot (v2)
+    node_name: str | None = None  # For template_snapshot (v2)
     _temp_dirs: list[str] = field(default_factory=list)  # Dirs to cleanup
 
     async def cleanup(self):
@@ -103,13 +126,18 @@ async def _acquire_from_git(spec: SourceSpec, task) -> AcquiredSource:
         task.update_progress(20, 100, "Cloning repository...")
 
     temp_dir = tempfile.mkdtemp(prefix="tesslate-clone-")
+    # Prefer the token-bearing URL so private repos can authenticate; fall back
+    # to git_url for public repos where no credential was resolved.
+    clone_target = spec.git_clone_url or spec.git_url
 
     try:
         clone_cmd = ["git", "clone", "--depth=1"]
         if spec.git_branch:
             clone_cmd.extend(["--branch", spec.git_branch])
-        clone_cmd.extend([spec.git_url, temp_dir])
+        clone_cmd.extend([clone_target, temp_dir])
 
+        # Log the token-free URL (spec.git_url), not clone_target, so tokens
+        # are never written to the log stream.
         logger.info(f"[SOURCE] Cloning {spec.git_url} to {temp_dir}")
         process = await asyncio.create_subprocess_exec(
             *clone_cmd,
