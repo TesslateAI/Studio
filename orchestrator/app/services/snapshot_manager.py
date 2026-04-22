@@ -222,8 +222,7 @@ class SnapshotManager:
                     status_bits.append(f"error={last_status.get('error')}")
                 if last_status.get("boundVolumeSnapshotContentName"):
                     status_bits.append(
-                        "content="
-                        f"{last_status.get('boundVolumeSnapshotContentName')}"
+                        f"content={last_status.get('boundVolumeSnapshotContentName')}"
                     )
                 error_msg = (
                     f"Snapshot {snapshot.snapshot_name} did not become ready within "
@@ -602,7 +601,10 @@ class SnapshotManager:
         result = await db.execute(
             update(ProjectSnapshot)
             .where(
-                and_(ProjectSnapshot.project_id == project_id, ProjectSnapshot.is_soft_deleted.is_(False))
+                and_(
+                    ProjectSnapshot.project_id == project_id,
+                    ProjectSnapshot.is_soft_deleted.is_(False),
+                )
             )
             .values(is_soft_deleted=True, soft_delete_expires_at=expiry_date)
         )
@@ -762,7 +764,9 @@ class SnapshotManager:
             conditions.append(ProjectSnapshot.pvc_name == pvc_name)
 
         result = await db.execute(
-            select(ProjectSnapshot).where(and_(*conditions)).order_by(ProjectSnapshot.created_at.asc())
+            select(ProjectSnapshot)
+            .where(and_(*conditions))
+            .order_by(ProjectSnapshot.created_at.asc())
         )
         snapshots = list(result.scalars().all())
 
@@ -854,8 +858,14 @@ class SnapshotManager:
                         f"[SNAPSHOT] Failed to delete VolumeSnapshotContent {snapshot_content_name}: {e.reason}"
                     )
 
-        # Delete from database
+        # Delete from database and commit immediately. An independent commit here
+        # ensures this deletion survives even if the caller's outer transaction is
+        # rolled back — for example, when create_snapshot fails after _rotate_snapshots
+        # has already deleted K8s resources. Without this, the DB rows would be
+        # restored by the rollback while the K8s VolumeSnapshots are already gone,
+        # creating ghost references.
         await db.delete(snapshot)
+        await db.commit()
 
     async def _get_pvc_size_bytes(self, namespace: str, pvc_name: str) -> int | None:
         """Get the size of a PVC in bytes."""

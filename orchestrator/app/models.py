@@ -155,9 +155,11 @@ class Project(Base):
     deployment_targets = relationship(
         "DeploymentTarget", back_populates="project", cascade="all, delete-orphan"
     )
-    snapshots = relationship(
-        "ProjectSnapshot", back_populates="project", cascade="all, delete-orphan"
-    )
+    # passive_deletes=True — no ORM cascade on snapshots. The DB-level
+    # ondelete="SET NULL" nullifies project_id when the project row is deleted.
+    # soft_delete_project_snapshots() must be called before db.delete(project) so
+    # the 30-day retention CronJob has rows to act on; see _perform_project_deletion.
+    snapshots = relationship("ProjectSnapshot", back_populates="project", passive_deletes=True)
 
 
 class ProjectSnapshot(Base):

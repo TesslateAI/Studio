@@ -1819,13 +1819,35 @@ async def _perform_project_deletion(
         )
         await db.commit()
 
+        settings = get_settings()
+
+        # 2c. K8s mode only: soft-delete snapshots BEFORE the project row is
+        #     deleted. The snapshots relationship uses passive_deletes=True, so
+        #     db.delete(project) will NOT cascade-delete snapshot rows — the DB's
+        #     ondelete="SET NULL" only nullifies project_id. Soft-deleting here
+        #     ensures the 30-day retention CronJob can still find these rows and
+        #     clean up K8s VolumeSnapshots after expiry.
+        if settings.deployment_mode == "kubernetes":
+            try:
+                from ..services.snapshot_manager import get_snapshot_manager
+
+                snapshot_manager = get_snapshot_manager()
+                deleted_count = await snapshot_manager.soft_delete_project_snapshots(project_id, db)
+                if deleted_count > 0:
+                    logger.info(
+                        f"[DELETE] Soft-deleted {deleted_count} snapshots for project {project_id} (30-day retention)"
+                    )
+            except Exception as e:
+                logger.warning(f"[DELETE] Error soft-deleting snapshots (continuing): {e}")
+
         task.update_progress(50, 100, "Removing project from database...")
 
-        # 3. Delete project from database (files will cascade automatically)
+        # 3. Delete project from database. Snapshot rows are NOT cascaded (passive_deletes=True
+        #    on the relationship) — the DB-level ondelete="SET NULL" nullifies their project_id.
         project_result = await db.execute(select(Project).where(Project.id == project_id))
         project = project_result.scalar_one_or_none()
         if project:
-            await db.delete(project)  # Use ORM delete to trigger cascades
+            await db.delete(project)
             await db.commit()
             logger.info("[DELETE] Deleted project from database")
 
@@ -1834,7 +1856,6 @@ async def _perform_project_deletion(
         # 4. Delete project files — shared volume (docker) or on-disk project
         # directory (desktop). K8s owns files in per-project PVCs so cleanup
         # happens in the namespace-delete branch below.
-        settings = get_settings()
         from ..services.project_fs import get_project_fs_path
 
         fs_path = get_project_fs_path(project) if project else None
@@ -1864,25 +1885,11 @@ async def _perform_project_deletion(
                 pass
 
         else:
-            # Kubernetes mode: Delete K8s resources and soft-delete snapshots
+            # Kubernetes mode: Delete K8s resources. Snapshot soft-delete already
+            # happened in step 2c above, before the project row was removed.
             logger.info("[DELETE] Kubernetes mode: Cleaning up K8s resources...")
 
-            # 4a. Soft-delete snapshots (marks for 30-day retention)
-            try:
-                from ..services.snapshot_manager import get_snapshot_manager
-
-                snapshot_manager = get_snapshot_manager()
-
-                deleted_count = await snapshot_manager.soft_delete_project_snapshots(project_id, db)
-                if deleted_count > 0:
-                    logger.info(
-                        f"[DELETE] Soft-deleted {deleted_count} snapshots for project {project_id} (30-day retention)"
-                    )
-            except Exception as e:
-                logger.warning(f"[DELETE] Error soft-deleting snapshots: {e}")
-                # Continue with deletion even if soft delete fails
-
-            # 4b. Delete Kubernetes namespace and all resources
+            # 4a. Delete Kubernetes namespace and all resources
             try:
                 # Delete entire namespace (cascades to all pods, services, ingresses, PVCs)
                 await orchestrator.delete_project_namespace(project_id=project_id, user_id=user_id)
@@ -1892,7 +1899,7 @@ async def _perform_project_deletion(
             except Exception as e:
                 logger.warning(f"[DELETE] Error deleting K8s resources: {e}")
 
-            # 4c. Delete compute-pool PVC/PV for this volume (prevents quota exhaustion)
+            # 4b. Delete compute-pool PVC/PV for this volume (prevents quota exhaustion)
             if volume_id:
                 try:
                     from ..services.compute_manager import get_compute_manager
