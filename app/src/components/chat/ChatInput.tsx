@@ -298,11 +298,19 @@ export function ChatInput({
     const textarea = textareaRef.current;
     if (!textarea) return;
 
+    // In chip mode the textarea is visually hidden via `w-0`; measuring
+    // scrollHeight on a zero-width element makes the text wrap per-character
+    // and clamps to the 200px max, pushing the whole row huge.
+    if (recognizedCommand) {
+      textarea.style.height = 'auto';
+      return;
+    }
+
     // Reset height to get accurate scrollHeight, then set final height
     textarea.style.height = 'auto';
     const newHeight = Math.min(textarea.scrollHeight, 200);
     textarea.style.height = `${newHeight}px`;
-  }, [message]);
+  }, [message, recognizedCommand]);
 
   const executeCommand = (cmd: string) => {
     if (cmd === '/clear') {
@@ -405,6 +413,9 @@ export function ChatInput({
         const selected = filteredCommands[commandIndex];
         setMessage(selected.command);
         setShowCommands(false);
+        // Keep focus on the textarea so Enter/Escape still land on it once
+        // the input flips into the hidden-chip layout.
+        requestAnimationFrame(() => textareaRef.current?.focus());
         return;
       }
       if (e.key === 'Escape') {
