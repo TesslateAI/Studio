@@ -7,18 +7,28 @@ import {
   FileText,
   Folder,
   FolderOpen,
-  GitBranch,
-  GithubLogo,
-  HardDrives,
   MagnifyingGlass,
   Warning,
   X,
 } from '@phosphor-icons/react';
-import { projectsApi } from '../../lib/api';
-import { buildFileTree, filterFileTree, type FileNode } from '../../utils/buildFileTree';
+import { projectsApi } from '../../../lib/api';
+import { buildFileTree, filterFileTree, type FileNode } from '../../../utils/buildFileTree';
+import { LoadingState } from './EmptyStates';
 
-interface RepositoryPanelProps {
+interface FilesTabProps {
   projectSlug: string;
+  onMeta?: (meta: RepoMeta) => void;
+}
+
+export interface RepoMeta {
+  source: 'github' | 'local';
+  owner: string | null;
+  repo: string | null;
+  branch: string | null;
+  htmlUrl: string | null;
+  truncated: boolean;
+  totalFiles: number;
+  totalDirs: number;
 }
 
 interface GitTreeResponse {
@@ -101,7 +111,6 @@ interface TreeRowProps {
 
 function TreeRow({ node, depth, expanded, toggle, sourceHtmlUrl, branch, source }: TreeRowProps) {
   const isOpen = expanded.has(node.path);
-  // Finger-friendly row on touch: min-h of 32px, ample hit target to the left.
   const paddingLeft = 8 + depth * 14;
 
   if (node.isDirectory) {
@@ -192,7 +201,7 @@ function TreeRow({ node, depth, expanded, toggle, sourceHtmlUrl, branch, source 
   );
 }
 
-export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
+export function FilesTab({ projectSlug, onMeta }: FilesTabProps) {
   const [data, setData] = useState<GitTreeResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -205,9 +214,8 @@ export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
     try {
       const result = await projectsApi.getGitTree(projectSlug);
       setData(result);
-
-      // Default-expand the top-level directories so first-time users see
-      // one level of structure without having to hunt.
+      // Default-expand top-level directories so first-time users see one level
+      // of structure without having to hunt.
       const topDirs = new Set<string>();
       for (const entry of result.files) {
         if (entry.is_dir && !entry.path.includes('/')) {
@@ -237,23 +245,42 @@ export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
     return filterFileTree(fullTree, query.trim());
   }, [fullTree, query]);
 
-  // When searching, expand every directory that has a match so the user sees
-  // results in context rather than collapsed.
+  const totalFiles = data?.files.filter((f) => !f.is_dir).length ?? 0;
+  const totalDirs = data?.files.filter((f) => f.is_dir).length ?? 0;
+
+  // Bubble meta up to the shell so the header can show repo name / branch /
+  // counts without duplicating the fetch.
+  useEffect(() => {
+    if (!data || !onMeta) return;
+    onMeta({
+      source: data.source,
+      owner: data.owner,
+      repo: data.repo,
+      branch: data.branch,
+      htmlUrl: data.html_url,
+      truncated: data.truncated,
+      totalFiles,
+      totalDirs,
+    });
+  }, [data, onMeta, totalFiles, totalDirs]);
+
+  // Expand every directory that matches on search so results are shown in
+  // context rather than collapsed.
   useEffect(() => {
     if (!query.trim()) return;
-    const next = new Set<string>(expanded);
-    const walk = (nodes: FileNode[]) => {
-      for (const n of nodes) {
-        if (n.isDirectory) {
-          next.add(n.path);
-          if (n.children) walk(n.children);
+    setExpanded((prev) => {
+      const next = new Set<string>(prev);
+      const walk = (nodes: FileNode[]) => {
+        for (const n of nodes) {
+          if (n.isDirectory) {
+            next.add(n.path);
+            if (n.children) walk(n.children);
+          }
         }
-      }
-    };
-    walk(visibleTree);
-    setExpanded(next);
-    // We intentionally depend on query + visibleTree only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      };
+      walk(visibleTree);
+      return next;
+    });
   }, [query, visibleTree]);
 
   const toggle = useCallback((path: string) => {
@@ -265,86 +292,10 @@ export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
     });
   }, []);
 
-  const totalFiles = data?.files.filter((f) => !f.is_dir).length ?? 0;
-  const totalDirs = data?.files.filter((f) => f.is_dir).length ?? 0;
-
   return (
-    <div className="w-full h-full flex flex-col bg-[var(--bg)] overflow-hidden">
-      {/* Header card */}
-      <div className="flex-shrink-0 p-2 sm:p-3 pb-2">
-        <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 sm:py-2.5">
-            <span className="flex-shrink-0 text-[var(--text-muted)]">
-              {data?.source === 'github' ? (
-                <GithubLogo size={16} weight="bold" />
-              ) : (
-                <HardDrives size={16} weight="bold" />
-              )}
-            </span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-[12px] font-semibold text-[var(--text)] truncate">
-                  {data?.source === 'github' && data.owner && data.repo
-                    ? `${data.owner}/${data.repo}`
-                    : 'Project files'}
-                </span>
-                {data?.source === 'github' && data.html_url && (
-                  <a
-                    href={data.html_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[var(--text-subtle)] hover:text-[var(--text)] transition-colors flex-shrink-0"
-                    title="Open on GitHub"
-                    aria-label="Open on GitHub"
-                  >
-                    <ArrowSquareOut size={12} weight="bold" />
-                  </a>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-[var(--text-muted)]">
-                {data?.branch && (
-                  <span className="inline-flex items-center gap-1">
-                    <GitBranch size={10} weight="bold" />
-                    <span className="truncate max-w-[120px]">{data.branch}</span>
-                  </span>
-                )}
-                {data && !loading && (
-                  <>
-                    {data.branch && <span className="text-[var(--text-subtle)]">·</span>}
-                    <span>
-                      {totalFiles.toLocaleString()} {totalFiles === 1 ? 'file' : 'files'}
-                    </span>
-                    <span className="text-[var(--text-subtle)]">·</span>
-                    <span>
-                      {totalDirs.toLocaleString()} {totalDirs === 1 ? 'folder' : 'folders'}
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={fetchTree}
-              disabled={loading}
-              className="btn btn-icon btn-sm flex-shrink-0"
-              title="Refresh"
-              aria-label="Refresh repository tree"
-            >
-              <ArrowClockwise size={13} weight="bold" className={loading ? 'animate-spin' : ''} />
-            </button>
-          </div>
-
-          {data?.truncated && (
-            <div className="flex items-center gap-2 px-3 py-2 border-t border-[var(--border)] bg-[var(--bg)] text-[10px] text-[var(--status-warning)]">
-              <Warning size={12} weight="bold" />
-              <span>This repository is large — some files were not included in the listing.</span>
-            </div>
-          )}
-        </div>
-      </div>
-
+    <div className="flex flex-col h-full">
       {/* Search */}
-      <div className="flex-shrink-0 px-2 sm:px-3 pb-2">
+      <div className="flex-shrink-0 p-2 border-b border-[var(--border)]">
         <div className="relative">
           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-subtle)] pointer-events-none">
             <MagnifyingGlass size={13} weight="bold" />
@@ -367,21 +318,18 @@ export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
             </button>
           )}
         </div>
+        {data?.truncated && (
+          <div className="mt-2 flex items-center gap-1.5 text-[10px] text-[var(--status-warning)]">
+            <Warning size={11} weight="bold" />
+            <span>This repository is large — some files were not included.</span>
+          </div>
+        )}
       </div>
 
       {/* Tree */}
-      <div className="flex-1 overflow-y-auto px-2 sm:px-3 pb-3">
+      <div className="flex-1 overflow-y-auto p-2">
         <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] p-1.5 min-h-full">
-          {loading && !data && (
-            <div className="flex flex-col items-center justify-center py-10 gap-2">
-              <ArrowClockwise
-                size={18}
-                weight="bold"
-                className="animate-spin text-[var(--text-muted)]"
-              />
-              <p className="text-[11px] text-[var(--text-muted)]">Loading repository…</p>
-            </div>
-          )}
+          {loading && !data && <LoadingState label="Loading files…" />}
 
           {error && !loading && (
             <div className="flex flex-col items-center justify-center py-10 px-4 text-center gap-2">
@@ -423,8 +371,24 @@ export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
             ))}
         </div>
       </div>
+
+      {/* Refresh affordance stays at the bottom for narrow panels */}
+      <div className="flex-shrink-0 p-2 border-t border-[var(--border)] flex items-center justify-between">
+        <span className="text-[10px] text-[var(--text-muted)]">
+          {totalFiles.toLocaleString()} {totalFiles === 1 ? 'file' : 'files'} ·{' '}
+          {totalDirs.toLocaleString()} {totalDirs === 1 ? 'folder' : 'folders'}
+        </span>
+        <button
+          type="button"
+          onClick={fetchTree}
+          disabled={loading}
+          className="btn btn-icon btn-sm"
+          title="Refresh"
+          aria-label="Refresh repository tree"
+        >
+          <ArrowClockwise size={12} weight="bold" className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
     </div>
   );
 }
-
-export default RepositoryPanel;
