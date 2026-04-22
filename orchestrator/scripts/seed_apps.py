@@ -35,13 +35,15 @@ logger = logging.getLogger("seed_apps")
 # Keep this explicit (vs. inferring snake_case from slug) so a typo in the
 # registry surfaces here, not as a confusing ImportError at runtime.
 _SLUG_TO_MODULE: dict[str, str] = {
-    "hello-node":        "scripts.seed_hello_node_app",
-    "crm-demo":          "scripts.seed_crm_app",
-    "nightly-digest":    "scripts.seed_nightly_digest",
+    "hello-node": "scripts.seed_hello_node_app",
+    "crm-demo": "scripts.seed_crm_app",
+    "nightly-digest": "scripts.seed_nightly_digest",
     "crm-with-postgres": "scripts.seed_crm_with_postgres_app",
-    "markitdown":        "scripts.seed_markitdown_app",
-    "deer-flow":         "scripts.seed_deer_flow_app",
-    "mirofish":          "scripts.seed_mirofish_app",
+    "markitdown": "scripts.seed_markitdown_app",
+    "deer-flow": "scripts.seed_deer_flow_app",
+    "mirofish": "scripts.seed_mirofish_app",
+    "damian-app": "scripts.seed_damian_app",
+    "law-onboarding": "scripts.seed_law_onboarding_app",
 }
 
 

@@ -1,0 +1,43 @@
+{
+  "manifest_schema_version": "2025-02",
+  "app": {
+    "id": "com.tesslate.damian-app",
+    "slug": "damian-app",
+    "name": "Damian App",
+    "version": "0.1.0",
+    "description": "Minimal Next.js 16 + React 19 + Tailwind starter built on the Tesslate nextjs-16-base template. Boots a live dev server with Turbopack; ready to hack on immediately after install.",
+    "category": "productivity",
+    "forkable": "true"
+  },
+  "compatibility": {
+    "studio": {"min": "0.0.0"},
+    "manifest_schema": "2025-02",
+    "runtime_api": "^1.0",
+    "required_features": []
+  },
+  "compute": {
+    "tier": 1,
+    "compute_model": "per-installer",
+    "containers": [
+      {
+        "name": "web",
+        "primary": true,
+        "image": "tesslate-devserver:latest",
+        "ports": [3000],
+        "startup_command": "sh -c 'cd /app && (test -d node_modules || pnpm install --frozen-lockfile) && bun run dev -- --hostname 0.0.0.0 --port 3000'",
+        "env": {}
+      }
+    ],
+    "connections": []
+  },
+  "surfaces": [
+    {"kind": "ui", "entrypoint": "/"}
+  ],
+  "state": {"model": "per-install-volume", "volume_size": "2Gi"},
+  "billing": {
+    "ai_compute": {"payer": "installer", "markup_pct": 0},
+    "general_compute": {"payer": "platform"},
+    "platform_fee": {"model": "free"}
+  },
+  "listing": {"visibility": "public"}
+}

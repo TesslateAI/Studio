@@ -93,6 +93,22 @@ SEED_APPS: list[SeedApp] = [
             "simulation with a web UI; requires an LLM API key."
         ),
     ),
+    SeedApp(
+        slug="damian-app",
+        assets_dir=SEEDS_ROOT / "damian-app",
+        description=(
+            "Next.js 16 + React 19 + Tailwind starter on the nextjs-16-base "
+            "template. Boots a live dev server with Turbopack; ready to hack on."
+        ),
+    ),
+    SeedApp(
+        slug="law-onboarding",
+        assets_dir=SEEDS_ROOT / "law-onboarding",
+        description=(
+            "Legal client-intake + document-redline demo. Next.js 16 + NextAuth "
+            "dashboard with a built-in demo-data layer (no database required)."
+        ),
+    ),
 ]
 
 
