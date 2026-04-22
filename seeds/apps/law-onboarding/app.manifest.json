@@ -24,7 +24,7 @@
         "primary": true,
         "image": "tesslate-devserver:latest",
         "ports": [3000],
-        "startup_command": "sh -c 'cd /app && (test -d node_modules || bun install) && bun run dev -- --hostname 0.0.0.0 --port 3000'",
+        "startup_command": "sh -c 'cd /app && (test -x node_modules/.bin/next || bun install) && bun run dev -- --hostname 0.0.0.0 --port 3000'",
         "env": {
           "NEXTAUTH_SECRET": "demo-secret-key-32chars-minimum-ok",
           "NEXTAUTH_URL": "http://localhost:3000",
