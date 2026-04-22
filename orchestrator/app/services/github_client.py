@@ -219,11 +219,88 @@ class GitHubClient:
         Returns:
             List of commit dictionaries
         """
-        params = {"per_page": per_page}
+        params: dict[str, Any] = {"per_page": per_page}
         if sha:
             params["sha"] = sha
 
         return await self._request("GET", f"/repos/{owner}/{repo}/commits", params=params)
+
+    async def get_commit(self, owner: str, repo: str, ref: str) -> dict[str, Any]:
+        """
+        Get a single commit including stats and file changes.
+
+        This hits the per-commit endpoint which returns ``stats`` (additions,
+        deletions, total) and ``files`` (patches) in addition to the fields
+        returned by ``list_commits``. Use sparingly — it costs one request per
+        commit.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            ref: Commit SHA or ref (branch/tag)
+
+        Returns:
+            Commit dictionary with ``stats`` and ``files`` keys.
+        """
+        return await self._request("GET", f"/repos/{owner}/{repo}/commits/{ref}")
+
+    async def compare_commits(self, owner: str, repo: str, base: str, head: str) -> dict[str, Any]:
+        """
+        Compare two commits/branches.
+
+        GitHub's compare endpoint returns ``ahead_by``, ``behind_by``,
+        ``total_commits`` and a list of commits between the two refs. Useful
+        for rendering "3 ahead · 1 behind" style branch status.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            base: Base ref (e.g. default branch name)
+            head: Head ref (e.g. feature branch name)
+
+        Returns:
+            Compare response dictionary.
+        """
+        return await self._request("GET", f"/repos/{owner}/{repo}/compare/{base}...{head}")
+
+    async def list_contributors(
+        self, owner: str, repo: str, per_page: int = 30
+    ) -> list[dict[str, Any]]:
+        """
+        List contributors for a repository, ordered by commit count.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            per_page: Max contributors to return (GitHub caps per_page at 100)
+
+        Returns:
+            List of contributor dictionaries (login, avatar_url, contributions).
+        """
+        params = {"per_page": per_page}
+        return await self._request("GET", f"/repos/{owner}/{repo}/contributors", params=params)
+
+    async def list_pulls(
+        self,
+        owner: str,
+        repo: str,
+        state: str = "open",
+        per_page: int = 30,
+    ) -> list[dict[str, Any]]:
+        """
+        List pull requests for a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            state: One of ``open``, ``closed`` or ``all``
+            per_page: Results per page (max 100)
+
+        Returns:
+            List of pull request dictionaries.
+        """
+        params = {"state": state, "per_page": per_page}
+        return await self._request("GET", f"/repos/{owner}/{repo}/pulls", params=params)
 
     async def get_rate_limit(self) -> dict[str, Any]:
         """

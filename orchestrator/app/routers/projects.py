@@ -906,6 +906,374 @@ async def get_git_tree(
         )
 
 
+async def _resolve_github_client(
+    db: AsyncSession,
+    project: Project,
+    user: User,
+) -> tuple[str, str, object] | None:
+    """Resolve (owner, repo, client) for a project's GitHub remote.
+
+    Returns ``None`` when the project has no GitHub remote or the URL is not
+    parseable. The returned client is authenticated when the user has a
+    GitHub OAuth token available; otherwise falls back to unauthenticated
+    requests (public repos only).
+    """
+    from ..services.github_client import GitHubClient
+
+    remote_url = getattr(project, "git_remote_url", None)
+    parsed = GitHubClient.parse_repo_url(remote_url) if remote_url else None
+    if not parsed:
+        return None
+
+    access_token: str | None = None
+    try:
+        from ..services.credential_manager import get_credential_manager
+
+        credential_manager = get_credential_manager()
+        access_token = await credential_manager.get_access_token(db, user.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"[GIT] Could not retrieve GitHub token: {exc}")
+
+    return parsed["owner"], parsed["repo"], GitHubClient(access_token or "")
+
+
+def _no_remote_payload(kind: str) -> dict[str, object]:
+    """Return a friendly 'connect GitHub to see X' envelope."""
+    return {
+        "status": "no_remote",
+        "message": f"Connect a GitHub remote to see {kind}.",
+    }
+
+
+def _error_payload(kind: str, exc: Exception) -> dict[str, object]:
+    """Return a safe error envelope for GitHub failures.
+
+    We intentionally surface errors as HTTP 200 bodies so the read-only
+    Repository panel can render a friendly empty state without triggering
+    axios error handlers or retry storms. The panel is non-critical — "no
+    data" is always an acceptable outcome.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return {
+            "status": "error",
+            "message": f"GitHub returned {exc.response.status_code}",
+            "http_status": exc.response.status_code,
+        }
+    return {
+        "status": "error",
+        "message": f"Could not load {kind} from GitHub",
+    }
+
+
+@router.get("/{project_slug}/git/commits")
+async def get_git_commits(
+    project_slug: str,
+    branch: str | None = None,
+    limit: int = 30,
+    include_stats: bool = False,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent commits for the Repository panel (Overview + Graph tabs).
+
+    Returns up to ``limit`` commits (capped at 100) from the given branch (or
+    default branch if not specified). When ``include_stats=true`` each commit
+    is enriched with a ``files_changed`` count via the per-commit GitHub
+    endpoint — this costs one extra request per commit so it is bounded to
+    the first 30 commits and only used when explicitly requested.
+
+    Shape (per commit):
+        sha: str
+        short_sha: str (first 7)
+        message: str
+        title: str (first line only)
+        author: {login, avatar_url, name, email, date}
+        committer: {...}
+        parents: [sha]
+        html_url: str
+        files_changed: int | None (only when include_stats=true)
+    """
+    project = await get_project_by_slug(db, project_slug, current_user)
+    resolved = await _resolve_github_client(db, project, current_user)
+    if resolved is None:
+        return _no_remote_payload("commit history")
+
+    owner, repo, client = resolved
+    capped = max(1, min(limit, 100))
+
+    try:
+        raw_commits = await client.list_commits(owner, repo, sha=branch, per_page=capped)
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[GIT_COMMITS] Failed for {project_slug}: {exc}")
+        return _error_payload("commit history", exc)
+
+    def _normalize(commit: dict[str, object]) -> dict[str, object]:
+        sha = str(commit.get("sha") or "")
+        commit_body = commit.get("commit") or {}
+        if not isinstance(commit_body, dict):
+            commit_body = {}
+        author_meta = commit_body.get("author") or {}
+        if not isinstance(author_meta, dict):
+            author_meta = {}
+        author_user = commit.get("author") or {}
+        if not isinstance(author_user, dict):
+            author_user = {}
+        committer_meta = commit_body.get("committer") or {}
+        if not isinstance(committer_meta, dict):
+            committer_meta = {}
+        committer_user = commit.get("committer") or {}
+        if not isinstance(committer_user, dict):
+            committer_user = {}
+        parents_raw = commit.get("parents") or []
+        parents: list[str] = []
+        if isinstance(parents_raw, list):
+            for p in parents_raw:
+                if isinstance(p, dict) and isinstance(p.get("sha"), str):
+                    parents.append(p["sha"])
+        message = str(commit_body.get("message") or "")
+        title = message.split("\n", 1)[0] if message else ""
+        return {
+            "sha": sha,
+            "short_sha": sha[:7] if sha else "",
+            "message": message,
+            "title": title,
+            "html_url": commit.get("html_url"),
+            "parents": parents,
+            "author": {
+                "login": author_user.get("login"),
+                "avatar_url": author_user.get("avatar_url"),
+                "name": author_meta.get("name"),
+                "email": author_meta.get("email"),
+                "date": author_meta.get("date"),
+            },
+            "committer": {
+                "login": committer_user.get("login"),
+                "avatar_url": committer_user.get("avatar_url"),
+                "name": committer_meta.get("name"),
+                "email": committer_meta.get("email"),
+                "date": committer_meta.get("date"),
+            },
+            "files_changed": None,
+        }
+
+    commits = [_normalize(c) for c in raw_commits if isinstance(c, dict)]
+
+    if include_stats and commits:
+        # Bounded enrichment — cap at 30 parallel requests to stay polite
+        # against GitHub rate limits and keep the response non-blocking.
+        stats_cap = min(len(commits), 30)
+
+        async def _enrich(commit: dict[str, object]) -> None:
+            sha = commit.get("sha")
+            if not isinstance(sha, str) or not sha:
+                return
+            try:
+                detail = await client.get_commit(owner, repo, sha)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"[GIT_COMMITS] stats fetch failed for {sha}: {exc}")
+                return
+            files = detail.get("files") if isinstance(detail, dict) else None
+            if isinstance(files, list):
+                commit["files_changed"] = len(files)
+
+        await asyncio.gather(*[_enrich(c) for c in commits[:stats_cap]])
+
+    return {
+        "status": "ready",
+        "owner": owner,
+        "repo": repo,
+        "branch": branch,
+        "html_url": f"https://github.com/{owner}/{repo}",
+        "commits": commits,
+    }
+
+
+@router.get("/{project_slug}/git/branches")
+async def get_git_branches(
+    project_slug: str,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List branches with ahead/behind-default counts.
+
+    For each non-default branch we call ``GET /compare/{default}...{branch}``
+    to get ``ahead_by`` / ``behind_by``. Comparisons run concurrently; if
+    any individual compare fails (e.g. on orphaned branches) we fall back to
+    ``None`` for that branch's counts rather than failing the whole request.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user)
+    resolved = await _resolve_github_client(db, project, current_user)
+    if resolved is None:
+        return _no_remote_payload("branches")
+
+    owner, repo, client = resolved
+
+    try:
+        repo_info = await client.get_repository_info(owner, repo)
+        default_branch = str(repo_info.get("default_branch") or "main")
+        raw_branches = await client.list_branches(owner, repo, per_page=100)
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[GIT_BRANCHES] Failed for {project_slug}: {exc}")
+        return _error_payload("branches", exc)
+
+    async def _compare(name: str) -> dict[str, object] | None:
+        if name == default_branch:
+            return {"ahead_by": 0, "behind_by": 0}
+        try:
+            cmp_result = await client.compare_commits(owner, repo, default_branch, name)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[GIT_BRANCHES] compare {name} failed: {exc}")
+            return None
+        return {
+            "ahead_by": cmp_result.get("ahead_by"),
+            "behind_by": cmp_result.get("behind_by"),
+        }
+
+    names = [
+        str(b.get("name"))
+        for b in raw_branches
+        if isinstance(b, dict) and isinstance(b.get("name"), str)
+    ]
+    compares = await asyncio.gather(*[_compare(n) for n in names])
+
+    branches: list[dict[str, object]] = []
+    for b, cmp in zip(raw_branches, compares, strict=False):
+        if not isinstance(b, dict):
+            continue
+        name = b.get("name")
+        if not isinstance(name, str):
+            continue
+        commit = b.get("commit") if isinstance(b.get("commit"), dict) else {}
+        sha = commit.get("sha") if isinstance(commit, dict) else None
+        branches.append(
+            {
+                "name": name,
+                "is_default": name == default_branch,
+                "protected": bool(b.get("protected")),
+                "sha": sha,
+                "html_url": (f"https://github.com/{owner}/{repo}/tree/{name}" if name else None),
+                "ahead_by": (cmp or {}).get("ahead_by"),
+                "behind_by": (cmp or {}).get("behind_by"),
+            }
+        )
+
+    # Default branch first, then alphabetical for predictability.
+    branches.sort(key=lambda b: (not b["is_default"], b["name"]))
+
+    return {
+        "status": "ready",
+        "owner": owner,
+        "repo": repo,
+        "default_branch": default_branch,
+        "html_url": f"https://github.com/{owner}/{repo}",
+        "branches": branches,
+    }
+
+
+@router.get("/{project_slug}/git/repo-info")
+async def get_git_repo_info(
+    project_slug: str,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate stats for the Overview tab.
+
+    Runs repo info, contributors list and open-PR list concurrently so the
+    panel gets everything in one round-trip. Any sub-call that fails returns
+    a safe default so the Overview tab degrades gracefully.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user)
+    resolved = await _resolve_github_client(db, project, current_user)
+    if resolved is None:
+        return _no_remote_payload("repository info")
+
+    owner, repo, client = resolved
+
+    async def _info() -> dict[str, object] | None:
+        try:
+            return await client.get_repository_info(owner, repo)
+        except Exception as exc:  # noqa: BLE001
+            logger.info(f"[GIT_REPO_INFO] info failed: {exc}")
+            return None
+
+    async def _contributors() -> list[dict[str, object]]:
+        try:
+            result = await client.list_contributors(owner, repo, per_page=30)
+        except Exception as exc:  # noqa: BLE001
+            logger.info(f"[GIT_REPO_INFO] contributors failed: {exc}")
+            return []
+        return result if isinstance(result, list) else []
+
+    async def _pulls() -> list[dict[str, object]]:
+        try:
+            result = await client.list_pulls(owner, repo, state="open", per_page=30)
+        except Exception as exc:  # noqa: BLE001
+            logger.info(f"[GIT_REPO_INFO] pulls failed: {exc}")
+            return []
+        return result if isinstance(result, list) else []
+
+    info, contributors_raw, pulls_raw = await asyncio.gather(_info(), _contributors(), _pulls())
+
+    if info is None:
+        return _error_payload("repository info", Exception("info fetch failed"))
+
+    contributors = [
+        {
+            "login": c.get("login"),
+            "avatar_url": c.get("avatar_url"),
+            "contributions": c.get("contributions"),
+            "html_url": c.get("html_url"),
+        }
+        for c in contributors_raw
+        if isinstance(c, dict)
+    ]
+
+    open_prs = [
+        {
+            "number": p.get("number"),
+            "title": p.get("title"),
+            "html_url": p.get("html_url"),
+            "user": (
+                {
+                    "login": p["user"].get("login"),
+                    "avatar_url": p["user"].get("avatar_url"),
+                }
+                if isinstance(p.get("user"), dict)
+                else None
+            ),
+            "created_at": p.get("created_at"),
+            "draft": p.get("draft"),
+        }
+        for p in pulls_raw
+        if isinstance(p, dict)
+    ]
+
+    topics = info.get("topics")
+    if not isinstance(topics, list):
+        topics = []
+
+    return {
+        "status": "ready",
+        "owner": owner,
+        "repo": repo,
+        "html_url": info.get("html_url") or f"https://github.com/{owner}/{repo}",
+        "description": info.get("description"),
+        "default_branch": info.get("default_branch") or "main",
+        "stars": info.get("stargazers_count"),
+        "watchers": info.get("watchers_count"),
+        "forks": info.get("forks_count"),
+        "open_issues": info.get("open_issues_count"),
+        "pushed_at": info.get("pushed_at"),
+        "updated_at": info.get("updated_at"),
+        "created_at": info.get("created_at"),
+        "is_private": info.get("private"),
+        "topics": topics,
+        "contributors": contributors,
+        "open_pulls": open_prs,
+        "open_pulls_count": len(open_prs),
+    }
+
+
 @router.get("/{project_slug}/files/content")
 async def get_file_content(
     project_slug: str,
