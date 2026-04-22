@@ -399,6 +399,14 @@ async def read_many_files_tool(params: dict[str, Any], context: dict[str, Any]) 
     if skipped:
         summary += f", skipped {pluralize(len(skipped), 'file')}"
 
+    try:
+        from ....services.recent_files import get_recent_file_tracker
+
+        tracker = get_recent_file_tracker()
+        await tracker.record_many(context, [f.get("path") for f in files_out if f.get("path")])
+    except Exception:
+        pass
+
     return success_output(
         message=summary,
         files=files_out,
