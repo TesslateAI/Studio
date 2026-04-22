@@ -13,11 +13,34 @@ import base64
 import logging
 from typing import Any
 
-from ..output_formatter import strip_ansi_codes, success_output
+from ..output_formatter import error_output, strip_ansi_codes, success_output
 from ..registry import Tool, ToolCategory
 from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
+
+_BYTES_PER_TOKEN = 4
+_TRUNCATION_MARKER = "\n[truncated]\n"
+
+
+def _truncate_output(text: str, max_output_tokens: int) -> tuple[str, bool]:
+    """Truncate ``text`` to at most ``max_output_tokens * 4`` bytes.
+
+    Keeps the tail of the output — shell tools typically emit the
+    interesting bit last.
+    """
+    if max_output_tokens <= 0:
+        return text, False
+    budget = max_output_tokens * _BYTES_PER_TOKEN
+    encoded = text.encode("utf-8", errors="replace")
+    if len(encoded) <= budget:
+        return text, False
+    tail = encoded[-budget:]
+    try:
+        decoded = tail.decode("utf-8", errors="replace")
+    except UnicodeDecodeError:
+        decoded = tail.decode("latin-1", errors="replace")
+    return _TRUNCATION_MARKER + decoded, True
 
 
 @tool_retry
@@ -34,6 +57,8 @@ async def shell_exec_executor(params: dict[str, Any], context: dict[str, Any]) -
     session_id = params["session_id"]
     command = params["command"]
     wait_seconds = params.get("wait_seconds", 2.0)
+    max_output_tokens_raw = params.get("max_output_tokens")
+    max_output_tokens = int(max_output_tokens_raw) if max_output_tokens_raw is not None else None
     db = context["db"]
     user_id = context["user_id"]
 
@@ -45,23 +70,101 @@ async def shell_exec_executor(params: dict[str, Any], context: dict[str, Any]) -
 
     # Write command (with authorization check)
     data_bytes = command.encode("utf-8")
-    await session_manager.write_to_session(session_id, data_bytes, db, user_id=user_id)
+    try:
+        await session_manager.write_to_session(session_id, data_bytes, db, user_id=user_id)
+    except KeyError:
+        return error_output(
+            message=f"Unknown shell session: {session_id}",
+            suggestion=(
+                "Call shell_open first to obtain a session_id, or the session may have exited."
+            ),
+            details={
+                "session_id": session_id,
+                "status": "unknown",
+                "tier": "orchestrator",
+            },
+        )
+    except BrokenPipeError as exc:
+        return error_output(
+            message=f"Shell session {session_id} pipe is broken: {exc}",
+            suggestion="The session may have exited — open a new session with shell_open",
+            details={
+                "session_id": session_id,
+                "error": str(exc),
+                "status": "exited",
+                "tier": "orchestrator",
+            },
+        )
 
     # Wait for execution
     await asyncio.sleep(wait_seconds)
 
     # Read output (with authorization check)
-    output_data = await session_manager.read_output(session_id, db, user_id=user_id)
+    try:
+        output_data = await session_manager.read_output(session_id, db, user_id=user_id)
+    except KeyError:
+        return error_output(
+            message=f"Unknown shell session: {session_id}",
+            suggestion="Session was removed between write and read",
+            details={
+                "session_id": session_id,
+                "status": "unknown",
+                "tier": "orchestrator",
+            },
+        )
+    except BrokenPipeError as exc:
+        return error_output(
+            message=f"Shell session {session_id} pipe is broken: {exc}",
+            suggestion="The session may have exited — open a new session with shell_open",
+            details={
+                "session_id": session_id,
+                "error": str(exc),
+                "status": "exited",
+                "tier": "orchestrator",
+            },
+        )
 
     # Decode base64 output and strip control characters
     output_text = base64.b64decode(output_data["output"]).decode("utf-8", errors="replace")
     output_text = strip_ansi_codes(output_text)
 
+    truncated = False
+    if max_output_tokens is not None and max_output_tokens > 0:
+        output_text, truncated = _truncate_output(output_text, max_output_tokens)
+
+    # Determine session status / exit_code from what the manager exposes
+    # (is_eof → exited; otherwise → running). The manager does not surface a
+    # process exit_code directly, so we attach it only when we can infer it.
+    is_eof = bool(output_data.get("is_eof"))
+    status = "exited" if is_eof else "running"
+    exit_code: int | None = None
+    session = session_manager.active_sessions.get(session_id)
+    if session is not None:
+        # Best-effort: some PTY session implementations expose ``exit_code``
+        # once the underlying process has terminated. Read it defensively.
+        candidate = getattr(session, "exit_code", None)
+        if candidate is not None:
+            try:
+                exit_code = int(candidate)
+            except (TypeError, ValueError):
+                exit_code = None
+
+    details: dict[str, Any] = {
+        "bytes": output_data["bytes"],
+        "is_eof": is_eof,
+        "status": status,
+        "tier": "orchestrator",
+    }
+    if exit_code is not None:
+        details["exit_code"] = exit_code
+    if truncated:
+        details["truncated"] = True
+
     return success_output(
         message=f"Executed '{command.strip()}' in session {session_id}",
         output=output_text,
         session_id=session_id,
-        details={"bytes": output_data["bytes"], "is_eof": output_data["is_eof"]},
+        details=details,
     )
 
 
@@ -87,6 +190,14 @@ def register_execute_tools(registry):
                     "wait_seconds": {
                         "type": "number",
                         "description": "Seconds to wait before reading output (default: 2)",
+                    },
+                    "max_output_tokens": {
+                        "type": "integer",
+                        "description": (
+                            "Approximate output budget in model tokens (4 bytes/token). "
+                            "When provided, output beyond this is truncated with a "
+                            "[truncated] marker. Default: unbounded."
+                        ),
                     },
                 },
                 "required": ["session_id", "command"],

@@ -3,7 +3,7 @@ File Undo Tool
 
 Reverts the most recent mutation to a given file by popping the latest
 matching entry off the shared :data:`EDIT_HISTORY` buffer and restoring
-the recorded ``prev_content`` via the unified orchestrator.
+the recorded ``prev_content`` via the active orchestrator.
 
 Semantics:
     * If the recorded ``prev_content`` is ``None``, the file did not exist
@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ....services.orchestration import get_orchestrator
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 from .edit_history import EDIT_HISTORY
@@ -58,13 +59,12 @@ async def file_undo_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
             file_path=file_path,
         )
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    project_id_raw = context.get("project_id")
+    project_id = str(project_id_raw) if project_id_raw is not None else ""
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")
     container_name = context.get("container_name")
-
-    from ....services.orchestration import get_orchestrator
 
     orchestrator = get_orchestrator()
 
@@ -75,7 +75,6 @@ async def file_undo_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
 
     try:
         if entry.prev_content is None:
-            # File did not exist before the mutation — delete it to undo.
             deleted = await orchestrator.delete_file(
                 user_id=user_id,
                 project_id=project_id,
@@ -94,7 +93,7 @@ async def file_undo_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
                     details={"op": entry.op},
                 )
             return success_output(
-                message=f"Reverted '{file_path}' (deleted — file did not previously exist)",
+                message=(f"Reverted '{file_path}' (deleted -- file did not previously exist)"),
                 file_path=file_path,
                 details={
                     "op": entry.op,
@@ -151,14 +150,14 @@ def register_undo_tool(registry) -> None:
             description=(
                 "Revert the most recent mutation (write/edit/patch/delete/move) "
                 "applied to a file by the agent in this run. Only undoes a single "
-                "step — call again to walk further back."
+                "step -- call again to walk further back."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "Path of the file to revert (relative to project root).",
+                        "description": ("Path of the file to revert (relative to project root)."),
                     }
                 },
                 "required": ["file_path"],

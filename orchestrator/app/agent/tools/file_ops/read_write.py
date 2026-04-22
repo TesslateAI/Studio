@@ -45,8 +45,9 @@ async def read_file_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
     if not file_path:
         raise ValueError("file_path parameter is required")
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    pid = context.get("project_id")
+    project_id = str(pid) if pid is not None else None
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
     container_name = context.get("container_name")
@@ -113,8 +114,9 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     if content is None:
         raise ValueError("content parameter is required")
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    pid = context.get("project_id")
+    project_id = str(pid) if pid is not None else None
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
     container_name = context.get("container_name")

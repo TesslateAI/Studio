@@ -1,14 +1,14 @@
 """
-Persistent Python REPL Tool
+Persistent Python REPL Tool.
 
 Exposes a per-session Python interpreter that keeps locals across calls,
 captures stdout/stderr/exceptions, and supports simple expression
 evaluation (returning the repr of the result in the ``value`` field).
 
-Execution is offloaded to a thread-pool with a hard deadline — when the
-deadline elapses the session is marked ``bad`` because arbitrary Python
-code cannot be interrupted safely, and subsequent calls against that
-session are rejected until ``reset=True`` is passed.
+Execution is offloaded to a daemon thread with a hard deadline — when
+the deadline elapses the session is marked ``bad`` because arbitrary
+Python code cannot be interrupted safely, and subsequent calls against
+that session are rejected until ``reset=True`` is passed.
 
 Design notes:
 - Each session owns an :class:`code.InteractiveInterpreter` and a
@@ -69,7 +69,10 @@ class PythonReplSession:
     """
 
     def __init__(self) -> None:
-        self.locals_dict: dict[str, Any] = {"__name__": "__repl__", "__builtins__": __builtins__}
+        self.locals_dict: dict[str, Any] = {
+            "__name__": "__repl__",
+            "__builtins__": __builtins__,
+        }
         self.interpreter = InteractiveInterpreter(self.locals_dict)
         self.lock = threading.Lock()
         self.bad = False
@@ -171,7 +174,10 @@ def _execute_code_sync(
     return stdout_buf.getvalue(), stderr_buf.getvalue(), value
 
 
-async def python_repl_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+async def python_repl_tool(
+    params: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
     """
     Run ``code`` against a persistent Python REPL session.
 
@@ -208,7 +214,8 @@ async def python_repl_tool(params: dict[str, Any], context: dict[str, Any]) -> d
             if existing is None:
                 # Session didn't exist — create fresh with the requested id.
                 session = PythonReplSession()
-                PYTHON_REPL_SESSIONS._sessions[session_id] = session  # noqa: SLF001
+                with PYTHON_REPL_SESSIONS._lock:  # noqa: SLF001
+                    PYTHON_REPL_SESSIONS._sessions[session_id] = session  # noqa: SLF001
             else:
                 session = existing
 
@@ -220,7 +227,11 @@ async def python_repl_tool(params: dict[str, Any], context: dict[str, Any]) -> d
                 f"Pass reset=true to recreate it."
             ),
             suggestion="Retry with reset=true to drop the broken session and start fresh.",
-            details={"session_id": session_id, "bad_reason": session.bad_reason, "tier": "local"},
+            details={
+                "session_id": session_id,
+                "bad_reason": session.bad_reason,
+                "tier": "local",
+            },
         )
 
     loop = asyncio.get_running_loop()
@@ -327,8 +338,8 @@ def register_python_repl_tool(registry) -> None:
                     "session_id": {
                         "type": "string",
                         "description": (
-                            "Persistent session identifier. Omit to auto-generate a "
-                            "fresh one (the id is returned in the response)."
+                            "Persistent session identifier. Omit to auto-generate "
+                            "a fresh one (the id is returned in the response)."
                         ),
                     },
                     "reset": {
@@ -338,7 +349,9 @@ def register_python_repl_tool(registry) -> None:
                     },
                     "timeout_ms": {
                         "type": "integer",
-                        "description": "Hard deadline in milliseconds. On timeout the session is marked bad.",
+                        "description": (
+                            "Hard deadline in milliseconds. On timeout the session is marked bad."
+                        ),
                         "default": 30000,
                     },
                     "max_output_tokens": {

@@ -495,6 +495,22 @@ def _resolve_run_id(context: dict[str, Any]) -> str | None:
     return None
 
 
+def _resolve_cwd(context: dict[str, Any], params_cwd: str | None) -> str:
+    """Resolve a working directory for the spawned process.
+
+    ``params_cwd`` — when provided — is treated as relative to the
+    project root (``context["cwd"]`` or ``$PROJECT_ROOT`` or the current
+    process ``cwd``). Absolute paths are silently joined under the root.
+    """
+    import os
+
+    base = context.get("cwd") or os.environ.get("PROJECT_ROOT") or os.getcwd()
+    if not params_cwd:
+        return base
+    candidate = os.path.join(base, params_cwd) if not os.path.isabs(params_cwd) else params_cwd
+    return candidate
+
+
 def _truncate_output(text: str, max_output_tokens: int) -> tuple[str, bool]:
     """Truncate ``text`` to at most ``max_output_tokens * 4`` bytes."""
     if max_output_tokens <= 0:
@@ -520,6 +536,8 @@ async def _run_local_pty(
     max_output_tokens: int,
     is_background: bool,
     idle_timeout_ms: int,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Execute ``command`` in local mode under a dedicated PTY session."""
     import os
@@ -529,10 +547,15 @@ async def _run_local_pty(
     from ....services.orchestration.local import PTY_SESSIONS
 
     run_id = _resolve_run_id(context)
-    cwd = context.get("cwd") or os.environ.get("PROJECT_ROOT") or os.getcwd()
+    resolved_cwd = _resolve_cwd(context, cwd)
 
     try:
-        session_id = PTY_SESSIONS.create(command, cwd=cwd, run_id=run_id)
+        session_id = PTY_SESSIONS.create(
+            command,
+            cwd=resolved_cwd,
+            env=env,
+            run_id=run_id,
+        )
     except FileNotFoundError as exc:
         return error_output(
             message=f"Failed to spawn PTY session: {exc}",
@@ -760,22 +783,33 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
     Args:
         params: {
             command: str,
+            cwd: str | None,
             timeout: int = 120,
+            timeout_ms: int | None,
             yield_time_ms: int = 10000,
             max_output_tokens: int = 16384,
+            env: dict[str, str] | None,
             is_background: bool = False,
             idle_timeout_ms: int = 0,
         }
         context: {user_id, project_id, db, container_name?, chat_id?, run_id?, ...}
     """
     command = params.get("command")
-    timeout = int(params.get("timeout", 120))
+    # Accept either ``timeout`` (seconds) or ``timeout_ms`` (milliseconds).
+    if "timeout_ms" in params and params["timeout_ms"] is not None:
+        timeout = max(1, int(params["timeout_ms"]) // 1000)
+    else:
+        timeout = int(params.get("timeout", 120))
     yield_time_ms = int(params.get("yield_time_ms", 10000))
     max_output_tokens = int(params.get("max_output_tokens", 16384))
     is_background = bool(params.get("is_background", False))
     idle_timeout_ms = int(params.get("idle_timeout_ms", 0))
     tier_param = (params.get("tier") or "auto").lower()
     container_param = params.get("container")
+    cwd = params.get("cwd")
+    env = params.get("env")
+    if env is not None and not isinstance(env, dict):
+        raise ValueError("env must be a mapping of str -> str")
 
     if tier_param not in ("auto", "ephemeral", "environment"):
         return error_output(
@@ -810,6 +844,8 @@ async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
             max_output_tokens=max_output_tokens,
             is_background=is_background,
             idle_timeout_ms=idle_timeout_ms,
+            cwd=cwd,
+            env=env,
         )
 
     # Desktop mode: PTY execution against the local project directory.
@@ -925,10 +961,24 @@ def register_bash_tools(registry):
                         "type": "string",
                         "description": "Command to execute (e.g., 'npm install', 'ls -la', 'cat package.json')",
                     },
+                    "cwd": {
+                        "type": "string",
+                        "description": (
+                            "Working directory relative to the project root. "
+                            "Defaults to the project root itself. Local mode only."
+                        ),
+                    },
                     "timeout": {
                         "type": "integer",
                         "description": "Hard timeout in seconds — the process group is killed when it elapses (default: 120)",
                         "default": 120,
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "description": (
+                            "Alternative hard timeout expressed in milliseconds. "
+                            "When provided, overrides ``timeout``. Local mode only."
+                        ),
                     },
                     "yield_time_ms": {
                         "type": "integer",
@@ -948,6 +998,14 @@ def register_bash_tools(registry):
                             "Default: 16384."
                         ),
                         "default": 16384,
+                    },
+                    "env": {
+                        "type": "object",
+                        "description": (
+                            "Optional environment variable overrides applied on top of "
+                            "the current process environment. Local mode only."
+                        ),
+                        "additionalProperties": {"type": "string"},
                     },
                     "is_background": {
                         "type": "boolean",

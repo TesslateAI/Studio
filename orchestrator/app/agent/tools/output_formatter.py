@@ -1,37 +1,41 @@
 """
-Tool Output Formatting Utilities
+Tool output formatting utilities.
 
-Provides standardized, user-friendly output formatting for all agent tools.
+Provides standardized, user-friendly output formatting for agent tools.
 """
+
+from __future__ import annotations
 
 import re
 from typing import Any
 
 
 def success_output(
-    message: str, details: dict[str, Any] | None = None, **extra_fields
+    message: str,
+    details: dict[str, Any] | None = None,
+    **extra_fields: Any,
 ) -> dict[str, Any]:
     """
-    Create a standardized success output.
+    Build a standardized tool success payload.
 
     Args:
-        message: User-friendly success message (REQUIRED)
-        details: Technical details for advanced users (optional)
-        **extra_fields: Additional fields to include at top level (e.g., file_path, session_id)
+        message: User-friendly success message.
+        details: Optional technical details shown to advanced callers.
+        **extra_fields: Additional top-level fields to include
+            (e.g. ``file_path``, ``session_id``).
 
     Returns:
-        Standardized success output dict
+        A dict with ``success=True``, ``message``, optional ``details``, and
+        any extra fields merged in at the top level.
     """
-    output = {
+    output: dict[str, Any] = {
         "success": True,
         "message": message,
     }
 
-    # Add extra fields at top level (for agent/backend use)
     if extra_fields:
         output.update(extra_fields)
 
-    # Add details section if provided
     if details:
         output["details"] = details
 
@@ -42,21 +46,22 @@ def error_output(
     message: str,
     suggestion: str | None = None,
     details: dict[str, Any] | None = None,
-    **extra_fields,
+    **extra_fields: Any,
 ) -> dict[str, Any]:
     """
-    Create a standardized error output.
+    Build a standardized tool error payload.
 
     Args:
-        message: User-friendly error message (REQUIRED)
-        suggestion: Actionable suggestion for the user (optional but recommended)
-        details: Technical error details (optional)
-        **extra_fields: Additional fields to include at top level
+        message: User-friendly error message.
+        suggestion: Optional actionable suggestion for the user.
+        details: Optional technical error details.
+        **extra_fields: Additional top-level fields to include.
 
     Returns:
-        Standardized error output dict
+        A dict with ``success=False``, ``message``, optional ``suggestion``,
+        optional ``details``, and any extra fields merged in.
     """
-    output = {
+    output: dict[str, Any] = {
         "success": False,
         "message": message,
     }
@@ -67,7 +72,6 @@ def error_output(
     if details:
         output["details"] = details
 
-    # Add extra fields at top level
     if extra_fields:
         output.update(extra_fields)
 
@@ -76,77 +80,61 @@ def error_output(
 
 def format_file_size(size_bytes: int) -> str:
     """
-    Format file size in human-readable format.
+    Format a byte count in a human-readable way (e.g. ``"1.5 KB"``).
 
     Args:
-        size_bytes: Size in bytes
+        size_bytes: Size in bytes.
 
     Returns:
-        Formatted string (e.g., "1.5 KB", "2.3 MB", "1.0 GB")
+        A compact string representation using the largest fitting unit.
     """
     if size_bytes == 1:
         return "1 byte"
-    elif size_bytes < 1024:
+    if size_bytes < 1024:
         return f"{size_bytes} bytes"
-    elif size_bytes < 1024 * 1024:
+    if size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
-    elif size_bytes < 1024 * 1024 * 1024:
+    if size_bytes < 1024 * 1024 * 1024:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
-    else:
-        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
 
 def truncate_session_id(session_id: str, length: int = 8) -> str:
     """
-    Truncate a session ID for display.
-
-    Args:
-        session_id: Full session ID (UUID)
-        length: Number of characters to show (default: 8)
-
-    Returns:
-        Truncated ID (e.g., "abc12345")
+    Return the first ``length`` characters of ``session_id`` for display.
     """
     return session_id[:length]
 
 
 def pluralize(count: int, singular: str, plural: str | None = None) -> str:
     """
-    Pluralize a word based on count.
+    Format ``count`` with ``singular`` or ``plural`` based on magnitude.
 
     Args:
-        count: The count
-        singular: Singular form (e.g., "file")
-        plural: Plural form (optional, defaults to singular + "s")
+        count: Numeric count to format.
+        singular: Singular form of the word.
+        plural: Plural form; defaults to ``singular + "s"``.
 
     Returns:
-        Formatted string (e.g., "1 file", "5 files")
+        A string like ``"1 file"`` or ``"5 files"``.
     """
     if count == 1:
         return f"{count} {singular}"
-    else:
-        plural_form = plural if plural else f"{singular}s"
-        return f"{count} {plural_form}"
+    plural_form = plural if plural else f"{singular}s"
+    return f"{count} {plural_form}"
 
 
 def strip_ansi_codes(text: str) -> str:
     """
-    Strip ANSI escape codes and control characters from text.
+    Remove ANSI escape sequences and unprintable control characters.
 
-    This is useful for cleaning shell output that may contain
-    terminal control sequences, color codes, cursor movements, etc.
-
-    Args:
-        text: Raw text with potential ANSI codes
-
-    Returns:
-        Clean text without ANSI codes
+    Keeps newlines and tabs intact; strips cursor movements, color codes,
+    and any other common terminal control bytes so the output is safe to
+    display in plain text UIs.
     """
-    # ANSI escape code pattern (ESC followed by various characters)
     ansi_pattern = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
     text = ansi_pattern.sub("", text)
 
-    # Remove other common control characters (but keep newlines and tabs)
     control_pattern = re.compile(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]")
     text = control_pattern.sub("", text)
 

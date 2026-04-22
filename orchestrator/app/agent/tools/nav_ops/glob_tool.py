@@ -7,12 +7,19 @@ exclusions already applied), then filters them with ``fnmatch`` /
 ``pathlib.PurePath.match`` and sorts by modification time or name.
 """
 
+from __future__ import annotations
+
 import fnmatch
 import logging
 from pathlib import PurePosixPath
 from typing import Any
 
-from ..output_formatter import error_output, pluralize, success_output
+from ....services.orchestration import get_orchestrator
+from ..output_formatter import (
+    error_output,
+    pluralize,
+    success_output,
+)
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
@@ -134,8 +141,6 @@ async def glob_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str
         limit,
         sort_mode,
     )
-
-    from ....services.orchestration import get_orchestrator
 
     try:
         orchestrator = get_orchestrator()

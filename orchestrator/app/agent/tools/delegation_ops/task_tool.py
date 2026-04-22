@@ -57,6 +57,7 @@ from ..registry import (
 )
 from .agent_registry import (
     MAX_SUBAGENT_DEPTH,
+    STATUS_CANCELLED,
     STATUS_PENDING,
     STATUS_RUNNING,
     SUBAGENT_REGISTRY,
@@ -180,7 +181,7 @@ def _build_child_context(
     return child_context
 
 
-def _record_event_for_trajectory(recorder, event: dict[str, Any]) -> None:
+def _record_event_for_trajectory(recorder: Any, event: dict[str, Any]) -> None:
     """Feed a child-agent event into the trajectory recorder."""
     etype = event.get("type", "")
     data = event.get("data") or {}
@@ -335,8 +336,6 @@ async def _run_subagent(
             record.final_response = final_response
             record.completed_at = datetime.now(UTC)
             # Preserve any status that cancel() set; otherwise mark cancelled.
-            from .agent_registry import STATUS_CANCELLED
-
             record.status = STATUS_CANCELLED
         raise
     except TimeoutError:

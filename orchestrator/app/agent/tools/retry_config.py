@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 # Transient errors that should be retried automatically
 # Note: We explicitly exclude FileNotFoundError and PermissionError even though
-# they are subclasses of IOError/OSError, as they indicate permanent problems
-_RETRYABLE_EXCEPTION_TYPES = (
+# they are subclasses of OSError, as they indicate permanent problems
+_RETRYABLE_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
     ConnectionError,  # Network issues
     TimeoutError,  # Request timeouts
 )
 
 # Non-retryable errors even if they're subclasses of retryable ones
-_NON_RETRYABLE_EXCEPTION_TYPES = (
+_NON_RETRYABLE_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
     FileNotFoundError,  # File doesn't exist (won't resolve with retry)
     PermissionError,  # Permission denied (won't resolve with retry)
     NotADirectoryError,  # Path is not a directory (won't resolve with retry)
@@ -42,10 +42,10 @@ _NON_RETRYABLE_EXCEPTION_TYPES = (
 )
 
 # For backward compatibility
-RETRYABLE_EXCEPTIONS = _RETRYABLE_EXCEPTION_TYPES
+RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = _RETRYABLE_EXCEPTION_TYPES
 
 # Non-retryable errors that indicate configuration or logic problems
-NON_RETRYABLE_EXCEPTIONS = (
+NON_RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,  # Bad parameters
     TypeError,  # Type mismatch
     KeyError,  # Missing required field
@@ -62,15 +62,15 @@ def _should_retry_exception(exception: Exception) -> bool:
     - Exception is a retryable type AND
     - Exception is NOT a non-retryable type (even if subclass of retryable)
 
-    This allows us to retry IOError but not FileNotFoundError/PermissionError.
+    This allows us to retry OSError but not FileNotFoundError/PermissionError.
     """
     # First check if it's explicitly non-retryable
     if isinstance(exception, _NON_RETRYABLE_EXCEPTION_TYPES):
         return False
 
-    # Also check IOError separately but exclude file system specific errors
-    if isinstance(exception, IOError):
-        # IOError is retryable UNLESS it's one of the specific non-retryable subclasses
+    # Also check OSError separately but exclude file system specific errors
+    if isinstance(exception, OSError):
+        # OSError is retryable UNLESS it's one of the specific non-retryable subclasses
         return not isinstance(exception, _NON_RETRYABLE_EXCEPTION_TYPES)
 
     # Check if it's in the retryable list
@@ -148,7 +148,7 @@ def is_retryable_error(exception: Exception) -> bool:
         True
         >>> is_retryable_error(ValueError("bad param"))
         False
-        >>> is_retryable_error(IOError("device busy"))
+        >>> is_retryable_error(OSError("device busy"))
         True
         >>> is_retryable_error(FileNotFoundError("no such file"))
         False
@@ -157,7 +157,7 @@ def is_retryable_error(exception: Exception) -> bool:
 
 
 def create_custom_retry(
-    retryable_exceptions: tuple = RETRYABLE_EXCEPTIONS,
+    retryable_exceptions: tuple[type[BaseException], ...] = RETRYABLE_EXCEPTIONS,
     max_attempts: int = 3,
     min_wait: float = 1.0,
     max_wait: float = 10.0,

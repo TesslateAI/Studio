@@ -7,14 +7,14 @@ Each tool is defined with name, description, parameters schema, and executor fun
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
-from enum import Enum
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class ToolCategory(Enum):
+class ToolCategory(StrEnum):
     """Tool categories for organization."""
 
     FILE_OPS = "file_operations"
@@ -26,6 +26,7 @@ class ToolCategory(Enum):
     MEMORY_OPS = "memory_operations"
     GIT_OPS = "git_operations"
     DELEGATION_OPS = "delegation_operations"
+    PLANNING = "planning_operations"
     VIEW_GRAPH = "graph_view_tools"  # Tools only available in graph/architecture view
 
 
@@ -49,8 +50,8 @@ class Tool:
     parameters: dict[str, Any]
     executor: Callable
     category: ToolCategory
-    examples: list[str] | None = None
-    system_prompt: str | None = None
+    examples: list[str] = field(default_factory=list)
+    system_prompt: str = ""
 
     def to_prompt_format(self) -> str:
         """Convert tool to format suitable for LLM system prompt."""
@@ -166,6 +167,31 @@ class ToolRegistry:
         "kanban_comment": "kanban.edit",
     }
 
+    # Tools that mutate state or reach out to the network — require approval
+    # in ``ask`` mode and are blocked entirely in ``plan`` mode.
+    DANGEROUS_TOOLS: frozenset[str] = frozenset(
+        {
+            "write_file",
+            "patch_file",
+            "multi_edit",  # File modifications
+            "apply_patch",  # Unified patches
+            "bash_exec",
+            "shell_exec",
+            "shell_open",  # Shell operations
+            "web_fetch",  # Web operations (can leak data)
+            "web_search",  # Web search (can leak query data)
+            "send_message",  # Can send data externally
+            # 'todo_write', 'save_plan', 'update_plan' excluded - safe planning operations
+        }
+    )
+
+    # Tools allowed in plan mode (read-only shell for context gathering).
+    PLAN_MODE_ALLOWED: frozenset[str] = frozenset(
+        {
+            "bash_exec",  # Needed for ls, cat, grep, find, etc. during planning
+        }
+    )
+
     def _check_tool_scope(self, tool_name: str, scopes: list[str]) -> str | None:
         """Check if API key scopes allow this tool. Returns error message or None."""
         required = self.TOOL_REQUIRED_SCOPES.get(tool_name)
@@ -220,30 +246,10 @@ class ToolRegistry:
         # ============================================================================
         edit_mode = context.get("edit_mode", "ask")  # Default to 'ask' mode
 
-        # Define dangerous tools that require special handling
-        DANGEROUS_TOOLS = {
-            "write_file",
-            "patch_file",
-            "multi_edit",  # File modifications
-            "apply_patch",  # Unified patches
-            "bash_exec",
-            "shell_exec",
-            "shell_open",  # Shell operations
-            "web_fetch",  # Web operations (can leak data)
-            "web_search",  # Web search (can leak query data)
-            "send_message",  # Can send data externally
-            # 'todo_write', 'save_plan', 'update_plan' excluded - safe planning operations
-        }
-
-        # Tools allowed in plan mode (read-only shell for context gathering)
-        PLAN_MODE_ALLOWED = {
-            "bash_exec",  # Needed for ls, cat, grep, find, etc. during planning
-        }
-
-        is_dangerous = tool_name in DANGEROUS_TOOLS
+        is_dangerous = tool_name in self.DANGEROUS_TOOLS
 
         # Plan Mode: Block dangerous operations except plan-mode-allowed tools
-        if edit_mode == "plan" and is_dangerous and tool_name not in PLAN_MODE_ALLOWED:
+        if edit_mode == "plan" and is_dangerous and tool_name not in self.PLAN_MODE_ALLOWED:
             logger.warning(f"[PLAN MODE] Blocked tool execution: {tool_name}")
             return {
                 "success": False,
@@ -295,9 +301,7 @@ class ToolRegistry:
 
                     result = await scrub_tool_result(result, context)
                 except Exception:  # pragma: no cover — defensive
-                    logger.debug(
-                        "[TOOL-EXEC] secret scrub failed for %s", tool_name, exc_info=True
-                    )
+                    logger.debug("[TOOL-EXEC] secret scrub failed for %s", tool_name, exc_info=True)
 
             # Check if the tool itself reported success/failure
             # Tools return dicts with "success" field to indicate operation status

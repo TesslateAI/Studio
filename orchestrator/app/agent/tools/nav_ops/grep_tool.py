@@ -3,7 +3,7 @@ Grep Tool
 
 Content search powered by ``ripgrep``. Shells out to ``rg`` via the
 orchestrator's ``execute_command`` interface so the tool works uniformly
-across Docker, Kubernetes, and Local deployment modes.
+across every deployment backend.
 
 Supports three output modes:
     - ``files_with_matches`` (default): returns a list of paths containing
@@ -20,7 +20,12 @@ import logging
 import re
 from typing import Any
 
-from ..output_formatter import error_output, pluralize, success_output
+from ....services.orchestration import get_orchestrator
+from ..output_formatter import (
+    error_output,
+    pluralize,
+    success_output,
+)
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
@@ -265,8 +270,6 @@ async def grep_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str
     )
 
     logger.info("[GREP] argv=%r", argv)
-
-    from ....services.orchestration import get_orchestrator
 
     try:
         orchestrator = get_orchestrator()

@@ -3,16 +3,16 @@ Fuzzy Editor
 
 Multi-strategy search/replace engine shared by ``patch_file``,
 ``multi_edit``, and ``apply_patch``. Ports the three-strategy pipeline
-(exact → flexible whitespace → Levenshtein fuzzy) with an optional LLM
+(exact -> flexible whitespace -> Levenshtein fuzzy) with an optional LLM
 repair pass for cases where every strategy fails.
 
 Strategies (in order):
-    1. **Exact**       — literal ``old_str`` occurrences. Honors
+    1. **Exact**       -- literal ``old_str`` occurrences. Honors
        ``expected_occurrence`` / ``allow_multiple``.
-    2. **Flexible**    — line-by-line whitespace-normalized sliding
+    2. **Flexible**    -- line-by-line whitespace-normalized sliding
        window. Replaces the ORIGINAL slice so indentation is preserved
        on the replacement lines.
-    3. **Fuzzy (Levenshtein)** — slides a window of length
+    3. **Fuzzy (Levenshtein)** -- slides a window of length
        ``len(old_str)`` (character-based) across the file, computes
        Levenshtein distance on each window, and replaces when the best
        window has ``distance / len(old_str) <= 0.10`` AND is uniquely
@@ -20,7 +20,7 @@ Strategies (in order):
 
 If all three strategies fail, :func:`apply_edit` optionally invokes an
 LLM repair pass (see :func:`llm_repair`). The repair model is asked to
-return a corrected ``old_str`` / ``new_str`` pair; strategies 1–3 are
+return a corrected ``old_str`` / ``new_str`` pair; strategies 1-3 are
 then retried once with the corrected values. Repair is capped at a
 single retry.
 
@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -102,7 +103,7 @@ def contains_omission_placeholder(text: str) -> bool:
 
 
 # =============================================================================
-# Strategy 1 — exact match
+# Strategy 1 -- exact match
 # =============================================================================
 
 
@@ -130,17 +131,14 @@ def _strategy_exact(
         return content.replace(old_str, new_str), count
 
     if count != expected_occurrence:
-        # Signal mismatch by returning the count and None — callers
-        # decide whether to fall through or error out.
         return None, count
 
-    # Replace exactly ``expected_occurrence`` occurrences from left to right.
     result = content.replace(old_str, new_str, expected_occurrence)
     return result, count
 
 
 # =============================================================================
-# Strategy 2 — flexible whitespace match
+# Strategy 2 -- flexible whitespace match
 # =============================================================================
 
 
@@ -170,8 +168,6 @@ def _strategy_flexible(
         return None, 0
 
     source_lines = content.splitlines(keepends=True)
-    # Drop purely-whitespace lines from the needle so agents that inject
-    # extra blank lines can still match the underlying content.
     search_significant = [
         re.sub(r"\s+", " ", ln).strip() for ln in old_str.splitlines() if ln.strip()
     ]
@@ -185,8 +181,6 @@ def _strategy_flexible(
 
     i = 0
     while i < len(source_lines):
-        # Grow the window until we've collected `needed` non-blank lines,
-        # allowing arbitrary blank lines between them.
         j = i
         significant_matched = 0
         window_end = i
@@ -219,7 +213,6 @@ def _strategy_flexible(
 
     targets = match_runs if allow_multiple else match_runs[:expected_occurrence]
 
-    # Apply from bottom to top so earlier indices stay valid.
     modified = list(source_lines)
     for start, end in reversed(targets):
         first_line = modified[start]
@@ -261,7 +254,7 @@ def _apply_indentation(lines: list[str], target_indent: str) -> list[str]:
 
 
 # =============================================================================
-# Strategy 3 — Levenshtein fuzzy
+# Strategy 3 -- Levenshtein fuzzy
 # =============================================================================
 
 
@@ -269,7 +262,7 @@ def _levenshtein(a: str, b: str) -> int:
     """
     Compute the Levenshtein distance between ``a`` and ``b``.
 
-    Uses the standard two-row dynamic programming formulation — adequate
+    Uses the standard two-row dynamic programming formulation -- adequate
     for the window sizes fuzzy match targets (bounded by the complexity
     guard below).
     """
@@ -320,7 +313,6 @@ def _strategy_fuzzy(
         return None, 0
 
     # Soft complexity guard so a huge file doesn't freeze the worker.
-    # O(N * M^2) ballpark, capped at 4e8 basic ops.
     if len(content) * (needle_len**2) > 400_000_000:
         return None, 0
 
@@ -331,7 +323,6 @@ def _strategy_fuzzy(
     span = len(content) - needle_len
     for i in range(span + 1):
         window = content[i : i + needle_len]
-        # Fast length-diff guard (identical lengths since we slice needle_len).
         dist = _levenshtein(window, old_str)
         score = dist / needle_len
         if score < best_score:
@@ -344,7 +335,6 @@ def _strategy_fuzzy(
     if best_idx < 0 or best_score > FUZZY_MATCH_THRESHOLD:
         return None, 0
     if ties > 1:
-        # Ambiguous best: refuse rather than guess.
         return None, ties
 
     new_content = content[:best_idx] + new_str + content[best_idx + needle_len :]
@@ -356,15 +346,15 @@ def _strategy_fuzzy(
 # =============================================================================
 
 
-RepairFn = Callable[[str, str, str, str], "RepairSuggestion | None"]
-
-
 @dataclass
 class RepairSuggestion:
     """Structured payload returned by an LLM repair callback."""
 
     old_str: str
     new_str: str
+
+
+RepairAsyncFn = Callable[[str, str, str, str], Any]
 
 
 async def apply_edit(
@@ -389,13 +379,13 @@ async def apply_edit(
             strategies when ``allow_multiple`` is False.
         allow_multiple: When True, replace every match regardless of
             count.
-        file_path: Optional file path — used in error messages and
+        file_path: Optional file path -- used in error messages and
             forwarded to the repair callback for context.
         repair_fn: Optional async callable
             ``async (file_path, content, old_str, new_str) -> RepairSuggestion | None``.
             When provided and the primary pipeline fails, it is invoked
             exactly once; the returned suggestion is then fed back
-            through strategies 1–3.
+            through strategies 1-3.
 
     Returns:
         :class:`EditResult` describing the modification.
@@ -405,7 +395,7 @@ async def apply_edit(
     """
     if contains_omission_placeholder(new_str):
         raise EditError(
-            message="new_str contains an omission placeholder — provide the full replacement",
+            message="new_str contains an omission placeholder -- provide the full replacement",
             attempted=["placeholder_check"],
             suggestion=(
                 "Replace any `...`, `// ...`, or `# ...` lines in new_str with the "
@@ -434,7 +424,7 @@ async def apply_edit(
                 old_str,
                 new_str,
             )
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
             logger.warning("[FUZZY-EDIT] repair_fn raised: %s", exc)
             suggestion = None
 
@@ -446,7 +436,7 @@ async def apply_edit(
                 message="Repaired new_str still contains an omission placeholder",
                 attempted=initial_error.attempted + ["llm_repair"],
                 suggestion=(
-                    "Ask the repair model to emit literal replacement text — no `...` shorthand."
+                    "Ask the repair model to emit literal replacement text -- no `...` shorthand."
                 ),
             ) from initial_error
 
@@ -481,7 +471,7 @@ def _run_pipeline(
     allow_multiple: bool,
     file_path: str | None,
 ) -> EditResult:
-    """Run strategies 1→3. Raise EditError on exhaustion."""
+    """Run strategies 1->3. Raise EditError on exhaustion."""
     if not old_str:
         raise EditError(
             message="old_str is empty",
@@ -589,9 +579,13 @@ def _run_pipeline(
 # =============================================================================
 
 
-RepairAsyncFn = Callable[
-    [str, str, str, str], "Any"  # Coroutine returning RepairSuggestion | None
-]
+def _default_repair_model_name() -> str:
+    """Return the model identifier used for fuzzy-edit repair passes."""
+    return (
+        os.environ.get("TESSLATE_REPAIR_MODEL")
+        or os.environ.get("COMPACTION_SUMMARY_MODEL")
+        or "openai/gpt-4o-mini"
+    )
 
 
 async def llm_repair(
@@ -603,24 +597,24 @@ async def llm_repair(
     """
     Default LLM repair callback.
 
-    Calls :func:`create_model_adapter` with the cheap repair model from
-    settings (``compaction_summary_model`` or the ``openai/gpt-4o-mini``
-    fallback), asks it to return corrected ``old_str`` / ``new_str``
-    values as strict JSON, and parses the response.
+    Calls :func:`app.agent.models.create_model_adapter` with
+    the cheap repair model from the environment
+    (``TESSLATE_REPAIR_MODEL``, ``COMPACTION_SUMMARY_MODEL``, or the
+    ``openai/gpt-4o-mini`` fallback), asks it to return corrected
+    ``old_str`` / ``new_str`` values as strict JSON, and parses the
+    response.
 
     Returns:
         :class:`RepairSuggestion` when the model produced a valid
         structured reply, or ``None`` if anything went wrong.
     """
     try:
-        from ....config import get_settings
         from ...models import create_model_adapter
-    except ImportError as exc:  # pragma: no cover - defensive
+    except ImportError as exc:
         logger.warning("[FUZZY-EDIT] llm_repair imports failed: %s", exc)
         return None
 
-    settings = get_settings()
-    model_name = getattr(settings, "compaction_summary_model", "") or "openai/gpt-4o-mini"
+    model_name = _default_repair_model_name()
 
     # Truncate very long files so we stay under the repair model's budget.
     excerpt = content
@@ -643,34 +637,37 @@ async def llm_repair(
     )
 
     try:
-        adapter = await create_model_adapter(model_name, user_id=None, db=None)
+        adapter = await create_model_adapter(model_name)
     except Exception as exc:
         logger.warning("[FUZZY-EDIT] create_model_adapter failed: %s", exc)
         return None
 
-    text_chunks: list[str] = []
     try:
-        async for chunk in adapter.chat(
-            [
+        response = await adapter.chat_with_tools(
+            messages=[
                 {
                     "role": "system",
                     "content": (
                         "You correct failing search/replace edits. You always "
                         "reply with a single JSON object of the form "
-                        '{"old_str": "...", "new_str": "..."} — no prose, '
+                        '{"old_str": "...", "new_str": "..."} -- no prose, '
                         "no markdown fences."
                     ),
                 },
                 {"role": "user", "content": prompt},
-            ]
-        ):
-            if isinstance(chunk, str):
-                text_chunks.append(chunk)
+            ],
+            stream=False,
+        )
     except Exception as exc:
-        logger.warning("[FUZZY-EDIT] repair model stream failed: %s", exc)
+        logger.warning("[FUZZY-EDIT] repair model call failed: %s", exc)
         return None
 
-    raw = "".join(text_chunks).strip()
+    raw = ""
+    if isinstance(response, dict):
+        raw = response.get("content") or ""
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
     if not raw:
         return None
 
@@ -681,7 +678,6 @@ async def llm_repair(
             raw = raw[4:]
         raw = raw.strip()
 
-    # Be lenient: pick the first {...} span.
     first_brace = raw.find("{")
     last_brace = raw.rfind("}")
     if first_brace == -1 or last_brace == -1 or last_brace <= first_brace:
@@ -705,6 +701,7 @@ __all__ = [
     "EditError",
     "EditResult",
     "RepairSuggestion",
+    "RepairAsyncFn",
     "apply_edit",
     "contains_omission_placeholder",
     "llm_repair",

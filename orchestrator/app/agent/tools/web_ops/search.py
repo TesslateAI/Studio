@@ -9,6 +9,8 @@ Retry Strategy:
 - Exponential backoff: 1s -> 2s -> 4s (up to 3 attempts)
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -32,10 +34,10 @@ async def web_search_tool(params: dict[str, Any], context: dict[str, Any]) -> di
             max_results: int,  # Max results to return (default: 5)
             detailed: bool  # Fetch page content for top 3 results (default: False)
         }
-        context: {}
+        context: Standard tool execution context (unused).
 
     Returns:
-        Dict with search results
+        Dict with search results.
     """
     query = params.get("query")
     max_results = params.get("max_results", 5)
@@ -53,7 +55,7 @@ async def web_search_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     # Cap max_results to prevent abuse
     max_results = min(max_results, 10)
 
-    from .providers import get_search_provider
+    from ..web_ops.providers import get_search_provider
 
     provider = get_search_provider()
     results = await provider.search(query, max_results)
@@ -103,13 +105,17 @@ async def _fetch_page_content(url: str, max_length: int = 15000) -> str | None:
         return None
 
 
-def register_search_tools(registry):
-    """Register web search tool."""
+def register_web_search_tool(registry) -> None:
+    """Register the web_search tool."""
 
     registry.register(
         Tool(
             name="web_search",
-            description="Search the web for current information. Returns titles, URLs, and snippets. Set 'detailed' to true to also fetch page content for top 3 results.",
+            description=(
+                "Search the web for current information. Returns titles, URLs, "
+                "and snippets. Set 'detailed' to true to also fetch page content "
+                "for top 3 results."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -124,7 +130,10 @@ def register_search_tools(registry):
                     },
                     "detailed": {
                         "type": "boolean",
-                        "description": "If true, fetch full page content for the top 3 results (slower but more detailed)",
+                        "description": (
+                            "If true, fetch full page content for the top 3 "
+                            "results (slower but more detailed)"
+                        ),
                         "default": False,
                     },
                 },
@@ -139,4 +148,4 @@ def register_search_tools(registry):
         )
     )
 
-    logger.info("Registered 1 web search tool")
+    logger.info("Registered web_search tool")

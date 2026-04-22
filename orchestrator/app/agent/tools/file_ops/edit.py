@@ -4,20 +4,14 @@ File Edit Tools
 Tools for making surgical edits to existing files.
 
 Exposes two wire-compatible tools:
-    * ``patch_file`` — single search/replace with fuzzy matching
-    * ``multi_edit`` — batch of sequential search/replace operations
+    * ``patch_file`` -- single search/replace with fuzzy matching
+    * ``multi_edit`` -- batch of sequential search/replace operations
 
 Both tools delegate their actual matching to :mod:`fuzzy_editor`, which
-runs a three-strategy pipeline (exact → flexible whitespace →
+runs a three-strategy pipeline (exact -> flexible whitespace ->
 Levenshtein fuzzy) with an optional LLM-repair pass when every strategy
 misses. Every successful mutation is recorded in :data:`EDIT_HISTORY`
 so the ``file_undo`` tool can revert it.
-
-Parameters now include:
-    * ``old_str`` / ``new_str`` (legacy ``search`` / ``replace`` still
-      accepted for backwards compatibility)
-    * ``expected_occurrence`` (default ``1``)
-    * ``allow_multiple`` (default ``False``)
 """
 
 from __future__ import annotations
@@ -26,6 +20,7 @@ import difflib
 import logging
 from typing import Any
 
+from ....services.orchestration import get_orchestrator
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 from ..retry_config import tool_retry
@@ -109,9 +104,9 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     """
     Apply a single search/replace edit with multi-strategy matching.
 
-    Strategy pipeline (in order): exact → flexible whitespace →
-    Levenshtein fuzzy → LLM repair (optional). See :mod:`fuzzy_editor`
-    for the full algorithm.
+    Strategy pipeline (in order): exact -> flexible whitespace ->
+    Levenshtein fuzzy -> LLM repair (optional). See
+    :mod:`fuzzy_editor` for the full algorithm.
     """
     file_path = params.get("file_path")
     old_str, new_str = _resolve_strings(params)
@@ -126,8 +121,9 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     expected_occurrence = _int_param(params, "expected_occurrence", 1)
     allow_multiple = _bool_param(params, "allow_multiple", False)
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    project_id_raw = context.get("project_id")
+    project_id = str(project_id_raw) if project_id_raw is not None else ""
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")
     container_name = context.get("container_name")
@@ -138,8 +134,6 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
         expected_occurrence,
         allow_multiple,
     )
-
-    from ....services.orchestration import get_orchestrator
 
     volume_hints = {
         "volume_id": context.get("volume_id"),
@@ -164,7 +158,10 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     if current_content is None:
         return error_output(
             message=f"File '{file_path}' does not exist",
-            suggestion="Use write_file to create new files, or list the directory first to verify the path.",
+            suggestion=(
+                "Use write_file to create new files, or list the directory first "
+                "to verify the path."
+            ),
             file_path=file_path,
         )
 
@@ -249,8 +246,9 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     if not isinstance(edits, list) or not edits:
         raise ValueError("edits parameter is required and must be a non-empty list")
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    project_id_raw = context.get("project_id")
+    project_id = str(project_id_raw) if project_id_raw is not None else ""
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")
     container_name = context.get("container_name")
@@ -261,8 +259,6 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
         len(edits),
         container_directory,
     )
-
-    from ....services.orchestration import get_orchestrator
 
     volume_hints = {
         "volume_id": context.get("volume_id"),
@@ -313,7 +309,7 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
         await EDIT_HISTORY.record(file_path, buffer, "edit")
 
         try:
-            result: EditResult = await apply_edit(
+            result = await apply_edit(
                 content=buffer,
                 old_str=old_str,
                 new_str=new_str,
@@ -323,7 +319,6 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
                 repair_fn=repair_fn,
             )
         except EditError as exc:
-            # Undo the speculative history entry for this failed step.
             await EDIT_HISTORY.pop_latest(file_path)
             base = _edit_error_to_output(
                 exc,
@@ -396,7 +391,7 @@ def register_edit_tools(registry) -> None:
             name="patch_file",
             description=(
                 "Apply a surgical edit to an existing file using search/replace. "
-                "Uses a multi-strategy matcher (exact → whitespace-flexible → "
+                "Uses a multi-strategy matcher (exact -> whitespace-flexible -> "
                 "Levenshtein fuzzy) with optional LLM repair for failed matches."
             ),
             parameters={
@@ -408,7 +403,9 @@ def register_edit_tools(registry) -> None:
                     },
                     "old_str": {
                         "type": "string",
-                        "description": "Exact text to find (include 3-5 lines of context for uniqueness).",
+                        "description": (
+                            "Exact text to find (include 3-5 lines of context for uniqueness)."
+                        ),
                     },
                     "new_str": {
                         "type": "string",
@@ -416,11 +413,13 @@ def register_edit_tools(registry) -> None:
                     },
                     "expected_occurrence": {
                         "type": "integer",
-                        "description": "Number of occurrences you expect to replace. Defaults to 1.",
+                        "description": (
+                            "Number of occurrences you expect to replace. Defaults to 1."
+                        ),
                     },
                     "allow_multiple": {
                         "type": "boolean",
-                        "description": "When true, replace every match regardless of count.",
+                        "description": ("When true, replace every match regardless of count."),
                     },
                 },
                 "required": ["file_path", "old_str", "new_str"],
@@ -450,7 +449,7 @@ def register_edit_tools(registry) -> None:
                     },
                     "edits": {
                         "type": "array",
-                        "description": "List of search/replace operations, applied in order.",
+                        "description": ("List of search/replace operations, applied in order."),
                         "items": {
                             "type": "object",
                             "properties": {

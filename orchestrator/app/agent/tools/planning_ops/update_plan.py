@@ -537,7 +537,7 @@ def register_update_plan_tool(registry) -> None:
                 "required": ["plan"],
             },
             executor=update_plan_tool,
-            category=ToolCategory.PROJECT,
+            category=ToolCategory.PLANNING,
             examples=[
                 (
                     '{"tool_name": "update_plan", "parameters": {"plan": ['

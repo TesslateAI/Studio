@@ -3,10 +3,10 @@ Apply Patch Tool (structured change format)
 
 Batches multiple file operations into a single atomic call:
 
-    * ``create`` — write a new file (errors if destination already exists)
-    * ``update`` — search/replace an existing file via the fuzzy editor
-    * ``delete`` — remove a file
-    * ``move``   — move a file from one path to another (no content edit)
+    * ``create`` -- write a new file (errors if destination already exists)
+    * ``update`` -- search/replace an existing file via the fuzzy editor
+    * ``delete`` -- remove a file
+    * ``move``   -- move a file from one path to another (no content edit)
 
 The tool runs a **two-phase commit**:
 
@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from ....services.orchestration import get_orchestrator
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 from ..retry_config import tool_retry
@@ -82,22 +83,18 @@ def _resolve_rel(cwd: str, path: str) -> str:
 
 @dataclass
 class _Change:
-    """One normalized change entry — filled in during the validate phase."""
+    """One normalized change entry -- filled in during the validate phase."""
 
     index: int
     op: str
     path: str
     source_path: str | None = None
-    # For update: computed new content
     new_content: str | None = None
-    # For create: literal content
     content: str | None = None
-    # Prior contents of path / source_path (or None if absent)
     prev_content_at_path: str | None = None
     prev_content_at_source: str | None = None
     path_existed: bool = False
     source_existed: bool = False
-    # Populated by the update strategy, for reporting
     strategy: str | None = None
     repair_applied: bool = False
 
@@ -156,14 +153,13 @@ class _PatchState:
                     exc,
                 )
 
-        # Shell fallback (Docker / K8s backends).
+        # Shell fallback for container-backed orchestrators.
         try:
             await orch.execute_command(
                 user_id=self.user_id,
                 project_id=self.project_id,
                 container_name=self.container_name,
                 command=["/bin/sh", "-c", f"rm -f {shlex.quote(rel_path)}"],
-                project_slug=self.project_slug,
             )
             return True
         except Exception as exc:
@@ -262,7 +258,6 @@ async def _phase1_validate(
             )
             continue
 
-        # Read current contents of the target path up front.
         prev_at_path = await state.read(change.path)
         change.prev_content_at_path = prev_at_path
         change.path_existed = prev_at_path is not None
@@ -279,7 +274,7 @@ async def _phase1_validate(
                         "index": i,
                         "op": change.op,
                         "path": change.path,
-                        "error": f"create: destination '{change.path}' already exists",
+                        "error": (f"create: destination '{change.path}' already exists"),
                     }
                 )
                 continue
@@ -345,7 +340,7 @@ async def _phase1_validate(
                         "index": i,
                         "op": change.op,
                         "path": change.path,
-                        "error": f"move: source '{change.source_path}' does not exist",
+                        "error": (f"move: source '{change.source_path}' does not exist"),
                     }
                 )
                 continue
@@ -355,13 +350,11 @@ async def _phase1_validate(
                         "index": i,
                         "op": change.op,
                         "path": change.path,
-                        "error": f"move: destination '{change.path}' already exists",
+                        "error": (f"move: destination '{change.path}' already exists"),
                     }
                 )
                 continue
 
-        # Guard against conflicts inside the same batch (two ops touching
-        # the same path produce ordering hazards).
         if change.path in resolved_paths:
             state.errors.append(
                 {
@@ -412,7 +405,12 @@ async def _phase2_apply(state: _PatchState, staged: list[_Change]) -> list[dict[
             if not ok:
                 raise RuntimeError(f"create: write_file returned False for {change.path}")
             applied.append(
-                {"index": change.index, "op": "create", "path": change.path, "status": "ok"}
+                {
+                    "index": change.index,
+                    "op": "create",
+                    "path": change.path,
+                    "status": "ok",
+                }
             )
 
         elif change.op == "update":
@@ -437,11 +435,15 @@ async def _phase2_apply(state: _PatchState, staged: list[_Change]) -> list[dict[
             if not ok:
                 raise RuntimeError(f"delete: orchestrator could not remove {change.path}")
             applied.append(
-                {"index": change.index, "op": "delete", "path": change.path, "status": "ok"}
+                {
+                    "index": change.index,
+                    "op": "delete",
+                    "path": change.path,
+                    "status": "ok",
+                }
             )
 
         elif change.op == "move":
-            # Snapshot the source so the full sequence is recoverable.
             await EDIT_HISTORY.record(
                 change.source_path or "",
                 change.prev_content_at_source,
@@ -489,11 +491,12 @@ async def apply_patch_tool(params: dict[str, Any], context: dict[str, Any]) -> d
             suggestion="Set cwd to '' for the project root or a subdirectory path.",
         )
 
-    from ....services.orchestration import get_orchestrator
+    project_id_raw = context.get("project_id")
+    project_id = str(project_id_raw) if project_id_raw is not None else ""
 
     state = _PatchState(
-        user_id=context["user_id"],
-        project_id=str(context["project_id"]),
+        user_id=context.get("user_id"),
+        project_id=project_id,
         project_slug=context.get("project_slug"),
         container_directory=context.get("container_directory"),
         container_name=context.get("container_name"),
@@ -517,8 +520,6 @@ async def apply_patch_tool(params: dict[str, Any], context: dict[str, Any]) -> d
     try:
         applied = await _phase2_apply(state, staged)
     except Exception as exc:
-        # Phase 2 failure means a write actually went wrong on the wire.
-        # Callers can use `file_undo` to walk back EDIT_HISTORY entries.
         logger.error("[APPLY-PATCH] phase2 failed: %s", exc, exc_info=True)
         return error_output(
             message=f"apply_patch runtime failure: {exc}",

@@ -1,13 +1,16 @@
 """
-Web Fetch and Search Tools
+Web Fetch Tool
 
-Tools for accessing external web content.
+Fetch content from a URL via HTTPS.
 
 Retry Strategy:
-- Automatically retries on transient failures (ConnectionError, TimeoutError, httpx.RequestError)
-- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
-- Does NOT retry on HTTP errors (4xx, 5xx) - those fail immediately
+- Automatically retries on transient failures (ConnectionError, TimeoutError,
+  httpx.RequestError)
+- Exponential backoff: 1s -> 2s -> 4s (up to 3 attempts)
+- Does NOT retry on HTTP errors (4xx, 5xx) — those fail immediately
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any
@@ -38,10 +41,10 @@ async def web_fetch_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
             url: str,  # URL to fetch
             timeout: int  # Optional timeout in seconds (default: 10)
         }
-        context: {}
+        context: Standard tool execution context (unused).
 
     Returns:
-        Dict with web content
+        Dict with web content.
     """
     url = params.get("url")
     timeout = params.get("timeout", 10)
@@ -59,7 +62,7 @@ async def web_fetch_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
 
     try:
         _headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; TesslateBot/1.0; +https://tesslate.com)",
+            "User-Agent": ("Mozilla/5.0 (compatible; TesslateBot/1.0; +https://tesslate.com)"),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
         }
@@ -113,13 +116,17 @@ async def web_fetch_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
         )
 
 
-def register_web_tools(registry):
-    """Register web fetch tool."""
+def register_web_fetch_tool(registry) -> None:
+    """Register the web_fetch tool."""
 
     registry.register(
         Tool(
             name="web_fetch",
-            description="Fetch content from a URL. Useful for reading documentation, API responses, or other web resources. Returns up to 50KB of content.",
+            description=(
+                "Fetch content from a URL. Useful for reading documentation, "
+                "API responses, or other web resources. Returns up to 50KB of "
+                "content."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -139,9 +146,9 @@ def register_web_tools(registry):
             category=ToolCategory.WEB,
             examples=[
                 '{"tool_name": "web_fetch", "parameters": {"url": "https://example.com/api/docs"}}',
-                '{"tool_name": "web_fetch", "parameters": {"url": "https://stackoverflow.com/questions/12345", "timeout": 15}}',
+                '{"tool_name": "web_fetch", "parameters": {"url": "https://example.com/page", "timeout": 15}}',
             ],
         )
     )
 
-    logger.info("Registered 1 web tool")
+    logger.info("Registered web_fetch tool")

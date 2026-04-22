@@ -9,10 +9,10 @@ user's home directory (``scope="global"``).
 
 Storage layout
 --------------
-- ``project`` scope → ``<PROJECT_ROOT>/.tesslate/memory.md``
+- ``project`` scope -> ``<PROJECT_ROOT>/.tesslate/memory.md``
   where ``PROJECT_ROOT`` is read from the environment, falling back to
   ``context['project_root']`` when that is unset.
-- ``global`` scope → ``<HOME>/.tesslate/memory.md``
+- ``global`` scope -> ``<HOME>/.tesslate/memory.md``
 
 File format
 -----------
