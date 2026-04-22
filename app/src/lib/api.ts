@@ -527,6 +527,29 @@ export const projectsApi = {
 
     return poll(20);
   },
+  getGitTree: async (slug: string, branch?: string) => {
+    const params: Record<string, string> = {};
+    if (branch) params.branch = branch;
+    const response = await api.get(`/api/projects/${slug}/git/tree`, { params });
+    return response.data as {
+      status: string;
+      source: 'github' | 'local';
+      owner: string | null;
+      repo: string | null;
+      branch: string | null;
+      sha: string | null;
+      truncated: boolean;
+      html_url: string | null;
+      files: Array<{
+        path: string;
+        name: string;
+        is_dir: boolean;
+        size: number;
+        mod_time: number;
+        sha?: string;
+      }>;
+    };
+  },
   getFileContent: async (slug: string, path: string, containerDir?: string) => {
     const params: Record<string, string> = { path };
     if (containerDir) params.container_dir = containerDir;

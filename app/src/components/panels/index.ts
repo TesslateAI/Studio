@@ -7,5 +7,6 @@ export { KanbanPanel } from './KanbanPanel';
 export { TerminalPanel } from './TerminalPanel';
 export { DeploymentsPanel } from './DeploymentsPanel';
 export { TimelinePanel } from './TimelinePanel';
+export { RepositoryPanel } from './RepositoryPanel';
 export { NodeConfigPanel } from './NodeConfigPanel';
 export type { NodeConfigPanelProps } from './NodeConfigPanel';

@@ -11,6 +11,7 @@ import shutil
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -777,6 +778,128 @@ async def get_file_tree(
             status_code=503,
             content={
                 "status": "unavailable",
+                "files": [],
+                "message": "Project storage is unavailable",
+            },
+        )
+
+
+@router.get("/{project_slug}/git/tree")
+async def get_git_tree(
+    project_slug: str,
+    branch: str | None = None,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Repository tree for the Repository panel.
+
+    If the project has a GitHub remote, fetch the recursive tree from GitHub
+    (using the user's OAuth token if connected, falling back to an
+    unauthenticated request for public repos). If there's no GitHub remote or
+    the GitHub API call fails, fall back to the local project file tree so the
+    panel always has something useful to show.
+    """
+    from ..services.github_client import GitHubClient
+    from ..services.volume_manager import VolumeRestoringError, VolumeUnavailableError
+
+    project = await get_project_by_slug(db, project_slug, current_user)
+
+    remote_url = getattr(project, "git_remote_url", None)
+    parsed = GitHubClient.parse_repo_url(remote_url) if remote_url else None
+
+    if parsed:
+        access_token: str | None = None
+        try:
+            from ..services.credential_manager import get_credential_manager
+
+            credential_manager = get_credential_manager()
+            access_token = await credential_manager.get_access_token(db, current_user.id)
+        except Exception as exc:
+            logger.debug(f"[GIT_TREE] Could not retrieve GitHub token: {exc}")
+
+        client = GitHubClient(access_token or "")
+        try:
+            result = await client.get_repository_tree(parsed["owner"], parsed["repo"], branch)
+
+            files: list[dict[str, object]] = []
+            for entry in result.get("tree", []):
+                if not isinstance(entry, dict):
+                    continue
+                path = entry.get("path")
+                if not isinstance(path, str) or not path:
+                    continue
+                is_dir = entry.get("type") == "tree"
+                size_val = entry.get("size")
+                files.append(
+                    {
+                        "path": path,
+                        "name": path.rsplit("/", 1)[-1],
+                        "is_dir": is_dir,
+                        "size": int(size_val) if isinstance(size_val, int | float) else 0,
+                        "mod_time": 0,
+                        "sha": entry.get("sha"),
+                    }
+                )
+
+            return {
+                "status": "ready",
+                "source": "github",
+                "owner": parsed["owner"],
+                "repo": parsed["repo"],
+                "branch": result.get("branch"),
+                "sha": result.get("sha"),
+                "truncated": result.get("truncated", False),
+                "html_url": f"https://github.com/{parsed['owner']}/{parsed['repo']}",
+                "files": files,
+            }
+        except httpx.HTTPStatusError as exc:
+            # 401 without token for a private repo, 404, rate-limit, etc.
+            # Fall through to local tree below so the panel still works.
+            logger.info(
+                f"[GIT_TREE] GitHub fetch failed for {project_slug} "
+                f"({parsed['owner']}/{parsed['repo']}): {exc.response.status_code}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[GIT_TREE] Unexpected GitHub error for {project_slug}: {exc}")
+
+    # Fallback — local project file tree (same shape as /files/tree)
+    from ..services.orchestration import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    try:
+        entries = await orchestrator.list_tree(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            subdir=None,
+        )
+        return {
+            "status": "ready",
+            "source": "local",
+            "owner": None,
+            "repo": None,
+            "branch": None,
+            "sha": None,
+            "truncated": False,
+            "html_url": remote_url,
+            "files": entries,
+        }
+    except VolumeRestoringError:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "restoring",
+                "source": "local",
+                "files": [],
+                "message": "Project storage is being restored",
+            },
+        )
+    except VolumeUnavailableError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unavailable",
+                "source": "local",
                 "files": [],
                 "message": "Project storage is unavailable",
             },

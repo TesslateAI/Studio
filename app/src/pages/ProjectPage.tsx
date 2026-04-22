@@ -20,6 +20,7 @@ import {
   SidebarSimple,
   Chat,
   Plus,
+  Folders,
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -43,6 +44,7 @@ import {
   AssetsPanel,
   KanbanPanel,
   TerminalPanel,
+  RepositoryPanel,
   NodeConfigPanel,
 } from '../components/panels';
 import {
@@ -89,6 +91,7 @@ const TOOL_LABELS: Record<ToolType, string> = {
   kanban: 'Kanban',
   assets: 'Assets',
   terminal: 'Terminal',
+  repository: 'Repository',
   'node-config': 'Configure',
 };
 
@@ -1048,6 +1051,14 @@ function ProjectPageInner() {
     { enableOnFormTags: false }
   );
   useHotkeys(
+    'mod+8',
+    (e) => {
+      e.preventDefault();
+      openToolAndShowDock('repository');
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
     'mod+r',
     (e) => {
       e.preventDefault();
@@ -1298,6 +1309,7 @@ function ProjectPageInner() {
       disabled: !canAccessTerminal,
       restricted: !canAccessTerminal,
     },
+    { id: 'repository', icon: <Folders size={14} weight="bold" />, hotkey: '⌘8' },
   ];
 
   const handleToolButtonClick = (id: ToolType, e: React.MouseEvent) => {
@@ -1656,6 +1668,7 @@ function ProjectPageInner() {
     assets: (_tab: TabInstance, _idx: number) => (
       <AssetsPanel projectSlug={slug!} readOnly={!canEditAssets} />
     ),
+    repository: (_tab: TabInstance, _idx: number) => <RepositoryPanel projectSlug={slug!} />,
     'node-config': (tab: TabInstance, _idx: number) => {
       const payload = dock.getNodeConfigPayload(tab.id);
       if (!payload) {

@@ -1,6 +1,7 @@
 import { useRef, type ReactNode } from 'react';
 import {
   Code as CodeIcon,
+  Folders,
   Image as ImageIcon,
   Kanban as KanbanIcon,
   Monitor,
@@ -54,6 +55,11 @@ export const TOOL_TAB_META: Record<ToolType, ToolTabMeta> = {
     id: 'terminal',
     label: 'Terminal',
     icon: <TerminalIcon size={13} weight="bold" />,
+  },
+  repository: {
+    id: 'repository',
+    label: 'Repository',
+    icon: <Folders size={13} weight="bold" />,
   },
   'node-config': {
     id: 'node-config',
@@ -138,9 +144,7 @@ export function ToolTabsPanel({
                   : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]'
               }`}
             >
-              <span
-                className={`flex-shrink-0 ${isActive ? 'text-[var(--primary)]' : ''}`}
-              >
+              <span className={`flex-shrink-0 ${isActive ? 'text-[var(--primary)]' : ''}`}>
                 {meta.icon}
               </span>
               <span className="whitespace-nowrap">{label}</span>
@@ -160,9 +164,7 @@ export function ToolTabsPanel({
             </div>
           );
         })}
-        {extraHeader && (
-          <div className="ml-auto flex items-center pr-2">{extraHeader}</div>
-        )}
+        {extraHeader && <div className="ml-auto flex items-center pr-2">{extraHeader}</div>}
       </div>
 
       {/* Content — keep-alive, CSS hide/show */}
@@ -175,10 +177,7 @@ export function ToolTabsPanel({
           const sameType = tabs.filter((t) => t.type === tab.type);
           const indexWithinType = sameType.findIndex((t) => t.id === tab.id);
           return (
-            <div
-              key={id}
-              className={`absolute inset-0 ${activeTabId === id ? 'block' : 'hidden'}`}
-            >
+            <div key={id} className={`absolute inset-0 ${activeTabId === id ? 'block' : 'hidden'}`}>
               {render(tab, indexWithinType)}
             </div>
           );

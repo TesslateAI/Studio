@@ -158,6 +158,52 @@ class GitHubClient:
         repo_info = await self.get_repository_info(owner, repo)
         return repo_info.get("default_branch", "main")
 
+    async def get_repository_tree(
+        self, owner: str, repo: str, branch: str | None = None, recursive: bool = True
+    ) -> dict[str, Any]:
+        """
+        Get the full file tree for a repository branch.
+
+        Uses GitHub's Git Trees API, which returns every blob/tree entry in a
+        single call. If the repo exceeds the 100k-entry / 7 MB response cap,
+        GitHub sets `truncated: true` — the caller should surface that to the
+        user so they know the listing is incomplete.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            branch: Branch to list (defaults to the repository's default branch)
+            recursive: Fetch the full tree in one request. Setting False only
+                returns entries at the root — rarely what the UI wants.
+
+        Returns:
+            dict with keys:
+                branch: resolved branch name
+                sha: commit SHA the tree was read from
+                truncated: bool — True if GitHub's limit was hit
+                tree: list of entries with path, type ('blob'|'tree'),
+                      size (blobs only), mode, sha, url
+        """
+        if not branch:
+            branch = await self.get_default_branch(owner, repo)
+
+        branch_info = await self._request("GET", f"/repos/{owner}/{repo}/branches/{branch}")
+        commit_sha = branch_info.get("commit", {}).get("sha")
+        tree_sha = branch_info.get("commit", {}).get("commit", {}).get("tree", {}).get("sha")
+        if not tree_sha:
+            return {"branch": branch, "sha": commit_sha, "truncated": False, "tree": []}
+
+        params: dict[str, str] = {"recursive": "1"} if recursive else {}
+        tree = await self._request(
+            "GET", f"/repos/{owner}/{repo}/git/trees/{tree_sha}", params=params
+        )
+        return {
+            "branch": branch,
+            "sha": commit_sha,
+            "truncated": bool(tree.get("truncated", False)),
+            "tree": tree.get("tree", []),
+        }
+
     async def list_commits(
         self, owner: str, repo: str, sha: str | None = None, per_page: int = 30
     ) -> list[dict[str, Any]]:
