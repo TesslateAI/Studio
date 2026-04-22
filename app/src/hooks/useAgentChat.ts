@@ -152,15 +152,12 @@ export function useAgentChat({
     const prevChatId = prevChatIdRef.current;
     prevChatIdRef.current = chatId;
 
-    // Only abort/reset when switching BETWEEN real sessions (oldId → newId),
-    // NOT on initial session creation (null → newId) or temp→real ID swap
-    // which coincide with an in-flight sendMessage.
+    // Only reset local UI state when switching between real sessions. We no
+    // longer abort the SSE stream / running task — AgentRunsContext keeps
+    // background streams alive so switching sessions doesn't kill parallel
+    // agents. The hook just stops rendering events for the old chat.
     const isTempSwap = prevChatId?.startsWith('temp-') && chatId && !chatId.startsWith('temp-');
     if (prevChatId !== null && prevChatId !== chatId && !isTempSwap) {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
       if (activeEventSourceRef.current) {
         activeEventSourceRef.current.close();
         activeEventSourceRef.current = null;
@@ -169,6 +166,10 @@ export function useAgentChat({
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
+      // IMPORTANT: do NOT abort abortControllerRef — that would kill an
+      // in-flight agent in the previous chat. The previous chat keeps its
+      // AbortController; the old stream continues in the background via
+      // AgentRunsContext, and this hook just detaches from it.
       isExecutingRef.current = false;
       setIsExecuting(false);
     }

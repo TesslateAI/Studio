@@ -51,6 +51,7 @@ import {
   NodeConfigPendingProvider,
   useNodeConfigPending,
 } from '../contexts/NodeConfigPendingContext';
+import { AgentRunsProvider } from '../contexts/AgentRunsContext';
 import { nodeConfigEvents } from '../utils/nodeConfigEvents';
 import { nodeConfigApi } from '../lib/api';
 import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
@@ -2207,10 +2208,19 @@ function ProjectPageInner() {
   );
 }
 
+function ProjectPageWithRuns() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return (
+    <AgentRunsProvider projectId={projectId ?? null}>
+      <ProjectPageInner />
+    </AgentRunsProvider>
+  );
+}
+
 export default function ProjectPage() {
   return (
     <NodeConfigPendingProvider>
-      <ProjectPageInner />
+      <ProjectPageWithRuns />
     </NodeConfigPendingProvider>
   );
 }

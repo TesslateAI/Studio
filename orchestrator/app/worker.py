@@ -251,6 +251,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     project_id = payload.project_id
     heartbeat_task = None
     lock_acquired = False
+    lock_stolen = False
     message_id = None
     # Ticket tracking — set when payload carries an agent_task_id and the claim succeeds
     claimed_ticket_id: UUID | None = None
@@ -293,30 +294,18 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             chat_id = payload.chat_id
 
             if agent_lock_enabled and pubsub:
+                # `acquire_chat_lock` now takes over cancelled zombie holders
+                # atomically (Lua script) — no retry loop needed. Fails only
+                # if a LIVE task is running in this chat.
                 lock_acquired = await pubsub.acquire_chat_lock(chat_id, task_id)
                 if not lock_acquired:
-                    # If the holding task has been cancelled, wait briefly
-                    # for it to release the lock (e.g. user cancelled then
-                    # immediately sent a new message).
                     holding_task = await pubsub.get_chat_lock(chat_id)
-                    if holding_task and await pubsub.is_cancelled(holding_task):
-                        for _retry in range(10):
-                            await asyncio.sleep(0.5)
-                            lock_acquired = await pubsub.acquire_chat_lock(chat_id, task_id)
-                            if lock_acquired:
-                                logger.info(
-                                    f"[WORKER] Acquired lock after cancelled task "
-                                    f"{holding_task} released"
-                                )
-                                break
-                    if not lock_acquired:
-                        holding_task = await pubsub.get_chat_lock(chat_id)
-                        await _publish_error(
-                            pubsub,
-                            task_id,
-                            f"Another agent is running in this session (task: {holding_task})",
-                        )
-                        return
+                    await _publish_error(
+                        pubsub,
+                        task_id,
+                        f"Another agent is running in this session (task: {holding_task})",
+                    )
+                    return
                 # Start heartbeat to extend lock every 10s
                 heartbeat_task = asyncio.create_task(_heartbeat_lock(pubsub, chat_id, task_id))
 
@@ -653,6 +642,19 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     # Check for cancellation between events
                     if pubsub and await pubsub.is_cancelled(task_id):
                         logger.info(f"[WORKER] Task {task_id} cancelled by client")
+                        # If a newer task has already taken over the chat lock,
+                        # exit quietly — the new task owns DB/stream state now.
+                        if agent_lock_enabled:
+                            holder = await pubsub.get_chat_lock(chat_id)
+                            if holder and holder != task_id:
+                                logger.info(
+                                    f"[WORKER] Task {task_id} lock stolen by {holder}; "
+                                    f"exiting quietly"
+                                )
+                                lock_stolen = True
+                                lock_acquired = False
+                                completion_reason = "superseded"
+                                break
                         completion_reason = "cancelled"
                         final_response = "Request was cancelled."
                         await pubsub.publish_agent_event(
@@ -749,8 +751,10 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     }
                     db.add(stale_msg)
 
-                # Update chat status
-                if chat:
+                # Update chat status — but skip if our lock was stolen.
+                # The new owner already set status="running"; we must not
+                # flip it back to "active"/"completed".
+                if chat and not lock_stolen:
                     chat.status = "completed" if completion_reason != "cancelled" else "active"
                 await db.commit()
 
@@ -773,7 +777,8 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         )
 
             # 13. Auto-generate chat title on first message (non-blocking)
-            if completion_reason != "cancelled":
+            # Skip if our lock was stolen — the live owner will handle titling.
+            if completion_reason != "cancelled" and not lock_stolen:
                 await _auto_title_chat(chat, model_adapter, payload.message, db)
                 # Publish title to SSE so frontend can update immediately
                 if pubsub and chat and chat.title:
@@ -935,11 +940,15 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         }
                         db.add(stale_msg)
 
-                # Mark chat as active (not running) on error
-                chat_result = await db.execute(select(Chat).where(Chat.id == UUID(payload.chat_id)))
-                chat = chat_result.scalar_one_or_none()
-                if chat and chat.status == "running":
-                    chat.status = "active"
+                # Mark chat as active (not running) on error — skip if our
+                # lock was stolen so we don't flip state owned by a new task.
+                if not lock_stolen:
+                    chat_result = await db.execute(
+                        select(Chat).where(Chat.id == UUID(payload.chat_id))
+                    )
+                    chat = chat_result.scalar_one_or_none()
+                    if chat and chat.status == "running":
+                        chat.status = "active"
 
                 await db.commit()
             except Exception as db_err:
@@ -948,7 +957,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 )
 
         finally:
-            # Always release chat lock and cancel heartbeat
+            # Always release chat lock, concurrency slot, and heartbeat
             if heartbeat_task:
                 heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -956,6 +965,15 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             if lock_acquired and pubsub:
                 await pubsub.release_chat_lock(payload.chat_id, task_id)
                 logger.debug(f"[WORKER] Released chat lock for {payload.chat_id}")
+            # Free the concurrency slot reserved at enqueue time.
+            with contextlib.suppress(Exception):
+                from .services.concurrency_limits import release_slot
+
+                await release_slot(
+                    user_id=payload.user_id,
+                    project_id=payload.project_id or None,
+                    task_id=task_id,
+                )
 
 
 async def send_webhook_callback(ctx: dict, url: str, payload: dict):

@@ -1,6 +1,14 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { MagnifyingGlass, Plus, ChatCircleDots, PencilSimple, Trash, X } from '@phosphor-icons/react';
+import {
+  MagnifyingGlass,
+  Plus,
+  ChatCircleDots,
+  PencilSimple,
+  Trash,
+  X,
+} from '@phosphor-icons/react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useAgentRuns } from '../../contexts/useAgentRuns';
 
 interface ChatSession {
   id: string;
@@ -63,6 +71,7 @@ export function ChatSessionPopover({
   const [renameValue, setRenameValue] = useState('');
   const popoverRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const agentRuns = useAgentRuns();
 
   const filteredSessions = useMemo(() => {
     if (!search.trim()) return sessions;
@@ -147,13 +156,22 @@ export function ChatSessionPopover({
           exit={{ opacity: 0, y: -4 }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
           className="absolute z-50 mt-1 w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[var(--radius-medium)] bg-[var(--surface)] border flex flex-col"
-          style={{ top: '100%', right: 0, borderWidth: 'var(--border-width)', borderColor: 'var(--border-hover)', maxHeight: '420px' }}
+          style={{
+            top: '100%',
+            right: 0,
+            borderWidth: 'var(--border-width)',
+            borderColor: 'var(--border-hover)',
+            maxHeight: '420px',
+          }}
         >
           {/* Search bar */}
           {showSearch && (
             <div className="px-3 pt-3 pb-1 flex-shrink-0">
               <div className="relative">
-                <MagnifyingGlass size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
+                <MagnifyingGlass
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]"
+                />
                 <input
                   type="text"
                   value={search}
@@ -211,9 +229,7 @@ export function ChatSessionPopover({
                       }
                     }}
                     className={`group relative flex cursor-pointer items-start gap-2 px-3 py-2 mx-1 rounded-[var(--radius-small)] transition-colors ${
-                      isSelected
-                        ? 'bg-[var(--surface-hover)]'
-                        : 'hover:bg-[var(--surface-hover)]'
+                      isSelected ? 'bg-[var(--surface-hover)]' : 'hover:bg-[var(--surface-hover)]'
                     }`}
                   >
                     {/* Status dot */}
@@ -239,9 +255,19 @@ export function ChatSessionPopover({
                             className="w-full bg-transparent border-b border-[var(--primary)] text-xs text-[var(--text)] outline-none"
                           />
                         ) : (
-                          <span className={`truncate text-xs font-medium ${isSelected ? 'text-[var(--text)]' : 'text-[var(--text-muted)]'}`}>
+                          <span
+                            className={`truncate text-xs font-medium ${isSelected ? 'text-[var(--text)]' : 'text-[var(--text-muted)]'}`}
+                          >
                             {session.title || 'Untitled'}
                           </span>
+                        )}
+
+                        {agentRuns.isRunning(session.id) && (
+                          <span
+                            className="shrink-0 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"
+                            aria-label="Agent running"
+                            title="Agent running"
+                          />
                         )}
 
                         {/* Origin badge */}

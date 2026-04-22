@@ -10,6 +10,7 @@ import { ChatSessionPopover } from './ChatSessionPopover';
 import { ToolDebugModal } from './ToolDebugModal';
 import { createWebSocket, chatApi, marketplaceApi } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAgentRuns } from '../../contexts/useAgentRuns';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
 import {
@@ -187,6 +188,7 @@ export function ChatContainer({
       });
     }
   }, [editMode]);
+  const agentRuns = useAgentRuns();
   const [isStreaming, setIsStreaming] = useState(false);
   const [agentExecuting, setAgentExecuting] = useState(false);
   const [currentStream, setCurrentStream] = useState('');
@@ -1101,23 +1103,29 @@ export function ChatContainer({
   const escTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const stopAgentExecution = useCallback(async () => {
+    // Stop-as-undo: unblock the input IMMEDIATELY. The server's lock-takeover
+    // path lets the next send steal the lock from this cancelled task, so we
+    // don't wait for the cancel RPC to ACK.
     const controller = abortControllerRef.current;
     if (controller) {
       controller.abort();
       abortControllerRef.current = null;
     }
-    // Explicitly cancel on the server (page refresh no longer cancels)
     const taskId = agentTaskIdRef.current;
-    if (taskId) {
-      try {
-        await chatApi.cancelAgentTask(taskId);
-      } catch {
-        // Best effort - task may already be done
-      }
-      agentTaskIdRef.current = null;
-    }
+    agentTaskIdRef.current = null;
     setAgentExecuting(false);
-  }, []);
+    if (currentChatIdRef.current) {
+      agentRuns.markTerminal(currentChatIdRef.current, 'superseded');
+    }
+
+    if (taskId) {
+      // Fire-and-forget — input is already ready for the next message.
+      chatApi.cancelAgentTask(taskId).catch(() => {
+        // Swallow: task may already be done; the takeover path handles any
+        // stuck lock on the next send.
+      });
+    }
+  }, [agentRuns]);
 
   // ESC key handler for stopping execution
   useEffect(() => {
@@ -1211,6 +1219,11 @@ export function ChatContainer({
           // Capture task ID from streaming events for cancellation/reconnection
           if (event.data?.task_id) {
             agentTaskIdRef.current = event.data.task_id as string;
+            // Publish to AgentRunsContext so other parts of the UI (sidebar
+            // dots, multi-chat view) can show this chat as running.
+            if (currentChatIdRef.current) {
+              agentRuns.register(currentChatIdRef.current, event.data.task_id as string);
+            }
           }
 
           if (event.type === 'text_delta') {
@@ -1696,7 +1709,10 @@ export function ChatContainer({
 
   const handleClearHistory = async () => {
     try {
-      const result = await chatApi.clearProjectMessages(projectId.toString());
+      const result = await chatApi.clearProjectMessages(
+        projectId.toString(),
+        currentChatId || undefined
+      );
       setMessages([]);
       animatedMessagesRef.current.clear();
       toast.success(`Cleared ${result.deleted_count} messages`, { icon: '🗑️' });

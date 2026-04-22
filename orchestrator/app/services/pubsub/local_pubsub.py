@@ -253,7 +253,23 @@ class LocalPubSub:
         return self._get_holder(self._project_locks, project_id)
 
     async def acquire_chat_lock(self, chat_id: str, task_id: str) -> bool:
-        return self._acquire(self._chat_locks, chat_id, task_id)
+        """Acquire or take over a chat lock (desktop parity with Redis backend).
+
+        Takes over the lock if the current holder has been cancelled.
+        """
+        current = self._chat_locks.get(chat_id)
+        if not self._lock_alive(current):
+            self._chat_locks[chat_id] = (task_id, time.monotonic() + 30.0)
+            return True
+        if current[0] == task_id:
+            self._chat_locks[chat_id] = (task_id, time.monotonic() + 30.0)
+            return True
+        # Takeover if current holder has been flagged cancelled.
+        if await self.is_cancelled(current[0]):
+            logger.info(f"Chat lock taken over from cancelled zombie: {chat_id} by {task_id}")
+            self._chat_locks[chat_id] = (task_id, time.monotonic() + 30.0)
+            return True
+        return False
 
     async def extend_chat_lock(self, chat_id: str, task_id: str) -> bool:
         return self._extend(self._chat_locks, chat_id, task_id)

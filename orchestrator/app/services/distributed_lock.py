@@ -229,6 +229,34 @@ class DistributedLock:
         finally:
             await self.release(lock_name)
 
+    @contextlib.asynccontextmanager
+    async def wait_for(
+        self,
+        lock_name: str,
+        ttl_seconds: int = 60,
+        max_wait_seconds: float = 30.0,
+        poll_interval: float = 0.05,
+    ):
+        """Context manager that BLOCKS until the lock is acquired (or times out).
+
+        Use for short, serialized operations like git index mutations or
+        per-file edits where contention is rare and we'd rather queue than
+        fail. Raises TimeoutError if max_wait_seconds elapses.
+        """
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + max_wait_seconds
+        while True:
+            acquired = await self.acquire(lock_name, ttl_seconds)
+            if acquired:
+                break
+            if loop.time() >= deadline:
+                raise TimeoutError(f"Lock {lock_name!r} contended for > {max_wait_seconds}s")
+            await asyncio.sleep(poll_interval)
+        try:
+            yield
+        finally:
+            await self.release(lock_name)
+
 
 # =============================================================================
 # Global Instance

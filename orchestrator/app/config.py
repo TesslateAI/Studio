@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     worker_job_timeout: int = 600  # Agent run timeout in seconds (10 min default)
     worker_max_tries: int = 2  # Retry failed jobs once (transient errors)
 
+    # Parallel-agent concurrency limits (enforced at enqueue time).
+    # Protects against runaway users / projects starving the worker pool.
+    user_max_concurrent_agents: int = 10
+    project_max_concurrent_agents: int = 20
+    # Per-user enqueue rate limit (sliding window) — caps how fast one user
+    # can spam new agents. Expressed as max enqueues per 10-second window.
+    user_enqueue_rate_per_10s: int = 20
+
     # Node-config (agent-driven user input) — how long we wait for the user
     # to submit the form before giving up and cancelling the paused task.
     node_config_input_timeout_seconds: int = 1800  # 30 minutes

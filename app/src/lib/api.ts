@@ -983,8 +983,10 @@ export const chatApi = {
     const response = await api.get(`/api/chat/${projectId}/messages`);
     return response.data;
   },
-  clearProjectMessages: async (projectId: string) => {
-    const response = await api.delete(`/api/chat/${projectId}/messages`);
+  clearProjectMessages: async (projectId: string, chatId?: string) => {
+    const response = await api.delete(`/api/chat/${projectId}/messages`, {
+      params: chatId ? { chat_id: chatId } : undefined,
+    });
     return response.data;
   },
   sendAgentMessage: async (request: AgentChatRequest): Promise<AgentChatResponse> => {
@@ -1087,10 +1089,31 @@ export const chatApi = {
     return response.data;
   },
 
+  // List ALL active agent tasks across a project's chat sessions.
+  // Powers the sidebar's live run-state dots and cold-start reconnect.
+  getActiveTasksInProject: async (
+    projectId: string
+  ): Promise<{ tasks: { task_id: string; chat_id: string; title: string | null }[] }> => {
+    const response = await api.get('/api/chat/agent/active-in-project', {
+      params: { project_id: projectId },
+    });
+    return response.data;
+  },
+
   // Subscribe to agent events (SSE) for reconnection
   subscribeToTask: (taskId: string, lastEventId?: string) => {
     const params = lastEventId ? `?last_event_id=${lastEventId}` : '';
     const url = `${API_URL}/api/chat/agent/events/${taskId}${params}`;
+    return new EventSource(url, { withCredentials: true });
+  },
+
+  // Multiplexed SSE for every active chat in a project — one connection.
+  // Used as a fallback when the client has too many per-task streams open
+  // (browsers cap SSE to ~6 per origin).
+  subscribeToProject: (projectId: string) => {
+    const url = `${API_URL}/api/chat/agent/stream-project?project_id=${encodeURIComponent(
+      projectId
+    )}`;
     return new EventSource(url, { withCredentials: true });
   },
 

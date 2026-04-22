@@ -141,75 +141,85 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     }
 
     orchestrator = get_orchestrator()
-    try:
-        current_content = await orchestrator.read_file(
-            user_id=user_id,
-            project_id=project_id,
-            container_name=container_name,
-            file_path=file_path,
-            project_slug=project_slug,
-            subdir=container_directory,
-            **volume_hints,
-        )
-    except Exception as exc:
-        logger.error("[PATCH-FILE] Failed to read '%s': %s", file_path, exc)
-        current_content = None
+    from ._write_fence import fence_file
 
-    if current_content is None:
-        return error_output(
-            message=f"File '{file_path}' does not exist",
-            suggestion=(
-                "Use write_file to create new files, or list the directory first "
-                "to verify the path."
-            ),
-            file_path=file_path,
-        )
+    async with fence_file(project_id, file_path):
+        try:
+            current_content = await orchestrator.read_file(
+                user_id=user_id,
+                project_id=project_id,
+                container_name=container_name,
+                file_path=file_path,
+                project_slug=project_slug,
+                subdir=container_directory,
+                **volume_hints,
+            )
+        except Exception as exc:
+            logger.error("[PATCH-FILE] Failed to read '%s': %s", file_path, exc)
+            current_content = None
 
-    repair_fn = None if context.get("disable_llm_repair") else llm_repair
-
-    try:
-        result: EditResult = await apply_edit(
-            content=current_content,
-            old_str=old_str,
-            new_str=new_str,
-            expected_occurrence=expected_occurrence,
-            allow_multiple=allow_multiple,
-            file_path=file_path,
-            repair_fn=repair_fn,
-        )
-    except EditError as exc:
-        return _edit_error_to_output(exc, file_path)
-
-    # Record BEFORE mutating so undo can always restore.
-    await EDIT_HISTORY.record(file_path, current_content, "edit")
-
-    try:
-        success = await orchestrator.write_file(
-            user_id=user_id,
-            project_id=project_id,
-            container_name=container_name,
-            file_path=file_path,
-            content=result.content,
-            project_slug=project_slug,
-            subdir=container_directory,
-            **volume_hints,
-        )
-        if not success:
+        if current_content is None:
             return error_output(
-                message=f"Failed to save patched file '{file_path}'",
-                suggestion="Check write permissions and disk space.",
+                message=f"File '{file_path}' does not exist",
+                suggestion=(
+                    "Use write_file to create new files, or list the directory first "
+                    "to verify the path."
+                ),
                 file_path=file_path,
             )
-    except Exception as exc:
-        logger.error("[PATCH-FILE] Failed to write '%s': %s", file_path, exc)
-        return error_output(
-            message=f"Could not save patched file '{file_path}': {exc}",
-            suggestion="Check write permissions and retry.",
-            file_path=file_path,
-            details={"error": str(exc)},
-        )
+
+        repair_fn = None if context.get("disable_llm_repair") else llm_repair
+
+        try:
+            result: EditResult = await apply_edit(
+                content=current_content,
+                old_str=old_str,
+                new_str=new_str,
+                expected_occurrence=expected_occurrence,
+                allow_multiple=allow_multiple,
+                file_path=file_path,
+                repair_fn=repair_fn,
+            )
+        except EditError as exc:
+            return _edit_error_to_output(exc, file_path)
+
+        # Record BEFORE mutating so undo can always restore.
+        await EDIT_HISTORY.record(file_path, current_content, "edit")
+
+        try:
+            success = await orchestrator.write_file(
+                user_id=user_id,
+                project_id=project_id,
+                container_name=container_name,
+                file_path=file_path,
+                content=result.content,
+                project_slug=project_slug,
+                subdir=container_directory,
+                **volume_hints,
+            )
+            if not success:
+                return error_output(
+                    message=f"Failed to save patched file '{file_path}'",
+                    suggestion="Check write permissions and disk space.",
+                    file_path=file_path,
+                )
+        except Exception as exc:
+            logger.error("[PATCH-FILE] Failed to write '%s': %s", file_path, exc)
+            return error_output(
+                message=f"Could not save patched file '{file_path}': {exc}",
+                suggestion="Check write permissions and retry.",
+                file_path=file_path,
+                details={"error": str(exc)},
+            )
 
     diff_preview = _generate_diff_preview(current_content, result.content)
+
+    try:
+        from ....services.recent_files import get_recent_file_tracker
+
+        await get_recent_file_tracker().record(context, file_path)
+    except Exception:
+        pass
 
     return success_output(
         message=(
@@ -369,6 +379,13 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
         )
 
     diff_preview = _generate_diff_preview(current_content, buffer)
+
+    try:
+        from ....services.recent_files import get_recent_file_tracker
+
+        await get_recent_file_tracker().record(context, file_path)
+    except Exception:
+        pass
 
     return success_output(
         message=f"Applied {len(applied)} edit(s) to '{file_path}'",

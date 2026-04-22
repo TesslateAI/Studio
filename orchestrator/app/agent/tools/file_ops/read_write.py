@@ -73,6 +73,12 @@ async def read_file_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
         )
 
         if content is not None:
+            try:
+                from ....services.recent_files import get_recent_file_tracker
+
+                await get_recent_file_tracker().record(context, file_path)
+            except Exception:
+                pass
             return success_output(
                 message=f"Read {format_file_size(len(content))} from '{file_path}'",
                 file_path=file_path,
@@ -141,21 +147,23 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     )
 
     from ....services.orchestration import get_orchestrator
+    from ._write_fence import fence_file
 
     try:
         orchestrator = get_orchestrator()
-        success = await orchestrator.write_file(
-            user_id=user_id,
-            project_id=project_id,
-            container_name=container_name,
-            file_path=file_path,
-            content=content,
-            project_slug=project_slug,
-            subdir=container_directory,
-            # Volume routing hints
-            volume_id=context.get("volume_id"),
-            cache_node=context.get("cache_node"),
-        )
+        async with fence_file(str(project_id) if project_id else "", file_path):
+            success = await orchestrator.write_file(
+                user_id=user_id,
+                project_id=project_id,
+                container_name=container_name,
+                file_path=file_path,
+                content=content,
+                project_slug=project_slug,
+                subdir=container_directory,
+                # Volume routing hints
+                volume_id=context.get("volume_id"),
+                cache_node=context.get("cache_node"),
+            )
 
         if success:
             if file_path.rstrip("/").endswith(".tesslate/config.json"):
@@ -163,6 +171,13 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
                     "[WRITE-FILE] .tesslate/config.json written — "
                     "call apply_setup_config to sync the container graph"
                 )
+
+            try:
+                from ....services.recent_files import get_recent_file_tracker
+
+                await get_recent_file_tracker().record(context, file_path)
+            except Exception:
+                pass
 
             return success_output(
                 message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
