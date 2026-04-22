@@ -2211,22 +2211,90 @@ async def get_setup_config(
 
 
 @router.post("/{project_slug}/setup-config", response_model=SetupConfigSyncResponse)
+async def _auto_start_project(project_id: UUID, project_slug: str, user_id: UUID) -> None:
+    """Background task: start all containers for a freshly configured project.
+
+    Opens its own DB session because the caller's session ends with the
+    response. Never raises — a failed auto-start logs a warning but doesn't
+    leave the user stuck with no response.
+    """
+    from ..database import AsyncSessionLocal
+    from ..services.orchestration import get_orchestrator
+
+    try:
+        async with AsyncSessionLocal() as bg_db:
+            proj_result = await bg_db.execute(select(Project).where(Project.id == project_id))
+            bg_project = proj_result.scalar_one_or_none()
+            if bg_project is None:
+                return
+
+            containers_result = await bg_db.execute(
+                select(Container)
+                .where(Container.project_id == project_id)
+                .options(selectinload(Container.base))
+            )
+            containers = list(containers_result.scalars().all())
+            if not containers:
+                return
+
+            conns_result = await bg_db.execute(
+                select(ContainerConnection).where(ContainerConnection.project_id == project_id)
+            )
+            connections = list(conns_result.scalars().all())
+
+            orchestrator = get_orchestrator()
+            await orchestrator.start_project(bg_project, containers, connections, user_id, bg_db)
+            logger.info(f"[AUTO_START] Started containers for new project {project_slug}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[AUTO_START] Failed to auto-start project {project_slug}: {exc}")
+
+
 async def save_setup_config(
     project_slug: str,
     config_data: TesslateConfigCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Save .tesslate/config.json and replace the project's container graph."""
+    """Save .tesslate/config.json and replace the project's container graph.
+
+    When this is the first config sync (no existing containers), auto-start
+    the newly created containers so the user lands on a running environment
+    rather than having to click 'Start Environment'. Subsequent syncs (canvas
+    edits on an already-configured project) do not auto-start — that would
+    interrupt a user editing their running project.
+    """
     project = await get_project_by_slug(db, project_slug, current_user, Permission.FILE_WRITE)
     await track_project_activity(project.id, db)
 
     from ..services.config_sync import ConfigSyncError, sync_project_config
 
+    # Detect first-sync before running the sync (afterwards, containers exist)
+    pre_count_result = await db.execute(
+        select(func.count(Container.id)).where(Container.project_id == project.id)
+    )
+    is_first_sync = (pre_count_result.scalar() or 0) == 0
+
     try:
-        return await sync_project_config(db, project, config_data, current_user.id)
+        result = await sync_project_config(db, project, config_data, current_user.id)
     except ConfigSyncError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if is_first_sync and result.container_ids and can_auto_start(project):
+        background_tasks.add_task(_auto_start_project, project.id, project.slug, current_user.id)
+
+    return result
+
+
+def can_auto_start(project: Project) -> bool:
+    """Gate auto-start to healthy environment states.
+
+    Don't auto-start if the environment is mid-transition (provisioning,
+    starting, stopping) or in an error state — a background start there
+    would race with the active workflow.
+    """
+    status_value = getattr(project, "environment_status", None)
+    return status_value in {None, "active", "stopped"}
 
 
 @router.post("/{project_slug}/sync-config")
