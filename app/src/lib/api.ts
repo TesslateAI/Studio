@@ -417,6 +417,100 @@ export const tasksApi = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Git / Repository panel response shapes
+// ---------------------------------------------------------------------------
+
+export interface GitAuthor {
+  login: string | null;
+  avatar_url: string | null;
+  name: string | null;
+  email: string | null;
+  date: string | null;
+}
+
+export interface GitCommit {
+  sha: string;
+  short_sha: string;
+  message: string;
+  title: string;
+  html_url: string | null;
+  parents: string[];
+  author: GitAuthor;
+  committer: GitAuthor;
+  files_changed: number | null;
+}
+
+export type GitApiStatus = 'ready' | 'no_remote' | 'error';
+
+export interface GitCommitsResponse {
+  status: GitApiStatus;
+  message?: string;
+  owner?: string;
+  repo?: string;
+  branch?: string | null;
+  html_url?: string;
+  commits?: GitCommit[];
+}
+
+export interface GitBranchSummary {
+  name: string;
+  is_default: boolean;
+  protected: boolean;
+  sha: string | null;
+  html_url: string | null;
+  ahead_by: number | null;
+  behind_by: number | null;
+}
+
+export interface GitBranchesResponse {
+  status: GitApiStatus;
+  message?: string;
+  owner?: string;
+  repo?: string;
+  default_branch?: string;
+  html_url?: string;
+  branches?: GitBranchSummary[];
+}
+
+export interface GitContributor {
+  login: string | null;
+  avatar_url: string | null;
+  contributions: number | null;
+  html_url: string | null;
+}
+
+export interface GitOpenPull {
+  number: number;
+  title: string;
+  html_url: string | null;
+  user: { login: string | null; avatar_url: string | null } | null;
+  created_at: string | null;
+  draft: boolean | null;
+}
+
+export interface GitRepoInfoResponse {
+  status: GitApiStatus;
+  message?: string;
+  owner?: string;
+  repo?: string;
+  html_url?: string;
+  description?: string | null;
+  default_branch?: string;
+  stars?: number | null;
+  watchers?: number | null;
+  forks?: number | null;
+  open_issues?: number | null;
+  pushed_at?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+  is_private?: boolean | null;
+  topics?: string[];
+  contributors?: GitContributor[];
+  open_pulls?: GitOpenPull[];
+  open_pulls_count?: number;
+}
+
 export const projectsApi = {
   getAll: async (teamSlug?: string) => {
     const params = teamSlug ? { team: teamSlug } : {};
@@ -549,6 +643,25 @@ export const projectsApi = {
         sha?: string;
       }>;
     };
+  },
+  getGitCommits: async (
+    slug: string,
+    opts?: { branch?: string; limit?: number; includeStats?: boolean }
+  ): Promise<GitCommitsResponse> => {
+    const params: Record<string, string | number | boolean> = {};
+    if (opts?.branch) params.branch = opts.branch;
+    if (typeof opts?.limit === 'number') params.limit = opts.limit;
+    if (opts?.includeStats) params.include_stats = true;
+    const response = await api.get(`/api/projects/${slug}/git/commits`, { params });
+    return response.data as GitCommitsResponse;
+  },
+  getGitBranches: async (slug: string): Promise<GitBranchesResponse> => {
+    const response = await api.get(`/api/projects/${slug}/git/branches`);
+    return response.data as GitBranchesResponse;
+  },
+  getGitRepoInfo: async (slug: string): Promise<GitRepoInfoResponse> => {
+    const response = await api.get(`/api/projects/${slug}/git/repo-info`);
+    return response.data as GitRepoInfoResponse;
   },
   getFileContent: async (slug: string, path: string, containerDir?: string) => {
     const params: Record<string, string> = { path };
