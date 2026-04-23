@@ -4,7 +4,7 @@
 
 <h1 align="center">OpenSail</h1>
 
-<p align="center">Build agents, apps, and automations from anywhere.<br />Run them on your infrastructure. Share them across your team.<br />Become your own sandboxing cloud. Governance, audit, and permissions built in.<br />Open source. Any model. No lock-in.</p>
+<p align="center">Build agents, software, apps, workflows, automations, and schedules — and deploy them to any provider. No vendor lock-in.<br />See your entire architecture on one canvas. Containers, preview windows, deploy targets, agents, and their wiring, all in one graph.<br />Run it on your infrastructure. Share it across your team. Become your own sandboxing cloud.<br />Governance, audit, and permissions built in. Open source. Any model.</p>
 
 <p align="center">
   <a href="https://docs.tesslate.com"><strong>Docs</strong></a> ·
@@ -27,10 +27,6 @@ OpenSail is an open platform for building, running, and sharing AI-powered softw
 It runs on a snapshot-based filesystem that makes workspaces portable, shareable, and persistent. Connect your local desktop to your own cloud. Run agents in sandboxed environments that cost almost nothing when idle. Ship workflows that keep working while you sleep.
 
 OpenSail also exposes a Gateway API and an MCP server (in development), so external agents and humans can interact with your running instance using an API key. They get their own sandboxed containers, can use agents, and publish apps (coming soon) directly from their own coding tools.
-
-<p align="center">
-  <img src="assets/opensail-demo.gif" alt="OpenSail in action" width="80%" />
-</p>
 
 ---
 
@@ -352,6 +348,10 @@ OpenSail is model-agnostic. All model calls route through LiteLLM. Switch provid
 
 Ship to 22 places by drawing an edge.
 
+<p align="center">
+  <img src="assets/opensail-deployment-targets.png" alt="OpenSail Deployment Targets" width="85%" />
+</p>
+
 Deploy from the Architecture Panel. Draw an edge from a container to a deployment target. A/B deployments work naturally: connect the same container to two targets (Vercel for production, Cloudflare for preview) and each gets independent deployment history and rollback.
 
 **22 supported targets:**
@@ -370,6 +370,10 @@ Each target is a registry entry. Adding a new provider is one config block, not 
 ## Communication gateways
 
 Deploy agents where your team already talks.
+
+<p align="center">
+  <img src="assets/opensail-communication-gateways.png" alt="OpenSail Communication Gateways" width="80%" />
+</p>
 
 Deploy agents to the channels where your team already works. Each channel is a `GatewayAdapter` subclass, hot-reloaded via Redis pub/sub.
 
