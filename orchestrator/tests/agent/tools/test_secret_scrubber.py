@@ -5,6 +5,7 @@ marker ``«secret:KEY»``. Short secrets (< 6 chars) are skipped to avoid
 false positives, binary/non-string output is passed through unchanged, and
 multiple keys with overlapping occurrences are all replaced.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -21,7 +22,6 @@ def test_scrubs_single_secret_substring() -> None:
 def test_short_secrets_are_not_scrubbed() -> None:
     # 5 chars is below the 6-char floor
     scrub_map = {"abc12": "TINY"}
-    out = scrub_text("prefix abc12 suffix abc12", scrub_map)
     # Unchanged — short secrets never appear in the scrub map in production,
     # but even if they did, scrub_text must still keep the min-length
     # promise. The contract is enforced upstream in _load_project_secrets,
@@ -106,7 +106,6 @@ def test_longest_first_ordering_with_shared_prefix() -> None:
 
 
 def test_non_string_output_passes_through_unchanged() -> None:
-    scrub_map = {"abcdef123456": "X"}
     # scrub_text is typed for str; verify the bytes path via the public entry.
     import asyncio
 
