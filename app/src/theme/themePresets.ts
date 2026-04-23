@@ -276,6 +276,9 @@ export function applyThemePreset(theme: Theme): void {
   // === BORDERS ===
   safeSetProperty(root, '--border', colors.border);
   safeSetProperty(root, '--border-hover', colors.borderHover);
+  // Legacy alias used by chat/panels (e.g. ChatMessage) — keep in sync with --border
+  // so light themes don't bleed the :root dark fallback through.
+  safeSetProperty(root, '--border-color', colors.border);
 
   // === SIDEBAR ===
   if (colors.sidebar) {
