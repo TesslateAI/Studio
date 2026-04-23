@@ -1,589 +1,165 @@
-# Orchestrator Routers Context - Agent Instructions
+# Orchestrator Routers Agent Context
 
-**Purpose**: API endpoint development for OpenSail's FastAPI backend
+**Purpose**: API endpoint development for OpenSail's FastAPI backend.
 
-**When to load this context**: When adding or modifying API endpoints, routers, or HTTP handlers
+**Load when**: Adding or modifying routers, HTTP handlers, WebSocket endpoints, or auth flows.
 
-## Key Files
+## Scope
 
-### Router Files
-Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
+Every Python file in these directories is documented here or in a linked per-router doc:
 
-- `projects.py` (5218 lines) - Project CRUD, file operations, container lifecycle, assets, deployment target assignment
-- `chat.py` (~2050 lines) - Chat management, agent streaming, WebSocket support, multi-session chat, ARQ worker dispatch (max_iterations default: unlimited, cost limit: $5/run), undo last exchange (`POST /{chat_id}/undo`)
-- `marketplace.py` (~2800 lines) - Agent/base marketplace, purchases, reviews, user-submitted bases, community bases browse with pagination, base versioning (git tags)
-- `admin.py` (~3700 lines) - Platform metrics, user management, moderation, audit logs, project admin, billing admin, deployment monitoring
-- `deployments.py` (1,197 lines) - External deployments (Vercel, Netlify, Cloudflare), deploy-all endpoint
-- `kanban.py` (757 lines) - Project task board management
-- `billing.py` (702 lines) - Subscriptions, credits, usage tracking, Stripe webhooks
-- `git.py` (607 lines) - Git operations (init, commit, push, pull)
-- `git_providers.py` (533 lines) - Multi-provider Git support (GitHub, GitLab, Bitbucket)
-- `deployment_credentials.py` (519 lines) - OAuth credential management
-- `github.py` (474 lines) - GitHub-specific operations (legacy, use git_providers instead)
-- `deployment_oauth.py` (447 lines) - OAuth callback handling
-- `feedback.py` (401 lines) - User feedback submission
-- `agent.py` (374 lines) - Legacy agent endpoints
-- `secrets.py` (293 lines) - Project environment variables
-- `tasks.py` (~350 lines) - Background task status queries, agent task status with Redis cross-pod lookup
-- `shell.py` (246 lines) - Interactive shell sessions
-- `creators.py` (238 lines) - Creator program management
-- `two_fa.py` (218 lines) - Email 2FA login, code verification, resend, password reset
-- `auth.py` (222 lines) - Pod access verification, custom auth
-- `users.py` (128 lines) - User profile management
-- `agents.py` (108 lines) - User agent management
-- `themes.py` - Public theme API (no auth required)
-- `webhooks.py` (52 lines) - Webhook endpoints
-- `referrals.py` (46 lines) - Referral program
-- `external_agent.py` (500 lines) - External API for agent invocation (API key auth, SSE events, webhook callbacks)
-- `channels.py` (~730 lines) - Messaging channel configs (Telegram, Slack, Discord, WhatsApp), webhook inbound, message history, gateway-compatible config management
-- `gateway.py` (~260 lines) - Gateway status (Redis), reload signal, platform list, identity pairing (verify code, list/unlink identities)
-- `schedules.py` (~340 lines) - CRUD for cron-scheduled agent tasks (create, list, get, update, delete), lifecycle (pause, resume, trigger)
-- `mcp.py` (~510 lines) - MCP server install/uninstall, credential management, discovery, agent assignments
-- `mcp_server.py` (~120 lines) - Tesslate-as-MCP-server (FastMCP Streamable HTTP transport)
+- `orchestrator/app/routers/*.py` (flat modules; cookie/session or tsk auth)
+- `orchestrator/app/routers/desktop/*.py` (sidecar routes, mounted at `/api/desktop`)
+- `orchestrator/app/routers/public/*.py` (tsk-key public API; `/api/public/*` and `/api/v1/*`)
 
-- `teams.py` (~900 lines) - Team CRUD, member management, invitations, project access control, audit log
+See [README.md](README.md) for the full index and the per-file to per-doc mapping.
 
-### Supporting Files
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/main.py` - FastAPI app setup, middleware, router registration
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/schemas.py` - Pydantic request/response models
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/models.py` - SQLAlchemy database models
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/users.py` - FastAPI Users configuration
+## Docs by Router
 
-## Related Contexts
+Every router has a doc entry. Use [README.md](README.md) for the complete matrix. Summary:
 
-Load these contexts when working on related functionality:
+### Core / project workflow
 
-- **Services**: `docs/orchestrator/services/CLAUDE.md` - Business logic, orchestration, external integrations
-- **Models**: `docs/orchestrator/models.md` - Database schema and relationships
-- **Agent**: `docs/orchestrator/agent/CLAUDE.md` - AI agent implementation, tools, streaming
-- **Schemas**: `docs/orchestrator/schemas.md` - Pydantic models for validation
+- [projects.md](projects.md): `projects.py` (CRUD, files, containers, setup-config, analyze, hibernate, ensure-environment).
+- [chat.md](chat.md): `chat.py` (agent streaming, WS, multi-session chat, ARQ dispatch, undo).
+- [node-config.md](node-config.md): `node_config.py` (container config + mid-chat interactive input).
+- [tasks.md](tasks.md): `tasks.py` (task status + WS).
+- [kanban.md](kanban.md): `kanban.py` (board, tasks `TSK-NNNN`, notes).
+- [snapshots.md](snapshots.md): `snapshots.py` (CAS timeline, branches, restore).
+- [shell.md](shell.md) + [terminal.md](terminal.md): persistent shell sessions + interactive PTY.
+- [design.md](design.md): `design.py` (OID index + AST apply-diff).
+- [secrets.md](secrets.md): per-user API keys, custom providers, model preferences.
 
-## Quick Reference
+### Auth and users
 
-### Common Decorators
+- [auth.md](auth.md): `auth.py` (refresh, logout, dev-server verify-access).
+- [two-fa.md](two-fa.md): `two_fa.py` (email 2FA login).
+- [magic-link.md](magic_link.md) (file: `magic_link.py`): passwordless login.
+- [users.md](users.md): `users.py` (preferences, profile, handle).
+- [teams.md](teams.md): `teams.py` (teams, members, invites, project access, audit log).
+- [referrals.md](referrals.md): `referrals.py`.
+- [creators.md](creators.md): `creators.py` (public creator profiles).
+- [feedback.md](feedback.md): `feedback.py`.
 
-```python
-# Public endpoints (no auth)
-@router.get("/public")
-async def public_endpoint():
-    pass
+### Agents and tools
 
-# Authenticated endpoints
-@router.get("/private")
-async def private_endpoint(
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    pass
+- [agents.md](agents.md): `agents.py` (user agents, tool catalog).
+- [agent.md](agent.md): `agent.py` (legacy command endpoints).
+- [external-agent.md](external-agent.md): `external_agent.py` (tsk-key invoke + SSE + webhooks).
+- [schedules.md](schedules.md): `schedules.py` (cron-scheduled agent tasks).
+- [gateway.md](gateway.md): `gateway.py` (gateway status, platforms, identity pairing).
+- [channels.md](channels.md): `channels.py` (messaging channel configs + webhooks).
 
-# Admin-only endpoints
-@router.get("/admin")
-async def admin_endpoint(
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-):
-    pass
+### Marketplace and apps
 
-# Background task support
-@router.post("/async-operation")
-async def async_operation(
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(current_active_user)
-):
-    background_tasks.add_task(do_work, arg1, arg2)
-    return {"status": "started"}
+- [marketplace.md](marketplace.md): `marketplace.py` (agents/skills/bases/MCP/themes).
+- [mcp.md](mcp.md): `mcp.py`, `mcp_server.py` (user MCP + streamable-HTTP server).
+- [mcp-oauth.md](mcp-oauth.md): `mcp_oauth.py` (per-user OAuth for MCP connectors).
+- [themes.md](themes.md): `themes.py` (public theme API).
+- [apps.md](apps.md): all Tesslate Apps routers (`marketplace_apps.py`, `app_versions.py`, `app_installs.py`, `app_runtime.py`, `app_runtime_status.py`, `app_schedules.py`, `app_billing.py`, `app_submissions.py`, `app_yanks.py`, `app_triggers.py`, `app_bundles.py`, `admin_marketplace.py`).
 
-# Streaming responses
-@router.get("/stream")
-async def stream_data():
-    async def generate():
-        yield f"data: {json.dumps(data)}\n\n"
+### Billing and deployments
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+- [billing.md](billing.md): `billing.py` (subscriptions, credits).
+- [webhooks.md](webhooks.md): `webhooks.py` (Stripe inbound).
+- [deployments.md](deployments.md): `deployments.py` (Vercel/Netlify/Cloudflare).
+- [deployment-credentials.md](deployment-credentials.md): `deployment_credentials.py`.
+- [deployment-oauth.md](deployment-oauth.md): `deployment_oauth.py`.
+- [deployment-targets.md](deployment-targets.md): `deployment_targets.py`.
 
-# WebSocket endpoints
-@router.websocket("/ws/{id}")
-async def websocket_endpoint(websocket: WebSocket, id: str):
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_text()
-            await websocket.send_text(response)
-    except WebSocketDisconnect:
-        pass
-```
+### Git
 
-### Public and Optional Auth Patterns
+- [git.md](git.md): `git.py` (init/commit/push/pull).
+- [git-providers.md](git-providers.md): `git_providers.py` (GitHub/GitLab/Bitbucket OAuth, repo listing).
+- [github.md](github.md): `github.py` (legacy GitHub-only routes).
 
-Some endpoints are publicly accessible (no auth required) or support optional authentication:
+### Admin and ops
+
+- [admin.md](admin.md): `admin.py`.
+- [internal.md](internal.md): `internal.py` (cluster-internal secret auth).
+- [feature-flags.md](feature-flags.md): `feature_flags.py`.
+- [version.md](version.md): `version.py`.
+- [test-helpers.md](test-helpers.md): `test_helpers.py` (test-only).
+
+### Proxies and SDKs
+
+- [proxy.md](proxy.md): `proxy.py` (OpenAI-compat `/v1` for external callers).
+- [public.md](public.md): every `public/*.py` router (tsk-auth external API).
+- [desktop.md](desktop.md): every `desktop/*.py` router plus `desktop_pair.py` and `marketplace_local.py`.
+
+## Auth Matrix
+
+| Dependency | Router examples | Token |
+|------------|-----------------|-------|
+| `current_active_user` | most `/api/*` routers | cookie JWT or bearer |
+| `current_superuser` | admin.py, admin_marketplace.py, moderation hooks | bearer/cookie + superuser flag |
+| `current_optional_user` | themes.py, marketplace.py browse, creators.py | optional |
+| `require_api_scope(Permission.X)` | public/* routers, external_agent.py, proxy.py | `tsk_` key |
+| HMAC-SHA256 over body | app_triggers.py | per-schedule key |
+| `verify_internal_secret` | internal.py | shared cluster secret |
+| Provider signature | webhooks.py (Stripe), channels.py | provider-signed |
+| State token | deployment_oauth.py callbacks, git_providers.py callbacks, mcp_oauth.py callback | signed state |
+
+## Common Patterns
+
+### Project access
 
 ```python
-# Public endpoint (themes, marketplace browsing)
-@router.get("/themes")
-async def get_themes(db: AsyncSession = Depends(get_db)):
-    # No current_user dependency - anyone can access
-    return await get_all_themes(db)
-
-# Optional auth - works for both authenticated and anonymous users
-@router.get("/marketplace/agents")
-async def get_agents(
-    current_user: Optional[User] = Depends(current_optional_user),
-    db: AsyncSession = Depends(get_db)
-):
-    # current_user is None for anonymous, User for authenticated
-    agents = await get_public_agents(db)
-    if current_user:
-        # Add user-specific data (purchased, in library, etc.)
-        agents = add_user_context(agents, current_user)
-    return agents
+project = await get_project_by_slug(db, project_slug, current_user.id)   # owner only
+# or for team-aware access:
+project = await get_project_with_access(db, project_slug, current_user)  # dual-scope
 ```
 
-**Public Routers:**
-- `themes.py` - Theme presets (needed before login for UI)
-- `marketplace.py` - Agent/skill/MCP server browsing (public access, optional auth for user context)
-- `channels.py` - Webhook inbound endpoints (unauthenticated, platform signature verified)
-- `gateway.py` - Gateway status endpoint (reads from Redis, no auth), platform list (public)
+### Schema validation
 
-### New Marketplace Endpoints
+Request/response bodies use Pydantic. Shared schemas live in `schemas.py`, `schemas_team.py`, and `schemas_auth.py`. Public routers inline their schemas per convention.
 
-**Browse Community Bases** (`GET /api/marketplace/bases/browse`):
-- Server-side paginated with `page`, `limit`, `category`, `search`, `sort` params
-- Returns `{ bases, total, page, total_pages }`
-- Includes official + community bases with creator info
-- Stable pagination sort with `.id` tiebreaker
+### Background + long-running tasks
 
-**Base Versions** (`GET /api/marketplace/bases/{slug}/versions`):
-- Returns available git tag versions for a base
-- 10-minute server-side cache per slug
-- Fetches tags from GitHub API (unauthenticated, 60 req/hr rate limit)
-- Used by `CreateProjectModal` for version selection
+- FastAPI `BackgroundTasks` for fire-and-forget side effects.
+- ARQ queue (cloud) or `LocalTaskQueue` (desktop) for agent work.
+- `TaskManager` for progress rows polled by the frontend.
+- Redis Streams + SSE/WS for real-time event broadcast.
 
-**Project Creation with Version** (`POST /api/projects`):
-- `ProjectCreate` schema now accepts optional `base_version` field
-- Clones the specific git tag via `--branch` instead of latest when provided
+### Orchestrator factory
 
-### Authentication Patterns
+Routers should not hardcode Docker vs K8s. Use:
 
 ```python
-# Verify project ownership
-from .projects import get_project_by_slug
-
-project = await get_project_by_slug(db, project_slug, current_user.id)
-# Raises HTTPException if not found or not owned
-
-# Manual ownership check
-result = await db.execute(
-    select(Project).where(
-        Project.id == project_id,
-        Project.owner_id == current_user.id
-    )
-)
-project = result.scalar_one_or_none()
-if not project:
-    raise HTTPException(status_code=404, detail="Project not found")
-
-# Superuser check
-if not current_user.is_superuser:
-    raise HTTPException(status_code=403, detail="Admin access required")
+from ..services.orchestration.factory import get_orchestrator
+orchestrator = get_orchestrator(project=project)
 ```
 
-### Database Patterns
+## Middleware Stack (order matters)
 
-```python
-# Query with eager loading (avoid N+1)
-from sqlalchemy.orm import selectinload
-
-result = await db.execute(
-    select(Project)
-    .options(selectinload(Project.containers))
-    .where(Project.id == project_id)
-)
-project = result.scalar_one()
-
-# Query with filters
-result = await db.execute(
-    select(MarketplaceAgent)
-    .where(
-        MarketplaceAgent.status == "published",
-        MarketplaceAgent.category == category
-    )
-    .order_by(MarketplaceAgent.downloads.desc())
-    .limit(20)
-)
-agents = result.scalars().all()
-
-# Aggregations
-from sqlalchemy import func
-
-count = await db.scalar(
-    select(func.count(Project.id))
-    .where(Project.owner_id == user_id)
-)
-
-# Transactions (auto-commit on success)
-project = Project(name="New Project", owner_id=user_id)
-db.add(project)
-await db.commit()
-await db.refresh(project)  # Refresh to get generated ID
-```
-
-### Error Handling
-
-```python
-from fastapi import HTTPException, status
-
-# Standard errors
-raise HTTPException(
-    status_code=status.HTTP_404_NOT_FOUND,
-    detail="Resource not found"
-)
-
-raise HTTPException(
-    status_code=status.HTTP_400_BAD_REQUEST,
-    detail="Invalid input"
-)
-
-raise HTTPException(
-    status_code=status.HTTP_403_FORBIDDEN,
-    detail="Not authorized"
-)
-
-# With logging
-import logging
-logger = logging.getLogger(__name__)
-
-try:
-    result = await some_operation()
-except Exception as e:
-    logger.error(f"Operation failed: {e}", exc_info=True)
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Operation failed: {str(e)}"
-    )
-```
-
-### File Operations
-
-```python
-from ..utils.async_fileio import (
-    read_file_async,
-    write_file_async,
-    makedirs_async,
-    walk_directory_async
-)
-from ..utils.resource_naming import get_project_path
-import os
-
-# Get project directory
-project_path = os.path.abspath(get_project_path(user_id, project_id))
-
-# Read file
-content = await read_file_async(os.path.join(project_path, "file.txt"))
-
-# Write file
-await makedirs_async(os.path.dirname(file_path))
-await write_file_async(file_path, content)
-
-# List files
-files = []
-async for root, dirs, filenames in walk_directory_async(project_path):
-    for filename in filenames:
-        rel_path = os.path.relpath(
-            os.path.join(root, filename),
-            project_path
-        )
-        files.append(rel_path)
-```
-
-### Task Manager (Progress Tracking)
-
-```python
-from ..services.task_manager import get_task_manager
-
-task_manager = get_task_manager()
-
-# Create task
-task = task_manager.create_task(
-    task_id="setup-project-123",
-    description="Setting up project"
-)
-
-# Update progress
-task.update_progress(50, 100, "Copying files")
-
-# Mark complete
-task.update_progress(100, 100, "Complete")
-
-# Get task status
-task = task_manager.get_task("setup-project-123")
-if task:
-    return {
-        "progress": task.progress,
-        "total": task.total,
-        "message": task.message,
-        "status": task.status
-    }
-```
-
-## Common Tasks
-
-### Adding a New Router
-
-1. Create router file in `orchestrator/app/routers/your_feature.py`
-2. Define router with prefix and tags
-3. Import in `orchestrator/app/main.py`
-4. Include router in app: `app.include_router(your_feature.router)`
-5. Create schemas in `orchestrator/app/schemas.py`
-6. Write documentation in `docs/orchestrator/routers/your_feature.md`
-
-### Adding an Endpoint to Existing Router
-
-1. Define Pydantic schemas for request/response (if needed)
-2. Add endpoint function with appropriate decorators
-3. Implement business logic (or call service layer)
-4. Add error handling and logging
-5. Update router documentation
-6. Write tests
-
-### Implementing Background Tasks
-
-1. For simple tasks, use FastAPI BackgroundTasks:
-   ```python
-   background_tasks.add_task(function, arg1, arg2)
-   ```
-
-2. For tasks needing progress tracking, use TaskManager:
-   ```python
-   task = task_manager.create_task(...)
-   background_tasks.add_task(_perform_work, task, ...)
-   ```
-
-3. Client polls `/api/tasks/{task_id}` for progress
-
-### Implementing Streaming
-
-1. Define async generator function:
-   ```python
-   async def generate():
-       for item in items:
-           yield f"data: {json.dumps(item)}\n\n"
-   ```
-
-2. Return StreamingResponse:
-   ```python
-   return StreamingResponse(generate(), media_type="text/event-stream")
-   ```
-
-3. Client uses EventSource or fetch with streaming
-
-## Architecture Notes
-
-### Router Layer Responsibilities
-
-Routers should:
-- Handle HTTP concerns (request/response, status codes)
-- Validate input using Pydantic schemas
-- Authenticate and authorize requests
-- Call service layer for business logic
-- Format responses
-- Handle errors gracefully
-
-Routers should NOT:
-- Contain complex business logic (use services)
-- Directly manipulate files or external systems
-- Make assumptions about deployment mode (Docker vs K8s)
-
-### Service Layer Integration
-
-Complex operations should be delegated to services:
-
-```python
-# Good: Delegate to service
-from ..services.deployment.manager import DeploymentManager
-
-deployment_manager = DeploymentManager(db)
-deployment = await deployment_manager.create_deployment(
-    project_id=project_id,
-    provider="vercel",
-    config=config
-)
-
-# Bad: Implement in router
-# ... 200 lines of deployment logic ...
-```
-
-### Deployment Mode Awareness
-
-Some operations differ between Docker and Kubernetes:
-
-```python
-from ..config import get_settings
-settings = get_settings()
-
-if settings.deployment_mode == "docker":
-    # Use DockerComposeOrchestrator
-    from ..services.docker_compose_orchestrator import DockerComposeOrchestrator
-    orchestrator = DockerComposeOrchestrator(...)
-elif settings.deployment_mode == "kubernetes":
-    # Use KubernetesOrchestrator
-    from ..services.orchestration.kubernetes_orchestrator import KubernetesOrchestrator
-    orchestrator = KubernetesOrchestrator(...)
-```
-
-The orchestrators abstract away the differences, providing a common interface.
+1. `ProxyHeadersMiddleware` handles `X-Forwarded-*`.
+2. `DynamicCORSMiddleware` matches wildcard subdomains.
+3. `CSRFProtectionMiddleware` validates CSRF tokens.
+4. Security headers (CSP, `X-Content-Type-Options`).
 
 ## Testing
 
-Run router tests:
 ```bash
 pytest orchestrator/tests/test_routers/
-```
-
-Test specific router:
-```bash
 pytest orchestrator/tests/test_routers/test_projects.py -v
 ```
 
-## Debugging
-
-Enable debug logging:
-```bash
-export LOG_LEVEL=DEBUG
-```
-
-View logs in production:
-```bash
-# Docker
-docker-compose logs -f backend
-
-# Kubernetes (Minikube)
-kubectl logs -f deployment/tesslate-backend -n tesslate
-
-# Kubernetes (AWS EKS)
-kubectl logs -f deployment/tesslate-backend -n tesslate
-```
+Public-router tests live in `orchestrator/tests/public/` (mirror the `public/` package layout).
 
 ## Common Gotchas
 
-### deployments.py - Build Trigger Parameters
+- `deployments.py` `trigger_build()` parameter names are `custom_build_command` and `volume_name`, not `build_command` / `working_directory`. See [deployments.md](deployments.md).
+- Registration order of `users.py` matters: it is included BEFORE the fastapi-users `/{id}` catch-all in `main.py`.
+- Desktop routes must never 5xx on probe or cloud failure. Degrade to a well-formed payload. See [desktop.md](desktop.md).
+- Public routers must never accept session auth; always use `require_api_scope(...)`. See [public.md](public.md).
+- `internal.py` endpoints must not be exposed through ingress.
+- K8s resource names: never derive `container.name` from `container.directory` (or vice versa). See root [docs/orchestrator/CLAUDE.md](../CLAUDE.md).
 
-When calling `DeploymentBuilder.trigger_build()`, ensure parameter names match exactly:
+## Related
 
-```python
-# CORRECT
-success, build_output = await builder.trigger_build(
-    user_id=str(current_user.id),
-    project_id=str(project.id),
-    project_slug=project.slug,
-    framework=framework,
-    custom_build_command=None,  # NOT build_command
-    container_name=container.container_name,
-    volume_name=project.slug    # NOT working_directory
-)
-
-# WRONG - will cause unexpected keyword argument error
-success, build_output = await builder.trigger_build(
-    ...
-    build_command=None,         # WRONG parameter name
-    working_directory=path      # WRONG parameter name
-)
-```
-
-## Examples
-
-See individual router documentation files for detailed examples:
-- `projects.md` - Project management workflows, setup config, project analysis
-- `chat.md` - Agent chat streaming
-- `marketplace.md` - Agent/skill/MCP server publishing and purchasing
-- `themes.md` - Theme API (public endpoints)
-- `deployments.md` - External deployment workflows
-- `billing.md` - Subscription and payment flows
-- `channels.md` - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
-- `gateway.md` - Gateway API, identity pairing, platform list
-- `schedules.md` - Cron-scheduled agent tasks
-- `mcp.md` - MCP server install/manage, agent assignments, Tesslate MCP server
-
-## teams.py — Team & RBAC Management
-
-**Prefix**: `/api/teams`
-
-### Team CRUD
-- POST / — Create team (auto-admin)
-- GET / — List user's teams with roles
-- GET /{slug} — Get team details
-- PATCH /{slug} — Update team (admin)
-- DELETE /{slug} — Delete non-personal team (admin)
-- POST /{slug}/switch — Set default team
-
-### Members
-- GET /{slug}/members — List with user info
-- POST /{slug}/members/invite — Email invite (admin, 50/day limit)
-- POST /{slug}/members/link — Link invite (admin, max 10 active)
-- DELETE /{slug}/members/{user_id} — Remove member
-- PATCH /{slug}/members/{user_id} — Change role
-- POST /{slug}/leave — Leave team
-
-### Invitations
-- GET /invitations/{token} — Public invite details (no auth)
-- POST /invitations/{token}/accept — Accept invite
-- GET /{slug}/invitations — List pending (admin)
-- DELETE /{slug}/invitations/{id} — Revoke
-
-### Project Access
-- GET /{slug}/projects/{slug}/members — List project members
-- POST /{slug}/projects/{slug}/members — Add project member
-- PATCH /{slug}/projects/{slug}/members/{user_id} — Change project role
-- DELETE /{slug}/projects/{slug}/members/{user_id} — Remove
-- PATCH /{slug}/projects/{slug}/visibility — Toggle team/private
-
-### Audit Log
-- GET /{slug}/audit-log — Filterable team log (admin)
-- GET /{slug}/projects/{slug}/audit-log — Project log
-- POST /{slug}/audit-log/export — CSV export (admin)
-
-### Key Patterns
-- `check_team_permission()` for team-level operations
-- `get_project_with_access()` for project-level with dual-scope resolution
-- All state-changing actions create audit log entries
-- Soft-delete via is_active flag on memberships
-
-## gateway.py — Gateway Status & Identity Pairing
-
-**Prefix**: `/api/gateway`
-
-### Gateway Status
-- GET /status — Read gateway process status from Redis (public, no auth). Returns shard, adapter count, active sessions, heartbeat, online/offline status.
-- POST /reload — Signal the gateway process to reload configs via Redis pub/sub (`tesslate:gateway:reload`). Admin-only.
-- GET /platforms — List supported messaging platforms (Telegram, Discord, Slack, WhatsApp, Signal, CLI) with setup notes. Public.
-
-### Identity Pairing
-- POST /pair/verify — Verify a pairing code and link a platform identity to the authenticated user. Validates code, checks expiry, sets `is_verified=True`.
-- GET /identities — List the current user's verified platform identities.
-- DELETE /identities/{identity_id} — Unlink a platform identity.
-
-### Key Patterns
-- Gateway status is read-only from Redis (no direct RPC to the gateway process)
-- Reload uses Redis pub/sub channel `tesslate:gateway:reload`
-- Pairing codes are 8-char alphanumeric, generated by the gateway process when an unknown user messages
-
-## schedules.py — Cron-Scheduled Agent Tasks
-
-**Prefix**: `/api/schedules`
-
-### CRUD
-- POST / — Create schedule. Validates project access, enforces per-user limit (`gateway_max_schedules_per_user`), parses natural language or cron expression via `schedule_parser.parse_schedule()`.
-- GET / — List schedules for current user, optionally filtered by `project_id` query param.
-- GET /{schedule_id} — Get single schedule.
-- PATCH /{schedule_id} — Update schedule fields. Re-parses cron expression if `schedule` field is provided.
-- DELETE /{schedule_id} — Delete schedule.
-
-### Lifecycle
-- POST /{schedule_id}/pause — Set `is_active=False`.
-- POST /{schedule_id}/resume — Set `is_active=True`, recompute `next_run_at`.
-- POST /{schedule_id}/trigger — Immediately enqueue the schedule's prompt as an agent task (test run). Creates a Chat + Message, builds `AgentTaskPayload`, enqueues via ARQ.
-
-### Key Patterns
-- Schedules are evaluated by the gateway process's `CronScheduler` background task
-- `parse_schedule()` accepts natural language ("every day at 9am") and standard cron expressions
-- `compute_next_run()` calculates the next fire time (timezone-aware)
-- `AgentTaskPayload` includes `schedule_id` and `gateway_deliver` for delivery routing
+- Schemas: [../schemas.md](../schemas.md).
+- Models: [../models/CLAUDE.md](../models/CLAUDE.md).
+- Services: [../services/CLAUDE.md](../services/CLAUDE.md).
+- Agent system: [../agent/CLAUDE.md](../agent/CLAUDE.md).
+- Apps feature: [../../apps/CLAUDE.md](../../apps/CLAUDE.md).
+- Desktop client: [../../desktop/CLAUDE.md](../../desktop/CLAUDE.md).

@@ -559,6 +559,31 @@ kubectl rollout status deployment/tesslate-backend -n tesslate
 - [s3-sandwich.md](s3-sandwich.md): Hibernation pattern
 - [../../deployment/kubernetes.md](../../deployment/kubernetes.md): Deployment procedures
 
+## Per-group base documentation
+
+| Group | Doc |
+|-------|-----|
+| `k8s/base/namespace/` | [base/namespace.md](base/namespace.md) |
+| `k8s/base/core/` | [base/core.md](base/core.md) |
+| `k8s/base/database/` | [base/database.md](base/database.md) |
+| `k8s/base/redis/` | [base/redis.md](base/redis.md) |
+| `k8s/base/ingress/` | [base/ingress.md](base/ingress.md) |
+| `k8s/base/security/` | [base/security.md](base/security.md) |
+| `k8s/base/volume-hub/` | [base/volume-hub.md](base/volume-hub.md) |
+| `k8s/base/compute-pool/` | [base/compute-pool.md](base/compute-pool.md) |
+
+## Scripts
+
+| Group | Doc |
+|-------|-----|
+| `k8s/scripts/` | [scripts/README.md](scripts/README.md) |
+
+## Related assets
+
+- `k8s/litellm/config.yaml` is documented at [litellm.md](litellm.md).
+- Storage stack source lives at `services/btrfs-csi/`; see [../../services/btrfs-csi/CLAUDE.md](../../services/btrfs-csi/CLAUDE.md).
+- In-container supervisor is documented at [../../services/tsinit/CLAUDE.md](../../services/tsinit/CLAUDE.md).
+
 ## References
 
 - Kustomize docs: https://kustomize.io/

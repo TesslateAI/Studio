@@ -13,15 +13,15 @@
 ## Key Files
 
 ### Model Definitions
-- `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models.py` - Main models (39 models, 1000+ lines)
-- `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models_auth.py` - FastAPI-Users auth models (User, OAuthAccount, AccessToken)
-- `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models_kanban.py` - Kanban board models (KanbanBoard, KanbanColumn, KanbanTask)
-- `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models_team.py` - Team RBAC models (Team, TeamMembership, ProjectMembership, TeamInvitation, AuditLog)
+- `orchestrator/app/models.py`: main models (60+ classes, ~3000 lines): Project, Container, Chat, Marketplace*, App*, billing, themes, channels, MCP, gateway, schedules, directories
+- `orchestrator/app/models_auth.py`: FastAPI-Users auth models (User, OAuthAccount, AccessToken)
+- `orchestrator/app/models_kanban.py`: Kanban board models (KanbanBoard, KanbanColumn, KanbanTask)
+- `orchestrator/app/models_team.py`: Team RBAC models (Team, TeamMembership, ProjectMembership, TeamInvitation, AuditLog)
 
 ### Related Files
-- `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\schemas.py` - Pydantic request/response schemas
-- `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\database.py` - Database connection and session management
-- `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\alembic\` - Database migrations
+- `orchestrator/app/schemas.py` (see `../schemas.md`): Pydantic request/response schemas
+- `orchestrator/app/database.py` (see `../entry-points.md`): connection and session management
+- `orchestrator/alembic/` (see `../alembic.md`): migrations
 
 ## Model Categories
 
@@ -119,7 +119,7 @@
 - Related: Can be forked by users (parent_agent_id), reviewed, purchased, has skill_assignments
 
 **MarketplaceBase** (models.py)
-- Purpose: Project templates (React, FastAPI, Next.js, etc.) — both seeded and user-submitted
+- Purpose: Project templates (React, FastAPI, Next.js, etc.): both seeded and user-submitted
 - Key fields: `name`, `slug`, `git_repo_url`, `category`, `pricing_type`, `tech_stack`, `created_by_user_id`, `visibility`
 - `created_by_user_id`: NULL for seeded bases, user UUID for user-submitted bases
 - `visibility`: `"private"` (only creator) or `"public"` (marketplace visible), default `"public"`
@@ -265,7 +265,7 @@
 
 **PlatformIdentity** (models.py)
 - Purpose: Links a messaging platform user to a Tesslate user for gateway authentication
-- Key fields: `user_id` (FK users, CASCADE, nullable — NULL until paired), `platform` (telegram/discord/slack/etc.), `platform_user_id`, `platform_username`, `is_verified`, `pairing_code` (8-char, nullable), `pairing_expires_at`, `paired_at`, `created_at`
+- Key fields: `user_id` (FK users, CASCADE, nullable; NULL until paired), `platform` (telegram/discord/slack/etc.), `platform_user_id`, `platform_username`, `is_verified`, `pairing_code` (8-char, nullable), `pairing_expires_at`, `paired_at`, `created_at`
 - Unique constraint: (platform, platform_user_id)
 - Pairing flow: Gateway creates unverified record with code → user enters code in Settings → code verified, `user_id` set, `is_verified=True`
 - Related: User (backref `platform_identities`)
@@ -316,8 +316,8 @@ The `permissions.py` module provides dual-scope role resolution:
 2. **Project-level override**: From `ProjectMembership.role` (editor/viewer), takes precedence over team role for that project
 
 Key functions:
-- `check_team_permission(db, user_id, team_slug, min_role)` — Verifies user has at least `min_role` in the team
-- `get_project_with_access(db, user_id, team_slug, project_slug, min_role)` — Resolves effective role (project override > team role) and checks access
+- `check_team_permission(db, user_id, team_slug, min_role)`: verifies user has at least `min_role` in the team
+- `get_project_with_access(db, user_id, team_slug, project_slug, min_role)`: resolves effective role (project override > team role) and checks access
 - Viewer role: read-only access (view project, browse files)
 - Editor role: read-write access (edit files, run agents, manage containers)
 - Admin role: full access (team settings, billing, member management, delete)

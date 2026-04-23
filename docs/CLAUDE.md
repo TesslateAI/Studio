@@ -45,8 +45,13 @@ OpenSail consists of four major systems:
 | [app/CLAUDE.md](app/CLAUDE.md) | Frontend development, UI changes |
 | [infrastructure/CLAUDE.md](infrastructure/CLAUDE.md) | Kubernetes, Docker, deployment |
 | [desktop/CLAUDE.md](desktop/CLAUDE.md) | Tauri shell, sidecar, tray, desktop runtimes |
-| [apps/CLAUDE.md](apps/CLAUDE.md) | Tesslate Apps — publish, install, approval pipeline |
+| [apps/CLAUDE.md](apps/CLAUDE.md) | Tesslate Apps: publish, install, approval pipeline |
 | [packages/CLAUDE.md](packages/CLAUDE.md) | tesslate-agent, tesslate-app-sdk, tesslate-embed-sdk |
+| [sdk/CLAUDE.md](sdk/CLAUDE.md) | Top-level @tesslate/sdk TypeScript client for the OpenSail REST API |
+| [scripts/CLAUDE.md](scripts/CLAUDE.md) | Operational scripts (deploy, seed, litellm, migration, utilities) |
+| [seeds/CLAUDE.md](seeds/CLAUDE.md) | Seed Tesslate Apps under `seeds/apps/` |
+| [infrastructure/traefik/CLAUDE.md](infrastructure/traefik/CLAUDE.md) | Traefik routing (Docker mode only) |
+| [infrastructure/docker-compose/CLAUDE.md](infrastructure/docker-compose/CLAUDE.md) | Root `docker-compose*.yml` files |
 
 ## Quick Reference
 
@@ -182,8 +187,16 @@ Load this root CLAUDE.md when:
 | Local ↔ cloud sync | [desktop/sync.md](desktop/sync.md) |
 | Tesslate Apps (publish/install/approval) | [apps/CLAUDE.md](apps/CLAUDE.md) |
 | packages/ submodules | [packages/CLAUDE.md](packages/CLAUDE.md) |
+| Top-level TypeScript SDK (`sdk/`) | [sdk/CLAUDE.md](sdk/CLAUDE.md) |
 | Task queue (cloud vs desktop) | [orchestrator/services/task-queue.md](orchestrator/services/task-queue.md) |
 | Cloud client + project sync service | [orchestrator/services/cloud-client.md](orchestrator/services/cloud-client.md) |
+| Operational scripts (deploy, seed, litellm, migration) | [scripts/README.md](scripts/README.md) |
+| Seed or edit a Tesslate App template | [seeds/README.md](seeds/README.md) |
+| Traefik routing (Docker mode) | [infrastructure/traefik/README.md](infrastructure/traefik/README.md) |
+| Docker Compose files (dev/prod/tunnel/test) | [infrastructure/docker-compose/README.md](infrastructure/docker-compose/README.md) |
+| Storage architecture (btrfs CSI, Volume Hub, CAS) | [architecture/storage-architecture.md](architecture/storage-architecture.md) |
+| Data-flow patterns (chat, container lifecycle, files) | [architecture/data-flow.md](architecture/data-flow.md) |
+| Deployment modes (desktop/docker/kubernetes) | [architecture/deployment-modes.md](architecture/deployment-modes.md) |
 
 ## Important Notes
 

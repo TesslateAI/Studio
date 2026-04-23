@@ -608,3 +608,17 @@ kubectl logs -n cert-manager deployment/cert-manager --tail=50
 kubectl delete certificate tesslate-wildcard-tls -n tesslate
 kubectl apply -k k8s/overlays/aws
 ```
+
+## Documentation Map
+
+| Area | Doc |
+|------|-----|
+| Kubernetes base manifests | [kubernetes/base/README.md](kubernetes/base/README.md), per-group docs in [base/core.md](kubernetes/base/core.md), [base/database.md](kubernetes/base/database.md), [base/redis.md](kubernetes/base/redis.md), [base/ingress.md](kubernetes/base/ingress.md), [base/security.md](kubernetes/base/security.md), [base/namespace.md](kubernetes/base/namespace.md), [base/volume-hub.md](kubernetes/base/volume-hub.md), [base/compute-pool.md](kubernetes/base/compute-pool.md) |
+| Kubernetes overlays | [kubernetes/overlays/README.md](kubernetes/overlays/README.md), [minikube.md](kubernetes/overlays/minikube.md), [aws-base.md](kubernetes/overlays/aws-base.md), [aws-beta.md](kubernetes/overlays/aws-beta.md), [aws-production.md](kubernetes/overlays/aws-production.md), [digitalocean.md](kubernetes/overlays/digitalocean.md), [gke.md](kubernetes/overlays/gke.md) |
+| Scripts | [kubernetes/scripts/README.md](kubernetes/scripts/README.md) |
+| LiteLLM proxy config | [kubernetes/litellm.md](kubernetes/litellm.md) |
+| Terraform (per-env + shared + module index) | [terraform/README.md](terraform/README.md), [terraform/eks.md](terraform/eks.md), [terraform/ecr.md](terraform/ecr.md), [terraform/s3.md](terraform/s3.md), [terraform/shared.md](terraform/shared.md), [terraform/aws-modules.md](terraform/aws-modules.md) |
+| Storage stack (btrfs-csi + Volume Hub) | [../services/btrfs-csi/CLAUDE.md](../services/btrfs-csi/CLAUDE.md) and package docs under [../services/btrfs-csi/](../services/btrfs-csi/) |
+| In-container supervisor (tsinit) | [../services/tsinit/CLAUDE.md](../services/tsinit/CLAUDE.md) |
+| Storage architecture narrative | [../architecture/storage-architecture.md](../architecture/storage-architecture.md) |
+| Docker Compose | [docker/README.md](docker/README.md) |

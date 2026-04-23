@@ -447,3 +447,39 @@ minikube -p tesslate ssh -- docker system prune -a -f
 # From local Docker
 docker rmi tesslate-backend:latest tesslate-frontend:latest tesslate-devserver:latest
 ```
+
+## Complete file inventory
+
+Every manifest in `k8s/overlays/minikube/`:
+
+| File | Purpose |
+|------|---------|
+| `kustomization.yaml` | Root overlay manifest. |
+| `apply.sh` | Prerequisites check + secret generation + kubectl apply wrapper. |
+| `backend-patch.yaml` | Backend env patch (local secrets, storage class, snapshot class). |
+| `frontend-patch.yaml` | Frontend image + `imagePullPolicy: Never`. |
+| `frontend-config.yaml` | Frontend runtime ConfigMap (`api-url`). |
+| `frontend-service-patch.yaml` | Service type patch for tunnel / port-forward. |
+| `ingress-patch.yaml`, `ingress.yaml` | Host patched to `localhost`; TLS disabled. |
+| `namespace-reaper-cronjob-patch.yaml` | Minikube schedule + env for the reaper cron. |
+| `snapshot-cleanup-cronjob-patch.yaml` | Minikube-friendly snapshot cleanup cron. |
+| `storage-class.yaml` | `tesslate-btrfs` StorageClass. |
+| `secrets/app-secrets.yaml` + `.example.yaml` | Backend secrets template. |
+| `secrets/postgres-secret.yaml` + `.example.yaml` | Postgres credentials template. |
+| `secrets/minio-credentials.yaml` + `.example.yaml` | MinIO admin credentials template. |
+| `secrets/s3-credentials.yaml` + `.example.yaml` | Backend S3 credentials template. |
+| `minio/minio-namespace.yaml` | `Namespace minio-system`. |
+| `minio/minio-deployment.yaml` | MinIO server. |
+| `minio/minio-service.yaml` | ClusterIP. |
+| `minio/minio-pvc.yaml` | 10Gi PVC. |
+| `minio/minio-init-job.yaml` | Creates `tesslate-projects` bucket. |
+| `minio/credentials.yaml` + `.example.yaml` | Admin creds. |
+| `minio/minio-secret.yaml.template` | Legacy template kept for historical reference. |
+| `snapshot-crds/setup-snapshot-controller.yaml` | External-snapshotter controller Deployment. |
+| `snapshot-crds/rbac-snapshot-controller.yaml` | Controller RBAC. |
+| `snapshot-crds/volumesnapshotclasses.yaml` | `VolumeSnapshotClass` CRD. |
+| `snapshot-crds/volumesnapshotcontents.yaml` | `VolumeSnapshotContent` CRD. |
+| `snapshot-crds/volumesnapshots.yaml` | `VolumeSnapshot` CRD. |
+| `cloudflare-tunnel/cloudflare-tunnel-namespace.yaml` | `Namespace cloudflare-tunnel`. |
+| `cloudflare-tunnel/cloudflare-tunnel-deployment.yaml` | `cloudflared` Deployment. |
+| `cloudflare-tunnel/credentials.example.yaml` | Tunnel credentials template. |

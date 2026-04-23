@@ -1,265 +1,37 @@
-# Panels - AI Agent Context
+# Panels - Project Builder Floating Panels
 
-## Adding a New Panel
+Modular panels used in the project builder and tool dock, in `app/src/components/panels/`. Each panel is self-contained and mounts inside a `FloatingPanel` or tool-dock tab.
 
-1. **Create component** in `components/panels/`:
-```typescript
-// NewFeaturePanel.tsx
-export function NewFeaturePanel({ projectSlug }: { projectSlug: string }) {
-  return (
-    <div className="h-full flex flex-col">
-      <div className="panel-section p-6">
-        {/* Panel content */}
-      </div>
-    </div>
-  );
-}
-```
+## File Index
 
-2. **Export** from `components/panels/index.ts`:
-```typescript
-export { NewFeaturePanel } from './NewFeaturePanel';
-```
+| File | Purpose |
+|------|---------|
+| `panels/index.ts` | Barrel export |
+| `panels/GitHubPanel.tsx` | Git status + actions: branch, stage, commit, push, pull, fetch, link-to-GitHub. Shows uncommitted changes count |
+| `panels/AssetsPanel.tsx` | Assets browser: grid/list views, search, upload (drag-drop via `AssetUploadZone`), folder navigation via `DirectoryTree`, per-asset actions (copy URL, rename, delete) |
+| `panels/KanbanPanel.tsx` | Task board: columns, drag-reorder cards, create via `+`, inline edit, due date, assignee, labels, comments. Integrates with agent via the kanban tool |
+| `panels/NotesPanel.tsx` | TipTap-based rich-text editor for project notes. Extensions: StarterKit, Placeholder, Underline, TextAlign, Link. Note: CSS selector must use `.tiptap-editor.ProseMirror` (same element, not descendant) |
+| `panels/DeploymentsPanel.tsx` | Deployment history: status, provider, live URL, logs, retry/cancel. Polls status until terminal |
+| `panels/SettingsPanel.tsx` | Project settings: name, visibility, sync toggle, chat position, runtime info, provider credentials, delete project |
+| `panels/TerminalPanel.tsx` | xterm.js terminal connecting via `createTerminalWebSocket(target)`. Addons: fit, weblinks, search. Theme-aware colors |
+| `panels/MarketplacePanel.tsx` | In-project marketplace browser (lock toggle prevents accidental installs while drag-dropping) |
+| `panels/TimelinePanel.tsx` | Project snapshot timeline: list snapshots, save-now, restore, delete. Shows sync status per snapshot |
+| `panels/NodeConfigPanel.tsx` | Agent-driven config form for a single container. Renders `FormSchema` from `nodeConfigApi` with per-field validation, password fields, sensitive env var masking (Eye/EyeSlash), info/warning callouts |
 
-3. **Add to parent** (e.g., Project.tsx):
-```typescript
-{activePanel === 'new-feature' && (
-  <FloatingPanel title="New Feature" onClose={() => setActivePanel(null)}>
-    <NewFeaturePanel projectSlug={project.slug} />
-  </FloatingPanel>
-)}
-```
+## Assets Sub-components (`panels/assets/`)
 
-4. **Add trigger button**:
-```typescript
-<button onClick={() => setActivePanel('new-feature')}>
-  Open New Feature
-</button>
-```
+| File | Purpose |
+|------|---------|
+| `assets/AssetComponents.tsx` | `AssetCard` renderer with MIME-type icon, badge, copy URL, rename, delete, folder-open actions |
+| `assets/AssetUploadZone.tsx` | Drag-drop dropzone with file validation (`validateFile` from `types/assets.ts`), progress, preview |
+| `assets/DirectoryTree.tsx` | Tree view of asset folders with create-folder inline input, expand/collapse |
 
 ## Panel Communication
 
-### Panel → Parent
+Panels receive `projectSlug` (sometimes `projectId`) plus feature-specific props. For events that affect the canvas (e.g. container added from Marketplace), panels emit via `connectionEvents` / `nodeConfigEvents` buses and ArchitectureView subscribes.
 
-Use callback props:
-```typescript
-interface PanelProps {
-  projectSlug: string;
-  onComplete?: () => void;
-  onError?: (error: string) => void;
-}
+## Related Docs
 
-// In panel
-onComplete?.();
-```
-
-### Parent → Panel
-
-Use props:
-```typescript
-<Panel
-  projectSlug={slug}
-  refreshTrigger={refreshCount}  // Increment to trigger reload
-/>
-
-// In panel
-useEffect(() => {
-  loadData();
-}, [refreshTrigger]);
-```
-
-## Architecture Diagram Tips
-
-### Custom Sanitization
-
-Mermaid syntax errors are common. Add sanitization:
-```typescript
-const sanitizeDiagram = (diagramCode: string): string => {
-  let sanitized = diagramCode;
-
-  // Remove problematic characters
-  sanitized = sanitized.replace(/@/g, 'at-');
-  sanitized = sanitized.replace(/\["([^"]+)"\]/g, '[$1]');
-
-  return sanitized;
-};
-```
-
-### Kroki API for PlantUML
-
-```typescript
-const renderPlantUML = async (diagram: string) => {
-  const response = await fetch('https://kroki.io/c4plantuml/svg', {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: diagram
-  });
-
-  return await response.text();
-};
-```
-
-## Git Panel Integration
-
-### Commit Flow
-
-```typescript
-const handleCommit = async () => {
-  try {
-    // 1. Stage files
-    await gitApi.stageFiles(projectSlug, ['*']);
-
-    // 2. Create commit
-    await gitApi.commit(projectSlug, {
-      message: commitMessage,
-      author: user.email
-    });
-
-    // 3. Push to remote
-    await gitApi.push(projectSlug);
-
-    toast.success('Changes pushed!');
-  } catch (error) {
-    toast.error('Git operation failed');
-  }
-};
-```
-
-## Assets Panel File Upload
-
-### Upload Flow
-
-```typescript
-const handleFileUpload = async (files: FileList) => {
-  const formData = new FormData();
-
-  Array.from(files).forEach(file => {
-    formData.append('files', file);
-  });
-
-  const response = await assetsApi.upload(projectSlug, formData);
-  setAssets(prev => [...prev, ...response.uploaded]);
-};
-```
-
-### Drag-and-Drop
-
-```typescript
-const AssetUploadZone = ({ onUpload }: Props) => {
-  const [isDragging, setIsDragging] = useState(false);
-
-  return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragging(true);
-      }}
-      onDragLeave={() => setIsDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragging(false);
-        onUpload(e.dataTransfer.files);
-      }}
-      className={isDragging ? 'border-orange-500' : 'border-gray-600'}
-    >
-      Drop files here
-    </div>
-  );
-};
-```
-
-## Terminal Integration
-
-### xterm.js Setup
-
-```typescript
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-
-const terminal = new Terminal({
-  cursorBlink: true,
-  fontSize: 14,
-  fontFamily: 'JetBrains Mono, monospace',
-  theme: {
-    background: '#0a0a0a',
-    foreground: '#e2e2e2',
-  }
-});
-
-const fitAddon = new FitAddon();
-terminal.loadAddon(fitAddon);
-
-terminal.open(terminalRef.current);
-fitAddon.fit();
-
-// Connect to backend shell
-const ws = new WebSocket(`ws://api/shell/${projectSlug}`);
-terminal.onData((data) => ws.send(data));
-ws.onmessage = (evt) => terminal.write(evt.data);
-```
-
-## Troubleshooting
-
-### Diagram Not Rendering
-
-Check:
-1. Mermaid syntax valid
-2. SVG container has proper sizing
-3. Theme variables defined
-
-Debug:
-```typescript
-try {
-  const { svg } = await mermaid.render(id, diagram);
-  console.log('[Diagram] Rendered:', svg.substring(0, 100));
-} catch (error) {
-  console.error('[Diagram] Render error:', error);
-}
-```
-
-### Panel Not Updating
-
-Check:
-1. Props changing trigger re-render
-2. useEffect dependencies correct
-3. API calls completing
-
-Debug:
-```typescript
-useEffect(() => {
-  console.log('[Panel] Props changed:', { projectSlug, ...props });
-  loadData();
-}, [projectSlug, ...dependencies]);
-```
-
-## Notes Panel (Tiptap Editor)
-
-### CSS Selector Pattern
-
-Tiptap's `editorProps.attributes.class` puts all custom classes directly on the `.ProseMirror` div itself. This means the DOM looks like:
-
-```html
-<div class="tiptap-editor prose prose-invert ProseMirror">
-  <ul><li>Bullet point</li></ul>
-</div>
-```
-
-Both `.tiptap-editor` and `.ProseMirror` are on the **same element**. CSS selectors in `index.css` must use `.tiptap-editor.ProseMirror` (no space = same element) rather than `.tiptap-editor .ProseMirror` (space = descendant). Using the descendant selector causes all list styles, headings, code blocks, and blockquote styles to silently not apply.
-
-### Adding the tiptap-editor Class
-
-The `tiptap-editor` class MUST be included in the editor's `editorProps.attributes.class` to activate the styles in `index.css`:
-
-```typescript
-editorProps: {
-  attributes: {
-    class: 'tiptap-editor prose prose-invert max-w-none focus:outline-none ...',
-  },
-},
-```
-
-Without `tiptap-editor`, none of the custom typography rules (bullet points, ordered lists, headings, code blocks, blockquotes) will apply -- the editor will render plain unstyled text.
-
----
-
-**Remember**: Panels are modular. Keep them self-contained with minimal parent dependencies.
+- `docs/app/components/project/CLAUDE.md` – ToolTabsPanel that hosts these in the dock
+- `docs/app/components/views/CLAUDE.md` – views that work alongside panels
+- `docs/app/utils/CLAUDE.md` – `nodeConfigEvents` wiring

@@ -26,10 +26,20 @@ The orchestrator is OpenSail's FastAPI backend handling all API requests, AI age
 |---------|------|
 | [routers/CLAUDE.md](routers/CLAUDE.md) | Adding/modifying API endpoints |
 | [services/CLAUDE.md](services/CLAUDE.md) | Business logic changes |
-| [agent/CLAUDE.md](agent/CLAUDE.md) | AI agent behavior |
-| [agent/tools/CLAUDE.md](agent/tools/CLAUDE.md) | Adding agent tools |
+| [agent/CLAUDE.md](agent/CLAUDE.md) | Agent tool registry + cross-cutting helpers |
+| [agent/tools/CLAUDE.md](agent/tools/CLAUDE.md) | Adding or modifying tools |
+| [agent/agent-runner.md](agent/agent-types.md) | Orchestrator to tesslate-agent submodule handoff |
+| [agent/agent-internals.md](agent/agent-internals.md) | Registry, scrubber, approval, retry internals |
 | [models/CLAUDE.md](models/CLAUDE.md) | Database schema changes |
 | [orchestration/CLAUDE.md](orchestration/CLAUDE.md) | Container management |
+| [core-modules.md](core-modules.md) | Index of all non-router, non-service orchestrator files |
+| [auth-and-permissions.md](auth-and-permissions.md) | Auth, OAuth, API keys, RBAC, compliance |
+| [middleware.md](middleware.md) | CSRF, activity tracking |
+| [schemas.md](schemas.md) | Pydantic request/response schemas |
+| [utilities.md](utilities.md) | `utils/`, `types/` (GUID, slug, async I/O, code patching) |
+| [seeds.md](seeds.md) | Seed package + scripts + Tesslate Apps seeders |
+| [entry-points.md](entry-points.md) | main / worker / gateway / cron / admin scripts |
+| [alembic.md](alembic.md) | Migrations and `env.py` |
 | [../infrastructure/kubernetes/CLAUDE.md](../infrastructure/kubernetes/CLAUDE.md) | K8s deployment issues |
 
 ## Quick Reference
@@ -166,7 +176,7 @@ Load this CLAUDE.md when:
 **NEVER** fall back to `container.name` when `container.directory` is `"."`, empty, or `None`. This pattern is **strictly banned**:
 
 ```python
-# BAD — BANNED — DO NOT USE
+# BAD: BANNED, DO NOT USE
 raw_dir = container.directory if container.directory not in (".", "", None) else container.name
 container_dir = _sanitize_k8s_name(raw_dir)
 
@@ -182,7 +192,7 @@ sib_dir = sibling.directory if sibling.directory not in (".", "", None) else sib
 When you need a container's URL (e.g., fast paths, status checks), read it from the actual K8s pods via `get_project_status()`. The pod labels (`tesslate.io/container-directory`) are the ground truth for what identifiers were used during deployment:
 
 ```python
-# GOOD — Read from K8s state, no recomputation
+# GOOD: Read from K8s state, no recomputation
 orchestrator = get_orchestrator()
 status = await orchestrator.get_project_status(project.slug, project.id)
 if status.get("status") == "active":
@@ -192,13 +202,13 @@ if status.get("status") == "active":
             break
 ```
 
-**When you must resolve directory → K8s name** (e.g., inside `start_environment()` during initial creation), use `container.directory` directly — never substitute `container.name`:
+**When you must resolve directory to K8s name** (e.g., inside `start_environment()` during initial creation), use `container.directory` directly; never substitute `container.name`:
 
 ```python
-# ACCEPTABLE — Uses directory directly, handles "." explicitly
+# ACCEPTABLE: Uses directory directly, handles "." explicitly
 container_directory = _sanitize_k8s_name(container.directory)
 if not container_directory:  # "." sanitizes to ""
-    # Handle root-directory containers explicitly — do NOT fall back to container.name
+    # Handle root-directory containers explicitly; do NOT fall back to container.name
     ...
 ```
 

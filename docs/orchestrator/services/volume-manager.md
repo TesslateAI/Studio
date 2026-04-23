@@ -1,12 +1,18 @@
 # Volume Manager Service
 
-The `VolumeManager` is a thin client for the Volume Hub — a storageless orchestrator that coordinates compute nodes for volume lifecycle, cache placement, and S3 sync. The orchestrator never manages volumes directly; all intelligence lives in the Hub.
+The `VolumeManager` is a thin client for the Volume Hub : a storageless orchestrator that coordinates compute nodes for volume lifecycle, cache placement, and S3 sync. The orchestrator never manages volumes directly; all intelligence lives in the Hub.
 
 ## Overview
 
-**Files**:
-- `orchestrator/app/services/volume_manager.py` — `VolumeManager` class and singleton accessor
-- `orchestrator/app/services/hub_client.py` — `HubClient` gRPC transport layer
+**Files covered**:
+
+| File | Purpose |
+|------|---------|
+| `volume_manager.py` | `VolumeManager` async API plus `get_volume_manager()` singleton. |
+| `hub_client.py` | `HubClient` gRPC transport (JSON codec over gRPC). Talks to the Volume Hub at port 9750. |
+| `fileops_client.py` | Python gRPC client for the btrfs CSI driver's FileOps service. JSON codec (not protobuf). Used for read/write/delete/stat inside user volumes without spawning exec pods. |
+| `nodeops_client.py` | Python gRPC client for the btrfs CSI driver's NodeOps service. Used for per-node operations (cache placement, peer transfer, local snapshot). |
+| `node_discovery.py` | Resolves per-node gRPC addresses for FileOps and NodeOps by listing btrfs CSI DaemonSet pods. Uses the synchronous kubernetes client. |
 
 **Purpose**: Provide a simple async API for volume lifecycle operations (create, delete, cache, sync, service subvolumes) without any local state machine, node selection logic, or S3 interaction.
 
@@ -14,7 +20,7 @@ The `VolumeManager` is a thin client for the Volume Hub — a storageless orches
 
 | Feature | Description |
 |---------|-------------|
-| **Thin client** | No local state — all intelligence (node selection, S3 sync, cache placement) is in the Hub |
+| **Thin client** | No local state : all intelligence (node selection, S3 sync, cache placement) is in the Hub |
 | **Singleton** | Single global instance via `get_volume_manager()` |
 | **Template cloning** | Create volumes from named templates (e.g. `"nextjs"`) or empty |
 | **Cache orchestration** | Ensure volumes are cached on live, schedulable compute nodes |
@@ -102,7 +108,7 @@ All methods map to gRPC service methods on `/volumehub.VolumeHub/{Method}`.
 
 ### Error Handling
 
-RPC failures propagate as `grpc.aio.AioRpcError` exceptions. The `VolumeManager` does not catch these — callers are responsible for handling failures (with the exception of `hibernate.py`, which catches and logs warnings for sync failures).
+RPC failures propagate as `grpc.aio.AioRpcError` exceptions. The `VolumeManager` does not catch these : callers are responsible for handling failures (with the exception of `hibernate.py`, which catches and logs warnings for sync failures).
 
 ### volume_status Response
 
@@ -132,10 +138,10 @@ async def create_volume(
 ```
 
 **Parameters**:
-- `template` — Template name to clone from (e.g. `"nextjs"`). Pass `None` for an empty volume.
-- `hint_node` — Preferred node for volume placement. If `None`, the Hub picks the best available node.
+- `template` : Template name to clone from (e.g. `"nextjs"`). Pass `None` for an empty volume.
+- `hint_node` : Preferred node for volume placement. If `None`, the Hub picks the best available node.
 
-**Returns**: `(volume_id, node_name)` — the volume ID and the node where it was created.
+**Returns**: `(volume_id, node_name)` : the volume ID and the node where it was created.
 
 ### create_empty_volume()
 
@@ -146,7 +152,7 @@ async def create_empty_volume(self, hint_node: str | None = None) -> tuple[str, 
 ```
 
 **Parameters**:
-- `hint_node` — Preferred node for volume placement.
+- `hint_node` : Preferred node for volume placement.
 
 **Returns**: `(volume_id, node_name)`.
 
@@ -159,7 +165,7 @@ async def delete_volume(self, volume_id: str) -> None:
 ```
 
 **Parameters**:
-- `volume_id` — Volume to delete.
+- `volume_id` : Volume to delete.
 
 ### ensure_cached()
 
@@ -172,8 +178,8 @@ async def ensure_cached(
 ```
 
 **Parameters**:
-- `volume_id` — Volume to cache.
-- `candidate_nodes` — K8s nodes the caller considers schedulable. The Hub intersects this with its own live node set and picks the best one. Pass `None` to let the Hub choose from all live nodes.
+- `volume_id` : Volume to cache.
+- `candidate_nodes` : K8s nodes the caller considers schedulable. The Hub intersects this with its own live node set and picks the best one. Pass `None` to let the Hub choose from all live nodes.
 
 **Returns**: The node name where the volume is now cached.
 
@@ -188,7 +194,7 @@ async def trigger_sync(self, volume_id: str) -> None:
 ```
 
 **Parameters**:
-- `volume_id` — Volume whose data to sync.
+- `volume_id` : Volume whose data to sync.
 
 **Behavior**: The Hub looks up the owner node and tells it to sync. Non-blocking from the caller's perspective.
 
@@ -203,8 +209,8 @@ async def create_service_volume(
 ```
 
 **Parameters**:
-- `base_volume_id` — Parent project volume ID.
-- `service_name` — Service identifier (e.g. `"postgres"`).
+- `base_volume_id` : Parent project volume ID.
+- `service_name` : Service identifier (e.g. `"postgres"`).
 
 **Returns**: The service volume ID (e.g. `"vol-a1b2c3d4-postgres"`).
 
@@ -220,7 +226,7 @@ vm = get_volume_manager()  # Creates instance on first call, returns same instan
 
 ## Usage Patterns
 
-### Project Creation — Template Snapshot
+### Project Creation : Template Snapshot
 
 ```python
 # In services/project_setup/source_acquisition.py
@@ -230,7 +236,7 @@ vm = get_volume_manager()
 volume_id, node_name = await vm.create_volume(template=spec.template_slug)
 ```
 
-### Project Creation — Empty Volume (File Placement)
+### Project Creation : Empty Volume (File Placement)
 
 ```python
 # In services/project_setup/file_placement.py
@@ -240,7 +246,7 @@ vm = get_volume_manager()
 volume_id, node_name = await vm.create_empty_volume()
 ```
 
-### Project Start — Ensure Cached on Schedulable Node
+### Project Start : Ensure Cached on Schedulable Node
 
 ```python
 # In services/compute_manager.py
@@ -258,7 +264,7 @@ if node_name != project.cache_node:
     await db.commit()
 ```
 
-### Service Container — Create Service Subvolume
+### Service Container : Create Service Subvolume
 
 ```python
 # In services/compute_manager.py
@@ -269,7 +275,7 @@ svc_volume_id = await vm.create_service_volume(volume_id, svc_dir)
 # e.g. "vol-a1b2c3d4-postgres"
 ```
 
-### Hibernation — Trigger S3 Sync
+### Hibernation : Trigger S3 Sync
 
 ```python
 # In services/hibernate.py
@@ -281,11 +287,11 @@ if project.volume_id:
         await vm.trigger_sync(project.volume_id)
     except Exception:
         logger.warning(
-            "[HIBERNATE] Sync trigger failed — Hub will catch up on next access"
+            "[HIBERNATE] Sync trigger failed : Hub will catch up on next access"
         )
 ```
 
-### FileOps Fallback — Re-cache on Node Failure
+### FileOps Fallback : Re-cache on Node Failure
 
 ```python
 # In services/orchestration/kubernetes_orchestrator.py
@@ -310,18 +316,18 @@ volume_hub_address: str = "tesslate-volume-hub.kube-system.svc:9750"
 
 ## Related Files
 
-- `orchestrator/app/services/volume_manager.py` — VolumeManager thin client
-- `orchestrator/app/services/hub_client.py` — HubClient gRPC transport
-- `orchestrator/app/services/compute_manager.py` — Primary consumer (project start, service volumes)
-- `orchestrator/app/services/hibernate.py` — Triggers S3 sync on hibernation
-- `orchestrator/app/services/project_setup/source_acquisition.py` — Creates volumes from templates
-- `orchestrator/app/services/project_setup/file_placement.py` — Creates empty volumes for file writes
-- `orchestrator/app/services/orchestration/kubernetes_orchestrator.py` — Re-caches volumes on node failure
-- `orchestrator/app/config.py` — `volume_hub_address` setting
-- `orchestrator/tests/services/test_volume_manager.py` — Unit tests
+- `orchestrator/app/services/volume_manager.py` : VolumeManager thin client
+- `orchestrator/app/services/hub_client.py` : HubClient gRPC transport
+- `orchestrator/app/services/compute_manager.py` : Primary consumer (project start, service volumes)
+- `orchestrator/app/services/hibernate.py` : Triggers S3 sync on hibernation
+- `orchestrator/app/services/project_setup/source_acquisition.py` : Creates volumes from templates
+- `orchestrator/app/services/project_setup/file_placement.py` : Creates empty volumes for file writes
+- `orchestrator/app/services/orchestration/kubernetes_orchestrator.py` : Re-caches volumes on node failure
+- `orchestrator/app/config.py` : `volume_hub_address` setting
+- `orchestrator/tests/services/test_volume_manager.py` : Unit tests
 
 ## Related Docs
 
-- [snapshot-manager.md](./snapshot-manager.md) — EBS VolumeSnapshot operations (separate from Volume Hub)
-- [orchestration.md](./orchestration.md) — Docker/K8s container orchestration
-- [CLAUDE.md](./CLAUDE.md) — Services layer overview
+- [snapshot-manager.md](./snapshot-manager.md) : EBS VolumeSnapshot operations (separate from Volume Hub)
+- [orchestration.md](./orchestration.md) : Docker/K8s container orchestration
+- [CLAUDE.md](./CLAUDE.md) : Services layer overview

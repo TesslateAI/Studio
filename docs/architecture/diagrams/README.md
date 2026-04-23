@@ -67,17 +67,12 @@ This directory contains Mermaid diagram files that visualize the OpenSail archit
 
 ---
 
-### 5. s3-sandwich.mmd
-**Type:** Sequence Diagram
+### 5. shared-platform.mmd
+**Type:** Infrastructure Diagram
 
-**Description:** The S3 Sandwich pattern for project storage:
-- **Layer 1 - Hydration:** S3 download → Init container → PVC mount
-- **Layer 2 - Runtime:** Fast local I/O on Persistent Volume Claim
-- **Layer 3 - Dehydration:** PreStop hook → S3 upload before termination
-- Cleanup cronjob for idle project detection
-- Benefits: Fast runtime I/O, cost-effective storage, stateless pods
+**Description:** Shared AWS platform stack showing the ECR repositories, platform EKS cluster, VPN, cert-manager, NGINX Ingress Controller, and Cloudflare DNS that every environment (beta, production) builds on top of.
 
-**Use this diagram to:** Understand project persistence and the ephemeral storage strategy.
+**Use this diagram to:** Understand the terraform-managed shared platform layer.
 
 ---
 
@@ -147,6 +142,9 @@ When updating these diagrams:
 
 ## Related Documentation
 
-- `docs/architecture/` - Architecture documentation
-- `CLAUDE.md` - System overview and development guide
-- `k8s/ARCHITECTURE.md` - Kubernetes-specific architecture details
+- `docs/architecture/README.md`: architecture overview
+- `docs/architecture/storage-architecture.md`: btrfs CSI + Volume Hub + CAS
+- `docs/architecture/data-flow.md`: chat and project lifecycle flows
+- `docs/architecture/deployment-modes.md`: desktop / docker / kubernetes matrix
+- `CLAUDE.md` (repo root): system overview and development guide
+- `k8s/ARCHITECTURE.md`: Kubernetes-specific architecture details

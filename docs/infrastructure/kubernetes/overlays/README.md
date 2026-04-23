@@ -341,4 +341,9 @@ kubectl create secret generic {secret-name} -n tesslate --from-literal=KEY=value
 - [../README.md](../README.md): Kubernetes overview
 - [../base/README.md](../base/README.md): Base manifests
 - [minikube.md](minikube.md): Minikube configuration details
-- [aws.md](aws.md): AWS EKS configuration details
+- [aws.md](aws.md): AWS EKS configuration details (legacy single-env layout)
+- [aws-base.md](aws-base.md): Shared AWS patches consumed by beta + production
+- [aws-beta.md](aws-beta.md): Beta AWS overlay
+- [aws-production.md](aws-production.md): Production AWS overlay
+- [digitalocean.md](digitalocean.md): DigitalOcean overlay
+- [gke.md](gke.md): GKE overlay

@@ -2,20 +2,63 @@
 
 **Directory**: `orchestrator/app/services/deployment/`
 
-Multi-provider deployment system for deploying user projects to external platforms (Vercel, Netlify, Cloudflare Workers).
+Multi-provider deployment system for publishing user projects to external platforms. Providers are grouped into source-push (Vercel, Netlify, Fly), container-push (AWS, GCP, Azure, DO, Fly, Koyeb, Northflank, Railway, Render, Heroku, Zeabur), and export (Docker Hub, GHCR, download zip, GitHub Pages, Surge, Firebase).
+
+## Files covered
+
+### Framework and factories
+
+| File | Purpose |
+|------|---------|
+| `deployment/__init__.py` | Re-exports `BaseDeploymentProvider`, config types. |
+| `deployment/base.py` | `BaseDeploymentProvider` ABC plus `DeploymentConfig`, `DeploymentFile`, `DeploymentResult` models. |
+| `deployment/container_base.py` | Base class for container-push providers (AWS ECS, GCP Cloud Run, Azure Container Apps, etc.). |
+| `deployment/manager.py` | `DeploymentManager` factory. |
+| `deployment/builder.py` | `DeploymentBuilder` coordinates build before deploy (detect framework, npm install, npm build, verify output). |
+| `deployment/guards.py` | Validates container-to-provider compatibility (uses `service_definitions.DEPLOYMENT_COMPATIBILITY`). |
+| `deployment/providers/__init__.py` | Re-exports. |
+| `deployment/providers/utils.py` | Shared helpers (file-collection, hash, chunked upload). |
+
+### Providers
+
+| File | Provider | Auth | Mode |
+|------|----------|------|------|
+| `providers/vercel.py` | Vercel | OAuth token | source-push |
+| `providers/netlify.py` | Netlify | OAuth token | source-push |
+| `providers/cloudflare.py` | Cloudflare Workers | API token | source-push |
+| `providers/fly.py` | Fly.io | API token | container-push (Fly Machines) |
+| `providers/railway.py` | Railway | API token | container-push |
+| `providers/render.py` | Render | API token | container-push |
+| `providers/heroku.py` | Heroku | API token | container-push |
+| `providers/koyeb.py` | Koyeb | API token | container-push |
+| `providers/northflank.py` | Northflank | API token | container-push |
+| `providers/zeabur.py` | Zeabur | API token | container-push |
+| `providers/aws_container.py` | AWS ECR + App Runner | IAM | container-push |
+| `providers/gcp_container.py` | GCP Artifact Registry + Cloud Run | service account | container-push |
+| `providers/azure_container.py` | Azure ACR + Container Apps | service principal | container-push |
+| `providers/do_container.py` | DigitalOcean DOCR + App Platform | API token | container-push |
+| `providers/firebase.py` | Firebase Hosting | service account | source-push |
+| `providers/deno_deploy.py` | Deno Deploy | API token | source-push |
+| `providers/github_pages.py` | GitHub Pages | OAuth token | source-push |
+| `providers/surge.py` | Surge.sh | CLI token | source-push |
+| `providers/dockerhub_export.py` | Docker Hub | registry credentials | export (image push only) |
+| `providers/ghcr_export.py` | GitHub Container Registry | OAuth token | export (image push only) |
+| `providers/download_export.py` | User download | none | export (zip) |
 
 ## Overview
 
-The deployment system uses a factory pattern with abstract base class to support multiple providers:
+The deployment system uses a factory pattern with an abstract base class. Source-push providers inherit from `BaseDeploymentProvider`; container-push providers inherit from `ContainerDeploymentBase` (in `container_base.py`), which adds image-build and registry-push steps.
 
 ```
 BaseDeploymentProvider (Abstract)
-├── VercelProvider - Deploy to Vercel
-├── NetlifyProvider - Deploy to Netlify
-└── CloudflareWorkersProvider - Deploy to Cloudflare Workers
+├── Source-push providers (Vercel, Netlify, Cloudflare, Firebase, Deno, GitHub Pages, Surge)
+├── ContainerDeploymentBase (Abstract)
+│   └── Container-push providers (AWS, GCP, Azure, DO, Fly, Koyeb, Northflank, Railway, Render, Heroku, Zeabur)
+└── Export providers (Docker Hub, GHCR, download zip)
 
-DeploymentManager - Factory & orchestration
-DeploymentBuilder - Build process coordination
+DeploymentManager: factory + registry
+DeploymentBuilder: build process coordination
+DeploymentGuards: container-to-provider compatibility checks
 ```
 
 ## Architecture

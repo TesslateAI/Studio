@@ -39,11 +39,18 @@ infrastructure/
 │   ├── rbac.md                  # RBAC configuration
 │   ├── network-policies.md      # Network security
 │   └── s3-sandwich.md           # Hibernation pattern
-├── docker/                      # Docker configuration
+├── docker/                      # Dockerfile details
 │   ├── README.md
 │   ├── CLAUDE.md
-│   ├── docker-compose.md        # Local development
-│   └── dockerfiles.md           # Image definitions
+│   ├── docker-compose.md        # (legacy pointer)
+│   ├── dockerfiles.md           # Image definitions
+│   └── symlink-fix.md           # Windows/WSL symlink patch
+├── docker-compose/              # Root docker-compose*.yml files
+│   ├── README.md                # dev, prod, cloudflare-tunnel, test
+│   └── CLAUDE.md
+├── traefik/                     # Traefik configs (Docker mode only)
+│   ├── README.md                # traefik.yml, prod, tunnel, dynamic/
+│   └── CLAUDE.md
 └── terraform/                   # Infrastructure as Code
     ├── README.md
     ├── CLAUDE.md
@@ -318,3 +325,44 @@ kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
 - Terraform (per-environment): `k8s/terraform/aws/`
 - Terraform (shared platform): `k8s/terraform/shared/`
 - Backend Config: `orchestrator/app/config.py`
+
+## Full Documentation Index
+
+### Kubernetes base (`k8s/base/`)
+
+- [kubernetes/base/README.md](kubernetes/base/README.md) overview
+- [kubernetes/base/core.md](kubernetes/base/core.md) core workloads
+- [kubernetes/base/database.md](kubernetes/base/database.md) PostgreSQL
+- [kubernetes/base/redis.md](kubernetes/base/redis.md) Redis
+- [kubernetes/base/ingress.md](kubernetes/base/ingress.md) NGINX ingress rules
+- [kubernetes/base/security.md](kubernetes/base/security.md) RBAC, NetworkPolicies, ResourceQuotas
+- [kubernetes/base/namespace.md](kubernetes/base/namespace.md) platform namespace
+- [kubernetes/base/volume-hub.md](kubernetes/base/volume-hub.md) Volume Hub Deployment
+- [kubernetes/base/compute-pool.md](kubernetes/base/compute-pool.md) ephemeral compute namespace
+
+### Overlays (`k8s/overlays/`)
+
+- [kubernetes/overlays/README.md](kubernetes/overlays/README.md) concepts
+- [kubernetes/overlays/minikube.md](kubernetes/overlays/minikube.md)
+- [kubernetes/overlays/aws-base.md](kubernetes/overlays/aws-base.md), [aws-beta.md](kubernetes/overlays/aws-beta.md), [aws-production.md](kubernetes/overlays/aws-production.md)
+- [kubernetes/overlays/digitalocean.md](kubernetes/overlays/digitalocean.md)
+- [kubernetes/overlays/gke.md](kubernetes/overlays/gke.md)
+
+### Scripts + misc
+
+- [kubernetes/scripts/README.md](kubernetes/scripts/README.md) deployment / local / minikube / testing scripts
+- [kubernetes/litellm.md](kubernetes/litellm.md) LiteLLM proxy config
+
+### Terraform (`k8s/terraform/`)
+
+- [terraform/README.md](terraform/README.md) stack overview
+- [terraform/eks.md](terraform/eks.md), [terraform/ecr.md](terraform/ecr.md), [terraform/s3.md](terraform/s3.md), [terraform/shared.md](terraform/shared.md)
+- [terraform/aws-modules.md](terraform/aws-modules.md) per-file module index (both stacks)
+
+### Go services
+
+- [../services/btrfs-csi/CLAUDE.md](../services/btrfs-csi/CLAUDE.md) + per-package docs under `docs/services/btrfs-csi/pkg/`
+- [../services/btrfs-csi/deploy/README.md](../services/btrfs-csi/deploy/README.md) CSI deploy manifests
+- [../services/btrfs-csi/integration.md](../services/btrfs-csi/integration.md) end-to-end tests
+- [../services/tsinit/CLAUDE.md](../services/tsinit/CLAUDE.md) + internal docs under `docs/services/tsinit/internal/`
+- [../architecture/storage-architecture.md](../architecture/storage-architecture.md) storage narrative

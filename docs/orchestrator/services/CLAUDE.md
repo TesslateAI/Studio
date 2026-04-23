@@ -79,8 +79,8 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - **media.py** - Media pipeline for voice transcription (LiteLLM/Whisper) and media caching
 
 ### Gateway Process (orchestrator/app/services/gateway/)
-- **runner.py** - `GatewayRunner` — manages persistent platform connections, routes inbound messages to agent system, delivers responses via Redis delivery stream. Background tasks: heartbeat, reconnect watcher, delivery consumer (XREADGROUP), session reaper, media cache cleaner, reload listener.
-- **scheduler.py** - `CronScheduler` — timezone-aware cron evaluation, reads `agent_schedules` table every tick, enqueues matching prompts as agent tasks via ARQ.
+- **runner.py** - `GatewayRunner`: manages persistent platform connections, routes inbound messages to agent system, delivers responses via Redis delivery stream. Background tasks: heartbeat, reconnect watcher, delivery consumer (XREADGROUP), session reaper, media cache cleaner, reload listener.
+- **scheduler.py** - `CronScheduler`: timezone-aware cron evaluation, reads `agent_schedules` table every tick, enqueues matching prompts as agent tasks via ARQ.
 - **schedule_parser.py** - Natural language schedule parsing ("every day at 9am", "weekdays at 5pm") → normalized 5-field cron expressions.
 
 ### MCP Integration (orchestrator/app/services/mcp/)
@@ -109,23 +109,56 @@ Service definitions now include deployment targets (Vercel, Netlify, Cloudflare)
 - `docs/orchestrator/models/CLAUDE.md` - When services interact with database models
 - `docs/orchestrator/agent/CLAUDE.md` - When AI agents use orchestration tools
 
-**Related documentation**:
-- [orchestration.md](./orchestration.md) - Detailed Docker/K8s orchestration docs
-- [snapshot-manager.md](./snapshot-manager.md) - EBS VolumeSnapshot patterns
-- [deployment-providers.md](./deployment-providers.md) - External deployment docs
-- [cache.md](./cache.md) - Distributed cache with Redis + in-memory fallback
-- [credit-system.md](./credit-system.md) - Multi-source credit system architecture
-- [model-pricing.md](./model-pricing.md) - LiteLLM dynamic pricing
-- [pubsub.md](./pubsub.md) - Cross-pod communication via Redis Pub/Sub and Streams
-- [worker.md](./worker.md) - ARQ worker for distributed agent execution
-- [agent-context.md](./agent-context.md) - Agent execution context building
-- [agent-task.md](./agent-task.md) - Agent task payload serialization
-- [distributed-lock.md](./distributed-lock.md) - Redis-based distributed locks
-- [session-router.md](./session-router.md) - Cross-pod shell session routing
-- [skill-discovery.md](./skill-discovery.md) - Skill discovery service for progressive disclosure
-- [channels.md](./channels.md) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
-- [gateway.md](./gateway.md) - Gateway process, delivery stream, cron scheduler
-- [mcp.md](./mcp.md) - MCP server management, client, and tool bridging
+**Related documentation** (see [README.md](./README.md) for the full file-level index):
+
+Container orchestration and compute:
+- [orchestration.md](./orchestration.md): Docker, K8s, local orchestrators plus factory.
+- [compute-lifecycle.md](./compute-lifecycle.md): compute_manager, hibernate, idle_monitor, activity_tracker, checkpoint_manager, namespace_reaper.
+- [runtime-support.md](./runtime-support.md): container_initializer, startup_generator, framework_detector, secret_manager_env, service_definitions, node_config_presets, command_validator, pty_broker, shell_session_manager, base_config_parser.
+
+Storage and templates:
+- [volume-manager.md](./volume-manager.md): volume_manager, hub_client, fileops_client, nodeops_client, node_discovery.
+- [snapshot-manager.md](./snapshot-manager.md): EBS VolumeSnapshot patterns.
+- [templates.md](./templates.md): template_builder, template_export, template_storage.
+- [project-filesystem.md](./project-filesystem.md): project_fs, project_patcher, config_sync, export_resolver.
+- [project-setup.md](./project-setup.md): project_setup pipeline (source acquisition, file placement, container creation, naming).
+
+AI, credits, payments:
+- [agent-runtime.md](./agent-runtime.md): agent_approval, agent_budget, agent_tickets, agent_audit, plan_manager, subagent_configs, context_compaction, prompt_caching, model_adapters, model_health, model_vision, tesslate_agent_adapter, tesslate_parser.
+- [agent-context.md](./agent-context.md), [agent-task.md](./agent-task.md), [worker.md](./worker.md): agent task pipeline.
+- [skill-discovery.md](./skill-discovery.md): skill catalog and marker substitution.
+- [credit-system.md](./credit-system.md): multi-source credit deduction.
+- [model-pricing.md](./model-pricing.md): dynamic LiteLLM pricing.
+- [litellm.md](./litellm.md): LiteLLM proxy client and key orchestration.
+- [stripe.md](./stripe.md): Stripe payments.
+- [cache.md](./cache.md): distributed cache (Redis + in-memory fallback).
+
+Messaging and integrations:
+- [channels.md](./channels.md): Telegram, Slack, Discord, WhatsApp, Signal, CLI WebSocket.
+- [gateway.md](./gateway.md): gateway runner, scheduler, schedule parser.
+- [mcp.md](./mcp.md): MCP client, bridge, manager, OAuth, sampling, scoping, security.
+- [git-manager.md](./git-manager.md): in-container git ops.
+- [git-providers.md](./git-providers.md): GitHub, GitLab, Bitbucket OAuth and API.
+- [deployment-providers.md](./deployment-providers.md): all external hosting providers.
+
+Infrastructure:
+- [pubsub.md](./pubsub.md): Redis pub/sub and Streams plus local backend.
+- [task-queue.md](./task-queue.md): ARQ + asyncio queue backends.
+- [distributed-lock.md](./distributed-lock.md): Redis locks.
+- [session-router.md](./session-router.md): cross-pod shell session ownership.
+- [shell-sessions.md](./shell-sessions.md): PTY session manager.
+
+Desktop and public:
+- [desktop-services.md](./desktop-services.md): desktop_auth, desktop_paths, cloud_client, sync_client, handoff_client, marketplace_installer, runtime_probe, token_store, tsinit_client.
+- [cloud-client.md](./cloud-client.md): desktop-to-cloud HTTP wrapper.
+- [public-services.md](./public-services.md): sync_service, handoff_service, marketplace_install_service.
+- [design.md](./design.md): ast_client, circuit_breaker.
+
+Cross-cutting:
+- [apps.md](./apps.md): Tesslate Apps service layer.
+- [auth-security.md](./auth-security.md): 2FA, magic link, OAuth state, rate limit, audit, notifications.
+- [utilities.md](./utilities.md): feature_flags, task_manager, recommendations, git_diff, litellm_keys, skill_markers.
+- [config-json.md](./config-json.md): `.tesslate/config.json` schema.
 
 ## Common Service Patterns
 
@@ -266,10 +299,10 @@ Both Docker and K8s orchestrators use this property, with TESSLATE.md config tak
 ### 9. K8s Probe Strategy
 
 K8s container probes use a two-tier strategy:
-- **Startup + Liveness**: Exec-based (`tmux has-session -t main`) — keeps container alive regardless of dev server state
-- **Readiness**: HTTP-based (`GET /` on effective_port) — controls traffic routing only
+- **Startup + Liveness**: Exec-based (`tmux has-session -t main`): keeps container alive regardless of dev server state
+- **Readiness**: HTTP-based (`GET /` on effective_port): controls traffic routing only
 
-This prevents CrashLoopBackOff for community bases that may not have a working startup command. Docker mode is unaffected — Docker doesn't kill containers on health check failure.
+This prevents CrashLoopBackOff for community bases that may not have a working startup command. Docker mode is unaffected: Docker doesn't kill containers on health check failure.
 
 ## Usage Examples
 

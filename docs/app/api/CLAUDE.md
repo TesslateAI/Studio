@@ -1,175 +1,60 @@
-# API Client Context for Claude
+# lib/ - API Client and Helpers
 
-## Key Files
+All HTTP, WebSocket, and client-side helpers used across the app live in `app/src/lib/`.
+
+## File Index
 
 | File | Purpose |
 |------|---------|
-| `app/src/lib/api.ts` | Main API client with all modules |
-| `app/src/lib/git-api.ts` | Git operations API |
-| `app/src/types/agent.ts` | Agent type definitions |
-| `app/src/types/git.ts` | Git type definitions |
+| `lib/api.ts` | ~4400-line axios client. Holds the shared axios instance, auth interceptors, WebSocket factory, feature-flag prefetch, and every typed API object |
+| `lib/git-api.ts` | Legacy `gitApi` for git operations on a project (status, stage, commit, push, pull, branches, diff, history) |
+| `lib/github-api.ts` | Legacy GitHub-only helpers (OAuth connect, user repos, import) |
+| `lib/git-providers-api.ts` | Unified `gitProvidersApi` covering GitHub, GitLab, Bitbucket with `resolveRepo`, `listBranches`, `listRepos` |
+| `lib/keyboard-registry.ts` | Single source of truth for keyboard shortcuts (platform-aware keys, context filtering, shortcut groups) |
+| `lib/posthog.ts` | PostHog singleton with DNT respect, safe `capture()` helper that never throws |
+| `lib/seo-manager.ts` | SEO tag registry singleton used by the `<SEO>` component |
+| `lib/url-validation.ts` | `isSafeOAuthRedirect`, `loadAllowedDomains` – prevents open-redirect vulnerabilities |
+| `lib/deployment-providers.ts` | `DEPLOYMENT_PROVIDERS` catalog, `PROVIDER_CREDENTIAL_HELP`, icon/color/display-name metadata |
+| `lib/ansi.tsx` | ANSI escape-code -> styled React spans; supports 16/256/RGB colors, bold, italic, underline |
+| `lib/utils.ts` | `cn(...classnames)` tailwind-merge helper; `isCanceledError(err)` for AbortError + Axios CanceledError |
 
-## Quick Reference
+## api.ts Structure
 
-### API Module Pattern
+`lib/api.ts` is intentionally monolithic so imports stay typed (`import { projectsApi, chatApi } from '../lib/api'`). Internal organization:
 
-All API modules follow this pattern:
+| Section | Contents |
+|---------|----------|
+| Axios setup | Shared instance, JWT + CSRF interceptors, 401 redirect (except task polling) |
+| WebSocket helpers | `createWebSocket()`, `createLogStreamWebSocket(id)`, `createTerminalWebSocket()`, `getAuthHeaders()` for fetch-based calls |
+| Type exports | Response shapes for every entity (User, Project, Chat, Message, Agent, Theme, App, Team, etc.) |
+| Auth APIs | `authApi`: login, register, verify2fa, OAuth, forgot/reset password, magic link |
+| User APIs | `usersApi`, `billingApi`, `creditsApi`, `referralsApi` |
+| Project APIs | `projectsApi` (CRUD, start/stop, containers, connections, files, snapshots, timeline), `setupApi` (`.tesslate/config.json`), `nodeConfigApi` (agent-driven config) |
+| Chat APIs | `chatApi` (sessions, messages, steps, undo, approvals) |
+| Marketplace | `marketplaceApi` (agents, bases, skills, MCP servers, themes, reviews, categories) |
+| Apps | `marketplaceAppsApi`, `appVersionsApi`, `appInstallsApi`, `appBundlesApi`, `appSubmissionsApi`, `appYanksApi`, `appRuntimeApi`, `appRuntimeStatusApi`, `appBillingApi` |
+| Admin | `adminMarketplaceApi`, various `getAuthHeaders`-based fetch calls |
+| Teams | `teamsApi` (teams, memberships, invites, audit log, billing) |
+| Deployment | `deploymentsApi`, `deploymentCredentialsApi` |
+| Integrations | `featureFlagsApi`, `mcpApi`, `channelsApi`, `schedulesApi`, `themesApi`, `adminMcpApi` |
+| Design | `designApi` (index, apply-diff) |
 
-```typescript
-export const exampleApi = {
-  getAll: async () => {
-    const response = await api.get('/api/examples/');
-    return response.data;
-  },
+## WebSocket Channels
 
-  create: async (data: CreateData) => {
-    const response = await api.post('/api/examples/', data);
-    return response.data;
-  },
+| Factory | Endpoint | Purpose |
+|---------|----------|---------|
+| `createWebSocket()` | `/ws?token=...` | Main agent event stream |
+| `createLogStreamWebSocket(containerId)` | `/ws/logs/:id` | Container startup logs |
+| `createTerminalWebSocket(target)` | `/ws/shell/:target` | xterm.js -> backend shell |
 
-  get: async (id: string) => {
-    const response = await api.get(`/api/examples/${id}`);
-    return response.data;
-  },
+## Auth Flow
 
-  update: async (id: string, data: UpdateData) => {
-    const response = await api.patch(`/api/examples/${id}`, data);
-    return response.data;
-  },
+1. Axios request -> interceptor attaches `Authorization: Bearer <localStorage.token>` and `X-CSRF-Token` cookie.
+2. If 401 and not a task-polling URL, interceptor fires `logout` + redirects to `/login`.
+3. OAuth uses `withCredentials: true` cookies; `AuthContext` reconciles both.
 
-  delete: async (id: string) => {
-    const response = await api.delete(`/api/examples/${id}`);
-    return response.data;
-  },
-};
-```
+## Related Docs
 
-### Adding New Endpoints
-
-1. Add the method to the appropriate API module in `api.ts`
-2. Use the shared `api` axios instance
-3. Return `response.data` directly
-4. Add TypeScript types if needed
-
-Example:
-```typescript
-// In api.ts, inside an existing API module:
-export const projectsApi = {
-  // ... existing methods ...
-
-  newEndpoint: async (slug: string, data: NewData) => {
-    const response = await api.post(`/api/projects/${slug}/new-endpoint`, data);
-    return response.data;
-  },
-};
-```
-
-### Streaming Endpoints (SSE)
-
-For Server-Sent Events, use native `fetch()` with `getAuthHeaders()`:
-
-```typescript
-const response = await fetch(`${API_URL}/api/endpoint/stream`, {
-  method: 'POST',
-  headers: getAuthHeaders(),
-  body: JSON.stringify(request),
-  credentials: 'include',
-  signal, // AbortSignal for cancellation
-});
-
-const reader = response.body?.getReader();
-const decoder = new TextDecoder();
-let buffer = '';
-
-while (true) {
-  const { done, value } = await reader.read();
-  if (done) break;
-
-  buffer += decoder.decode(value, { stream: true });
-  const lines = buffer.split('\n\n');
-  buffer = lines.pop() || '';
-
-  for (const line of lines) {
-    if (line.startsWith('data: ')) {
-      const event = JSON.parse(line.slice(6));
-      onEvent(event);
-    }
-  }
-}
-```
-
-### WebSocket Connections
-
-```typescript
-// For chat WebSocket
-const ws = createWebSocket(token);
-
-// For terminal WebSocket
-const ws = createTerminalWebSocket(projectId);
-```
-
-## Common Patterns
-
-### Task Polling
-
-Many operations return a `task_id` for background processing:
-
-```typescript
-const { task_id } = await projectsApi.create(name);
-const result = await tasksApi.pollUntilComplete(task_id);
-```
-
-### Error Handling
-
-The interceptor handles auth errors. For component-level errors:
-
-```typescript
-try {
-  const data = await projectsApi.get(slug);
-} catch (error) {
-  if (axios.isAxiosError(error)) {
-    // Handle specific error codes
-    if (error.response?.status === 404) {
-      // Not found
-    }
-  }
-}
-```
-
-### File Operations with Projects
-
-```typescript
-// Save file
-await projectsApi.saveFile(slug, filePath, content);
-
-// Delete file
-await projectsApi.deleteFile(slug, filePath);
-
-// Get all files
-const files = await projectsApi.getFiles(slug);
-```
-
-## API Module Summary
-
-| Module | Endpoint Prefix | Primary Operations |
-|--------|-----------------|-------------------|
-| `authApi` | `/api/auth/` | Login, register, OAuth |
-| `projectsApi` | `/api/projects/` | CRUD, files, containers |
-| `chatApi` | `/api/chat/` | Messages, streaming, approvals |
-| `gitApi` | `/api/projects/{id}/git/` | Version control |
-| `tasksApi` | `/api/tasks/` | Background task status |
-| `marketplaceApi` | `/api/marketplace/` | Agents, bases, skills, MCP servers, reviews |
-| `billingApi` | `/api/billing/` | Subscriptions, credits |
-| `assetsApi` | `/api/projects/{slug}/assets/` | File uploads |
-| `deploymentsApi` | `/api/deployments/` | External deploys |
-| `secretsApi` | `/api/secrets/` | API keys |
-| `usersApi` | `/api/users/` | Profile, preferences |
-| `configApi` | `/api/config` | App configuration |
-| `setupApi` | `/api/projects/{slug}/` | Setup config, project analysis |
-
-## Type Definitions Location
-
-- Agent types: `app/src/types/agent.ts`
-- Git types: `app/src/types/git.ts`
-- TesslateConfig types: `app/src/types/tesslateConfig.ts`
-- Inline types: `app/src/lib/api.ts` (UserProfile, etc.)
+- `docs/app/api/chat-api.md`, `core-api.md`, `git-api.md`, `projects-api.md`, `setup-api.md` – per-domain walkthroughs
+- `docs/app/keyboard-shortcuts/CLAUDE.md` – `keyboard-registry.ts`
+- `docs/app/seo/CLAUDE.md` – `seo-manager.ts` + SEO component

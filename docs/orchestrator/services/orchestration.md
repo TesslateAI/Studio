@@ -1,6 +1,25 @@
 # Container Orchestration Services
 
-OpenSail uses a unified orchestration layer that abstracts Docker Compose and Kubernetes deployments behind a common interface. This allows the same codebase to run in local development (Docker) and production (Kubernetes) with minimal changes.
+OpenSail uses a unified orchestration layer that abstracts Docker Compose, Kubernetes, and local-subprocess deployments behind a common interface. The same codebase runs in local development (Docker), production (Kubernetes), and the desktop sidecar (local host OS) with minimal branching.
+
+## Files covered
+
+| File | Purpose |
+|------|---------|
+| `orchestration/__init__.py` | Re-exports. |
+| `orchestration/base.py` | `BaseOrchestrator` ABC. |
+| `orchestration/deployment_mode.py` | `DeploymentMode` enum. |
+| `orchestration/factory.py` | `get_orchestrator()` plus per-project dispatch by `project.runtime`. |
+| `orchestration/docker.py` | `DockerOrchestrator` for Docker Compose. |
+| `orchestration/local.py` | `LocalOrchestrator` for the desktop sidecar: spawns host-OS subprocesses, manages stdout/stderr logs. |
+| `orchestration/local_ports.py` | Port allocator for the local runtime: reserves free loopback ports per container. |
+| `orchestration/kubernetes_orchestrator.py` | `KubernetesOrchestrator`: top-level K8s impl. |
+| `orchestration/kubernetes/__init__.py` | Re-exports. |
+| `orchestration/kubernetes/client.py` | K8s API client wrapper. |
+| `orchestration/kubernetes/helpers.py` | Deployment manifest helpers. |
+| `orchestration/kubernetes/manager.py` | K8s container lifecycle and cleanup. |
+
+`factory.py` routes per-project based on `project.runtime` (`local` / `docker` / `k8s`) so cloud and desktop paths coexist in one codebase.
 
 ## Overview
 
@@ -21,10 +40,14 @@ BaseOrchestrator (Abstract)
 │   ├── Uses shared volume: /projects
 │   ├── Traefik routing: {project}-{container}.localhost
 │   └── Direct filesystem access
-└── KubernetesOrchestrator (Kubernetes)
-    ├── Uses per-project namespaces: proj-{uuid}
-    ├── NGINX Ingress: {project}-{container}.domain.com
-    └── S3 Sandwich pattern (ephemeral + S3)
+├── KubernetesOrchestrator (Kubernetes)
+│   ├── Uses per-project namespaces: proj-{uuid}
+│   ├── NGINX Ingress: {project}-{container}.domain.com
+│   └── btrfs CSI + Volume Hub (cache-node placement)
+└── LocalOrchestrator (Desktop sidecar)
+    ├── Host-OS subprocesses
+    ├── 127.0.0.1 ports allocated by local_ports.py
+    └── Stdout/stderr streamed to log files per container
 ```
 
 ## Core Files

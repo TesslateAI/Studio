@@ -1,69 +1,121 @@
 # Orchestrator Routers
 
-API routers for OpenSail's FastAPI backend. Each router handles a specific domain of functionality.
+API routers for OpenSail's FastAPI backend. Each module exposes an `APIRouter` that `orchestrator/app/main.py` includes once.
 
-## Router Organization
-
-Routers are organized by feature domain, not by database model. This allows for clear separation of concerns and makes it easy to find the right endpoint for a given task.
+## Layout
 
 ```
 orchestrator/app/routers/
-├── projects.py              # Project CRUD, files, containers, assets
-├── chat.py                  # Chat management, agent streaming
-├── marketplace.py           # Agent/base marketplace, purchases, reviews
-├── billing.py               # Subscriptions, credits, usage tracking
-├── git.py                   # Git operations (init, commit, push, pull)
-├── git_providers.py         # Multi-provider Git support
-├── deployments.py           # External deployments (Vercel, Netlify, Cloudflare)
-├── deployment_credentials.py # OAuth credentials for deployments
-├── deployment_oauth.py      # OAuth callback handling
-├── admin.py                 # Platform metrics, user management
-├── auth.py                  # Custom auth endpoints (pod access verification)
-├── users.py                 # User profile management
-├── agents.py                # Agent management (user agents)
-├── agent.py                 # Legacy agent endpoints
-├── shell.py                 # Interactive shell sessions
-├── secrets.py               # Project environment variables
-├── kanban.py                # Project task board
-├── tasks.py                 # Background task status
-├── feedback.py              # User feedback submission
-├── referrals.py             # Referral program
-├── creators.py              # Creator program management
-├── github.py                # GitHub-specific operations
-├── webhooks.py              # Webhook endpoints
-├── channels.py              # Messaging channels (Telegram, Slack, Discord, WhatsApp)
-├── mcp.py                   # MCP server install/manage, agent assignments
-└── mcp_server.py            # Tesslate-as-MCP-server (Streamable HTTP)
+├── <flat modules>.py   # Cookie/session or tsk-auth API endpoints
+├── desktop/            # Desktop sidecar routes (session auth via Tauri shell)
+└── public/             # tsk-key authenticated external API (/api/public, /api/v1)
 ```
 
-## Base Paths
+## Full Router Index
 
-Most routers define their base path using `prefix` in the APIRouter:
+Every router file in `orchestrator/app/routers/` (and its `desktop/` and `public/` subpackages) maps to a documentation entry below. Files grouped into a single doc (Tesslate Apps, desktop package, public package) are listed in that doc's File Index.
 
-```python
-router = APIRouter(prefix="/api/projects", tags=["projects"])
-```
+### Top-level routers (`orchestrator/app/routers/*.py`)
 
-Key base paths:
-- `/api/projects` - Project management, setup config, project analysis
-- `/api/chat` - Chat and agent interactions
-- `/api/marketplace` - Agent, skill, base, and MCP server marketplace
-- `/api/billing` - Subscription and billing
-- `/api/deployments` - External deployments
-- `/api/admin` - Admin operations (superuser only)
-- `/api/auth` - Authentication
-- `/api/git` - Git operations (typically nested under projects)
-- `/api/channels` - Messaging channel integrations
-- `/api/mcp` - MCP server management and agent assignments
-- `/api/mcp/server` - Tesslate-as-MCP-server (Streamable HTTP)
+| File | Base path | Doc |
+|------|-----------|-----|
+| `admin.py` | `/api/admin` | [admin.md](admin.md) |
+| `admin_marketplace.py` | `/api/admin-marketplace` | [apps.md](apps.md) |
+| `agent.py` | `/api/agent` | [agent.md](agent.md) |
+| `agents.py` | `/api/agents` | [agents.md](agents.md) |
+| `app_billing.py` | `/api/apps/billing` | [apps.md](apps.md) |
+| `app_bundles.py` | `/api/app-bundles` | [apps.md](apps.md) |
+| `app_installs.py` | `/api/app-installs` | [apps.md](apps.md) |
+| `app_runtime.py` | `/api/apps/runtime` | [apps.md](apps.md) |
+| `app_runtime_status.py` | `/api/app-installs` | [apps.md](apps.md) |
+| `app_schedules.py` | `/api/app-installs` | [apps.md](apps.md) |
+| `app_submissions.py` | `/api/app-submissions` | [apps.md](apps.md) |
+| `app_triggers.py` | `/api/app-instances/{id}/trigger/{name}` | [apps.md](apps.md) |
+| `app_versions.py` | `/api/app-versions` | [apps.md](apps.md) |
+| `app_yanks.py` | `/api/app-yanks` | [apps.md](apps.md) |
+| `auth.py` | `/api/auth` | [auth.md](auth.md) |
+| `billing.py` | `/api/billing` | [billing.md](billing.md) |
+| `channels.py` | `/api/channels` | [channels.md](channels.md) |
+| `chat.py` | `/api/chat` | [chat.md](chat.md) |
+| `creators.py` | `/api/creators` | [creators.md](creators.md) |
+| `deployment_credentials.py` | `/api/deployment-credentials` | [deployment-credentials.md](deployment-credentials.md) |
+| `deployment_oauth.py` | `/api/deployment-oauth` | [deployment-oauth.md](deployment-oauth.md) |
+| `deployment_targets.py` | `/api/projects/{slug}/deployment-targets` | [deployment-targets.md](deployment-targets.md) |
+| `deployments.py` | `/api/deployments` | [deployments.md](deployments.md) |
+| `design.py` | `/api/projects/{slug}/design` | [design.md](design.md) |
+| `desktop_pair.py` | `/api/desktop`, `/api/v1/desktop` | [desktop.md](desktop.md) |
+| `external_agent.py` | `/api/external` | [external-agent.md](external-agent.md) |
+| `feature_flags.py` | `/api/feature-flags` | [feature-flags.md](feature-flags.md) |
+| `feedback.py` | `/api/feedback` | [feedback.md](feedback.md) |
+| `gateway.py` | `/api/gateway` | [gateway.md](gateway.md) |
+| `git.py` | `/api/git` | [git.md](git.md) |
+| `git_providers.py` | `/api/git-providers` | [git-providers.md](git-providers.md) |
+| `github.py` | `/api/github` | [github.md](github.md) |
+| `internal.py` | `/api/internal` | [internal.md](internal.md) |
+| `kanban.py` | `/api/kanban` | [kanban.md](kanban.md) |
+| `magic_link.py` | `/api/auth/magic-link` | [magic-link.md](magic-link.md) |
+| `marketplace.py` | `/api/marketplace` | [marketplace.md](marketplace.md) |
+| `marketplace_apps.py` | `/api/marketplace-apps` | [apps.md](apps.md) |
+| `marketplace_local.py` | `/api/desktop/marketplace` | [desktop.md](desktop.md) |
+| `mcp.py` | `/api/mcp` | [mcp.md](mcp.md) |
+| `mcp_oauth.py` | `/api/mcp/oauth` | [mcp-oauth.md](mcp-oauth.md) |
+| `mcp_server.py` | `/api/mcp-servers`, `/api/mcp/server` | [mcp.md](mcp.md) |
+| `node_config.py` | `/api/chat/node-config`, `/api/projects/*/containers/*/config` | [node-config.md](node-config.md) |
+| `projects.py` | `/api/projects` | [projects.md](projects.md) |
+| `proxy.py` | `/v1` | [proxy.md](proxy.md) |
+| `referrals.py` | `/api` | [referrals.md](referrals.md) |
+| `schedules.py` | `/api/schedules` | [schedules.md](schedules.md) |
+| `secrets.py` | `/api/secrets` | [secrets.md](secrets.md) |
+| `shell.py` | `/api/shell` | [shell.md](shell.md) |
+| `snapshots.py` | `/api/projects/{id}/snapshots` | [snapshots.md](snapshots.md) |
+| `tasks.py` | `/api/tasks` | [tasks.md](tasks.md) |
+| `teams.py` | `/api/teams` | [teams.md](teams.md) |
+| `terminal.py` | `/api/terminal` | [terminal.md](terminal.md) |
+| `test_helpers.py` | `/api/__test__` | [test-helpers.md](test-helpers.md) |
+| `themes.py` | `/api/themes` | [themes.md](themes.md) |
+| `two_fa.py` | `/api/auth` | [two-fa.md](two-fa.md) |
+| `users.py` | `/api/users` | [users.md](users.md) |
+| `version.py` | `/api/version` | [version.md](version.md) |
+| `webhooks.py` | `/api/webhooks` | [webhooks.md](webhooks.md) |
 
-Some routers don't define a prefix and expect the including router to handle it. For example, `auth.py` is mounted at `/api/auth` by `main.py`.
+### Desktop subpackage (`orchestrator/app/routers/desktop/*.py`)
+
+All submodules mount under `/api/desktop` via `desktop/__init__.py`. See [desktop.md](desktop.md).
+
+| File | Purpose |
+|------|---------|
+| `desktop/__init__.py` | Assembles the desktop router. |
+| `desktop/_helpers.py` | Shared helpers (probe, git root, serializers). |
+| `desktop/auth.py` | Cloud pairing auth shim. |
+| `desktop/directories.py` | Connected directories CRUD. |
+| `desktop/handoff.py` | Local/cloud agent handoff. |
+| `desktop/projects.py` | Folder import + sync endpoints. |
+| `desktop/sessions.py` | Agent sessions + ticket diff. |
+| `desktop/tickets.py` | Agent tickets list + approve. |
+| `desktop/tray.py` | Runtime probe + tray state. |
+
+### Public subpackage (`orchestrator/app/routers/public/*.py`)
+
+All modules are tsk-auth and registered via `public/__init__.py`. See [public.md](public.md).
+
+| File | Prefix |
+|------|--------|
+| `public/__init__.py` | (aggregator) |
+| `public/_deps.py` | (helpers) |
+| `public/_shared.py` | (helpers) |
+| `public/agents.py` | `/api/v1/agents` |
+| `public/agents_handoff.py` | `/api/v1/agents/handoff` |
+| `public/k8s_projects.py` | `/api/v1/k8s/projects` |
+| `public/marketplace.py` | `/api/public/marketplace` |
+| `public/marketplace_install.py` | `/api/v1/marketplace` |
+| `public/models.py` | `/api/v1` |
+| `public/projects_sync.py` | `/api/v1/projects/sync` |
 
 ## Common Patterns
 
 ### Authentication
 
-All routers use FastAPI dependency injection for authentication:
+All cookie/session routers inject the current user via FastAPI dependencies:
 
 ```python
 from ..users import current_active_user, current_superuser
@@ -71,247 +123,83 @@ from ..users import current_active_user, current_superuser
 @router.get("/endpoint")
 async def my_endpoint(
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    # User is authenticated and available as current_user
-    pass
+    ...
 ```
 
-**current_active_user**: Requires valid JWT token (cookie or bearer)
-**current_superuser**: Requires superuser role (for admin endpoints)
+- `current_active_user`: JWT (cookie or bearer).
+- `current_superuser`: platform admin.
+- `current_optional_user`: public endpoints that add user-specific context when logged in.
+- `require_api_scope(Permission.X)`: tsk-key API (used by `public/`, `proxy.py`, `external_agent.py`).
+- HMAC signature: `app_triggers.py` (per-schedule key over raw body).
+- Internal shared secret: `internal.py` (`verify_internal_secret`).
+- Provider signature: `webhooks.py` (Stripe), `channels.py` (Telegram/Slack/Discord/WhatsApp).
 
 ### Database Session
 
-All endpoints that need database access use the `get_db` dependency:
-
 ```python
-@router.get("/endpoint")
-async def my_endpoint(db: AsyncSession = Depends(get_db)):
+from ..database import get_db
+
+async def handler(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Model).where(...))
     return result.scalars().all()
 ```
 
-The session is automatically committed/rolled back based on success/failure.
-
-### Error Handling
-
-Endpoints use HTTPException for error responses:
-
-```python
-if not resource:
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Resource not found"
-    )
-```
-
-Common status codes:
-- `400 BAD_REQUEST` - Invalid input, validation errors
-- `401 UNAUTHORIZED` - Authentication required
-- `403 FORBIDDEN` - User doesn't have permission
-- `404 NOT_FOUND` - Resource not found
-- `500 INTERNAL_SERVER_ERROR` - Unexpected server error
-
 ### Background Tasks
 
-Long-running operations use FastAPI's BackgroundTasks:
+For short fire-and-forget work use FastAPI `BackgroundTasks`. For long-running agent tasks, enqueue via ARQ (cloud) or the local asyncio queue (desktop); clients poll `/api/tasks/{task_id}/status` or subscribe to SSE.
 
-```python
-@router.post("/start")
-async def start_operation(
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    # Queue background task
-    background_tasks.add_task(perform_operation, arg1, arg2)
-    return {"message": "Operation started"}
-```
+### Streaming
 
-For longer tasks that need progress tracking, use the TaskManager service (see `orchestrator/app/services/task_manager.py`).
-
-### Streaming Responses
-
-Agents and build operations use Server-Sent Events (SSE) for streaming:
+Agent and logs streams use Server-Sent Events:
 
 ```python
 from fastapi.responses import StreamingResponse
 
-@router.post("/stream")
-async def stream_endpoint():
-    async def generate():
-        yield f"data: {json.dumps(event_data)}\n\n"
+async def gen():
+    yield f"data: {json.dumps(event)}\n\n"
 
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream"
-    )
+return StreamingResponse(gen(), media_type="text/event-stream")
 ```
 
-The frontend listens for these events using EventSource or fetch with streaming.
+### WebSocket
 
-### WebSocket Connections
-
-Chat uses WebSocket for real-time bidirectional communication:
-
-```python
-@router.websocket("/ws/{chat_id}")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    chat_id: str
-):
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_text()
-            # Process and send response
-            await websocket.send_text(response)
-    except WebSocketDisconnect:
-        pass
-```
+Used for interactive terminal, container log streaming, and progress channels. Auth is passed via query parameter.
 
 ### Pagination
 
-List endpoints support pagination via query parameters:
-
 ```python
 @router.get("/items")
-async def list_items(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, le=100)
-):
-    # Apply offset and limit to query
-    pass
-```
-
-### File Uploads
-
-File upload endpoints use FastAPI's `UploadFile`:
-
-```python
-@router.post("/upload")
-async def upload_file(
-    file: UploadFile = File(...)
-):
-    contents = await file.read()
-    # Process file
-    return {"filename": file.filename}
+async def list_items(skip: int = Query(0, ge=0), limit: int = Query(20, le=100)):
+    ...
 ```
 
 ## Adding a New Router
 
-1. **Create the router file** in `orchestrator/app/routers/`:
+1. Create `orchestrator/app/routers/<name>.py`.
+2. Expose `router = APIRouter(prefix="/api/<name>", tags=["<name>"])`.
+3. Import and `app.include_router(...)` in `orchestrator/app/main.py`.
+4. Add request/response schemas to `orchestrator/app/schemas.py` (or a `schemas_<domain>.py` sibling).
+5. Document here: add a row to the index above and create `docs/orchestrator/routers/<name>.md`.
+6. Add tests under `orchestrator/tests/test_routers/`.
 
-```python
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from ..database import get_db
-from ..users import current_active_user
-from ..models import YourModel
+## Security Reminders
 
-router = APIRouter(prefix="/api/your-feature", tags=["your-feature"])
-
-@router.get("/")
-async def list_items(
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    # Implementation
-    pass
-```
-
-2. **Import and include in main.py**:
-
-```python
-from .routers import your_feature
-
-app.include_router(your_feature.router)
-```
-
-3. **Create schemas** in `orchestrator/app/schemas.py` (or `schemas_*.py`):
-
-```python
-from pydantic import BaseModel
-
-class YourFeatureCreate(BaseModel):
-    name: str
-
-class YourFeatureResponse(BaseModel):
-    id: UUID
-    name: str
-
-    class Config:
-        from_attributes = True
-```
-
-4. **Add database models** if needed in `orchestrator/app/models.py`
-
-5. **Write tests** in `orchestrator/tests/test_your_feature.py`
-
-6. **Document the router** in `docs/orchestrator/routers/your_feature.md`
-
-## Testing Endpoints
-
-Use pytest with async support:
-
-```python
-import pytest
-from httpx import AsyncClient
-
-@pytest.mark.asyncio
-async def test_endpoint(client: AsyncClient, authenticated_user):
-    response = await client.get("/api/endpoint")
-    assert response.status_code == 200
-```
-
-Or use FastAPI's TestClient for sync tests:
-
-```python
-from fastapi.testclient import TestClient
-
-def test_endpoint(client: TestClient):
-    response = client.get("/api/endpoint")
-    assert response.status_code == 200
-```
-
-## Security Considerations
-
-1. **Always validate user ownership** before allowing access to resources
-2. **Never trust client input** - use Pydantic schemas for validation
-3. **Use parameterized queries** - SQLAlchemy handles this automatically
-4. **Log security-relevant events** (failed auth, unauthorized access attempts)
-5. **Rate limit sensitive endpoints** (login, password reset, file uploads)
-6. **Sanitize file paths** - use `os.path.abspath()` and validate against project directory
-7. **Encrypt sensitive data** - use encryption service for tokens, credentials
-
-## Performance Optimization
-
-1. **Use async operations** for all I/O (database, filesystem, HTTP)
-2. **Eager load relationships** with `selectinload()` to avoid N+1 queries
-3. **Index frequently queried fields** in database models
-4. **Cache expensive operations** (model lists, marketplace data)
-5. **Stream large responses** instead of loading into memory
-6. **Use background tasks** for long-running operations
-7. **Paginate list endpoints** to limit result set size
+1. Verify ownership before allowing access (`get_project_by_slug`, `get_project_with_access`, `check_team_permission`).
+2. Validate input via Pydantic schemas.
+3. Use SQLAlchemy parameterized queries; never string-concatenate SQL.
+4. Encrypt credentials (Fernet) at rest; redact on read.
+5. Log security-relevant events (auth failures, permission denials, admin actions).
+6. Rate-limit sensitive endpoints (login, password reset, invitation emails, uploads).
+7. Sanitize file paths and S3/CAS keys.
 
 ## Related Documentation
 
-- [API Schemas](../schemas.md) - Request/response models
-- [Database Models](../models.md) - Database schema
-- [Services](../services/) - Business logic services
-- [Agent System](../agent/) - AI agent implementation
-- [Deployment Modes](../../k8s/ARCHITECTURE.md) - Docker vs Kubernetes
-
-## Router Documentation Index
-
-- [projects.md](projects.md) - Project CRUD, files, containers, setup config, project analysis
-- [marketplace.md](marketplace.md) - Agent, skill, base, and MCP server marketplace
-- [chat.md](chat.md) - Chat management, agent streaming
-- [channels.md](channels.md) - Messaging channel integrations (Telegram, Slack, Discord, WhatsApp)
-- [mcp.md](mcp.md) - MCP server install/manage, agent assignments, Tesslate MCP server
-- [deployments.md](deployments.md) - External deployments (Vercel, Netlify, Cloudflare)
-- [billing.md](billing.md) - Subscriptions, credits, usage tracking
-- [admin.md](admin.md) - Platform metrics, user management
-- [git.md](git.md) - Git operations
-- [themes.md](themes.md) - Theme API (public endpoints)
-- [external-agent.md](external-agent.md) - External agent API (API keys, SSE, webhooks)
+- API schemas: [../schemas.md](../schemas.md)
+- Database models: [../models/CLAUDE.md](../models/CLAUDE.md)
+- Services: [../services/CLAUDE.md](../services/CLAUDE.md)
+- Agent system: [../agent/CLAUDE.md](../agent/CLAUDE.md)
+- Deployment modes: [../orchestration/CLAUDE.md](../orchestration/CLAUDE.md)
+- Apps feature: [../../apps/CLAUDE.md](../../apps/CLAUDE.md)
+- Desktop client: [../../desktop/CLAUDE.md](../../desktop/CLAUDE.md)

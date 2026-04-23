@@ -2,9 +2,9 @@
 
 OpenSail has three layers of automated testing:
 
-1. **Unit tests** — Fast, mocked, no external dependencies
-2. **Integration tests** — Real PostgreSQL database, httpx AsyncClient
-3. **E2E tests** — Full browser automation with Playwright
+1. **Unit tests**: Fast, mocked, no external dependencies
+2. **Integration tests**: Real PostgreSQL database, httpx AsyncClient
+3. **E2E tests**: Full browser automation with Playwright
 
 ## Quick Start
 
@@ -183,10 +183,10 @@ The GitHub Actions CI pipeline (`..github/workflows/ci.yml`) runs all three test
 ```
 
 **Jobs**:
-1. `backend-unit` — Backend unit tests (parallel)
-2. `frontend-unit` — Frontend unit tests (parallel)
-3. `backend-integration` — Integration tests (depends on backend-unit)
-4. `e2e` — E2E tests (depends on backend-integration + frontend-unit)
+1. `backend-unit`: Backend unit tests (parallel)
+2. `frontend-unit`: Frontend unit tests (parallel)
+3. `backend-integration`: Integration tests (depends on backend-unit)
+4. `e2e`: E2E tests (depends on backend-integration + frontend-unit)
 
 **Artifacts**:
 - Test results (JUnit XML)

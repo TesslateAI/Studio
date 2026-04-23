@@ -165,7 +165,24 @@ network_policy = {
 
 ## Deployment Modes
 
-OpenSail supports **two deployment modes** configured via `DEPLOYMENT_MODE` environment variable:
+OpenSail supports **three deployment modes** configured via `DEPLOYMENT_MODE` environment variable: `desktop`, `docker`, and `kubernetes`. See [deployment-modes.md](./deployment-modes.md) for the full matrix and [storage-architecture.md](./storage-architecture.md) for the storage layer.
+
+### Desktop Mode (Tauri Shell)
+
+**When**: User runs the Tesslate desktop app.
+
+**Configuration**:
+```bash
+DEPLOYMENT_MODE=desktop
+```
+
+**Architecture**:
+- Tauri v2 shell spawns a PyInstaller-frozen FastAPI sidecar on a random loopback port.
+- SQLite replaces Postgres; `asyncio.Queue` + `apscheduler` replace Redis/ARQ.
+- Per-project `runtime` column routes container work to `local` (host subprocesses), `docker` (local Docker Compose), or `k8s` (remote cloud cluster via authenticated API).
+- Token stored in Stronghold; cloud features (marketplace, sync, K8s runtime) require a `tsk_` API key.
+
+**Key Code**: `orchestrator/app/services/task_queue/local_queue.py`, `orchestrator/app/services/pubsub/local_pubsub.py`, `orchestrator/app/services/orchestration/local.py`.
 
 ### Docker Mode (Local Development)
 

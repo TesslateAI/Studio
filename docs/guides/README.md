@@ -6,7 +6,7 @@ Practical how-to guides for developing, deploying, and extending OpenSail.
 
 | Guide | Description | When to Use |
 |-------|-------------|-------------|
-| [Docker Setup](docker-setup.md) | Set up OpenSail from scratch with Docker Compose | **Start here** — first-time setup, new developers |
+| [Docker Setup](docker-setup.md) | Set up OpenSail from scratch with Docker Compose | **Start here**. First-time setup, new developers |
 | [Local Development](local-development.md) | Run backend/frontend natively (without Docker) | Faster iteration, debugging |
 | [Minikube Setup](minikube-setup.md) | Deploy to local Kubernetes cluster | Testing K8s features locally |
 | [AWS Deployment](aws-deployment.md) | Deploy to AWS EKS production | Production deployment |
@@ -17,6 +17,7 @@ Practical how-to guides for developing, deploying, and extending OpenSail.
 |-------|-------------|-------------|
 | [Image Update Workflow](image-update-workflow.md) | Build and deploy container images | After code changes, deploying updates |
 | [Database Migrations](database-migrations.md) | Manage database schema changes | Adding/modifying database tables |
+| [Environment Variables](environment-variables.md) | Full env var reference (all categories) | Configuring any environment |
 
 ## Extending the Platform
 
@@ -38,6 +39,8 @@ Practical how-to guides for developing, deploying, and extending OpenSail.
 |-------|-------------|-------------|
 | [Stripe Testing](stripe-testing.md) | Stripe integration testing guide | Testing payment flows |
 | [Stripe Integration Complete](stripe-integration-complete.md) | Full Stripe implementation summary | Understanding billing system |
+| [Testing Reference](../testing/README.md) | Full test suite docs (pytest, vitest, Playwright, Go) | Writing, running, or triaging tests |
+| [CI/CD Reference](../ci-cd/README.md) | GitHub Actions workflows, hooks, lint-staged | Adjusting pipelines or release process |
 
 ## Deep Dives & Architecture
 
@@ -47,13 +50,21 @@ Practical how-to guides for developing, deploying, and extending OpenSail.
 | [Universal Project Setup](universal-project-setup.md) | `.tesslate/config.json` project configuration system | Understanding project config, container startup |
 | [Edit Mode Implementation](edit-mode-implementation.md) | Three-mode edit system (Ask/Allow/Plan) | Understanding edit flow |
 | [View-Scoped Tools](../orchestrator/agent/tools/view-scoped-tools.md) | View-specific agent tools | Extending view-based tools |
+| [Enterprise Observability](enterprise-observability.md) | OpenTelemetry, structured logging, audit export plan | Adding tracing or compliance export |
+| [Real-time Agent Architecture](real-time-agent-architecture.md) | Agent streaming, Redis pub/sub, WebSocket fan-out | Debugging live agent output |
+
+## Specs
+
+| Spec | Description |
+|------|-------------|
+| [App Manifest index](../specs/README.md) | Frozen Tesslate App manifest versions (2025-01, 2025-02) |
 
 ## Quick Reference
 
 ### Common Commands
 
 ```powershell
-# Local Development (Docker) — from-scratch setup
+# Local Development (Docker). From-scratch setup
 cp .env.example .env          # then edit .env with your keys
 docker compose up --build -d  # build images and start
 docker compose ps             # verify all services are healthy
@@ -94,7 +105,7 @@ k8s/                   # Kubernetes manifests
 
 ### Environment Variables
 
-See `.env.example` files in the root directory and `k8s/` folder for required environment variables.
+See [environment-variables.md](environment-variables.md) for the complete reference. `.env.example` and `.env.prod.example` at the repo root document local / production defaults; `k8s/` overlays carry deployment-mode values.
 
 ## Contributing
 
@@ -104,3 +115,5 @@ When adding new guides:
 3. Reference specific files when appropriate
 4. Add common issues and solutions
 5. Update this README with the new guide
+6. Use the OpenSail product name. Replace any "Tesslate Studio" references you encounter in the edited area
+7. Avoid em dashes. Use colons, commas, semicolons, or periods

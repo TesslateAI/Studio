@@ -360,7 +360,7 @@ def create_ingress_manifest(
 │  Hub returns (volume_id, node_name)                     │
 │    - Stored on Project.volume_id / Project.cache_node   │
 │                                                         │
-│  ✅ Volume ready — zero npm install on first boot       │
+│  Volume ready: zero npm install on first boot            │
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
@@ -421,7 +421,7 @@ def create_ingress_manifest(
 │      - Delete namespace (cascades pods, services, PVC)  │
 │      - Delete cluster-scoped PVs (Retain policy keeps   │
 │        btrfs subvolumes intact on the node)             │
-│    - VolumeManager.trigger_sync(volume_id) — final S3   │
+│    - VolumeManager.trigger_sync(volume_id): final S3    │
 │      push to ensure all data is persisted (separate     │
 │      step in hibernate.py, NOT in stop_environment)     │
 │                                                         │
@@ -478,7 +478,7 @@ await vm.delete_volume(volume_id)
 
 **CSI PV+PVC** (created by `ComputeManager.start_environment()`):
 ```yaml
-# PV — cluster-scoped, locked to a specific node
+# PV: cluster-scoped, locked to a specific node
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -499,7 +499,7 @@ spec:
           operator: In
           values: ["{node_name}"]
 ---
-# PVC — namespaced, binds to the PV above
+# PVC: namespaced, binds to the PV above
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -514,7 +514,7 @@ spec:
       storage: 10Gi           # Function default; config.k8s_pvc_size overrides (default "5Gi")
 ```
 
-**SnapshotManager** (K8s VolumeSnapshot API — Timeline UI):
+**SnapshotManager** (K8s VolumeSnapshot API, Timeline UI):
 
 SnapshotManager (`snapshot_manager.py`) still manages K8s VolumeSnapshots for the Timeline UI, but snapshots now use btrfs under the hood (via the btrfs CSI driver's VolumeSnapshotClass) instead of EBS. The same create/restore/rotate/soft-delete logic applies:
 - Up to 5 snapshots per project (configurable via `K8S_MAX_SNAPSHOTS_PER_PROJECT`)
@@ -534,10 +534,10 @@ SnapshotManager (`snapshot_manager.py`) still manages K8s VolumeSnapshots for th
 - 30-day soft-delete retention for recovery
 
 **Key Files**:
-- `orchestrator/app/services/volume_manager.py` — Thin VolumeManager client
-- `orchestrator/app/services/hub_client.py` — gRPC client for Volume Hub
-- `orchestrator/app/services/compute_manager.py` — Start/stop environment, creates CSI PV+PVC
-- `orchestrator/app/services/snapshot_manager.py` — K8s VolumeSnapshot API (Timeline UI)
+- `orchestrator/app/services/volume_manager.py`: thin VolumeManager client
+- `orchestrator/app/services/hub_client.py`: gRPC client for Volume Hub
+- `orchestrator/app/services/compute_manager.py`: start/stop environment, creates CSI PV+PVC
+- `orchestrator/app/services/snapshot_manager.py`: K8s VolumeSnapshot API (Timeline UI)
 
 ### Namespace Isolation
 
@@ -556,7 +556,7 @@ metadata:
 
 ---
 # CSI PV+PVC (btrfs subvolume on compute node)
-# Created by ComputeManager.start_environment() — see Storage section above.
+# Created by ComputeManager.start_environment(); see Storage section above.
 # PV is cluster-scoped with nodeAffinity; PVC is namespace-scoped and pre-bound.
 # All pods in the namespace share this PVC via pod affinity.
 

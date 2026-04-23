@@ -1,436 +1,352 @@
-# Docker Setup from Scratch
+# Running OpenSail on Docker
 
-Complete guide to setting up OpenSail locally using Docker Compose, from a fresh clone to a running application.
+Complete walk-through to get OpenSail running locally with Docker Compose. A fresh clone should be at `http://localhost` with a logged-in user and a working project in under 20 minutes.
 
-## Prerequisites
+If you just need commands, jump to [Quick Start](#quick-start). If something breaks, jump to [Common Issues](#common-issues).
 
-| Software | Version | Purpose |
-|----------|---------|---------|
-| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Latest | Container runtime + Docker Compose |
-| Git | Latest | Clone the repository |
+## 1. Prerequisites
 
-### System Requirements
+| Tool | Minimum | Notes |
+|------|---------|-------|
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | 4.30+ (Engine 26+, Compose v2) | Required on macOS, Windows, and Linux desktops. Enable WSL 2 backend on Windows. |
+| `docker compose` | v2.27+ | Ships with Docker Desktop. The guide uses the `docker compose` (no hyphen) form. |
+| `git` | 2.40+ | For cloning the repo. |
+| Disk | 15 GB free | Images: roughly 2.5 GB. Named volumes (Postgres, projects, base cache, Redis) grow with use. |
+| RAM | 8 GB minimum, 16 GB recommended | Orchestrator plus worker plus gateway plus user containers get heavy. |
+| CPU | 4 cores | Vite HMR and agent runs are CPU sensitive. |
 
-- **RAM**: 8GB minimum (16GB recommended)
-- **Disk**: 10GB free (images + volumes)
-- **OS**: Windows (WSL 2), macOS, or Linux
-- **Docker Desktop**: Running with WSL 2 backend (Windows) or native engine (macOS/Linux)
+Node.js and Python are NOT required on the host. Everything runs inside containers.
 
-> **Note**: Node.js and Python are NOT required on your host machine. Everything runs inside Docker containers.
+### OS support
 
-## Step-by-Step Setup
+| OS | Status | Notes |
+|----|--------|-------|
+| macOS 13+ (Intel or Apple Silicon) | Supported | Docker Desktop with the Virtualization.framework backend. Apple Silicon pulls `arm64` images transparently. |
+| Windows 11 + WSL 2 | Supported | Run the commands from inside your WSL 2 distro, not PowerShell. Docker Desktop must have "Use WSL 2 based engine" on. |
+| Linux (Ubuntu 22.04+, Fedora 39+, Arch) | Supported | Install Docker Engine plus the Compose plugin. Rootless Docker works but see [Platform notes](#platform-notes). |
+| macOS + Colima | Supported with tweaks | See [Platform notes](#platform-notes). |
+| Native Windows (no WSL) | Not supported | Path translation breaks the bind mounts. |
 
-### 1. Clone the Repository
+## 2. Clone and configure
 
 ```bash
-git clone https://github.com/your-org/tesslate-studio.git
+git clone https://github.com/TesslateAI/tesslate-studio.git
 cd tesslate-studio
-```
-
-### 2. Create Environment File
-
-Copy the example and configure required values:
-
-```bash
 cp .env.example .env
 ```
 
-Open `.env` and update these **required** values:
+Open `.env` in your editor. Only two values are genuinely required for first boot; everything else has sensible defaults.
 
-```bash
-# REQUIRED: Change this to a random string
-SECRET_KEY=your-secret-key-here-change-this
+### Required env vars
 
-# REQUIRED: LiteLLM API configuration (for AI features)
-LITELLM_API_BASE=https://your-litellm-url.com/v1
-LITELLM_MASTER_KEY=your-litellm-master-key
-LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6
-```
+| Variable | Why | How to get one |
+|----------|-----|----------------|
+| `SECRET_KEY` | Signs JWTs and derives other secrets. | `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `LITELLM_API_BASE` and `LITELLM_MASTER_KEY` | Backend routes LLM calls through a LiteLLM proxy. Without a real endpoint the agent features stay disabled, but the app still boots. | Point at your existing proxy, or stand up your own (`docs/infrastructure/kubernetes/litellm.md`). |
 
-Everything else has sensible defaults for local development. See the `.env.example` file for the full list of optional settings (OAuth, Stripe, Deployment providers, etc).
+### Env var groups (optional)
 
-### 3. Build and Start
+These live in `/home/smirk/Tesslate-Studio/.env.example`. Open that file for the full list; the groups below are the ones you are most likely to touch.
+
+| Group | Vars | When to set |
+|-------|------|-------------|
+| Database | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT` | Keep defaults for dev. Change `POSTGRES_PORT` only if `5432` is busy. |
+| Redis | `REDIS_URL`, `REDIS_PORT` | Default `redis://redis:6379/0` works in Compose. |
+| Secrets | `SECRET_KEY`, `INTERNAL_API_SECRET`, `CSRF_SECRET_KEY`, `DEPLOYMENT_ENCRYPTION_KEY`, `CHANNEL_ENCRYPTION_KEY` | Generate real values for any environment you share. `CHANNEL_ENCRYPTION_KEY` needs a Fernet key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
+| LiteLLM | `LITELLM_API_BASE`, `LITELLM_MASTER_KEY`, `LITELLM_DEFAULT_MODELS`, `LITELLM_TEAM_ID`, `LITELLM_INITIAL_BUDGET` | Required for the agent. `LITELLM_DEFAULT_MODELS` is a comma list, no spaces. |
+| OAuth (optional) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `GITHUB_*` | Enable social login. Without these only email/password works. Redirect URI for dev: `http://localhost/api/auth/{google,github}/callback`. |
+| Domain and ports | `APP_DOMAIN`, `APP_PROTOCOL`, `APP_PORT`, `APP_SECURE_PORT`, `BACKEND_PORT`, `FRONTEND_PORT`, `TRAEFIK_DASHBOARD_PORT` | Keep `APP_DOMAIN=localhost` for dev. Change individual ports only on conflicts. |
+| Stripe (optional) | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_*_PRICE_ID` | Needed for billing UI. Use `sk_test_*` keys plus `stripe listen` for webhooks. |
+| SMTP (optional) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_SENDER_EMAIL`, `TWO_FA_ENABLED` | Required if you want 2FA codes or password resets by email. |
+
+Docker Compose does not interpolate variables inside other variables in `.env`, so `ALLOWED_HOSTS=${APP_DOMAIN}` keeps the literal `${APP_DOMAIN}` string. For dev it still works because `APP_DOMAIN=localhost` is also the default; in production set `ALLOWED_HOSTS` to an explicit value.
+
+## 3. First boot
 
 ```bash
 docker compose up --build -d
 ```
 
-This builds two images from source and pulls two from Docker Hub:
+This builds the orchestrator image and the app image from source, pulls Postgres, Redis, and Traefik, and brings up seven services. First build takes 3 to 6 minutes depending on your machine. Subsequent boots are near-instant thanks to the build cache.
 
-| Service | Image | Build Time |
-|---------|-------|------------|
-| `orchestrator` | Built from `orchestrator/Dockerfile` | ~60s |
-| `app` | Built from `app/Dockerfile` | ~30s |
-| `postgres` | `postgres:15-alpine` (pulled) | instant |
-| `traefik` | `traefik:v3.1` (pulled) | instant |
+### Services
 
-### 4. Build the Devserver Image
+| Service | Built from / image | Role |
+|---------|-------------------|------|
+| `traefik` | `traefik:v3.6` | Reverse proxy. Routes paths to the app or orchestrator and exposes `*.localhost` for user projects. |
+| `postgres` | `postgres:15-alpine` | Primary database. |
+| `redis` | `redis:7-alpine` | Pub/sub, ARQ task queue, distributed locks. |
+| `orchestrator` | `orchestrator/Dockerfile` | FastAPI backend. Mounts `/var/run/docker.sock` so it can spawn user containers. |
+| `worker` | Same image as `orchestrator`, `arq app.worker.WorkerSettings` | Runs agent tasks off the ARQ queue. |
+| `gateway` | Same image as `orchestrator`, `python -m app.gateway` | Persistent connections for Telegram, Slack, Discord, WhatsApp. Idle unless you enable channels. |
+| `app` | `app/Dockerfile` | Vite dev server with HMR. |
+| `devserver` | `orchestrator/Dockerfile.devserver`, `entrypoint: true` | Build-only image. Never starts; produces `tesslate-devserver:latest` that user project containers derive from. |
 
-The devserver image is used for **user project containers** (the containers that run user code). It's **not** part of `docker-compose.yml`, so you must build it separately:
-
-```bash
-docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
-```
-
-Without this image, starting any user project will fail with `pull access denied for tesslate-devserver`.
-
-### 5. Verify Everything is Running
+### Verify
 
 ```bash
 docker compose ps
 ```
 
-Expected output:
+Healthy output looks like this (timings will vary):
 
 ```
-NAME                    IMAGE                          STATUS                  PORTS
-tesslate-app            tesslate-studio-app            Up (healthy)            0.0.0.0:5173->5173/tcp
-tesslate-orchestrator   tesslate-studio-orchestrator   Up (healthy)            0.0.0.0:8000->8000/tcp
-tesslate-postgres-dev   postgres:15-alpine             Up (healthy)            0.0.0.0:5432->5432/tcp
-tesslate-traefik        traefik:v3.1                   Up                      0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp, 0.0.0.0:8080->8080/tcp
+NAME                    STATUS
+tesslate-app            Up 30s (healthy)
+tesslate-gateway        Up 28s
+tesslate-orchestrator   Up 40s (healthy)
+tesslate-postgres-dev   Up 45s (healthy)
+tesslate-redis          Up 45s (healthy)
+tesslate-traefik        Up 45s
+tesslate-worker         Up 40s
 ```
 
-All services should show `Up` (and `healthy` where applicable). The orchestrator may show `health: starting` for the first ~30 seconds while it runs database migrations.
+`orchestrator` can show `health: starting` for up to 30 seconds while Alembic migrations run. If it never turns `healthy`, see [Common Issues](#common-issues).
 
-### 6. Access the Application
-
-| Service | URL | Description |
-|---------|-----|-------------|
-| Frontend | http://localhost | Main application (via Traefik) |
-| Frontend (direct) | http://localhost:5173 | Vite dev server (bypasses Traefik) |
-| Backend API | http://localhost/api | REST API (via Traefik) |
-| Backend (direct) | http://localhost:8000 | FastAPI (bypasses Traefik) |
-| API Docs | http://localhost:8000/docs | Swagger UI |
-| Traefik Dashboard | http://localhost:8080 | Reverse proxy admin panel |
-| PostgreSQL | localhost:5432 | Connect with pgAdmin/DBeaver |
-
-The database is auto-initialized on first startup (tables created via Alembic migrations).
-
-### 7. Seed the Database
-
-After the first startup, seed marketplace data (bases, agents, skills, themes):
+Tail the orchestrator log until you see `Uvicorn running on http://0.0.0.0:8000`:
 
 ```bash
-# Copy seed scripts into the backend container
-docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_skills.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_mcp_servers.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_themes.py tesslate-orchestrator:/tmp/
-docker exec tesslate-orchestrator mkdir -p /tmp/themes
-docker cp scripts/themes/. tesslate-orchestrator:/tmp/themes/
-
-# Run seed scripts (order matters: bases → agents → skills → themes)
-# On Windows (Git Bash/MSYS2), prefix each with MSYS_NO_PATHCONV=1
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_skills.py
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_mcp_servers.py
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python -c "
-import asyncio, sys; sys.path.insert(0, '/app')
-from pathlib import Path
-exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
-asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
-"
+docker compose logs -f orchestrator
 ```
 
-This creates:
-- **4 marketplace bases**: Next.js 16, Vite+React+FastAPI, Vite+React+Go, Expo
-- **6 official agents**: Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent, Librarian
-- **6 open-source agents**: Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer
-- **11 marketplace skills**: Open-source skills from GitHub (Vercel React, Web Design, Frontend Design, Remotion, etc.)
-- **6 MCP servers**: GitHub, Slack, and other MCP server configurations
-- **7 themes**: default-dark, default-light, midnight, ocean, forest, rose, sunset
-- **1 system account**: Tesslate official account (official@tesslate.com)
+## 4. Seed the database
 
-All seed scripts are idempotent — safe to re-run without duplicating data.
-
-> **Note**: Seeds also run automatically on backend startup via `run_all_seeds()`. The Librarian agent is automatically added to all user libraries.
-
-## What Gets Created
-
-### Docker Images
-
-| Image | Source | Size |
-|-------|--------|------|
-| `tesslate-studio-orchestrator` | `orchestrator/Dockerfile` | ~870MB |
-| `tesslate-studio-app` | `app/Dockerfile` | ~760MB |
-
-### Docker Volumes
-
-| Volume | Purpose | Persists Between Restarts |
-|--------|---------|--------------------------|
-| `tesslate-postgres-dev-data` | PostgreSQL database | Yes |
-| `tesslate-base-cache` | Pre-installed marketplace bases | Yes |
-| `tesslate-projects-data` | All user project source code | Yes |
-
-### Docker Network
-
-| Network | Purpose |
-|---------|---------|
-| `tesslate-network` | Bridge network connecting all services |
-
-## Clean Slate Reset
-
-If you need to completely reset everything (database, images, volumes):
+On backend startup the orchestrator automatically runs `run_all_seeds()` from `/home/smirk/Tesslate-Studio/orchestrator/app/seeds/__init__.py`. That covers themes, bases, agents, skills, MCP servers, and deployment targets on a clean database. Confirm with:
 
 ```bash
-# 1. Stop and remove containers + volumes
+docker compose exec postgres psql -U tesslate_user -d tesslate_dev -c "SELECT COUNT(*) FROM marketplace_agents;"
+```
+
+If the count is zero (older database or partial seed), re-run them manually in this order. Each script is idempotent.
+
+```bash
+# Copy the scripts into the container once
+docker cp scripts/seed/. tesslate-orchestrator:/tmp/seed/
+
+# Run them in dependency order
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed/seed_themes.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed/seed_marketplace_bases.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed/seed_community_bases.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed/seed_marketplace_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed/seed_opensource_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed/seed_skills.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed/seed_mcp_servers.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed/seed_deployment_targets.py
+```
+
+On Windows (Git Bash or MSYS2), prefix each `docker exec` with `MSYS_NO_PATHCONV=1` so paths like `/tmp/seed/...` are not translated.
+
+What you get: themes (default-dark, default-light, midnight, ocean, forest, rose, sunset), official and open-source agents (Librarian, ReAct, Stream Builder, etc.), marketplace bases (Next.js, Vite+React+FastAPI, Vite+React+Go, Expo), open-source and Tesslate skills, MCP server catalog entries, and deployment target definitions (Vercel, Netlify, Cloudflare, Railway, etc.).
+
+## 5. Access URLs
+
+| Target | URL | Notes |
+|--------|-----|-------|
+| Frontend via Traefik | `http://localhost` | Use this for OAuth and cookie-correct testing. |
+| Frontend direct | `http://localhost:5173` | Vite dev server. Bypasses Traefik. |
+| Backend API via Traefik | `http://localhost/api` | Frontend calls here. |
+| Backend direct | `http://localhost:8000` | Useful for `curl`. |
+| OpenAPI docs | `http://localhost:8000/docs` | Swagger UI. |
+| Traefik dashboard | `http://localhost:8080` | Raw dashboard. |
+| Traefik via proxy | `http://localhost/traefik` | Basic-auth gated; defaults to `admin:admin`. Change `TRAEFIK_BASIC_AUTH` in `.env`. |
+| PostgreSQL | `localhost:5432` | Connect with pgAdmin or DBeaver. Creds from `.env`. |
+| Redis | `localhost:6379` | `redis-cli -h localhost` works. |
+| User project | `http://{container}.localhost` | Wildcard is auto-handled by Traefik. Some OS require `dnsmasq` or `/etc/hosts` entries; see [Common Issues](#common-issues). |
+
+## 6. Create your first user
+
+You have two options.
+
+### Option A: Sign up in the UI (recommended)
+
+1. Visit `http://localhost`.
+2. Click "Sign up", enter email and password.
+3. You are logged in. Billing starts on the FREE tier.
+
+### Option B: Create a superuser from the CLI
+
+```bash
+docker compose exec orchestrator python /app/create_superuser.py
+```
+
+The script prompts interactively for email and password. To promote an existing user to admin:
+
+```bash
+docker compose exec orchestrator python /app/make_admin.py you@example.com
+```
+
+Both scripts live at `/home/smirk/Tesslate-Studio/orchestrator/create_superuser.py` and `/home/smirk/Tesslate-Studio/orchestrator/make_admin.py`.
+
+## 7. Create your first project
+
+1. From the dashboard, click "New project".
+2. Pick a base (for example "Vite + React + FastAPI").
+3. Give it a name; a slug like `my-app-k3x8n2` is generated.
+4. Wait for the toast that says "Project ready". The orchestrator copied the template and wrote a `docker-compose.yml` into `/projects/{slug}/`.
+5. Click "Start". Containers for that project spin up on `tesslate-network` and register with Traefik.
+6. The preview panel loads `http://frontend.localhost` (or whatever the base's primary container is called). Watch it come up with `docker compose logs -f orchestrator` if it stalls.
+
+Open the chat panel and ask the agent to change something. For a complete reference of every agent tool, see `/home/smirk/Tesslate-Studio/packages/tesslate-agent/docs/DOCS.md`.
+
+## 8. Clean slate reset
+
+Exact sequence from the root [CLAUDE.md](/home/smirk/Tesslate-Studio/CLAUDE.md):
+
+```bash
+# 1. Stop and remove containers plus volumes
 docker compose down --volumes --remove-orphans
 
-# 2. Remove all project images
-docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep -i tesslate | awk '{print $2}' | sort -u | xargs docker rmi -f
+# 2. Remove all OpenSail images
+docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" \
+  | grep -i tesslate \
+  | awk '{print $2}' \
+  | sort -u \
+  | xargs -r docker rmi -f
 
-# 3. Rebuild and start fresh
+# 3. Rebuild and start
 docker compose up --build -d
 ```
 
-## Development Workflow
+Leave out step 2 if you only want to reset the database; step 1 already wipes `tesslate-postgres-dev-data`, `tesslate-redis-data`, `tesslate-projects-data`, `tesslate-base-cache`, and `tesslate-gateway-locks`.
 
-### Hot Reload (No Rebuild Needed)
-
-Both backend and frontend support hot reload via volume mounts:
-
-- **Backend**: Edit files in `orchestrator/app/` → Uvicorn auto-reloads
-- **Frontend**: Edit files in `app/src/` → Vite HMR updates the browser instantly
-
-### When to Rebuild
-
-Rebuild only when dependencies change:
+To reset only the database:
 
 ```bash
-# Rebuild a specific service
-docker compose up -d --build orchestrator  # backend dependency changes
-docker compose up -d --build app           # frontend dependency changes
-
-# Rebuild everything
-docker compose up -d --build
-```
-
-### Viewing Logs
-
-```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f orchestrator
-docker compose logs -f app
-docker compose logs -f postgres
-```
-
-### Shell Access
-
-```bash
-# Backend container (Python/bash)
-docker compose exec orchestrator bash
-
-# Frontend container (sh - alpine)
-docker compose exec app sh
-
-# Database (psql)
-docker compose exec postgres psql -U tesslate_user -d tesslate_dev
-```
-
-### Database Migrations
-
-```bash
-# Apply pending migrations
-docker compose exec orchestrator alembic upgrade head
-
-# Create a new migration
-docker compose exec orchestrator alembic revision --autogenerate -m "description"
-
-# Rollback one migration
-docker compose exec orchestrator alembic downgrade -1
-```
-
-### Reset Database Only
-
-```bash
-# Stop services
 docker compose down
-
-# Remove only the database volume
 docker volume rm tesslate-postgres-dev-data
-
-# Restart (fresh database, auto-migrated)
 docker compose up -d
 ```
 
-## Architecture
+## 9. Quick Start
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Host Machine (Docker Desktop)                           │
-│                                                         │
-│  ┌──────────────┐                                      │
-│  │   Traefik     │ :80 (HTTP), :443 (HTTPS), :8080     │
-│  │   (Reverse    │ Routes by path:                      │
-│  │    Proxy)     │   /api/* /ws/* → orchestrator:8000   │
-│  └──────┬───────┘   /*           → app:5173            │
-│         │                                               │
-│    ┌────┴─────┬──────────────┐                         │
-│    │          │              │                          │
-│    ↓          ↓              ↓                          │
-│  ┌─────┐  ┌────────────┐  ┌──────────────┐            │
-│  │ App │  │Orchestrator│  │User Projects │            │
-│  │:5173│  │   :8000    │  │(Dynamic)     │            │
-│  └─────┘  └─────┬──────┘  └──────────────┘            │
-│                  │                                      │
-│                  ↓                                      │
-│           ┌──────────┐                                 │
-│           │PostgreSQL│                                 │
-│           │  :5432   │                                 │
-│           └──────────┘                                 │
-└─────────────────────────────────────────────────────────┘
+For someone who has already read this guide once:
+
+```bash
+git clone https://github.com/TesslateAI/tesslate-studio.git
+cd tesslate-studio
+cp .env.example .env
+# edit SECRET_KEY and LITELLM_* in .env
+docker compose up --build -d
+docker compose ps            # wait for healthy
+open http://localhost         # macOS; xdg-open on Linux, start on Windows
 ```
 
-### Routing Rules (Traefik)
+## 10. Common Issues
 
-| Path | Destination | Priority |
-|------|-------------|----------|
-| `/api/*` | `orchestrator:8000` | 100 |
-| `/ws/*` | `orchestrator:8000` | 100 |
-| `/traefik` | Traefik dashboard | 200 |
-| `/*` (everything else) | `app:5173` | 10 |
-| `*.localhost` | User project containers | Auto-discovered |
+### Port already in use
 
-### Volume Mounts (Hot Reload)
+Symptom: `bind: address already in use` on `80`, `5432`, `6379`, `8000`, `5173`, or `8080`.
 
-**Orchestrator** mounts these for live code editing:
-- `./orchestrator/app` → `/app/app`
-- `./orchestrator/alembic` → `/app/alembic`
-- `./orchestrator/alembic.ini` → `/app/alembic.ini`
-- `./orchestrator/pyproject.toml` → `/app/pyproject.toml`
-- `/var/run/docker.sock` → Docker CLI access (for managing user containers)
+Fix: override the port in `.env`:
 
-**App** mounts these for Vite HMR:
-- `./app/src` → `/app/src`
-- `./app/public` → `/app/public`
-- `./app/index.html` → `/app/index.html`
-- Config files: `vite.config.ts`, `tsconfig.json`, `tailwind.config.ts`, etc.
-
-## Troubleshooting
-
-### Port Already in Use
-
-**Symptom**: `bind: address already in use`
-
-**Fix**: Change the port in `.env`:
 ```bash
 APP_PORT=8081        # default 80
 BACKEND_PORT=8001    # default 8000
 FRONTEND_PORT=5174   # default 5173
 POSTGRES_PORT=5433   # default 5432
+REDIS_PORT=6380      # default 6379
+TRAEFIK_DASHBOARD_PORT=8090  # default 8080
 ```
 
-### Orchestrator Fails Health Check
+Re-run `docker compose up -d`. Traefik dashboard moves with `APP_PORT`, so use `http://localhost:8081` if you changed it.
 
-**Symptom**: `tesslate-orchestrator` shows `unhealthy`
+### Orchestrator stuck unhealthy
 
-**Check logs**:
 ```bash
-docker compose logs orchestrator
+docker compose logs --tail 100 orchestrator
 ```
 
-**Common causes**:
-- Database not ready yet (postgres health check takes ~10s, orchestrator waits for it)
-- Missing required env vars (`SECRET_KEY`, `LITELLM_API_BASE`)
-- Port 8000 conflict
+Usual causes:
 
-### Hot Reload Not Working
+- Postgres not ready yet: wait 15 more seconds.
+- `SECRET_KEY` empty or still at the placeholder.
+- `LITELLM_API_BASE` unreachable: the boot continues but the log shows warnings.
+- Port 8000 busy on host: change `BACKEND_PORT`.
 
-**Backend** (Uvicorn):
-- Verify `WATCHFILES_FORCE_POLLING=true` is set (already in docker-compose.yml)
-- Check logs: `docker compose logs -f orchestrator` (look for "Reloading...")
+### `*.localhost` does not resolve
 
-**Frontend** (Vite):
-- Verify `CHOKIDAR_USEPOLLING=true` is set (already in docker-compose.yml)
-- Check browser console for HMR connection errors
-- Try hard refresh: Ctrl+Shift+R
+Modern Linux (systemd-resolved), macOS, and Windows with WSL 2 resolve `*.localhost` to `127.0.0.1` automatically. Some distros do not.
 
-### Database Connection Failed
+- Linux: add `address=/localhost/127.0.0.1` to dnsmasq, or add per-project entries to `/etc/hosts`.
+- Windows native: edit `C:\Windows\System32\drivers\etc\hosts`.
+- Browsers: Chrome and Firefox honor loopback for `*.localhost` without `/etc/hosts`.
+
+### Hot reload not firing
+
+The compose file already sets `WATCHFILES_FORCE_POLLING=true` (uvicorn), `CHOKIDAR_USEPOLLING=true`, and `WATCHPACK_POLLING=true` (Vite). If it still stops working:
+
+- Inotify limit hit on Linux: `sudo sysctl fs.inotify.max_user_watches=524288`.
+- WSL 2: make sure the repo lives inside the WSL filesystem (`~/code/...`), not `/mnt/c/...`. The `/mnt` mount does not emit file events reliably.
+
+### Database connection failed
 
 ```bash
-# Check postgres is running
 docker compose ps postgres
-
-# Test connection
 docker compose exec postgres pg_isready -U tesslate_user -d tesslate_dev
 ```
 
-### User Project Container Not Accessible
+If the container is unhealthy: `docker compose logs postgres`. Usually a leftover volume with a mismatched password; run the clean slate reset.
 
-User projects run as separate containers on `tesslate-network`:
-- URL pattern: `http://{container-name}.{project-slug}.localhost`
-- Check Traefik dashboard at http://localhost:8080 for registered routes
-- Verify the container has the `com.tesslate.routable=true` label
+### User project container not reachable
 
-### Node.js Dependencies Not Installing
+- Traefik dashboard at `http://localhost:8080` lists every router. Confirm your container is there.
+- Verify the container has `com.tesslate.routable=true` (orchestrator sets this automatically from the generated compose).
+- Check the container is on `tesslate-network`: `docker network inspect tesslate-network`.
 
-When a project starts for the first time, the container automatically installs Node.js dependencies (detected from lockfile: bun → pnpm → yarn → npm). This typically takes 5-15 seconds with Bun or 15-60 seconds with npm.
+### Docker socket permission denied (Linux)
 
-If dependencies aren't installing:
+The orchestrator mounts `/var/run/docker.sock`. If you run rootless Docker, the socket lives in `$XDG_RUNTIME_DIR/docker.sock` and the mount is wrong. Either run rootful Docker or edit the volume mount in `docker-compose.yml`.
 
-1. **Check container logs** for `[TESSLATE] Installing dependencies...`
-2. **Verify the project has a lockfile** (`bun.lock`, `package-lock.json`, etc.)
-3. **Manual install**: `docker exec -it <container-name> sh` then `npm install`
+### `LITELLM_DEFAULT_MODELS` is not set
 
-See [dependency-management.md](../infrastructure/docker/symlink-fix.md) for details.
-
-### LITELLM_DEFAULT_MODELS Warning
-
-If you see `The "LITELLM_DEFAULT_MODELS" variable is not set. Defaulting to a blank string.` — this is harmless. Set it in `.env` to suppress:
+Harmless if you have not configured LiteLLM. Set it in `.env` to silence:
 
 ```bash
 LITELLM_DEFAULT_MODELS=claude-sonnet-4.6,claude-opus-4.6
 ```
 
-## Optional Configuration
-
-### OAuth (Google/GitHub Login)
-
-Uncomment and configure in `.env`:
-```bash
-GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-secret
-GOOGLE_OAUTH_REDIRECT_URI=http://localhost/api/auth/google/callback
-
-GITHUB_CLIENT_ID=your-github-client-id
-GITHUB_CLIENT_SECRET=your-github-secret
-GITHUB_OAUTH_REDIRECT_URI=http://localhost/api/auth/github/callback
-```
-
-Without OAuth configured, only email/password login is available.
-
-### Stripe (Payments)
+### Tailing logs
 
 ```bash
-STRIPE_SECRET_KEY=sk_test_xxx
-STRIPE_PUBLISHABLE_KEY=pk_test_xxx
-STRIPE_WEBHOOK_SECRET=whsec_xxx
+docker compose logs -f                    # everything
+docker compose logs -f orchestrator worker  # just the Python services
+docker compose logs --tail 200 app         # Vite last 200 lines
 ```
 
-For local webhook testing, use the Stripe CLI:
+## 11. Platform notes
+
+### WSL 2 (Windows)
+
+- Clone into the WSL filesystem, for example `~/code/tesslate-studio`. Bind mounts from `/mnt/c/...` are slow and drop file-change events.
+- Run `docker compose` from inside WSL, not from PowerShell.
+- When piping scripts that pass container paths (`/tmp/...`, `/app/...`) through `docker exec`, prefix with `MSYS_NO_PATHCONV=1` on Git Bash.
+
+### macOS with Colima
+
+Colima replaces Docker Desktop on macOS. OpenSail works, with two tweaks:
+
 ```bash
-stripe listen --forward-to localhost:8000/api/webhooks/stripe
+colima start --cpu 4 --memory 8 --disk 60 --mount-type virtiofs
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
 ```
 
-### PostHog (Analytics)
+virtiofs is the only mount type that keeps file-change events fast enough for Vite HMR.
 
-```bash
-VITE_PUBLIC_POSTHOG_KEY=your_posthog_key
-VITE_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
-```
+### Linux rootless Docker
 
-## Next Steps
+The orchestrator bind-mounts the Docker socket so it can manage user project containers. Under rootless Docker the socket path is `$XDG_RUNTIME_DIR/docker.sock` and the orchestrator inside the container cannot see it at `/var/run/docker.sock`. Either run rootful Docker for development, or change the volume mount in `docker-compose.yml` to the rootless socket and set `DOCKER_HOST` inside the orchestrator container. Kubernetes mode sidesteps this entirely.
 
-- [Docker Infrastructure Details](../infrastructure/docker/README.md) — Deep dive into services, networks, volumes
-- [Dockerfile Documentation](../infrastructure/docker/dockerfiles.md) — How each image is built
-- [Minikube Setup](minikube-setup.md) — Test Kubernetes features locally
-- [Adding Routers](adding-routers.md) — Create new API endpoints
-- [Adding Agent Tools](adding-agent-tools.md) — Extend AI agent capabilities
-- [Troubleshooting](troubleshooting.md) — More common issues and solutions
+### Volume permissions
+
+On Linux, the Postgres volume is owned by UID 70 (the alpine postgres user). If you shell in as a different UID, you may see permission errors writing to `/var/lib/postgresql/data`. Do not chown the volume from the host; let the container manage it.
+
+## 12. Where to next
+
+- Desktop shell (Tauri) for a single-user experience: `/home/smirk/Tesslate-Studio/docs/desktop/CLAUDE.md`.
+- Minikube for a local Kubernetes mirror of production: `/home/smirk/Tesslate-Studio/docs/guides/minikube-setup.md`.
+- AWS EKS deployment: `/home/smirk/Tesslate-Studio/docs/guides/aws-deployment.md`.
+- Compose file deep-dive (prod, Cloudflare tunnel, test): `/home/smirk/Tesslate-Studio/docs/infrastructure/docker-compose/README.md`.
+- Traefik routing: `/home/smirk/Tesslate-Studio/docs/infrastructure/traefik/README.md`.
+- Dockerfile and image build details: `/home/smirk/Tesslate-Studio/docs/infrastructure/docker/README.md`.
+- Agent tool reference: `/home/smirk/Tesslate-Studio/packages/tesslate-agent/docs/DOCS.md`.
+- Tesslate Apps (publish and install): `/home/smirk/Tesslate-Studio/docs/apps/CLAUDE.md`.

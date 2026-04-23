@@ -10,27 +10,34 @@ OpenSail is an AI-powered web application builder that enables users to create, 
 
 ### Core Architecture Documents
 
-1. **[system-overview.md](./system-overview.md)** - Complete system architecture
+1. **[system-overview.md](./system-overview.md)**: complete system architecture
    - Technology stack breakdown
    - System component responsibilities
    - External service integrations
    - Security architecture (RBAC, Network Policies)
-   - Visual reference: High-level architecture diagram
+   - Visual reference: high-level architecture diagram
 
-2. **[data-flow.md](./data-flow.md)** - Detailed request/response flows
+2. **[data-flow.md](./data-flow.md)**: detailed request/response flows
    - User request lifecycle
-   - Agent chat flow (user → agent → LLM → tools → response)
+   - Agent chat flow (user, agent, LLM, tools, response)
    - File operations flow (read/write through orchestrator)
    - Container operations flow (start/stop/status)
    - Git operations flow
-   - Visual reference: Request flow and agent execution diagrams
+   - Visual reference: request flow and agent execution diagrams
 
-3. **[deployment-modes.md](./deployment-modes.md)** - Deployment configurations
+3. **[deployment-modes.md](./deployment-modes.md)**: deployment configurations
+   - Desktop mode (Tauri shell, SQLite, local task queue)
    - Docker mode (local development with Traefik)
    - Kubernetes mode (production with NGINX Ingress)
-   - S3 Sandwich pattern (ephemeral storage + persistence)
+   - Volume Hub + btrfs CSI storage lifecycle (create, cache, hibernate, restore)
    - Configuration differences and environment variables
-   - Visual reference: Deployment pipeline diagram
+   - Visual reference: deployment pipeline diagram
+
+4. **[storage-architecture.md](./storage-architecture.md)**: btrfs CSI, Volume Hub, CAS
+   - Subvolume lifecycle (template, clone, snapshot, sync)
+   - Content-addressable S3 layout
+   - Hub orchestration and peer transfer
+   - Visual reference: container lifecycle and shared platform diagrams
 
 ### Supporting Documents
 
@@ -165,6 +172,12 @@ OpenSail is an AI-powered web application builder that enables users to create, 
 - **Kubernetes Deep Dive**:
   - [K8s Architecture](../../k8s/ARCHITECTURE.md)
   - [K8s Quickstart](../../k8s/QUICKSTART.md)
+  - [Traefik (Docker-mode alternative)](../infrastructure/traefik/README.md)
+
+- **Companion surfaces**:
+  - [Scripts reference](../scripts/README.md)
+  - [Seed Tesslate Apps](../seeds/README.md)
+  - [Docker Compose files](../infrastructure/docker-compose/README.md)
 
 ## Quick Reference
 
@@ -172,8 +185,9 @@ OpenSail is an AI-powered web application builder that enables users to create, 
 
 | Mode | Use Case | Routing | Storage |
 |------|----------|---------|---------|
-| `docker` | Local development | Traefik (*.localhost) | Local filesystem |
-| `kubernetes` | Production | NGINX Ingress | S3 + PVC (S3 Sandwich) |
+| `desktop` | Tauri desktop app | Loopback only (127.0.0.1) | SQLite + host filesystem / Docker / remote K8s |
+| `docker` | Local development | Traefik (`*.localhost`) | Named volume `tesslate-projects-data` |
+| `kubernetes` | Production | NGINX Ingress | btrfs CSI + Volume Hub + S3/CAS |
 
 ### Key Environment Variables
 

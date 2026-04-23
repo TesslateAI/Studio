@@ -13,7 +13,10 @@ OpenSail is an AI-powered web application builder that lets users create, edit, 
 | [Architecture](architecture/README.md) | High-level system design, data flows, diagrams | Understanding the system |
 | [Orchestrator](orchestrator/README.md) | FastAPI backend, API endpoints, services | Backend development |
 | [App](app/README.md) | React frontend, components, state management | Frontend development |
-| [Infrastructure](infrastructure/README.md) | Kubernetes, Docker, Terraform | DevOps & deployment |
+| [Infrastructure](infrastructure/README.md) | Kubernetes, Docker Compose, Traefik, Terraform | DevOps & deployment |
+| [Scripts](scripts/README.md) | Operational scripts: deploy, seed, litellm, migrations, utilities | Running helper scripts |
+| [Seeds](seeds/README.md) | Template Tesslate Apps under `seeds/apps/` | Adding or editing a seed app |
+| [Root files](root-files.md) | Every file at the repo root, what it is, where it is owned | Finding compose, env, lockfiles, licenses |
 | [Guides](guides/README.md) | How-to guides, troubleshooting | Getting started |
 
 ## System Overview
@@ -195,7 +198,7 @@ tesslate-studio/
 
 ### For New Developers
 
-1. **Set up Docker from scratch**: Follow [Docker Setup Guide](guides/docker-setup.md) — fastest way to get running
+1. **Set up Docker from scratch**: Follow [Docker Setup Guide](guides/docker-setup.md), the fastest way to get running
 2. **Understand the architecture**: Read [Architecture Overview](architecture/README.md)
 3. **Explore the codebase**: Use CLAUDE.md files for context
 4. **Native development** (optional): See [Local Development Guide](guides/local-development.md) for running without Docker
@@ -237,9 +240,14 @@ Visual architecture diagrams are in [architecture/diagrams/](architecture/diagra
 | [request-flow.mmd](architecture/diagrams/request-flow.mmd) | API request lifecycle |
 | [agent-execution.mmd](architecture/diagrams/agent-execution.mmd) | AI agent execution flow |
 | [container-lifecycle.mmd](architecture/diagrams/container-lifecycle.mmd) | Project container management |
-| [s3-sandwich.mmd](architecture/diagrams/s3-sandwich.mmd) | Hibernation pattern |
 | [auth-flow.mmd](architecture/diagrams/auth-flow.mmd) | Authentication flows |
 | [deployment-pipeline.mmd](architecture/diagrams/deployment-pipeline.mmd) | Build and deploy process |
+| [shared-platform.mmd](architecture/diagrams/shared-platform.mmd) | Shared AWS platform stack |
+
+Storage architecture (btrfs CSI + Volume Hub + CAS) is documented in
+[architecture/storage-architecture.md](architecture/storage-architecture.md). Data flows for chat and
+project lifecycle are in [architecture/data-flow.md](architecture/data-flow.md). Deployment-mode
+matrices (desktop, docker, kubernetes) are in [architecture/deployment-modes.md](architecture/deployment-modes.md).
 
 ## Contributing
 
