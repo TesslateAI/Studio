@@ -363,3 +363,97 @@ To rotate `INTERNAL_API_SECRET` / `ORCHESTRATOR_INTERNAL_SECRET`:
 4. Deploy the btrfs-csi DaemonSet and Volume Hub.
 5. Verify Hub calls succeed: `kubectl logs -n kube-system deployment/tesslate-volume-hub`.
 6. Reset `INTERNAL_SECRET_GRACE_SECONDS=0`.
+
+---
+
+## Orchestrator Config Settings (K8s mode)
+
+Full reference for K8s-related settings in `orchestrator/app/config.py`. Complements the smaller Volume Hub table above.
+
+```python
+# User container image
+k8s_devserver_image: str           # Image for user containers (registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest)
+k8s_image_pull_secret: str         # Registry secret (tesslate-container-registry-nyc3)
+
+# Storage & snapshots
+k8s_storage_class: str             # StorageClass for PVCs (tesslate-block-storage)
+k8s_snapshot_class: str            # VolumeSnapshotClass (tesslate-ebs-snapshots)
+k8s_snapshot_retention_days: int   # Days to keep soft-deleted snapshots (30)
+k8s_max_snapshots_per_project: int # Max snapshots in timeline (5)
+k8s_snapshot_ready_timeout_seconds: int  # Snapshot readiness timeout (300)
+k8s_hibernation_idle_minutes: int  # Auto-hibernate after X idle minutes (10)
+k8s_pvc_size: str                  # Default PVC size per project (5Gi)
+k8s_enable_pod_affinity: bool      # Keep multi-container projects on same node
+
+# Volume Hub + btrfs CSI
+volume_hub_address: str            # Hub gRPC endpoint (tesslate-volume-hub.kube-system.svc:9750)
+template_build_storage_class: str  # btrfs CSI storage class for templates (tesslate-btrfs)
+template_build_nodeops_address: str # NodeOps gRPC endpoint for template builds
+fileops_enabled: bool              # Feature flag for v2 file operations via CSI (True)
+fileops_timeout: int               # gRPC timeout for file operations (30s)
+
+# Compute pool
+compute_max_concurrent_pods: int   # Max concurrent compute pods (5)
+compute_pod_timeout: int           # Compute pod readiness timeout (600s)
+compute_reaper_interval_seconds: int  # Orphaned-pod reaper interval (60s)
+compute_reaper_max_age_seconds: int   # Max pod age before reaping (900s)
+
+# Task queue / workers
+redis_url: str                     # Redis connection string (empty = in-memory fallback)
+worker_max_jobs: int               # Concurrent agent tasks per worker pod (10)
+worker_job_timeout: int            # Task timeout in seconds (600)
+
+# Web search
+web_search_provider: str           # tavily, brave, or duckduckgo (default: tavily)
+tavily_api_key: str                # Tavily API key
+brave_search_api_key: str          # Brave Search API key
+
+# Messaging channels
+agent_discord_webhook_url: str     # Discord webhook URL for agent send_message tool
+channel_encryption_key: str        # Fernet key for channel credential encryption
+
+# MCP (Model Context Protocol)
+mcp_tool_cache_ttl: int            # MCP tool schema cache TTL in seconds (300)
+mcp_tool_timeout: int              # MCP tool call timeout in seconds (30)
+mcp_max_servers_per_user: int      # Max installed MCP servers per user (20)
+
+# Gateway (Communication Protocol v2)
+gateway_enabled: bool              # Enable gateway process (False)
+gateway_shard: str                 # Shard identifier for multi-instance gateway
+gateway_tick_interval: int         # Scheduler tick interval in seconds
+gateway_session_idle_minutes: int  # Idle timeout for gateway sessions
+gateway_voice_transcription: bool  # Enable voice message transcription
+
+# Agent
+compaction_summary_model: str      # Cheap model for context summarization
+default_thinking_effort: str       # Extended thinking effort for supported models
+```
+
+## Minikube vs Production Config
+
+| Setting | Minikube | Production (AWS EKS) |
+|---------|----------|----------------------|
+| `K8S_DEVSERVER_IMAGE` | `tesslate-devserver:latest` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
+| `K8S_IMAGE_PULL_SECRET` | `` (empty) | `ecr-credentials` |
+| `K8S_WILDCARD_TLS_SECRET` | `` (empty, use HTTP) | `tesslate-wildcard-tls` (use HTTPS) |
+| `K8S_SNAPSHOT_CLASS` | `tesslate-btrfs-snapshots` (via btrfs CSI) | `tesslate-ebs-snapshots` |
+| `K8S_STORAGE_CLASS` | `tesslate-btrfs` (btrfs CSI) | `tesslate-block-storage` (EBS gp3) |
+| `TEMPLATE_BUILD_STORAGE_CLASS` | `tesslate-btrfs` | `tesslate-btrfs` |
+| `VOLUME_HUB_ADDRESS` | `tesslate-volume-hub.kube-system.svc:9750` | `tesslate-volume-hub.kube-system.svc:9750` |
+
+## AWS Overlay Conventions
+
+### envFrom Auto-Sync
+
+The AWS backend overlay (`k8s/overlays/aws-base/backend-patch.yaml`) uses a two-part strategy:
+
+1. **`envFrom`** — auto-mounts ALL keys from 3 terraform-managed secrets (`tesslate-app-secrets`, `postgres-secret`, `s3-credentials`). Adding a new key in terraform's `kubernetes.tf` automatically makes it available in the pod — **no manual kustomize sync needed**.
+2. **`env` with `$patch: replace`** — replaces the base manifest's env array with ONLY static values (not in any secret) and 1 alias mapping (`K8S_INGRESS_DOMAIN` → `APP_DOMAIN`). The `$patch: replace` prevents stale base entries from merging in.
+
+**When adding new config:**
+- **Secret-based values** (domain, API keys, OAuth, etc.): add to terraform `kubernetes.tf` secrets → automatically picked up via `envFrom`
+- **Static values** (feature flags, class names, etc.): add to `backend-patch.yaml` env array
+
+### Frontend Config: `API_URL` must NOT include `/api`
+
+The frontend `api-url` in the `frontend-config` ConfigMap (managed by terraform `kubernetes.tf`) must be the **base domain only** (e.g., `https://opensail.tesslate.com`), NOT `https://opensail.tesslate.com/api`. All API calls in `app/src/lib/api.ts` already include the `/api` prefix in their paths, so including `/api` in the base URL causes double `/api/api/` paths.

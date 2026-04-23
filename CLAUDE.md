@@ -17,7 +17,7 @@ Always read through the docs/ to find items it is a knowledgegraph
 The `research/` directory is gitignored and contains cloned repos for reference/research:
 - `research/hermes-agent/` — [NousResearch/hermes-agent](https://github.com/nousresearch/hermes-agent) — Hermes agent framework
 
-Use subagents generously if you are doing bulk task items that have a small / atomic scope. 
+Use subagents generously if you are doing bulk task items that have a small / atomic scope.
 
 don't do conditional logic for k8s and docker implementation differences. try to keep it as similar as possible unless if a platform requires differeces. Prioritize the k8s (keep that logic more intact than docker. )
 
@@ -210,218 +210,24 @@ Gateway runner → services/gateway/runner.py
   └─ Delivery stream (Redis XREADGROUP for response routing)
 ```
 
-## Directory Structure
+## Directory Structure (top-level)
 
 ```
 tesslate-studio/
-├── desktop/                  # Tauri v2 desktop shell
-│   ├── src-tauri/            # Rust: sidecar, tray, tokens, deep-link, updater
-│   ├── sidecar/              # PyInstaller build scripts + entrypoint
-│   └── scripts/              # build-all.sh, dev.sh
-│
-├── packages/                 # Versioned Python/TS submodules
-│   ├── tesslate-agent/       # Primary agent runner (replaces inline stream_agent.py)
-│   ├── tesslate-app-sdk/     # Python SDK for apps built on the platform
-│   └── tesslate-embed-sdk/   # TypeScript SDK for embedding Studio externally
-│
-├── orchestrator/              # FastAPI backend
-│   └── app/
-│       ├── main.py           # App entry, middleware setup
-│       ├── models.py         # SQLAlchemy models (User, Project, Container, Chat, etc.)
-│       ├── schemas.py        # Pydantic request/response schemas
-│       ├── config.py         # Settings (env vars, deployment mode)
-│       ├── models_team.py    # Team, TeamMembership, ProjectMembership, TeamInvitation, AuditLog
-│       ├── schemas_team.py   # Team/membership Pydantic schemas
-│       ├── permissions.py    # RBAC permission system, dual-scope role resolution
-│       ├── routers/          # API endpoints
-│       │   ├── projects.py   # Project CRUD, start/stop containers, setup-config
-│       │   ├── chat.py       # Agent chat, streaming responses
-│       │   ├── billing.py    # Stripe subscriptions
-│       │   ├── deployments.py # Vercel/Netlify/Cloudflare
-│       │   ├── git.py        # Git operations
-│       │   ├── external_agent.py # External agent API (API keys, SSE, webhooks)
-│       │   ├── channels.py   # Messaging channel configuration (Telegram, Slack, Discord, WhatsApp)
-│       │   ├── mcp.py        # User MCP server management
-│       │   ├── mcp_server.py # MCP server marketplace catalog
-│       │   ├── teams.py      # Team CRUD, members, invitations, project access, audit log
-│       │   ├── marketplace_apps.py  # Tesslate Apps marketplace listing
-│       │   ├── marketplace_local.py # Desktop dual-source marketplace (local + cloud)
-│       │   ├── app_versions.py      # AppVersion CRUD + publish
-│       │   ├── app_submissions.py   # Approval pipeline admin
-│       │   ├── app_installs.py      # App install flow
-│       │   ├── app_runtime.py       # App instance runtime control
-│       │   ├── app_billing.py       # App billing configuration
-│       │   ├── app_yanks.py         # Yank/unpublish workflow
-│       │   ├── app_bundles.py       # App bundle management
-│       │   ├── desktop/             # Desktop-only endpoints
-│       │   │   ├── auth.py          # Pairing + deep-link callback
-│       │   │   ├── projects.py      # Import folder, runtime probe
-│       │   │   ├── tray.py          # Tray state feed
-│       │   │   ├── tickets.py       # Agent task tickets
-│       │   │   ├── sessions.py      # Agent sessions feed
-│       │   │   ├── handoff.py       # Local ↔ cloud agent handoff
-│       │   │   └── directories.py   # Connected directories CRUD
-│       │   └── ...
-│       ├── services/
-│       │   ├── docker_compose_orchestrator.py  # Docker container mgmt
-│       │   ├── orchestration/
-│       │   │   ├── kubernetes_orchestrator.py  # K8s container mgmt
-│       │   │   ├── local.py                    # Local subprocess orchestrator (desktop)
-│       │   │   ├── k8s_remote_client.py        # K8s-remote via cloud API (desktop auth)
-│       │   │   ├── factory.py                  # Per-project runtime dispatch
-│       │   │   └── kubernetes/
-│       │   │       ├── client.py               # K8s API client wrapper
-│       │   │       └── helpers.py              # Deployment manifests
-│       │   ├── task_queue/                 # TaskQueue protocol + backends
-│       │   │   ├── base.py                 # Abstract protocol
-│       │   │   ├── arq_queue.py            # Cloud: ARQ + Redis
-│       │   │   └── local_queue.py          # Desktop: asyncio + apscheduler
-│       │   ├── pubsub/                     # Pub/sub backends
-│       │   │   ├── base.py                 # Abstract interface
-│       │   │   ├── redis_pubsub.py         # Cloud: Redis Streams
-│       │   │   └── local_pubsub.py         # Desktop: in-process asyncio
-│       │   ├── apps/                       # Tesslate Apps services
-│       │   │   ├── installer.py            # App install saga
-│       │   │   ├── publisher.py            # Publish AppVersion + CAS bundle
-│       │   │   ├── submissions.py          # Staged approval pipeline
-│       │   │   ├── yanks.py               # Yank/unpublish workflow
-│       │   │   ├── bundles.py             # App bundle management
-│       │   │   ├── runtime.py             # App instance runtime
-│       │   │   ├── stage1_scanner.py      # Automated security/manifest scan
-│       │   │   ├── stage2_sandbox.py      # Sandbox execution testing
-│       │   │   └── schedule_triggers.py   # Cron + webhook trigger dispatch
-│       │   ├── cloud_client.py             # httpx wrapper for cloud APIs (desktop)
-│       │   ├── sync_client.py              # Local ↔ cloud project sync
-│       │   ├── runtime_probe.py            # Detect Docker/K8s availability (desktop)
-│       │   ├── agent_handlers.py           # Agent task handler bodies (ARQ + local)
-│       │   ├── permission_store.py         # .tesslate/permissions.json read/write
-│       │   ├── snapshot_manager.py         # K8s VolumeSnapshot for project persistence
-│       │   ├── volume_manager.py          # Volume Hub thin client (create, delete, cache, sync)
-│       │   ├── hub_client.py              # Hub gRPC/JSON client (VolumeHub RPC calls)
-│       │   ├── litellm_service.py          # AI model routing
-│       │   ├── distributed_lock.py         # Redis-based distributed locks
-│       │   ├── agent_context.py            # Agent execution context builder
-│       │   ├── agent_task.py               # Agent task payload serialization
-│       │   ├── session_router.py           # Cross-pod shell session routing
-│       │   ├── skill_discovery.py          # Skill discovery and loading for agents
-│       │   ├── channels/                   # Messaging channel integrations
-│       │   │   ├── base.py                 # Abstract channel interface
-│       │   │   ├── telegram.py             # Telegram bot
-│       │   │   ├── slack.py                # Slack
-│       │   │   ├── discord_bot.py          # Discord webhook
-│       │   │   ├── whatsapp.py             # WhatsApp
-│       │   │   ├── formatting.py           # Cross-platform message formatting
-│       │   │   └── registry.py             # Channel provider registry
-│       │   ├── gateway/                     # Communication Protocol v2
-│       │   │   ├── runner.py               # Gateway process (persistent platform connections)
-│       │   │   ├── scheduler.py            # Cron scheduler with timezone support
-│       │   │   └── schedule_parser.py      # Natural language → cron expression
-│       │   ├── mcp/                        # Model Context Protocol
-│       │   │   ├── client.py               # MCP client for server communication
-│       │   │   ├── bridge.py               # Bridge MCP tools into agent tool registry
-│       │   │   └── manager.py              # MCP server lifecycle management
-│       │   └── ...
-│       ├── seeds/            # Database seed data
-│       │   ├── skills.py     # Marketplace skills (15+ skills)
-│       │   └── marketplace_agents.py # Official + community agents
-│       ├── worker.py         # ARQ worker (cloud); handlers in agent_handlers.py
-│       ├── auth_external.py  # API key authentication
-│       └── agent/            # Legacy inline agent (cloud path; desktop uses packages/tesslate-agent)
-│           ├── base.py       # Abstract agent interface
-│           ├── stream_agent.py # Streaming agent implementation
-│           ├── factory.py    # Agent instantiation
-│           └── tools/        # Agent tools
-│               ├── web_ops/          # Web operations
-│               │   ├── search.py     # Multi-provider web search (Tavily/Brave/DuckDuckGo)
-│               │   ├── fetch.py      # HTTP requests for web content
-│               │   ├── send_message.py # Send messages via channels (Discord, etc.)
-│               │   └── providers.py  # Search provider implementations
-│               ├── skill_ops/        # Skill operations
-│               │   └── load_skill.py # Load skill instructions at runtime
-│               └── schedule_ops/     # Schedule operations
-│                   └── manage_schedule.py # Agent tool for cron schedule management
-│
-├── app/                      # React frontend
-│   └── src/
-│       ├── pages/            # Dashboard, Project, Marketplace, Library, etc.
-│       │   └── settings/
-│       │       ├── TeamSettingsPage   # Team general settings, leave, delete
-│       │       ├── TeamMembersPage    # Member list, invite, role management
-│       │       ├── TeamBillingPage    # Team billing (admin-scoped)
-│       │       └── AuditLogPage       # Filterable audit trail
-│       ├── components/
-│       │   ├── chat/         # ChatContainer, AgentMessage
-│       │   ├── panels/       # Architecture, Git, Assets, Kanban
-│       │   ├── billing/      # Subscription UI
-│       │   ├── marketplace/  # AgentCard, skill/MCP browsing
-│       │   └── modals/       # CreateProject, Deployment, etc.
-│       ├── contexts/
-│       │   └── TeamContext.tsx    # Team switching, role permissions (can()), refreshTeams
-│       ├── layouts/
-│       │   └── SettingsLayout.tsx # Settings with team sub-tabs
-│       └── lib/              # API client, utilities
-│
-├── k8s/                      # Kubernetes manifests (Kustomize)
-│   ├── base/                 # Shared base manifests
-│   │   ├── kustomization.yaml
-│   │   ├── namespace/        # tesslate namespace
-│   │   ├── core/             # Backend, frontend, cleanup cronjob
-│   │   ├── database/         # PostgreSQL deployment
-│   │   ├── ingress/          # NGINX Ingress rules
-│   │   ├── security/         # RBAC, network policies
-│   │   ├── redis/            # Redis deployment, service, PVC
-│   │   └── minio/            # S3-compatible storage (local dev)
-│   ├── overlays/
-│   │   ├── minikube/         # Local dev patches
-│   │   │   ├── kustomization.yaml
-│   │   │   ├── backend-patch.yaml   # K8S_DEVSERVER_IMAGE=local
-│   │   │   ├── frontend-patch.yaml
-│   │   │   └── secrets/      # Generated from .env.minikube
-│   │   ├── aws-base/         # Shared AWS base patches
-│   │   ├── aws-beta/         # AWS beta environment
-│   │   ├── aws-production/   # AWS production environment
-│   │   ├── digitalocean/     # DigitalOcean patches
-│   │   └── gke/              # Google Kubernetes Engine patches
-│   ├── terraform/
-│   │   ├── aws/              # AWS environment stack (EKS, ECR locals, S3, IAM, Helm, DNS)
-│   │   └── shared/           # Shared platform stack (ECR repos, platform EKS, VPN, cert-manager, NGINX Ingress, Cloudflare DNS)
-│   ├── scripts/              # Helper scripts
-│   ├── .env.example          # Template for credentials
-│   ├── .env.minikube         # Local credentials (gitignored)
-│   ├── QUICKSTART.md         # Getting started guide
-│   └── ARCHITECTURE.md       # Detailed K8s architecture
-│
-├── services/                     # Standalone services (non-Python)
-│   └── btrfs-csi/               # btrfs CSI driver + Volume Hub (Go)
-│       ├── cmd/driver/          # Driver entrypoint
-│       ├── pkg/
-│       │   ├── btrfs/           # btrfs subvolume operations
-│       │   ├── driver/          # CSI identity/node/controller
-│       │   ├── cas/             # Content-addressable S3 store
-│       │   ├── fileops/         # File operations gRPC service
-│       │   ├── nodeops/         # Node operations gRPC service
-│       │   ├── volumehub/       # Volume Hub orchestrator (hub.go, registry, discovery)
-│       │   ├── sync/            # S3 sync daemon
-│       │   ├── gc/              # Garbage collector
-│       │   ├── objstore/        # Object storage (rclone)
-│       │   ├── template/        # Template manager
-│       │   └── metrics/         # Prometheus metrics
-│       ├── deploy/              # K8s manifests (kustomize)
-│       ├── overlays/            # Environment overlays (minikube, etc.)
-│       └── integration/         # Integration tests
-│
-├── scripts/
-│   └── seed/                 # Database seed scripts
-│       ├── seed_marketplace_bases.py
-│       ├── seed_marketplace_agents.py
-│       ├── seed_opensource_agents.py
-│       ├── seed_themes.py
-│       ├── seed_community_bases.py
-│       ├── seed_skills.py          # Skills (open-source + Tesslate)
-│       └── seed_mcp_servers.py     # MCP servers (GitHub, Brave, Slack, etc.)
-│
-└── docker-compose.yml        # Local dev setup (Docker mode)
+├── desktop/         # Tauri v2 shell — src-tauri (Rust), sidecar (PyInstaller), scripts
+├── packages/        # Submodules: tesslate-agent, tesslate-app-sdk, tesslate-embed-sdk
+├── orchestrator/    # FastAPI backend — routers/, services/, agent/, seeds/, worker.py
+├── app/             # React frontend — pages/, components/, contexts/, layouts/, lib/
+├── k8s/             # Kubernetes (Kustomize) — base/, overlays/, terraform/, scripts/
+├── services/        # Standalone services — btrfs-csi/ (Go), tsinit/
+├── sdk/             # Top-level @tesslate/sdk TypeScript client
+├── seeds/           # Seed Tesslate Apps
+├── scripts/         # Deploy, seed, migration scripts
+├── docs/            # Knowledge graph (see Subfolder Index below)
+└── docker-compose.yml
 ```
+
+For deep nesting (per-subdir file lists) load the corresponding `CLAUDE.md` from the **Subfolder CLAUDE.md Index** below.
 
 ## Key Database Models (models.py)
 
@@ -464,6 +270,8 @@ tesslate-studio/
 - **AppBundle**: Curated collection of AppVersions (e.g., "Tesslate Starter Pack")
 - **AppBundleItem**: Ordered membership of AppVersion in a bundle
 
+Full model reference → `docs/orchestrator/models/CLAUDE.md`. Apps feature detail → `docs/apps/CLAUDE.md`.
+
 ## Agent Tools (orchestrator/app/agent/tools/)
 
 | Tool | Purpose |
@@ -482,248 +290,98 @@ tesslate-studio/
 | `kanban.py` | Kanban board management (create/move/update tasks by TSK-NNNN ref, columns, comments) |
 | `schedule_ops/manage_schedule.py` | Manage cron schedules (create/update/delete/pause/resume) |
 
-## Documentation Knowledge Graph
+Tool registry internals, scope enforcement, edit-mode gating, secret scrubbing → `docs/orchestrator/agent/CLAUDE.md`.
 
-The `docs/` folder contains comprehensive documentation organized as a **knowledge graph** with `CLAUDE.md` files providing context for AI agents.
+## Subfolder CLAUDE.md Index
 
-### Navigating the Documentation
+Load the most specific CLAUDE.md first, then follow its "Related Contexts" links outward. **Primary doc entry point: [docs/CLAUDE.md](docs/CLAUDE.md)** — full navigation guide, "I need to…" table, env var reference.
 
-**Quick Start:**
-1. Start at `docs/README.md` for system overview
-2. Navigate to the relevant section based on your task
-3. Load the `CLAUDE.md` file in that section for AI agent context
-4. Follow cross-references to related contexts
+### Code directories (in-tree CLAUDE.md)
 
-**Documentation Structure:**
-```
-docs/
-├── README.md                    # Main entry point, system overview
-├── CLAUDE.md                    # Root agent context
-├── architecture/                # System architecture & diagrams
-│   ├── diagrams/*.mmd          # Mermaid diagrams (7 files)
-│   └── CLAUDE.md               # Architecture context
-├── orchestrator/                # Backend documentation
-│   ├── routers/                # API endpoints
-│   ├── services/               # Business logic
-│   ├── agent/                  # AI agent system
-│   │   └── tools/             # Agent tools
-│   ├── models/                 # Database models
-│   └── orchestration/          # Container management
-├── app/                         # Frontend documentation
-│   ├── pages/                  # Route components
-│   ├── components/             # UI components
-│   ├── api/                    # API client
-│   ├── state/                  # State management
-│   ├── contexts/               # React contexts (Auth, Command, Marketplace)
-│   ├── hooks/                  # Custom hooks (useCancellable, useAuth, useTask)
-│   ├── keyboard-shortcuts/     # Command palette & shortcuts system
-│   └── layouts/                # Page layouts (Settings, Marketplace)
-├── infrastructure/              # DevOps documentation
-│   ├── kubernetes/             # K8s manifests
-│   ├── docker/                 # Docker setup (dependency management, etc.)
-│   └── terraform/              # AWS IaC
-└── guides/                      # How-to guides
-    └── theme-system.md         # Theme system complete guide
-```
+| Path | What it covers |
+|------|----------------|
+| [desktop/CLAUDE.md](desktop/CLAUDE.md) | Tauri v2 shell root |
+| [desktop/src-tauri/CLAUDE.md](desktop/src-tauri/CLAUDE.md) | Rust: sidecar supervisor, tray, Stronghold tokens, deep-link, updater |
+| [desktop/sidecar/CLAUDE.md](desktop/sidecar/CLAUDE.md) | PyInstaller build for the FastAPI sidecar |
+| [desktop/scripts/CLAUDE.md](desktop/scripts/CLAUDE.md) | build-all.sh, dev.sh |
+| [orchestrator/app/routers/CLAUDE.md](orchestrator/app/routers/CLAUDE.md) | Router code-site conventions (complements docs) |
+| [orchestrator/tests/routers/CLAUDE.md](orchestrator/tests/routers/CLAUDE.md) | Router test conventions |
+| [orchestrator/tests/orchestration/CLAUDE.md](orchestrator/tests/orchestration/CLAUDE.md) | Docker/K8s orchestrator test conventions |
+| [orchestrator/tests/agent_bridge/CLAUDE.md](orchestrator/tests/agent_bridge/CLAUDE.md) | Agent bridge test conventions |
 
-### Using CLAUDE.md Files
+### Documentation knowledge graph (`docs/`)
 
-Each `CLAUDE.md` file contains:
-- **Purpose**: What this system does
-- **Key Files**: Source files with absolute paths
-- **Related Contexts**: Links to other CLAUDE.md files
-- **Quick Reference**: Common patterns and gotchas
-- **When to Load**: Conditions for loading this context
+**Architecture & backend**
 
-**Best Practices:**
-1. Load the most specific CLAUDE.md first (e.g., `docs/orchestrator/agent/tools/CLAUDE.md` for agent tools)
-2. Follow "Related Contexts" links when you need broader understanding
-3. Reference diagram files in `docs/architecture/diagrams/` for visual architecture
-4. Use the README.md files for comprehensive documentation, CLAUDE.md for quick context
+| Path | What it covers |
+|------|----------------|
+| [docs/architecture/CLAUDE.md](docs/architecture/CLAUDE.md) | System architecture, data-flow patterns, deployment-mode internals, principles (non-blocking, scalable, isolation) |
+| [docs/orchestrator/CLAUDE.md](docs/orchestrator/CLAUDE.md) | FastAPI backend overview, middleware, env vars, K8s-name derivation rule |
+| [docs/orchestrator/routers/CLAUDE.md](docs/orchestrator/routers/CLAUDE.md) | Every router, auth matrix, common patterns |
+| [docs/orchestrator/services/CLAUDE.md](docs/orchestrator/services/CLAUDE.md) | Business logic (orchestration, pubsub, channels, MCP, apps) |
+| [docs/orchestrator/agent/CLAUDE.md](docs/orchestrator/agent/CLAUDE.md) | Agent tool registry, scope/edit-mode gating, approval, secret scrubbing |
+| [docs/orchestrator/models/CLAUDE.md](docs/orchestrator/models/CLAUDE.md) | All SQLAlchemy models (60+), query patterns, field reference |
+| [docs/orchestrator/orchestration/CLAUDE.md](docs/orchestrator/orchestration/CLAUDE.md) | Container lifecycle (Docker/K8s/local) |
 
-### Key Entry Points by Task
+**Frontend**
 
-| Task | Start Here |
-|------|------------|
-| Desktop client (Tauri shell) | `docs/desktop/CLAUDE.md` |
-| Desktop dev environment setup | `docs/desktop/development.md` |
-| Desktop runtimes (local/docker/k8s) | `docs/desktop/runtimes.md` |
-| Desktop notification dispatch | `docs/desktop/notifications.md` |
-| Desktop agent permission system | `docs/desktop/permissions.md` |
-| Desktop TUI (headless agent) | `docs/desktop/tui.md` |
-| Local ↔ cloud project sync | `docs/desktop/sync.md` |
-| Tesslate Apps feature | `docs/apps/CLAUDE.md` |
-| packages/ submodules (agent, app-sdk, embed-sdk) | `docs/packages/CLAUDE.md` |
-| Task queue (ARQ vs local) | `docs/orchestrator/services/task-queue.md` |
-| Cloud client + sync service | `docs/orchestrator/services/cloud-client.md` |
-| Docker setup from scratch | `docs/guides/docker-setup.md` |
-| Database seeding | `docker-dev` skill |
-| Database migrations | `docs/guides/database-migrations.md` |
-| Understanding system architecture | `docs/architecture/CLAUDE.md` |
-| Backend API development | `docs/orchestrator/routers/CLAUDE.md` |
-| AI agent development | `docs/orchestrator/agent/CLAUDE.md` |
-| Frontend development | `docs/app/CLAUDE.md` |
-| Container orchestration | `docs/orchestrator/orchestration/CLAUDE.md` |
-| Kubernetes deployment | `docs/infrastructure/kubernetes/CLAUDE.md` |
-| Database models | `docs/orchestrator/models/CLAUDE.md` |
-| Payment integration | `docs/orchestrator/services/stripe.md` |
-| Stripe payments rebuild (tiers, UX, security) | `docs/guides/stripe-payments-rebuild.md` |
-| Enterprise observability (OTel, structured logging) | `docs/guides/enterprise-observability.md` |
-| Theme system | `docs/guides/theme-system.md` |
-| Keyboard shortcuts & commands | `docs/app/keyboard-shortcuts/CLAUDE.md` |
-| Settings pages | `docs/app/pages/settings.md` |
-| Marketplace pages | `docs/app/pages/marketplace-browse.md` |
-| Page layouts | `docs/app/layouts/CLAUDE.md` |
-| Real-time agent architecture | `docs/guides/real-time-agent-architecture.md` |
-| External agent API | `docs/orchestrator/routers/external-agent.md` |
-| Redis/pub-sub infrastructure | `docs/orchestrator/services/pubsub.md` |
-| Worker system | `docs/orchestrator/services/worker.md` |
-| Skills system | `docs/orchestrator/agent/CLAUDE.md` |
-| Messaging channels | `docs/orchestrator/routers/CLAUDE.md` → channels.py |
-| MCP server integration | `docs/orchestrator/routers/CLAUDE.md` → mcp.py, mcp_server.py |
-| Web search tool | `docs/orchestrator/agent/tools/CLAUDE.md` |
-| Universal project setup | `docs/orchestrator/routers/CLAUDE.md` → projects.py setup-config |
-| Volume/storage architecture | `services/btrfs-csi/` (Go driver) + `orchestrator/app/services/volume_manager.py` |
-| Volume Hub client | `orchestrator/app/services/hub_client.py` (gRPC client for Hub RPCs) |
-| Config.json schema & lifecycle | `docs/orchestrator/services/config-json.md` |
-| Container lifecycle tool | `docs/orchestrator/agent/tools/project-control.md` |
-| Kanban agent tool | `docs/orchestrator/agent/kanban-agent-tool.md` |
-| Teams & RBAC | `docs/orchestrator/routers/CLAUDE.md` → teams.py, `orchestrator/app/permissions.py` |
-| Gateway / messaging channels | `docs/orchestrator/routers/CLAUDE.md` → gateway.py, schedules.py |
-| Agent scheduling | `docs/orchestrator/agent/tools/CLAUDE.md` → schedule_ops |
+| Path | What it covers |
+|------|----------------|
+| [docs/app/CLAUDE.md](docs/app/CLAUDE.md) | React frontend overview |
+| [docs/app/pages/CLAUDE.md](docs/app/pages/CLAUDE.md) | Route components (Dashboard, Project, Marketplace, Settings, etc.) |
+| [docs/app/components/CLAUDE.md](docs/app/components/CLAUDE.md) | Chat, panels, billing, marketplace, modals |
+| [docs/app/api/CLAUDE.md](docs/app/api/CLAUDE.md) | API client (`lib/api.ts`) |
+| [docs/app/state/CLAUDE.md](docs/app/state/CLAUDE.md) | State management |
+| [docs/app/contexts/CLAUDE.md](docs/app/contexts/CLAUDE.md) | Auth, Command, Marketplace, Team contexts |
+| [docs/app/hooks/CLAUDE.md](docs/app/hooks/CLAUDE.md) | useCancellable, useAuth, useTask |
+| [docs/app/keyboard-shortcuts/CLAUDE.md](docs/app/keyboard-shortcuts/CLAUDE.md) | Command palette & shortcut system |
+| [docs/app/layouts/CLAUDE.md](docs/app/layouts/CLAUDE.md) | Settings, Marketplace page layouts |
+| [docs/app/utils/CLAUDE.md](docs/app/utils/CLAUDE.md), [seo/](docs/app/seo/CLAUDE.md), [types/](docs/app/types/CLAUDE.md) | Utility, SEO, shared TS types |
+
+**Infrastructure**
+
+| Path | What it covers |
+|------|----------------|
+| [docs/infrastructure/CLAUDE.md](docs/infrastructure/CLAUDE.md) | DevOps overview, deployment modes, S3 Sandwich pattern, network policies, RBAC |
+| [docs/infrastructure/kubernetes/CLAUDE.md](docs/infrastructure/kubernetes/CLAUDE.md) | K8s manifests, Volume Hub + btrfs CSI, **orchestrator config settings**, **minikube↔prod mapping**, **AWS overlay conventions**, security layers |
+| [docs/infrastructure/docker/CLAUDE.md](docs/infrastructure/docker/CLAUDE.md) | Docker image / dependency management |
+| [docs/infrastructure/docker-compose/CLAUDE.md](docs/infrastructure/docker-compose/CLAUDE.md) | Root `docker-compose*.yml` files |
+| [docs/infrastructure/terraform/CLAUDE.md](docs/infrastructure/terraform/CLAUDE.md) | AWS + shared Terraform stacks (EKS, ECR, S3, IAM, DNS) |
+| [docs/infrastructure/traefik/CLAUDE.md](docs/infrastructure/traefik/CLAUDE.md) | Traefik routing (Docker mode only) |
+
+**Features & platform**
+
+| Path | What it covers |
+|------|----------------|
+| [docs/desktop/CLAUDE.md](docs/desktop/CLAUDE.md) | Desktop runtimes (local/docker/k8s), sync, permissions, notifications, TUI |
+| [docs/apps/CLAUDE.md](docs/apps/CLAUDE.md) | Tesslate Apps: publish, install, approval pipeline, billing, yank, fork, bundles |
+| [docs/packages/CLAUDE.md](docs/packages/CLAUDE.md) | `tesslate-agent`, `tesslate-app-sdk`, `tesslate-embed-sdk` submodules |
+| [docs/sdk/CLAUDE.md](docs/sdk/CLAUDE.md) | Top-level `@tesslate/sdk` TypeScript client |
+| [docs/services/btrfs-csi/CLAUDE.md](docs/services/btrfs-csi/CLAUDE.md) | btrfs CSI driver + Volume Hub (Go) |
+| [docs/services/tsinit/CLAUDE.md](docs/services/tsinit/CLAUDE.md) | In-container supervisor |
+
+**Ops & meta**
+
+| Path | What it covers |
+|------|----------------|
+| [docs/scripts/CLAUDE.md](docs/scripts/CLAUDE.md) | Deploy, seed, litellm, migration scripts |
+| [docs/seeds/CLAUDE.md](docs/seeds/CLAUDE.md) | Seed Tesslate Apps |
+| [docs/ci-cd/CLAUDE.md](docs/ci-cd/CLAUDE.md) | CI/CD workflows |
+| [docs/testing/CLAUDE.md](docs/testing/CLAUDE.md) | Test conventions across the repo |
+| [docs/linear/CLAUDE.md](docs/linear/CLAUDE.md) | Linear integration docs |
 
 ## Deployment Modes
 
-### Desktop (`DEPLOYMENT_MODE=desktop`)
-- Tauri v2 shell spawns a PyInstaller-frozen FastAPI sidecar on a random loopback port
-- SQLite replaces PostgreSQL; asyncio queue + LocalPubSub replace Redis/ARQ
-- Per-project `runtime` column: `local` (host OS subprocesses), `docker` (Docker Compose), `k8s` (remote cloud cluster via authenticated API)
-- System tray keeps sidecar alive when main window is closed
-- Token stored in Stronghold; cloud features (marketplace, sync, K8s) require `tsk_` API key pairing
+| Mode | Config | Use case |
+|------|--------|----------|
+| Desktop | `DEPLOYMENT_MODE=desktop` | Tauri app — SQLite + local queue, per-project `runtime` column (local/docker/k8s-remote) |
+| Docker | `DEPLOYMENT_MODE=docker` | Local dev — Traefik routes `*.localhost` |
+| Kubernetes | `DEPLOYMENT_MODE=kubernetes` | Minikube / EKS — per-project namespaces, btrfs CSI + Volume Hub, NGINX Ingress |
 
-**For desktop development setup, see: [docs/desktop/CLAUDE.md](docs/desktop/CLAUDE.md)**
+Detailed mode architecture → [docs/architecture/CLAUDE.md](docs/architecture/CLAUDE.md). K8s config settings, minikube↔prod mapping, Volume Hub + btrfs CSI, and AWS overlay conventions → [docs/infrastructure/kubernetes/CLAUDE.md](docs/infrastructure/kubernetes/CLAUDE.md).
 
-### Docker (Local Dev)
-- `DEPLOYMENT_MODE=docker` in config
-- Traefik routes `*.localhost` to containers
-- Project files on local filesystem
+### Minikube limitations
+- HTTP only (no TLS certs), all URLs use `http://`
+- PVCs persist across restarts but data is lost if the cluster is deleted
 
-**For complete Docker setup from scratch, see: [docs/guides/docker-setup.md](docs/guides/docker-setup.md)**
-
-For Docker quick start, clean slate reset, and database seeding scripts, use the **`docker-dev`** skill.
-
-### Kubernetes (Minikube/Production)
-- `DEPLOYMENT_MODE=kubernetes` in config
-- Per-project namespaces (`proj-{uuid}`) with NetworkPolicy isolation
-- btrfs CSI volumes with Volume Hub orchestration and S3/CAS persistence
-- NGINX Ingress for routing
-- Pod affinity for multi-container projects (same node)
-
-#### Volume Hub + btrfs CSI Architecture
-User project data lives on btrfs subvolumes managed by a two-layer system:
-
-1. **btrfs CSI Driver** (`services/btrfs-csi/`): Runs per-node as a DaemonSet. Manages btrfs subvolumes, instant snapshot-clone from templates, file operations (FileOps gRPC), and S3 sync via content-addressable storage (CAS).
-2. **Volume Hub** (`pkg/volumehub/`): Storageless orchestrator (single pod). Tracks volume ownership, coordinates cache placement across nodes, triggers S3 sync, and handles peer-transfer for volume migration between nodes.
-3. **Orchestrator client** (`volume_manager.py` / `hub_client.py`): Thin async client that calls Hub RPCs (CreateVolume, DeleteVolume, EnsureCached, TriggerSync, CreateServiceVolume, VolumeStatus).
-
-**Lifecycle**:
-- **Create**: Hub picks best node, creates btrfs subvolume (from template snapshot or empty)
-- **Compute**: Pod scheduled on cache_node with volume hostPath-mounted
-- **Hibernate**: S3 sync triggered, compute pod removed, volume stays cached on node
-- **Restore**: Hub ensures volume is cached (fast path if still on node, otherwise peer-transfer or S3 restore)
-- **Timeline**: Up to 5 K8s VolumeSnapshots per project for version history and restore points
-
-#### Key K8s Config Settings (config.py)
-```python
-k8s_devserver_image: str           # Image for user containers (registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest)
-k8s_image_pull_secret: str         # Registry secret (tesslate-container-registry-nyc3)
-k8s_storage_class: str             # StorageClass for PVCs (tesslate-block-storage)
-k8s_snapshot_class: str            # VolumeSnapshotClass (tesslate-ebs-snapshots)
-k8s_snapshot_retention_days: int   # Days to keep soft-deleted snapshots (30)
-k8s_max_snapshots_per_project: int # Max snapshots in timeline (5)
-k8s_snapshot_ready_timeout_seconds: int  # Snapshot readiness timeout (300)
-k8s_hibernation_idle_minutes: int  # Auto-hibernate after X idle minutes (10)
-k8s_pvc_size: str                  # Default PVC size per project (5Gi)
-k8s_enable_pod_affinity: bool      # Keep multi-container projects on same node
-
-# Volume Hub + btrfs CSI
-volume_hub_address: str            # Hub gRPC endpoint (tesslate-volume-hub.kube-system.svc:9750)
-template_build_storage_class: str  # btrfs CSI storage class for templates (tesslate-btrfs)
-template_build_nodeops_address: str # NodeOps gRPC endpoint for template builds
-fileops_enabled: bool              # Feature flag for v2 file operations via CSI (True)
-fileops_timeout: int               # gRPC timeout for file operations (30s)
-compute_max_concurrent_pods: int   # Max concurrent compute pods (5)
-compute_pod_timeout: int           # Compute pod readiness timeout (600s)
-compute_reaper_interval_seconds: int  # Orphaned-pod reaper interval (60s)
-compute_reaper_max_age_seconds: int   # Max pod age before reaping (900s)
-
-redis_url: str                     # Redis connection string (empty = in-memory fallback)
-worker_max_jobs: int               # Concurrent agent tasks per worker pod (10)
-worker_job_timeout: int            # Task timeout in seconds (600)
-
-# Web Search
-web_search_provider: str           # tavily, brave, or duckduckgo (default: tavily)
-tavily_api_key: str                # Tavily API key
-brave_search_api_key: str          # Brave Search API key
-
-# Messaging Channels
-agent_discord_webhook_url: str     # Discord webhook URL for agent send_message tool
-channel_encryption_key: str        # Fernet key for channel credential encryption
-
-# MCP (Model Context Protocol)
-mcp_tool_cache_ttl: int            # MCP tool schema cache TTL in seconds (300)
-mcp_tool_timeout: int              # MCP tool call timeout in seconds (30)
-mcp_max_servers_per_user: int      # Max installed MCP servers per user (20)
-
-# Gateway (Communication Protocol v2)
-gateway_enabled: bool              # Enable gateway process (False)
-gateway_shard: str                 # Shard identifier for multi-instance gateway
-gateway_tick_interval: int         # Scheduler tick interval in seconds
-gateway_session_idle_minutes: int  # Idle timeout for gateway sessions
-gateway_voice_transcription: bool  # Enable voice message transcription
-
-# Agent
-compaction_summary_model: str      # Cheap model for context summarization
-default_thinking_effort: str       # Extended thinking effort for supported models
-```
-
-#### Minikube vs Production Config
-| Setting | Minikube | Production (AWS EKS) |
-|---------|----------|----------------------|
-| `K8S_DEVSERVER_IMAGE` | `tesslate-devserver:latest` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
-| `K8S_IMAGE_PULL_SECRET` | `` (empty) | `ecr-credentials` |
-| `K8S_WILDCARD_TLS_SECRET` | `` (empty, use HTTP) | `tesslate-wildcard-tls` (use HTTPS) |
-| `K8S_SNAPSHOT_CLASS` | `tesslate-btrfs-snapshots` (via btrfs CSI) | `tesslate-ebs-snapshots` |
-| `K8S_STORAGE_CLASS` | `tesslate-btrfs` (btrfs CSI) | `tesslate-block-storage` (EBS gp3) |
-| `TEMPLATE_BUILD_STORAGE_CLASS` | `tesslate-btrfs` | `tesslate-btrfs` |
-| `VOLUME_HUB_ADDRESS` | `tesslate-volume-hub.kube-system.svc:9750` | `tesslate-volume-hub.kube-system.svc:9750` |
-
-#### Minikube Limitations
-- **HTTP only**: No TLS certificates, all URLs use `http://`
-- **Data persistence**: PVCs persist across restarts, but data is lost if cluster is deleted
-
-**For complete minikube setup instructions, see: [docs/guides/minikube-setup.md](docs/guides/minikube-setup.md)**
-
-## Minikube Local Development
-
-For build workflows, image management, quick reference commands, and troubleshooting, use the **`minikube-dev`** skill.
-
-## AWS EKS Production Deployment
-
-For infrastructure details, Terraform deployment, ECR image builds, debugging commands, and troubleshooting, use the **`aws-deploy`** skill.
-
-### AWS Overlay: envFrom Auto-Sync Architecture
-
-The AWS backend overlay (`k8s/overlays/aws-base/backend-patch.yaml`) uses a two-part strategy:
-
-1. **`envFrom`** — auto-mounts ALL keys from 3 terraform-managed secrets (`tesslate-app-secrets`, `postgres-secret`, `s3-credentials`). Adding a new key in terraform's `kubernetes.tf` automatically makes it available in the pod — **no manual kustomize sync needed**.
-
-2. **`env` with `$patch: replace`** — replaces the base manifest's env array with ONLY static values (not in any secret) and 1 alias mapping (`K8S_INGRESS_DOMAIN` → `APP_DOMAIN`). The `$patch: replace` prevents stale base entries from merging in.
-
-**When adding new config:**
-- **Secret-based values** (domain, API keys, OAuth, etc.): Add to terraform `kubernetes.tf` secrets → automatically picked up via `envFrom`
-- **Static values** (feature flags, class names, etc.): Add to `backend-patch.yaml` env array
-
-### Frontend Config: API_URL Must NOT Include `/api`
-
-The frontend `api-url` in the `frontend-config` ConfigMap (managed by terraform `kubernetes.tf`) must be the **base domain only** (e.g., `https://opensail.tesslate.com`), NOT `https://opensail.tesslate.com/api`. All API calls in `app/src/lib/api.ts` already include the `/api` prefix in their paths, so including `/api` in the base URL causes double `/api/api/` paths.
+For build workflows, image management, and troubleshooting, use the **`minikube-dev`** skill (local) or **`aws-deploy`** skill (production).
