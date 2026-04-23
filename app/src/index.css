@@ -230,7 +230,7 @@ body.tauri-shell {
   font-weight: 500;
   line-height: 1;
   border: var(--border-width) solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
@@ -238,13 +238,13 @@ body.tauri-shell {
 }
 
 .btn:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
   border-color: var(--border-hover);
   color: var(--text);
 }
 
 .btn:active {
-  background: var(--border);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
 }
 
 .btn:disabled {
@@ -253,7 +253,7 @@ body.tauri-shell {
 }
 
 .btn:disabled:hover {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   border-color: var(--border);
   color: var(--text-muted);
 }
@@ -261,12 +261,12 @@ body.tauri-shell {
 /* Primary: accent-colored text, slightly tinted fill */
 .btn-primary {
   color: var(--text);
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
   border-color: var(--border-hover);
 }
 
 .btn-primary:hover {
-  background: var(--border);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
   color: var(--text);
 }
 
@@ -285,7 +285,7 @@ body.tauri-shell {
 
 /* Active: for active toggle states */
 .btn-active {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
   border-color: var(--border-hover);
   color: var(--text);
 }
@@ -298,19 +298,19 @@ body.tauri-shell {
 }
 
 .btn-tab:hover {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   color: var(--text-muted);
 }
 
 /* Tab selected: grey fill, white text, no border */
 .btn-tab-active {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
   border-color: transparent;
   color: var(--text);
 }
 
 .btn-tab-active:hover {
-  background: var(--border);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
   border-color: transparent;
   color: var(--text);
 }

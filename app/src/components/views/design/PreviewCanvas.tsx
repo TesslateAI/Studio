@@ -46,7 +46,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>(
-    bridgeInstalled ? 'connecting' : 'not-installed',
+    bridgeInstalled ? 'connecting' : 'not-installed'
   );
   const [showReadyPill, setShowReadyPill] = useState(false);
   const [statusHovered, setStatusHovered] = useState(false);
@@ -77,7 +77,10 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   useEffect(() => {
     if (!bridgeInstalled) {
       setBridgeStatus('not-installed');
-    } else if (bridgeStatusRef.current === 'not-installed' || bridgeStatusRef.current === 'unavailable') {
+    } else if (
+      bridgeStatusRef.current === 'not-installed' ||
+      bridgeStatusRef.current === 'unavailable'
+    ) {
       // Bridge was just installed or we need to retry — reload iframe so the script gets loaded
       setBridgeStatus('connecting');
       setTimeout(() => {
@@ -141,7 +144,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           break;
       }
     },
-    [onElementSelect, onElementHover, markBridgeReady, startBridgeTimeout, bridgeInstalled],
+    [onElementSelect, onElementHover, markBridgeReady, startBridgeTimeout, bridgeInstalled]
   );
 
   useEffect(() => {
@@ -181,9 +184,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
   // ── Iframe source ──────────────────────────────────────────────
   const iframeSrc =
-    devServerUrlWithAuth +
-    (devServerUrlWithAuth.includes('?') ? '&' : '?') +
-    '_r=1';
+    devServerUrlWithAuth + (devServerUrlWithAuth.includes('?') ? '&' : '?') + '_r=1';
 
   // ── Viewport sizing ────────────────────────────────────────────
   // Inside CanvasViewport the frame is a transformed 0×0 container, so
@@ -208,10 +209,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             borderColor: 'var(--border)',
           }}
         >
-          <span
-            className="w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ background: '#f97316' }}
-          />
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#f97316' }} />
           <span style={{ color: 'var(--text-muted)' }}>Bridge needed</span>
           <button
             type="button"
@@ -237,10 +235,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             borderColor: 'var(--border)',
           }}
         >
-          <span
-            className="w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ background: '#eab308' }}
-          />
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#eab308' }} />
           <span style={{ color: 'var(--text-muted)' }}>Connecting...</span>
         </div>
       );
@@ -261,10 +256,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             pointerEvents: 'auto',
           }}
         >
-          <span
-            className="w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ background: '#22c55e' }}
-          />
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#22c55e' }} />
           <span style={{ color: 'var(--text-muted)' }}>Design Mode</span>
         </div>
       );
@@ -279,10 +271,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             borderColor: 'var(--border)',
           }}
         >
-          <span
-            className="w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ background: '#ef4444' }}
-          />
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#ef4444' }} />
           <span style={{ color: 'var(--text-muted)' }}>Unavailable</span>
           <button
             type="button"
@@ -327,31 +316,28 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
       {/* Install bridge prompt — centered over preview (not canvas-transformed). */}
       {bridgeStatus === 'not-installed' && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+        <div
+          className="absolute inset-0 z-40 flex items-center justify-center"
+          style={{ background: 'color-mix(in srgb, var(--bg, #000) 60%, transparent)' }}
+        >
           <div
-            className="flex flex-col items-center gap-3 px-6 py-5 rounded-lg border pointer-events-auto"
+            className="flex flex-col items-center gap-3 px-6 py-5 rounded-lg border shadow-xl"
             style={{
               background: 'var(--surface)',
               borderColor: 'var(--border)',
             }}
           >
-            <p
-              className="text-sm font-medium"
-              style={{ color: 'var(--text-muted)' }}
-            >
+            <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>
               Design bridge is not installed in this project
             </p>
-            <p
-              className="text-xs max-w-[280px] text-center"
-              style={{ color: 'var(--text-subtle)' }}
-            >
-              The design bridge enables element inspection, style editing, and
-              live preview interactions.
+            <p className="text-xs max-w-[280px] text-center" style={{ color: 'var(--text-muted)' }}>
+              The design bridge enables element inspection, style editing, and live preview
+              interactions.
             </p>
             <button
               type="button"
               onClick={onInstallBridge}
-              className="px-4 py-1.5 rounded-md text-xs font-medium"
+              className="px-4 py-1.5 rounded-md text-xs font-medium cursor-pointer hover:opacity-90 transition-opacity"
               style={{
                 background: 'var(--primary)',
                 color: '#fff',

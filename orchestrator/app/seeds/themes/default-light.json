@@ -15,56 +15,56 @@
     "primaryRgb": "248, 149, 33",
     "accent": "#0891b2",
 
-    "background": "#F5F6F6",
+    "background": "#F5F6F7",
     "surface": "#ffffff",
-    "surfaceHover": "#f0f0f0",
+    "surfaceHover": "#f3f4f6",
 
     "text": "#1a1a1a",
-    "textMuted": "rgba(26, 26, 26, 0.6)",
-    "textSubtle": "rgba(26, 26, 26, 0.4)",
+    "textMuted": "#4b5563",
+    "textSubtle": "#6b7280",
 
-    "border": "rgba(0, 0, 0, 0.1)",
-    "borderHover": "rgba(0, 0, 0, 0.2)",
+    "border": "#e5e7eb",
+    "borderHover": "#d1d5db",
 
     "sidebar": {
       "background": "#ffffff",
       "text": "#1a1a1a",
-      "border": "rgba(0, 0, 0, 0.08)",
-      "hover": "rgba(0, 0, 0, 0.04)",
+      "border": "#e5e7eb",
+      "hover": "#f3f4f6",
       "active": "rgba(248, 149, 33, 0.15)"
     },
 
     "input": {
       "background": "#ffffff",
-      "border": "rgba(0, 0, 0, 0.15)",
+      "border": "#d1d5db",
       "borderFocus": "#F89521",
       "text": "#1a1a1a",
-      "placeholder": "rgba(26, 26, 26, 0.4)"
+      "placeholder": "#9ca3af"
     },
 
     "scrollbar": {
-      "thumb": "rgba(0, 0, 0, 0.2)",
-      "thumbHover": "rgba(0, 0, 0, 0.3)",
+      "thumb": "#d1d5db",
+      "thumbHover": "#9ca3af",
       "track": "transparent"
     },
 
     "code": {
       "inlineBackground": "rgba(248, 149, 33, 0.1)",
-      "inlineText": "#d97706",
-      "blockBackground": "rgba(0, 0, 0, 0.05)",
-      "blockBorder": "rgba(0, 0, 0, 0.1)",
+      "inlineText": "#c2570b",
+      "blockBackground": "#f3f4f6",
+      "blockBorder": "#e5e7eb",
       "blockText": "#374151"
     },
 
     "status": {
-      "error": "#dc2626",
-      "errorRgb": "220, 38, 38",
-      "success": "#16a34a",
-      "successRgb": "22, 163, 74",
-      "warning": "#d97706",
-      "warningRgb": "217, 119, 6",
-      "info": "#2563eb",
-      "infoRgb": "37, 99, 235"
+      "error": "#b91c1c",
+      "errorRgb": "185, 28, 28",
+      "success": "#15803d",
+      "successRgb": "21, 128, 61",
+      "warning": "#b45309",
+      "warningRgb": "180, 83, 9",
+      "info": "#1d4ed8",
+      "infoRgb": "29, 78, 216"
     },
 
     "shadow": {
