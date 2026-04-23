@@ -62,6 +62,10 @@ You can also start from templates for finance, sales, marketing, operations, and
 
 One workspace in. One installable app out.
 
+<p align="center">
+  <img src="assets/opensail-apps.png" alt="OpenSail Apps" width="80%" />
+</p>
+
 An app on OpenSail is a versioned, immutable, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, its own containers, and its own permissions.
 
 **The lifecycle:** build in a workspace, publish a version (immutable, content-addressed), go through the approval pipeline, list on the marketplace (or keep private/team-only), install per-user, run, update, fork.
@@ -104,6 +108,10 @@ Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything
 
 Code, ship, and operate from the same workspace.
 
+<p align="center">
+  <img src="assets/opensail-chat.png" alt="OpenSail Agentic Coding" width="85%" />
+</p>
+
 OpenSail is a full coding environment and a product-ops platform living in one window. You get a real editor, a real terminal, and real containers for the code side. You get deployments, schedules, permissions, audit logs, and channel integrations for the operating side. Agents can drive any of it, or stay out of the way.
 
 **A real IDE, not a chat box.** Monaco editor with multi-language syntax support, autocomplete, find-in-files, and refactor support. A terminal attached to the running container. A file tree that mirrors the container's filesystem exactly. Live preview with hot module reload. Git panel with diff, blame, history, and branch switching. Everything you expect from a dedicated coding tool.
@@ -125,6 +133,10 @@ OpenSail is a full coding environment and a product-ops platform living in one w
 ## Design engineer
 
 Click a pixel in your running app, jump to the JSX line that rendered it.
+
+<p align="center">
+  <img src="assets/opensail-design-engineer.png" alt="OpenSail Design Engineer" width="85%" />
+</p>
 
 The Design Engineer is a live-editing canvas that runs alongside the code editor. It loads your dev server in an iframe, injects a bridge script into the running app, and turns every rendered element into something you can select, edit, and push back to source.
 
