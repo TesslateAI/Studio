@@ -1,9 +1,9 @@
 @echo off
-REM Tesslate Studio - Docker Development Setup Script (Windows)
+REM OpenSail - Docker Development Setup Script (Windows)
 REM This script helps you quickly set up the development environment
 
 echo ==================================
-echo Tesslate Studio Docker Setup
+echo OpenSail Docker Setup
 echo ==================================
 echo.
 

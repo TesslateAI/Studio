@@ -1,6 +1,6 @@
 # Settings UI Components
 
-This document provides comprehensive documentation for the settings UI component system used in Tesslate Studio. These components create a consistent, responsive settings experience across all settings pages.
+This document provides comprehensive documentation for the settings UI component system used in OpenSail. These components create a consistent, responsive settings experience across all settings pages.
 
 ## Component Hierarchy Overview
 

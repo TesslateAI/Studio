@@ -1,6 +1,6 @@
 # Channel & MCP Models
 
-This document covers the models that power Tesslate Studio's messaging channel integrations (Telegram, Slack, Discord, WhatsApp) and the Model Context Protocol (MCP) server system for extending agent capabilities.
+This document covers the models that power OpenSail's messaging channel integrations (Telegram, Slack, Discord, WhatsApp) and the Model Context Protocol (MCP) server system for extending agent capabilities.
 
 **File**: `orchestrator/app/models.py`
 

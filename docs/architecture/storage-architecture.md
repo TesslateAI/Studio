@@ -1,10 +1,10 @@
 # Storage Architecture
 
-This document describes Tesslate Studio's three-layer storage architecture: the Volume Hub (storageless orchestrator), btrfs CSI node drivers (node-native storage), and the CAS Layer Store (content-addressed object storage). It also covers the Python integration layer, the legacy SnapshotManager, storage class configuration, and the full volume lifecycle.
+This document describes OpenSail's three-layer storage architecture: the Volume Hub (storageless orchestrator), btrfs CSI node drivers (node-native storage), and the CAS Layer Store (content-addressed object storage). It also covers the Python integration layer, the legacy SnapshotManager, storage class configuration, and the full volume lifecycle.
 
 ## Overview
 
-Tesslate Studio uses a purpose-built storage stack designed for instant project creation via copy-on-write cloning, cross-node volume migration, and durable persistence to object storage. The system is split into three tiers:
+OpenSail uses a purpose-built storage stack designed for instant project creation via copy-on-write cloning, cross-node volume migration, and durable persistence to object storage. The system is split into three tiers:
 
 | Layer | Role | Runs As | Storage |
 |-------|------|---------|---------|

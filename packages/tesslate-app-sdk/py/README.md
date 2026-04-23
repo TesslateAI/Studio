@@ -18,7 +18,7 @@ import asyncio
 from tesslate_app_sdk import AppClient, AppSdkOptions, ManifestBuilder
 
 async def main() -> None:
-    opts = AppSdkOptions(base_url="https://your-domain.com", api_key="tsk_...")
+    opts = AppSdkOptions(base_url="https://opensail.tesslate.com", api_key="tsk_...")
     manifest = (
         ManifestBuilder()
         .app(slug="hello", name="Hello App", version="0.1.0")

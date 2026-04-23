@@ -81,7 +81,8 @@ func main() {
 		consolidationInterval  = flag.Int("consolidation-interval", 10, "Create consolidation every N snapshots (0 to disable)")
 		consolidationRetention = flag.Int("consolidation-retention", 3, "Keep last N consolidation blobs (0 = keep all)")
 		hubGRPCPort     = flag.Int("hub-grpc-port", 9750, "VolumeHub gRPC listen port (hub mode)")
-		orchestratorURL = flag.String("orchestrator-url", "", "Orchestrator base URL for GC known-volumes (e.g., http://tesslate-backend:8000)")
+		orchestratorURL            = flag.String("orchestrator-url", "", "Orchestrator base URL for GC known-volumes (e.g., http://tesslate-backend:8000)")
+		orchestratorInternalSecret = flag.String("orchestrator-internal-secret", "", "X-Internal-Secret value for /api/internal/* endpoints (required in k8s)")
 		drainPort       = flag.Int("drain-port", 9743, "HTTP port for drain endpoint (preStop hook)")
 		hubAddress     = flag.String("hub-address", "tesslate-volume-hub.kube-system.svc:9750", "VolumeHub gRPC address for CSI safety-net materialization (node mode)")
 		defaultQuota   = flag.String("default-quota", "", "Default per-volume storage quota (e.g., 5Gi, 500Mi)")
@@ -110,6 +111,11 @@ func main() {
 	if *orchestratorURL == "" {
 		if v := os.Getenv("ORCHESTRATOR_URL"); v != "" {
 			*orchestratorURL = v
+		}
+	}
+	if *orchestratorInternalSecret == "" {
+		if v := os.Getenv("ORCHESTRATOR_INTERNAL_SECRET"); v != "" {
+			*orchestratorInternalSecret = v
 		}
 	}
 
@@ -168,6 +174,7 @@ func main() {
 		driver.WithHubGRPCPort(*hubGRPCPort),
 		driver.WithHubAddress(*hubAddress),
 		driver.WithOrchestratorURL(*orchestratorURL),
+		driver.WithOrchestratorInternalSecret(*orchestratorInternalSecret),
 		driver.WithDrainPort(*drainPort),
 		driver.WithDefaultQuota(driver.ParseQuota(*defaultQuota)),
 	)

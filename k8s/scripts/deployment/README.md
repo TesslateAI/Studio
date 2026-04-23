@@ -1,6 +1,6 @@
-# Tesslate Studio Deployment Scripts
+# OpenSail Deployment Scripts
 
-This directory contains scripts for deploying Tesslate Studio to Kubernetes using DigitalOcean Container Registry.
+This directory contains scripts for deploying OpenSail to Kubernetes using DigitalOcean Container Registry.
 
 ## 🚀 Quick Start
 
@@ -48,7 +48,7 @@ Creates all required Kubernetes application secrets.
 - Creates application secrets in Kubernetes
 
 ### 4. `04-deploy-application.sh`
-Deploys the complete Tesslate Studio application.
+Deploys the complete OpenSail application.
 
 **What it does:**
 - Deploys PostgreSQL database

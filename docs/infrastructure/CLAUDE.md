@@ -1,6 +1,6 @@
 # Infrastructure Agent Context
 
-You are working on Tesslate Studio's infrastructure layer. This context provides essential information for debugging, modifying, and deploying infrastructure components.
+You are working on OpenSail's infrastructure layer. This context provides essential information for debugging, modifying, and deploying infrastructure components.
 
 ## Your Role
 

@@ -1,6 +1,6 @@
 # Testing Guide
 
-Tesslate Studio has three layers of automated testing:
+OpenSail has three layers of automated testing:
 
 1. **Unit tests** — Fast, mocked, no external dependencies
 2. **Integration tests** — Real PostgreSQL database, httpx AsyncClient

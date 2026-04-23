@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Tesslate Studio",
+  "productName": "OpenSail",
   "version": "0.1.0",
   "identifier": "com.tesslate.studio",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Tesslate Studio",
+        "title": "OpenSail",
         "width": 1440,
         "height": 900,
         "minWidth": 960,
@@ -28,7 +28,7 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": ["https://your-domain.com/desktop/releases/latest.json"],
+      "endpoints": ["https://opensail.tesslate.com/desktop/releases/latest.json"],
       "pubkey": "PLACEHOLDER — replace with output of `cargo tauri signer generate` once the release keypair is created; store the private key as CI secret TAURI_SIGNING_PRIVATE_KEY",
       "dialog": false
     }

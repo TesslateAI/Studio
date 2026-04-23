@@ -1,12 +1,12 @@
 # Deployment Modes Documentation
 
-This document explains Tesslate Studio's two deployment modes: **Docker mode** (local development) and **Kubernetes mode** (production). Each mode has different routing, storage, and configuration requirements.
+This document explains OpenSail's two deployment modes: **Docker mode** (local development) and **Kubernetes mode** (production). Each mode has different routing, storage, and configuration requirements.
 
 **Visual Reference**: For deployment pipeline diagrams, see `diagrams/deployment-pipeline.mmd` (when created).
 
 ## Overview
 
-Tesslate Studio supports two deployment modes configured via the `DEPLOYMENT_MODE` environment variable:
+OpenSail supports two deployment modes configured via the `DEPLOYMENT_MODE` environment variable:
 
 | Mode | Use Case | Routing | Storage | Complexity |
 |------|----------|---------|---------|------------|

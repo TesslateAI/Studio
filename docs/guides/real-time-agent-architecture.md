@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tesslate Studio uses a distributed agent execution system that separates request handling from computation. API pods accept requests and return immediately, worker pods execute long-running agent tasks, and Redis provides the communication fabric between them. This architecture ensures the API remains responsive, agent tasks survive pod restarts, and multiple consumers (WebSocket clients, SSE clients, polling clients) can observe the same execution in real time.
+OpenSail uses a distributed agent execution system that separates request handling from computation. API pods accept requests and return immediately, worker pods execute long-running agent tasks, and Redis provides the communication fabric between them. This architecture ensures the API remains responsive, agent tasks survive pod restarts, and multiple consumers (WebSocket clients, SSE clients, polling clients) can observe the same execution in real time.
 
 ## System Interaction Diagram
 

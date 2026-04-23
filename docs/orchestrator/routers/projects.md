@@ -2,11 +2,11 @@
 
 **File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/projects.py` (5142 lines)
 
-The projects router is the largest and most complex router in Tesslate Studio. It handles everything related to project management: CRUD operations, file management, container lifecycle, asset uploads, terminal access, and deployment.
+The projects router is the largest and most complex router in OpenSail. It handles everything related to project management: CRUD operations, file management, container lifecycle, asset uploads, terminal access, and deployment.
 
 ## Overview
 
-Projects are the core entity in Tesslate Studio. Each project represents a web application that users build with AI assistance. Projects can be:
+Projects are the core entity in OpenSail. Each project represents a web application that users build with AI assistance. Projects can be:
 - Created from scratch (default Next.js template)
 - Imported from Git repositories (GitHub, GitLab, Bitbucket)
 - Created from marketplace bases (pre-built templates)
@@ -1165,7 +1165,7 @@ Returns the base dev server URL for the project. This is used by the frontend to
 ```json
 {
   "dev_server_url": "http://my-app-k3x8n2.localhost",         // Docker
-  "dev_server_url": "http://my-app-k3x8n2.your-domain.com" // K8s
+  "dev_server_url": "http://my-app-k3x8n2.opensail.tesslate.com" // K8s
 }
 ```
 
@@ -1286,7 +1286,7 @@ await enforce_project_limit(current_user, db)
    - Server listening on port 3000
 
 5. **User accesses container**:
-   - Frontend iframe loads `http://frontend.my-app-k3x8n2.your-domain.com`
+   - Frontend iframe loads `http://frontend.my-app-k3x8n2.opensail.tesslate.com`
    - NGINX Ingress routes to container service
    - User sees their app running
 

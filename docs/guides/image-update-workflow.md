@@ -1,6 +1,6 @@
 # Image Update Workflow
 
-This guide covers the complete build and deploy workflow for Tesslate Studio container images.
+This guide covers the complete build and deploy workflow for OpenSail container images.
 
 ## Why --no-cache is Critical
 

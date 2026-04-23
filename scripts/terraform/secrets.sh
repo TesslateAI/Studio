@@ -204,7 +204,7 @@ cmd_upload() {
     info "Creating new secret in AWS..."
     aws secretsmanager create-secret \
       --name "$SECRET_NAME" \
-      --description "Terraform variables for Tesslate Studio ${ENVIRONMENT} environment" \
+      --description "Terraform variables for OpenSail ${ENVIRONMENT} environment" \
       --secret-string "$TFVARS_CONTENT" > /dev/null
 
     success "✓ Secret created in AWS Secrets Manager"

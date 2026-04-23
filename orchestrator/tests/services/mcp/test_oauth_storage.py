@@ -19,7 +19,6 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from app.models import McpOAuthConnection
 from app.services.mcp.oauth_storage import PostgresTokenStorage
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -56,7 +55,7 @@ def _client_info() -> OAuthClientInformationFull:
         token_endpoint_auth_method="client_secret_basic",
         grant_types=["authorization_code", "refresh_token"],
         response_types=["code"],
-        client_name="Tesslate Studio",
+        client_name="OpenSail",
         client_id="cid-abc",
         client_secret="s3cret",
     )

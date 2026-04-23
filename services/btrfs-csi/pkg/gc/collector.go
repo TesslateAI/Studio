@@ -58,19 +58,22 @@ func (c *Collector) SetKnownVolumesFunc(fn func(ctx context.Context) (map[string
 
 // SetOrchestratorURL configures the GC collector to fetch known volume IDs
 // from the orchestrator's internal API. This replaces SetKnownVolumesFunc
-// with an HTTP-based implementation.
-func (c *Collector) SetOrchestratorURL(url string) {
+// with an HTTP-based implementation.  secret is sent as X-Internal-Secret.
+func (c *Collector) SetOrchestratorURL(url, secret string) {
 	c.knownVolumes = func(ctx context.Context) (map[string]bool, error) {
-		return fetchKnownVolumes(ctx, url)
+		return fetchKnownVolumes(ctx, url, secret)
 	}
 }
 
 // fetchKnownVolumes fetches the set of known volume IDs from the orchestrator.
-func fetchKnownVolumes(ctx context.Context, baseURL string) (map[string]bool, error) {
+func fetchKnownVolumes(ctx context.Context, baseURL, secret string) (map[string]bool, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/internal/known-volume-ids", nil)
 	if err != nil {
 		return nil, err
+	}
+	if secret != "" {
+		req.Header.Set("X-Internal-Secret", secret)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

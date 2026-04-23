@@ -31,7 +31,7 @@ async fn check_and_prompt(app: AppHandle) -> anyhow::Result<()> {
     // Ask the user before downloading.
     let body = update.body.as_deref().unwrap_or("No release notes.");
     let message = format!(
-        "Tesslate Studio {} is available.\n\n{}\n\nInstall now? The app will restart automatically.",
+        "OpenSail {} is available.\n\n{}\n\nInstall now? The app will restart automatically.",
         update.version, body
     );
 

@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 MINIKUBE_PROFILE="tesslate"
 
 echo -e "${BLUE}=============================================${NC}"
-echo -e "${BLUE}  Tesslate Studio - Minikube Teardown${NC}"
+echo -e "${BLUE}  OpenSail - Minikube Teardown${NC}"
 echo -e "${BLUE}=============================================${NC}"
 echo ""
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Tesslate Studio - Management Helper Script
+# OpenSail - Management Helper Script
 
 set -e
 
@@ -9,7 +9,7 @@ MANIFESTS_DIR="$(dirname "$SCRIPT_DIR")/manifests"
 
 function show_help {
     cat <<EOF
-Tesslate Studio Kubernetes Management
+OpenSail Kubernetes Management
 
 Usage: $0 <command> [options]
 
@@ -42,7 +42,7 @@ function check_kubectl {
 }
 
 function show_status {
-    echo "=== Tesslate Studio Status ==="
+    echo "=== OpenSail Status ==="
     echo ""
     echo "Nodes:"
     kubectl get nodes
@@ -142,7 +142,7 @@ function scale_service {
 }
 
 function update_application {
-    echo "Updating Tesslate Studio..."
+    echo "Updating OpenSail..."
     kubectl apply -f $MANIFESTS_DIR/base/
     kubectl apply -f $MANIFESTS_DIR/database/
     kubectl apply -f $MANIFESTS_DIR/app/
@@ -177,7 +177,7 @@ function restore_database {
 }
 
 function clean_all {
-    echo "Warning: This will remove all Tesslate Studio resources from the cluster"
+    echo "Warning: This will remove all OpenSail resources from the cluster"
     read -p "Are you sure? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then

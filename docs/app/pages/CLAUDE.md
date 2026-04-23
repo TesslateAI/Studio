@@ -1,6 +1,6 @@
 # Page Development Context
 
-**Purpose**: This context provides guidance for developing and modifying individual pages in the Tesslate Studio frontend.
+**Purpose**: This context provides guidance for developing and modifying individual pages in the OpenSail frontend.
 
 ## When to Load This Context
 

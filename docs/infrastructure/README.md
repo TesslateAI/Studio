@@ -1,10 +1,10 @@
-# Tesslate Studio Infrastructure Documentation
+# OpenSail Infrastructure Documentation
 
-This directory contains comprehensive documentation for Tesslate Studio's infrastructure, covering deployment modes, container orchestration, and cloud provisioning.
+This directory contains comprehensive documentation for OpenSail's infrastructure, covering deployment modes, container orchestration, and cloud provisioning.
 
 ## Overview
 
-Tesslate Studio supports two deployment modes:
+OpenSail supports two deployment modes:
 
 1. **Docker Compose** (Local Development)
    - Traefik for routing (`*.localhost`)

@@ -1,8 +1,8 @@
 # Third-Party Software Notices and Licenses
 
-This document contains the licenses and notices for third-party software used in Tesslate Studio.
+This document contains the licenses and notices for third-party software used in OpenSail.
 
-Tesslate Studio itself is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for the full license text.
+OpenSail itself is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for the full license text.
 
 ---
 
@@ -164,11 +164,11 @@ npm list --json | jq '.dependencies | keys'
 
 ### License Compatibility
 
-All third-party licenses used in this project (MIT, BSD, PostgreSQL License) are permissive open-source licenses that are compatible with the Apache License 2.0 under which Tesslate Studio is released.
+All third-party licenses used in this project (MIT, BSD, PostgreSQL License) are permissive open-source licenses that are compatible with the Apache License 2.0 under which OpenSail is released.
 
 ### Docker Images
 
-This project uses official Docker images for Traefik and PostgreSQL in development and production deployments. These images are not modified or bundled with the Tesslate Studio source code, but are referenced in docker-compose.yml and Kubernetes manifests.
+This project uses official Docker images for Traefik and PostgreSQL in development and production deployments. These images are not modified or bundled with the OpenSail source code, but are referenced in docker-compose.yml and Kubernetes manifests.
 
 ### Kubernetes Components
 

@@ -1,6 +1,6 @@
 # Orchestrator Routers Context - Agent Instructions
 
-**Purpose**: API endpoint development for Tesslate Studio's FastAPI backend
+**Purpose**: API endpoint development for OpenSail's FastAPI backend
 
 **When to load this context**: When adding or modifying API endpoints, routers, or HTTP handlers
 

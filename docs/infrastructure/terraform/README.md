@@ -6,7 +6,7 @@ Infrastructure as Code for AWS EKS deployment.
 
 ## Overview
 
-Terraform provisions all AWS resources for Tesslate Studio production deployment:
+Terraform provisions all AWS resources for OpenSail production deployment:
 - EKS cluster with managed node groups
 - ECR repositories for container images
 - S3 bucket for project storage
@@ -119,7 +119,7 @@ s3_force_destroy = false  # Prevent accidental deletion
 
 # Tags
 tags = {
-  Project     = "Tesslate Studio"
+  Project     = "OpenSail"
   Environment = "Production"
   ManagedBy   = "Terraform"
 }

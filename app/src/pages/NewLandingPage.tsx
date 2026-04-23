@@ -1836,7 +1836,7 @@ export default function NewLandingPage() {
                   step: '1',
                   title: 'Build an Agent',
                   description:
-                    'Use Tesslate Studio to create coding agents with custom logic, tools, and models.',
+                    'Use OpenSail to create coding agents with custom logic, tools, and models.',
                   icon: Package,
                 },
                 {
@@ -2328,7 +2328,7 @@ export default function NewLandingPage() {
               Build your next app in minutes, not months
             </h2>
             <p className="text-xl text-white/90 mb-8 max-w-2xl mx-auto">
-              Start free. See why teams choose Tesslate Studio.
+              Start free. See why teams choose OpenSail.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <button

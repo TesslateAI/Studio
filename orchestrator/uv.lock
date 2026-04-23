@@ -2412,6 +2412,18 @@ wheels = [
 ]
 
 [[package]]
+name = "respx"
+version = "0.23.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/98/4e55c9c486404ec12373708d015ebce157966965a5ebe7f28ff2c784d41b/respx-0.23.1.tar.gz", hash = "sha256:242dcc6ce6b5b9bf621f5870c82a63997e8e82bc7c947f9ffe272b8f3dd5a780", size = 29243, upload-time = "2026-04-08T14:37:16.008Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/4a/221da6ca167db45693d8d26c7dc79ccfc978a440251bf6721c9aaf251ac0/respx-0.23.1-py2.py3-none-any.whl", hash = "sha256:b18004b029935384bccfa6d7d9d74b4ec9af73a081cc28600fffc0447f4b8c1a", size = 25557, upload-time = "2026-04-08T14:37:14.613Z" },
+]
+
+[[package]]
 name = "rpds-py"
 version = "0.30.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2719,6 +2731,7 @@ dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "aiosmtplib" },
+    { name = "aiosqlite" },
     { name = "alembic" },
     { name = "arq" },
     { name = "asyncpg" },
@@ -2764,13 +2777,13 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "aiosqlite" },
     { name = "freezegun" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
+    { name = "respx" },
     { name = "ruff" },
 ]
 
@@ -2779,7 +2792,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=23.2.1" },
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "aiosmtplib", specifier = ">=3.0.0" },
-    { name = "aiosqlite", marker = "extra == 'dev'", specifier = ">=0.21.0" },
+    { name = "aiosqlite", specifier = ">=0.21.0" },
     { name = "alembic", specifier = ">=1.13.1" },
     { name = "arq", specifier = ">=0.26.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
@@ -2819,6 +2832,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", extras = ["hiredis"], specifier = ">=5.0.0" },
+    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.22.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.4" },
     { name = "slack-sdk", extras = ["socket-mode"], specifier = ">=3.27.0" },
     { name = "slowapi", specifier = ">=0.1.9" },

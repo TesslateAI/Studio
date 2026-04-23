@@ -1,6 +1,6 @@
 # Kubernetes Quickstart
 
-Run Tesslate Studio on Kubernetes (Minikube for local dev, DigitalOcean for production).
+Run OpenSail on Kubernetes (Minikube for local dev, DigitalOcean for production).
 
 ## Local Development (Minikube)
 

@@ -1,6 +1,6 @@
 # Universal Project Setup
 
-This guide explains the `.tesslate/config.json` system, which defines how Tesslate Studio discovers, configures, and starts project containers.
+This guide explains the `.tesslate/config.json` system, which defines how OpenSail discovers, configures, and starts project containers.
 
 ## Overview
 

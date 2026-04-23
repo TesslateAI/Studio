@@ -8,7 +8,7 @@ Docker Compose configuration for local development.
 
 ## Overview
 
-Docker Compose provides a simple way to run Tesslate Studio locally for development. It includes:
+Docker Compose provides a simple way to run OpenSail locally for development. It includes:
 - Traefik reverse proxy (routing *.localhost)
 - PostgreSQL database
 - Backend orchestrator (FastAPI)

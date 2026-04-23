@@ -219,7 +219,7 @@ const VERSION = '1.0.0';"""
                 "file_path": "config.js",
                 "edits": [
                     {"search": "http://localhost:3000", "replace": "https://api.example.com"},
-                    {"search": "My App", "replace": "Tesslate Studio"},
+                    {"search": "My App", "replace": "OpenSail"},
                     {"search": "1.0.0", "replace": "2.0.0"},
                 ],
             },
@@ -233,7 +233,7 @@ const VERSION = '1.0.0';"""
         # Verify all edits were applied
         new_content = patched_orchestrator._files["config.js"]
         assert "https://api.example.com" in new_content
-        assert "Tesslate Studio" in new_content
+        assert "OpenSail" in new_content
         assert "2.0.0" in new_content
 
     @pytest.mark.asyncio
@@ -372,7 +372,7 @@ class TestPatchFileFuzzyMatching:
                     },
                     {
                         "search": "const APP_NAME = 'My App';",
-                        "replace": "const APP_NAME = 'Tesslate Studio';",
+                        "replace": "const APP_NAME = 'OpenSail';",
                     },
                 ],
             },
@@ -382,7 +382,7 @@ class TestPatchFileFuzzyMatching:
         assert "diff" in result
         patched = patched_orchestrator._files["config.js"]
         assert "https://api.example.com" in patched
-        assert "Tesslate Studio" in patched
+        assert "OpenSail" in patched
 
 
 @pytest.mark.integration

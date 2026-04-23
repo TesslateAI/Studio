@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document explains how Tesslate Studio handles Node.js dependencies (`node_modules`) in Docker containers across all platforms.
+This document explains how OpenSail handles Node.js dependencies (`node_modules`) in Docker containers across all platforms.
 
 **Source File**: `orchestrator/app/services/base_config_parser.py`
 
@@ -10,7 +10,7 @@ This document explains how Tesslate Studio handles Node.js dependencies (`node_m
 
 ## Design Principle: Never Copy node_modules
 
-Tesslate Studio **never copies `node_modules`** between filesystems. Instead, dependencies are always installed fresh inside the container on first boot.
+OpenSail **never copies `node_modules`** between filesystems. Instead, dependencies are always installed fresh inside the container on first boot.
 
 **Why?**
 

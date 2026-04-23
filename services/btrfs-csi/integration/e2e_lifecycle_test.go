@@ -305,7 +305,7 @@ func TestGC_WithHTTPKnownVolumes(t *testing.T) {
 		GracePeriod: 0,
 		DryRun:      false,
 	})
-	collector.SetOrchestratorURL(ts.URL)
+	collector.SetOrchestratorURL(ts.URL, "") // empty secret — test server has no auth
 
 	if err := collector.RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce: %v", err)

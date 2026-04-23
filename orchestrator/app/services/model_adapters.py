@@ -96,7 +96,7 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "description": "Access to 200+ AI models through a unified API",
         "base_url": "https://openrouter.ai/api/v1",
         "api_type": "openai",
-        "default_headers": {"HTTP-Referer": "https://tesslate.com", "X-Title": "Tesslate Studio"},
+        "default_headers": {"HTTP-Referer": "https://tesslate.com", "X-Title": "OpenSail"},
         "website": "https://openrouter.ai",
         "requires_key": True,
     },

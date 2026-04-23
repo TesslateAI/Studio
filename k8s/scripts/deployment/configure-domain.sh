@@ -4,7 +4,7 @@
 
 set -e
 
-echo "🌐 Tesslate Studio - Domain Configuration Helper"
+echo "🌐 OpenSail - Domain Configuration Helper"
 echo "================================================"
 echo ""
 

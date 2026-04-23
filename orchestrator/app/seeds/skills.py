@@ -248,8 +248,7 @@ OPENSOURCE_SKILLS = [
             "Efficiency suggestions",
         ],
         "github_raw_url": (
-            "https://raw.githubusercontent.com/roin-orca/skills"
-            "/main/skills/simplify/SKILL.md"
+            "https://raw.githubusercontent.com/roin-orca/skills/main/skills/simplify/SKILL.md"
         ),
         "fallback_skill_body": (
             "## Simplify\n\n"
@@ -277,7 +276,7 @@ TESSLATE_SKILLS = [
     {
         "name": "Deploy to Vercel",
         "slug": "deploy-vercel",
-        "description": "Deploy Tesslate projects to Vercel with environment setup",
+        "description": "Deploy OpenSail projects to Vercel with environment setup",
         "long_description": (
             "Tesslate skill that guides agents through deploying projects to "
             "Vercel, including vercel.json configuration, environment variables, "
@@ -363,7 +362,7 @@ TESSLATE_SKILLS = [
             "#### Vitest (Recommended for Vite projects)\n"
             "- Install: `npm install -D vitest @testing-library/react @testing-library/jest-dom`\n"
             "- Create `vitest.config.ts` with proper test environment (jsdom/happy-dom)\n"
-            "- Add test scripts to `package.json`: `\"test\": \"vitest\", \"test:coverage\": \"vitest --coverage\"`\n"
+            '- Add test scripts to `package.json`: `"test": "vitest", "test:coverage": "vitest --coverage"`\n'
             "- Set up `setupTests.ts` with testing-library matchers\n\n"
             "#### Jest (For CRA or non-Vite projects)\n"
             "- Install: `npm install -D jest @testing-library/react @testing-library/jest-dom`\n"
@@ -417,9 +416,9 @@ TESSLATE_SKILLS = [
             "- Return appropriate status codes: 200 (OK), 201 (Created), 204 (No Content), 400 (Bad Request), 401 (Unauthorized), 404 (Not Found), 422 (Unprocessable Entity)\n"
             "- Use plural nouns for collections: `/api/v1/users` not `/api/v1/user`\n\n"
             "### Response Format\n"
-            "- Wrap responses in a consistent envelope: `{\"data\": ..., \"meta\": ...}`\n"
-            "- Include pagination for list endpoints: `{\"data\": [...], \"meta\": {\"total\": 100, \"page\": 1, \"per_page\": 20}}`\n"
-            "- Use consistent error format: `{\"error\": {\"code\": \"NOT_FOUND\", \"message\": \"User not found\"}}`\n\n"
+            '- Wrap responses in a consistent envelope: `{"data": ..., "meta": ...}`\n'
+            '- Include pagination for list endpoints: `{"data": [...], "meta": {"total": 100, "page": 1, "per_page": 20}}`\n'
+            '- Use consistent error format: `{"error": {"code": "NOT_FOUND", "message": "User not found"}}`\n\n'
             "### Versioning\n"
             "- Use URL path versioning: `/api/v1/resources`\n"
             "- Never break backward compatibility within a version\n"
@@ -491,7 +490,7 @@ TESSLATE_SKILLS = [
             "COPY --from=builder /app/dist ./dist\n"
             "COPY --from=deps /app/node_modules ./node_modules\n"
             "USER app\n"
-            "CMD [\"node\", \"dist/index.js\"]\n"
+            'CMD ["node", "dist/index.js"]\n'
             "```\n\n"
             "### Docker Compose\n"
             "- Define services, networks, and volumes clearly\n"
@@ -623,7 +622,7 @@ TESSLATE_SKILLS = [
         "slug": "project-architecture",
         "description": "Full reference for .tesslate/config.json — schema, validation rules, service catalog, connections, deployments, and lifecycle tools",
         "long_description": (
-            "Canonical reference for Tesslate's project architecture: the "
+            "Canonical reference for OpenSail's project architecture: the "
             ".tesslate/config.json schema (generated live from Pydantic), "
             "startup-command validation rules, the infrastructure service "
             "catalog, connection semantics, deployment provider compatibility, "
@@ -699,7 +698,7 @@ TESSLATE_SKILLS = [
             "to bring the service online.\n"
             "5. Call `container_restart(container_name=<app>)` so the app picks "
             "up the injected env vars.\n"
-            "6. Verify with `project_control(action=\"health_check\", "
+            '6. Verify with `project_control(action="health_check", '
             "container_name=<app>)`.\n\n"
             "### Change a startup command\n\n"
             "1. Read `.tesslate/config.json` to get the current config.\n"

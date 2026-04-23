@@ -51,11 +51,11 @@ feat: fix loading screen colors
 feat: add compute manager with quota enforcement and container-id status lookup
 ```
 
-# Tesslate Studio
+# OpenSail
 
 When I have an issue, fix it for the next time it happens in a general, scalable way. For example, if a container fails on startup, ensure all future container startups work 100%.
 
-## What is Tesslate Studio?
+## What is OpenSail?
 
 AI-powered web application builder that lets users create, edit, deploy, and manage full-stack apps using natural language. Users describe what they want, an AI agent writes the code, and the platform handles containerized deployment. Projects can be published as distributable Apps on the Tesslate marketplace.
 
@@ -63,7 +63,7 @@ AI-powered web application builder that lets users create, edit, deploy, and man
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Tesslate Studio                          │
+│                    OpenSail                                 │
 ├─────────────────────────────────────────────────────────────┤
 │  Desktop (desktop/)        │  Frontend (app/)               │
 │  Tauri v2 shell            │  React + Vite + TypeScript     │
@@ -726,4 +726,4 @@ The AWS backend overlay (`k8s/overlays/aws-base/backend-patch.yaml`) uses a two-
 
 ### Frontend Config: API_URL Must NOT Include `/api`
 
-The frontend `api-url` in the `frontend-config` ConfigMap (managed by terraform `kubernetes.tf`) must be the **base domain only** (e.g., `https://your-domain.com`), NOT `https://your-domain.com/api`. All API calls in `app/src/lib/api.ts` already include the `/api` prefix in their paths, so including `/api` in the base URL causes double `/api/api/` paths.
+The frontend `api-url` in the `frontend-config` ConfigMap (managed by terraform `kubernetes.tf`) must be the **base domain only** (e.g., `https://opensail.tesslate.com`), NOT `https://opensail.tesslate.com/api`. All API calls in `app/src/lib/api.ts` already include the `/api` prefix in their paths, so including `/api` in the base URL causes double `/api/api/` paths.

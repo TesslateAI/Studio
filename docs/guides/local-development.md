@@ -1,6 +1,6 @@
 # Local Development Setup
 
-This guide covers running Tesslate Studio services natively on your machine (without Docker for the app/backend). This is useful for faster iteration and debugging with breakpoints.
+This guide covers running OpenSail services natively on your machine (without Docker for the app/backend). This is useful for faster iteration and debugging with breakpoints.
 
 > **Looking for Docker setup?** See [Docker Setup from Scratch](docker-setup.md) — the easiest way to get started.
 

@@ -28,7 +28,7 @@ REPO_ROOT="$(cd "$K8S_DIR/.." && pwd)"
 CSI_DIR="$REPO_ROOT/services/btrfs-csi"
 
 echo -e "${BLUE}=============================================${NC}"
-echo -e "${BLUE}  Tesslate Studio - Minikube Setup${NC}"
+echo -e "${BLUE}  OpenSail - Minikube Setup${NC}"
 echo -e "${BLUE}=============================================${NC}"
 echo ""
 

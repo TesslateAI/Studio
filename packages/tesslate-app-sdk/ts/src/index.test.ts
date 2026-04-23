@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { AppClient, ManifestBuilder, AppSdkHttpError } from "./index.js";
 
 const API_KEY = "tsk_test_key_abc123";
-const BASE = "https://your-domain.com";
+const BASE = "https://opensail.tesslate.com";
 
 function mockFetch(
   status: number,

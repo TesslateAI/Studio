@@ -281,7 +281,7 @@ export default function PreferencesSettings() {
   }
 
   return (
-    <SettingsSection title="Preferences" description="Customize your Tesslate Studio experience">
+    <SettingsSection title="Preferences" description="Customize your OpenSail experience">
       {/* Theme Selection */}
       <SettingsGroup title="Theme">
         <div className="p-0">

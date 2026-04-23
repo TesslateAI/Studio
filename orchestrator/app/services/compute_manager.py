@@ -322,8 +322,18 @@ class ComputeManager:
                             k8s_client.V1NetworkPolicyPort(protocol="TCP", port=53),
                         ],
                     ),
-                    # HTTP/HTTPS to external
+                    # HTTP/HTTPS to external — IMDS (169.254.169.254) is explicitly
+                    # blocked so user code running in compute pods cannot steal node
+                    # IAM credentials via the AWS metadata service.
                     k8s_client.V1NetworkPolicyEgressRule(
+                        to=[
+                            k8s_client.V1NetworkPolicyPeer(
+                                ip_block=k8s_client.V1IPBlock(
+                                    cidr="0.0.0.0/0",
+                                    _except=["169.254.169.254/32"],  # Block AWS IMDS
+                                )
+                            )
+                        ],
                         ports=[
                             k8s_client.V1NetworkPolicyPort(protocol="TCP", port=443),
                             k8s_client.V1NetworkPolicyPort(protocol="TCP", port=80),

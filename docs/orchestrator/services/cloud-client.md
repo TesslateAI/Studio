@@ -41,7 +41,7 @@ client = CloudClient(base_url="http://localhost:8000", transport=my_mock_transpo
 
 | Setting | Source | Default |
 |---------|--------|---------|
-| `tesslate_cloud_url` | `settings.tesslate_cloud_url` | `https://your-domain.com` |
+| `tesslate_cloud_url` | `settings.tesslate_cloud_url` | `https://opensail.tesslate.com` |
 | Connection pool | hardcoded | `max_connections=20`, `max_keepalive_connections=5` |
 | Request timeout | hardcoded | `30s` |
 

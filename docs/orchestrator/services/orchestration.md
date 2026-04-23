@@ -1,6 +1,6 @@
 # Container Orchestration Services
 
-Tesslate Studio uses a unified orchestration layer that abstracts Docker Compose and Kubernetes deployments behind a common interface. This allows the same codebase to run in local development (Docker) and production (Kubernetes) with minimal changes.
+OpenSail uses a unified orchestration layer that abstracts Docker Compose and Kubernetes deployments behind a common interface. This allows the same codebase to run in local development (Docker) and production (Kubernetes) with minimal changes.
 
 ## Overview
 

@@ -1,6 +1,6 @@
 # Agent Types
 
-Tesslate Studio provides three agent implementations, each optimized for different use cases. All agents inherit from the `AbstractAgent` base class and can be instantiated via the factory pattern.
+OpenSail provides three agent implementations, each optimized for different use cases. All agents inherit from the `AbstractAgent` base class and can be instantiated via the factory pattern.
 
 ## AbstractAgent Base Class
 

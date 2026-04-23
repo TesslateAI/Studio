@@ -460,7 +460,7 @@ def _build_client_metadata(*, redirect_uri: str, scope: str | None) -> OAuthClie
         token_endpoint_auth_method="client_secret_basic",
         grant_types=["authorization_code", "refresh_token"],
         response_types=["code"],
-        client_name="Tesslate Studio",
+        client_name="OpenSail",
         client_uri="https://tesslate.com",
         scope=scope,
     )
@@ -499,7 +499,7 @@ def _make_byo_client_info(
         token_endpoint_auth_method=token_endpoint_auth_method,
         grant_types=["authorization_code", "refresh_token"],
         response_types=["code"],
-        client_name="Tesslate Studio",
+        client_name="OpenSail",
         client_uri="https://tesslate.com",
         scope=scope,
         client_id=client_id,

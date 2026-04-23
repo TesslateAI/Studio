@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tesslate Studio - Environment Configuration Verifier
+OpenSail - Environment Configuration Verifier
 Cross-platform Python script to verify .env configuration
 """
 
@@ -64,7 +64,7 @@ def read_env_file(filepath='.env'):
 def print_header():
     """Print the header."""
     print(f"{Colors.CYAN}{'='*60}")
-    print("Tesslate Studio - Environment Configuration Check")
+    print("OpenSail - Environment Configuration Check")
     print(f"{'='*60}{Colors.RESET}")
     print()
 

@@ -1,4 +1,4 @@
-# Tesslate Studio - Base Kustomize Configuration
+# OpenSail - Base Kustomize Configuration
 # This is the base layer that gets patched by overlays for each environment
 # Deploy with: kubectl apply -k overlays/<environment>/
 

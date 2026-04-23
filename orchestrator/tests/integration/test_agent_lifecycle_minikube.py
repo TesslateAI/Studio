@@ -6,7 +6,7 @@ flow via the HTTP API and verifies Kubernetes resources (namespace,
 deployments, services) appear and disappear as expected via kubectl.
 
 Requirements:
-  * minikube running with Tesslate Studio deployed (`./scripts/minikube.sh start`)
+  * minikube running with OpenSail deployed (`./scripts/minikube.sh start`)
   * kubectl available with context `tesslate`
   * Environment:
       - ``MINIKUBE_INTEGRATION=1``            — enable this test
@@ -20,6 +20,7 @@ can run repeatedly without state cleanup between runs.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -54,9 +55,7 @@ def _kubectl(*args: str, check: bool = True) -> str:
     cmd = ["kubectl", f"--context={KUBECTL_CONTEXT}", *args]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if check and result.returncode != 0:
-        raise RuntimeError(
-            f"kubectl failed: {' '.join(cmd)}\nstderr: {result.stderr}"
-        )
+        raise RuntimeError(f"kubectl failed: {' '.join(cmd)}\nstderr: {result.stderr}")
     return result.stdout
 
 
@@ -88,9 +87,7 @@ def _wait_for_namespace_gone(namespace: str, timeout: int = 60) -> bool:
 
 
 def _deployments_in_namespace(namespace: str) -> list[str]:
-    out = _kubectl(
-        "get", "deployments", "-n", namespace, "-o", "json", check=False
-    )
+    out = _kubectl("get", "deployments", "-n", namespace, "-o", "json", check=False)
     if not out:
         return []
     data = json.loads(out)
@@ -184,14 +181,10 @@ def e2e_project(http_client):
     yield project
 
     # Cleanup: stop + delete project so the next run is hermetic.
-    try:
+    with contextlib.suppress(Exception):
         http_client.post(f"/api/projects/{project['slug']}/containers/stop-all")
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         http_client.delete(f"/api/projects/{project['slug']}")
-    except Exception:
-        pass
 
 
 def test_apply_setup_config_happy_path(http_client, e2e_project):
@@ -249,17 +242,13 @@ def test_container_stop_scales_down_deployment(http_client, e2e_project):
         pytest.skip("container 'app' not present — setup-config test must run first")
     container_id = app_container["id"]
 
-    resp = http_client.post(
-        f"/api/projects/{slug}/containers/{container_id}/stop"
-    )
+    resp = http_client.post(f"/api/projects/{slug}/containers/{container_id}/stop")
     assert resp.status_code == 200, resp.text
 
     # Verify the container's pods transition to not-ready or disappear.
     deadline = time.time() + 60
     while time.time() < deadline:
-        out = _kubectl(
-            "get", "pods", "-n", namespace, "-o", "json", check=False
-        )
+        out = _kubectl("get", "pods", "-n", namespace, "-o", "json", check=False)
         try:
             pods_data = json.loads(out) if out else {"items": []}
         except json.JSONDecodeError:
@@ -278,9 +267,7 @@ def test_container_stop_scales_down_deployment(http_client, e2e_project):
             break
         time.sleep(2)
     else:
-        pytest.fail(
-            f"App pods in {namespace} are still ready 60s after container stop"
-        )
+        pytest.fail(f"App pods in {namespace} are still ready 60s after container stop")
 
 
 def test_project_stop_tears_down_namespace(http_client, e2e_project):

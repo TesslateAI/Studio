@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Tesslate Studio - Complete k3s Setup Script
+# OpenSail - Complete k3s Setup Script
 # Much simpler than kubeadm, perfect for single-node production
 
 set -e
@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_IP=${1:-""}
 
 echo "========================================"
-echo "Tesslate Studio - k3s Setup"
+echo "OpenSail - k3s Setup"
 echo "Simpler, lighter, production-ready!"
 echo "========================================"
 
@@ -22,7 +22,7 @@ if [ -z "$SERVER_IP" ]; then
     echo "  2. Configure kubectl"
     echo "  3. Install NGINX Ingress (optional, k3s has Traefik)"
     echo "  4. Build application images"
-    echo "  5. Deploy Tesslate Studio"
+    echo "  5. Deploy OpenSail"
     exit 1
 fi
 
@@ -91,7 +91,7 @@ echo ">>> Building Docker images..."
 bash $SCRIPT_DIR/build-images.sh
 
 echo ""
-echo ">>> Deploying Tesslate Studio..."
+echo ">>> Deploying OpenSail..."
 bash $SCRIPT_DIR/deploy-tesslate-k3s.sh
 
 echo ""
@@ -99,7 +99,7 @@ echo "========================================"
 echo "k3s Setup Complete!"
 echo "========================================"
 echo ""
-echo "Tesslate Studio is now running on k3s!"
+echo "OpenSail is now running on k3s!"
 echo ""
 echo "Access points:"
 echo "  Web Interface: http://$SERVER_IP:30080"

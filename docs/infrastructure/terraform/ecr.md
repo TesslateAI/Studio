@@ -1,6 +1,6 @@
 # ECR Container Registry
 
-Amazon ECR repositories for Tesslate Studio images.
+Amazon ECR repositories for OpenSail images.
 
 **File**: `k8s/terraform/aws/ecr.tf`
 

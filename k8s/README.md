@@ -1,6 +1,6 @@
-# Tesslate Studio Kubernetes Deployment
+# OpenSail Kubernetes Deployment
 
-This directory contains all Kubernetes manifests and scripts for deploying Tesslate Studio to DigitalOcean Managed Kubernetes (DOKS).
+This directory contains all Kubernetes manifests and scripts for deploying OpenSail to DigitalOcean Managed Kubernetes (DOKS).
 
 ## Directory Structure
 

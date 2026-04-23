@@ -215,7 +215,7 @@ class FrameworkDetector:
     @staticmethod
     def is_framework_supported(framework: str) -> bool:
         """
-        Check if a framework is fully supported by Tesslate Studio.
+        Check if a framework is fully supported by OpenSail.
 
         Args:
             framework: Framework name
@@ -239,7 +239,7 @@ class FrameworkDetector:
             Human-readable compatibility message
         """
         compatibility_messages = {
-            "vite": "Fully supported - Optimized for Tesslate Studio",
+            "vite": "Fully supported - Optimized for OpenSail",
             "nextjs": "Experimental support - Some features may not work correctly",
             "create-react-app": "Experimental support - Consider migrating to Vite for better performance",
         }

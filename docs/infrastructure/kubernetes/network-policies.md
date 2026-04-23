@@ -1,6 +1,6 @@
 # Network Policies
 
-Network security configuration for Tesslate Studio's Kubernetes deployment.
+Network security configuration for OpenSail's Kubernetes deployment.
 
 **File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/base/security/network-policies.yaml`
 

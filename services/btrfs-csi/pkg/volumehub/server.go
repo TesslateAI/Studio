@@ -66,7 +66,8 @@ type Server struct {
 	resolveAddr     NodeAddrResolver
 	liveNodes       LiveNodesFn
 	resWatcher      *ResourceWatcher // standalone resource headroom (no registry dependency)
-	orchestratorURL string           // base URL for volume event callbacks (fire-and-forget)
+	orchestratorURL    string // base URL for volume event callbacks (fire-and-forget)
+	orchestratorSecret string // X-Internal-Secret header value for /api/internal/* auth
 	srv             *grpc.Server
 
 	mu       sync.Mutex
@@ -94,9 +95,10 @@ func NewServer(registry *NodeRegistry, casStore *cas.Store, nodeClient NodeClien
 // SetOrchestratorURL enables volume event callbacks to the orchestrator.
 // The Hub POSTs to {url}/api/internal/volume-events after completing async
 // operations (EnsureCached, DeleteVolume) so the frontend can be notified
-// in real time via WebSocket.
-func (s *Server) SetOrchestratorURL(url string) {
+// in real time via WebSocket.  secret is sent as X-Internal-Secret.
+func (s *Server) SetOrchestratorURL(url, secret string) {
 	s.orchestratorURL = url
+	s.orchestratorSecret = secret
 }
 
 // cleanupSourceAfterTransfer deletes the stale volume copy on the source node
@@ -127,12 +129,17 @@ func (s *Server) notifyOrchestrator(volumeID, event string) {
 			"volume_id": volumeID,
 			"event":     event,
 		})
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Post(
-			s.orchestratorURL+"/api/internal/volume-events",
-			"application/json",
-			bytes.NewReader(body),
-		)
+		httpClient := &http.Client{Timeout: 5 * time.Second}
+		req, err := http.NewRequest("POST", s.orchestratorURL+"/api/internal/volume-events", bytes.NewReader(body))
+		if err != nil {
+			klog.V(2).Infof("notifyOrchestrator: build request: %v (non-fatal)", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if s.orchestratorSecret != "" {
+			req.Header.Set("X-Internal-Secret", s.orchestratorSecret)
+		}
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			klog.V(2).Infof("notifyOrchestrator: %v (non-fatal)", err)
 			return

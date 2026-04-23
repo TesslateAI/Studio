@@ -1,6 +1,6 @@
 # Page Layouts Documentation
 
-**Purpose**: This context provides guidance for working with the page layout system in Tesslate Studio, which provides consistent structure for settings and marketplace pages.
+**Purpose**: This context provides guidance for working with the page layout system in OpenSail, which provides consistent structure for settings and marketplace pages.
 
 ## When to Load This Context
 

@@ -6,7 +6,7 @@ Configuration for local Kubernetes development using Minikube.
 
 ## Overview
 
-The Minikube overlay configures Tesslate Studio for local testing with:
+The Minikube overlay configures OpenSail for local testing with:
 - Local Docker images (no registry)
 - MinIO for S3 storage
 - Reduced resource limits

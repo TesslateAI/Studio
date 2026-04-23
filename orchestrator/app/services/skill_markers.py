@@ -69,9 +69,7 @@ def _render_service_catalog() -> str:
 
     # Only list runnable/container services + external providers; skip
     # deployment targets (rendered separately).
-    relevant = [
-        s for s in SERVICES.values() if s.service_type != ServiceType.DEPLOYMENT_TARGET
-    ]
+    relevant = [s for s in SERVICES.values() if s.service_type != ServiceType.DEPLOYMENT_TARGET]
     # Group by category for easier reading.
     by_category: dict[str, list] = {}
     for svc in relevant:
@@ -91,9 +89,7 @@ def _render_service_catalog() -> str:
             outputs = ", ".join(f"`{k}`" for k in svc.outputs) if svc.outputs else "—"
             image = f"`{svc.docker_image}`" if svc.docker_image else "external"
             port = str(svc.internal_port or svc.default_port or "—")
-            lines.append(
-                f"| `{svc.slug}` | {svc.name} | {image} | {port} | {outputs} |"
-            )
+            lines.append(f"| `{svc.slug}` | {svc.name} | {image} | {port} | {outputs} |")
 
     # Connection-template examples for the two most common DB services.
     examples: list[str] = []
@@ -119,7 +115,7 @@ def _render_service_catalog() -> str:
 def _render_connection_semantics() -> str:
     """What a connections edge actually does."""
     return (
-        "A `connections` entry `{\"from_node\": \"A\", \"to_node\": \"B\"}` "
+        'A `connections` entry `{"from_node": "A", "to_node": "B"}` '
         "declares **three things** at once:\n\n"
         "1. **Startup ordering** — `A` is started after `B` is healthy.\n"
         "2. **Env-var injection** — `B`'s `outputs` / `connection_template` "
@@ -186,7 +182,7 @@ def _render_url_patterns() -> str:
         "`http://my-app-abc-frontend.localhost`.\n"
         "- **Kubernetes** — `https://<project-slug>-<container-name>."
         "<app-domain>` via NGINX Ingress. Example: "
-        "`https://my-app-abc-frontend.your-domain.com`.\n"
+        "`https://my-app-abc-frontend.opensail.tesslate.com`.\n"
         "- **Internal service DNS (K8s only)** — `http://dev-<container-dir>."
         "proj-<project-id>.svc.cluster.local:<port>` for pod-to-pod calls. "
         "Used by `project_control`'s `health_check` action.\n\n"
@@ -216,8 +212,8 @@ def _render_lifecycle_tools() -> str:
         "```\n"
         "apply_setup_config(config=…)            # write + sync graph\n"
         "container_restart(container_name=…)     # for each affected app\n"
-        "project_control(action=\"health_check\", container_name=…)\n"
-        "project_control(action=\"container_logs\", container_name=…) if unhealthy\n"
+        'project_control(action="health_check", container_name=…)\n'
+        'project_control(action="container_logs", container_name=…) if unhealthy\n'
         "```\n"
     )
 

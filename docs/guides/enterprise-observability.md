@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add enterprise-grade, vendor-neutral observability to Tesslate Studio. As an open-source product, we emit data in **standard formats** (OpenTelemetry, structured JSON) so self-hosters plug in their own stack (Datadog, Splunk, Grafana, New Relic, etc.). We **don't bundle** a specific observability stack — operators choose their own.
+Add enterprise-grade, vendor-neutral observability to OpenSail. As an open-source product, we emit data in **standard formats** (OpenTelemetry, structured JSON) so self-hosters plug in their own stack (Datadog, Splunk, Grafana, New Relic, etc.). We **don't bundle** a specific observability stack — operators choose their own.
 
 ---
 

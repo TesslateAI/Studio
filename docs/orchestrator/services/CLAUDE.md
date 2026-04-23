@@ -1,6 +1,6 @@
 # Services Layer - Agent Context
 
-**Purpose**: Business logic layer for Tesslate Studio backend operations
+**Purpose**: Business logic layer for OpenSail backend operations
 
 **Load this context when**: Developing or modifying service layer business logic, implementing new features that require orchestration/storage/payments/deployments
 

@@ -1,5 +1,5 @@
 @echo off
-echo Starting Tesslate Studio...
+echo Starting OpenSail...
 echo.
 echo WARNING: This script starts services WITHOUT Traefik!
 echo User dev containers will NOT work. Use start-all-with-traefik.bat instead.

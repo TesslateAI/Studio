@@ -1,12 +1,12 @@
-# Tesslate Studio Guides
+# OpenSail Guides
 
-Practical how-to guides for developing, deploying, and extending Tesslate Studio.
+Practical how-to guides for developing, deploying, and extending OpenSail.
 
 ## Getting Started
 
 | Guide | Description | When to Use |
 |-------|-------------|-------------|
-| [Docker Setup](docker-setup.md) | Set up Tesslate Studio from scratch with Docker Compose | **Start here** — first-time setup, new developers |
+| [Docker Setup](docker-setup.md) | Set up OpenSail from scratch with Docker Compose | **Start here** — first-time setup, new developers |
 | [Local Development](local-development.md) | Run backend/frontend natively (without Docker) | Faster iteration, debugging |
 | [Minikube Setup](minikube-setup.md) | Deploy to local Kubernetes cluster | Testing K8s features locally |
 | [AWS Deployment](aws-deployment.md) | Deploy to AWS EKS production | Production deployment |

@@ -1,5 +1,5 @@
 # =============================================================================
-# Terraform Variables for Tesslate Studio AWS EKS
+# Terraform Variables for OpenSail AWS EKS
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -204,6 +204,12 @@ variable "postgres_password" {
 
 variable "app_secret_key" {
   description = "Application secret key for JWT signing"
+  type        = string
+  sensitive   = true
+}
+
+variable "internal_api_secret" {
+  description = "Shared secret for cluster-internal /api/internal/* endpoints (Hub GC, btrfs CSI)"
   type        = string
   sensitive   = true
 }

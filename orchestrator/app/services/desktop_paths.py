@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 def resolve_studio_home(explicit: str | None = None) -> Path:
-    """Return the Tesslate Studio home directory for the desktop shell.
+    """Return the OpenSail home directory for the desktop shell.
 
     The directory is NOT created here — callers that need it materialized
     should call :func:`ensure_studio_home`.

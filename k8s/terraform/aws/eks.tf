@@ -1,5 +1,5 @@
 # =============================================================================
-# EKS Cluster Configuration for Tesslate Studio
+# EKS Cluster Configuration for OpenSail
 # =============================================================================
 # Creates an EKS cluster with managed node groups, EBS CSI driver,
 # and required OIDC provider for IRSA (IAM Roles for Service Accounts).
@@ -89,6 +89,15 @@ module "eks" {
       iam_role_name            = "tess-${var.environment}-primary-node"
       iam_role_use_name_prefix = false
 
+      # IMDSv2 enforcement: hop-limit=1 means pod → veth → IMDS is 2 hops,
+      # so the IMDS service drops the response before it reaches the pod.
+      # Nodes themselves (kubelet) still work (1 hop).  Blocks IMDS credential theft.
+      metadata_options = {
+        http_endpoint               = "enabled"
+        http_tokens                 = "required"  # IMDSv2 only — blocks v1 theft
+        http_put_response_hop_limit = 1           # pod network adds an extra hop
+      }
+
       labels = {
         role        = "primary"
         environment = var.environment
@@ -135,6 +144,14 @@ module "eks" {
         role        = "spot"
         environment = var.environment
         "tesslate.io/workload-type" = "user-project"
+      }
+
+      # Same IMDSv2 enforcement as the primary node group — spot instances are
+      # shared infrastructure and must not expose IMDS to user pods.
+      metadata_options = {
+        http_endpoint               = "enabled"
+        http_tokens                 = "required"
+        http_put_response_hop_limit = 1
       }
 
       taints = [

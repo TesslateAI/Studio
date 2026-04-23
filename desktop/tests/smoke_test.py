@@ -231,7 +231,7 @@ def test_manual_updater_prompt():
     Setup notes:
       - Generate a keypair:   cargo tauri signer generate
       - Store private key as CI secret TAURI_SIGNING_PRIVATE_KEY.
-      - Publish latest.json to https://your-domain.com/desktop/releases/latest.json.
+      - Publish latest.json to https://opensail.tesslate.com/desktop/releases/latest.json.
       - Replace the PLACEHOLDER pubkey in tauri.conf.json with the public key output.
     """
     pytest.skip("Run manually — requires signed release manifest")

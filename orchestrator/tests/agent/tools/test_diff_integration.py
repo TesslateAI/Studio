@@ -203,7 +203,7 @@ src/App.jsx
 <<<<<<< SEARCH
     <Header title="My App" />
 =======
-    <Header title="Tesslate Studio" />
+    <Header title="OpenSail" />
 >>>>>>> REPLACE
 ```
 
@@ -232,7 +232,7 @@ src/components/Header.jsx
         edits = [(e.search_content, e.replace_content) for e in edits_by_file["src/App.jsx"]]
         result = apply_multiple_edits(app_content, edits, fuzzy=True)
         assert result.success, f"Failed to edit App.jsx: {result.error}"
-        assert 'title="Tesslate Studio"' in result.content
+        assert 'title="OpenSail"' in result.content
         print("   ✅ src/App.jsx updated")
 
     # Edit Header.jsx

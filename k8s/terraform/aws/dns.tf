@@ -28,7 +28,7 @@ locals {
 }
 
 # -----------------------------------------------------------------------------
-# Base domain CNAME → NLB (e.g., your-domain.com → NLB)
+# Base domain CNAME → NLB (e.g., opensail.tesslate.com → NLB)
 # -----------------------------------------------------------------------------
 resource "cloudflare_record" "domain" {
   count = var.cloudflare_zone_id != "" ? 1 : 0
@@ -51,7 +51,7 @@ resource "cloudflare_record" "domain" {
 }
 
 # -----------------------------------------------------------------------------
-# Wildcard CNAME → NLB (e.g., *.your-domain.com → NLB)
+# Wildcard CNAME → NLB (e.g., *.opensail.tesslate.com → NLB)
 # Required for user project subdomains
 # -----------------------------------------------------------------------------
 resource "cloudflare_record" "wildcard" {

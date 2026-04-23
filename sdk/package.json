@@ -1,7 +1,7 @@
 {
   "name": "@tesslate/sdk",
   "version": "0.1.0",
-  "description": "TypeScript SDK for the Tesslate Studio API",
+  "description": "TypeScript SDK for the OpenSail API",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

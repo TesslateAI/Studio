@@ -1,6 +1,6 @@
 # Dockerfile Documentation
 
-Docker image definitions for Tesslate Studio.
+Docker image definitions for OpenSail.
 
 ## Backend (orchestrator/Dockerfile)
 

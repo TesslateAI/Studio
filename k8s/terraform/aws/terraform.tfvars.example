@@ -1,5 +1,5 @@
 # =============================================================================
-# Tesslate Studio - AWS EKS Terraform Variables
+# OpenSail - AWS EKS Terraform Variables
 # =============================================================================
 # Copy this file to terraform.{environment}.tfvars and fill in your values.
 # DO NOT commit terraform.*.tfvars to version control!
@@ -86,6 +86,12 @@ postgres_password = "your-secure-postgres-password"
 # Application secret key for JWT signing
 # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
 app_secret_key = "your-app-secret-key"
+
+# Internal API shared secret — authenticates Hub GC and btrfs CSI calls to /api/internal/*
+# Must be unique per environment. Same value is written to both tesslate-app-secrets
+# (as INTERNAL_API_SECRET) and tesslate-btrfs-csi-config (as ORCHESTRATOR_INTERNAL_SECRET).
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+internal_api_secret = "your-internal-api-secret"
 
 # -----------------------------------------------------------------------------
 # LiteLLM Configuration (REQUIRED for AI features)

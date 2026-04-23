@@ -19,7 +19,7 @@ Both environments configure:
 - AWS S3 for project storage
 - TLS with cert-manager
 - Environment-specific resource limits
-- Domains: `your-domain.com` (beta), `your-domain.com` (production)
+- Domains: `your-domain.com` (beta), `opensail.tesslate.com` (production)
 
 ## Key Configuration
 

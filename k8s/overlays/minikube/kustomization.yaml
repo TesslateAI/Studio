@@ -1,5 +1,5 @@
 # Minikube Overlay for Local Development
-# Configures Tesslate Studio for local Minikube cluster with MinIO
+# Configures OpenSail for local Minikube cluster with MinIO
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

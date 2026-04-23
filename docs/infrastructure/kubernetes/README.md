@@ -1,10 +1,10 @@
 # Kubernetes Infrastructure
 
-This directory documents Tesslate Studio's Kubernetes deployment configuration using Kustomize.
+This directory documents OpenSail's Kubernetes deployment configuration using Kustomize.
 
 ## Overview
 
-Tesslate Studio uses **Kustomize** for Kubernetes manifest management, with a base configuration that is customized per environment using overlays.
+OpenSail uses **Kustomize** for Kubernetes manifest management, with a base configuration that is customized per environment using overlays.
 
 **Location**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/`
 
@@ -154,7 +154,7 @@ kubectl port-forward -n tesslate svc/tesslate-backend-service 8000:8000
 - Image pull policy: `Always` (check for updates)
 - Storage class: `tesslate-block-storage` (EBS gp3)
 - S3: Native AWS S3 via IRSA
-- Domain: `your-domain.com` (beta), `your-domain.com` (production)
+- Domain: `your-domain.com` (beta), `opensail.tesslate.com` (production)
 - TLS: Enabled via cert-manager
 
 **Overlays**: Split into shared base + environment-specific patches:
@@ -172,7 +172,7 @@ kubectl port-forward -n tesslate svc/tesslate-backend-service 8000:8000
 **Access**:
 ```
 https://your-domain.com          (beta)
-https://your-domain.com   (production)
+https://opensail.tesslate.com   (production)
 ```
 
 ## Resource Limits

@@ -17,42 +17,47 @@ interface WalkthroughStep {
 const WALKTHROUGH_STEPS: WalkthroughStep[] = [
   {
     id: 'welcome',
-    title: 'Welcome to Tesslate Studio! 👋',
-    description: 'Hey there! I\'m excited to show you around. Tesslate Studio is where you build software with AI agents. Let me give you a quick tour!',
+    title: 'Welcome to OpenSail! 👋',
+    description:
+      "Hey there! I'm excited to show you around. OpenSail is where you build software with AI agents. Let me give you a quick tour!",
     position: 'center',
-    showContinueButton: true
+    showContinueButton: true,
   },
   {
     id: 'navigate-marketplace',
     title: 'Step 1: Get an AI Agent',
-    description: 'First, click the Marketplace button to browse AI agents. These agents will help you build your projects!',
+    description:
+      'First, click the Marketplace button to browse AI agents. These agents will help you build your projects!',
     targetElement: '[data-tour="marketplace-link"]',
     position: 'right',
-    action: 'Click Marketplace →'
+    action: 'Click Marketplace →',
   },
   {
     id: 'marketplace-agents',
     title: 'Pick a Stream Builder Agent',
-    description: 'Here in Tesslate Studio, you can pick or make your own agents! Look for a "Stream Builder" type agent - try the "Full Stack Agent" (it\'s free). Click "Install" to add it to your library.',
+    description:
+      'Here in OpenSail, you can pick or make your own agents! Look for a "Stream Builder" type agent - try the "Full Stack Agent" (it\'s free). Click "Install" to add it to your library.',
     position: 'center',
     route: '/marketplace',
-    showContinueButton: true
+    showContinueButton: true,
   },
   {
     id: 'marketplace-bases-tab',
     title: 'Step 2: Now Get a Base Template',
-    description: 'Great! Now click the "Bases" tab at the top to see project templates. Bases give you a head start on your projects.',
+    description:
+      'Great! Now click the "Bases" tab at the top to see project templates. Bases give you a head start on your projects.',
     position: 'center',
     route: '/marketplace',
-    showContinueButton: true
+    showContinueButton: true,
   },
   {
     id: 'marketplace-bases',
     title: 'Pick a Base Template',
-    description: 'Perfect! Pick any base you like and click "Install" - we recommend the Next.js base for modern web apps!',
+    description:
+      'Perfect! Pick any base you like and click "Install" - we recommend the Next.js base for modern web apps!',
     position: 'center',
     route: '/marketplace',
-    showContinueButton: true
+    showContinueButton: true,
   },
   {
     id: 'navigate-library',
@@ -60,39 +65,43 @@ const WALKTHROUGH_STEPS: WalkthroughStep[] = [
     description: 'Awesome! Now click the Library button to manage your agents.',
     targetElement: '[data-tour="library-link"]',
     position: 'bottom',
-    route: '/marketplace'
+    route: '/marketplace',
   },
   {
     id: 'library-enable-agent',
     title: 'Enable Your Agent',
-    description: 'This is your library! Find the agent you added and make sure it\'s "Active" (green badge). Click "Enable" if it shows as "Disabled". Active agents can be used in your projects!',
+    description:
+      'This is your library! Find the agent you added and make sure it\'s "Active" (green badge). Click "Enable" if it shows as "Disabled". Active agents can be used in your projects!',
     position: 'center',
     route: '/library',
-    showContinueButton: true
+    showContinueButton: true,
   },
   {
     id: 'navigate-dashboard',
     title: 'Step 4: Create a Project',
-    description: 'Perfect! Now let\'s head back to the Dashboard to create your first project. Click the Back button.',
+    description:
+      "Perfect! Now let's head back to the Dashboard to create your first project. Click the Back button.",
     targetElement: '[data-tour="dashboard-link"]',
     position: 'bottom',
-    route: '/library'
+    route: '/library',
   },
   {
     id: 'create-project-intro',
     title: 'Create Your First Project',
-    description: 'Almost there! Click the "New Project" button. You\'ll choose your enabled agent and base to start building!',
+    description:
+      'Almost there! Click the "New Project" button. You\'ll choose your enabled agent and base to start building!',
     targetElement: '[data-tour="create-project"]',
     position: 'bottom',
-    route: '/'
+    route: '/',
   },
   {
     id: 'complete',
-    title: 'You\'re Ready to Build! 🎉',
-    description: 'That\'s it! Create a project, chat with your AI agent in the project page, and watch your ideas come to life. Need help? Click the Discord button anytime. Happy building!',
+    title: "You're Ready to Build! 🎉",
+    description:
+      "That's it! Create a project, chat with your AI agent in the project page, and watch your ideas come to life. Need help? Click the Discord button anytime. Happy building!",
     position: 'center',
-    showContinueButton: true
-  }
+    showContinueButton: true,
+  },
 ];
 
 interface WalkthroughProps {
@@ -118,18 +127,18 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
           element.scrollIntoView({
             behavior: 'smooth',
             block: 'center',
-            inline: 'center'
+            inline: 'center',
           });
 
           // Also scroll to center if needed
           setTimeout(() => {
             const rect = element.getBoundingClientRect();
             const absoluteTop = window.pageYOffset + rect.top;
-            const middle = absoluteTop - (window.innerHeight / 2) + (rect.height / 2);
+            const middle = absoluteTop - window.innerHeight / 2 + rect.height / 2;
 
             window.scrollTo({
               top: middle,
-              behavior: 'smooth'
+              behavior: 'smooth',
             });
           }, 100);
 
@@ -194,7 +203,7 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
 
   const handleNext = () => {
     if (currentStep < WALKTHROUGH_STEPS.length - 1) {
-      setCurrentStep(prev => prev + 1);
+      setCurrentStep((prev) => prev + 1);
     } else {
       handleComplete();
     }
@@ -216,7 +225,7 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
       return {
         top: '50%',
         left: '50%',
-        transform: 'translate(-50%, -50%)'
+        transform: 'translate(-50%, -50%)',
       };
     }
 
@@ -229,7 +238,7 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
         bottom: '24px',
         left: '16px',
         right: '16px',
-        transform: 'none'
+        transform: 'none',
       };
     }
 
@@ -269,7 +278,7 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
       return {
         bottom: '220px',
         left: `${targetRect.left + targetRect.width / 2}px`,
-        transform: 'translateX(-50%) rotate(180deg)'
+        transform: 'translateX(-50%) rotate(180deg)',
       };
     }
 
@@ -330,7 +339,7 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
                   width: targetRect.width + 16,
                   height: targetRect.height + 16,
                   border: '4px solid var(--primary)',
-                  boxShadow: '0 0 0 4px rgba(255, 107, 53, 0.3), 0 0 40px rgba(255, 107, 53, 0.6)'
+                  boxShadow: '0 0 0 4px rgba(255, 107, 53, 0.3), 0 0 40px rgba(255, 107, 53, 0.6)',
                 }}
               />
 
@@ -342,16 +351,16 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
                   top: targetRect.top - 8,
                   width: targetRect.width + 16,
                   height: targetRect.height + 16,
-                  border: '3px solid var(--primary)'
+                  border: '3px solid var(--primary)',
                 }}
                 animate={{
                   opacity: [0.3, 0.8, 0.3],
-                  scale: [1, 1.08, 1]
+                  scale: [1, 1.08, 1],
                 }}
                 transition={{
                   duration: 2,
                   repeat: Infinity,
-                  ease: 'easeInOut'
+                  ease: 'easeInOut',
                 }}
               />
             </>
@@ -368,12 +377,12 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
             >
               <motion.div
                 animate={{
-                  y: [-4, 4, -4]
+                  y: [-4, 4, -4],
                 }}
                 transition={{
                   duration: 1.5,
                   repeat: Infinity,
-                  ease: 'easeInOut'
+                  ease: 'easeInOut',
                 }}
               >
                 <HandPointing
@@ -446,12 +455,12 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
                           index === currentStep
                             ? 'bg-[var(--primary)]'
                             : index < currentStep
-                            ? 'bg-[var(--primary)]/60'
-                            : 'bg-white/20'
+                              ? 'bg-[var(--primary)]/60'
+                              : 'bg-white/20'
                         }`}
                         initial={false}
                         animate={{
-                          width: index === currentStep ? 48 : 8
+                          width: index === currentStep ? 48 : 8,
                         }}
                       />
                     ))}
@@ -483,9 +492,7 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
                         whileTap={{ scale: 0.95 }}
                       >
                         <span>
-                          {currentStep === WALKTHROUGH_STEPS.length - 1
-                            ? "Let's Go!"
-                            : 'Continue'}
+                          {currentStep === WALKTHROUGH_STEPS.length - 1 ? "Let's Go!" : 'Continue'}
                         </span>
                         {currentStep === WALKTHROUGH_STEPS.length - 1 ? (
                           <Check className="w-5 h-5" weight="bold" />
@@ -509,12 +516,12 @@ export function Walkthrough({ onComplete, onSkip }: WalkthroughProps) {
               className="absolute -inset-4 bg-[var(--primary)]/15 rounded-3xl blur-2xl -z-10"
               animate={{
                 opacity: [0.3, 0.5, 0.3],
-                scale: [0.95, 1.05, 0.95]
+                scale: [0.95, 1.05, 0.95],
               }}
               transition={{
                 duration: 3,
                 repeat: Infinity,
-                ease: 'easeInOut'
+                ease: 'easeInOut',
               }}
             />
           </motion.div>
