@@ -11,12 +11,10 @@ import { WalletProvider } from './contexts/WalletContext';
 import { AdminProvider } from './contexts/AdminContext';
 import { CommandProvider } from './contexts/CommandContext';
 import { FeatureFlagProvider } from './contexts/FeatureFlagContext';
-import { useFeatureFlags } from './contexts/useFeatureFlag';
 import { DashboardLayout } from './components/DashboardLayout';
 import { PrivateRoute, PublicOnlyRoute } from './components/RouteGuards';
 import { TitleBar } from './components/desktop/TitleBar';
 import Landing from './pages/Landing';
-import NewLandingPage from './pages/NewLandingPage';
 import Login from './pages/Login';
 import MagicLinkConsume from './pages/MagicLinkConsume';
 import Register from './pages/Register';
@@ -86,16 +84,6 @@ if (IS_TAURI) document.body.classList.add('tauri-shell');
 function CategoryRedirect() {
   const { category } = useParams();
   return <Navigate to={`/marketplace/browse/agent?category=${category}`} replace />;
-}
-
-function LandingRoute() {
-  const { flags } = useFeatureFlags();
-  if (flags.enable_landing_page === false) {
-    // In desktop (Tauri) mode skip the marketing page and go straight to the
-    // dashboard; PrivateRoute will send unauthenticated users to /login.
-    return <Navigate to={IS_TAURI ? '/home' : '/login'} replace />;
-  }
-  return <NewLandingPage />;
 }
 
 function AppContent() {
@@ -280,7 +268,7 @@ function AppContent() {
         )}
       </Toaster>
       <Routes>
-        <Route path="/" element={<LandingRoute />} />
+        <Route path="/" element={<Navigate to="/home" replace />} />
         <Route path="/landing-old" element={<Landing />} />
         <Route
           path="/login"

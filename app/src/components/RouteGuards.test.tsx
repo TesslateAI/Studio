@@ -65,7 +65,6 @@ interface RouteSpec {
  */
 const ROUTE_CONFIG: RouteSpec[] = [
   // --- Public pages (no guard) ---
-  { path: '/', guard: 'public', label: 'Landing page' },
   { path: '/landing-old', guard: 'public', label: 'Old landing page' },
   { path: '/import', guard: 'public', label: 'Import redirect (deep link)' },
   { path: '/forgot-password', guard: 'public', label: 'Forgot password' },
