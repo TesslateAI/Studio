@@ -14,7 +14,6 @@ import { FeatureFlagProvider } from './contexts/FeatureFlagContext';
 import { DashboardLayout } from './components/DashboardLayout';
 import { PrivateRoute, PublicOnlyRoute } from './components/RouteGuards';
 import { TitleBar } from './components/desktop/TitleBar';
-import Landing from './pages/Landing';
 import Login from './pages/Login';
 import MagicLinkConsume from './pages/MagicLinkConsume';
 import Register from './pages/Register';
@@ -269,7 +268,6 @@ function AppContent() {
       </Toaster>
       <Routes>
         <Route path="/" element={<Navigate to="/home" replace />} />
-        <Route path="/landing-old" element={<Landing />} />
         <Route
           path="/login"
           element={
