@@ -62,7 +62,8 @@ type Driver struct {
 	consolidationRetention int
 	nodeOpsPort    int    // Port for nodeops gRPC server (for node mode)
 	hubGRPCPort     int // VolumeHub gRPC listen port (hub mode)
-	orchestratorURL string
+	orchestratorURL            string
+	orchestratorInternalSecret string // X-Internal-Secret for /api/internal/* endpoints
 	drainPort       int
 	drainSrv        *http.Server
 	defaultQuota    int64 // Default per-volume storage quota in bytes (0 = unlimited)
@@ -161,8 +162,9 @@ func WithHubGRPCPort(grpcPort int) Option {
 	}
 }
 
-func WithHubAddress(addr string) Option        { return func(d *Driver) { d.hubAddress = addr } }
-func WithOrchestratorURL(url string) Option { return func(d *Driver) { d.orchestratorURL = url } }
+func WithHubAddress(addr string) Option                   { return func(d *Driver) { d.hubAddress = addr } }
+func WithOrchestratorURL(url string) Option               { return func(d *Driver) { d.orchestratorURL = url } }
+func WithOrchestratorInternalSecret(s string) Option      { return func(d *Driver) { d.orchestratorInternalSecret = s } }
 func WithDrainPort(port int) Option         { return func(d *Driver) { d.drainPort = port } }
 func WithDefaultQuota(bytes int64) Option   { return func(d *Driver) { d.defaultQuota = bytes } }
 
@@ -309,7 +311,7 @@ func (d *Driver) runNode(ctx context.Context) error {
 		DryRun:      false,
 	})
 	if d.orchestratorURL != "" {
-		gcCollector.SetOrchestratorURL(d.orchestratorURL)
+		gcCollector.SetOrchestratorURL(d.orchestratorURL, d.orchestratorInternalSecret)
 		klog.Infof("GC collector wired to orchestrator at %s", d.orchestratorURL)
 	}
 	go gcCollector.Start(ctx)
@@ -463,7 +465,7 @@ func (d *Driver) runHub(ctx context.Context) error {
 	// Start VolumeHub gRPC server with CAS store for manifest reads.
 	hubSrv := volumehub.NewServer(registry, casStore, nodeClientFactory, resolver.Resolve, resolver.NodeNames, resWatcher)
 	if d.orchestratorURL != "" {
-		hubSrv.SetOrchestratorURL(d.orchestratorURL)
+		hubSrv.SetOrchestratorURL(d.orchestratorURL, d.orchestratorInternalSecret)
 	}
 	d.hubServer = hubSrv // store for CSI controller access
 

@@ -7,6 +7,17 @@ class Settings(BaseSettings):
     # Security - MUST be set via environment
     secret_key: str = ""
 
+    # Internal API shared secret — used by cluster-internal callers (Hub GC, btrfs CSI)
+    # to authenticate /api/internal/* endpoints.  Must be non-empty in kubernetes/docker
+    # modes; desktop mode skips this check (Hub does not run on desktop).
+    # Generate: python -c "import secrets; print(secrets.token_hex(32))"
+    internal_api_secret: str = ""
+
+    # Seconds after process start during which a missing/wrong secret is warned but
+    # allowed through, giving the Hub pod time to roll over alongside the backend.
+    # Set to 0 in production once both sides are confirmed stable.
+    internal_secret_grace_seconds: int = 60
+
     # Database - PostgreSQL required
     database_url: str
     database_ssl: bool = False  # Set to True for RDS connections

@@ -9,6 +9,14 @@ metadata:
   namespace: tesslate
   annotations:
     kubernetes.io/ingress.class: nginx
+    # Block /api/internal/* at the edge before routing — defence-in-depth on top of
+    # NetworkPolicy and X-Internal-Secret auth.  Cluster-internal callers (Hub, GC)
+    # must use the ClusterIP DNS name (tesslate-backend-service.tesslate.svc) directly.
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~* ^/api/internal/ {
+        deny all;
+        return 403;
+      }
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"

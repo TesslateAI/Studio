@@ -112,6 +112,12 @@ spec:
             secretKeyRef:
               name: tesslate-app-secrets
               key: SECRET_KEY
+        - name: INTERNAL_API_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: INTERNAL_API_SECRET
+              optional: true
 
         # LiteLLM Configuration
         - name: LITELLM_API_BASE

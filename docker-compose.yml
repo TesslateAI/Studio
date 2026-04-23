@@ -104,6 +104,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-dev-secret-changeme}
       - DEPLOYMENT_MODE=docker
       - DEPLOYMENT_ENV=${DEPLOYMENT_ENV:-docker}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -264,6 +265,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-dev-secret-changeme}
       - DEPLOYMENT_MODE=docker
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
@@ -350,6 +352,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-dev-secret-changeme}
       - DEPLOYMENT_MODE=docker
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}

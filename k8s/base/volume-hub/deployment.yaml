@@ -45,6 +45,14 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: ORCHESTRATOR_URL
+          value: "http://tesslate-backend-service.tesslate.svc.cluster.local:8000"
+        - name: ORCHESTRATOR_INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-btrfs-csi-config
+              key: ORCHESTRATOR_INTERNAL_SECRET
+              optional: true
         envFrom:
         - secretRef:
             name: tesslate-btrfs-csi-config

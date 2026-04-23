@@ -159,6 +159,8 @@ resource "kubernetes_secret" "btrfs_csi_config" {
     RCLONE_S3_NO_CHECK_BUCKET   = "true"
     SYNC_INTERVAL               = "60"
     POOL_PATH                   = "/mnt/tesslate-pool"
+    # Must match INTERNAL_API_SECRET in tesslate-app-secrets.
+    ORCHESTRATOR_INTERNAL_SECRET = var.internal_api_secret
   }
 
   type = "Opaque"
@@ -349,6 +351,10 @@ resource "kubernetes_secret" "app_secrets" {
     ) : (
       "redis://redis:6379/0"
     )
+
+    # Internal API shared secret — authenticates Hub GC and btrfs CSI calls to
+    # /api/internal/*.  Must match ORCHESTRATOR_INTERNAL_SECRET in btrfs-csi-config.
+    INTERNAL_API_SECRET = var.internal_api_secret
 
   }
 

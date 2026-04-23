@@ -500,6 +500,16 @@ async def startup():
         "litellm_api_base": "LiteLLM proxy not configured — AI features will not work",
         "litellm_master_key": "LiteLLM master key not set — user key creation will fail",
     }
+
+    # Hard warn if INTERNAL_API_SECRET is missing in non-desktop modes.
+    # Without it, /api/internal/* will reject all Hub/GC calls after the grace window.
+    if not settings.is_desktop_mode and not settings.internal_api_secret:
+        logger.warning(
+            "[SECURITY] INTERNAL_API_SECRET is not set — /api/internal/* endpoints "
+            "will reject all Hub/GC calls after the %ds grace window. "
+            "Set INTERNAL_API_SECRET in your environment.",
+            settings.internal_secret_grace_seconds,
+        )
     for attr, message in _optional_env_checks.items():
         if not getattr(settings, attr, ""):
             logger.warning(f"[STARTUP] {attr} is not configured: {message}")

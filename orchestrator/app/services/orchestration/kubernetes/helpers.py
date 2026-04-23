@@ -619,14 +619,29 @@ def create_network_policy_manifest(namespace: str, project_id: UUID) -> client.V
                     to=[client.V1NetworkPolicyPeer(namespace_selector=client.V1LabelSelector())],
                     ports=[client.V1NetworkPolicyPort(protocol="UDP", port=53)],
                 ),
-                # Allow HTTPS (npm, git)
+                # Allow HTTPS (npm, git) — IMDS is blocked on both ports so user code
+                # cannot steal node IAM credentials via either port.
                 client.V1NetworkPolicyEgressRule(
-                    to=[client.V1NetworkPolicyPeer(ip_block=client.V1IPBlock(cidr="0.0.0.0/0"))],
+                    to=[
+                        client.V1NetworkPolicyPeer(
+                            ip_block=client.V1IPBlock(
+                                cidr="0.0.0.0/0",
+                                _except=["169.254.169.254/32"],  # Block AWS IMDS
+                            )
+                        )
+                    ],
                     ports=[client.V1NetworkPolicyPort(protocol="TCP", port=443)],
                 ),
-                # Allow HTTP (some registries)
+                # Allow HTTP (some registries) — IMDS blocked here too.
                 client.V1NetworkPolicyEgressRule(
-                    to=[client.V1NetworkPolicyPeer(ip_block=client.V1IPBlock(cidr="0.0.0.0/0"))],
+                    to=[
+                        client.V1NetworkPolicyPeer(
+                            ip_block=client.V1IPBlock(
+                                cidr="0.0.0.0/0",
+                                _except=["169.254.169.254/32"],  # Block AWS IMDS
+                            )
+                        )
+                    ],
                     ports=[client.V1NetworkPolicyPort(protocol="TCP", port=80)],
                 ),
                 # Allow MinIO

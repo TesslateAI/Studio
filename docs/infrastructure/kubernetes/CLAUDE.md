@@ -299,3 +299,67 @@ kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
 3. **Delete before load (Minikube)**: `minikube image load` doesn't overwrite
 4. **Restart ingress after backend changes**: Clears endpoint cache
 5. **Test in Minikube first**: Catches K8s issues before production
+
+---
+
+## Network Boundary Security (issue #248)
+
+The platform enforces network security at three independent layers so a single misconfiguration cannot create a breach.
+
+### Layer 1 — Ingress block for `/api/internal/*`
+
+`/api/internal/*` is blocked at the NGINX edge via `server-snippet` in `k8s/base/ingress/main-ingress.yaml`. External callers receive 403 before the request reaches the backend. Cluster-internal callers (Hub, GC) **must** use the ClusterIP DNS name directly:
+```
+http://tesslate-backend-service.tesslate.svc.cluster.local:8000/api/internal/...
+```
+They must **not** use the public Ingress hostname.
+
+### Layer 2 — Shared-secret auth on `/api/internal/*`
+
+All `/api/internal/*` routes require an `X-Internal-Secret` header matching `INTERNAL_API_SECRET` in the backend. Both secrets must be set consistently:
+
+| Component | Secret variable | Secret source |
+|-----------|----------------|---------------|
+| Backend (`tesslate-backend`) | `INTERNAL_API_SECRET` | `tesslate-app-secrets` |
+| Volume Hub (`tesslate-volume-hub`) | `ORCHESTRATOR_INTERNAL_SECRET` | `tesslate-btrfs-csi-config` |
+| CSI node (`tesslate-btrfs-csi-node`) | `ORCHESTRATOR_INTERNAL_SECRET` | `tesslate-btrfs-csi-config` |
+
+**Generating a secret value:**
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+**Grace period**: For the first 60 seconds after the backend starts, requests with a missing or wrong secret are allowed through with a warning (to avoid hard failures during rolling deploys). Set `INTERNAL_SECRET_GRACE_SECONDS=0` once both sides are confirmed stable.
+
+**Desktop mode**: The Hub does not run in desktop mode, so `INTERNAL_API_SECRET` is ignored.
+
+### Layer 3 — IMDS block in user project NetworkPolicies
+
+All user project NetworkPolicies (`proj-*` namespaces) block `169.254.169.254/32` (the AWS IMDS endpoint) from both TCP 443 and TCP 80 egress rules. This prevents user code from stealing node IAM credentials via the metadata service.
+
+The same IMDS except-block is applied to compute pool pods (`tesslate-compute-pool` namespace).
+
+**Minikube impact**: None. `169.254.169.254` is not routed in the minikube virtual network — the block is a no-op locally.
+
+### Runbook — Adding a New External Dependency
+
+When any backend or worker code makes a new outbound call to an external service (new AI provider, OAuth endpoint, webhook target, etc.), egress to that target will be blocked in K8s environments by `default-deny-egress` unless an explicit rule is added.
+
+**Steps:**
+1. Identify the external service's hostname and port(s).
+2. Add an egress rule to `allow-backend-egress` (or `allow-worker-egress` if the call originates from the ARQ worker) in `k8s/base/security/network-policies.yaml`.
+3. Apply: `kubectl apply -k k8s/overlays/minikube --context=tesslate` and test.
+4. Apply to beta, then production.
+
+**Note**: In Minikube without Calico/Cilium CNI, NetworkPolicy is not enforced — the policy gap only surfaces in beta. Test with `kubectl exec` network probes to verify egress is working as expected.
+
+### Runbook — Rolling Out Secret Changes
+
+To rotate `INTERNAL_API_SECRET` / `ORCHESTRATOR_INTERNAL_SECRET`:
+
+1. Update both secrets simultaneously in Terraform / K8s secrets.
+2. Set `INTERNAL_SECRET_GRACE_SECONDS=120` temporarily to widen the window.
+3. Deploy the backend (new secret active, grace period covers the hub rollover).
+4. Deploy the btrfs-csi DaemonSet and Volume Hub.
+5. Verify Hub calls succeed: `kubectl logs -n kube-system deployment/tesslate-volume-hub`.
+6. Reset `INTERNAL_SECRET_GRACE_SECONDS=0`.

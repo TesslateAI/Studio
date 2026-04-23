@@ -125,6 +125,23 @@ spec:
       port: 53
 
 ---
+# Default deny all egress from tesslate namespace.
+# Explicit allow rules below (allow-backend-egress, allow-worker-egress, allow-dns-egress)
+# permit the traffic each component actually needs.
+# Pods without an explicit allowlist (frontend, postgres, redis) lose outbound access —
+# this is correct; they should not make arbitrary external calls.
+# IMPORTANT: always ship allow-worker-egress in the same commit as this deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: tesslate
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+
+---
 # Allow backend egress to project namespaces and external services
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -149,6 +166,44 @@ spec:
         - 10.0.0.0/8     # Exclude internal ranges for safety
         - 172.16.0.0/12
         - 192.168.0.0/16
+        - 169.254.169.254/32  # Block AWS IMDS — prevents credential theft from backend pods
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 9000  # MinIO
+
+---
+# Allow worker egress — mirrors allow-backend-egress for the ARQ worker pods.
+# Must ship alongside default-deny-egress; without this the worker cannot reach
+# AI providers (LiteLLM/OpenAI/Anthropic), web search APIs, S3, or user project
+# namespaces.  Dropping this policy would silently break all agent chat.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-egress
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: tesslate-worker
+  policyTypes:
+  - Egress
+  egress:
+  # Allow to any namespace (for managing user project namespaces, bash_exec, etc.)
+  - to:
+    - namespaceSelector: {}
+  # Allow to external (LiteLLM, AI providers, search APIs, S3, Stripe, OAuth)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.169.254/32  # Block AWS IMDS — prevents credential theft from worker pods
     ports:
     - protocol: TCP
       port: 443

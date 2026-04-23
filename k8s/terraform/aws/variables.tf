@@ -208,6 +208,13 @@ variable "app_secret_key" {
   sensitive   = true
 }
 
+variable "internal_api_secret" {
+  description = "Shared secret for cluster-internal /api/internal/* endpoints (Hub GC, btrfs CSI)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "litellm_api_base" {
   description = "DEPRECATED: LiteLLM is now self-hosted. This variable is kept for backward compatibility with existing tfvars and will be ignored."
   type        = string
