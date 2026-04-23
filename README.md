@@ -36,6 +36,8 @@ OpenSail also exposes a Gateway API and an MCP server (in development), so exter
 
 ## What you can build
 
+Describe the job. Ship the app.
+
 Describe the job you want done or drop in a file. OpenSail helps turn it into a working agent, app, or workflow: defining the steps, connecting the right tools, adding skills, and testing it until it works the way you expect.
 
 An "app" on OpenSail is anything you build and ship: a piece of software, an agent, a scheduled automation, a triggered webhook handler, or an MCP tool that other agents can call. Every app is a versioned, installable bundle produced from a workspace project.
@@ -58,6 +60,8 @@ You can also start from templates for finance, sales, marketing, operations, and
 
 ## Apps
 
+One workspace in. One installable app out.
+
 An app on OpenSail is a versioned, immutable, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, its own containers, and its own permissions.
 
 **The lifecycle:** build in a workspace, publish a version (immutable, content-addressed), go through the approval pipeline, list on the marketplace (or keep private/team-only), install per-user, run, update, fork.
@@ -75,6 +79,8 @@ An app on OpenSail is a versioned, immutable, manifest-described bundle. Build i
 ---
 
 ## Workspaces
+
+Fork a running environment in seconds.
 
 <p align="center">
   <img src="assets/opensail-workspaces.png" alt="OpenSail Workspaces" width="80%" />
@@ -142,6 +148,8 @@ The Design Engineer is a live-editing canvas that runs alongside the code editor
 
 ## Architecture Panel
 
+One canvas. One config file. Two authors. No drift.
+
 <p align="center">
   <img src="assets/opensail-architecture-panel.png" alt="OpenSail Architecture Panel" width="85%" />
 </p>
@@ -176,6 +184,8 @@ One canvas. One config file. Agents, humans, secrets, deployments, and apps all 
 
 ## Turn best practices into shared agents
 
+Turn institutional knowledge into agents the whole team can run.
+
 <p align="center">
   <img src="assets/opensail-agent-library.png" alt="OpenSail Agent Library" width="80%" />
 </p>
@@ -193,6 +203,8 @@ Build once, improve through use, then share or duplicate for new workflows. Beca
 ---
 
 ## Cloud sandboxes for agents
+
+Run your own sandboxing engine.
 
 Running agents means giving them compute. OpenSail provides the infrastructure to do it without burning money.
 
@@ -216,6 +228,8 @@ The whole system is backed by a custom CSI driver built on BtrFS that handles sn
 
 ## Gateway API and MCP Server
 
+Rent your compute to other agents.
+
 OpenSail exposes your running instance to the outside world through two interfaces:
 
 **Gateway API:** External users (agents or humans) can interact with your OpenSail instance using an API key. They get their own sandboxed containers, can invoke agents, and run workflows. The API supports webhook callbacks on completion, scoped permissions per key, and project-level isolation.
@@ -225,6 +239,8 @@ OpenSail exposes your running instance to the outside world through two interfac
 ---
 
 ## Connectors
+
+Every tool your agent needs, already wired.
 
 <p align="center">
   <img src="assets/opensail-connectors.png" alt="OpenSail Connectors" width="80%" />
@@ -242,6 +258,8 @@ Build your own connectors for internal systems. Publish them for your team. The 
 
 ## Agent skills
 
+Teach an agent once. Any agent can use it forever.
+
 Skills are reusable capabilities you teach your agents. Instead of re-prompting every time, package what works into a skill and let the agent use it when it needs to.
 
 Skills are loaded progressively: a lightweight catalog (name + description) is injected into the agent's context, and the full skill body is pulled on demand only when the agent decides to use it. This keeps the context window lean.
@@ -251,6 +269,8 @@ Skills can be anything: a data analysis pipeline, a writing style, a code review
 ---
 
 ## Desktop App
+
+The full cloud platform, running on your laptop.
 
 OpenSail ships as a native desktop app built on Tauri v2. It runs the exact same orchestrator as the cloud version, locally, with zero network dependency by default. No Docker required. No Kubernetes required. Just install and start building.
 
@@ -292,6 +312,8 @@ One folder. Wipe it, you get a clean install.
 
 ## Model Providers
 
+One agent. Every model.
+
 OpenSail is model-agnostic. All model calls route through LiteLLM. Switch providers without rewriting your agents.
 
 **Supported providers:**
@@ -318,6 +340,8 @@ OpenSail is model-agnostic. All model calls route through LiteLLM. Switch provid
 
 ## Deployment targets
 
+Ship to 22 places by drawing an edge.
+
 Deploy from the Architecture Panel. Draw an edge from a container to a deployment target. A/B deployments work naturally: connect the same container to two targets (Vercel for production, Cloudflare for preview) and each gets independent deployment history and rollback.
 
 **22 supported targets:**
@@ -335,6 +359,8 @@ Each target is a registry entry. Adding a new provider is one config block, not 
 
 ## Communication gateways
 
+Deploy agents where your team already talks.
+
 Deploy agents to the channels where your team already works. Each channel is a `GatewayAdapter` subclass, hot-reloaded via Redis pub/sub.
 
 | Channel | Description |
@@ -351,6 +377,8 @@ Set agents to run on a schedule, or let them listen for messages and respond as 
 ---
 
 ## Why open source
+
+Your data. Your models. Your infrastructure.
 
 Workspace agents are powerful. They touch your data, your tools, your processes. You should be able to see exactly what they're doing, run them on your own infrastructure, and not be locked to a single model provider.
 
