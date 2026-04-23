@@ -1,6 +1,6 @@
 # React Contexts Documentation
 
-**Purpose**: This context provides guidance for working with the centralized React context system in Tesslate Studio.
+**Purpose**: This context provides guidance for working with the centralized React context system in OpenSail.
 
 ## When to Load This Context
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# ElastiCache Redis for Tesslate Studio
+# ElastiCache Redis for OpenSail
 # =============================================================================
 # Provides Redis as a distributed backplane for horizontal scaling:
 # - Pub/Sub for WebSocket fanout across API pods

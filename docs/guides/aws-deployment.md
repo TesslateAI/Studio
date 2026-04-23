@@ -1,6 +1,6 @@
 # AWS EKS Production Deployment
 
-This guide covers deploying Tesslate Studio to AWS Elastic Kubernetes Service (EKS) for production use.
+This guide covers deploying OpenSail to AWS Elastic Kubernetes Service (EKS) for production use.
 
 ## Infrastructure Overview
 

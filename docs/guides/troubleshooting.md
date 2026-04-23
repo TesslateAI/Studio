@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide covers common issues and solutions when developing and deploying Tesslate Studio.
+This guide covers common issues and solutions when developing and deploying OpenSail.
 
 ## Container Issues
 

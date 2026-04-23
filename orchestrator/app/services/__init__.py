@@ -1,7 +1,7 @@
 """
 Services Module
 
-This module contains all backend services for Tesslate Studio.
+This module contains all backend services for OpenSail.
 
 Key Submodules:
 - orchestration: Unified container orchestration (Docker/K8s)

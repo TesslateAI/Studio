@@ -1,12 +1,12 @@
 # System Overview
 
-This document provides a comprehensive overview of Tesslate Studio's architecture, including the complete technology stack, system responsibilities, data flow, external integrations, and security design.
+This document provides a comprehensive overview of OpenSail's architecture, including the complete technology stack, system responsibilities, data flow, external integrations, and security design.
 
 ## High-Level Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                      Tesslate Studio                             │
+│                      OpenSail                             │
 │                  AI-Powered App Builder                          │
 ├──────────────────────────────────────────────────────────────────┤
 │                                                                  │

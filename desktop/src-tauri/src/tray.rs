@@ -33,7 +33,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     })?;
 
     let _tray = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip("Tesslate Studio")
+        .tooltip("OpenSail")
         .icon(icon)
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -105,11 +105,11 @@ fn set_tooltip(tray: &TrayIcon, text: &str) -> tauri::Result<()> {
 
 fn format_tooltip(agents: usize, projects: usize) -> String {
     match (agents, projects) {
-        (0, 0) => "Tesslate Studio".to_string(),
-        (a, 0) => format!("Tesslate Studio · {a} agent{}", plural(a)),
-        (0, p) => format!("Tesslate Studio · {p} project{}", plural(p)),
+        (0, 0) => "OpenSail".to_string(),
+        (a, 0) => format!("OpenSail · {a} agent{}", plural(a)),
+        (0, p) => format!("OpenSail · {p} project{}", plural(p)),
         (a, p) => format!(
-            "Tesslate Studio · {a} agent{} · {p} project{}",
+            "OpenSail · {a} agent{} · {p} project{}",
             plural(a),
             plural(p)
         ),

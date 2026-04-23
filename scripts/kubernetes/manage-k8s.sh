@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tesslate Studio - Kubernetes Management Script
+# OpenSail - Kubernetes Management Script
 # Manages the DigitalOcean Kubernetes deployment
 
 set -e
@@ -9,7 +9,7 @@ USER_NAMESPACE="tesslate-user-environments"
 
 case "$1" in
   status)
-    echo "📊 Tesslate Studio Status (Kubernetes)"
+    echo "📊 OpenSail Status (Kubernetes)"
     echo ""
     echo "Main Application:"
     kubectl get all -n $NAMESPACE
@@ -113,14 +113,14 @@ case "$1" in
     ;;
 
   deploy)
-    echo "🚀 Deploying Tesslate Studio to Kubernetes..."
+    echo "🚀 Deploying OpenSail to Kubernetes..."
     cd "$(dirname "$0")/../k8s"
     ./scripts/deployment/deploy-all.sh
     echo "✅ Deployment complete!"
     ;;
 
   update)
-    echo "⬆️  Updating Tesslate Studio..."
+    echo "⬆️  Updating OpenSail..."
 
     # Source DOCR_TOKEN from k8s/.env
     if [ -f "../k8s/.env" ]; then
@@ -168,7 +168,7 @@ case "$1" in
     ;;
 
   *)
-    echo "Tesslate Studio - Kubernetes Management"
+    echo "OpenSail - Kubernetes Management"
     echo ""
     echo "Usage: ./manage-k8s.sh [command] [options]"
     echo ""

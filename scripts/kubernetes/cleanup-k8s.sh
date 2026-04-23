@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tesslate Studio - Kubernetes Cleanup Script
+# OpenSail - Kubernetes Cleanup Script
 # Removes all user development environments and optionally resets the database
 
 set -e
@@ -8,7 +8,7 @@ NAMESPACE="tesslate"
 USER_NAMESPACE="tesslate-user-environments"
 
 echo "======================================"
-echo "Tesslate Studio - Kubernetes Cleanup"
+echo "OpenSail - Kubernetes Cleanup"
 echo "======================================"
 echo ""
 echo "This will clean up Kubernetes resources."

@@ -1,6 +1,6 @@
 # Kubernetes Agent Context
 
-You are working on Tesslate Studio's Kubernetes configuration. This context provides quick reference for common Kubernetes tasks.
+You are working on OpenSail's Kubernetes configuration. This context provides quick reference for common Kubernetes tasks.
 
 ## File Locations
 
@@ -15,7 +15,7 @@ You are working on Tesslate Studio's Kubernetes configuration. This context prov
 
 | Environment | `--context=` value | Domain |
 |-------------|-------------------|--------|
-| Production | `tesslate-production-eks` | `your-domain.com` |
+| Production | `tesslate-production-eks` | `opensail.tesslate.com` |
 | Beta | `tesslate-beta-eks` | beta domain |
 | Minikube | `tesslate` | `localhost` |
 

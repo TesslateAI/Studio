@@ -1,6 +1,6 @@
 # Marketplace Models
 
-This document covers the models that power Tesslate Studio's marketplace, where users can discover, purchase, and use AI agents, project templates, and workflow templates.
+This document covers the models that power OpenSail's marketplace, where users can discover, purchase, and use AI agents, project templates, and workflow templates.
 
 **File**: `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models.py`
 

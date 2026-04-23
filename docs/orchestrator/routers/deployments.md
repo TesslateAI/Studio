@@ -6,7 +6,7 @@ The deployments router handles external deployments to production hosting provid
 
 ## Overview
 
-Tesslate Studio supports deploying projects to external hosting providers for production use. The internal dev environments (Docker/Kubernetes) are for development only; external deployments are for live websites.
+OpenSail supports deploying projects to external hosting providers for production use. The internal dev environments (Docker/Kubernetes) are for development only; external deployments are for live websites.
 
 Supported providers:
 - **Vercel**: Ideal for Next.js, React, Vue

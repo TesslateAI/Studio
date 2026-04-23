@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Tesslate Studio - Phase 1: Configure Kubernetes Cluster
+# OpenSail - Phase 1: Configure Kubernetes Cluster
 
 set -e
 
 echo "========================================"
-echo "Tesslate Studio Kubernetes Setup"
+echo "OpenSail Kubernetes Setup"
 echo "Phase 1: Configure Kubernetes Cluster"
 echo "========================================"
 

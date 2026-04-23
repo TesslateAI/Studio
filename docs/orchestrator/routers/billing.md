@@ -2,11 +2,11 @@
 
 **File**: `orchestrator/app/routers/billing.py`
 
-The billing router handles subscription management, credit purchases, usage tracking, and Stripe integration for Tesslate Studio.
+The billing router handles subscription management, credit purchases, usage tracking, and Stripe integration for OpenSail.
 
 ## Overview
 
-Tesslate Studio uses a **4-tier subscription model** with a **dual credit system**:
+OpenSail uses a **4-tier subscription model** with a **dual credit system**:
 
 ### Subscription Tiers
 

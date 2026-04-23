@@ -2,7 +2,7 @@
 
 ## Purpose
 
-You are working on the container orchestration layer for Tesslate Studio. This system manages the lifecycle of user project containers across two deployment modes: Docker Compose (local development) and Kubernetes (production).
+You are working on the container orchestration layer for OpenSail. This system manages the lifecycle of user project containers across two deployment modes: Docker Compose (local development) and Kubernetes (production).
 
 ## When to Load This Context
 

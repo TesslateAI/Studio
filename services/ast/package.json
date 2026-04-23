@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Stateless gRPC service that performs JSX/TSX AST operations for the Tesslate Studio design view. Bytes in, bytes out.",
+  "description": "Stateless gRPC service that performs JSX/TSX AST operations for the OpenSail design view. Bytes in, bytes out.",
   "engines": {
     "node": ">=20"
   },

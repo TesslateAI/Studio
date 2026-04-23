@@ -2,11 +2,11 @@
 
 **File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/chat.py` (2044 lines)
 
-The chat router handles all AI agent interactions in Tesslate Studio. It supports both HTTP and WebSocket communication, allowing users to have conversations with AI agents that can read/write files, execute commands, and build applications.
+The chat router handles all AI agent interactions in OpenSail. It supports both HTTP and WebSocket communication, allowing users to have conversations with AI agents that can read/write files, execute commands, and build applications.
 
 ## Overview
 
-Chat in Tesslate Studio is project-scoped. Each project has one chat session where the user converses with an AI agent. The agent has access to the project's files and can perform actions through a set of tools.
+Chat in OpenSail is project-scoped. Each project has one chat session where the user converses with an AI agent. The agent has access to the project's files and can perform actions through a set of tools.
 
 The router supports:
 - **HTTP chat**: Non-streaming, returns complete response

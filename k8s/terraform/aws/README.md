@@ -1,6 +1,6 @@
-# Tesslate Studio - AWS EKS Deployment Guide
+# OpenSail - AWS EKS Deployment Guide
 
-This guide walks you through deploying Tesslate Studio on AWS EKS using Terraform.
+This guide walks you through deploying OpenSail on AWS EKS using Terraform.
 
 ## Architecture Overview
 
@@ -399,6 +399,6 @@ kubectl get ns | grep proj- | awk '{print $1}' | xargs kubectl delete ns
 
 For issues, check:
 1. This README troubleshooting section
-2. [Tesslate Studio issues](https://github.com/your-repo/issues)
+2. [OpenSail issues](https://github.com/your-repo/issues)
 3. AWS EKS documentation
 4. Terraform AWS provider documentation

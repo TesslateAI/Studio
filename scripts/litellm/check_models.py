@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "orchestr
 # Environment configs: domain and litellm public URL pattern
 ENV_CONFIGS = {
     "beta": {"domain": "your-domain.com"},
-    "production": {"domain": "your-domain.com"},
+    "production": {"domain": "opensail.tesslate.com"},
 }
 
 

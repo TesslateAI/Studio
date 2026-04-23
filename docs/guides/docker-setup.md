@@ -1,6 +1,6 @@
 # Docker Setup from Scratch
 
-Complete guide to setting up Tesslate Studio locally using Docker Compose, from a fresh clone to a running application.
+Complete guide to setting up OpenSail locally using Docker Compose, from a fresh clone to a running application.
 
 ## Prerequisites
 

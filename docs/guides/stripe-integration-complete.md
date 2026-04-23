@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tesslate Studio uses Stripe for subscription management, credit purchases, and marketplace payments. This guide covers the complete implementation.
+OpenSail uses Stripe for subscription management, credit purchases, and marketplace payments. This guide covers the complete implementation.
 
 ---
 

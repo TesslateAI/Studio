@@ -1,5 +1,5 @@
 """
-Custom authentication routes for Tesslate Studio.
+Custom authentication routes for OpenSail.
 
 Note: Register, login, and token management are handled by fastapi-users in main.py
 This file contains token refresh (via DB-backed refresh tokens), unified logout,

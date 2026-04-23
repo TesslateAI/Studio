@@ -64,7 +64,7 @@ async def get_access_token_db(session: AsyncSession = Depends(get_db)):
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     """
-    Custom user manager with Tesslate Studio-specific logic.
+    Custom user manager with OpenSail-specific logic.
 
     Handles:
     - User registration with custom fields (name, username, slug, referral)
@@ -197,12 +197,11 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
                 for row in agent_rows:
                     logger.info(f"Auto-added {row.name} to user {user.username}")
             missing = set(default_agent_slugs) - {
-                row.name for row in agent_rows  # noqa: F821 — name used as slug when present
+                row.name
+                for row in agent_rows  # noqa: F821 — name used as slug when present
             }
             for slug in missing:
-                logger.warning(
-                    f"{slug} not found - user registered without this default agent"
-                )
+                logger.warning(f"{slug} not found - user registered without this default agent")
         except Exception as e:
             logger.error(f"Failed to add default agents to user {user.username}: {e}")
 

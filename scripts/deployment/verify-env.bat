@@ -1,9 +1,9 @@
 @echo off
-REM Tesslate Studio - Environment Configuration Checker
+REM OpenSail - Environment Configuration Checker
 REM Batch script for Windows
 
 echo ================================================
-echo Tesslate Studio - Environment Configuration Check
+echo OpenSail - Environment Configuration Check
 echo ================================================
 echo.
 

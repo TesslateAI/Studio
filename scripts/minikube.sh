@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tesslate Studio - Minikube Management (Swiss Knife)
+# OpenSail - Minikube Management (Swiss Knife)
 # Usage: scripts/minikube.sh <command> [options]
 #
 # Setup:
@@ -281,7 +281,7 @@ _ensure_secrets() {
 }
 
 cmd_init() {
-  header "Initializing Tesslate Studio secrets"
+  header "Initializing OpenSail secrets"
   _init_secrets STACK_SECRETS
 
   echo ""
@@ -296,7 +296,7 @@ cmd_init() {
 }
 
 cmd_start() {
-  header "Starting Tesslate Studio (Minikube)"
+  header "Starting OpenSail (Minikube)"
 
   ensure_docker
 
@@ -710,7 +710,7 @@ cmd_reset() {
   read -rp "Are you sure? (y/N) " confirm
   [[ "$confirm" =~ ^[Yy]$ ]] || { info "Aborted."; return; }
 
-  header "Resetting Tesslate Studio (Minikube)"
+  header "Resetting OpenSail (Minikube)"
   minikube delete -p "$PROFILE" 2>/dev/null || true
 
   cmd_start

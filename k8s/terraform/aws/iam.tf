@@ -1,5 +1,5 @@
 # =============================================================================
-# IAM Roles and Policies for Tesslate Studio
+# IAM Roles and Policies for OpenSail
 # =============================================================================
 # Creates IRSA (IAM Roles for Service Accounts) for:
 # - Tesslate backend (S3 access for hibernation)

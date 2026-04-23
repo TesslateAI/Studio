@@ -4,7 +4,7 @@ The orchestration layer manages the lifecycle of user project containers across 
 
 ## Overview
 
-User projects in Tesslate Studio run in isolated containerized environments. Each project can have multiple containers (frontend, backend, database) that communicate over a private network. The orchestration layer handles:
+User projects in OpenSail run in isolated containerized environments. Each project can have multiple containers (frontend, backend, database) that communicate over a private network. The orchestration layer handles:
 
 - **Container lifecycle**: Starting, stopping, and restarting containers
 - **File operations**: Reading/writing project files for the AI agent

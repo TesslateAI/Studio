@@ -1,5 +1,5 @@
 # =============================================================================
-# ECR Repositories for Tesslate Studio Container Images
+# ECR Repositories for OpenSail Container Images
 # =============================================================================
 # Shared across all environments. Each environment pushes with its own tag:
 #   - production: tesslate-backend:production

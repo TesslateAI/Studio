@@ -1,6 +1,6 @@
 # Data Flow Documentation
 
-This document provides detailed data flow patterns for Tesslate Studio, including user request lifecycle, agent chat execution, file operations, container management, and git workflows.
+This document provides detailed data flow patterns for OpenSail, including user request lifecycle, agent chat execution, file operations, container management, and git workflows.
 
 **Visual Reference**: For flowchart diagrams, see:
 - `diagrams/request-flow.mmd` - User request patterns (when created)

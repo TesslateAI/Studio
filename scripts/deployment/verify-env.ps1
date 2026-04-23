@@ -1,8 +1,8 @@
-# Tesslate Studio - Environment Configuration Checker
+# OpenSail - Environment Configuration Checker
 # PowerShell script for Windows
 
 Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "Tesslate Studio - Environment Configuration Check" -ForegroundColor Cyan
+Write-Host "OpenSail - Environment Configuration Check" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 

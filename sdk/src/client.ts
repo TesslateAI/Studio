@@ -6,7 +6,7 @@ import { ShellResource } from "./resources/shell.js";
 export interface TesslateClientOptions {
   /** API key (tsk_...). */
   apiKey: string;
-  /** Base URL of the Tesslate Studio instance (default: https://your-domain.com). */
+  /** Base URL of the OpenSail instance (default: https://opensail.tesslate.com). */
   baseUrl?: string;
   /** Request timeout in milliseconds (default: 30 000). */
   timeout?: number;
@@ -19,7 +19,7 @@ export class TesslateClient {
 
   constructor(opts: TesslateClientOptions) {
     const http = new HttpClient({
-      baseUrl: opts.baseUrl ?? "https://your-domain.com",
+      baseUrl: opts.baseUrl ?? "https://opensail.tesslate.com",
       apiKey: opts.apiKey,
       timeout: opts.timeout,
     });

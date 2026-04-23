@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Tesslate Studio - Install Kubernetes Prerequisites
+# OpenSail - Install Kubernetes Prerequisites
 # This script installs required cluster components before deploying the application
 
 set -e
 
 echo "================================================================"
-echo "Tesslate Studio - Installing Kubernetes Prerequisites"
+echo "OpenSail - Installing Kubernetes Prerequisites"
 echo "================================================================"
 echo ""
 

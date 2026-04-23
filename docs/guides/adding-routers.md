@@ -1,10 +1,10 @@
 # Adding API Routers
 
-This guide covers how to add new API endpoints to Tesslate Studio's FastAPI backend.
+This guide covers how to add new API endpoints to OpenSail's FastAPI backend.
 
 ## Overview
 
-Tesslate Studio uses FastAPI routers to organize API endpoints. Each router handles a specific domain of functionality (projects, chat, billing, etc.).
+OpenSail uses FastAPI routers to organize API endpoints. Each router handles a specific domain of functionality (projects, chat, billing, etc.).
 
 ### Router Location
 

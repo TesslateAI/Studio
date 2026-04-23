@@ -1,8 +1,8 @@
-# Tesslate Studio Components
+# OpenSail Components
 
 **Location**: `app/src/components/`
 
-The React component library that powers Tesslate Studio's user interface. These components are built with React 19, TypeScript, and modern patterns including hooks, composition, and optimized rendering.
+The React component library that powers OpenSail's user interface. These components are built with React 19, TypeScript, and modern patterns including hooks, composition, and optimized rendering.
 
 ## Component Organization
 

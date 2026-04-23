@@ -1,6 +1,6 @@
 # Kubernetes Base Manifests
 
-This directory contains environment-agnostic Kubernetes manifests that form the foundation of Tesslate Studio's platform deployment.
+This directory contains environment-agnostic Kubernetes manifests that form the foundation of OpenSail's platform deployment.
 
 **Location**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/base/`
 

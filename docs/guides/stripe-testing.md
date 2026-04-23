@@ -1,6 +1,6 @@
 # Stripe Integration Testing Guide
 
-This guide provides comprehensive instructions for testing the Stripe integration in Tesslate Studio.
+This guide provides comprehensive instructions for testing the Stripe integration in OpenSail.
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ In your Stripe Dashboard (Test mode), create the following products:
 #### Premium Subscription Product
 1. Go to https://dashboard.stripe.com/test/products
 2. Click "Add product"
-3. Name: "Tesslate Studio Premium"
+3. Name: "OpenSail Premium"
 4. Description: "$5/month subscription"
 5. Pricing model: "Standard pricing"
 6. Price: $5.00 USD

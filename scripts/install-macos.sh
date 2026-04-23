@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tesslate Studio - macOS Interactive Installer
+# OpenSail - macOS Interactive Installer
 # Installs all dependencies, configures environment, builds images,
 # and starts the development stack.
 #
@@ -33,7 +33,7 @@ fi
 
 echo ""
 echo -e "${BOLD}========================================${NC}"
-echo -e "${BOLD}  Tesslate Studio - macOS Setup${NC}"
+echo -e "${BOLD}  OpenSail - macOS Setup${NC}"
 echo -e "${BOLD}========================================${NC}"
 echo ""
 

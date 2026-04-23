@@ -1,10 +1,10 @@
 #!/bin/bash
-# Deploy Tesslate Studio Application to Kubernetes
+# Deploy OpenSail Application to Kubernetes
 # This script deploys the database and application services
 
 set -e
 
-echo "🚀 Deploying Tesslate Studio application..."
+echo "🚀 Deploying OpenSail application..."
 
 # Check if secrets exist
 echo "🔍 Checking prerequisites..."

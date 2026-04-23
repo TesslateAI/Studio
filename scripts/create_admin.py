@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create or update admin user for Tesslate Studio.
+Create or update admin user for OpenSail.
 
 Usage:
     python scripts/create_admin.py

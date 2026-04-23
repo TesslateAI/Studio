@@ -29,7 +29,7 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     - is_superuser (bool): Whether user has admin privileges
     - is_verified (bool): Whether email is verified
 
-    Additional custom fields for Tesslate Studio:
+    Additional custom fields for OpenSail:
     """
 
     __tablename__ = "users"
@@ -49,9 +49,7 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     # Creator-branded handle used in app runtime URLs
     # (``{container}-{app_handle}-{user_handle}.{app_domain}``). Nullable
     # until backfilled; unique once populated.
-    handle: Mapped[str | None] = mapped_column(
-        String(32), unique=True, index=True, nullable=True
-    )
+    handle: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
 
     # Subscription & billing
     subscription_tier: Mapped[str] = mapped_column(

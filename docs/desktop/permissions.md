@@ -1,6 +1,6 @@
 # Per-Project Agent Permissions
 
-Per-project agent permission system for Tesslate Studio. Controls what
+Per-project agent permission system for OpenSail. Controls what
 capabilities each agent (or all agents) may exercise within a project, and
 routes gated operations through an appropriate approval mechanism depending on
 the client context.

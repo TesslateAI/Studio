@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Tesslate Studio - Build Docker Images
+# OpenSail - Build Docker Images
 
 set -e
 
@@ -9,7 +9,7 @@ PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 REGISTRY=${1:-"localhost:30500"}
 
 echo "========================================"
-echo "Building Tesslate Studio Docker Images"
+echo "Building OpenSail Docker Images"
 echo "Registry: $REGISTRY"
 echo "========================================"
 

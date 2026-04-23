@@ -1,10 +1,10 @@
-# Tesslate Studio Documentation
+# OpenSail Documentation
 
-> Comprehensive technical documentation for Tesslate Studio - an AI-powered web application builder
+> Comprehensive technical documentation for OpenSail - an AI-powered web application builder
 
-## What is Tesslate Studio?
+## What is OpenSail?
 
-Tesslate Studio is an AI-powered web application builder that lets users create, edit, deploy, and manage full-stack applications using natural language. Users describe what they want, an AI agent writes the code, and the platform handles containerized deployment.
+OpenSail is an AI-powered web application builder that lets users create, edit, deploy, and manage full-stack applications using natural language. Users describe what they want, an AI agent writes the code, and the platform handles containerized deployment.
 
 ## Quick Navigation
 
@@ -20,7 +20,7 @@ Tesslate Studio is an AI-powered web application builder that lets users create,
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         Tesslate Studio                                  │
+│                         OpenSail                                  │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  ┌──────────────────────┐          ┌──────────────────────────────────┐ │
@@ -83,7 +83,7 @@ Tesslate Studio is an AI-powered web application builder that lets users create,
 ## Key Concepts
 
 ### 1. AI Agent System
-The heart of Tesslate Studio. Agents receive user requests, call LLMs with system prompts and tools, and execute code changes.
+The heart of OpenSail. Agents receive user requests, call LLMs with system prompts and tools, and execute code changes.
 
 - **StreamAgent**: Real-time streaming responses
 - **IterativeAgent**: Multi-step tool execution

@@ -1,6 +1,6 @@
 # Keyboard Shortcuts & Command System
 
-**Purpose**: This context provides guidance for working with the keyboard shortcuts registry, command palette, and command dispatch system in Tesslate Studio.
+**Purpose**: This context provides guidance for working with the keyboard shortcuts registry, command palette, and command dispatch system in OpenSail.
 
 ## When to Load This Context
 

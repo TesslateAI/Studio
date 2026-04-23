@@ -1,1 +1,1 @@
-"""Tesslate Studio seed and one-off maintenance scripts."""
+"""OpenSail seed and one-off maintenance scripts."""

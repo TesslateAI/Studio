@@ -1,6 +1,6 @@
-# Tesslate Studio - Orchestrator Service
+# OpenSail - Orchestrator Service
 
-Backend orchestration service for the Tesslate Studio platform. Handles user authentication, project management, and container lifecycle orchestration with support for both Docker and Kubernetes deployments.
+Backend orchestration service for the OpenSail platform. Handles user authentication, project management, and container lifecycle orchestration with support for both Docker and Kubernetes deployments.
 
 ## 🚀 Features
 

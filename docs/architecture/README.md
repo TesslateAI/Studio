@@ -1,10 +1,10 @@
-# Tesslate Studio Architecture Documentation
+# OpenSail Architecture Documentation
 
-This directory contains comprehensive documentation about Tesslate Studio's system architecture, component interactions, and deployment patterns.
+This directory contains comprehensive documentation about OpenSail's system architecture, component interactions, and deployment patterns.
 
 ## Overview
 
-Tesslate Studio is an AI-powered web application builder that enables users to create, edit, deploy, and manage full-stack applications using natural language. The platform consists of a React frontend, FastAPI backend orchestrator, PostgreSQL database, and containerized user project environments.
+OpenSail is an AI-powered web application builder that enables users to create, edit, deploy, and manage full-stack applications using natural language. The platform consists of a React frontend, FastAPI backend orchestrator, PostgreSQL database, and containerized user project environments.
 
 ## Documentation Structure
 
@@ -71,7 +71,7 @@ Tesslate Studio is an AI-powered web application builder that enables users to c
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Tesslate Studio                          │
+│                    OpenSail                          │
 ├─────────────────────────────────────────────────────────────┤
 │  Frontend (app/)           │   Orchestrator (orchestrator/) │
 │  React + Vite + TypeScript │   FastAPI + Python             │
@@ -215,7 +215,7 @@ When modifying the architecture:
 
 ## Getting Started
 
-New to Tesslate Studio? Start here:
+New to OpenSail? Start here:
 
 1. Read [system-overview.md](./system-overview.md) for high-level understanding
 2. Review [deployment-modes.md](./deployment-modes.md) for your deployment target

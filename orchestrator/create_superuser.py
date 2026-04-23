@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create a superuser account for Tesslate Studio.
+Create a superuser account for OpenSail.
 
 This script creates a superuser (admin) account with full access to the system.
 Run this script after setting up the database and running migrations.
@@ -28,7 +28,7 @@ from app.users import UserManager, get_user_db
 async def create_superuser():
     """Create a superuser interactively."""
     print("=" * 60)
-    print("Create Superuser Account for Tesslate Studio")
+    print("Create Superuser Account for OpenSail")
     print("=" * 60)
     print()
 

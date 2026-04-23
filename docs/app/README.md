@@ -1,8 +1,8 @@
-# Tesslate Studio Frontend
+# OpenSail Frontend
 
 **Location**: `c:/Users/Smirk/Downloads/Tesslate-Studio/app/`
 
-The Tesslate Studio frontend is a sophisticated React application that provides a visual interface for building, editing, and deploying full-stack applications through AI-powered code generation. Users interact with AI agents to describe what they want, see code being written in real-time, and manage their containerized deployments.
+The OpenSail frontend is a sophisticated React application that provides a visual interface for building, editing, and deploying full-stack applications through AI-powered code generation. Users interact with AI agents to describe what they want, see code being written in real-time, and manage their containerized deployments.
 
 ## Technology Stack
 

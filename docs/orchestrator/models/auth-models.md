@@ -6,7 +6,7 @@ This document covers models related to user authentication, OAuth integration, G
 
 **File**: `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models_auth.py`
 
-Tesslate Studio uses [FastAPI-Users](https://fastapi-users.github.io/fastapi-users/) for authentication, which provides a robust, battle-tested authentication system with support for email/password and OAuth providers.
+OpenSail uses [FastAPI-Users](https://fastapi-users.github.io/fastapi-users/) for authentication, which provides a robust, battle-tested authentication system with support for email/password and OAuth providers.
 
 ---
 
@@ -203,7 +203,7 @@ class OAuthAccount(SQLAlchemyBaseOAuthAccountTable[uuid.UUID], Base):
 
 ### OAuth Providers
 
-Tesslate Studio supports:
+OpenSail supports:
 - **Google**: OAuth 2.0 with openid, email, profile scopes
 - **GitHub**: OAuth 2.0 with user:email, read:user scopes
 

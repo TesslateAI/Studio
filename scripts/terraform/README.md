@@ -212,7 +212,7 @@ Some variables must differ between environments. Key settings:
 | Variable | Production | Beta | Purpose |
 |----------|-----------|------|---------|
 | `environment` | `"production"` | `"beta"` | Resource naming, image tags |
-| `domain_name` | `"your-domain.com"` | `"your-domain.com"` | Application domain |
+| `domain_name` | `"opensail.tesslate.com"` | `"your-domain.com"` | Application domain |
 | `image_tag` | `"production"` | `"beta"` | Docker image tag pushed to ECR |
 
 **Note**: ECR repositories are managed by the **shared stack** (`k8s/terraform/shared/`), not by environment stacks. See `docs/infrastructure/terraform/ecr.md`.

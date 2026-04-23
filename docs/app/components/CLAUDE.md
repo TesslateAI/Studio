@@ -1,6 +1,6 @@
-# CLAUDE.md - Tesslate Studio Components
+# CLAUDE.md - OpenSail Components
 
-**Context for AI Agents**: This file provides patterns and context for developing, modifying, or debugging React components in Tesslate Studio.
+**Context for AI Agents**: This file provides patterns and context for developing, modifying, or debugging React components in OpenSail.
 
 ## Component Development Guidelines
 

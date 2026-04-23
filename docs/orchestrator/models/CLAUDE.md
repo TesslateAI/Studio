@@ -1,6 +1,6 @@
 # Database Models Context
 
-**Purpose**: Database schema development and modification for Tesslate Studio
+**Purpose**: Database schema development and modification for OpenSail
 
 **When to Load This Context**: You should load this context when you need to:
 - Add new database models or tables

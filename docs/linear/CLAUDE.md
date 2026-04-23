@@ -90,7 +90,7 @@ Most issues use action verbs to clearly indicate what needs to be done:
 | `Agent` | AI agent system |
 | `Marketplace` | Marketplace features |
 
-**Note:** Deployment integrations (Vercel, Netlify, AWS, etc.) use `backend` label since they are backend features of Tesslate Studio that allow users to deploy their software.
+**Note:** Deployment integrations (Vercel, Netlify, AWS, etc.) use `backend` label since they are backend features of OpenSail that allow users to deploy their software.
 
 ### Product Labels (Pick ONE per issue)
 
@@ -98,7 +98,7 @@ Most issues use action verbs to clearly indicate what needs to be done:
 
 | Label | When to Use |
 |-------|-------------|
-| `tesslate-studio` | Core Tesslate Studio features |
+| `tesslate-studio` | Core OpenSail features |
 | `Teals` | Teals product work |
 | `Trackstars` | Trackstars product work |
 
@@ -303,7 +303,7 @@ Example: `security` + `bug` + `backend` + `tesslate-studio`
 
 ### 3. Product Label is MANDATORY
 Every issue MUST have exactly ONE product label:
-- `tesslate-studio` - Default for Tesslate Studio features
+- `tesslate-studio` - Default for OpenSail features
 - `teals` - Only for Teals-specific work
 - `trackstars` - Only for Trackstars-specific work
 

@@ -22,7 +22,7 @@ from app.models_auth import User
 async def make_admin(email: str):
     """Make a user an admin by their email address."""
     print("=" * 60)
-    print("Make User Admin - Tesslate Studio")
+    print("Make User Admin - OpenSail")
     print("=" * 60)
     print()
 
@@ -77,7 +77,7 @@ async def make_admin(email: str):
 async def revoke_admin(email: str):
     """Revoke admin privileges from a user."""
     print("=" * 60)
-    print("Revoke Admin Privileges - Tesslate Studio")
+    print("Revoke Admin Privileges - OpenSail")
     print("=" * 60)
     print()
 

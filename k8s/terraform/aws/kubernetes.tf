@@ -1,5 +1,5 @@
 # =============================================================================
-# Kubernetes Resources for Tesslate Studio
+# Kubernetes Resources for OpenSail
 # =============================================================================
 # Creates Kubernetes namespaces, secrets, and configmaps needed for
 # the Tesslate application deployment.

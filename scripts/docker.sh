@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tesslate Studio - Docker Compose Management
+# OpenSail - Docker Compose Management
 # Usage: scripts/docker.sh <command> [options]
 #
 # Commands:
@@ -86,7 +86,7 @@ check_prereqs() {
 }
 
 cmd_start() {
-  header "Starting Tesslate Studio (Docker Compose)"
+  header "Starting OpenSail (Docker Compose)"
 
   # Auto-start Colima on macOS if not running
   if [[ "$(uname -s)" == "Darwin" ]] && command -v colima &>/dev/null; then
@@ -233,7 +233,7 @@ cmd_reset() {
   read -rp "Are you sure? (y/N) " confirm
   [[ "$confirm" =~ ^[Yy]$ ]] || { info "Aborted."; return; }
 
-  header "Resetting Tesslate Studio"
+  header "Resetting OpenSail"
 
   info "Removing containers and volumes..."
   docker compose down --volumes --remove-orphans

@@ -2,7 +2,7 @@
 
 **Purpose**: AI agent development and modification
 
-This context provides information about Tesslate Studio's AI agent system, including agent types, tool calling, and execution patterns.
+This context provides information about OpenSail's AI agent system, including agent types, tool calling, and execution patterns.
 
 ## Key Files
 

@@ -1,6 +1,6 @@
 # RBAC Configuration
 
-Role-Based Access Control for Tesslate Studio's Kubernetes deployment.
+Role-Based Access Control for OpenSail's Kubernetes deployment.
 
 **File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/base/security/rbac.yaml`
 

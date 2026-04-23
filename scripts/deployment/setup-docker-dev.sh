@@ -1,11 +1,11 @@
 #!/bin/bash
-# Tesslate Studio - Docker Development Setup Script
+# OpenSail - Docker Development Setup Script
 # This script helps you quickly set up the development environment
 
 set -e  # Exit on error
 
 echo "=================================="
-echo "Tesslate Studio Docker Setup"
+echo "OpenSail Docker Setup"
 echo "=================================="
 echo ""
 

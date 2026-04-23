@@ -1,4 +1,4 @@
-// Tesslate Studio desktop — Tauri host entry point.
+// OpenSail desktop — Tauri host entry point.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

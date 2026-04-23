@@ -183,9 +183,7 @@ export default function AuthCallback() {
 
         {/* GitHub OAuth Info */}
         <div className="text-center mt-6">
-          <p className="text-xs text-[var(--text)]/40">
-            GitHub OAuth integration by Tesslate Studio
-          </p>
+          <p className="text-xs text-[var(--text)]/40">GitHub OAuth integration by OpenSail</p>
         </div>
       </div>
     </div>

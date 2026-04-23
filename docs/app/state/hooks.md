@@ -1,6 +1,6 @@
 # Custom Hooks
 
-Tesslate Studio provides custom React hooks for task management, notifications, and referral tracking.
+OpenSail provides custom React hooks for task management, notifications, and referral tracking.
 
 ## Files
 

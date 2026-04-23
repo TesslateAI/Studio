@@ -2,7 +2,7 @@
 
 **Location**: `app/src/components/billing/`
 
-Billing components handle subscription management, credit purchases, usage tracking, and tier-based feature gating for Tesslate Studio.
+Billing components handle subscription management, credit purchases, usage tracking, and tier-based feature gating for OpenSail.
 
 ## Component Overview
 
@@ -24,7 +24,7 @@ Billing components handle subscription management, credit purchases, usage track
 
 ## Subscription Tiers
 
-Tesslate Studio uses a **4-tier subscription model**:
+OpenSail uses a **4-tier subscription model**:
 
 | Tier | Price | Projects | Deploys | Monthly Credits | BYOK |
 |------|-------|----------|---------|-----------------|------|

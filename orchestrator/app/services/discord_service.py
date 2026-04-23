@@ -39,7 +39,7 @@ class DiscordWebhookService:
                 {"name": "User ID", "value": str(user_id), "inline": False},
             ],
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"},  # overridden in _send_webhook with source
+            "footer": {"text": "OpenSail"},  # overridden in _send_webhook with source
         }
 
         await self._send_webhook(embeds=[embed])
@@ -63,7 +63,7 @@ class DiscordWebhookService:
             "color": 0x0099FF,  # Blue
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"},  # overridden in _send_webhook with source
+            "footer": {"text": "OpenSail"},  # overridden in _send_webhook with source
         }
 
         await self._send_webhook(embeds=[embed])
@@ -82,7 +82,7 @@ class DiscordWebhookService:
             "color": 0x00FF00,  # Green
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"},  # overridden in _send_webhook with source
+            "footer": {"text": "OpenSail"},  # overridden in _send_webhook with source
         }
 
         await self._send_webhook(embeds=[embed])
@@ -107,7 +107,7 @@ class DiscordWebhookService:
                 {"name": "User ID", "value": str(user_id), "inline": False},
             ],
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"},  # overridden in _send_webhook with source
+            "footer": {"text": "OpenSail"},  # overridden in _send_webhook with source
         }
 
         await self._send_webhook(embeds=[embed])
@@ -120,7 +120,7 @@ class DiscordWebhookService:
 
         source = self._source
         for embed in embeds:
-            embed["footer"] = {"text": f"Tesslate Studio • {source}"}
+            embed["footer"] = {"text": f"OpenSail • {source}"}
 
         payload = {"embeds": embeds}
 
@@ -141,6 +141,4 @@ class DiscordWebhookService:
 # Global instance — webhook URL must be set via DISCORD_WEBHOOK_URL env var.
 # No hardcoded URL: prevents leaking PII (emails, names) to a third-party
 # Discord server when self-hosted or running locally.
-discord_service = DiscordWebhookService(
-    webhook_url=os.environ.get("DISCORD_WEBHOOK_URL", "")
-)
+discord_service = DiscordWebhookService(webhook_url=os.environ.get("DISCORD_WEBHOOK_URL", ""))

@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================================
-REM Tesslate Studio - Hybrid Mode Startup Script
+REM OpenSail - Hybrid Mode Startup Script
 REM ============================================================================
 REM
 REM WHAT THIS DOES:
@@ -46,7 +46,7 @@ REM ============================================================================
 
 echo.
 echo ============================================================================
-echo  Tesslate Studio - Hybrid Mode (Native Services + Traefik)
+echo  OpenSail - Hybrid Mode (Native Services + Traefik)
 echo ============================================================================
 echo.
 
@@ -108,7 +108,7 @@ start "Frontend Dev Server" cmd /k "cd ..\..\..\app && npm run dev"
 
 echo.
 echo ============================================================================
-echo  🚀 Tesslate Studio is Starting!
+echo  🚀 OpenSail is Starting!
 echo ============================================================================
 echo.
 echo 📍 MAIN SERVICES (Native - Fast hot reload):

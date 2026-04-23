@@ -1,10 +1,10 @@
 # Theme System Models
 
-This document covers the Theme model and related database schema for Tesslate Studio's theming system. The theme system enables customizable UI themes stored in the database and served via API.
+This document covers the Theme model and related database schema for OpenSail's theming system. The theme system enables customizable UI themes stored in the database and served via API.
 
 ## Overview
 
-Tesslate Studio uses a database-driven theme system where themes are:
+OpenSail uses a database-driven theme system where themes are:
 1. Stored as JSON in PostgreSQL
 2. Seeded from JSON files in `scripts/themes/`
 3. Served via public API endpoints (no auth required)

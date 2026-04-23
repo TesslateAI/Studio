@@ -1,10 +1,10 @@
 # Orchestrator (Backend)
 
-> FastAPI backend powering Tesslate Studio's API, AI agents, and container orchestration
+> FastAPI backend powering OpenSail's API, AI agents, and container orchestration
 
 ## Overview
 
-The orchestrator is the heart of Tesslate Studio - a FastAPI application that:
+The orchestrator is the heart of OpenSail - a FastAPI application that:
 - Serves REST API endpoints for the frontend
 - Manages AI agent execution and tool calls
 - Orchestrates Docker/Kubernetes containers for user projects

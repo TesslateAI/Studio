@@ -1,4 +1,4 @@
-# Production Docker Compose for Tesslate Studio
+# Production Docker Compose for OpenSail
 # Domain configured via APP_DOMAIN environment variable
 
 services:

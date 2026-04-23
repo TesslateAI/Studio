@@ -1,6 +1,6 @@
 # Frontend Development Context
 
-**Purpose**: This context provides guidance for developing and modifying the Tesslate Studio React frontend.
+**Purpose**: This context provides guidance for developing and modifying the OpenSail React frontend.
 
 ## When to Load This Context
 

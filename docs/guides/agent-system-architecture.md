@@ -1,6 +1,6 @@
-# Tesslate Studio Agent System Architecture
+# OpenSail Agent System Architecture
 
-This document provides a comprehensive overview of the agent system in Tesslate Studio, from user authentication to agent execution.
+This document provides a comprehensive overview of the agent system in OpenSail, from user authentication to agent execution.
 
 ## Table of Contents
 

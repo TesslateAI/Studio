@@ -13,11 +13,11 @@ CRITICAL -- ENSURE ALL CHANGES ARE NON-BLOCKING
 
 Everything u do or write should be non-blocking so certain actions don't hold up other people on our software. 
 
-# Tesslate Studio
+# OpenSail
 
 When I have an issue, fix it for the next time it happens in a general, scalable way. For example, if a container fails on startup, ensure all future container startups work 100%.
 
-## What is Tesslate Studio?
+## What is OpenSail?
 
 AI-powered web application builder that lets users create, edit, deploy, and manage full-stack apps using natural language. Users describe what they want, an AI agent writes the code, and the platform handles containerized deployment.
 
@@ -25,7 +25,7 @@ AI-powered web application builder that lets users create, edit, deploy, and man
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Tesslate Studio                          │
+│                    OpenSail                                 │
 ├─────────────────────────────────────────────────────────────┤
 │  Frontend (app/)           │   Orchestrator (orchestrator/) │
 │  React + Vite + TypeScript │   FastAPI + Python             │
@@ -840,8 +840,8 @@ kubectl create secret generic tesslate-secrets -n tesslate \
 |---------|------|------------|
 | `K8S_DEVSERVER_IMAGE` | `...tesslate-devserver:beta` | `...tesslate-devserver:production` |
 | `K8S_IMAGE_PULL_SECRET` | `""` | `""` |
-| `APP_DOMAIN` | `your-domain.com` | `your-domain.com` |
-| `COOKIE_DOMAIN` | `.your-domain.com` | `.your-domain.com` |
+| `APP_DOMAIN` | `your-domain.com` | `opensail.tesslate.com` |
+| `COOKIE_DOMAIN` | `.your-domain.com` | `.opensail.tesslate.com` |
 | `replicas` | `1` (single replica - tasks stored in-memory) | `1` |
 
 ### AWS Overlay: envFrom Auto-Sync Architecture
@@ -858,7 +858,7 @@ The AWS backend overlay (`k8s/overlays/aws-base/backend-patch.yaml`) uses a two-
 
 ### Frontend Config: API_URL Must NOT Include `/api`
 
-The frontend `api-url` in the `frontend-config` ConfigMap (managed by terraform `kubernetes.tf`) must be the **base domain only** (e.g., `https://your-domain.com`), NOT `https://your-domain.com/api`. All API calls in `app/src/lib/api.ts` already include the `/api` prefix in their paths, so including `/api` in the base URL causes double `/api/api/` paths.
+The frontend `api-url` in the `frontend-config` ConfigMap (managed by terraform `kubernetes.tf`) must be the **base domain only** (e.g., `https://opensail.tesslate.com`), NOT `https://opensail.tesslate.com/api`. All API calls in `app/src/lib/api.ts` already include the `/api` prefix in their paths, so including `/api` in the base URL causes double `/api/api/` paths.
 
 ### Common AWS Issues & Fixes
 

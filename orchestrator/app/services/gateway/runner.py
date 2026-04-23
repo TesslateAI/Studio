@@ -702,7 +702,7 @@ class GatewayRunner:
             jid = f"{event.source.platform}:{event.source.chat_id}"
             await adapter.send_message(
                 jid,
-                f"Link your Tesslate account: go to Settings → Connections "
+                f"Link your OpenSail account: go to Settings → Connections "
                 f"and enter code **{code}**\n\nThis code expires in 1 hour.",
             )
 

@@ -26,7 +26,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # Test mode (default: all)
 MODE="${1:-all}"
 
-echo -e "${GREEN}=== Tesslate Studio Test Runner ===${NC}"
+echo -e "${GREEN}=== OpenSail Test Runner ===${NC}"
 echo -e "Mode: ${YELLOW}${MODE}${NC}\n"
 
 # Function to run backend unit tests

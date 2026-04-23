@@ -1,6 +1,6 @@
-# Tesslate Studio State Management
+# OpenSail State Management
 
-Tesslate Studio uses a lightweight state management approach without Redux. State is managed through React Context, service singletons, and localStorage persistence.
+OpenSail uses a lightweight state management approach without Redux. State is managed through React Context, service singletons, and localStorage persistence.
 
 ## Architecture Overview
 
@@ -104,7 +104,7 @@ sessionStorage.setItem('referral_tracked', 'true');
 
 ## Why No Redux?
 
-Tesslate Studio avoids Redux for several reasons:
+OpenSail avoids Redux for several reasons:
 
 1. **Component-local state** - Most state is local to components
 2. **API-driven** - Data comes from the API, not stored globally
