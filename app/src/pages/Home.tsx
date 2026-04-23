@@ -173,11 +173,14 @@ function ActionCard({ icon, title, tooltip, onClick, disabled, badge }: ActionCa
 // Monochrome brand logos from Simple Icons CDN. `filter: invert(1)` turns the
 // default black SVG into pure white so every logo reads consistently on the
 // dark sidebar surface regardless of theme preset.
+// Slugs must resolve on cdn.simpleicons.org — Slack + Salesforce were
+// delisted (trademark) in 2024 and rendered as empty circles on the card.
+// Keep categories stable: messaging, CRM, dev-tooling.
 const CONNECTORS: Array<{ name: string; slug: string }> = [
   { name: 'Linear', slug: 'linear' },
-  { name: 'Slack', slug: 'slack' },
+  { name: 'Discord', slug: 'discord' },
   { name: 'GitHub', slug: 'github' },
-  { name: 'Salesforce', slug: 'salesforce' },
+  { name: 'HubSpot', slug: 'hubspot' },
   { name: 'Sentry', slug: 'sentry' },
 ];
 
@@ -190,8 +193,8 @@ function ConnectorsCard({ onClick }: ConnectorsCardProps) {
     <button
       type="button"
       onClick={onClick}
-      aria-label="Connect your connectors — Linear, Slack, GitHub, Salesforce, Sentry and more"
-      title="Hook your workspace up to Linear, Slack, GitHub, Salesforce, Sentry and more via MCP."
+      aria-label="Connect your connectors — Linear, Discord, GitHub, HubSpot, Sentry and more"
+      title="Hook your workspace up to Linear, Discord, GitHub, HubSpot, Sentry and more via MCP."
       className="group relative col-span-2 flex w-full min-h-[72px] items-center gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-left motion-safe:transition-colors hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] sm:gap-4 sm:px-4"
     >
       {/* Logo row */}
