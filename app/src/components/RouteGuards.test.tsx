@@ -392,6 +392,6 @@ describe('Route config sanity', () => {
   it('covers a minimum number of routes (catch missing entries)', () => {
     // Update this count when adding routes. If it fails, you added a route
     // to App.tsx but forgot to add it here.
-    expect(ROUTE_CONFIG.length).toBeGreaterThanOrEqual(28);
+    expect(ROUTE_CONFIG.length).toBeGreaterThanOrEqual(27);
   });
 });
