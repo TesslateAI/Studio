@@ -4,7 +4,7 @@
 
 <h1 align="center">OpenSail</h1>
 
-<p align="center">Build agents, apps, and automations from anywhere.<br />Run them on your infrastructure. Share them across your team.<br />Open source. Any model. No lock-in.</p>
+<p align="center">Build agents, apps, and automations from anywhere.<br />Run them on your infrastructure. Share them across your team.<br />Become your own sandboxing cloud. Governance, audit, and permissions built in.<br />Open source. Any model. No lock-in.</p>
 
 <p align="center">
   <a href="https://docs.tesslate.com"><strong>Docs</strong></a> ·
@@ -100,27 +100,25 @@ Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything
 
 ---
 
-## Agent coding and builder
+## Agentic coding and Product Operating
 
-Run your own agent roster.
+Code, ship, and operate from the same workspace.
 
-OpenSail ships with a set of specialized coding agents, each tuned for a different shape of work. Pair them on a single workspace or let one drive the whole thing.
+OpenSail is a full coding environment and a product-ops platform living in one window. You get a real editor, a real terminal, and real containers for the code side. You get deployments, schedules, permissions, audit logs, and channel integrations for the operating side. Agents can drive any of it, or stay out of the way.
 
-**Tesslate Agent.** An autonomous full-stack engineer. Reads and writes files, runs shell commands, manages git, fetches the web, and delegates to subagents when it needs to explore in parallel. Follows a project's `TESSLATE.md` the way a human reads a README. Keeps going until the task is actually done.
+**A real IDE, not a chat box.** Monaco editor with multi-language syntax support, autocomplete, find-in-files, and refactor support. A terminal attached to the running container. A file tree that mirrors the container's filesystem exactly. Live preview with hot module reload. Git panel with diff, blame, history, and branch switching. Everything you expect from a dedicated coding tool.
 
-**Stream Builder.** Streaming-first React + TypeScript prototyping. Code lands in the editor as it's being written. Built for the loop where you need to see the shape of the thing before you commit to it.
+**Code with an agent, or code alone.** The agent sees the same tree, the same files, the same shell output as you do. Every edit the agent makes is a reviewable diff you can accept, reject, or keep editing. Every command the agent runs shows up in your terminal. The agent's work is your work, in the same checkout.
 
-**React Component Builder.** Production components with a plan-act-observe-verify loop. WCAG 2.1 accessibility, TypeScript props, `memo` / `useMemo` / `useCallback`, and JSDoc-with-examples on every public API by default.
+**Kanban for real work.** Ticket refs like TSK-0001 live on a board inside the project. Drag columns, hand tasks to agents, watch them close as the work lands. The agent can create tickets, update status, and comment as it goes. No separate tracker.
 
-**API Integration Agent.** REST and GraphQL integrations with retry logic, exponential backoff, circuit breakers, and rate limiting baked in. Edge cases are the default, not an afterthought.
+**Ship from the canvas.** Draw an edge from a container to a deploy target. Draw one to a Slack channel. Draw one to a schedule. The same canvas that authors the app authors the ops.
 
-**Librarian.** Scans a project's manifests (`package.json`, `requirements.txt`, `go.mod`, Dockerfiles) and writes the `.tesslate/config.json` that drives the Architecture Panel. One pass gets you the full container topology with framework-appropriate ports and service wiring.
+**Governance on by default.** Per-project permissions gate what tools the agent can touch (shell, network, git push, file writes, process spawning). Budget caps throttle AI spend per project and per team. Team roles (admin, editor, viewer) scope who can edit, deploy, or approve. Every significant action writes to an append-only audit log keyed by team and project.
 
-**Service Integrator.** Wires Supabase, Stripe, Postgres, or any REST API into a project without ever seeing plaintext credentials. Opens a secure panel on the Architecture canvas for the user to paste keys; the agent only writes env-var references. Rotate a key later and nothing in the code changes.
+**Context that doesn't run out.** When a session crosses 80% of the model's window, the agent progressively compacts older messages with a cheap model and keeps going. Multi-hour runs don't hit a wall.
 
-**Context that doesn't run out.** When a session crosses 80% of the model's window, the agent progressively compacts older messages with a cheap model and keeps working. Multi-hour runs don't hit a wall.
-
-**Progressive persistence.** Every agent step is written to the database as it happens. Pods can die, browsers can close, networks can hiccup — come back and the trajectory is still there. Resume mid-task.
+**Progressive persistence.** Every agent step streams to the database as it happens. Pods can die, browsers can close, networks can hiccup. Come back later and the trajectory is still there. Resume mid-task.
 
 ---
 
@@ -132,7 +130,7 @@ The Design Engineer is a live-editing canvas that runs alongside the code editor
 
 **Click-to-source.** The bridge walks the React Fiber tree at runtime to resolve any DOM element to its component name, source file, and line number. No source maps required. Click a button in the preview and the editor opens the JSX that produced it.
 
-**Stable OID mapping.** A server-side pass tags JSX elements with `data-oid` attributes so every edit is keyed to the exact source location that rendered it. Refactor a file, move the component — the mapping survives.
+**Stable OID mapping.** A server-side pass tags JSX elements with `data-oid` attributes so every edit is keyed to the exact source location that rendered it. Refactor a file, move the component, and the mapping survives.
 
 **Two-way, sub-100ms sync.** Edit class names, text, styles, or attributes in the inspector and the change lands in the preview and the source file in one step. Edit the file directly and HMR flows back through the canvas without losing your selection.
 
@@ -142,7 +140,7 @@ The Design Engineer is a live-editing canvas that runs alongside the code editor
 
 **Canvas powers.** Pan and zoom with cursor-anchored math so the point under the cursor stays fixed. Responsive breakpoints from 375px to 1536px. Snap guides. Undo/redo across the whole session with inverse-request replay.
 
-**Structured diffs for the agent.** Canvas edits aren't character patches — they become typed `CodeDiffRequest` objects (style patch, class override, text content, attributes, structural changes). The agent can see what a user did on the canvas and reason about intent, not just bytes.
+**Structured diffs for the agent.** Canvas edits aren't character patches. They become typed `CodeDiffRequest` objects (style patch, class override, text content, attributes, structural changes). The agent can see what a user did on the canvas and reason about intent, not just bytes.
 
 ---
 
@@ -406,90 +404,46 @@ Read the full setup guide in the [docs](https://docs.tesslate.com).
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    D["Desktop App<br/>(Tauri v2)"] --> R
+    B["Browser Web UI"] --> R
+    C["CLI / TUI"] --> R
+    G["Gateway API<br/>+ MCP Server"] --> R
+
+    R{{"Runtime Selector<br/>per project"}}
+
+    R --> L["Local<br/>subprocess + SQLite + asyncio"]
+    R --> DC["Docker Compose"]
+    R --> K["Kubernetes<br/>(cloud or self-host)"]
+
+    subgraph K8S["Kubernetes Cluster (Tesslate Cloud or your own)"]
+        direction TB
+        AP["Architecture Panel Canvas<br/>nodes, edges, previews, deploy targets<br/>agent co-authors .tesslate/config.json"]
+        WS["BtrFS Workspace Layer<br/>CSI driver, snapshots, CAS bundles, S3-backed"]
+        TC["Three-Tier Compute<br/>Tier 0 reasoning, Tier 1 warm pool, Tier 2 namespaces"]
+        AR["Agent Runtime<br/>LiteLLM, BYOK, Redis Streams, context compaction<br/>tool registry, approval gates, secret scrubbing"]
+        MK["Apps Marketplace<br/>publish, install, fork, bundle<br/>4-stage approval, billing dispatcher"]
+        PS["Platform Services<br/>Connectors, Skills, Teams, RBAC, Audit log<br/>22 deployment targets, messaging channels"]
+
+        AP --> WS
+        WS --> TC
+        TC --> AR
+        AR --> MK
+        MK --> PS
+    end
+
+    K --> AP
+
+    classDef surface fill:#eef2ff,stroke:#6366f1,color:#1e1b4b;
+    classDef runtime fill:#ecfdf5,stroke:#10b981,color:#064e3b;
+    classDef cluster fill:#fff7ed,stroke:#f97316,color:#7c2d12;
+    class D,B,C,G surface;
+    class L,DC,K runtime;
+    class AP,WS,TC,AR,MK,PS cluster;
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        SURFACES                                      │
-│                                                                      │
-│  ┌──────────────┐  ┌──────────┐  ┌────────────┐  ┌──────────────┐  │
-│  │  Desktop App  │  │  Browser │  │    CLI /   │  │  Gateway API │  │
-│  │  (Tauri v2)   │  │   (Web)  │  │    TUI     │  │  + MCP Server│  │
-│  └──────┬───────┘  └────┬─────┘  └─────┬──────┘  └──────┬───────┘  │
-│         │               │              │                │           │
-│         └───────────────┴──────────────┴────────────────┘           │
-│                              │                                       │
-│                    ┌─────────▼──────────┐                            │
-│                    │  Runtime Selector   │                            │
-│                    │  (per project)      │                            │
-│                    └──┬──────┬───────┬──┘                            │
-│                       │      │       │                               │
-│            ┌──────────▼┐ ┌───▼────┐ ┌▼────────────────────┐         │
-│            │   Local    │ │ Docker │ │    Kubernetes        │         │
-│            │ subprocess │ │Compose │ │ (cloud or self-host) │         │
-│            │ + SQLite   │ │        │ │                      │         │
-│            │ + asyncio  │ │        │ │                      │         │
-│            └────────────┘ └────────┘ └──────────────────────┘        │
-│                                              │                       │
-└──────────────────────────────────────────────┼───────────────────────┘
-                                               │
-          ┌────────────────────────────────────▼─────────────────────┐
-          │              KUBERNETES CLUSTER                           │
-          │        (Tesslate Cloud OR your own cluster)               │
-          │                                                          │
-          │  ┌────────────────────────────────────────────────────┐  │
-          │  │            Architecture Panel Canvas                │  │
-          │  │  Container nodes · Edges · Previews · Deploy targets│  │
-          │  │  Agent co-authors .tesslate/config.json               │  │
-          │  └──────────────────────┬─────────────────────────────┘  │
-          │                         │                                 │
-          │  ┌──────────────────────▼─────────────────────────────┐  │
-          │  │        BtrFS Workspace Layer (CSI Driver)           │  │
-          │  │  Snapshots · CAS Bundles · S3-backed storage       │  │
-          │  │  Per-project subvolumes · Atomic hibernate/restore  │  │
-          │  └──────────────────────┬─────────────────────────────┘  │
-          │                         │                                 │
-          │  ┌──────────────────────▼─────────────────────────────┐  │
-          │  │       Three-Tier Compute Runtime                    │  │
-          │  │  Tier 0: serverless file ops, reasoning (near zero) │  │
-          │  │  Tier 1: warm ephemeral container pool (instant)    │  │
-          │  │  Tier 2: full namespaces, multi-container,          │  │
-          │  │          pod affinity, per-container ingress         │  │
-          │  └──────────────────────┬─────────────────────────────┘  │
-          │                         │                                 │
-          │  ┌──────────────────────▼─────────────────────────────┐  │
-          │  │              Agent Runtime                           │  │
-          │  │  LiteLLM routing · Per-session keys · BYOK          │  │
-          │  │  Redis Streams · Distributed locks · Compaction     │  │
-          │  │  Tool registry: file, shell, git, web, planning,    │  │
-          │  │    delegation, memory, MCP bridge, schedule, kanban  │  │
-          │  │  Approval gates · Secret scrubbing · Mode gating    │  │
-          │  └──────────────────────┬─────────────────────────────┘  │
-          │                         │                                 │
-          │  ┌──────────────────────▼─────────────────────────────┐  │
-          │  │              Apps Marketplace                        │  │
-          │  │  Publish · Install (CAS restore) · Fork · Bundle    │  │
-          │  │  4-stage approval pipeline · Yank/Appeal             │  │
-          │  │  Billing dispatcher (creator/installer/platform/BYOK)│  │
-          │  │  Surfaces: UI · Chat · Scheduled · Triggered · MCP  │  │
-          │  └──────────────────────┬─────────────────────────────┘  │
-          │                         │                                 │
-          │  ┌──────────────────────▼─────────────────────────────┐  │
-          │  │              Platform Services                       │  │
-          │  │  Connectors (MCP) · Skills · Team Controls · RBAC   │  │
-          │  │  Audit Log · Communication Gateways                  │  │
-          │  │  (Slack · Telegram · Discord · WhatsApp · Signal)   │  │
-          │  │  22 Deployment Targets · Cloud Sync                  │  │
-          │  └────────────────────────────────────────────────────┘  │
-          │                                                          │
-          │  ┌────────────────────────────────────────────────────┐  │
-          │  │         Self-host the whole thing.                   │  │
-          │  │  helm install opensail TesslateAI/opensail             │  │
-          │  │  You get everything above on your own cluster.       │  │
-          │  │  Your own marketplace. Your own agent infra.         │  │
-          │  │  Pair desktop apps to it. Full Codex-style           │  │
-          │  │  cloud sandboxing, owned by you.                     │  │
-          │  └────────────────────────────────────────────────────┘  │
-          └──────────────────────────────────────────────────────────┘
-```
+
+`helm install opensail TesslateAI/opensail` gets you the whole stack on your own cluster. Pair desktop apps to it for Codex-style cloud sandboxing, owned end to end by you.
 
 ## Contributing
 
