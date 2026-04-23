@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Tesslate Studio - Phase 1: Kubernetes Installation Script
+# OpenSail - Phase 1: Kubernetes Installation Script
 
 set -e
 
 echo "========================================"
-echo "Tesslate Studio Kubernetes Setup"
+echo "OpenSail Kubernetes Setup"
 echo "Phase 1: Install Kubernetes Components"
 echo "========================================"
 

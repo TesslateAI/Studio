@@ -1,5 +1,5 @@
 # =============================================================================
-# EKS Cluster Configuration for Tesslate Studio
+# EKS Cluster Configuration for OpenSail
 # =============================================================================
 # Creates an EKS cluster with managed node groups, EBS CSI driver,
 # and required OIDC provider for IRSA (IAM Roles for Service Accounts).

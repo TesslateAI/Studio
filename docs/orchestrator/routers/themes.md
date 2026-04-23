@@ -8,7 +8,7 @@ The themes router serves theme configuration data for the frontend UI. Themes ar
 
 This is a **public API** - no authentication required. This design allows themes to load before user login, ensuring the UI can display correctly during the authentication flow.
 
-Themes define the visual appearance of the Tesslate Studio interface including:
+Themes define the visual appearance of the OpenSail interface including:
 - Color palette (primary, accent, background, text, etc.)
 - Typography (font families, sizes, line height)
 - Spacing (border radius values)

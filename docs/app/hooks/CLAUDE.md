@@ -1,6 +1,6 @@
 # Custom Hooks Documentation
 
-**Purpose**: This context documents the custom React hooks in Tesslate Studio, focusing on request management, authentication, and component lifecycle patterns.
+**Purpose**: This context documents the custom React hooks in OpenSail, focusing on request management, authentication, and component lifecycle patterns.
 
 ## When to Load This Context
 

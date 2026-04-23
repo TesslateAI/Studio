@@ -1,12 +1,12 @@
-# Tesslate Studio - Root Agent Context
+# OpenSail - Root Agent Context
 
 ## Purpose
 
-This is the root context for Tesslate Studio, an AI-powered web application builder. Load this context when you need a high-level understanding of the entire system or don't know where to start.
+This is the root context for OpenSail, an AI-powered web application builder. Load this context when you need a high-level understanding of the entire system or don't know where to start.
 
 ## System Overview
 
-Tesslate Studio consists of four major systems:
+OpenSail consists of four major systems:
 
 | System | Purpose | Technology |
 |--------|---------|------------|
@@ -135,7 +135,7 @@ docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource
 ## When to Load This Context
 
 Load this root CLAUDE.md when:
-- Starting work on Tesslate Studio for the first time
+- Starting work on OpenSail for the first time
 - Need to understand how systems connect
 - Looking for the right subsystem to modify
 - Debugging cross-system issues

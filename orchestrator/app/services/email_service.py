@@ -46,7 +46,7 @@ class EmailService:
         If SMTP is not configured, logs the code to the console instead.
         This is non-blocking and safe to fire-and-forget via asyncio.create_task.
         """
-        subject = "Your Tesslate verification code"
+        subject = "Your OpenSail verification code"
 
         if not self.is_configured:
             logger.info(
@@ -75,7 +75,7 @@ class EmailService:
         If SMTP is not configured, logs the reset URL to the console instead.
         This is non-blocking and safe to fire-and-forget via asyncio.create_task.
         """
-        subject = "Reset your Tesslate password"
+        subject = "Reset your OpenSail password"
 
         if not self.is_configured:
             logger.info(
@@ -87,7 +87,7 @@ class EmailService:
         try:
             html = _build_password_reset_html(reset_url)
             plain = (
-                f"You requested a password reset for your Tesslate account.\n\n"
+                f"You requested a password reset for your OpenSail account.\n\n"
                 f"Click the link below to reset your password:\n{reset_url}\n\n"
                 "This link expires in 1 hour.\n"
                 "If you did not request a password reset, you can safely ignore this email."
@@ -107,7 +107,7 @@ class EmailService:
         the entry in an in-memory inbox that Playwright E2E tests can poll.
         This is non-blocking and safe to fire-and-forget via asyncio.create_task.
         """
-        subject = "Your Tesslate sign-in link"
+        subject = "Your OpenSail sign-in link"
 
         if not self.is_configured:
             logger.info(
@@ -126,7 +126,7 @@ class EmailService:
         try:
             html = _build_magic_link_html(link_url, code)
             plain = (
-                "Sign in to your Tesslate account.\n\n"
+                "Sign in to your OpenSail account.\n\n"
                 f"Click the link to sign in:\n{link_url}\n\n"
                 f"Or enter this 6-digit code: {code}\n\n"
                 "This link and code expire in 10 minutes.\n"
@@ -146,7 +146,7 @@ class EmailService:
         If SMTP is not configured, logs the invite URL to the console instead.
         This is non-blocking and safe to fire-and-forget via asyncio.create_task.
         """
-        subject = f"You've been invited to {team_name} on Tesslate"
+        subject = f"You've been invited to {team_name} on OpenSail"
 
         if not self.is_configured:
             logger.info(
@@ -159,7 +159,7 @@ class EmailService:
         try:
             html = _build_team_invite_html(invite_url, team_name, inviter_name, role)
             plain = (
-                f"{inviter_name} invited you to join {team_name} on Tesslate as {role}.\n\n"
+                f"{inviter_name} invited you to join {team_name} on OpenSail as {role}.\n\n"
                 f"Accept the invitation:\n{invite_url}\n\n"
                 "This invitation expires in 7 days.\n"
                 "If you weren't expecting this, you can safely ignore this email."
@@ -248,7 +248,7 @@ def _build_magic_link_html(link_url: str, code: str) -> str:
         '<div style="font-family: -apple-system, BlinkMacSystemFont,'
         " 'Segoe UI', Roboto, sans-serif; max-width: 480px;"
         ' margin: 0 auto; padding: 40px 20px;">'
-        '<h2 style="color: #111; margin-bottom: 8px;">Sign in to Tesslate</h2>'
+        '<h2 style="color: #111; margin-bottom: 8px;">Sign in to OpenSail</h2>'
         '<p style="color: #666; font-size: 14px; margin-bottom: 24px;">'
         "Click the button below to sign in. This link expires in 10 minutes."
         "</p>"

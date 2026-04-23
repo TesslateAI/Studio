@@ -1,5 +1,5 @@
 # =============================================================================
-# Tesslate Studio - AWS EKS Terraform Variables
+# OpenSail - AWS EKS Terraform Variables
 # =============================================================================
 # Copy this file to terraform.{environment}.tfvars and fill in your values.
 # DO NOT commit terraform.*.tfvars to version control!

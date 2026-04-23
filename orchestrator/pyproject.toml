@@ -10,7 +10,7 @@ exclude = ["users*", "k8s*", "template*"]
 [project]
 name = "tesslate-studio-orchestrator"
 version = "0.1.0"
-description = "Tesslate Studio - Open source full stack software builder - Backend Orchestrator"
+description = "OpenSail - Open source full stack software builder - Backend Orchestrator"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -16,7 +16,7 @@ mints the iframe URL.
 import { createEmbedClient } from "@tesslate/embed-sdk";
 
 const client = createEmbedClient({
-  targetOrigin: "https://your-domain.com",
+  targetOrigin: "https://opensail.tesslate.com",
   timeoutMs: 10_000,
 });
 

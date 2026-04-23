@@ -1,6 +1,6 @@
 # Settings Pages Architecture
 
-This document describes the modular settings architecture used in Tesslate Studio's frontend application.
+This document describes the modular settings architecture used in OpenSail's frontend application.
 
 ## Overview
 

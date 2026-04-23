@@ -1,6 +1,6 @@
 # AI Agent System
 
-The AI agent system is the core of Tesslate Studio's AI-powered development capabilities. It enables language models to write code, execute commands, and manage projects through a sophisticated tool-calling architecture.
+The AI agent system is the core of OpenSail's AI-powered development capabilities. It enables language models to write code, execute commands, and manage projects through a sophisticated tool-calling architecture.
 
 ## Architecture Overview
 

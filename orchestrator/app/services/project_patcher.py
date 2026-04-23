@@ -1,7 +1,7 @@
 """
 Project Configuration Patcher
 
-Automatically detects and patches imported GitHub projects to work with Tesslate Studio.
+Automatically detects and patches imported GitHub projects to work with OpenSail.
 Handles missing configurations, incompatible settings, and framework-specific requirements.
 """
 
@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 class ProjectPatcher:
-    """Patches imported projects to work with Tesslate Studio."""
+    """Patches imported projects to work with OpenSail."""
 
-    # Required Vite configuration for Tesslate Studio
+    # Required Vite configuration for OpenSail
     REQUIRED_VITE_CONFIG = """import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -313,7 +313,7 @@ export default defineConfig({
 
     async def auto_patch(self) -> dict[str, any]:
         """
-        Automatically detect and patch the project to work with Tesslate Studio.
+        Automatically detect and patch the project to work with OpenSail.
 
         Returns:
             Dictionary with results:
@@ -359,7 +359,7 @@ export default defineConfig({
         else:
             self.issues_detected.append(
                 "Unknown framework detected. Manual configuration may be required. "
-                "Tesslate Studio is optimized for Vite projects."
+                "OpenSail is optimized for Vite projects."
             )
 
         result = {

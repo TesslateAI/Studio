@@ -80,7 +80,7 @@ Invoke an AI agent on a project. This is the primary entry point for external in
 **Example:**
 
 ```bash
-curl -X POST https://your-domain.com/api/external/agent/invoke \
+curl -X POST https://opensail.tesslate.com/api/external/agent/invoke \
   -H "Authorization: Bearer tsk_8f3a1b2c4d5e6f7a8b9c0d1e2f3a4b5c" \
   -H "Content-Type: application/json" \
   -d '{
@@ -149,7 +149,7 @@ This uses `subscribe_agent_events_from()` to replay missed events from the Redis
 
 ```bash
 curl -N -H "Authorization: Bearer tsk_8f3a1b2c..." \
-  https://your-domain.com/api/external/agent/events/arq:task:abc123
+  https://opensail.tesslate.com/api/external/agent/events/arq:task:abc123
 ```
 
 ### 3. GET `/api/external/agent/status/{task_id}`
@@ -179,7 +179,7 @@ Poll for agent task status. Use this as an alternative to SSE when streaming is 
 
 ```bash
 curl -H "Authorization: Bearer tsk_8f3a1b2c..." \
-  https://your-domain.com/api/external/agent/status/arq:task:abc123
+  https://opensail.tesslate.com/api/external/agent/status/arq:task:abc123
 ```
 
 **Response:**
@@ -322,7 +322,7 @@ class ExternalAgentStatusResponse(BaseModel):
 ```python
 import requests, time
 
-API = "https://your-domain.com/api/external"
+API = "https://opensail.tesslate.com/api/external"
 HEADERS = {"Authorization": "Bearer tsk_..."}
 
 # Invoke
@@ -346,7 +346,7 @@ while True:
 ```python
 import sseclient, requests
 
-API = "https://your-domain.com/api/external"
+API = "https://opensail.tesslate.com/api/external"
 HEADERS = {"Authorization": "Bearer tsk_..."}
 
 resp = requests.post(f"{API}/agent/invoke", headers=HEADERS, json={
@@ -355,7 +355,7 @@ resp = requests.post(f"{API}/agent/invoke", headers=HEADERS, json={
 })
 events_url = resp.json()["events_url"]
 
-stream = requests.get(f"https://your-domain.com{events_url}",
+stream = requests.get(f"https://opensail.tesslate.com{events_url}",
                        headers=HEADERS, stream=True)
 client = sseclient.SSEClient(stream)
 for event in client.events():

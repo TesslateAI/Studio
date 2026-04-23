@@ -23,8 +23,8 @@ to `LocalOrchestrator`.
 
 Resolver: `/orchestrator/app/services/desktop_paths.py` (`resolve_studio_home`,
 `ensure_studio_home`). Precedence: explicit setting → `$TESSLATE_STUDIO_HOME`
-env var → OS default (`~/Library/Application Support/Tesslate Studio` on macOS,
-`%APPDATA%/Tesslate Studio` on Windows, `$XDG_DATA_HOME/tesslate-studio` on
+env var → OS default (`~/Library/Application Support/OpenSail` on macOS,
+`%APPDATA%/OpenSail` on Windows, `$XDG_DATA_HOME/tesslate-studio` on
 Linux).
 
 ```

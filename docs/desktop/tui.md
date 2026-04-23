@@ -1,7 +1,7 @@
 # Textual TUI Client
 
 Terminal-based agent client for headless and server environments. An
-alternative frontend to the Tesslate Studio desktop app and browser UI.
+alternative frontend to the OpenSail desktop app and browser UI.
 Intended for SSH sessions, CI pipelines, or any context where a graphical
 window is unavailable.
 

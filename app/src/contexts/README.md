@@ -1,6 +1,6 @@
 # Frontend Contexts
 
-Cross-cutting React contexts for Tesslate Studio. Each context owns a slice of
+Cross-cutting React contexts for OpenSail. Each context owns a slice of
 app-wide state plus the mutations that keep it fresh. Providers are composed
 at the root (see `App.tsx` / `main.tsx`).
 

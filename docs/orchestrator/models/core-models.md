@@ -1,12 +1,12 @@
 # Core Database Models
 
-This document covers the foundational models that power Tesslate Studio's core functionality: users, projects, containers, and file management.
+This document covers the foundational models that power OpenSail's core functionality: users, projects, containers, and file management.
 
 ## User Model
 
 **File**: `c:\Users\Smirk\Downloads\Tesslate-Studio\orchestrator\app\models_auth.py`
 
-The User model is the central identity in Tesslate Studio. It extends FastAPI-Users' `SQLAlchemyBaseUserTable` to provide authentication while adding Tesslate-specific features like subscriptions, billing, and creator payouts.
+The User model is the central identity in OpenSail. It extends FastAPI-Users' `SQLAlchemyBaseUserTable` to provide authentication while adding Tesslate-specific features like subscriptions, billing, and creator payouts.
 
 ### Schema
 
@@ -842,7 +842,7 @@ await db.commit()
 
 ## Summary
 
-The core models form the foundation of Tesslate Studio:
+The core models form the foundation of OpenSail:
 
 - **User**: Identity, authentication, subscription, and billing
 - **Project**: Top-level container for user applications

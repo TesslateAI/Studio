@@ -1,8 +1,8 @@
 # =============================================================================
-# Tesslate Studio - AWS EKS Terraform Configuration
+# OpenSail - AWS EKS Terraform Configuration
 # =============================================================================
 # This Terraform configuration provisions the complete AWS infrastructure
-# for running Tesslate Studio on EKS with:
+# for running OpenSail on EKS with:
 # - VPC with public/private subnets
 # - EKS cluster with managed node groups
 # - S3 bucket for project hibernation
@@ -148,10 +148,10 @@ locals {
 
   # Cloudflare zone name for cert-manager DNS01 challenges
   # Defaults to domain_name (works when domain == zone, e.g., your-domain.com)
-  # Must be explicitly set when domain is a subdomain (e.g., your-domain.com → tesslate.com)
+  # Must be explicitly set when domain is a subdomain (e.g., opensail.tesslate.com → tesslate.com)
   cloudflare_zone_name = var.cloudflare_zone_name != "" ? var.cloudflare_zone_name : var.domain_name
 
-  # DNS subdomain relative to Cloudflare zone (e.g., "studio" for "your-domain.com" in zone "tesslate.com")
+  # DNS subdomain relative to Cloudflare zone (e.g., "opensail" for "opensail.tesslate.com" in zone "tesslate.com")
   # When domain == zone (e.g., your-domain.com), subdomain is "@" (zone apex)
   dns_subdomain = (
     local.cloudflare_zone_name == var.domain_name

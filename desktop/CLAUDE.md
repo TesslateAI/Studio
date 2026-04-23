@@ -1,7 +1,7 @@
-# Tesslate Studio Desktop
+# OpenSail Desktop
 
 ## Purpose
-Tauri v2 shell that wraps the Tesslate Studio orchestrator and React frontend
+Tauri v2 shell that wraps the OpenSail orchestrator and React frontend
 as a native desktop app on macOS, Windows, and Linux. The orchestrator runs
 as a PyInstaller-frozen **sidecar** process, launched and supervised by the
 Tauri host. UI is the same React app (`app/`) served over loopback.

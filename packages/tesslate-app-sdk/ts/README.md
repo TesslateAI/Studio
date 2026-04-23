@@ -16,7 +16,7 @@ sessions, which this SDK does not use.
 import { AppClient, ManifestBuilder } from "@tesslate/app-sdk";
 
 const client = new AppClient({
-  baseUrl: "https://your-domain.com",
+  baseUrl: "https://opensail.tesslate.com",
   apiKey: process.env.TESSLATE_API_KEY!, // "tsk_..."
 });
 

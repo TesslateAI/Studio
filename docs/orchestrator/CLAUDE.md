@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The orchestrator is Tesslate Studio's FastAPI backend handling all API requests, AI agent execution, and container orchestration. Load this context when working on any backend functionality.
+The orchestrator is OpenSail's FastAPI backend handling all API requests, AI agent execution, and container orchestration. Load this context when working on any backend functionality.
 
 ## Key Source Files
 

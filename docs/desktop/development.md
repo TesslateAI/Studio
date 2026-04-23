@@ -1,6 +1,6 @@
 # Desktop development setup
 
-This page walks through standing up the Tesslate Studio desktop client
+This page walks through standing up the OpenSail desktop client
 (Tauri v2 + PyInstaller-frozen FastAPI sidecar) from a clean checkout.
 
 If you already have the backend and frontend running in cloud mode, the

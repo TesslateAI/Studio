@@ -1,5 +1,5 @@
 #!/bin/bash
-# Complete Tesslate Studio Deployment Script
+# Complete OpenSail Deployment Script
 # This script runs all deployment steps in sequence
 
 set -e
@@ -33,7 +33,7 @@ if [ -z "$DOCR_TOKEN" ]; then
     exit 1
 fi
 
-echo "🚀 Starting complete Tesslate Studio deployment..."
+echo "🚀 Starting complete OpenSail deployment..."
 echo "This will:"
 echo "  0. Install Kubernetes prerequisites (NGINX Ingress, cert-manager)"
 echo "  1. Setup DigitalOcean Container Registry authentication"
@@ -111,7 +111,7 @@ echo "==============================================="
 echo ""
 echo "🎉 Complete deployment finished!"
 echo ""
-echo "Your Tesslate Studio is now running on Kubernetes!"
+echo "OpenSail is now running on Kubernetes!"
 echo ""
 echo "📋 What was deployed:"
 echo "  ✅ Kubernetes prerequisites (NGINX Ingress Controller, cert-manager)"

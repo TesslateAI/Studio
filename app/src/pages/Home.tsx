@@ -3,7 +3,14 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FolderPlus, GitBranch, SquaresFour, Folder, FolderOpen, ArrowRight } from '@phosphor-icons/react';
+import {
+  FolderPlus,
+  GitBranch,
+  SquaresFour,
+  Folder,
+  FolderOpen,
+  ArrowRight,
+} from '@phosphor-icons/react';
 import { TesslateLogo } from '../components/ui/TesslateLogo';
 import { MoodyFace } from '../components/ui/MoodyFace';
 import { CreateProjectModal, RepoImportModal } from '../components/modals';
@@ -221,9 +228,7 @@ function ConnectorsCard({ onClick }: ConnectorsCardProps) {
 
       {/* Text block */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-sm font-semibold text-[var(--text)]">
-          Connect your connectors
-        </span>
+        <span className="text-sm font-semibold text-[var(--text)]">Connect your connectors</span>
         <span className="truncate text-[11px] text-[var(--text-muted)]">
           {CONNECTORS.map((c) => c.name).join(' · ')}
         </span>
@@ -394,139 +399,137 @@ export default function Home() {
     <div className="h-full w-full overflow-y-auto">
       <div className="flex min-h-full items-center justify-center">
         <div className="flex w-full max-w-[560px] flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12 lg:px-8 lg:py-16">
-        {/* Logo + title + plan line */}
-        <header className="flex flex-col items-center gap-2 text-center">
-          <TesslateLogo
-            width={56}
-            height={44}
-            className="text-[var(--primary)] sm:h-[52px] sm:w-[64px]"
-          />
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--text)] sm:text-2xl">
-            Tesslate Studio
-          </h1>
-          <p className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] sm:text-sm">
-            <span>{tierLabel} Plan</span>
-            {!isPaidPlan && (
-              <>
-                <span aria-hidden="true">·</span>
-                <button
-                  type="button"
-                  onClick={handleUpgrade}
-                  className="text-[var(--primary)] hover:underline focus-visible:outline-none focus-visible:underline"
-                >
-                  Upgrade
-                </button>
-              </>
-            )}
-          </p>
-        </header>
-
-        {/* Action grid — 2x2 */}
-        <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
-          <ActionCard
-            icon={<FolderPlus size={20} weight="duotone" />}
-            title="New Workspace"
-            tooltip="Create a fresh workspace — name it, pick a template, and start building."
-            onClick={() => setShowCreateDialog(true)}
-          />
-          <ActionCard
-            icon={<GitBranch size={20} weight="duotone" />}
-            title="Clone Repo"
-            tooltip="Import an existing GitHub, GitLab, or Bitbucket repo as a new workspace."
-            onClick={() => setShowImportDialog(true)}
-          />
-          <ActionCard
-            icon={<SquaresFour size={20} weight="duotone" />}
-            title="Apps"
-            tooltip="Install and launch prebuilt apps into your workspace."
-            onClick={() => navigate('/apps/installed')}
-          />
-          <ActionCard
-            icon={<MoodyFace size={20} animate trackPointer />}
-            title="Agents"
-            tooltip="Chat with agents to automate workflows in your projects."
-            onClick={() => navigate('/chat')}
-          />
-          <ConnectorsCard onClick={() => navigate('/marketplace/browse/mcp_server')} />
-        </div>
-
-        {/* Recent Projects — finder-style list */}
-        <section
-          aria-labelledby="recent-projects-heading"
-          className="flex flex-col gap-2"
-        >
-          <div className="flex items-center justify-between">
-            <h2
-              id="recent-projects-heading"
-              className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"
-            >
-              Recent Workspaces
-            </h2>
-            {recent.length > 0 && (
-              <button
-                type="button"
-                onClick={() => navigate('/dashboard')}
-                className="flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:text-[var(--text)]"
-              >
-                View all
-                <ArrowRight size={12} />
-              </button>
-            )}
-          </div>
-
-          {recentLoading ? (
-            <div
-              className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-xs text-[var(--text-muted)]"
-              role="status"
-              aria-live="polite"
-            >
-              Loading workspaces…
-            </div>
-          ) : recent.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 rounded-[var(--radius)] border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-8 text-center">
-              <FolderOpen size={24} className="text-[var(--text-subtle)]" />
-              <p className="text-sm text-[var(--text-muted)]">No workspaces yet</p>
-              <p className="text-xs text-[var(--text-subtle)]">
-                Click <span className="text-[var(--text-muted)]">New Workspace</span> above to create your first one.
-              </p>
-            </div>
-          ) : (
-            <ul className="flex flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
-              {recent.map((p, i) => (
-                <li key={p.id}>
+          {/* Logo + title + plan line */}
+          <header className="flex flex-col items-center gap-2 text-center">
+            <TesslateLogo
+              width={56}
+              height={44}
+              className="text-[var(--primary)] sm:h-[52px] sm:w-[64px]"
+            />
+            <h1 className="text-xl font-semibold tracking-tight text-[var(--text)] sm:text-2xl">
+              OpenSail
+            </h1>
+            <p className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] sm:text-sm">
+              <span>{tierLabel} Plan</span>
+              {!isPaidPlan && (
+                <>
+                  <span aria-hidden="true">·</span>
                   <button
                     type="button"
-                    onClick={() => handleOpenProject(p.slug)}
-                    className={[
-                      'flex w-full items-center gap-3 px-3 py-2.5 text-left motion-safe:transition-colors',
-                      'hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:bg-[var(--surface-hover)]',
-                      i !== recent.length - 1 ? 'border-b border-[var(--border)]' : '',
-                    ].join(' ')}
+                    onClick={handleUpgrade}
+                    className="text-[var(--primary)] hover:underline focus-visible:outline-none focus-visible:underline"
                   >
-                    <Folder
-                      size={18}
-                      weight="duotone"
-                      className="flex-shrink-0 text-[var(--text-muted)]"
-                    />
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-sm text-[var(--text)]">{p.name}</span>
-                      <span className="truncate text-[11px] text-[var(--text-subtle)]">
-                        {activeTeam?.slug ? `${activeTeam.slug}/` : ''}
-                        {p.slug}
-                      </span>
-                    </div>
-                    <span
-                      className="hidden flex-shrink-0 text-[11px] text-[var(--text-muted)] sm:inline"
-                      title={new Date(p.updatedAt).toLocaleString()}
-                    >
-                      {formatRelativeTime(p.updatedAt)}
-                    </span>
+                    Upgrade
                   </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+                </>
+              )}
+            </p>
+          </header>
+
+          {/* Action grid — 2x2 */}
+          <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
+            <ActionCard
+              icon={<FolderPlus size={20} weight="duotone" />}
+              title="New Workspace"
+              tooltip="Create a fresh workspace — name it, pick a template, and start building."
+              onClick={() => setShowCreateDialog(true)}
+            />
+            <ActionCard
+              icon={<GitBranch size={20} weight="duotone" />}
+              title="Clone Repo"
+              tooltip="Import an existing GitHub, GitLab, or Bitbucket repo as a new workspace."
+              onClick={() => setShowImportDialog(true)}
+            />
+            <ActionCard
+              icon={<SquaresFour size={20} weight="duotone" />}
+              title="Apps"
+              tooltip="Install and launch prebuilt apps into your workspace."
+              onClick={() => navigate('/apps/installed')}
+            />
+            <ActionCard
+              icon={<MoodyFace size={20} animate trackPointer />}
+              title="Agents"
+              tooltip="Chat with agents to automate workflows in your projects."
+              onClick={() => navigate('/chat')}
+            />
+            <ConnectorsCard onClick={() => navigate('/marketplace/browse/mcp_server')} />
+          </div>
+
+          {/* Recent Projects — finder-style list */}
+          <section aria-labelledby="recent-projects-heading" className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <h2
+                id="recent-projects-heading"
+                className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"
+              >
+                Recent Workspaces
+              </h2>
+              {recent.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/dashboard')}
+                  className="flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:text-[var(--text)]"
+                >
+                  View all
+                  <ArrowRight size={12} />
+                </button>
+              )}
+            </div>
+
+            {recentLoading ? (
+              <div
+                className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-xs text-[var(--text-muted)]"
+                role="status"
+                aria-live="polite"
+              >
+                Loading workspaces…
+              </div>
+            ) : recent.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 rounded-[var(--radius)] border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-8 text-center">
+                <FolderOpen size={24} className="text-[var(--text-subtle)]" />
+                <p className="text-sm text-[var(--text-muted)]">No workspaces yet</p>
+                <p className="text-xs text-[var(--text-subtle)]">
+                  Click <span className="text-[var(--text-muted)]">New Workspace</span> above to
+                  create your first one.
+                </p>
+              </div>
+            ) : (
+              <ul className="flex flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
+                {recent.map((p, i) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenProject(p.slug)}
+                      className={[
+                        'flex w-full items-center gap-3 px-3 py-2.5 text-left motion-safe:transition-colors',
+                        'hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:bg-[var(--surface-hover)]',
+                        i !== recent.length - 1 ? 'border-b border-[var(--border)]' : '',
+                      ].join(' ')}
+                    >
+                      <Folder
+                        size={18}
+                        weight="duotone"
+                        className="flex-shrink-0 text-[var(--text-muted)]"
+                      />
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate text-sm text-[var(--text)]">{p.name}</span>
+                        <span className="truncate text-[11px] text-[var(--text-subtle)]">
+                          {activeTeam?.slug ? `${activeTeam.slug}/` : ''}
+                          {p.slug}
+                        </span>
+                      </div>
+                      <span
+                        className="hidden flex-shrink-0 text-[11px] text-[var(--text-muted)] sm:inline"
+                        title={new Date(p.updatedAt).toLocaleString()}
+                      >
+                        {formatRelativeTime(p.updatedAt)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
       </div>
 

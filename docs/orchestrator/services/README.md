@@ -1,6 +1,6 @@
 # Orchestrator Services Documentation
 
-This directory contains documentation for Tesslate Studio's service layer, which implements the core business logic for container orchestration, AI model management, payments, deployments, and more.
+This directory contains documentation for OpenSail's service layer, which implements the core business logic for container orchestration, AI model management, payments, deployments, and more.
 
 ## Overview
 

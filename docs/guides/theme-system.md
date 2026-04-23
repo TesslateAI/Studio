@@ -1,6 +1,6 @@
 # Theme System Guide
 
-This guide covers Tesslate Studio's theme system, which allows users to customize the application's visual appearance through database-stored themes served via API.
+This guide covers OpenSail's theme system, which allows users to customize the application's visual appearance through database-stored themes served via API.
 
 ## Overview
 
@@ -358,7 +358,7 @@ DATABASE_URL="postgresql+asyncpg://tesslate_user:your_password@localhost:5432/te
 
 ### Step 4: Verify in the Application
 
-1. Refresh the Tesslate Studio frontend
+1. Refresh the OpenSail frontend
 2. Open Settings > Appearance
 3. Your new theme should appear in the theme picker
 

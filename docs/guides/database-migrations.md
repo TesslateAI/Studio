@@ -1,10 +1,10 @@
 # Database Migrations
 
-This guide covers managing database schema changes in Tesslate Studio using Alembic.
+This guide covers managing database schema changes in OpenSail using Alembic.
 
 ## Overview
 
-Tesslate Studio uses Alembic for database migrations with SQLAlchemy models. The configuration supports:
+OpenSail uses Alembic for database migrations with SQLAlchemy models. The configuration supports:
 - Async database connections (asyncpg)
 - Autogeneration from SQLAlchemy models
 - Type and default value change detection

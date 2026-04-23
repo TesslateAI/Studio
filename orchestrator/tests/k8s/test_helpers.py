@@ -447,7 +447,7 @@ class TestCreateIngressManifest:
             "container_directory": "frontend",
             "project_slug": "my-app-abc123",
             "port": 3000,
-            "domain": "your-domain.com",
+            "domain": "opensail.tesslate.com",
         }
         defaults.update(overrides)
         return create_ingress_manifest(**defaults)
@@ -456,10 +456,10 @@ class TestCreateIngressManifest:
         ing = self._make(
             project_slug="my-app-abc123",
             container_directory="frontend",
-            domain="your-domain.com",
+            domain="opensail.tesslate.com",
         )
         host = ing.spec.rules[0].host
-        assert host == "my-app-abc123-frontend.your-domain.com"
+        assert host == "my-app-abc123-frontend.opensail.tesslate.com"
 
     def test_service_backend_name(self):
         ing = self._make(container_directory="frontend", port=3000)

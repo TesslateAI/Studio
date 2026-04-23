@@ -31,7 +31,8 @@ export function GitHubConnectModal({ isOpen, onClose }: GitHubConnectModalProps)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } }; message?: string };
       const detail = err.response?.data?.detail;
-      const errorMessage = typeof detail === 'string' ? detail : (err.message || 'Failed to initiate GitHub OAuth');
+      const errorMessage =
+        typeof detail === 'string' ? detail : err.message || 'Failed to initiate GitHub OAuth';
       toast.error(errorMessage);
       setIsConnecting(false);
     }
@@ -60,7 +61,7 @@ export function GitHubConnectModal({ isOpen, onClose }: GitHubConnectModalProps)
             </div>
             <div>
               <h2 className="font-heading text-2xl font-bold text-[var(--text)]">Connect GitHub</h2>
-              <p className="text-sm text-gray-500">Authorize Tesslate Studio</p>
+              <p className="text-sm text-gray-500">Authorize OpenSail</p>
             </div>
           </div>
           {!isConnecting && (

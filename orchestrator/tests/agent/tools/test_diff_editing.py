@@ -166,7 +166,7 @@ const VERSION = '1.0.0';
 
     edits = [
         ("const API_URL = 'http://localhost:3000';", "const API_URL = 'https://api.example.com';"),
-        ("const APP_NAME = 'My App';", "const APP_NAME = 'Tesslate Studio';"),
+        ("const APP_NAME = 'My App';", "const APP_NAME = 'OpenSail';"),
         ("const VERSION = '1.0.0';", "const VERSION = '2.0.0';"),
     ]
 
@@ -174,7 +174,7 @@ const VERSION = '1.0.0';
 
     assert result.success, f"Edits failed: {result.error}"
     assert "https://api.example.com" in result.content, "First edit not applied"
-    assert "Tesslate Studio" in result.content, "Second edit not applied"
+    assert "OpenSail" in result.content, "Second edit not applied"
     assert "2.0.0" in result.content, "Third edit not applied"
 
     print("[OK] Multiple edits successful")

@@ -2,7 +2,7 @@
 
 **Purpose**: Agent tool development and modification
 
-This context provides information about Tesslate Studio's agent tool system, including tool registration, execution, and creation patterns.
+This context provides information about OpenSail's agent tool system, including tool registration, execution, and creation patterns.
 
 ## Key Files
 

@@ -46,7 +46,7 @@ async def create_internal_team():
                 "max_budget": 1000.0,  # $1000 budget for the team
                 "max_parallel_requests": 100,
                 "metadata": {
-                    "description": "Internal team for Tesslate Studio users",
+                    "description": "Internal team for OpenSail users",
                     "created_by": "admin"
                 }
             }

@@ -1,6 +1,6 @@
-# Tesslate Studio - Minikube Development Environment
+# OpenSail - Minikube Development Environment
 
-This directory contains scripts for setting up and testing Tesslate Studio's S3 Sandwich architecture on a local Minikube cluster.
+This directory contains scripts for setting up and testing OpenSail's S3 Sandwich architecture on a local Minikube cluster.
 
 ## Architecture Overview
 

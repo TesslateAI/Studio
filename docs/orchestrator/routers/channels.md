@@ -6,7 +6,7 @@ The channels router handles messaging platform integrations (Telegram, Slack, Di
 
 ## Overview
 
-Channels allow users to connect external messaging platforms to their Tesslate projects. When a message arrives via webhook, the router:
+Channels allow users to connect external messaging platforms to their OpenSail projects. When a message arrives via webhook, the router:
 1. Verifies the platform signature
 2. Parses the inbound message
 3. Stores an audit record (`ChannelMessage`)
@@ -183,7 +183,7 @@ POST /api/channels/configs/{config_id}/test
 ```
 
 **Behavior**:
-- Sends a predefined test message: "Hello from Tesslate Studio! Your channel is configured correctly."
+- Sends a predefined test message: "Hello from OpenSail! Your channel is configured correctly."
 - Records the outbound message in `ChannelMessage` for audit
 - Returns 502 if the platform rejects the message
 

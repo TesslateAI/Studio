@@ -1,6 +1,6 @@
 # Minikube Setup Guide
 
-This guide covers deploying Tesslate Studio to a local Kubernetes cluster using Minikube from a completely fresh start.
+This guide covers deploying OpenSail to a local Kubernetes cluster using Minikube from a completely fresh start.
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ choco install kubernetes-cli
 
 ## Fresh Start: Complete Setup
 
-Follow these steps to get Tesslate Studio running on minikube from scratch.
+Follow these steps to get OpenSail running on minikube from scratch.
 
 ### Step 1: Create Minikube Cluster
 

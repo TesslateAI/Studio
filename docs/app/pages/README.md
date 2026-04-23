@@ -1,8 +1,8 @@
-# Tesslate Studio Pages
+# OpenSail Pages
 
 **Location**: `c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/`
 
-This directory contains all top-level route components that make up the Tesslate Studio application. Each page represents a distinct feature or user workflow.
+This directory contains all top-level route components that make up the OpenSail application. Each page represents a distinct feature or user workflow.
 
 ## Route Map
 

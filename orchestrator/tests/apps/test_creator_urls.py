@@ -19,7 +19,6 @@ from app.services.apps.runtime_urls import (
     container_url,
 )
 
-
 # ---------------------------------------------------------------------------
 # Handle validation
 # ---------------------------------------------------------------------------
@@ -115,7 +114,7 @@ def test_legacy_container_url_unchanged_https() -> None:
     url = container_url(
         project_slug="cool-thing-abc123",
         container_dir_or_name="api",
-        app_domain="your-domain.com",
+        app_domain="opensail.tesslate.com",
         protocol="https",
     )
-    assert url == "https://cool-thing-abc123-api.your-domain.com"
+    assert url == "https://cool-thing-abc123-api.opensail.tesslate.com"

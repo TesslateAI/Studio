@@ -1,6 +1,6 @@
 # Frontend Type Definitions
 
-**Purpose**: TypeScript types and runtime validation for the Tesslate Studio frontend, with particular focus on theme types that must stay in sync with the backend.
+**Purpose**: TypeScript types and runtime validation for the OpenSail frontend, with particular focus on theme types that must stay in sync with the backend.
 
 ## When to Load This Context
 

@@ -219,7 +219,7 @@ export function TitleBar() {
         pointerEvents: 'none',
       }}
     >
-      Tesslate Studio
+      OpenSail
     </span>
   );
 

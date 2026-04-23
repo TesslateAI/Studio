@@ -1,6 +1,6 @@
 # Orchestrator Database Models
 
-This directory contains comprehensive documentation for Tesslate Studio's database schema. The database models are the foundation of the application, defining how projects, users, containers, agents, and marketplace items are stored and related.
+This directory contains comprehensive documentation for OpenSail's database schema. The database models are the foundation of the application, defining how projects, users, containers, agents, and marketplace items are stored and related.
 
 ## Files in this Directory
 
@@ -13,7 +13,7 @@ This directory contains comprehensive documentation for Tesslate Studio's databa
 
 ## Database Architecture Overview
 
-Tesslate Studio uses PostgreSQL with SQLAlchemy ORM. The schema consists of 45+ models organized into several functional domains:
+OpenSail uses PostgreSQL with SQLAlchemy ORM. The schema consists of 45+ models organized into several functional domains:
 
 ### Core Models (10 models)
 Models that define the fundamental project and container structure:

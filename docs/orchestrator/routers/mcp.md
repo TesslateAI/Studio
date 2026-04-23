@@ -226,7 +226,7 @@ List all MCP servers assigned to a specific agent for the current user. Only ret
 
 **File**: `orchestrator/app/routers/mcp_server.py` (~120 lines)
 
-Tesslate Studio also exposes itself as an MCP server via Streamable HTTP transport. This allows external MCP clients to use Tesslate's project tools.
+OpenSail also exposes itself as an MCP server via Streamable HTTP transport. This allows external MCP clients to use Tesslate's project tools.
 
 ### Server Info
 
@@ -239,13 +239,13 @@ Returns metadata about the Tesslate MCP server including available tools and tra
 **Response**:
 ```json
 {
-  "name": "Tesslate Studio",
-  "description": "MCP server exposing Tesslate project tools",
+  "name": "OpenSail",
+  "description": "MCP server exposing OpenSail project tools",
   "transport": "streamable-http",
   "endpoint": "/api/mcp/server/mcp",
   "tools": [
-    {"name": "list_project_files", "description": "List files in a Tesslate project directory"},
-    {"name": "read_project_file", "description": "Read a file from a Tesslate project"},
+    {"name": "list_project_files", "description": "List files in an OpenSail project directory"},
+    {"name": "read_project_file", "description": "Read a file from an OpenSail project"},
     {"name": "run_project_command", "description": "Execute a shell command in a project container"}
   ]
 }

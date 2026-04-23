@@ -1,10 +1,10 @@
 #!/bin/bash
-# Cleanup Tesslate Studio Deployment
+# Cleanup OpenSail Deployment
 # This script removes all deployed resources
 
 set -e
 
-echo "🧹 Tesslate Studio Cleanup Script"
+echo "🧹 OpenSail Cleanup Script"
 echo ""
 echo "⚠️  WARNING: This will DELETE all Tesslate resources including:"
 echo "  - All application pods and services"
@@ -44,5 +44,5 @@ kubectl delete -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/con
 echo ""
 echo "🎉 Cleanup complete!"
 echo ""
-echo "All Tesslate Studio resources have been removed from your cluster."
+echo "All OpenSail resources have been removed from your cluster."
 echo "Your DigitalOcean Kubernetes cluster itself remains running."

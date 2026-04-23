@@ -1,5 +1,5 @@
 """
-MCP (Model Context Protocol) integration for Tesslate Studio.
+MCP (Model Context Protocol) integration for OpenSail.
 
 Provides multi-transport client connections (stdio, streamable-http, SSE),
 tool/resource/prompt bridging into the agent's ToolRegistry, per-user MCP

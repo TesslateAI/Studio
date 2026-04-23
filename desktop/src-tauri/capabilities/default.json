@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Baseline capabilities for the Tesslate Studio desktop shell",
+  "description": "Baseline capabilities for the OpenSail desktop shell",
   "windows": ["main"],
   "permissions": [
     "core:default",

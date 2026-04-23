@@ -1,6 +1,6 @@
-# Tesslate Studio - Scripts Directory
+# OpenSail - Scripts Directory
 
-This directory contains utility scripts for managing Tesslate Studio in different deployment modes.
+This directory contains utility scripts for managing OpenSail in different deployment modes.
 
 ## 📁 Directory Structure
 

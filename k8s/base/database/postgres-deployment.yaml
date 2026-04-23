@@ -1,4 +1,4 @@
-# PostgreSQL Deployment for Tesslate Studio
+# PostgreSQL Deployment for OpenSail
 # Stores user data, projects, chat history, etc.
 
 apiVersion: apps/v1

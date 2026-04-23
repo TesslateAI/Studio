@@ -1,5 +1,5 @@
 # =============================================================================
-# Tesslate Studio - Shared Infrastructure
+# OpenSail - Shared Infrastructure
 # =============================================================================
 # Manages resources shared across all environments:
 # - ECR repositories (backend, frontend, devserver)

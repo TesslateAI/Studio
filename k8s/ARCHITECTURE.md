@@ -1,6 +1,6 @@
 # Tesslate Kubernetes Architecture
 
-Complete specification for running Tesslate Studio on Kubernetes.
+Complete specification for running OpenSail on Kubernetes.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ Complete specification for running Tesslate Studio on Kubernetes.
 
 ## Overview
 
-Tesslate Studio is an AI-powered web application builder. The Kubernetes deployment uses a **lifecycle separation** architecture that mirrors Docker's correct behavior:
+OpenSail is an AI-powered web application builder. The Kubernetes deployment uses a **lifecycle separation** architecture that mirrors Docker's correct behavior:
 
 | Concern | Docker Mode | Kubernetes Mode |
 |---------|-------------|-----------------|

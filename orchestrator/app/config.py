@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     # Desktop: cloud companion endpoint. The desktop sidecar talks to this URL
     # via services.cloud_client.CloudClient for marketplace pulls, model proxy,
     # sync, etc. Bearer token is sourced from services.token_store.
-    tesslate_cloud_url: str = "https://your-domain.com"
+    tesslate_cloud_url: str = "https://opensail.tesslate.com"
 
     # Desktop marketplace: when True and paired, /api/desktop/marketplace/items
     # merges cloud catalog entries with local installed items. Toggle off to

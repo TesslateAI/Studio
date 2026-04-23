@@ -1,6 +1,6 @@
 # Desktop project import
 
-Adopting an existing on-disk directory as a Tesslate project without copying
+Adopting an existing on-disk directory as an OpenSail project without copying
 files or running template scaffolding.
 
 ## Endpoint

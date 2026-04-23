@@ -1,5 +1,5 @@
 /**
- * Keyboard shortcuts registry for Tesslate Studio
+ * Keyboard shortcuts registry for OpenSail
  * Defines all keyboard shortcuts across the application
  */
 

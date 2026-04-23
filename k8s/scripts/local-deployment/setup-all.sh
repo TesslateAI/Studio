@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Tesslate Studio - Complete Setup Script
-# This script runs all phases to set up Tesslate Studio on Kubernetes
+# OpenSail - Complete Setup Script
+# This script runs all phases to set up OpenSail on Kubernetes
 
 set -e
 
@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_IP=${1:-""}
 
 echo "========================================"
-echo "Tesslate Studio - Complete Kubernetes Setup"
+echo "OpenSail - Complete Kubernetes Setup"
 echo "========================================"
 
 if [ -z "$SERVER_IP" ]; then
@@ -21,7 +21,7 @@ if [ -z "$SERVER_IP" ]; then
     echo "  2. Install Kubernetes"
     echo "  3. Configure the cluster"
     echo "  4. Build application images"
-    echo "  5. Deploy Tesslate Studio"
+    echo "  5. Deploy OpenSail"
     exit 1
 fi
 
@@ -53,7 +53,7 @@ bash $SCRIPT_DIR/build-images.sh
 
 # Phase 5: Deploy Application
 echo ""
-echo ">>> Phase 5: Deploying Tesslate Studio"
+echo ">>> Phase 5: Deploying OpenSail"
 bash $SCRIPT_DIR/04-deploy-tesslate.sh
 
 echo ""
@@ -61,7 +61,7 @@ echo "========================================"
 echo "Setup Complete!"
 echo "========================================"
 echo ""
-echo "Tesslate Studio is now running on Kubernetes!"
+echo "OpenSail is now running on Kubernetes!"
 echo ""
 echo "Access points:"
 echo "  Web Interface: http://$SERVER_IP:30080"

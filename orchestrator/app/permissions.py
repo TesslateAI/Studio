@@ -1,5 +1,5 @@
 """
-Centralized RBAC permission system for Tesslate Studio.
+Centralized RBAC permission system for OpenSail.
 
 Provides the Permission enum, role-to-permission mappings, and core access-check
 functions used across all routers. This module is the single source of truth for
@@ -281,7 +281,10 @@ SCOPE_LABELS: dict[str, dict[str, str]] = {
     Permission.AGENTS_HANDOFF: {"label": "Agents — Handoff sessions", "category": "Agents"},
     Permission.PROJECTS_SYNC: {"label": "Projects — Sync push/pull", "category": "Projects"},
     Permission.K8S_PROJECTS: {"label": "K8s — Manage cloud projects", "category": "Kubernetes"},
-    Permission.MARKETPLACE_INSTALL: {"label": "Marketplace — Install items", "category": "Marketplace"},
+    Permission.MARKETPLACE_INSTALL: {
+        "label": "Marketplace — Install items",
+        "category": "Marketplace",
+    },
 }
 
 

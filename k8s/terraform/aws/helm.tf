@@ -1,5 +1,5 @@
 # =============================================================================
-# Helm Releases for Tesslate Studio EKS
+# Helm Releases for OpenSail EKS
 # =============================================================================
 # Installs essential cluster components:
 # - NGINX Ingress Controller (for routing)

@@ -1,6 +1,6 @@
 {
   "name": "tesslate-studio",
-  "description": "Tesslate Studio - Open source full stack software builder",
+  "description": "OpenSail - Open source full stack software builder",
   "private": true,
   "version": "0.0.0",
   "type": "module",

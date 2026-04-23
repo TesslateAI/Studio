@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Tesslate Studio - S3 Sandwich Test Script
+# OpenSail - S3 Sandwich Test Script
 # =============================================================================
 # This script tests the S3 Sandwich pattern:
 # 1. Creates a test project

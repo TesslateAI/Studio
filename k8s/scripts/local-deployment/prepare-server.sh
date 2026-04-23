@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Tesslate Studio - Phase 1: Server Preparation Script
+# OpenSail - Phase 1: Server Preparation Script
 # This script prepares a Ubuntu 22.04 server for Kubernetes installation
 
 set -e
 
 echo "========================================"
-echo "Tesslate Studio Kubernetes Setup"
+echo "OpenSail Kubernetes Setup"
 echo "Phase 1: Server Preparation"
 echo "========================================"
 

@@ -1,6 +1,6 @@
-# Tesslate Studio Architecture Diagrams
+# OpenSail Architecture Diagrams
 
-This directory contains Mermaid diagram files that visualize the Tesslate Studio architecture and key workflows.
+This directory contains Mermaid diagram files that visualize the OpenSail architecture and key workflows.
 
 ## Diagram Files
 

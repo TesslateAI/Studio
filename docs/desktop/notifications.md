@@ -1,6 +1,6 @@
 # Desktop Notifications
 
-Cross-platform notification dispatch layer for Tesslate Studio. Delivers agent
+Cross-platform notification dispatch layer for OpenSail. Delivers agent
 lifecycle events to users whether they are running the desktop app, a browser
 session, or have the window minimised to the system tray.
 

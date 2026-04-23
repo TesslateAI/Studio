@@ -1,4 +1,4 @@
-# Tesslate Studio API Client
+# OpenSail API Client
 
 The frontend API client provides a centralized, type-safe interface for all backend communication. It handles authentication, CSRF protection, error handling, and provides domain-specific API modules.
 

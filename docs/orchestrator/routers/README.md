@@ -1,6 +1,6 @@
 # Orchestrator Routers
 
-API routers for Tesslate Studio's FastAPI backend. Each router handles a specific domain of functionality.
+API routers for OpenSail's FastAPI backend. Each router handles a specific domain of functionality.
 
 ## Router Organization
 

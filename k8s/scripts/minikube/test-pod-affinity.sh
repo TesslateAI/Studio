@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Tesslate Studio - Pod Affinity Test Script
+# OpenSail - Pod Affinity Test Script
 # =============================================================================
 # This script tests pod affinity for multi-container projects:
 # 1. Creates a test project with multiple containers

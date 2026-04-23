@@ -1,6 +1,6 @@
 # SEO Management Documentation
 
-**Purpose**: This context documents the SEO system in Tesslate Studio, including the SEOManager singleton and SEO component patterns.
+**Purpose**: This context documents the SEO system in OpenSail, including the SEOManager singleton and SEO component patterns.
 
 ## When to Load This Context
 

@@ -1,6 +1,6 @@
-# Contributing to Tesslate Studio
+# Contributing to OpenSail
 
-Thank you for your interest in contributing to Tesslate Studio! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to OpenSail! This document provides guidelines and information for contributors.
 
 ## Code of Conduct
 

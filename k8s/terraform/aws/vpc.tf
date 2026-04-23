@@ -1,5 +1,5 @@
 # =============================================================================
-# VPC Configuration for Tesslate Studio EKS
+# VPC Configuration for OpenSail EKS
 # =============================================================================
 # Creates a VPC with public and private subnets across multiple AZs
 # for high availability. EKS nodes run in private subnets with

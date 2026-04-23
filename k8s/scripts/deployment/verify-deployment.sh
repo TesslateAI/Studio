@@ -1,10 +1,10 @@
 #!/bin/bash
-# Verify Tesslate Studio Deployment
+# Verify OpenSail Deployment
 # This script checks that all components are properly deployed and configured
 
 set -e
 
-echo "🔍 Verifying Tesslate Studio Deployment..."
+echo "🔍 Verifying OpenSail Deployment..."
 echo ""
 
 # Set kubeconfig

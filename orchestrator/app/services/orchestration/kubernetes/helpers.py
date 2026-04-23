@@ -488,7 +488,7 @@ def create_ingress_manifest(
         container_directory: Container directory name
         project_slug: Project slug (e.g., "my-app-abc123")
         port: Port the dev server listens on
-        domain: Base domain (e.g., "localhost" or "your-domain.com")
+        domain: Base domain (e.g., "localhost" or "opensail.tesslate.com")
         ingress_class: Ingress class name
         tls_secret: Optional TLS secret name for HTTPS
 

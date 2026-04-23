@@ -1,7 +1,7 @@
 # Desktop client (docs/desktop)
 
 ## Purpose
-Landing page for Tesslate Studio **desktop** (Tauri v2 + PyInstaller sidecar)
+Landing page for OpenSail **desktop** (Tauri v2 + PyInstaller sidecar)
 documentation. The desktop client reuses the same React frontend and FastAPI
 orchestrator as cloud; this section covers only what's unique to the desktop
 shell.

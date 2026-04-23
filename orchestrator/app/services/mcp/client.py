@@ -355,7 +355,7 @@ async def _connect_streamable_http(
             token_endpoint_auth_method=token_auth_method,
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
-            client_name="Tesslate Studio (runtime)",
+            client_name="OpenSail (runtime)",
         )
         auth = OAuthClientProvider(
             server_url=url,
@@ -480,7 +480,7 @@ async def _connect_sse(
             token_endpoint_auth_method=token_auth_method,
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
-            client_name="Tesslate Studio (runtime)",
+            client_name="OpenSail (runtime)",
         )
         auth = OAuthClientProvider(
             server_url=url,

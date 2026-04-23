@@ -1,6 +1,6 @@
 # Test Suite Documentation
 
-Comprehensive test suite for the Tesslate Studio orchestrator, with a focus on the AI agent implementation.
+Comprehensive test suite for the OpenSail orchestrator, with a focus on the AI agent implementation.
 
 ## Directory Structure
 
@@ -453,7 +453,7 @@ pytest --cov=app.agent --cov-report=term
 
 ## Maintenance
 
-This test suite is maintained as part of the Tesslate Studio project.
+This test suite is maintained as part of the OpenSail project.
 
 **Last Updated:** 2025-01-15
 **Test Count:** 100+ tests across unit, integration, and E2E categories

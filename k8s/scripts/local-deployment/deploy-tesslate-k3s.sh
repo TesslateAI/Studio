@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Tesslate Studio - Deploy Application to k3s
+# OpenSail - Deploy Application to k3s
 
 set -e
 
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFESTS_DIR="$(dirname "$SCRIPT_DIR")/manifests"
 
 echo "========================================"
-echo "Tesslate Studio k3s Deployment"
+echo "OpenSail k3s Deployment"
 echo "========================================"
 
 # Check if kubectl is configured

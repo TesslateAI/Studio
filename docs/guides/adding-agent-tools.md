@@ -1,6 +1,6 @@
 # Adding Agent Tools
 
-This guide covers how to create new tools for the AI agent system in Tesslate Studio.
+This guide covers how to create new tools for the AI agent system in OpenSail.
 
 ## Overview
 

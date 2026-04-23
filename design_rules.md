@@ -1,4 +1,4 @@
-# Tesslate Studio — Design Rules
+# OpenSail — Design Rules
 
 Canonical reference for the visual design system. All UI work on the dashboard, sidebar, and shared components must follow these rules.
 

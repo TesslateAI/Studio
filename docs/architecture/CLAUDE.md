@@ -1,6 +1,6 @@
 # Architecture Context for AI Agents
 
-**Purpose**: This context helps AI agents understand Tesslate Studio's system architecture, component interactions, and deployment patterns when working with the codebase.
+**Purpose**: This context helps AI agents understand OpenSail's system architecture, component interactions, and deployment patterns when working with the codebase.
 
 ## When to Load This Context
 
@@ -21,7 +21,7 @@ Load this architecture context when:
 
 ## System Architecture Overview
 
-Tesslate Studio uses a **multi-tier architecture** with clear separation of concerns:
+OpenSail uses a **multi-tier architecture** with clear separation of concerns:
 
 ```
 User Browser (React)
@@ -165,7 +165,7 @@ network_policy = {
 
 ## Deployment Modes
 
-Tesslate Studio supports **two deployment modes** configured via `DEPLOYMENT_MODE` environment variable:
+OpenSail supports **two deployment modes** configured via `DEPLOYMENT_MODE` environment variable:
 
 ### Docker Mode (Local Development)
 

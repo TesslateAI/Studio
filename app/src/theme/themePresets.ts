@@ -1,5 +1,5 @@
 /**
- * Theme System for Tesslate Studio
+ * Theme System for OpenSail
  *
  * Themes are loaded from the API (database) and cached in memory.
  * This file provides the TypeScript interfaces and helper functions
@@ -89,7 +89,8 @@ const DEFAULT_FALLBACK_THEME: Theme = {
     },
   },
   typography: {
-    fontFamily: "'Instrument Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    fontFamily:
+      "'Instrument Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     fontFamilyHeading: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
     fontFamilyMono: "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
     fontSizeBase: '14px',

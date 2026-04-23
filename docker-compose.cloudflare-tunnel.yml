@@ -1,4 +1,4 @@
-# Production Docker Compose for Tesslate Studio with Cloudflare Tunnel
+# Production Docker Compose for OpenSail with Cloudflare Tunnel
 # Designed to work with cloudflared running on host (not in container)
 # Traefik handles internal routing, cloudflared forwards traffic from internet
 
