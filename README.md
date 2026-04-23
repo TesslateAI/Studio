@@ -4,7 +4,7 @@
 
 <h1 align="center">OpenSail</h1>
 
-<p align="center">Build agents, software, apps, workflows, automations, and schedules — and deploy them to any provider. No vendor lock-in.<br />See your entire architecture on one canvas. Containers, preview windows, deploy targets, agents, and their wiring, all in one graph.<br />Run it on your infrastructure. Share it across your team. Become your own sandboxing cloud.<br />Governance, audit, and permissions built in. Open source. Any model.</p>
+<p align="center">Build agents, software, apps, workflows, automations, and schedules. Deploy them to any provider. No vendor lock-in.<br />See your entire architecture on one canvas. Containers, preview windows, deploy targets, agents, and their wiring, all in one graph.<br />Run it on your infrastructure. Share it across your team. Become your own sandboxing cloud.<br />Governance, audit, and permissions built in. Open source. Any model.</p>
 
 <p align="center">
   <a href="https://docs.tesslate.com"><strong>Docs</strong></a> ·
