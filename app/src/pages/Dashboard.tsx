@@ -945,7 +945,7 @@ export default function Dashboard() {
                   onClick={() => setShowCreateDialog(true)}
                   disabled={isCreating}
                   className={`
-                    group bg-white/[0.01] rounded-[var(--radius)] p-6
+                    group bg-[var(--surface)] rounded-[var(--radius)] p-6
                     border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
                     hover:border-[rgba(var(--primary-rgb),0.6)]
                     transition-all duration-300
@@ -973,7 +973,7 @@ export default function Dashboard() {
                 <button
                   onClick={() => setShowImportDialog(true)}
                   className={`
-                    group bg-white/[0.01] rounded-[var(--radius)] p-6
+                    group bg-[var(--surface)] rounded-[var(--radius)] p-6
                     border-2 border-dashed border-emerald-500/30
                     hover:border-emerald-500/60
                     transition-all duration-300

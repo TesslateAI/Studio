@@ -67,7 +67,7 @@ export function ProjectCard({
     <div
       className={`
         project-card relative group cursor-pointer
-        bg-[var(--surface-hover)] rounded-[var(--radius)]
+        bg-[var(--surface)] rounded-[var(--radius)]
         transition-all duration-300 ease-[var(--ease)]
         hover:transform hover:-translate-y-0.5
       `}
