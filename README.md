@@ -1,829 +1,454 @@
-<div align="center">
+<p align="center">
+  <img src="assets/opensail-banner.png" alt="Tesslate OpenSail" width="100%" />
+</p>
 
-<img src="images/Banner.png" alt="OpenSail Banner" width="100%">
+<h1 align="center">OpenSail</h1>
 
-# OpenSail
+<p align="center">Build agents, apps, and automations from anywhere.<br />Run them on your infrastructure. Share them across your team.<br />Open source. Any model. No lock-in.</p>
 
-**AI Coding Across Your Entire Stack — Frontend, Backend, Infrastructure & Mobile**
+<p align="center">
+  <a href="https://opensail.dev/docs"><strong>Docs</strong></a> ·
+  <a href="https://opensail.dev/quickstart"><strong>Quickstart</strong></a> ·
+  <a href="https://discord.gg/tesslate"><strong>Discord</strong></a> ·
+  <a href="https://github.com/TesslateAI/opensail/releases"><strong>Releases</strong></a>
+</p>
 
-AI-powered development environment with advanced agent orchestration, designed for complete data sovereignty and infrastructure control.
-The open-source platform where AI agents build complete applications: React frontends, FastAPI/Go backends, Kubernetes deployments, and Expo mobile apps — all from natural language.
-
-**Multi-Container Architecture** | **Self-Hosted & Private** | **Autonomous AI Agents**
-
-[![GitHub Stars](https://img.shields.io/github/stars/TesslateAI/Studio?style=social)](https://github.com/TesslateAI/Studio/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/TesslateAI/Studio?style=social)](https://github.com/TesslateAI/Studio/fork)
-
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-Ready-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Go](https://img.shields.io/badge/Go-Backend-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Ready-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-
-[Quick Start](#quick-start) · [Features](#features) · [Install](https://tesslate.com/install) · [Documentation](https://docs.tesslate.com) · [Contributing](#contributing)
-
-**Includes support for llama.cpp, LM Studio, Ollama, Openrouter, and any provider you choose.**
-
-</div>
+<p align="center">
+  <a href="#"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-blue?style=flat-square" alt="Platform" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/Runtime-Kubernetes_Native-purple?style=flat-square" alt="Runtime" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/Patent-Pending-orange?style=flat-square" alt="Patent Pending" /></a>
+  <a href="https://discord.gg/tesslate"><img src="https://img.shields.io/discord/000000000?label=Discord&style=flat-square" alt="Discord" /></a>
+</p>
 
 ---
 
-<div align="center">
+OpenSail is an open platform for building, running, and sharing AI-powered software. Build an agent that does your job for you. Turn it into an app. Share it with your team. Deploy it to hundreds of users. Connect it to everything.
 
-<img src="images/screenshot.png" alt="OpenSail Screenshot" width="100%">
+It runs on a snapshot-based filesystem that makes workspaces portable, shareable, and persistent. Connect your local desktop to your own cloud. Run agents in sandboxed environments that cost almost nothing when idle. Ship workflows that keep working while you sleep.
 
-</div>
+OpenSail also exposes a Gateway API and an MCP server (in development), so external agents and humans can interact with your running instance using an API key. They get their own sandboxed containers, can use agents, and publish apps (coming soon) directly from their own coding tools.
 
----
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-<div align="center">
-
-### TL;DR? Get an AI Summary
-
-**Click to auto-load the summary:**
-
-[![ChatGPT](https://img.shields.io/badge/Ask-ChatGPT-74aa9c?style=for-the-badge&logo=openai&logoColor=white)](https://chatgpt.com/?q=Summarize%20https%3A%2F%2Fgithub.com%2FTesslateAI%2FStudio)
-
-[![Claude](https://img.shields.io/badge/Ask-Claude-191919?style=for-the-badge&logo=anthropic&logoColor=d4a574)](https://claude.ai/new?q=Summarize%20https%3A%2F%2Fgithub.com%2FTesslateAI%2FStudio)
-
-[![Gemini](https://img.shields.io/badge/Ask-Gemini-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://www.google.com/search?udm=50&q=Summarize+https://github.com/TesslateAI/Studio)
-
-[![Perplexity](https://img.shields.io/badge/Ask-Perplexity-20808d?style=for-the-badge&logo=perplexity&logoColor=white)](https://www.perplexity.ai/?q=Summarize%20https://github.com/TesslateAI/Studio)
-
-<sub>Links open with the prompt pre-loaded</sub>
-
-</div>
-
-</td>
-<td width="50%" valign="top">
-
-<div align="center">
-
-### Community & Resources
-
-[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YR5aKPyMuW)
-[![Website](https://img.shields.io/badge/Website-tesslate.com-FF6B6B?style=for-the-badge&logo=google-chrome&logoColor=white)](https://tesslate.com)
-[![Install](https://img.shields.io/badge/Install-One%20Command-F97316?style=for-the-badge&logo=terminal&logoColor=white)](https://tesslate.com/install)
-[![Hugging Face](https://img.shields.io/badge/HF-Models-FFD21E?style=for-the-badge)](https://huggingface.co/Tesslate)
-
-[![Twitter](https://img.shields.io/badge/Twitter-1DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://twitter.com/TesslateAI)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/company/tesslate-ai)
-[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/@TesslateAI)
-[![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=for-the-badge&logo=instagram&logoColor=white)](https://instagram.com/tesslateai)
-
-**Email:** [team@tesslate.com](mailto:team@tesslate.com)
-
-</div>
-
-</td>
-</tr>
-</table>
+<p align="center">
+  <img src="assets/opensail-demo.gif" alt="OpenSail in action" width="80%" />
+</p>
 
 ---
 
-## What Makes OpenSail Different?
+## What you can build
 
-**AI coding across your entire stack — not just frontend snippets.**
+Describe the job you want done or drop in a file. OpenSail helps turn it into a working agent, app, or workflow: defining the steps, connecting the right tools, adding skills, and testing it until it works the way you expect.
 
-Most AI coding tools generate UI components. Tesslate builds **complete systems**: React frontends talking to FastAPI backends, Go microservices with WebSocket support, Kubernetes deployments with proper networking, and cross-platform Expo mobile apps. One AI agent, full-stack applications.
+An "app" on OpenSail is anything you build and ship: a piece of software, an agent, a scheduled automation, a triggered webhook handler, or an MCP tool that other agents can call. Every app is a versioned, installable bundle produced from a workspace project.
 
-### Multi-Container Architecture
-- **Beyond single-container**: Run frontend + backend + database as separate services
-- **Real microservices**: Each container has its own process, ports, and environment
-- **Inter-service communication**: Containers discover each other automatically
-- **Production-ready patterns**: The same architecture you'd deploy to production
+Agents do more than answer a prompt. They can write and run code, use connected apps, remember what they've learned, and continue work across multiple steps. They run in sandboxed cloud environments and keep going even when you close your laptop.
 
-### Self-Hosted & Private
-- **Run anywhere**: Your machine, your cloud, your datacenter
-- **Container isolation**: Each project runs in its own sandboxed environment
-- **Subdomain routing**: Clean URLs (`project.studio.localhost`) for easy project access
-- **Data sovereignty**: Your code never leaves your infrastructure
+A few things people are building today:
 
-### Advanced Agent System
-- **4 agent architectures**: Stream, Iterative, ReAct, and Tesslate (native function-calling with subagent delegation)
-- **Real-time streaming**: Progressive step persistence with live event streaming via Redis pub/sub
-- **External Agent API**: Invoke agents programmatically with API keys, SSE streaming, and webhook callbacks
-- **Agent marketplace**: 11 agents (5 official + 6 community) — fork, customize prompts, swap models
-- **Tool registry**: File operations (read/write/edit/patch), persistent shell sessions, web fetch, planning tools
-- **Command validation**: Security sandboxing with allowlists, blocklists, and injection protection
+- **Software Reviewer** - Reviews employee software requests, checks them against approved tools and policies, recommends next steps, and files tickets when needed
+- **Product Feedback Router** - Monitors Slack, support channels, and public forums, then turns feedback into prioritized tickets and weekly product summaries
+- **Weekly Metrics Reporter** - Pulls data every Friday, creates charts, writes the summary, and shares a report with the team
+- **Lead Outreach Agent** - Researches inbound leads, scores them against your qualification rubric, drafts personalized follow-ups, and updates your CRM
+- **Client Onboarding Agent** - Walks through intake forms, pulls in context from past projects, and drafts a kickoff doc
+- **Third-Party Risk Manager** - Researches vendors, assesses sanctions exposure, financial health, and reputational risk, and produces a structured report
+- **Multi-container CRM** - Next.js frontend + Node API + Postgres, with an embedded AI chat drawer, deployed as a single installable app
 
-### Enterprise-Grade Security
-- **JWT authentication** with refresh token rotation and revocable sessions
-- **Two-factor authentication** (TOTP-based 2FA)
-- **Google + GitHub OAuth** for single sign-on
-- **API key authentication** for external agent API (SHA-256 hashed, scoped, with optional expiry)
-- **Encrypted credential storage** using Fernet encryption for API keys and tokens
-- **Audit logging**: Complete command history for compliance
-- **Container isolation**: Projects run in isolated environments
-
-### Full Development Lifecycle
-- **10 IDE panels**: Architecture, Assets, Timeline, Deployments, Kanban, Notes, Settings, Terminal, GitHub, Marketplace
-- **File tree with context menu**: Create, rename, delete files and directories inline
-- **Architecture visualization**: AI-generated Mermaid diagrams of your codebase
-- **Git integration**: Full version control with commit history, branching, and GitHub push/pull
-- **External deployments**: Deploy to Vercel, Netlify, or Cloudflare with OAuth credential management
-- **Kanban project management**: Built-in task tracking with priorities, assignees, and comments
-
-### Marketplace & Templates
-- **4 official project templates**: Next.js 16, Vite+React+FastAPI, Vite+React+Go, Expo
-- **63+ community templates**: Go, Rust, Django, Laravel, Rails, Flutter, .NET, and more
-- **11 AI agents**: Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct, Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer
-- **40+ themes**: Customizable UI themes with colors, typography, spacing, and animations
-
-### Admin Dashboard
-- **User management**: View, edit, and manage all users
-- **System health monitoring**: Real-time system metrics
-- **Audit logs**: Full audit trail
-- **Token analytics**: Track API usage and costs
-- **Billing admin**: Manage subscriptions and credits
-- **Deployment monitor**: Track active deployments
-
-### Extensibility & Customization
-- **Open source agent**: The Tesslate Agent is fully forkable and customizable
-- **Create your own agents**: Build specialized agents for your workflow
-- **Model flexibility**: OpenAI, Anthropic, Google, local LLMs via Ollama/LM Studio — routed through LiteLLM
-- **Platform customization**: Fork the entire platform for proprietary workflows
-
-**Built for:**
-- **Developers** who want complete control over their AI development environment
-- **Teams** needing data privacy and on-premises deployment
-- **Regulated industries** (healthcare, finance, government) requiring data sovereignty
-- **Organizations** building AI-powered internal tools
-- **Engineers** wanting to customize the platform itself
+You can also start from templates for finance, sales, marketing, operations, and more.
 
 ---
 
-## Quick Start
+## Architecture Panel
 
-**Get running in 3 steps:**
+<p align="center">
+  <img src="assets/opensail-architecture-panel.png" alt="OpenSail Architecture Panel" width="85%" />
+</p>
 
-```bash
-# 1. Clone and configure
-git clone https://github.com/TesslateAI/Studio.git
-cd Studio
-cp .env.example .env
+The Architecture Panel is a visual node-graph canvas built on React Flow where you design, wire, and manage the full topology of your project. Every project has one. It is the single source of truth for what your app is: what containers run, how they connect, where secrets flow, and where the whole thing deploys.
 
-# 2. Add your API keys (OpenAI, Anthropic, etc.) to .env
-# Edit .env: Set SECRET_KEY and LITELLM_MASTER_KEY
+The panel renders `.TesslateAI/config.json`. Both humans and agents read and write the same file. When the agent adds a Postgres container and wires its `DATABASE_URL` into the backend, the nodes and edges appear on the canvas in real time. When you drag a new service onto the canvas, the agent sees the updated graph on its next iteration. One file, two authors, no drift.
 
-# 3. Start everything
-docker compose up -d
+**Node types on the canvas:**
+
+- **Container nodes** - Your app containers (frontend, backend, workers), color-coded by role: green for base, blue for service, purple for external, cyan for hybrid. Each shows status, port, and tech stack. Click to open the properties panel; double-click to jump into the code editor.
+- **Browser preview nodes** - Live iframe windows rendered directly on the canvas. Resizable, with back/forward/home/refresh and a URL bar. You can see your running app while you wire its architecture.
+- **Deployment target nodes** - Branded cards for each provider (Vercel, AWS, Cloudflare, etc.) with environment tags, connected containers, and deployment history. Click the env tag to cycle production/staging/preview.
+- **Hosted agent nodes** - The TesslateLLM proxy node. Represents a contained agent inside the app: creator configures system prompt, bound tools, bound MCPs, and model preference. At runtime it resolves to a shared worker pool with per-session keys tied to the installer's wallet.
+
+**Edge types (each expresses a different dependency):**
+
+- `env_injection` (orange, dashed) - Source container's exports become target container's environment variables
+- `http_api` (blue, solid animated) - HTTP service dependency
+- `database` (green, solid) - Persistence dependency
+- `cache` (red, dashed) - Redis or memcached
+- `browser_preview` (purple, dashed) - Container to preview window
+- `deployment` (orange, dashed with arrow) - Container to deployment target
+
+**Why this exists:**
+
+The AI agent needs a structured, parseable, roundtrippable target. If "what are the containers and how do they connect" lives as free-form prose in chat, every edit requires re-inferring state. The panel gives both humans and agents a typed graph they can read and write. Credentials and secrets are visible in the graph as env_injection edges, not buried in `.env` files. Multi-container topology is first-class instead of hidden in docker-compose YAML. And for apps, the panel is the authoring surface: publish serializes the graph into the manifest, install restores it into a new project with the same graph.
+
+One canvas. One config file. Agents, humans, secrets, deployments, and apps all share one structured representation.
+
+---
+
+## Apps
+
+An app on OpenSail is a versioned, immutable, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, its own containers, and its own permissions.
+
+**The lifecycle:** build in a workspace, publish a version (immutable, content-addressed), go through the approval pipeline, list on the marketplace (or keep private/team-only), install per-user, run, update, fork.
+
+**Surfaces:** Every app declares what shape it takes. A single app can be a UI (full web app), a chat interface, a scheduled job (cron), a triggered webhook handler, or an MCP tool callable by other agents. These are not different products. They are surface declarations in the same manifest.
+
+**Billing:** The creator decides who pays. Each billing dimension (AI compute, general compute, platform fee) can be set independently to creator-pays, installer-pays, platform-subsidized, or BYOK (bring your own key, bypass routing entirely). Promotional budgets let creators sponsor the first N users, then flip to installer-pays when the fund runs out. Caps and overage behavior are per-dimension.
+
+**Approval pipeline:** Every published version goes through staged review before it reaches the public marketplace. Automated agent scans check for overbroad OAuth scopes, known-bad code patterns, leaked secrets, and dependency vulnerabilities. A sandbox evaluation runs the app against synthetic inputs with a cheap model to catch crashes, cost blowouts, and prompt injection vulnerabilities. Then a human reviewer signs off. Private and team installs skip the public listing gate, so your first apps ship immediately.
+
+**Forking:** If the creator allows it, anyone can fork an app. Fork creates a new workspace with full source access and a `forked_from` provenance link. The marketplace shows fork trees. A lawyer takes a starter "intake" app, forks it to "intake-estate-planning," and republishes for their firm.
+
+**Bundles:** Group multiple apps into a starter pack. "Install Lawyer Starter" installs 10 apps with consolidated OAuth consent (one Gmail authorization covers all of them), sane defaults, and a dashboard app at the center that embeds the others via signed iframes.
+
+---
+
+## Turn best practices into shared agents
+
+<p align="center">
+  <img src="assets/opensail-agent-library.png" alt="OpenSail Agent Library" width="80%" />
+</p>
+
+Knowledge is scattered across people and systems. OpenSail gives teams a way to turn that knowledge into a reusable agent or workflow that follows the right process, uses the right tools, and can be shared across the organization.
+
+Build once, improve through use, then share or duplicate for new workflows. Because agents have memory and can be guided and corrected in conversation, they get better as teams use them.
+
+**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists instead of starting from scratch.
+
+**Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
+
+**Scale without re-architecting.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
+
+---
+
+## Workspaces
+
+<p align="center">
+  <img src="assets/opensail-workspaces.png" alt="OpenSail Workspaces" width="80%" />
+</p>
+
+Every agent, app, and workflow runs inside a workspace. One workspace = one app. Multiple agents can collaborate inside the same workspace (frontend agent, backend agent, test agent working on the same codebase), but the workspace publishes as a single unit.
+
+Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything fast, portable, and persistent.
+
+**Instant snapshots.** Fork a workspace in seconds. Roll back to any point in time. Branch off a working agent to try something new without breaking what's already running. Up to 5 snapshots retained per project for a built-in timeline.
+
+**Desktop to cloud.** Connect your local OpenSail instance to your own cloud infrastructure. Build locally, push to the cloud, run at scale. Same workspace, same state, no re-setup.
+
+**Share anything.** Workspaces are self-contained. Share an agent with your team and they get the full environment: code, state, config, dependencies. Not just a link.
+
+**Stay in control.** You decide what tools and data an agent can use, what actions it can take, and when it needs approval. For sensitive steps, require the agent to ask before moving forward. Analytics show you how agents are being used, how many runs they've completed, and who's using them.
+
+---
+
+## Cloud sandboxes for agents
+
+Running agents means giving them compute. OpenSail provides the infrastructure to do it without burning money.
+
+The runtime uses a patent-pending three-tier compute model built on Kubernetes:
+
+| Tier | What runs here | Cost |
+|------|---------------|------|
+| **Tier 0** | File operations, web calls, agent reasoning | Near zero |
+| **Tier 1** | Shell commands via warm ephemeral containers | Execute instantly, return to pool |
+| **Tier 2** | Full K8s namespaces with multi-container environments for live previews and deployments | On-demand |
+
+About 99% of agent operations run on the first two tiers. Containers hibernate when idle and wake on demand.
+
+The whole system is backed by a custom CSI driver built on BtrFS that handles snapshot management, S3-backed storage, and backup/restore. Agent workspaces persist independently of any running container and mount on demand across tiers.
+
+**Multi-container by default.** Each project gets its own K8s namespace. Every container gets its own Deployment, Service, and Ingress. Pod affinity pins all containers in a project to the same node so they can share the BtrFS volume. Inter-container networking uses cluster DNS (`backend.proj-abc123.svc.cluster.local:8000`). Infrastructure containers (Postgres, Redis) get their own isolated PVCs. Start a project and the orchestrator creates the namespace, provisions the PVC, deploys the file manager, clones repos, and spins up all containers with readiness probes gating traffic.
+
+**Hibernation is volume-level.** Hibernate a project and it snapshots the entire shared volume, then tears down the namespace. Restore from snapshot and all containers come back together with their files intact. Atomic save and restore for multi-container projects.
+
+---
+
+## Gateway API and MCP Server
+
+OpenSail exposes your running instance to the outside world through two interfaces:
+
+**Gateway API:** External users (agents or humans) can interact with your OpenSail instance using an API key. They get their own sandboxed containers, can invoke agents, and run workflows. The API supports webhook callbacks on completion, scoped permissions per key, and project-level isolation.
+
+**MCP Server (in development):** OpenSail itself becomes an MCP tool server. External coding agents (Claude Code, Cursor, Codex, or your own) can connect to your OpenSail instance, get sandboxed compute, use your agents, and publish apps directly from their development environment. Your instance becomes infrastructure that other agents can build on.
+
+---
+
+## Connectors
+
+<p align="center">
+  <img src="assets/opensail-connectors.png" alt="OpenSail Connectors" width="80%" />
+</p>
+
+Agents can gather context and take action across dozens of tools. OpenSail supports MCP (Model Context Protocol) natively.
+
+Plug in Slack, Gmail, Google Drive, Linear, Jira, Notion, GitHub, Salesforce, HubSpot, Confluence, databases, internal APIs, or anything with an MCP server or a REST endpoint.
+
+Connectors are first-class. When you build an agent, you pick the tools it needs, set the permissions, and it just works. Add new connectors without changing your agent's code. MCP tool schemas are cached and bridged into the agent's tool registry automatically.
+
+Build your own connectors for internal systems. Publish them for your team. The protocol is open, so nothing is locked in.
+
+---
+
+## Agent skills
+
+Skills are reusable capabilities you teach your agents. Instead of re-prompting every time, package what works into a skill and let the agent use it when it needs to.
+
+Skills are loaded progressively: a lightweight catalog (name + description) is injected into the agent's context, and the full skill body is pulled on demand only when the agent decides to use it. This keeps the context window lean.
+
+Skills can be anything: a data analysis pipeline, a writing style, a code review checklist, a research methodology, a report template. Build them once, attach them to any agent or workflow. Share them on the marketplace.
+
+---
+
+## Desktop App
+
+OpenSail ships as a native desktop app built on Tauri v2. It runs the exact same orchestrator as the cloud version, locally, with zero network dependency by default. No Docker required. No Kubernetes required. Just install and start building.
+
+The desktop app is a Tauri shell wrapping a PyInstaller-frozen FastAPI sidecar. The sidecar binds to localhost on a random port, mints a per-launch bearer token, runs migrations against a local SQLite database, and starts the same server you'd get in the cloud. The frontend is identical. The agent is identical. The tools are identical.
+
+**Three runtimes per project, your choice:**
+
+- **Local** - Subprocesses on your machine. No containers, no setup. The default.
+- **Docker** - Docker Compose if you have it installed. Full container isolation without a cluster.
+- **Kubernetes** - Connect to a remote K8s cluster (your own or Tesslate's cloud). Get sandboxed multi-container environments, BtrFS snapshots, tiered compute, the full infrastructure.
+
+You pick the runtime per project. A personal script can run local. A multi-container app can run on Docker. A production workflow can run on your own K8s cluster. Same UI, same agent, same workspace for all three.
+
+**Cloud pairing.** Pair your desktop app to a cloud instance (Tesslate's or your own self-hosted cluster) and you get Codex-style cloud sandboxing from your own machine. Your projects sync bidirectionally. Build locally, push to the cloud, run at scale. Pull results back down. The desktop stays your home base, the cloud is your compute.
+
+**What lives on your machine:**
+
+```
+$TESSLATE_STUDIO_HOME/
+├── projects/{slug}-{uuid}/     # your project files
+├── cache/                       # cloud token, marketplace cache, port allocations
+├── agents/{slug}/manifest.json  # installed agents
+├── skills/{slug}/manifest.json  # installed skills
+├── logs/
+└── studio.db                    # local SQLite database
 ```
 
-**That's it!** Open http://studio.localhost
+One folder. Wipe it, you get a clean install.
 
-### Seed the Marketplace
+**Offline-first marketplace.** Agents, skills, bases, and themes install locally from the cloud marketplace with SHA-256 verified downloads. Once installed, they work offline. Local items and cloud items merge, local wins by slug. Cache is stale-while-revalidate with background refresh.
 
-After starting, seed the marketplace with templates, agents, and themes:
+**Permissions per project.** Each project has a `.TesslateAI/permissions.json` that gates what agents can do: shell access, network calls, git push, file writes, process spawning. Three policies per capability: `allow` (silent), `deny` (blocked), `ask` (approval prompt in the tray, TUI, or browser). "Always allow" persists your decision back to the file. Budget caps with monthly limits and alert thresholds are built in.
 
-```bash
-# Run database migrations
-docker exec tesslate-orchestrator alembic upgrade head
+**Approval workflow.** When an agent hits a gated tool, the desktop shows a tray notification with an approval card. Approve, deny, or "always allow" for that tool. Human-readable ticket refs (TSK-0001, TSK-0002) so you can track what the agent asked for and what you approved.
 
-# Copy seed scripts into container
-docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_themes.py tesslate-orchestrator:/tmp/
-docker cp scripts/seed/seed_community_bases.py tesslate-orchestrator:/tmp/
-
-# Copy theme JSON files
-docker exec tesslate-orchestrator mkdir -p /tmp/themes
-docker cp scripts/themes/. tesslate-orchestrator:/tmp/themes/
-
-# Run seed scripts (order matters: bases first, then agents)
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_community_bases.py
-
-# Seed themes
-docker exec -e PYTHONPATH=/app tesslate-orchestrator python -c "
-import asyncio, sys; sys.path.insert(0, '/app')
-from pathlib import Path
-exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
-asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
-"
-```
-
-This adds:
-
-| Script | What it seeds | Count |
-|--------|--------------|-------|
-| `seed_marketplace_bases.py` | Official project templates (Next.js 16, Vite+React+FastAPI, Vite+React+Go, Expo) | 4 |
-| `seed_marketplace_agents.py` | Official agents (Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent) | 5 |
-| `seed_opensource_agents.py` | Community agents (Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer) | 6 |
-| `seed_community_bases.py` | Community templates (Go, Rust, Django, Laravel, Rails, Flutter, .NET, and more) | 63 |
-| `seed_themes.py` | UI themes (dark, light, midnight, ocean, forest, rose, sunset, and more) | 40+ |
-
-<details>
-<summary><b>First time with Docker? Click here for help</b></summary>
-
-**Install Docker:**
-- **Windows/Mac**: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- **Linux**: `curl -fsSL https://get.docker.com | sh`
-
-**Generate secure keys:**
-```bash
-# SECRET_KEY
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-
-# LITELLM_MASTER_KEY
-python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
-```
-
-</details>
+**Adopt existing folders.** Point OpenSail at any directory on your machine and it becomes a project. No copying. On POSIX it symlinks; on Windows it writes a marker file. Git root detection groups sessions by repo automatically. One agent session can span multiple directories.
 
 ---
 
-## Features
+## Model Providers
 
-### AI-Powered Full-Stack Development
-Natural language to complete applications. Not just UI components — entire systems with frontends, backends, databases, and APIs. Watch AI write across your entire stack in real-time.
+OpenSail is model-agnostic. All model calls route through LiteLLM. Switch providers without rewriting your agents.
 
-### Multi-Container Projects
-Build real microservices architectures:
-- **Vite + React + FastAPI**: Frontend + Python backend in separate containers
-- **Vite + React + Go**: Frontend + high-performance Go backend
-- **Next.js 16**: Integrated fullstack with React Compiler and Turbopack
-- **Expo**: Cross-platform mobile (iOS/Android/Web)
-- **63+ community templates**: Go, Rust, Django, Laravel, Rails, Flutter, .NET, and more
+**Supported providers:**
 
-Each service runs independently with proper inter-container networking.
+| Provider | 
+|----------|
+| **Anthropic** |
+| **OpenAI** | 
+| **DeepSeek** |
+| **Meta** | 
+| **Mistral** | 
+| **Qwen** | 
+| **Google** | 
+| **Moonshot** | 
+| **MiniMax** |
+| **Z.AI (ChatGLM)** |
+| **xAI** |
 
-### Agent System
-Four agent architectures to fit different workflows:
-- **Tesslate Agent**: Native function-calling with OpenAI tools API, parallel tool execution, subagent delegation, and context compaction
-- **Stream Agent**: Real-time streaming code generation — code blocks extracted and saved as files on the fly
-- **ReAct Agent**: Explicit Thought-Action-Observation loops based on the ReAct paradigm
-- **Iterative Agent**: Text-based JSON tool invocation with progressive persistence
+**BYOK (Bring Your Own Key):** Attach your own API key from OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks, or any OpenAI-compatible endpoint. When using BYOK, no platform wallet is charged. Your key, your cost, your provider.
 
-All agents support:
-- Multi-step task planning with todo tracking
-- File operations (read, write, edit, patch)
-- Persistent shell sessions
-- Web fetch for external content
-- Security-sandboxed command execution
-- Real-time step streaming to the frontend via Redis pub/sub
+**Self-hosted models:** Point LiteLLM at Ollama, vLLM, or any local inference server. Run fully air-gapped with open-weight models on your own hardware.
 
-### External Agent API
-Invoke agents programmatically from any application:
+---
+
+## Deployment targets
+
+Deploy from the Architecture Panel. Draw an edge from a container to a deployment target. A/B deployments work naturally: connect the same container to two targets (Vercel for production, Cloudflare for preview) and each gets independent deployment history and rollback.
+
+**22 supported targets:**
+
+| Category | Targets |
+|----------|---------|
+| **Serverless / Full-stack** | Vercel, Netlify, Cloudflare Pages, DigitalOcean App Platform, Railway, Fly.io, Heroku, Render, Koyeb, Zeabur, Northflank |
+| **Static hosting** | GitHub Pages, Surge, Deno Deploy, Firebase Hosting |
+| **Container push** | AWS App Runner, GCP Cloud Run, Azure Container Apps, DigitalOcean Container Apps |
+| **Registry / Export** | Docker Hub, GitHub Container Registry (GHCR), Download/Export (zip) |
+
+Each target is a registry entry. Adding a new provider is one config block, not a UI rewrite.
+
+---
+
+## Communication gateways
+
+Deploy agents to the channels where your team already works. Each channel is a `GatewayAdapter` subclass, hot-reloaded via Redis pub/sub.
+
+| Channel | Description |
+|---------|-------------|
+| **Slack** | Agents respond in channels, pick up requests, post reports |
+| **Telegram** | Full bot integration with message handling |
+| **Discord** | Server and DM support |
+| **WhatsApp** | Business API integration |
+| **Signal** | Secure messaging support |
+| **CLI WebSocket** | For headless usage, external agents, and the Tesslate TUI |
+
+Set agents to run on a schedule, or let them listen for messages and respond as they come in. Delivery routing supports per-schedule targets: origin, telegram:chat_id, discord:channel_id, and more.
+
+---
+
+## Why open source
+
+Workspace agents are powerful. They touch your data, your tools, your processes. You should be able to see exactly what they're doing, run them on your own infrastructure, and not be locked to a single model provider.
+
+OpenSail runs on any model. Switch providers without rewriting your agents. Deploy on-prem, air-gapped, or on any cloud. Data never has to leave your network.
+
+No per-seat pricing that scales against you. No credit system that makes you think twice before running an agent. Your infrastructure, your cost structure.
+
+---
+
+## Get started
+
+Clone the repo and run locally:
 
 ```bash
-# Create an API key
-curl -X POST https://your-domain/api/external/keys \
-  -H "Authorization: Bearer <jwt>" \
-  -d '{"name": "my-key"}'
-
-# Invoke the agent
-curl -X POST https://your-domain/api/external/agent/invoke \
-  -H "Authorization: Bearer tsk_<your-key>" \
-  -d '{"project_id": "...", "message": "Add a login page"}'
-
-# Stream events (SSE)
-curl -N https://your-domain/api/external/agent/events/<task_id>
-
-# Poll status
-curl https://your-domain/api/external/agent/status/<task_id>
+git clone https://github.com/TesslateAI/opensail.git
+cd opensail
+./install.sh
 ```
 
-Features:
-- API key authentication (`tsk_` prefixed, SHA-256 hashed, max 10 per user)
-- Optional key expiration and project-scoped restrictions
-- Server-Sent Events (SSE) for real-time streaming
-- Webhook callbacks on task completion
-- Full project context (architecture, git status, TESSLATE.md)
+Or pull the Docker image:
 
-### Agent Marketplace
-- **5 official agents**: Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent
-- **6 community agents**: Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer
-- Fork any agent to customize prompts, swap models, or modify behavior
-- Create and publish your own agents
+```bash
+docker pull TesslateAI/opensail:latest
+docker compose up
+```
 
-### Live Preview with Real URLs
-Every project gets its own subdomain (`your-app.studio.localhost`) with hot module replacement. See changes instantly as AI writes code.
+Then open `http://localhost:3000` and start building.
 
-### IDE Panels
-10 panels for a complete development experience:
-
-| Panel | Purpose |
-|-------|---------|
-| **Architecture** | AI-generated Mermaid diagrams of your codebase |
-| **Assets** | Image and file management with drag-and-drop upload |
-| **Timeline** | Project snapshots and version history (EBS VolumeSnapshots on K8s) |
-| **Deployments** | Deploy to Vercel, Netlify, or Cloudflare |
-| **Kanban** | Task tracking with priorities, assignees, and comments |
-| **Notes** | Rich-text project notes (Tiptap editor) |
-| **Settings** | Project configuration |
-| **Terminal** | Integrated terminal with ANSI escape code rendering |
-| **GitHub** | Git operations, commit history, branching, push/pull |
-| **Marketplace** | Browse and install agents and templates |
-
-Additional IDE features:
-- Monaco code editor with syntax highlighting and IntelliSense
-- File tree with context menu (create, rename, delete files and directories)
-- File search
-- Real-time container log streaming
-- Resizable panels
-- Chat sessions with inline rename and multi-session support
-- Tool call collapse toggle in agent messages
-
-### Authentication & Security
-- JWT authentication with refresh token rotation
-- Two-factor authentication (TOTP-based 2FA)
-- Google and GitHub OAuth
-- API key authentication for external agent API
-- Encrypted credential storage (Fernet encryption)
-- Command sanitization for AI-generated shell commands
-- Container isolation between projects
-
-### External Deployments
-Deploy projects to external hosting providers:
-- **Vercel** — OAuth integration, automatic builds
-- **Netlify** — OAuth integration, automatic builds
-- **Cloudflare Pages** — OAuth integration, automatic builds
-
-Manage OAuth credentials per provider, trigger builds, and track deployment status from the Deployments panel.
-
-### Admin Dashboard
-Full administrative control:
-- User management (view, edit, manage accounts)
-- System health monitoring
-- Audit logs with full action history
-- Token analytics and API usage tracking
-- Billing administration (Stripe subscriptions, credits)
-- Deployment monitor
-- Base management CRUD
-- Agent restore-to-marketplace
-
-### Themes
-40+ built-in UI themes with customizable colors, typography, spacing, and animations. Themes are stored as JSON and applied globally per user.
+Read the full setup guide in the [docs](https://opensail.dev/docs).
 
 ---
 
 ## Architecture
 
 ```
-+-------------------------------------------------------------+
-|                    OpenSail                                  |
-+-------------------------------------------------------------+
-|  Frontend (app/)           |   Orchestrator (orchestrator/)  |
-|  React 19 + Vite + TS     |   FastAPI + Python              |
-|  - Monaco Editor           |   - Auth (JWT/OAuth/2FA)        |
-|  - Live Preview            |   - Project Management          |
-|  - Chat UI                 |   - AI Agent System             |
-|  - File Browser            |   - Container Orchestration     |
-|  - 10 IDE Panels           |   - External Agent API          |
-+-------------------------------------------------------------+
-|  Redis 7               |  ARQ Worker                         |
-|  - Pub/Sub + Streams   |  - Distributed agent execution      |
-|  - Task queue (ARQ)    |  - Progressive step persistence     |
-|  - Distributed locks   |  - Webhook callbacks                |
-+-------------------------------------------------------------+
-|  PostgreSQL            |  Docker/K8s Container Manager       |
-|  (Users, projects,     |  (User project environments)        |
-|   chat, agents,        |  - Per-project isolation            |
-|   marketplace)         |  - EBS snapshots (K8s)              |
-+-------------------------------------------------------------+
+┌─────────────────────────────────────────────────────────────────────┐
+│                        SURFACES                                      │
+│                                                                      │
+│  ┌──────────────┐  ┌──────────┐  ┌────────────┐  ┌──────────────┐  │
+│  │  Desktop App  │  │  Browser │  │    CLI /   │  │  Gateway API │  │
+│  │  (Tauri v2)   │  │   (Web)  │  │    TUI     │  │  + MCP Server│  │
+│  └──────┬───────┘  └────┬─────┘  └─────┬──────┘  └──────┬───────┘  │
+│         │               │              │                │           │
+│         └───────────────┴──────────────┴────────────────┘           │
+│                              │                                       │
+│                    ┌─────────▼──────────┐                            │
+│                    │  Runtime Selector   │                            │
+│                    │  (per project)      │                            │
+│                    └──┬──────┬───────┬──┘                            │
+│                       │      │       │                               │
+│            ┌──────────▼┐ ┌───▼────┐ ┌▼────────────────────┐         │
+│            │   Local    │ │ Docker │ │    Kubernetes        │         │
+│            │ subprocess │ │Compose │ │ (cloud or self-host) │         │
+│            │ + SQLite   │ │        │ │                      │         │
+│            │ + asyncio  │ │        │ │                      │         │
+│            └────────────┘ └────────┘ └──────────────────────┘        │
+│                                              │                       │
+└──────────────────────────────────────────────┼───────────────────────┘
+                                               │
+          ┌────────────────────────────────────▼─────────────────────┐
+          │              KUBERNETES CLUSTER                           │
+          │        (Tesslate Cloud OR your own cluster)               │
+          │                                                          │
+          │  ┌────────────────────────────────────────────────────┐  │
+          │  │            Architecture Panel Canvas                │  │
+          │  │  Container nodes · Edges · Previews · Deploy targets│  │
+          │  │  Agent co-authors .TesslateAI/config.json             │  │
+          │  └──────────────────────┬─────────────────────────────┘  │
+          │                         │                                 │
+          │  ┌──────────────────────▼─────────────────────────────┐  │
+          │  │        BtrFS Workspace Layer (CSI Driver)           │  │
+          │  │  Snapshots · CAS Bundles · S3-backed storage       │  │
+          │  │  Per-project subvolumes · Atomic hibernate/restore  │  │
+          │  └──────────────────────┬─────────────────────────────┘  │
+          │                         │                                 │
+          │  ┌──────────────────────▼─────────────────────────────┐  │
+          │  │       Three-Tier Compute Runtime                    │  │
+          │  │  Tier 0: serverless file ops, reasoning (near zero) │  │
+          │  │  Tier 1: warm ephemeral container pool (instant)    │  │
+          │  │  Tier 2: full namespaces, multi-container,          │  │
+          │  │          pod affinity, per-container ingress         │  │
+          │  └──────────────────────┬─────────────────────────────┘  │
+          │                         │                                 │
+          │  ┌──────────────────────▼─────────────────────────────┐  │
+          │  │              Agent Runtime                           │  │
+          │  │  LiteLLM routing · Per-session keys · BYOK          │  │
+          │  │  Redis Streams · Distributed locks · Compaction     │  │
+          │  │  Tool registry: file, shell, git, web, planning,    │  │
+          │  │    delegation, memory, MCP bridge, schedule, kanban  │  │
+          │  │  Approval gates · Secret scrubbing · Mode gating    │  │
+          │  └──────────────────────┬─────────────────────────────┘  │
+          │                         │                                 │
+          │  ┌──────────────────────▼─────────────────────────────┐  │
+          │  │              Apps Marketplace                        │  │
+          │  │  Publish · Install (CAS restore) · Fork · Bundle    │  │
+          │  │  4-stage approval pipeline · Yank/Appeal             │  │
+          │  │  Billing dispatcher (creator/installer/platform/BYOK)│  │
+          │  │  Surfaces: UI · Chat · Scheduled · Triggered · MCP  │  │
+          │  └──────────────────────┬─────────────────────────────┘  │
+          │                         │                                 │
+          │  ┌──────────────────────▼─────────────────────────────┐  │
+          │  │              Platform Services                       │  │
+          │  │  Connectors (MCP) · Skills · Team Controls · RBAC   │  │
+          │  │  Audit Log · Communication Gateways                  │  │
+          │  │  (Slack · Telegram · Discord · WhatsApp · Signal)   │  │
+          │  │  22 Deployment Targets · Cloud Sync                  │  │
+          │  └────────────────────────────────────────────────────┘  │
+          │                                                          │
+          │  ┌────────────────────────────────────────────────────┐  │
+          │  │         Self-host the whole thing.                   │  │
+          │  │  helm install opensail TesslateAI/opensail             │  │
+          │  │  You get everything above on your own cluster.       │  │
+          │  │  Your own marketplace. Your own agent infra.         │  │
+          │  │  Pair desktop apps to it. Full Codex-style           │  │
+          │  │  cloud sandboxing, owned by you.                     │  │
+          │  └────────────────────────────────────────────────────┘  │
+          └──────────────────────────────────────────────────────────┘
 ```
-
-**Key Architecture Principles:**
-1. **Container-per-project** — True isolation, no conflicts
-2. **Subdomain routing** — Clean URLs, easy project access
-3. **Bring your own models** — No vendor lock-in for AI
-4. **Self-hosted** — Complete infrastructure control
-5. **Real-time streaming** — Redis pub/sub + streams for live agent events
-6. **Distributed execution** — ARQ workers with distributed locks for project isolation
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 19, TypeScript, Vite 7, Tailwind CSS, Monaco Editor |
-| Backend | FastAPI, Python 3.11+, SQLAlchemy, Pydantic |
-| Database | PostgreSQL 15 (asyncpg) |
-| Task Queue | Redis 7, ARQ |
-| Containers | Docker Compose (dev), Kubernetes (prod) |
-| Routing | Traefik (Docker), NGINX Ingress (K8s) |
-| AI | LiteLLM — OpenAI, Anthropic, Google, Ollama, and 100+ providers |
-| Auth | JWT, OAuth (Google/GitHub), TOTP 2FA, API keys |
-| Payments | Stripe |
-| Deployments | Vercel, Netlify, Cloudflare Pages |
-| Infrastructure | Terraform (AWS EKS), EBS VolumeSnapshots |
-| Testing | Vitest, Playwright, pytest |
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- **Docker Desktop** (Windows/Mac) or **Docker Engine** (Linux)
-- **8GB RAM minimum** (16GB recommended)
-- **OpenAI or Anthropic API key** (or run local LLMs with Ollama)
-
-### Installation
-
-**Step 1: Clone the repository**
-
-```bash
-git clone https://github.com/TesslateAI/Studio.git
-cd Studio
-```
-
-**Step 2: Configure environment**
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set these required values:
-
-```env
-# Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
-SECRET_KEY=your-generated-secret-key
-
-# Your LiteLLM master key
-LITELLM_MASTER_KEY=sk-your-litellm-key
-
-# AI provider API keys (at least one required)
-OPENAI_API_KEY=sk-your-openai-key
-ANTHROPIC_API_KEY=sk-your-anthropic-key
-```
-
-**Step 3: Start OpenSail**
-
-```bash
-docker compose up -d
-```
-
-**Step 4: Build the devserver image** (required for user project containers)
-
-```bash
-docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
-```
-
-**Step 5: Create your account**
-
-Open http://studio.localhost and sign up. The first user becomes admin automatically.
-
-**Step 6: Start building**
-
-1. Click "New Project" and choose a template
-2. Describe what you want in natural language
-3. Watch AI generate your app in real-time
-4. Open live preview at `{your-project}.studio.localhost`
-
-### Development Modes
-
-**Full Docker** (Recommended for most users)
-```bash
-docker compose up -d
-```
-Everything runs in containers. One command, fully isolated.
-
-**Hybrid Mode** (Fastest for active development)
-```bash
-# Start infrastructure
-docker compose up -d traefik postgres redis
-
-# Run services natively (separate terminals)
-cd orchestrator && uv run uvicorn app.main:app --reload
-cd app && npm run dev
-```
-Native services for instant hot reload, Docker for infrastructure.
-
-**Kubernetes** (Production)
-```bash
-# Minikube (local)
-kubectl apply -k k8s/overlays/minikube
-
-# AWS EKS (production)
-kubectl apply -k k8s/overlays/production
-```
-
----
-
-## Configuration
-
-### AI Models
-
-Tesslate uses [LiteLLM](https://github.com/BerriAI/litellm) as a unified gateway. This means you can use:
-
-- **OpenAI** (GPT-4o, GPT-4, o1, o3)
-- **Anthropic** (Claude 4, Claude 3.5)
-- **Google** (Gemini Pro, Gemini Ultra)
-- **Local LLMs** (Ollama, LM Studio, llama.cpp)
-- **100+ other providers** (OpenRouter, Together, Groq, etc.)
-
-Configure in `.env`:
-
-```env
-# AI provider keys
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-
-# Per-user budget (USD)
-LITELLM_INITIAL_BUDGET=10.0
-```
-
-### Database
-
-**Development:** PostgreSQL runs in Docker automatically.
-
-**Production:** Use a managed database:
-```env
-DATABASE_URL=postgresql+asyncpg://user:pass@your-postgres:5432/tesslate
-```
-
-### Domain Configuration
-
-**Local development:**
-```env
-APP_DOMAIN=studio.localhost
-```
-
-**Production:**
-```env
-APP_DOMAIN=studio.yourcompany.com
-APP_PROTOCOL=https
-```
-
-Projects will be accessible at `{project}.studio.yourcompany.com`
-
----
 
 ## Contributing
 
-We'd love your help making OpenSail better!
+We're building this in the open. Contributions are welcome.
 
-### Quick Contribution Guide
-
-1. **Fork the repo** and clone your fork
-2. **Create a branch**: `git checkout -b feature/amazing-feature`
-3. **Make your changes** and test locally
-4. **Commit**: `git commit -m 'Add amazing feature'`
-5. **Push**: `git push origin feature/amazing-feature`
-6. **Open a Pull Request** with a clear description
-
-### Good First Issues
-
-New to the project? Check out issues labeled [`good first issue`](https://github.com/TesslateAI/Studio/labels/good%20first%20issue).
-
-### Development Setup
-
-```bash
-# Clone your fork
-git clone https://github.com/YOUR-USERNAME/Studio.git
-cd Studio
-
-# Start in hybrid mode (fastest for development)
-docker compose up -d traefik postgres redis
-cd orchestrator && uv run uvicorn app.main:app --reload
-cd app && npm run dev
-```
-
-### Contribution Guidelines
-
-- **Tests**: Add tests for new features
-- **Docs**: Update documentation if you change functionality
-- **Commits**: Use clear, descriptive commit messages
-- **PRs**: One feature per PR, keep them focused
-
-**Before submitting:**
-- Run tests: `npm test` (frontend), `pytest` (backend)
-- Update docs if needed
-- Test with `docker compose up -d`
+Check out the [contributing guide](CONTRIBUTING.md) for development setup and how to submit PRs. Join the [Discord](https://discord.gg/tesslate) to talk about what you're building or what you'd like to see.
 
 ---
 
-## Documentation
+## Community
 
-Visit our complete documentation at **[docs.tesslate.com](https://docs.tesslate.com)**
-
-### Self-Hosting Guides
-- **[Self-Hosting Quickstart](https://docs.tesslate.com/self-hosting/quickstart)** - Get running in 5 minutes
-- **[Configuration Guide](https://docs.tesslate.com/self-hosting/configuration)** - All environment variables explained
-- **[Production Deployment](https://docs.tesslate.com/self-hosting/deployment)** - Deploy with custom domains and SSL
-- **[Architecture Overview](https://docs.tesslate.com/self-hosting/architecture)** - How everything works under the hood
-
-### Development Guides
-- **[Development Setup](https://docs.tesslate.com/development/guide)** - Contributor and developer guide
-- **[API Documentation](https://docs.tesslate.com/api-reference/introduction)** - Backend API reference
-
-### Using OpenSail
-- **[Getting Started](https://docs.tesslate.com/quickstart)** - Cloud version quickstart
-- **[Working with Projects](https://docs.tesslate.com/guides/creating-projects)** - Create and manage projects
-- **[AI Agents Guide](https://docs.tesslate.com/guides/agents)** - Understanding and using AI agents
-- **[FAQ](https://docs.tesslate.com/faq)** - Frequently asked questions
-
----
-
-## Security
-
-We take security seriously. Found a vulnerability?
-
-**Please DO NOT open a public issue.** Instead:
-
-**Email us:** security@tesslate.com
-
-We'll respond within 24 hours and work with you to address it.
-
-### Security Features
-
-- **JWT authentication** with refresh token rotation
-- **Two-factor authentication** (TOTP-based)
-- **OAuth** (Google, GitHub)
-- **API key authentication** (SHA-256 hashed, scoped, expirable)
-- **Encrypted secrets** storage (Fernet encryption for API keys and tokens)
-- **Audit logging** (who did what, when)
-- **Container isolation** (projects can't access each other)
-- **Command sanitization** (AI-generated shell commands validated before execution)
-- **HTTPS/TLS** in production (via cert-manager or Cloudflare)
-
----
-
-## Roadmap
-
-**What we've shipped:**
-- [x] Multi-container architecture (frontend + backend + db)
-- [x] 4 agent architectures (Stream, Iterative, ReAct, Tesslate)
-- [x] Tesslate Agent with native function-calling, subagents, and context compaction
-- [x] External Agent API with SSE streaming and webhook callbacks
-- [x] Agent marketplace with 11 agents (5 official + 6 community)
-- [x] 4 official + 63 community project templates
-- [x] 40+ UI themes
-- [x] Real-time agent streaming via Redis pub/sub + streams
-- [x] ARQ worker system with distributed task execution
-- [x] Persistent shell sessions
-- [x] Kubernetes production mode with EBS VolumeSnapshots
-- [x] Project timeline and snapshot-based versioning
-- [x] External deployments (Vercel, Netlify, Cloudflare)
-- [x] Two-factor authentication (2FA/TOTP)
-- [x] Full admin dashboard
-- [x] Kanban project management
-- [x] Full Git integration with GitHub push/pull
-- [x] Chat sessions with inline rename and multi-session support
-
-**Coming next:**
-- [ ] Multi-agent orchestration (agents collaborating on complex tasks)
-- [ ] Model Context Protocol (MCP) for inter-agent communication
-- [ ] Two-way Git sync (pull external changes)
-- [ ] Plugin system for custom integrations
-
-**Have an idea?** [Open a feature request](https://github.com/TesslateAI/Studio/issues/new?template=feature_request.md)
-
----
-
-## FAQ
-
-<details>
-<summary><b>Q: Do I need to pay for OpenAI/Claude API?</b></summary>
-
-**A:** You bring your own API keys. OpenSail doesn't charge for AI — you pay your provider directly (usually pennies per request). You can also use free local models via Ollama.
-
-</details>
-
-<details>
-<summary><b>Q: Can I use this commercially?</b></summary>
-
-**A:** Yes! Apache 2.0 license allows commercial use. Build SaaS products, internal tools, whatever you want.
-
-</details>
-
-<details>
-<summary><b>Q: Is my code/data sent to Tesslate's servers?</b></summary>
-
-**A:** No. OpenSail is self-hosted — everything runs on YOUR infrastructure. We never see your code or data.
-
-</details>
-
-<details>
-<summary><b>Q: Can I modify the AI agent?</b></summary>
-
-**A:** Absolutely! All agents are fully open source. Fork any agent, edit the system prompt, swap models, or create entirely new agents from scratch via the marketplace.
-
-</details>
-
-<details>
-<summary><b>Q: Can I use the External Agent API?</b></summary>
-
-**A:** Yes. Create an API key from your account settings, then invoke agents via REST API with SSE streaming or webhook callbacks. See the [External Agent API](#external-agent-api) section above.
-
-</details>
-
-<details>
-<summary><b>Q: Can I run this without Docker?</b></summary>
-
-**A:** While Docker is recommended, you can run services natively. You'll need to manually set up PostgreSQL, Redis, Traefik, and configure networking.
-
-</details>
-
-<details>
-<summary><b>Q: What hardware do I need?</b></summary>
-
-**A:** Minimum 8GB RAM, 16GB recommended. Works on Windows, Mac, and Linux. An internet connection is needed for AI API calls (unless using local models).
-
-</details>
-
-<details>
-<summary><b>Q: What's the difference between Docker and Kubernetes mode?</b></summary>
-
-**A:** Docker Compose is for local development — one command gets everything running. Kubernetes mode is for production with per-project namespaces, EBS VolumeSnapshots for persistence, NGINX Ingress routing, and horizontal scaling. Both modes use the same codebase.
-
-</details>
+- [Discord](https://discord.gg/tesslate) - Ask questions, share what you're building
+- [GitHub Discussions](https://github.com/TesslateAI/opensail/discussions) - Feature requests and ideas
+- [Issues](https://github.com/TesslateAI/opensail/issues) - Bug reports
 
 ---
 
 ## License
 
-OpenSail is **Apache 2.0 licensed**. See [LICENSE](LICENSE).
-
-**What this means:**
-- **Commercial use** - Build paid products with it
-- **Modification** - Fork and customize freely
-- **Distribution** - Share your modifications
-- **Patent grant** - Protected from patent claims
-- **Trademark** - "Tesslate" name is reserved
-- **Liability** - Provided "as is" (standard for open source)
-
-### Third-Party Licenses
-
-This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+MIT. See [LICENSE](LICENSE).
 
 ---
 
-## The Story
-
-**Why we built this:**
-
-We needed an AI development platform that could run on our own infrastructure without sacrificing data sovereignty or architectural control. Every existing solution required choosing between convenience and control — cloud platforms were fast but locked us in, while local tools lacked the sophistication we needed.
-
-So we built OpenSail as infrastructure-first: Docker for simple deployment, Kubernetes for production scale, container isolation for project sandboxing, and enterprise security built-in. It's designed for developers and organizations that need the power of AI-assisted development while maintaining complete ownership of their code and data.
-
-**The name "Tesslate"** comes from tessellation — the mathematical concept of tiles fitting together perfectly without gaps. That's our architecture: AI agents, human developers, isolated environments, and scalable infrastructure working together seamlessly.
-
-**Open source from the start:** We believe critical development infrastructure should be transparent, auditable, and owned by the teams using it — not controlled by vendors who can change terms overnight.
+<p align="center">
+  <sub>Built by <a href="https://tesslate.com">Tesslate</a></sub>
+</p>
 
 ---
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=TesslateAI/Studio&type=Date)](https://star-history.com/#TesslateAI/Studio&Date)
-
----
-
-## Acknowledgments
-
-OpenSail wouldn't exist without these amazing open-source projects:
-
-- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
-- [React](https://react.dev/) - UI library
-- [Vite](https://vitejs.dev/) - Lightning-fast build tool
-- [Monaco Editor](https://microsoft.github.io/monaco-editor/) - VSCode's editor
-- [LiteLLM](https://github.com/BerriAI/litellm) - Unified AI gateway
-- [Traefik](https://traefik.io/) - Cloud-native proxy
-- [PostgreSQL](https://www.postgresql.org/) - Reliable database
-- [Redis](https://redis.io/) - In-memory data store
-- [ARQ](https://github.com/samuelcolvin/arq) - Async task queue
-- [xterm.js](https://xtermjs.org/) - Terminal emulator
-- [Tiptap](https://tiptap.dev/) - Rich text editor
-
----
-
-## Community & Support
-
-### Get Help
-
-- **[Documentation](https://docs.tesslate.com)** - Comprehensive guides
-- **[GitHub Discussions](https://github.com/TesslateAI/Studio/discussions)** - Ask questions, share ideas
-- **[Issues](https://github.com/TesslateAI/Studio/issues)** - Report bugs, request features
-- **[Email](mailto:support@tesslate.com)** - Direct support (response within 24h)
-
-### Stay Updated
-
-- **Star this repo** to get notified of updates
-- **Watch releases** for new versions
-- **[Follow on Twitter/X](https://twitter.com/tesslateai)** - News and tips
-
----
-
-<div align="center">
-
-**Built by developers who believe AI coding tools should work across your entire stack**
-
-### If you find this useful, please star the repo
-
-[![Star on GitHub](https://img.shields.io/badge/Star_on_GitHub-grey?style=for-the-badge&logo=github)](https://github.com/TesslateAI/Studio)
-
-[Star this repo](https://github.com/TesslateAI/Studio) · [Fork it](https://github.com/TesslateAI/Studio/fork) · [Share it](https://twitter.com/intent/tweet?text=Check%20out%20Tesslate%20Studio%20-%20Open%20source%20AI%20coding%20across%20your%20entire%20stack%20(frontend,%20backend,%20infra,%20mobile)!&url=https://github.com/TesslateAI/Studio)
-
-</div>
