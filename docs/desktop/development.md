@@ -108,7 +108,7 @@ auth issues:
 rm -rf /tmp/tesslate-studio-test
 mkdir -p /tmp/tesslate-studio-test
 
-TESSLATE_STUDIO_HOME=/tmp/tesslate-studio-test \
+OPENSAIL_HOME=/tmp/tesslate-studio-test \
   desktop/src-tauri/binaries/tesslate-studio-orchestrator-x86_64-unknown-linux-gnu
 ```
 
@@ -155,9 +155,9 @@ Environment variables the desktop sidecar reads at boot:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TESSLATE_STUDIO_HOME` | per-OS default (macOS Application Support / Windows AppData / XDG) | Root for projects, SQLite DB, cache, marketplace installs |
+| `OPENSAIL_HOME` | per-OS default (macOS Application Support / Windows AppData / XDG) | Root for projects, SQLite DB, cache, marketplace installs |
 | `DEPLOYMENT_MODE` | `desktop` (set by entrypoint) | Orchestrator mode selector |
-| `DATABASE_URL` | `sqlite+aiosqlite:///$TESSLATE_STUDIO_HOME/studio.db` | Override to point at Postgres for debugging |
+| `DATABASE_URL` | `sqlite+aiosqlite:///$OPENSAIL_HOME/opensail.db` | Override to point at Postgres for debugging |
 | `REDIS_URL` | `""` (empty) | Set to a real URL to opt back into Redis-backed pubsub + ARQ |
 | `TESSLATE_DESKTOP_BEARER` | minted per launch | Loopback isolation token; Tauri host reads it from the handshake |
 | `TESSLATE_CLOUD_TOKEN` | — | Override cloud bearer without going through the pairing deep-link |
@@ -165,7 +165,7 @@ Environment variables the desktop sidecar reads at boot:
 | `TESSLATE_DESKTOP_PORT` | ephemeral | Pin the port (don't — the Tauri host reads whichever the sidecar chose) |
 
 See `/orchestrator/app/config.py` for the full set and
-`/orchestrator/app/services/desktop_paths.py` for the per-OS `$TESSLATE_STUDIO_HOME`
+`/orchestrator/app/services/desktop_paths.py` for the per-OS `$OPENSAIL_HOME`
 resolution.
 
 ## Troubleshooting

@@ -909,7 +909,7 @@ async def get_project_files(
     get_settings()
 
     # Check if this project has a host-reachable filesystem path (docker shared
-    # volume, or desktop $TESSLATE_STUDIO_HOME). K8s projects go through
+    # volume, or desktop $OPENSAIL_HOME). K8s projects go through
     # orchestrator FileOps in the next branch.
     from ..services.project_fs import get_project_fs_path, read_all_files
 

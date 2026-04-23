@@ -7,7 +7,7 @@ this token in OS Stronghold; the sidecar reads it via either:
 
   1. ``$TESSLATE_CLOUD_TOKEN`` env var (preferred when set — Tauri can inject
      it without ever touching disk), or
-  2. A JSON file at ``$TESSLATE_STUDIO_HOME/cache/cloud_token.json`` written
+  2. A JSON file at ``$OPENSAIL_HOME/cache/cloud_token.json`` written
      by ``POST /api/desktop/auth/token``.
 
 This module performs no network I/O. File writes are atomic (tmp + rename)
@@ -24,7 +24,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .desktop_paths import resolve_studio_home
+from .desktop_paths import resolve_opensail_home
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ _FILENAME = "cloud_token.json"
 
 
 def _token_path() -> Path:
-    return resolve_studio_home() / "cache" / _FILENAME
+    return resolve_opensail_home() / "cache" / _FILENAME
 
 
 def get_cloud_token() -> str | None:

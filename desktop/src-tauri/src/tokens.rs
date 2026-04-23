@@ -6,7 +6,7 @@
 //      `store_cloud_token()` after the cloud issues a bearer.
 //   2. The Python sidecar reads it from `TESSLATE_CLOUD_TOKEN` env var
 //      (highest priority in `token_store.py`) OR from the on-disk cache file
-//      (`$TESSLATE_STUDIO_HOME/cache/cloud_token.json`).
+//      (`$OPENSAIL_HOME/cache/cloud_token.json`).
 //
 // This module mirrors the Python `token_store.py` contract:
 //   - Writes are atomic (tmp-file + rename).
@@ -26,10 +26,10 @@ use anyhow::{Context, Result};
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Resolve `$TESSLATE_STUDIO_HOME/cache/cloud_token.json`.
+/// Resolve `$OPENSAIL_HOME/cache/cloud_token.json`.
 /// Falls back to `{local_app_data}/Tesslate/Studio/cache/cloud_token.json`.
 fn token_path() -> PathBuf {
-    if let Ok(home) = std::env::var("TESSLATE_STUDIO_HOME") {
+    if let Ok(home) = std::env::var("OPENSAIL_HOME") {
         return PathBuf::from(home).join("cache").join("cloud_token.json");
     }
 

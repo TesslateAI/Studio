@@ -20,7 +20,7 @@ harness or `../scripts/dev.sh`.
 - `src/main.rs` — entry; wires all modules.
 - `src/sidecar.rs` — spawn orchestrator, parse `TESSLATE_READY {port} {bearer}`, health-check, restart on crash.
 - `src/tray.rs` — tray icon + menu (Open Studio / Running Agents / Running Projects / Quit).
-- `src/bootstrap.rs` — first-run copy of bundled marketplace + `$TESSLATE_STUDIO_HOME` tree.
+- `src/bootstrap.rs` — first-run copy of bundled marketplace + `$OPENSAIL_HOME` tree.
 - `src/tokens.rs` — Stronghold-backed token get/set (paired cloud credentials).
 - `src/deep_link.rs` — `tesslate://auth/callback?token=...` handler.
 - `src/updater.rs` — auto-update wiring.

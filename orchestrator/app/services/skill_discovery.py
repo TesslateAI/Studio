@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SkillCatalogEntry:
     """Lightweight skill entry for progressive disclosure catalog."""
+
     name: str
     description: str
     source: str  # "builtin" | "db" | "file"
@@ -173,11 +174,9 @@ async def _discover_db_skills(
         return []
 
 
-async def _discover_file_skills_local(
-    project_id: str, db: AsyncSession
-) -> list[SkillCatalogEntry]:
+async def _discover_file_skills_local(project_id: str, db: AsyncSession) -> list[SkillCatalogEntry]:
     """Discover SKILL.md files from the project's on-disk root and the
-    shared ``$TESSLATE_STUDIO_HOME/skills/`` tree on desktop.
+    shared ``$OPENSAIL_HOME/skills/`` tree on desktop.
 
     Reads the filesystem directly — no docker/kubectl shell-out needed when
     both the project and the agent run in-process.
@@ -199,11 +198,11 @@ async def _discover_file_skills_local(
 
         try:
             from ..config import get_settings
-            from .desktop_paths import ensure_studio_home
+            from .desktop_paths import ensure_opensail_home
 
             settings = get_settings()
             if settings.deployment_mode.lower() == "desktop":
-                home = ensure_studio_home(settings.tesslate_studio_home or None)
+                home = ensure_opensail_home(settings.opensail_home or None)
                 roots.append(home / "skills")
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("Skill discovery: studio-home lookup failed: %s", exc)

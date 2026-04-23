@@ -130,7 +130,7 @@ class GitManager:
         """Run a git subprocess directly against the on-disk project root.
 
         Local/desktop runtime doesn't have a shared volume or exec'able
-        container — the project lives at ``$TESSLATE_STUDIO_HOME/projects/
+        container — the project lives at ``$OPENSAIL_HOME/projects/
         <slug>-<id>/``, so we invoke git there with the caller's identity.
         """
         import asyncio

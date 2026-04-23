@@ -597,13 +597,13 @@ async def get_llm_client(
         # No prefix — use LiteLLM proxy for system models.
         # In desktop mode (no LiteLLM proxy) fall back to common env-var API
         # keys so users can drop OPENAI_API_KEY / ANTHROPIC_API_KEY into
-        # $TESSLATE_STUDIO_HOME/.env without needing to configure BYOK in the UI.
+        # $OPENSAIL_HOME/.env without needing to configure BYOK in the UI.
         import os as _os
 
         if not user.litellm_api_key or not settings.litellm_api_base:
             # Desktop / standalone: no per-user LiteLLM key provisioned.
             # If the proxy is configured (LITELLM_API_BASE + LITELLM_MASTER_KEY
-            # both set — e.g. from $TESSLATE_STUDIO_HOME/.env), use the master
+            # both set — e.g. from $OPENSAIL_HOME/.env), use the master
             # key directly so the proxy is reachable without requiring the full
             # cloud user-key provisioning flow.
             if settings.litellm_api_base and settings.litellm_master_key:
@@ -667,7 +667,7 @@ async def get_llm_client(
                 "No LLM API key configured. "
                 "Add a provider key in Library → API Keys, or set OPENAI_API_KEY / "
                 "ANTHROPIC_API_KEY / OPENROUTER_API_KEY in "
-                "$TESSLATE_STUDIO_HOME/.env."
+                "$OPENSAIL_HOME/.env."
             )
 
         logger.info(f"Using LiteLLM proxy for model: {model_name}")

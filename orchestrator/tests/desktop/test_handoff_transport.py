@@ -12,7 +12,7 @@ from app.services.handoff_client import HandoffBundle
 
 @pytest.fixture(autouse=True)
 def _reset_cloud_client(monkeypatch, tmp_path):
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.setenv("TESSLATE_CLOUD_TOKEN", "tsk_test")
     cloud_client._singleton = None
     token_store._cached_token = None

@@ -116,7 +116,7 @@ On-disk and env-var storage for the `tsk_` bearer token. No network I/O.
 ### Resolution Order
 
 1. `$TESSLATE_CLOUD_TOKEN` env var (Tauri shell injects this; takes precedence).
-2. `$TESSLATE_STUDIO_HOME/cache/cloud_token.json` (written by `POST /api/desktop/auth/token`).
+2. `$OPENSAIL_HOME/cache/cloud_token.json` (written by `POST /api/desktop/auth/token`).
 
 ### API
 

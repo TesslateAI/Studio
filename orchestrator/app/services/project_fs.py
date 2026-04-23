@@ -9,7 +9,7 @@ Contract:
 
 - Docker: returns ``/projects/<slug>`` — the shared volume mount that the host
   and every project container share.
-- Desktop: returns ``$TESSLATE_STUDIO_HOME/projects/<slug>-<id>`` — the
+- Desktop: returns ``$OPENSAIL_HOME/projects/<slug>-<id>`` — the
   per-project root materialized by ``file_placement._place_desktop`` (and
   referenced by ``LocalOrchestrator`` for multi-project isolation).
 - Kubernetes: returns ``None`` — there is no host-reachable path; callers
@@ -62,9 +62,9 @@ def get_project_fs_path(project: Any | None) -> Path | None:
         return Path(f"/projects/{slug}")
 
     if mode == "desktop":
-        from .desktop_paths import ensure_studio_home
+        from .desktop_paths import ensure_opensail_home
 
-        home = ensure_studio_home(settings.tesslate_studio_home or None)
+        home = ensure_opensail_home(settings.opensail_home or None)
         pid = getattr(project, "id", None)
         dir_name = f"{slug}-{pid}" if pid is not None else slug
         return (home / "projects" / dir_name).resolve()

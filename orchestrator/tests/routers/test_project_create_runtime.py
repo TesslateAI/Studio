@@ -5,25 +5,23 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import select
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _install_sqlite_now(engine) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(timezone.utc).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -38,7 +36,7 @@ def migrated_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     db_path = tmp_path / "rt.db"
     url = f"sqlite+aiosqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", url)
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path / "studio-home"))
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path / "studio-home"))
 
     from app.config import get_settings
 

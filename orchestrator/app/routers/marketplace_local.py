@@ -2,7 +2,7 @@
 Desktop-local marketplace router.
 
 Surfaces installed marketplace items (agents / skills / bases / themes) that
-live on the desktop filesystem under ``$TESSLATE_STUDIO_HOME/{kind}s/`` and,
+live on the desktop filesystem under ``$OPENSAIL_HOME/{kind}s/`` and,
 when paired + ``settings.pull_from_cloud`` is on, merges the cloud catalog so
 the UI can render a unified dual-source list.
 
@@ -37,7 +37,7 @@ from ..services.cloud_client import (
     NotPairedError,
     get_cloud_client,
 )
-from ..services.desktop_paths import resolve_studio_home
+from ..services.desktop_paths import resolve_opensail_home
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -61,8 +61,8 @@ _CACHE_FILENAME = "marketplace.json"
 
 
 def _scan_local(kind: str) -> list[dict[str, Any]]:
-    """Scan ``$TESSLATE_STUDIO_HOME/{kind}s/*/manifest.json``."""
-    home = resolve_studio_home()
+    """Scan ``$OPENSAIL_HOME/{kind}s/*/manifest.json``."""
+    home = resolve_opensail_home()
     base = home / _KIND_TO_DIR[kind]
     if not base.exists():
         return []
@@ -95,7 +95,7 @@ def _scan_local(kind: str) -> list[dict[str, Any]]:
 
 
 def _cache_path() -> Path:
-    return resolve_studio_home() / "cache" / _CACHE_FILENAME
+    return resolve_opensail_home() / "cache" / _CACHE_FILENAME
 
 
 def _read_cache(kind: str) -> tuple[list[dict[str, Any]] | None, bool]:
@@ -155,9 +155,7 @@ async def _fetch_cloud(kind: str) -> list[dict[str, Any]]:
         return []
 
     if resp.status_code >= 400:
-        logger.debug(
-            "marketplace_local: cloud returned %s for %s", resp.status_code, kind
-        )
+        logger.debug("marketplace_local: cloud returned %s for %s", resp.status_code, kind)
         return []
 
     try:
@@ -194,9 +192,7 @@ async def _refresh_cache_in_background(kind: str) -> None:
         logger.debug("marketplace_local: background refresh failed (%s): %s", kind, exc)
 
 
-def _merge(
-    local: list[dict[str, Any]], cloud: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+def _merge(local: list[dict[str, Any]], cloud: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge local + cloud, de-duped by ``slug`` (local wins)."""
     seen = {item.get("slug") for item in local if item.get("slug")}
     merged = list(local)

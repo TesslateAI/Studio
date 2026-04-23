@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.delenv("TESSLATE_CLOUD_TOKEN", raising=False)
     (tmp_path / "cache").mkdir(parents=True, exist_ok=True)
 

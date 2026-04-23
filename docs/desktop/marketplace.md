@@ -6,13 +6,13 @@ and a SHA-256-verified install pipeline.
 ## Items
 
 Four `kind` values: `agent`, `skill`, `base`, `theme`. Each installed item
-lives under `$TESSLATE_STUDIO_HOME/{kind}s/{slug}/manifest.json`.
+lives under `$OPENSAIL_HOME/{kind}s/{slug}/manifest.json`.
 
 Sources:
 
 | `source` tag | Origin                                                              |
 | ------------ | ------------------------------------------------------------------- |
-| `"local"`    | Scanned from `$TESSLATE_STUDIO_HOME/{kind}s/*/manifest.json`.       |
+| `"local"`    | Scanned from `$OPENSAIL_HOME/{kind}s/*/manifest.json`.       |
 | `"cloud"`    | Fetched via `CloudClient.get("/api/public/marketplace/{kind}s")`.   |
 
 Router: `/orchestrator/app/routers/marketplace_local.py`. Installer service:
@@ -33,7 +33,7 @@ present in local are dropped.
 
 ### Cache (stale-while-revalidate)
 
-- Path: `$TESSLATE_STUDIO_HOME/cache/marketplace.json`.
+- Path: `$OPENSAIL_HOME/cache/marketplace.json`.
 - TTL: `_CACHE_TTL_SECONDS = 3600` (1h).
 - Writes atomic (`.tmp` + `replace`).
 - Fresh cache → served directly (`cached: true`).

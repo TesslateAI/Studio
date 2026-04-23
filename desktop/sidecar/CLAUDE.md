@@ -17,13 +17,13 @@ externalBin ships one file; onedir's sibling `_internal/` shared libs
 get lost on spawn).
 
 ## Key files
-- `entrypoint.py` — `uvicorn` launcher with `DEPLOYMENT_MODE=desktop`; resolves `$TESSLATE_STUDIO_HOME`; prints `TESSLATE_READY {port} {bearer}`.
+- `entrypoint.py` — `uvicorn` launcher with `DEPLOYMENT_MODE=desktop`; resolves `$OPENSAIL_HOME`; prints `TESSLATE_READY {port} {bearer}`.
 - `build_sidecar.py` — per-OS PyInstaller driver.
 - `spec/{macos,windows,linux}.spec` — PyInstaller specs (`--onedir`).
 
 ## Related contexts
 - `../src-tauri/src/sidecar.rs` — the Rust supervisor that spawns this process
-- `/orchestrator/app/config.py` — `deployment_mode="desktop"` + `tesslate_studio_home`
+- `/orchestrator/app/config.py` — `deployment_mode="desktop"` + `opensail_home`
 
 ## When to load
 Changing sidecar startup, PyInstaller bundling, or the ready-line contract.

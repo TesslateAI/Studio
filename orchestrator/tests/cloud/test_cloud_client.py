@@ -11,8 +11,8 @@ import respx
 
 
 @pytest.fixture
-def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+def opensail_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.delenv("TESSLATE_CLOUD_TOKEN", raising=False)
     (tmp_path / "cache").mkdir(parents=True, exist_ok=True)
     return tmp_path
@@ -31,7 +31,7 @@ def fast_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def paired(studio_home: Path):
+def paired(opensail_home: Path):
     from app.services import token_store
 
     token_store.set_cloud_token("tsk_test")
@@ -46,7 +46,7 @@ def _make_client(base_url: str = "https://cloud.test"):
 
 
 @pytest.mark.asyncio
-async def test_not_paired_raises(studio_home: Path) -> None:
+async def test_not_paired_raises(opensail_home: Path) -> None:
     from app.services.cloud_client import NotPairedError
 
     client = _make_client()

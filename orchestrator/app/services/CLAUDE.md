@@ -31,7 +31,7 @@ for the process singleton, or instantiate directly in tests with a custom
 
 `token_store` is the on-disk contract for the eventual Tauri shell:
 `$TESSLATE_CLOUD_TOKEN` env var wins, else `cache/cloud_token.json` under
-`$TESSLATE_STUDIO_HOME` (atomic write, 0600 on POSIX). No network I/O.
+`$OPENSAIL_HOME` (atomic write, 0600 on POSIX). No network I/O.
 
 Both modules are non-blocking on failure: routers should `try/except` and
 fall back to cached/empty data so the desktop UI stays responsive when the
@@ -44,7 +44,7 @@ calls `POST /api/v1/marketplace/install` via `CloudClient` (cloud returns
 signed download URLs + sha256 + manifest), streams each URL with a
 bearer-LESS `httpx.AsyncClient` (signed S3/R2 URLs MUST NOT carry the cloud
 bearer), verifies SHA-256, and atomically moves a `.installing/` staging
-directory into `$TESSLATE_STUDIO_HOME/{kind}s/{slug}/`. Writes `manifest.json`
+directory into `$OPENSAIL_HOME/{kind}s/{slug}/`. Writes `manifest.json`
 with `source: "local"`, `installed_from: "cloud"`, `install_id`. Best-effort
 `POST .../ack` — ack failure logs but never raises.
 

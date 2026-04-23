@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -13,20 +14,17 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _install_sqlite_now(engine) -> None:
     """SQLite lacks ``now()``; register it so server_default=func.now() works."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(timezone.utc).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -42,7 +40,7 @@ def migrated_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     url = f"sqlite+aiosqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", url)
     monkeypatch.setenv("DEPLOYMENT_MODE", "desktop")
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path / "studio-home"))
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path / "studio-home"))
 
     from app.config import get_settings
 
@@ -114,9 +112,9 @@ def test_import_happy_path_creates_local_project(app_env, tmp_path: Path) -> Non
     # Project root should be a symlink pointing at the source on POSIX.
     # Note: _get_project_root calls .resolve() which follows symlinks, so we
     # reconstruct the unresolved path to verify the symlink itself.
-    from app.services.desktop_paths import ensure_studio_home
+    from app.services.desktop_paths import ensure_opensail_home
 
-    home = ensure_studio_home(os.environ.get("TESSLATE_STUDIO_HOME"))
+    home = ensure_opensail_home(os.environ.get("OPENSAIL_HOME"))
     unresolved_root = home / "projects" / f"{row.slug}-{row.id}"
     if os.name != "nt":
         assert unresolved_root.is_symlink()

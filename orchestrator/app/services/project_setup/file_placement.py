@@ -70,7 +70,7 @@ async def _place_desktop(
     write_config: bool = True,
     project_id: str | None = None,
 ) -> PlacedFiles:
-    """Copy source files into ``$TESSLATE_STUDIO_HOME/projects/<slug>-<id>/``.
+    """Copy source files into ``$OPENSAIL_HOME/projects/<slug>-<id>/``.
 
     The directory name uses the same ``{slug}-{id}`` convention as
     ``LocalOrchestrator._get_project_root`` and ``project_fs.get_project_fs_path``
@@ -80,11 +80,11 @@ async def _place_desktop(
     1000:1000 is skipped — owner already matches. Skips the same set of
     generated/dependency dirs (SKIP_DIRS) as Docker mode.
     """
-    from ...services.desktop_paths import ensure_studio_home
+    from ...services.desktop_paths import ensure_opensail_home
 
-    studio_home = ensure_studio_home(None)
+    opensail_home = ensure_opensail_home(None)
     dir_name = f"{project_slug}-{project_id}" if project_id is not None else project_slug
-    project_path = str(studio_home / "projects" / dir_name)
+    project_path = str(opensail_home / "projects" / dir_name)
     os.makedirs(project_path, exist_ok=True)
 
     if task:

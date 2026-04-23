@@ -2,9 +2,9 @@
 
 Spawned by the Tauri host (``desktop/src-tauri/src/sidecar.rs``). Contract:
 
-1. Resolve ``$TESSLATE_STUDIO_HOME`` and materialize its directory tree.
+1. Resolve ``$OPENSAIL_HOME`` and materialize its directory tree.
 2. Set ``DEPLOYMENT_MODE=desktop`` + ``DATABASE_URL=sqlite+aiosqlite://``
-   pointing at ``$TESSLATE_STUDIO_HOME/studio.db`` (override-able via env).
+   pointing at ``$OPENSAIL_HOME/opensail.db`` (override-able via env).
 3. Pick an ephemeral free TCP port on ``127.0.0.1``.
 4. Mint a per-launch bearer token (32 random bytes, urlsafe-base64).
 5. Print ``TESSLATE_READY {port} {bearer}`` to stdout and flush — the Tauri
@@ -47,15 +47,15 @@ def _mint_bearer() -> str:
     return secrets.token_urlsafe(32)
 
 
-def _load_dot_env(studio_home: Path) -> None:
-    """Load ``$TESSLATE_STUDIO_HOME/.env`` into the process environment.
+def _load_dot_env(opensail_home: Path) -> None:
+    """Load ``$OPENSAIL_HOME/.env`` into the process environment.
 
     Only sets variables that are not already present so that explicit env
     overrides (shell exports, CI) take priority.  Uses a minimal parser to
     avoid a python-dotenv dependency — supports ``KEY=value`` and
     ``KEY="value"`` lines; skips blank lines and ``#`` comments.
     """
-    dot_env = studio_home / ".env"
+    dot_env = opensail_home / ".env"
     if not dot_env.is_file():
         return
     try:
@@ -75,10 +75,10 @@ def _load_dot_env(studio_home: Path) -> None:
         pass  # Best-effort; missing/unreadable .env is not fatal.
 
 
-def _ensure_secret_key(studio_home: Path) -> str:
+def _ensure_secret_key(opensail_home: Path) -> str:
     """Return a stable per-installation SECRET_KEY, generating one on first boot.
 
-    The key is persisted at ``$TESSLATE_STUDIO_HOME/.secret_key`` (0600) so
+    The key is persisted at ``$OPENSAIL_HOME/.secret_key`` (0600) so
     that JWTs survive sidecar restarts.  If ``SECRET_KEY`` is already set in
     the environment (or loaded from ``.env``), that value is used as-is.
     """
@@ -86,7 +86,7 @@ def _ensure_secret_key(studio_home: Path) -> str:
     if len(existing) >= 32:
         return existing
 
-    key_file = studio_home / ".secret_key"
+    key_file = opensail_home / ".secret_key"
     if key_file.is_file():
         try:
             key = key_file.read_text(encoding="utf-8").strip()
@@ -105,21 +105,21 @@ def _ensure_secret_key(studio_home: Path) -> str:
     return key
 
 
-def _configure_environment(studio_home: Path) -> None:
+def _configure_environment(opensail_home: Path) -> None:
     """Set the env vars FastAPI / SQLAlchemy read at import time."""
     # User-supplied keys (OPENAI_API_KEY etc.) land first so the rest of the
     # defaults below don't accidentally shadow them.
-    _load_dot_env(studio_home)
+    _load_dot_env(opensail_home)
     os.environ.setdefault("DEPLOYMENT_MODE", "desktop")
     os.environ.setdefault("DEPLOYMENT_ENV", "desktop")
-    os.environ.setdefault("TESSLATE_STUDIO_HOME", str(studio_home))
+    os.environ.setdefault("OPENSAIL_HOME", str(opensail_home))
     os.environ.setdefault(
-        "DATABASE_URL", f"sqlite+aiosqlite:///{studio_home / 'studio.db'}"
+        "DATABASE_URL", f"sqlite+aiosqlite:///{opensail_home / 'opensail.db'}"
     )
     # SQLite + desktop mode must not try to talk to Redis.
     os.environ.setdefault("REDIS_URL", "")
     # Ensure a stable JWT signing key (min 32 bytes required by jose/SHA-256).
-    secret = _ensure_secret_key(studio_home)
+    secret = _ensure_secret_key(opensail_home)
     os.environ.setdefault("SECRET_KEY", secret)
 
 
@@ -148,10 +148,10 @@ def _run_migrations_in_process() -> None:
 
 def main() -> int:
     # Lazy imports — the env vars above land before SQLAlchemy / config cache.
-    from app.services.desktop_paths import ensure_studio_home
+    from app.services.desktop_paths import ensure_opensail_home
 
-    studio_home = ensure_studio_home(os.environ.get("TESSLATE_STUDIO_HOME"))
-    _configure_environment(studio_home)
+    opensail_home = ensure_opensail_home(os.environ.get("OPENSAIL_HOME"))
+    _configure_environment(opensail_home)
 
     host = os.environ.get("TESSLATE_DESKTOP_HOST", "127.0.0.1")
     env_port = os.environ.get("TESSLATE_DESKTOP_PORT")

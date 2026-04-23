@@ -9,14 +9,14 @@ shell.
 ## Key files
 - `/desktop/` — Tauri project + sidecar packaging
 - `/desktop/CLAUDE.md` — entry into the desktop source tree
-- `/orchestrator/app/services/desktop_paths.py` — `$TESSLATE_STUDIO_HOME` resolver
+- `/orchestrator/app/services/desktop_paths.py` — `$OPENSAIL_HOME` resolver
 - `/orchestrator/app/services/orchestration/factory.py` — per-project runtime dispatch
 
 ## Content pages
 | Page | What it covers | Load when |
 | ---- | -------------- | --------- |
 | [development.md](development.md) | Toolchain install, sidecar build, `cargo tauri dev`, installer bundles, env vars, troubleshooting | First time standing up the desktop client locally |
-| [runtimes.md](runtimes.md) | Runtime probe, per-project dispatch, port allocator, `$TESSLATE_STUDIO_HOME` layout, tray endpoints | Touching the tray, runtime picker, local-runtime ports, or FS layout |
+| [runtimes.md](runtimes.md) | Runtime probe, per-project dispatch, port allocator, `$OPENSAIL_HOME` layout, tray endpoints | Touching the tray, runtime picker, local-runtime ports, or FS layout |
 | [import.md](import.md) | `POST /api/desktop/import`, `import_path` schema, canonical-path dedup, POSIX symlink vs Windows `.tesslate-source` marker | Wiring the "open existing folder" flow or changing `ProjectCreate` |
 | [cloud.md](cloud.md) | `CloudClient` pool/retry/breaker, `token_store` precedence, pairing endpoints, `tesslate://auth/callback` deep-link | Any change that calls the cloud from the sidecar |
 | [marketplace.md](marketplace.md) | Dual-source listing, stale-while-revalidate cache, SHA-256 install pipeline, install/uninstall error map | Marketplace UI changes or installer edits |

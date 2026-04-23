@@ -9,7 +9,7 @@ base / theme) on the desktop shell:
      SHA-256 digests, and the canonical manifest.
   2. Stream each download to a tmp file with a bearer-less ``httpx.AsyncClient``
      (signed S3/R2 URLs MUST NOT carry the cloud bearer), verifying SHA-256 as
-     bytes arrive. Files land in ``$TESSLATE_STUDIO_HOME/{kind}s/{slug}/`` via
+     bytes arrive. Files land in ``$OPENSAIL_HOME/{kind}s/{slug}/`` via
      atomic rename so a mid-stream crash never leaves partial files.
   3. Write ``manifest.json`` with ``{...cloud_manifest, source: "local",
      installed_from: "cloud", install_id}``.
@@ -40,7 +40,7 @@ from .cloud_client import (
     NotPairedError,
     get_cloud_client,
 )
-from .desktop_paths import resolve_studio_home
+from .desktop_paths import resolve_opensail_home
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def _install_dir(kind: str, slug: str) -> Path:
         raise InstallError(f"unknown kind: {kind}")
     if not slug or "/" in slug or ".." in slug:
         raise InstallError(f"invalid slug: {slug}")
-    return resolve_studio_home() / _KIND_TO_DIR[kind] / slug
+    return resolve_opensail_home() / _KIND_TO_DIR[kind] / slug
 
 
 def install_path(kind: str, slug: str) -> Path:
@@ -88,9 +88,7 @@ async def _download_and_verify(
     try:
         async with http.stream("GET", url) as resp:
             if resp.status_code >= 400:
-                raise InstallError(
-                    f"download failed ({resp.status_code}) for {url}"
-                )
+                raise InstallError(f"download failed ({resp.status_code}) for {url}")
             with dest_tmp.open("wb") as f:
                 async for chunk in resp.aiter_bytes(_STREAM_CHUNK_BYTES):
                     if not chunk:
@@ -106,18 +104,12 @@ async def _download_and_verify(
 
     digest = hasher.hexdigest()
     if digest.lower() != sha256.lower():
-        raise InstallError(
-            f"sha256 mismatch for {url}: expected {sha256}, got {digest}"
-        )
+        raise InstallError(f"sha256 mismatch for {url}: expected {sha256}, got {digest}")
 
 
-async def _initiate_install(
-    client: CloudClient, kind: str, slug: str
-) -> dict[str, Any]:
+async def _initiate_install(client: CloudClient, kind: str, slug: str) -> dict[str, Any]:
     try:
-        resp = await client.post(
-            "/api/v1/marketplace/install", json={"kind": kind, "slug": slug}
-        )
+        resp = await client.post("/api/v1/marketplace/install", json={"kind": kind, "slug": slug})
     except NotPairedError:
         raise
     except CircuitOpenError as exc:
@@ -126,9 +118,7 @@ async def _initiate_install(
         raise InstallError(f"cloud transport error: {exc}") from exc
 
     if resp.status_code >= 400:
-        raise InstallError(
-            f"cloud install initiate failed: HTTP {resp.status_code}"
-        )
+        raise InstallError(f"cloud install initiate failed: HTTP {resp.status_code}")
     try:
         body = resp.json()
     except ValueError as exc:
@@ -149,9 +139,7 @@ async def _initiate_install(
 async def _ack_install(client: CloudClient, install_id: str) -> None:
     """Best-effort ack. Never raises."""
     try:
-        resp = await client.post(
-            f"/api/v1/marketplace/install/{install_id}/ack", json={}
-        )
+        resp = await client.post(f"/api/v1/marketplace/install/{install_id}/ack", json={})
         if resp.status_code >= 400:
             logger.warning(
                 "marketplace_installer: ack returned %s for %s",
@@ -161,9 +149,7 @@ async def _ack_install(client: CloudClient, install_id: str) -> None:
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 — ack is explicitly non-blocking
-        logger.warning(
-            "marketplace_installer: ack failed for %s: %s", install_id, exc
-        )
+        logger.warning("marketplace_installer: ack failed for %s: %s", install_id, exc)
 
 
 async def install(kind: str, slug: str) -> InstallResult:

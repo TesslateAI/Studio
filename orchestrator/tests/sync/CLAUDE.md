@@ -5,7 +5,7 @@ Unit tests for `app.services.sync_client` and the
 
 All tests are offline: respx mocks the cloud surface (`/api/v1/projects/sync/
 push|pull|manifest/{id}`) so they never touch the network. Fixtures mirror
-`tests/marketplace/` — a `studio_home` tmp dir, a `paired` token fixture,
+`tests/marketplace/` — a `opensail_home` tmp dir, a `paired` token fixture,
 and a `cloud_singleton` that rebinds `get_cloud_client` to a respx-backed
 client at `https://cloud.test`.
 

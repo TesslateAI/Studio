@@ -1,12 +1,12 @@
 """
 Desktop filesystem layout resolver.
 
-Resolves `$TESSLATE_STUDIO_HOME` — the root directory the Tauri shell uses
+Resolves `$OPENSAIL_HOME` — the root directory the Tauri shell uses
 for projects, cache, marketplace items, logs, and the SQLite database.
 
 Resolution order:
-  1. Explicit `settings.tesslate_studio_home` (if non-empty).
-  2. `$TESSLATE_STUDIO_HOME` env var (if set).
+  1. Explicit `settings.opensail_home` (if non-empty).
+  2. `$OPENSAIL_HOME` env var (if set).
   3. OS-default application data directory:
        - macOS:   ~/Library/Application Support/Tesslate Studio
        - Windows: %APPDATA%/Tesslate Studio
@@ -22,16 +22,16 @@ import sys
 from pathlib import Path
 
 
-def resolve_studio_home(explicit: str | None = None) -> Path:
+def resolve_opensail_home(explicit: str | None = None) -> Path:
     """Return the OpenSail home directory for the desktop shell.
 
     The directory is NOT created here — callers that need it materialized
-    should call :func:`ensure_studio_home`.
+    should call :func:`ensure_opensail_home`.
     """
     if explicit:
         return Path(explicit).expanduser()
 
-    env = os.environ.get("TESSLATE_STUDIO_HOME")
+    env = os.environ.get("OPENSAIL_HOME")
     if env:
         return Path(env).expanduser()
 
@@ -48,9 +48,9 @@ def resolve_studio_home(explicit: str | None = None) -> Path:
     return base / "tesslate-studio"
 
 
-def ensure_studio_home(explicit: str | None = None) -> Path:
+def ensure_opensail_home(explicit: str | None = None) -> Path:
     """Resolve and create the studio home directory tree (projects/, cache/, logs/)."""
-    root = resolve_studio_home(explicit)
+    root = resolve_opensail_home(explicit)
     for sub in ("projects", "cache", "logs", "agents", "skills", "bases", "themes"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     return root

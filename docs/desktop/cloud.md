@@ -49,7 +49,7 @@ File: `/orchestrator/app/services/token_store.py`. No network I/O.
 Precedence (read order):
 
 1. `$TESSLATE_CLOUD_TOKEN` env var — Tauri-side injection; wins when set.
-2. `$TESSLATE_STUDIO_HOME/cache/cloud_token.json` — written by the auth-token
+2. `$OPENSAIL_HOME/cache/cloud_token.json` — written by the auth-token
    endpoint.
 
 `set_cloud_token(token)` writes atomically via `tempfile.mkstemp` + `os.replace`

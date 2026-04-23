@@ -19,7 +19,7 @@ is the single-command wrapper once the toolchain is installed.
 
 ## Related contexts
 - `/docs/desktop/CLAUDE.md` — user-facing desktop docs index
-- `/orchestrator/app/services/desktop_paths.py` — `$TESSLATE_STUDIO_HOME` resolver
+- `/orchestrator/app/services/desktop_paths.py` — `$OPENSAIL_HOME` resolver
 - `/orchestrator/app/services/orchestration/factory.py` — per-project runtime dispatch (`resolve_for_project`)
 
 ## When to load

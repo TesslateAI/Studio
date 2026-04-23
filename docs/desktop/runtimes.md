@@ -19,16 +19,16 @@ Resolution lives in `OrchestratorFactory.resolve_for_project(project)` at
 Under `DEPLOYMENT_MODE=desktop` any row without an explicit runtime resolves
 to `LocalOrchestrator`.
 
-## `$TESSLATE_STUDIO_HOME` layout
+## `$OPENSAIL_HOME` layout
 
-Resolver: `/orchestrator/app/services/desktop_paths.py` (`resolve_studio_home`,
-`ensure_studio_home`). Precedence: explicit setting → `$TESSLATE_STUDIO_HOME`
+Resolver: `/orchestrator/app/services/desktop_paths.py` (`resolve_opensail_home`,
+`ensure_opensail_home`). Precedence: explicit setting → `$OPENSAIL_HOME`
 env var → OS default (`~/Library/Application Support/OpenSail` on macOS,
 `%APPDATA%/OpenSail` on Windows, `$XDG_DATA_HOME/tesslate-studio` on
 Linux).
 
 ```
-$TESSLATE_STUDIO_HOME/
+$OPENSAIL_HOME/
 ├── projects/{slug}-{uuid}/      # local-runtime project roots
 ├── cache/
 │   ├── cloud_token.json         # paired bearer (token_store)
@@ -42,7 +42,7 @@ $TESSLATE_STUDIO_HOME/
 ```
 
 `_get_project_root(project)` at `/orchestrator/app/services/orchestration/local.py`
-returns `$TESSLATE_STUDIO_HOME/projects/{slug}-{id}` under desktop mode, else
+returns `$OPENSAIL_HOME/projects/{slug}-{id}` under desktop mode, else
 falls back to `$PROJECT_ROOT` then `os.getcwd()`.
 
 ## Port allocator (local runtime)
@@ -51,7 +51,7 @@ falls back to `$PROJECT_ROOT` then `os.getcwd()`.
 reserves host TCP ports per `(project_id, container_name)` from
 `settings.local_port_range_start`–`_range_end` (default `42000`–`42999`).
 
-- Persists to `$TESSLATE_STUDIO_HOME/cache/ports.json` (atomic `tmp + os.replace`).
+- Persists to `$OPENSAIL_HOME/cache/ports.json` (atomic `tmp + os.replace`).
 - Stores owning `pid`; `reclaim_dead(pid_check=_pid_alive)` frees ports whose
   owner is gone.
 - `allocate()` is idempotent for existing pairs.

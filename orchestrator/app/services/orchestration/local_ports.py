@@ -3,7 +3,7 @@ Local-runtime port allocator.
 
 Reserves host TCP ports for per-project / per-container dev servers under the
 desktop local runtime. Persists assignments to
-``$TESSLATE_STUDIO_HOME/cache/ports.json`` so that allocations survive
+``$OPENSAIL_HOME/cache/ports.json`` so that allocations survive
 orchestrator restarts.
 
 Concurrency:
@@ -251,10 +251,10 @@ async def get_default_allocator() -> PortAllocator:
     async with _default_lock:
         if _default is None:
             from ...config import get_settings
-            from ..desktop_paths import ensure_studio_home
+            from ..desktop_paths import ensure_opensail_home
 
             settings = get_settings()
-            home = ensure_studio_home(settings.tesslate_studio_home or None)
+            home = ensure_opensail_home(settings.opensail_home or None)
             _default = PortAllocator(
                 cache_dir=home / "cache",
                 range_start=settings.local_port_range_start,

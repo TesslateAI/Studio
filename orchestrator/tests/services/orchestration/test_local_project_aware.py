@@ -34,7 +34,7 @@ def _reset_caches() -> None:
 @pytest.fixture
 def desktop_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("DEPLOYMENT_MODE", "desktop")
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.setenv("PROJECT_ROOT", str(tmp_path / "legacy"))
     return tmp_path
 
@@ -76,12 +76,8 @@ async def test_multi_project_file_isolation(desktop_home: Path) -> None:
         (desktop_home / "projects" / f"{slug}-{pid}").mkdir(parents=True, exist_ok=True)
 
     user = uuid4()
-    assert await orch.write_file(
-        user, pid_a, "main", "hello.txt", "from-a", project_slug=slug_a
-    )
-    assert await orch.write_file(
-        user, pid_b, "main", "hello.txt", "from-b", project_slug=slug_b
-    )
+    assert await orch.write_file(user, pid_a, "main", "hello.txt", "from-a", project_slug=slug_a)
+    assert await orch.write_file(user, pid_b, "main", "hello.txt", "from-b", project_slug=slug_b)
 
     a = await orch.read_file(user, pid_a, "main", "hello.txt", project_slug=slug_a)
     b = await orch.read_file(user, pid_b, "main", "hello.txt", project_slug=slug_b)

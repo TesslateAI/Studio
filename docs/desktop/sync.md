@@ -9,7 +9,7 @@ companion. Service: `/orchestrator/app/services/sync_client.py`. Router:
 `_project_root(project)` prefers `project.source_path` (set for imported
 projects) before falling back to `local._get_project_root(project)`. For
 non-imported desktop projects this resolves to
-`$TESSLATE_STUDIO_HOME/projects/{slug}-{id}`.
+`$OPENSAIL_HOME/projects/{slug}-{id}`.
 
 ## Pack exclusions
 

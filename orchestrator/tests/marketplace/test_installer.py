@@ -12,8 +12,8 @@ import respx
 
 
 @pytest.fixture
-def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+def opensail_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.delenv("TESSLATE_CLOUD_TOKEN", raising=False)
     for sub in ("agents", "skills", "bases", "themes", "cache"):
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
@@ -25,7 +25,7 @@ def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def paired(studio_home: Path):
+def paired(opensail_home: Path):
     from app.services import token_store
 
     token_store.set_cloud_token("tsk_test")
@@ -49,9 +49,7 @@ def cloud_singleton(monkeypatch: pytest.MonkeyPatch):
             holder["c"] = cc_mod.CloudClient(base_url="https://cloud.test")
         return holder["c"]
 
-    monkeypatch.setattr(
-        "app.services.marketplace_installer.get_cloud_client", fake_get
-    )
+    monkeypatch.setattr("app.services.marketplace_installer.get_cloud_client", fake_get)
 
 
 def _sha(data: bytes) -> str:
@@ -59,9 +57,7 @@ def _sha(data: bytes) -> str:
 
 
 @pytest.mark.asyncio
-async def test_install_happy_path(
-    studio_home: Path, paired, cloud_singleton
-) -> None:
+async def test_install_happy_path(opensail_home: Path, paired, cloud_singleton) -> None:
     from app.services import marketplace_installer
 
     payload = b"skill body contents"
@@ -91,16 +87,16 @@ async def test_install_happy_path(
         router.get("https://cdn.test/skill.md").mock(
             return_value=httpx.Response(200, content=payload)
         )
-        ack = router.post(
-            "https://cloud.test/api/v1/marketplace/install/inst-123/ack"
-        ).mock(return_value=httpx.Response(200, json={"ok": True}))
+        ack = router.post("https://cloud.test/api/v1/marketplace/install/inst-123/ack").mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
 
         result = await marketplace_installer.install("skill", "my-skill")
 
     assert result.kind == "skill"
     assert result.slug == "my-skill"
     assert result.install_id == "inst-123"
-    install_dir = studio_home / "skills" / "my-skill"
+    install_dir = opensail_home / "skills" / "my-skill"
     assert install_dir.is_dir()
     assert (install_dir / "skill.md").read_bytes() == payload
     manifest = json.loads((install_dir / "manifest.json").read_text())
@@ -113,7 +109,7 @@ async def test_install_happy_path(
 
 @pytest.mark.asyncio
 async def test_install_sha_mismatch_leaves_no_files(
-    studio_home: Path, paired, cloud_singleton
+    opensail_home: Path, paired, cloud_singleton
 ) -> None:
     from app.services import marketplace_installer
 
@@ -141,13 +137,13 @@ async def test_install_sha_mismatch_leaves_no_files(
         with pytest.raises(marketplace_installer.InstallError, match="sha256"):
             await marketplace_installer.install("skill", "bad-skill")
 
-    assert not (studio_home / "skills" / "bad-skill").exists()
-    assert not (studio_home / "skills" / "bad-skill.installing").exists()
+    assert not (opensail_home / "skills" / "bad-skill").exists()
+    assert not (opensail_home / "skills" / "bad-skill.installing").exists()
 
 
 @pytest.mark.asyncio
 async def test_install_ack_failure_is_non_blocking(
-    studio_home: Path, paired, cloud_singleton
+    opensail_home: Path, paired, cloud_singleton
 ) -> None:
     from app.services import marketplace_installer
 
@@ -174,21 +170,21 @@ async def test_install_ack_failure_is_non_blocking(
         router.get("https://cdn.test/theme.css").mock(
             return_value=httpx.Response(200, content=payload)
         )
-        router.post(
-            "https://cloud.test/api/v1/marketplace/install/inst-ack-fail/ack"
-        ).mock(return_value=httpx.Response(500))
+        router.post("https://cloud.test/api/v1/marketplace/install/inst-ack-fail/ack").mock(
+            return_value=httpx.Response(500)
+        )
 
         result = await marketplace_installer.install("theme", "my-theme")
 
     assert result.install_id == "inst-ack-fail"
-    assert (studio_home / "themes" / "my-theme" / "manifest.json").is_file()
+    assert (opensail_home / "themes" / "my-theme" / "manifest.json").is_file()
 
 
 @pytest.mark.asyncio
-async def test_uninstall_removes_directory(studio_home: Path) -> None:
+async def test_uninstall_removes_directory(opensail_home: Path) -> None:
     from app.services import marketplace_installer
 
-    target = studio_home / "agents" / "gone"
+    target = opensail_home / "agents" / "gone"
     target.mkdir(parents=True)
     (target / "manifest.json").write_text("{}")
 
@@ -198,18 +194,16 @@ async def test_uninstall_removes_directory(studio_home: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_uninstall_missing_returns_false(studio_home: Path) -> None:
+async def test_uninstall_missing_returns_false(opensail_home: Path) -> None:
     from app.services import marketplace_installer
 
     assert await marketplace_installer.uninstall("agent", "nope") is False
 
 
 @pytest.mark.asyncio
-async def test_install_duplicate_raises(
-    studio_home: Path, paired, cloud_singleton
-) -> None:
+async def test_install_duplicate_raises(opensail_home: Path, paired, cloud_singleton) -> None:
     from app.services import marketplace_installer
 
-    (studio_home / "skills" / "dup").mkdir(parents=True)
+    (opensail_home / "skills" / "dup").mkdir(parents=True)
     with pytest.raises(marketplace_installer.InstallError, match="already"):
         await marketplace_installer.install("skill", "dup")

@@ -396,7 +396,7 @@ class CheckpointManager:
         """Desktop/local-mode checkpoint exec.
 
         Scripts are authored against ``/app``; rewrite it to the real
-        on-disk project root (``$TESSLATE_STUDIO_HOME/projects/<slug>-<id>``)
+        on-disk project root (``$OPENSAIL_HOME/projects/<slug>-<id>``)
         and run git as the calling user — no docker / kubectl in scope.
         """
         import asyncio

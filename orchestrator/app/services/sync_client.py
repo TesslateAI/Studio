@@ -55,7 +55,7 @@ from .cloud_client import (
     NotPairedError,
     get_cloud_client,
 )
-from .desktop_paths import resolve_studio_home
+from .desktop_paths import resolve_opensail_home
 
 logger = logging.getLogger(__name__)
 
@@ -359,11 +359,11 @@ def _destination_for_pull(project: Any | None, project_id: str) -> Path:
     """Resolve the extraction destination for a pull.
 
     If ``project`` is provided, reuses :func:`_project_root`. Otherwise falls
-    back to ``$TESSLATE_STUDIO_HOME/projects/{project_id}``.
+    back to ``$OPENSAIL_HOME/projects/{project_id}``.
     """
     if project is not None:
         return _project_root(project)
-    return resolve_studio_home() / "projects" / project_id
+    return resolve_opensail_home() / "projects" / project_id
 
 
 async def _download_zip(url_or_path: str, *, base_url: str | None = None) -> Path:

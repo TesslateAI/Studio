@@ -74,7 +74,7 @@ async def initialize_container_async(
         logger.info(f"[CONTAINER-INIT] Starting initialization for container {container_id}")
         task.update_progress(10, 100, "Initializing container...")
 
-        # Local/desktop runtime: files land in $TESSLATE_STUDIO_HOME/projects/<slug>/
+        # Local/desktop runtime: files land in $OPENSAIL_HOME/projects/<slug>/
         # at project-create time via file_placement._place_desktop, and containers
         # are host subprocesses — there's no shared volume to seed. Short-circuit
         # before probing methods the LocalOrchestrator doesn't expose.

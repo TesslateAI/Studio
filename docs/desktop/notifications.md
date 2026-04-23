@@ -36,7 +36,7 @@ is the `Project.name` value.
 
 VAPID key pair:
 - Generated once at first start.
-- Persisted to `$TESSLATE_STUDIO_HOME/vapid.json` (readable only by the sidecar
+- Persisted to `$OPENSAIL_HOME/vapid.json` (readable only by the sidecar
   process on POSIX; created with mode `0600`).
 - The VAPID public key is served to the browser via `GET /api/notifications/vapid-key`.
 

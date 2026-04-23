@@ -42,11 +42,11 @@ def test_docker_mode_returns_projects_mount(monkeypatch: pytest.MonkeyPatch) -> 
     assert get_project_fs_path(project) == Path("/projects/my-app")
 
 
-def test_desktop_mode_returns_studio_home_subpath(
+def test_desktop_mode_returns_opensail_home_subpath(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("DEPLOYMENT_MODE", "desktop")
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     pid = uuid4()
     project = _Proj(slug="my-app", id=pid)
     expected = (tmp_path / "projects" / f"my-app-{pid}").resolve()

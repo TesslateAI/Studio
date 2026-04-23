@@ -84,8 +84,8 @@ class Settings(BaseSettings):
     deployment_env: str = "docker"
 
     # Desktop: root directory for projects, cache, sqlite db, etc.
-    # Empty string → resolved per-OS at runtime via services.desktop_paths.resolve_studio_home().
-    tesslate_studio_home: str = ""
+    # Empty string → resolved per-OS at runtime via services.desktop_paths.resolve_opensail_home().
+    opensail_home: str = ""
 
     # Desktop: cloud companion endpoint. The desktop sidecar talks to this URL
     # via services.cloud_client.CloudClient for marketplace pulls, model proxy,
@@ -99,7 +99,7 @@ class Settings(BaseSettings):
 
     # Local runtime: inclusive TCP port range for per-container host ports.
     # The allocator (services.orchestration.local_ports) reserves ports from this
-    # window and persists assignments under $TESSLATE_STUDIO_HOME/cache/ports.json.
+    # window and persists assignments under $OPENSAIL_HOME/cache/ports.json.
     local_port_range_start: int = 42000
     local_port_range_end: int = 42999
 

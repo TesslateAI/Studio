@@ -25,8 +25,8 @@ def _write_local_item(home: Path, kind_dir: str, slug: str, name: str) -> None:
 
 
 @pytest.fixture
-def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+def opensail_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.delenv("TESSLATE_CLOUD_TOKEN", raising=False)
     for sub in ("agents", "skills", "bases", "themes", "cache"):
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
@@ -38,7 +38,7 @@ def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def app_client(studio_home: Path, monkeypatch: pytest.MonkeyPatch):
+def app_client(opensail_home: Path, monkeypatch: pytest.MonkeyPatch):
     from app.routers import marketplace_local
     from app.services import cloud_client as cc_mod
     from app.users import current_active_user
@@ -63,15 +63,13 @@ def app_client(studio_home: Path, monkeypatch: pytest.MonkeyPatch):
             holder["c"] = cc_mod.CloudClient(base_url="https://cloud.test")
         return holder["c"]
 
-    monkeypatch.setattr(
-        "app.routers.marketplace_local.get_cloud_client", fake_get_cloud_client
-    )
+    monkeypatch.setattr("app.routers.marketplace_local.get_cloud_client", fake_get_cloud_client)
 
     yield TestClient(app)
 
 
-def test_local_only_when_unpaired(app_client: TestClient, studio_home: Path) -> None:
-    _write_local_item(studio_home, "agents", "local-agent", "Local Agent")
+def test_local_only_when_unpaired(app_client: TestClient, opensail_home: Path) -> None:
+    _write_local_item(opensail_home, "agents", "local-agent", "Local Agent")
     r = app_client.get("/api/desktop/marketplace/items?kind=agent")
     assert r.status_code == 200
     body = r.json()
@@ -81,13 +79,11 @@ def test_local_only_when_unpaired(app_client: TestClient, studio_home: Path) -> 
     assert all(i["source"] == "local" for i in body["items"])
 
 
-def test_dual_source_merge_when_paired(
-    app_client: TestClient, studio_home: Path
-) -> None:
+def test_dual_source_merge_when_paired(app_client: TestClient, opensail_home: Path) -> None:
     from app.services import token_store
 
     token_store.set_cloud_token("tsk_test")
-    _write_local_item(studio_home, "agents", "local-agent", "Local")
+    _write_local_item(opensail_home, "agents", "local-agent", "Local")
 
     with respx.mock(base_url="https://cloud.test") as router:
         router.get("/api/public/marketplace/agents").mock(
@@ -104,18 +100,14 @@ def test_dual_source_merge_when_paired(
     assert by_slug["cloud-agent"]["source"] == "cloud"
 
 
-def test_cloud_500_degrades_to_local(
-    app_client: TestClient, studio_home: Path
-) -> None:
+def test_cloud_500_degrades_to_local(app_client: TestClient, opensail_home: Path) -> None:
     from app.services import token_store
 
     token_store.set_cloud_token("tsk_test")
-    _write_local_item(studio_home, "skills", "skill-a", "Skill A")
+    _write_local_item(opensail_home, "skills", "skill-a", "Skill A")
 
     with respx.mock(base_url="https://cloud.test") as router:
-        router.get("/api/public/marketplace/skills").mock(
-            return_value=httpx.Response(500)
-        )
+        router.get("/api/public/marketplace/skills").mock(return_value=httpx.Response(500))
         r = app_client.get("/api/desktop/marketplace/items?kind=skill")
     assert r.status_code == 200
     items = r.json()["items"]
@@ -123,8 +115,8 @@ def test_cloud_500_degrades_to_local(
     assert items[0]["source"] == "local"
 
 
-def test_cache_hit_returns_cached(app_client: TestClient, studio_home: Path) -> None:
-    cache_path = studio_home / "cache" / "marketplace.json"
+def test_cache_hit_returns_cached(app_client: TestClient, opensail_home: Path) -> None:
+    cache_path = opensail_home / "cache" / "marketplace.json"
     cache_path.write_text(
         json.dumps(
             {
@@ -150,13 +142,11 @@ def test_cache_hit_returns_cached(app_client: TestClient, studio_home: Path) -> 
     assert body["items"][0]["slug"] == "cached-theme"
 
 
-def test_stale_cache_serves_then_refreshes(
-    app_client: TestClient, studio_home: Path
-) -> None:
+def test_stale_cache_serves_then_refreshes(app_client: TestClient, opensail_home: Path) -> None:
     from app.services import token_store
 
     token_store.set_cloud_token("tsk_test")
-    cache_path = studio_home / "cache" / "marketplace.json"
+    cache_path = opensail_home / "cache" / "marketplace.json"
     cache_path.write_text(
         json.dumps(
             {
@@ -175,7 +165,7 @@ def test_stale_cache_serves_then_refreshes(
         ),
         encoding="utf-8",
     )
-    _write_local_item(studio_home, "bases", "fresh-base", "Fresh")
+    _write_local_item(opensail_home, "bases", "fresh-base", "Fresh")
 
     with respx.mock(base_url="https://cloud.test") as router:
         router.get("/api/public/marketplace/bases").mock(

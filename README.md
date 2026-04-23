@@ -7,18 +7,17 @@
 <p align="center">Build agents, apps, and automations from anywhere.<br />Run them on your infrastructure. Share them across your team.<br />Open source. Any model. No lock-in.</p>
 
 <p align="center">
-  <a href="https://opensail.dev/docs"><strong>Docs</strong></a> ·
-  <a href="https://opensail.dev/quickstart"><strong>Quickstart</strong></a> ·
-  <a href="https://discord.gg/tesslate"><strong>Discord</strong></a> ·
+  <a href="https://docs.tesslate.com"><strong>Docs</strong></a> ·
+  <a href="https://docs.tesslate.com/quickstart"><strong>Quickstart</strong></a> ·
+  <a href="https://discord.gg/DkzMzwBTaw"><strong>Discord</strong></a> ·
   <a href="https://github.com/TesslateAI/opensail/releases"><strong>Releases</strong></a>
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/License-Apache_2.0-green?style=flat-square" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-blue?style=flat-square" alt="Platform" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Runtime-Kubernetes_Native-purple?style=flat-square" alt="Runtime" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/Patent-Pending-orange?style=flat-square" alt="Patent Pending" /></a>
-  <a href="https://discord.gg/tesslate"><img src="https://img.shields.io/discord/000000000?label=Discord&style=flat-square" alt="Discord" /></a>
+  <a href="https://discord.gg/DkzMzwBTaw"><img src="https://img.shields.io/discord/000000000?label=Discord&style=flat-square" alt="Discord" /></a>
 </p>
 
 ---
@@ -57,6 +56,90 @@ You can also start from templates for finance, sales, marketing, operations, and
 
 ---
 
+## Apps
+
+An app on OpenSail is a versioned, immutable, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, its own containers, and its own permissions.
+
+**The lifecycle:** build in a workspace, publish a version (immutable, content-addressed), go through the approval pipeline, list on the marketplace (or keep private/team-only), install per-user, run, update, fork.
+
+**Surfaces:** Every app declares what shape it takes. A single app can be a UI (full web app), a chat interface, a scheduled job (cron), a triggered webhook handler, or an MCP tool callable by other agents. These are not different products. They are surface declarations in the same manifest.
+
+**Billing:** The creator decides who pays. Each billing dimension (AI compute, general compute, platform fee) can be set independently to creator-pays, installer-pays, platform-subsidized, or BYOK (bring your own key, bypass routing entirely). Promotional budgets let creators sponsor the first N users, then flip to installer-pays when the fund runs out. Caps and overage behavior are per-dimension.
+
+**Approval pipeline:** Every published version goes through staged review before it reaches the public marketplace. Automated agent scans check for overbroad OAuth scopes, known-bad code patterns, leaked secrets, and dependency vulnerabilities. A sandbox evaluation runs the app against synthetic inputs with a cheap model to catch crashes, cost blowouts, and prompt injection vulnerabilities. Then a human reviewer signs off. Private and team installs skip the public listing gate, so your first apps ship immediately.
+
+**Forking:** If the creator allows it, anyone can fork an app. Fork creates a new workspace with full source access and a `forked_from` provenance link. The marketplace shows fork trees. A lawyer takes a starter "intake" app, forks it to "intake-estate-planning," and republishes for their firm.
+
+**Bundles:** Group multiple apps into a starter pack. "Install Lawyer Starter" installs 10 apps with consolidated OAuth consent (one Gmail authorization covers all of them), sane defaults, and a dashboard app at the center that embeds the others via signed iframes.
+
+---
+
+## Workspaces
+
+<p align="center">
+  <img src="assets/opensail-workspaces.png" alt="OpenSail Workspaces" width="80%" />
+</p>
+
+Every agent, app, and workflow runs inside a workspace. One workspace = one app. Multiple agents can collaborate inside the same workspace (frontend agent, backend agent, test agent working on the same codebase), but the workspace publishes as a single unit.
+
+Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything fast, portable, and persistent.
+
+**Instant snapshots.** Fork a workspace in seconds. Roll back to any point in time. Branch off a working agent to try something new without breaking what's already running. Up to 5 snapshots retained per project for a built-in timeline.
+
+**Desktop to cloud.** Connect your local OpenSail instance to your own cloud infrastructure. Build locally, push to the cloud, run at scale. Same workspace, same state, no re-setup.
+
+**Share anything.** Workspaces are self-contained. Share an agent with your team and they get the full environment: code, state, config, dependencies. Not just a link.
+
+**Stay in control.** You decide what tools and data an agent can use, what actions it can take, and when it needs approval. For sensitive steps, require the agent to ask before moving forward. Analytics show you how agents are being used, how many runs they've completed, and who's using them.
+
+---
+
+## Agent coding and builder
+
+Run your own agent roster.
+
+OpenSail ships with a set of specialized coding agents, each tuned for a different shape of work. Pair them on a single workspace or let one drive the whole thing.
+
+**Tesslate Agent.** An autonomous full-stack engineer. Reads and writes files, runs shell commands, manages git, fetches the web, and delegates to subagents when it needs to explore in parallel. Follows a project's `TESSLATE.md` the way a human reads a README. Keeps going until the task is actually done.
+
+**Stream Builder.** Streaming-first React + TypeScript prototyping. Code lands in the editor as it's being written. Built for the loop where you need to see the shape of the thing before you commit to it.
+
+**React Component Builder.** Production components with a plan-act-observe-verify loop. WCAG 2.1 accessibility, TypeScript props, `memo` / `useMemo` / `useCallback`, and JSDoc-with-examples on every public API by default.
+
+**API Integration Agent.** REST and GraphQL integrations with retry logic, exponential backoff, circuit breakers, and rate limiting baked in. Edge cases are the default, not an afterthought.
+
+**Librarian.** Scans a project's manifests (`package.json`, `requirements.txt`, `go.mod`, Dockerfiles) and writes the `.tesslate/config.json` that drives the Architecture Panel. One pass gets you the full container topology with framework-appropriate ports and service wiring.
+
+**Service Integrator.** Wires Supabase, Stripe, Postgres, or any REST API into a project without ever seeing plaintext credentials. Opens a secure panel on the Architecture canvas for the user to paste keys; the agent only writes env-var references. Rotate a key later and nothing in the code changes.
+
+**Context that doesn't run out.** When a session crosses 80% of the model's window, the agent progressively compacts older messages with a cheap model and keeps working. Multi-hour runs don't hit a wall.
+
+**Progressive persistence.** Every agent step is written to the database as it happens. Pods can die, browsers can close, networks can hiccup — come back and the trajectory is still there. Resume mid-task.
+
+---
+
+## Design engineer
+
+Click a pixel in your running app, jump to the JSX line that rendered it.
+
+The Design Engineer is a live-editing canvas that runs alongside the code editor. It loads your dev server in an iframe, injects a bridge script into the running app, and turns every rendered element into something you can select, edit, and push back to source.
+
+**Click-to-source.** The bridge walks the React Fiber tree at runtime to resolve any DOM element to its component name, source file, and line number. No source maps required. Click a button in the preview and the editor opens the JSX that produced it.
+
+**Stable OID mapping.** A server-side pass tags JSX elements with `data-oid` attributes so every edit is keyed to the exact source location that rendered it. Refactor a file, move the component — the mapping survives.
+
+**Two-way, sub-100ms sync.** Edit class names, text, styles, or attributes in the inspector and the change lands in the preview and the source file in one step. Edit the file directly and HMR flows back through the canvas without losing your selection.
+
+**Full CSS inspector.** Tailwind autocomplete from a curated palette, an interactive box model for margin / padding / border, grouped style sections for layout, size, typography, background, flex, and grid, color pickers, and HTML attribute editing with add / remove.
+
+**Insert palette.** Drag in semantic HTML, project components auto-detected from your PascalCase files (with auto-import hints), or framework patterns tailored to React, Next.js, Vue, Svelte, Angular, or Astro.
+
+**Canvas powers.** Pan and zoom with cursor-anchored math so the point under the cursor stays fixed. Responsive breakpoints from 375px to 1536px. Snap guides. Undo/redo across the whole session with inverse-request replay.
+
+**Structured diffs for the agent.** Canvas edits aren't character patches — they become typed `CodeDiffRequest` objects (style patch, class override, text content, attributes, structural changes). The agent can see what a user did on the canvas and reason about intent, not just bytes.
+
+---
+
 ## Architecture Panel
 
 <p align="center">
@@ -65,7 +148,7 @@ You can also start from templates for finance, sales, marketing, operations, and
 
 The Architecture Panel is a visual node-graph canvas built on React Flow where you design, wire, and manage the full topology of your project. Every project has one. It is the single source of truth for what your app is: what containers run, how they connect, where secrets flow, and where the whole thing deploys.
 
-The panel renders `.TesslateAI/config.json`. Both humans and agents read and write the same file. When the agent adds a Postgres container and wires its `DATABASE_URL` into the backend, the nodes and edges appear on the canvas in real time. When you drag a new service onto the canvas, the agent sees the updated graph on its next iteration. One file, two authors, no drift.
+The panel renders `.tesslate/config.json`. Both humans and agents read and write the same file. When the agent adds a Postgres container and wires its `DATABASE_URL` into the backend, the nodes and edges appear on the canvas in real time. When you drag a new service onto the canvas, the agent sees the updated graph on its next iteration. One file, two authors, no drift.
 
 **Node types on the canvas:**
 
@@ -91,24 +174,6 @@ One canvas. One config file. Agents, humans, secrets, deployments, and apps all 
 
 ---
 
-## Apps
-
-An app on OpenSail is a versioned, immutable, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, its own containers, and its own permissions.
-
-**The lifecycle:** build in a workspace, publish a version (immutable, content-addressed), go through the approval pipeline, list on the marketplace (or keep private/team-only), install per-user, run, update, fork.
-
-**Surfaces:** Every app declares what shape it takes. A single app can be a UI (full web app), a chat interface, a scheduled job (cron), a triggered webhook handler, or an MCP tool callable by other agents. These are not different products. They are surface declarations in the same manifest.
-
-**Billing:** The creator decides who pays. Each billing dimension (AI compute, general compute, platform fee) can be set independently to creator-pays, installer-pays, platform-subsidized, or BYOK (bring your own key, bypass routing entirely). Promotional budgets let creators sponsor the first N users, then flip to installer-pays when the fund runs out. Caps and overage behavior are per-dimension.
-
-**Approval pipeline:** Every published version goes through staged review before it reaches the public marketplace. Automated agent scans check for overbroad OAuth scopes, known-bad code patterns, leaked secrets, and dependency vulnerabilities. A sandbox evaluation runs the app against synthetic inputs with a cheap model to catch crashes, cost blowouts, and prompt injection vulnerabilities. Then a human reviewer signs off. Private and team installs skip the public listing gate, so your first apps ship immediately.
-
-**Forking:** If the creator allows it, anyone can fork an app. Fork creates a new workspace with full source access and a `forked_from` provenance link. The marketplace shows fork trees. A lawyer takes a starter "intake" app, forks it to "intake-estate-planning," and republishes for their firm.
-
-**Bundles:** Group multiple apps into a starter pack. "Install Lawyer Starter" installs 10 apps with consolidated OAuth consent (one Gmail authorization covers all of them), sane defaults, and a dashboard app at the center that embeds the others via signed iframes.
-
----
-
 ## Turn best practices into shared agents
 
 <p align="center">
@@ -127,31 +192,11 @@ Build once, improve through use, then share or duplicate for new workflows. Beca
 
 ---
 
-## Workspaces
-
-<p align="center">
-  <img src="assets/opensail-workspaces.png" alt="OpenSail Workspaces" width="80%" />
-</p>
-
-Every agent, app, and workflow runs inside a workspace. One workspace = one app. Multiple agents can collaborate inside the same workspace (frontend agent, backend agent, test agent working on the same codebase), but the workspace publishes as a single unit.
-
-Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything fast, portable, and persistent.
-
-**Instant snapshots.** Fork a workspace in seconds. Roll back to any point in time. Branch off a working agent to try something new without breaking what's already running. Up to 5 snapshots retained per project for a built-in timeline.
-
-**Desktop to cloud.** Connect your local OpenSail instance to your own cloud infrastructure. Build locally, push to the cloud, run at scale. Same workspace, same state, no re-setup.
-
-**Share anything.** Workspaces are self-contained. Share an agent with your team and they get the full environment: code, state, config, dependencies. Not just a link.
-
-**Stay in control.** You decide what tools and data an agent can use, what actions it can take, and when it needs approval. For sensitive steps, require the agent to ask before moving forward. Analytics show you how agents are being used, how many runs they've completed, and who's using them.
-
----
-
 ## Cloud sandboxes for agents
 
 Running agents means giving them compute. OpenSail provides the infrastructure to do it without burning money.
 
-The runtime uses a patent-pending three-tier compute model built on Kubernetes:
+The runtime uses a three-tier compute model built on Kubernetes:
 
 | Tier | What runs here | Cost |
 |------|---------------|------|
@@ -224,20 +269,20 @@ You pick the runtime per project. A personal script can run local. A multi-conta
 **What lives on your machine:**
 
 ```
-$TESSLATE_STUDIO_HOME/
+$OPENSAIL_HOME/
 ├── projects/{slug}-{uuid}/     # your project files
 ├── cache/                       # cloud token, marketplace cache, port allocations
 ├── agents/{slug}/manifest.json  # installed agents
 ├── skills/{slug}/manifest.json  # installed skills
 ├── logs/
-└── studio.db                    # local SQLite database
+└── opensail.db                    # local SQLite database
 ```
 
 One folder. Wipe it, you get a clean install.
 
 **Offline-first marketplace.** Agents, skills, bases, and themes install locally from the cloud marketplace with SHA-256 verified downloads. Once installed, they work offline. Local items and cloud items merge, local wins by slug. Cache is stale-while-revalidate with background refresh.
 
-**Permissions per project.** Each project has a `.TesslateAI/permissions.json` that gates what agents can do: shell access, network calls, git push, file writes, process spawning. Three policies per capability: `allow` (silent), `deny` (blocked), `ask` (approval prompt in the tray, TUI, or browser). "Always allow" persists your decision back to the file. Budget caps with monthly limits and alert thresholds are built in.
+**Permissions per project.** Each project has a `.tesslate/permissions.json` that gates what agents can do: shell access, network calls, git push, file writes, process spawning. Three policies per capability: `allow` (silent), `deny` (blocked), `ask` (approval prompt in the tray, TUI, or browser). "Always allow" persists your decision back to the file. Budget caps with monthly limits and alert thresholds are built in.
 
 **Approval workflow.** When an agent hits a gated tool, the desktop shows a tray notification with an approval card. Approve, deny, or "always allow" for that tool. Human-readable ticket refs (TSK-0001, TSK-0002) so you can track what the agent asked for and what you approved.
 
@@ -325,16 +370,9 @@ cd opensail
 ./install.sh
 ```
 
-Or pull the Docker image:
-
-```bash
-docker pull TesslateAI/opensail:latest
-docker compose up
-```
-
 Then open `http://localhost:3000` and start building.
 
-Read the full setup guide in the [docs](https://opensail.dev/docs).
+Read the full setup guide in the [docs](https://docs.tesslate.com).
 
 ---
 
@@ -372,7 +410,7 @@ Read the full setup guide in the [docs](https://opensail.dev/docs).
           │  ┌────────────────────────────────────────────────────┐  │
           │  │            Architecture Panel Canvas                │  │
           │  │  Container nodes · Edges · Previews · Deploy targets│  │
-          │  │  Agent co-authors .TesslateAI/config.json             │  │
+          │  │  Agent co-authors .tesslate/config.json               │  │
           │  └──────────────────────┬─────────────────────────────┘  │
           │                         │                                 │
           │  ┌──────────────────────▼─────────────────────────────┐  │
@@ -429,13 +467,13 @@ Read the full setup guide in the [docs](https://opensail.dev/docs).
 
 We're building this in the open. Contributions are welcome.
 
-Check out the [contributing guide](CONTRIBUTING.md) for development setup and how to submit PRs. Join the [Discord](https://discord.gg/tesslate) to talk about what you're building or what you'd like to see.
+Check out the [contributing guide](CONTRIBUTING.md) for development setup and how to submit PRs. Join the [Discord](https://discord.gg/DkzMzwBTaw) to talk about what you're building or what you'd like to see.
 
 ---
 
 ## Community
 
-- [Discord](https://discord.gg/tesslate) - Ask questions, share what you're building
+- [Discord](https://discord.gg/DkzMzwBTaw) - Ask questions, share what you're building
 - [GitHub Discussions](https://github.com/TesslateAI/opensail/discussions) - Feature requests and ideas
 - [Issues](https://github.com/TesslateAI/opensail/issues) - Bug reports
 
@@ -443,7 +481,7 @@ Check out the [contributing guide](CONTRIBUTING.md) for development setup and ho
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
 
 ---
 

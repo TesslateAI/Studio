@@ -87,7 +87,7 @@ def _get_project_root(project: Any | None = None) -> Path:
 
     1. If a ``project`` row is supplied AND the app is running under
        ``DEPLOYMENT_MODE=desktop``, the root is
-       ``$TESSLATE_STUDIO_HOME/projects/{slug}-{id}`` so multi-project
+       ``$OPENSAIL_HOME/projects/{slug}-{id}`` so multi-project
        desktop shells can host many projects simultaneously. The directory
        is NOT created here — the importer / setup path is responsible for
        materializing it.
@@ -108,9 +108,9 @@ def _get_project_root(project: Any | None = None) -> Path:
 
             settings = get_settings()
             if settings.deployment_mode.lower() == "desktop":
-                from ..desktop_paths import ensure_studio_home
+                from ..desktop_paths import ensure_opensail_home
 
-                home = ensure_studio_home(settings.tesslate_studio_home or None)
+                home = ensure_opensail_home(settings.opensail_home or None)
                 slug = getattr(project, "slug", None) or "project"
                 pid = getattr(project, "id", None)
                 dir_name = f"{slug}-{pid}" if pid is not None else slug
@@ -637,7 +637,7 @@ class LocalOrchestrator(BaseOrchestrator):
         """Resolve the on-disk root for a specific project.
 
         Desktop shells host many projects at
-        ``$TESSLATE_STUDIO_HOME/projects/<slug>-<id>/``; other modes
+        ``$OPENSAIL_HOME/projects/<slug>-<id>/``; other modes
         (local benchmark / tests) share the single ``PROJECT_ROOT`` tree.
 
         Resolution order:
@@ -659,9 +659,9 @@ class LocalOrchestrator(BaseOrchestrator):
             return self.root
 
         if project_slug:
-            from ..desktop_paths import ensure_studio_home
+            from ..desktop_paths import ensure_opensail_home
 
-            home = ensure_studio_home(settings.tesslate_studio_home or None)
+            home = ensure_opensail_home(settings.opensail_home or None)
             return (home / "projects" / f"{project_slug}-{project_id}").resolve()
 
         cached = _PROJECT_ROOT_CACHE.get(project_id)

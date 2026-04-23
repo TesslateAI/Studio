@@ -15,7 +15,7 @@ from app.services.orchestration.local import _get_project_root
 @pytest.fixture
 def desktop_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the studio home at an isolated tmpdir and flip to desktop mode."""
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.setenv("DEPLOYMENT_MODE", "desktop")
     # Blow away the cached settings so the new env vars take effect.
     get_settings.cache_clear()
@@ -35,7 +35,7 @@ def test_three_projects_resolve_to_disjoint_roots(desktop_home: Path) -> None:
     # All three are distinct paths.
     assert len({str(r) for r in roots}) == 3
 
-    # Each lives under $TESSLATE_STUDIO_HOME/projects/.
+    # Each lives under $OPENSAIL_HOME/projects/.
     projects_dir = (desktop_home / "projects").resolve()
     for p, root in zip(projects, roots, strict=True):
         assert root.parent == projects_dir

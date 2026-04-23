@@ -65,7 +65,7 @@ def _resolve_project_root(context: dict[str, Any] | None = None) -> Path:
     Precedence:
       1. ``PROJECT_ROOT`` environment variable.
       2. ``context['project_root']`` when provided.
-      3. Desktop mode: ``$TESSLATE_STUDIO_HOME/projects/{slug}-{id}`` derived
+      3. Desktop mode: ``$OPENSAIL_HOME/projects/{slug}-{id}`` derived
          from ``context['project_slug']`` + ``context['project_id']``.
       4. Current working directory.
     """
@@ -80,9 +80,9 @@ def _resolve_project_root(context: dict[str, Any] | None = None) -> Path:
 
             settings = get_settings()
             if (settings.deployment_mode or "").lower() == "desktop":
-                from ...services.desktop_paths import ensure_studio_home
+                from ...services.desktop_paths import ensure_opensail_home
 
-                home = ensure_studio_home(settings.tesslate_studio_home or None)
+                home = ensure_opensail_home(settings.opensail_home or None)
                 slug = context["project_slug"]
                 pid = context["project_id"]
                 return (home / "projects" / f"{slug}-{pid}").resolve()

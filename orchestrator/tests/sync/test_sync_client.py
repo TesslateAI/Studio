@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import io
-import json
 import uuid
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,15 +13,14 @@ import httpx
 import pytest
 import respx
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+def opensail_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.delenv("TESSLATE_CLOUD_TOKEN", raising=False)
     (tmp_path / "projects").mkdir(parents=True, exist_ok=True)
     (tmp_path / "cache").mkdir(parents=True, exist_ok=True)
@@ -34,7 +32,7 @@ def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def paired(studio_home: Path):
+def paired(opensail_home: Path):
     from app.services import token_store
 
     token_store.set_cloud_token("tsk_test")
@@ -146,7 +144,7 @@ async def test_manifest_is_stable(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_push_happy_path_updates_last_sync(
-    tmp_path: Path, studio_home: Path, paired, cloud_singleton
+    tmp_path: Path, opensail_home: Path, paired, cloud_singleton
 ) -> None:
     from app.services import sync_client
 
@@ -180,17 +178,17 @@ async def test_push_happy_path_updates_last_sync(
 
 @pytest.mark.asyncio
 async def test_push_conflict_when_remote_newer(
-    tmp_path: Path, studio_home: Path, paired, cloud_singleton
+    tmp_path: Path, opensail_home: Path, paired, cloud_singleton
 ) -> None:
     from app.services import sync_client
 
     root = tmp_path / "proj"
     _seed_project_tree(root)
-    older = datetime.now(timezone.utc) - timedelta(hours=1)
+    older = datetime.now(UTC) - timedelta(hours=1)
     project = _make_project(root, last_sync_at=older)
     pid = str(project.id)
 
-    newer = (datetime.now(timezone.utc)).isoformat()
+    newer = (datetime.now(UTC)).isoformat()
     with respx.mock(assert_all_called=False) as router:
         router.get(f"https://cloud.test/api/v1/projects/sync/manifest/{pid}").mock(
             return_value=httpx.Response(
@@ -226,7 +224,7 @@ def _zip_bytes(files: dict[str, bytes]) -> bytes:
 
 @pytest.mark.asyncio
 async def test_pull_extracts_atomically(
-    tmp_path: Path, studio_home: Path, paired, cloud_singleton
+    tmp_path: Path, opensail_home: Path, paired, cloud_singleton
 ) -> None:
     from app.services import sync_client
 
@@ -264,7 +262,7 @@ async def test_pull_extracts_atomically(
 
 @pytest.mark.asyncio
 async def test_pull_failure_leaves_project_intact(
-    tmp_path: Path, studio_home: Path, paired, cloud_singleton
+    tmp_path: Path, opensail_home: Path, paired, cloud_singleton
 ) -> None:
     from app.services import sync_client
 

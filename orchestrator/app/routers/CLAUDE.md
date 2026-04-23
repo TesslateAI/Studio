@@ -22,13 +22,13 @@ is ever returned.
 ## marketplace_local.py
 
 `/api/desktop/marketplace/items?kind=agent|skill|base|theme` — lists installed
-items from `$TESSLATE_STUDIO_HOME/{agents,skills,bases,themes}/*/manifest.json`
+items from `$OPENSAIL_HOME/{agents,skills,bases,themes}/*/manifest.json`
 (`source: "local"`). When `settings.pull_from_cloud` is on AND a cloud token
 exists, ALSO fetches the cloud catalog via `services.cloud_client.CloudClient`
 (`source: "cloud"`). Cloud failures are swallowed (NotPaired, CircuitOpen,
 5xx, transport error → log.debug, return local-only).
 
-1h on-disk cache at `$TESSLATE_STUDIO_HOME/cache/marketplace.json` with
+1h on-disk cache at `$OPENSAIL_HOME/cache/marketplace.json` with
 stale-while-revalidate: stale entries return immediately and trigger a
 background refresh via `BackgroundTasks`.
 

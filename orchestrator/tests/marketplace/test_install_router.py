@@ -20,8 +20,8 @@ def _sha(data: bytes) -> str:
 
 
 @pytest.fixture
-def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+def opensail_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.delenv("TESSLATE_CLOUD_TOKEN", raising=False)
     for sub in ("agents", "skills", "bases", "themes", "cache"):
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
@@ -33,7 +33,7 @@ def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def app_client(studio_home: Path, monkeypatch: pytest.MonkeyPatch):
+def app_client(opensail_home: Path, monkeypatch: pytest.MonkeyPatch):
     from app.routers import marketplace_local
     from app.services import cloud_client as cc_mod
     from app.users import current_active_user
@@ -57,9 +57,7 @@ def app_client(studio_home: Path, monkeypatch: pytest.MonkeyPatch):
             holder["c"] = cc_mod.CloudClient(base_url="https://cloud.test")
         return holder["c"]
 
-    monkeypatch.setattr(
-        "app.services.marketplace_installer.get_cloud_client", fake_get
-    )
+    monkeypatch.setattr("app.services.marketplace_installer.get_cloud_client", fake_get)
 
     yield TestClient(app)
 
@@ -73,7 +71,7 @@ def paired():
     token_store.clear_cloud_token()
 
 
-def test_install_happy_path(app_client: TestClient, studio_home: Path, paired) -> None:
+def test_install_happy_path(app_client: TestClient, opensail_home: Path, paired) -> None:
     payload = b"file contents"
     sha = _sha(payload)
 
@@ -83,19 +81,15 @@ def test_install_happy_path(app_client: TestClient, studio_home: Path, paired) -
                 200,
                 json={
                     "install_id": "inst-rt",
-                    "download_urls": [
-                        {"url": "https://cdn.test/a", "sha256": sha, "name": "a"}
-                    ],
+                    "download_urls": [{"url": "https://cdn.test/a", "sha256": sha, "name": "a"}],
                     "manifest": {"slug": "agt", "name": "Agent", "version": "1"},
                 },
             )
         )
-        router.get("https://cdn.test/a").mock(
-            return_value=httpx.Response(200, content=payload)
+        router.get("https://cdn.test/a").mock(return_value=httpx.Response(200, content=payload))
+        router.post("https://cloud.test/api/v1/marketplace/install/inst-rt/ack").mock(
+            return_value=httpx.Response(200, json={})
         )
-        router.post(
-            "https://cloud.test/api/v1/marketplace/install/inst-rt/ack"
-        ).mock(return_value=httpx.Response(200, json={}))
 
         r = app_client.post(
             "/api/desktop/marketplace/install",
@@ -106,13 +100,11 @@ def test_install_happy_path(app_client: TestClient, studio_home: Path, paired) -
     body = r.json()
     assert body["install_id"] == "inst-rt"
     assert body["slug"] == "agt"
-    assert (studio_home / "agents" / "agt" / "manifest.json").is_file()
+    assert (opensail_home / "agents" / "agt" / "manifest.json").is_file()
 
 
-def test_install_duplicate_returns_409(
-    app_client: TestClient, studio_home: Path, paired
-) -> None:
-    (studio_home / "skills" / "dup").mkdir(parents=True)
+def test_install_duplicate_returns_409(app_client: TestClient, opensail_home: Path, paired) -> None:
+    (opensail_home / "skills" / "dup").mkdir(parents=True)
     r = app_client.post(
         "/api/desktop/marketplace/install",
         json={"kind": "skill", "slug": "dup"},
@@ -120,9 +112,7 @@ def test_install_duplicate_returns_409(
     assert r.status_code == 409
 
 
-def test_install_unpaired_returns_401(
-    app_client: TestClient, studio_home: Path
-) -> None:
+def test_install_unpaired_returns_401(app_client: TestClient, opensail_home: Path) -> None:
     # No token set → CloudClient raises NotPairedError on build_headers.
     r = app_client.post(
         "/api/desktop/marketplace/install",
@@ -132,7 +122,7 @@ def test_install_unpaired_returns_401(
 
 
 def test_install_circuit_open_returns_502(
-    app_client: TestClient, studio_home: Path, paired, monkeypatch: pytest.MonkeyPatch
+    app_client: TestClient, opensail_home: Path, paired, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.services import marketplace_installer
     from app.services.cloud_client import CircuitOpenError
@@ -149,13 +139,13 @@ def test_install_circuit_open_returns_502(
     assert r.status_code == 502
 
 
-def test_delete_happy_path(app_client: TestClient, studio_home: Path) -> None:
-    target = studio_home / "themes" / "t1"
+def test_delete_happy_path(app_client: TestClient, opensail_home: Path) -> None:
+    target = opensail_home / "themes" / "t1"
     target.mkdir(parents=True)
     (target / "manifest.json").write_text("{}")
 
     # Seed cache so we can verify invalidation.
-    cache = studio_home / "cache" / "marketplace.json"
+    cache = opensail_home / "cache" / "marketplace.json"
     cache.write_text(json.dumps({"theme": {"ts": 0, "items": [{"slug": "t1"}]}}))
 
     r = app_client.delete("/api/desktop/marketplace/install/theme/t1")
@@ -166,8 +156,6 @@ def test_delete_happy_path(app_client: TestClient, studio_home: Path) -> None:
     assert "theme" not in blob
 
 
-def test_delete_missing_returns_404(
-    app_client: TestClient, studio_home: Path
-) -> None:
+def test_delete_missing_returns_404(app_client: TestClient, opensail_home: Path) -> None:
     r = app_client.delete("/api/desktop/marketplace/install/agent/missing")
     assert r.status_code == 404

@@ -21,12 +21,10 @@ def _reset_settings() -> None:
 
 
 @pytest.fixture
-def desktop_project(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[Path, object]:
+def desktop_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, object]:
     """Bootstrap a desktop-mode project directory with a clean tree."""
     monkeypatch.setenv("DEPLOYMENT_MODE", "desktop")
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
 
     class _Proj:
         def __init__(self, slug: str, pid) -> None:
@@ -51,10 +49,7 @@ async def test_local_exec_rewrites_app_prefix_to_project_dir(
 
     mgr = CheckpointManager(user_id=uuid4(), project_id=str(pid))
 
-    result = AsyncMock(return_value=project)
-    with patch(
-        "app.database.AsyncSessionLocal"
-    ) as session_factory:
+    with patch("app.database.AsyncSessionLocal") as session_factory:
         session = AsyncMock()
         session.execute = AsyncMock()
         session.execute.return_value.scalar_one_or_none = lambda: project
@@ -78,8 +73,6 @@ def test_checkpoint_git_create_works_on_real_fs(
         f"cd {project_dir} && git -c safe.directory={project_dir} init -b main"
         " >/dev/null 2>&1 && echo OK"
     )
-    result = subprocess.run(
-        ["/bin/sh", "-c", script], capture_output=True, text=True, timeout=10
-    )
+    result = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0
     assert "OK" in result.stdout

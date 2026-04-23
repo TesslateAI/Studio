@@ -83,7 +83,7 @@ def test_sidecar_entrypoint_importable():
         cwd=sidecar_dir,
         capture_output=True,
         text=True,
-        env={**os.environ, "TESSLATE_STUDIO_HOME": tempfile.gettempdir()},
+        env={**os.environ, "OPENSAIL_HOME": tempfile.gettempdir()},
     )
     # ImportError is acceptable if deps not installed; syntax error is not.
     assert result.returncode != 1 or "SyntaxError" not in result.stderr, (

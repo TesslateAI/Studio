@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import uuid
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -15,7 +15,6 @@ import pytest
 import respx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 
 PROJECT_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
 
@@ -29,8 +28,8 @@ def _zip_bytes(files: dict[str, bytes]) -> bytes:
 
 
 @pytest.fixture
-def studio_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("TESSLATE_STUDIO_HOME", str(tmp_path))
+def opensail_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("OPENSAIL_HOME", str(tmp_path))
     monkeypatch.delenv("TESSLATE_CLOUD_TOKEN", raising=False)
     (tmp_path / "projects").mkdir(parents=True, exist_ok=True)
     (tmp_path / "cache").mkdir(parents=True, exist_ok=True)
@@ -51,9 +50,7 @@ def paired():
 
 
 @pytest.fixture
-def client(
-    tmp_path: Path, studio_home: Path, monkeypatch: pytest.MonkeyPatch
-):
+def client(tmp_path: Path, opensail_home: Path, monkeypatch: pytest.MonkeyPatch):
     from app.database import get_db
     from app.routers import desktop as desktop_mod
     from app.services import cloud_client as cc_mod
@@ -93,9 +90,7 @@ def client(
         return holder["c"]
 
     monkeypatch.setattr("app.services.sync_client.get_cloud_client", fake_get)
-    monkeypatch.setattr(
-        "app.services.cloud_client.get_cloud_client", fake_get
-    )
+    monkeypatch.setattr("app.services.cloud_client.get_cloud_client", fake_get)
 
     async def noop_db():
         s = AsyncMock()
@@ -143,10 +138,10 @@ def test_push_unpaired_returns_401(client):
 
 def test_push_conflict_returns_409(client, paired):
     tc, project = client
-    project.last_sync_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    project.last_sync_at = datetime.now(UTC) - timedelta(hours=2)
     pid = str(project.id)
 
-    newer = datetime.now(timezone.utc).isoformat()
+    newer = datetime.now(UTC).isoformat()
     with respx.mock(assert_all_called=False) as router:
         router.get(f"https://cloud.test/api/v1/projects/sync/manifest/{pid}").mock(
             return_value=httpx.Response(
