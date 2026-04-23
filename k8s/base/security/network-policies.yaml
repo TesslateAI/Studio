@@ -81,11 +81,13 @@ spec:
       port: 8000
 
 ---
-# Allow backend to access postgres
+# Allow all platform components that query the database to reach postgres.
+# Callers: backend (API), worker (ARQ agent tasks), gateway (channel configs),
+# and snapshot-cleanup cronjob (snapshot records).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-postgres-from-backend
+  name: allow-postgres-from-platform
   namespace: tesslate
 spec:
   podSelector:
@@ -96,11 +98,46 @@ spec:
   ingress:
   - from:
     - podSelector:
-        matchLabels:
-          app: tesslate-backend
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - tesslate-backend
+          - tesslate-worker
+          - tesslate-gateway
+          - tesslate-snapshot-cleanup
     ports:
     - protocol: TCP
       port: 5432
+
+---
+# Allow all platform components that use Redis to reach it.
+# Callers: backend (pubsub, session data), worker (ARQ queue, pubsub),
+# gateway (pub/sub event delivery).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-from-platform
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - tesslate-backend
+          - tesslate-worker
+          - tesslate-gateway
+    ports:
+    - protocol: TCP
+      port: 6379
 
 ---
 # Allow egress to DNS (kube-dns) for all pods
@@ -126,11 +163,17 @@ spec:
 
 ---
 # Default deny all egress from tesslate namespace.
-# Explicit allow rules below (allow-backend-egress, allow-worker-egress, allow-dns-egress)
-# permit the traffic each component actually needs.
-# Pods without an explicit allowlist (frontend, postgres, redis) lose outbound access —
-# this is correct; they should not make arbitrary external calls.
-# IMPORTANT: always ship allow-worker-egress in the same commit as this deny.
+# Explicit allow rules below permit the traffic each component actually needs:
+#   allow-dns-egress              — UDP/TCP 53 for all pods (kube-dns)
+#   allow-backend-egress          — backend: namespaces + external 443/80/9000
+#   allow-worker-egress           — worker: namespaces + external 443/80/9000
+#   allow-gateway-egress          — gateway: namespaces + external 443/80
+#   allow-namespace-reaper-egress — reaper: all namespaces (K8s API calls)
+#   allow-snapshot-cleanup-egress — snapshot-cleanup: all namespaces (postgres + K8s API)
+# Pods with no egress allowlist (frontend, postgres, redis) only need to respond to
+# inbound connections; stateful CNI (Calico/Cilium/AWS VPC CNI) tracks those
+# established-connection responses automatically — no explicit egress rule needed.
+# IMPORTANT: always ship all allow-*-egress policies in the same commit as this deny.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -173,7 +216,7 @@ spec:
     - protocol: TCP
       port: 80
     - protocol: TCP
-      port: 9000  # MinIO
+      port: 9000  # MinIO object store (S3-compatible)
 
 ---
 # Allow worker egress — mirrors allow-backend-egress for the ARQ worker pods.
@@ -192,7 +235,10 @@ spec:
   policyTypes:
   - Egress
   egress:
-  # Allow to any namespace (for managing user project namespaces, bash_exec, etc.)
+  # namespaceSelector: {} = all namespaces, no port restriction.
+  # Required because the agent bash tool execs into user project containers
+  # (proj-* namespaces) and the worker also reaches postgres, redis, and the
+  # backend API — all of which live in various namespaces.
   - to:
     - namespaceSelector: {}
   # Allow to external (LiteLLM, AI providers, search APIs, S3, Stripe, OAuth)
@@ -210,4 +256,78 @@ spec:
     - protocol: TCP
       port: 80
     - protocol: TCP
-      port: 9000  # MinIO
+      port: 9000  # MinIO object store (S3-compatible)
+
+---
+# Allow gateway egress — the gateway holds long-lived connections to external
+# messaging platforms (Telegram, Discord, Slack, WhatsApp) and calls LiteLLM
+# for voice transcription.  It also reads from Redis and queries postgres.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-egress
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: tesslate-gateway
+  policyTypes:
+  - Egress
+  egress:
+  # Cluster-internal: redis (6379), postgres (5432), backend API (8000)
+  - to:
+    - namespaceSelector: {}
+  # External: Telegram, Discord, Slack, WhatsApp APIs + LiteLLM (Whisper)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.169.254/32  # Block AWS IMDS
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
+---
+# Allow namespace-reaper egress — the reaper CronJob force-deletes pods and
+# strips PVC/namespace finalizers in stuck proj-* namespaces.  All operations
+# go through the K8s API server (kubernetes.default.svc:443 in the default
+# namespace) and to the target proj-* namespaces — covered by namespaceSelector: {}.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-namespace-reaper-egress
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: tesslate-namespace-reaper
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector: {}
+
+---
+# Allow snapshot-cleanup egress — the cleanup CronJob queries postgres for
+# expired snapshot records and calls the K8s VolumeSnapshot API to delete them.
+# Both destinations (postgres in tesslate ns, K8s API in default/kube-system)
+# are covered by namespaceSelector: {}.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-snapshot-cleanup-egress
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: tesslate-snapshot-cleanup
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector: {}

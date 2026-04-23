@@ -192,6 +192,28 @@ class TestVerifyInternalSecret:
                     await mod.verify_internal_secret(request)
         assert exc_info.value.status_code == 403
 
+    @pytest.mark.asyncio
+    async def test_wrong_secret_exactly_at_grace_boundary_raises_403(self, _reload_internal_module):
+        """elapsed == grace falls through to the 403 branch (boundary condition).
+
+        The guard is `if elapsed < grace`, so equality is NOT within the grace
+        window.  This test pins that boundary so a future `<=` change is caught.
+        """
+        from fastapi import HTTPException
+
+        mod = _reload_internal_module
+        mod._startup_time = 0.0
+        settings = _make_settings(secret=_GOOD_SECRET, grace=60)
+        with patch.object(mod, "get_settings", return_value=settings):
+            with patch(f"{mod.__name__}.time") as mock_time:
+                # elapsed = 60.0 - 0.0 = 60.0, grace = 60  →  60 < 60 is False → 403
+                mock_time.monotonic.return_value = 60.0
+                request = MagicMock()
+                request.headers.get.return_value = _BAD_SECRET
+                with pytest.raises(HTTPException) as exc_info:
+                    await mod.verify_internal_secret(request)
+        assert exc_info.value.status_code == 403
+
 
 # ---------------------------------------------------------------------------
 # Integration: GET /api/internal/known-volume-ids

@@ -212,7 +212,6 @@ variable "internal_api_secret" {
   description = "Shared secret for cluster-internal /api/internal/* endpoints (Hub GC, btrfs CSI)"
   type        = string
   sensitive   = true
-  default     = ""
 }
 
 variable "litellm_api_base" {
