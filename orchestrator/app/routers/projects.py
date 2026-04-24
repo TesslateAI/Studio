@@ -2578,7 +2578,6 @@ async def get_setup_config(
     }
 
 
-@router.post("/{project_slug}/setup-config", response_model=SetupConfigSyncResponse)
 async def _auto_start_project(project_id: UUID, project_slug: str, user_id: UUID) -> None:
     """Background task: start all containers for a freshly configured project.
 
@@ -2617,6 +2616,7 @@ async def _auto_start_project(project_id: UUID, project_slug: str, user_id: UUID
         logger.warning(f"[AUTO_START] Failed to auto-start project {project_slug}: {exc}")
 
 
+@router.post("/{project_slug}/setup-config", response_model=SetupConfigSyncResponse)
 async def save_setup_config(
     project_slug: str,
     config_data: TesslateConfigCreate,
