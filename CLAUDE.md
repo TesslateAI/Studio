@@ -26,6 +26,8 @@ The ECR IS <AWS_ACCOUNT_ID> not <AWS_ACCOUNT_ID>
 
 **CRITICAL: kubectl Context Safety** — EVERY `kubectl` command MUST include `--context=<name>`. NEVER use `kubectl config use-context`, `./scripts/kctx.sh`, or any context-switching command. Context switching is BANNED because cronjobs and other processes can change it mid-session, causing accidental production mutations. Use: `kubectl --context=tesslate` (minikube), `kubectl --context=tesslate-production-eks` (prod), `kubectl --context=tesslate-beta-eks` (beta). See `docs/infrastructure/kubernetes/CLAUDE.md` for details.
 
+**CRITICAL: AWS/EKS team roles** — Before any `aws` / `kubectl` against beta or production, assume a team role: `arn:aws:iam::<AWS_ACCOUNT_ID>:role/tesslate-{env}-eks-team-{observer|deployer|debugger|admin}` (least-privilege: observer=read+logs, deployer=rollout+ECR push, debugger=exec, admin=secrets/RBAC). Do NOT assume `eks-deployer` — that's a legacy admin-only role (`eks_admin_iam_arns` = `<AWS_IAM_USER>` + `tesslate-bigboss`); regular users (in `tesslate-{env}-{observers,deployers,debuggers,admins}` IAM groups) get `AccessDenied`. `./scripts/aws-deploy.sh` defaults to `team-deployer`; override with `AWS_EKS_ROLE_ARN=...` for admin-only roles. Full reference: `docs/guides/eks-cluster-access.md`.
+
 CRITICAL -- ENSURE ALL CHANGES ARE NON-BLOCKING
 
 Everything u do or write should be non-blocking so certain actions don't hold up other people on our software.
@@ -384,4 +386,4 @@ Detailed mode architecture → [docs/architecture/CLAUDE.md](docs/architecture/C
 - HTTP only (no TLS certs), all URLs use `http://`
 - PVCs persist across restarts but data is lost if the cluster is deleted
 
-For build workflows, image management, and troubleshooting, use the **`minikube-dev`** skill (local) or **`aws-deploy`** skill (production).
+For build workflows, image management, and troubleshooting, use the **`minikube-dev`** skill (local) or **`aws`** skill (production / beta — covers logs, exec, debug, deploy).

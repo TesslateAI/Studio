@@ -17,9 +17,9 @@
 3. Run Terraform (`terraform plan` / `apply`).
 4. Push back: `./secrets.sh push <env>` re-uploads the edited file.
 
-The `aws-deploy` skill wraps all of this for the full deploy flow.
+The `aws` skill wraps all of this for the full deploy flow.
 
 ## Related
 
 - Terraform modules: [k8s/terraform/](../../k8s/terraform/) and [docs/infrastructure/terraform/CLAUDE.md](../infrastructure/terraform/CLAUDE.md)
-- `aws-deploy` skill (production deploy orchestration)
+- `aws` skill (AWS/EKS operations — logs, exec, ECR, Terraform, deploy)
