@@ -1213,6 +1213,52 @@ export const chatApi = {
   },
 };
 
+export interface SidebarChat {
+  id: string;
+  title: string;
+  status: string;
+  origin: string;
+  project_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SidebarProject {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  visibility: string | null;
+  runtime: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  latest_activity_at: string | null;
+  chats: SidebarChat[];
+}
+
+export interface SidebarTreeResponse {
+  rootChats: SidebarChat[];
+  projects: SidebarProject[];
+}
+
+export const sidebarApi = {
+  /** Single-round-trip fetch for the left-nav tree (projects + their chats + root chats). */
+  getTree: async (
+    opts: {
+      projectLimit?: number;
+      rootChatLimit?: number;
+      chatsPerProject?: number;
+    } = {}
+  ): Promise<SidebarTreeResponse> => {
+    const params: Record<string, number> = {};
+    if (opts.projectLimit !== undefined) params.project_limit = opts.projectLimit;
+    if (opts.rootChatLimit !== undefined) params.root_chat_limit = opts.rootChatLimit;
+    if (opts.chatsPerProject !== undefined) params.chats_per_project = opts.chatsPerProject;
+    const response = await api.get('/api/sidebar/tree', { params });
+    return response.data as SidebarTreeResponse;
+  },
+};
+
 export const nodeConfigApi = {
   /** Submit form values for a pending agent `user_input_required`. */
   submit: async (inputId: string, values: SubmittedValues): Promise<void> => {

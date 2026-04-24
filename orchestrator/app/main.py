@@ -67,6 +67,7 @@ from .routers import (
     schedules,
     secrets,
     shell,
+    sidebar,
     snapshots,
     tasks,
     teams,
@@ -1161,6 +1162,7 @@ async def get_csrf_token():
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(node_config.router, prefix="/api", tags=["node-config"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(sidebar.router)  # prefix set on the router itself (/api/sidebar)
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])

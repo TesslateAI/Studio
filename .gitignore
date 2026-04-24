@@ -91,6 +91,8 @@ Thumbs.db
 .env.production
 .env.prod
 .env.minikube
+*.env
+!*.env.example
 .tfvars
 
 # Docker

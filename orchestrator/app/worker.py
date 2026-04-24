@@ -42,35 +42,121 @@ def _convert_uuids_to_strings(obj):
         return obj
 
 
-async def _auto_title_chat(chat, model_adapter, user_message: str, db) -> None:
-    """Generate and set a chat title from the user's first message. Non-blocking."""
+def _seed_text_for_title(user_message: str, attachments: list[dict] | None) -> str:
+    """Pick the best available text to seed title generation from.
+
+    If the user typed something, use that. Otherwise reach into attachments —
+    pasted-text content, then a file-reference path, then an image label — so
+    paste-only / image-only turns still produce a meaningful title.
+    """
+    if user_message and user_message.strip():
+        return user_message.strip()
+    for att in attachments or []:
+        if not isinstance(att, dict):
+            continue
+        att_type = att.get("type")
+        if att_type == "pasted_text":
+            body = (att.get("content") or "").strip()
+            if body:
+                label = att.get("label") or "Pasted text"
+                return f"{label}: {body}"
+        elif att_type == "file_reference":
+            fp = att.get("file_path")
+            if fp:
+                return f"Discuss file {fp}"
+        elif att_type == "image":
+            label = att.get("label") or att.get("mime_type") or "image"
+            return f"Review attached {label}"
+    return ""
+
+
+def _fallback_title(seed: str) -> str:
+    """Truncation fallback when the LLM title step is empty/errors.
+
+    Takes the first meaningful line of ``seed`` and trims it. Always returns
+    a non-empty string (the caller guards on ``seed`` being empty already).
+    """
+    first_line = next((line for line in seed.splitlines() if line.strip()), seed)
+    trimmed = first_line.strip()[:60].rstrip()
+    return trimmed or "New chat"
+
+
+async def _auto_title_chat(
+    chat,
+    model_adapter,
+    user_message: str,
+    db,
+    attachments: list[dict] | None = None,
+    assistant_response: str = "",
+) -> None:
+    """Generate and set a chat title after the first agent turn. Non-blocking.
+
+    Design: we "fork" the conversation — replay what the user sent plus the
+    agent's first reply to an independent LLM call, then append a synthetic
+    "Generate a concise title" user turn. This gives the titling model full
+    context (instead of guessing from a bare "hiii") while leaving the main
+    chat history untouched. If the LLM call is empty or errors, we fall back
+    to a truncated seed so chats never stay "Untitled" forever.
+    """
     if not chat or chat.title:
         return
+    seed_user = _seed_text_for_title(user_message, attachments)
+    if not seed_user and not assistant_response:
+        logger.info(
+            f"[WORKER] Auto-title skipped for chat {chat.id}: no seed text "
+            f"(empty message, no usable attachments, and no assistant reply yet)"
+        )
+        return
+
+    logger.info(
+        f"[WORKER] Auto-titling chat {chat.id} via forked session "
+        f"(message={bool(user_message)}, attachments={len(attachments or [])}, "
+        f"assistant_response_chars={len(assistant_response or '')})"
+    )
+
+    fork: list[dict[str, str]] = [
+        {
+            "role": "system",
+            "content": (
+                "You generate concise chat session titles. Read the "
+                "conversation and produce a 3-6 word title. Return ONLY "
+                "the title — no quotes, no punctuation, no prefixes like "
+                "'Title:'. Examples: 'Login page with OAuth', "
+                "'Fix navbar responsive layout', 'Add dark mode toggle'."
+            ),
+        }
+    ]
+    if seed_user:
+        fork.append({"role": "user", "content": seed_user[:500]})
+    if assistant_response:
+        fork.append({"role": "assistant", "content": assistant_response[:1000]})
+    fork.append(
+        {
+            "role": "user",
+            "content": "Generate a title for this chat session.",
+        }
+    )
+
+    title_text = ""
     try:
-        title_text = ""
-        async for chunk in model_adapter.chat(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "Generate a concise 3-6 word title for this chat based on "
-                        "the user's message. Return ONLY the title, no quotes or "
-                        "punctuation. Examples: 'Login page with OAuth', "
-                        "'Fix navbar responsive layout', 'Add dark mode toggle'."
-                    ),
-                },
-                {"role": "user", "content": user_message[:500]},
-            ],
-            max_tokens=20,
-        ):
+        async for chunk in model_adapter.chat(fork, max_tokens=20):
             title_text += chunk
         title_text = title_text.strip().strip("\"'")[:100]
-        if title_text:
-            chat.title = title_text
-            await db.commit()
-            logger.info(f"[WORKER] Auto-titled chat {chat.id}: {title_text}")
     except Exception as e:
-        logger.warning(f"[WORKER] Auto-title generation failed: {e}")
+        logger.warning(f"[WORKER] Auto-title LLM call failed for chat {chat.id}: {e}")
+        title_text = ""
+
+    if not title_text:
+        fallback_seed = seed_user or assistant_response or "New chat"
+        title_text = _fallback_title(fallback_seed)
+        logger.info(f"[WORKER] Auto-title fallback used for chat {chat.id}: {title_text!r}")
+
+    try:
+        chat.title = title_text
+        await db.commit()
+        logger.info(f"[WORKER] Auto-titled chat {chat.id}: {title_text}")
+    except Exception as e:
+        logger.warning(f"[WORKER] Auto-title commit failed for chat {chat.id}: {e}")
 
 
 async def _create_agent_checkpoint(volume_id: str, summary: str) -> None:
@@ -779,7 +865,14 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             # 13. Auto-generate chat title on first message (non-blocking)
             # Skip if our lock was stolen — the live owner will handle titling.
             if completion_reason != "cancelled" and not lock_stolen:
-                await _auto_title_chat(chat, model_adapter, payload.message, db)
+                await _auto_title_chat(
+                    chat,
+                    model_adapter,
+                    payload.message,
+                    db,
+                    attachments=payload.attachments,
+                    assistant_response=final_response,
+                )
                 # Publish title to SSE so frontend can update immediately
                 if pubsub and chat and chat.title:
                     await pubsub.publish_agent_event(
