@@ -9,6 +9,10 @@ orchestrator/.tesslate/
 
 # Desktop PRD scratch / planning (local-only, never committed)
 desktop-todo/
+
+# Skill-local secrets (API keys, tokens) — keep .example files tracked
+.agents/skills/*/config/*.env
+!.agents/skills/*/config/*.env.example
 # Python
 __pycache__/
 *.py[cod]
