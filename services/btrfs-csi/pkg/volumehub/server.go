@@ -487,6 +487,34 @@ func (s *Server) handleEnsureCached(_ interface{}, ctx context.Context, dec func
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
+	// Self-heal: recover volumes that CAS knows about but the registry
+	// doesn't. Handles the case where the Hub restarted after a node that
+	// owned the only cached copy was replaced (e.g. rolling EKS node group
+	// upgrade): the live-node scan at startup misses the volume, but its
+	// manifest + data are intact in CAS. Without this, the downstream
+	// CAS-restore path fails at lease acquisition with "not registered".
+	//
+	// Tombstone-first (mirrors sync/daemon.go discoverVolumes at pass 2) —
+	// a deleted volume's manifest may still exist briefly alongside the
+	// tombstone, and we must not resurrect it. Manifest presence alone is
+	// not proof a volume is alive.
+	//
+	// Gating on real CAS state (tombstone absent + manifest present)
+	// prevents both resurrection and bogus registry entries for garbage
+	// volume IDs. The registration is pure metadata (no owner, no cache);
+	// ownership is resolved by the restore path below.
+	if s.cas != nil && s.registry.GetVolumeStatus(req.VolumeID) == nil {
+		tombstoned, tsErr := s.cas.HasTombstone(ctx, req.VolumeID)
+		if tsErr != nil {
+			klog.Warningf("EnsureCached: HasTombstone(%s) failed: %v — skipping self-heal", req.VolumeID, tsErr)
+		} else if !tombstoned {
+			if _, err := s.cas.GetManifest(ctx, req.VolumeID); err == nil {
+				s.registry.RegisterVolume(req.VolumeID)
+				klog.Infof("EnsureCached: auto-registered volume %s from CAS manifest (was absent from registry)", req.VolumeID)
+			}
+		}
+	}
+
 	// Backward compat: treat deprecated hint_node as single-element candidate list.
 	candidates := req.CandidateNodes
 	if len(candidates) == 0 && req.HintNode != "" {
