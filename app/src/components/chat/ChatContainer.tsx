@@ -2114,11 +2114,11 @@ export function ChatContainer({
           bg-[var(--bg)]
           ${
             isDocked
-              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border)] overflow-hidden'
+              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border-hover)] overflow-hidden'
               : `
               fixed
               z-40
-              border border-[var(--border)]
+              border border-[var(--border-hover)]
               transition-all duration-400 ease-[var(--ease)]
               rounded-[var(--radius)]
               max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-b-none max-md:w-full

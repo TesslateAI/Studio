@@ -34,6 +34,7 @@ import { modKey } from '../../lib/keyboard-registry';
 import { useAttachments } from '../../hooks/useAttachments';
 import { AttachmentStrip } from './AttachmentStrip';
 import { FilePickerDropdown } from './FilePickerDropdown';
+import { PlusMenu } from './PlusMenu';
 
 // Width thresholds for responsive collapse
 // Below VERY_COMPACT: Only essential icons (agent icon, menu, send button)
@@ -617,6 +618,109 @@ export function ChatInput({
     setShowFilePicker(false);
   };
 
+  // Settings drop-up — rendered inline next to the trigger button so it
+  // pops up directly above the gear / compact-menu button. The trigger's
+  // wrapper provides the relative positioning context.
+  const renderSettingsMenu = () => (
+    <div
+      ref={settingsRef}
+      role="menu"
+      className="absolute bottom-full right-0 mb-1.5 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg min-w-[200px] z-50"
+    >
+      {onToggleToolCallsCollapsed && (
+        <button
+          type="button"
+          onClick={() => {
+            onToggleToolCallsCollapsed();
+            setShowSettings(false);
+          }}
+          className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
+        >
+          <span
+            className={
+              toolCallsCollapsed ? 'text-[var(--primary)]' : 'text-[var(--text)]/60'
+            }
+          >
+            {toolCallsCollapsed ? (
+              <ArrowsOutSimple size={16} weight="bold" />
+            ) : (
+              <ArrowsInSimple size={16} weight="bold" />
+            )}
+          </span>
+          <span className="text-[var(--text)] text-sm">
+            {toolCallsCollapsed ? 'Expand Tool Calls' : 'Collapse Tool Calls'}
+          </span>
+        </button>
+      )}
+
+      {isCompact && (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setMessage('/');
+              setShowSettings(false);
+              setShowCommands(true);
+              textareaRef.current?.focus();
+            }}
+            className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
+          >
+            <span className="text-[var(--text)]/60 w-4 text-center font-mono font-bold text-base leading-none">
+              /
+            </span>
+            <span className="text-[var(--text)] text-sm">Commands</span>
+          </button>
+          <div className="my-1 border-t border-[var(--border)]" />
+        </>
+      )}
+
+      {isAdmin && onOpenDebugTools && (
+        <button
+          type="button"
+          onClick={() => {
+            onOpenDebugTools();
+            setShowSettings(false);
+          }}
+          className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
+        >
+          <span className="text-[var(--text)]/60">
+            <Bug size={16} weight="bold" />
+          </span>
+          <span className="text-[var(--text)] text-sm">Debug Tools</span>
+        </button>
+      )}
+
+      <button
+        type="button"
+        onClick={() => {
+          downloadProject();
+          setShowSettings(false);
+        }}
+        className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
+      >
+        <span className="text-[var(--text)]/60">
+          <DownloadSimple size={16} weight="bold" />
+        </span>
+        <span className="text-[var(--text)] text-sm">Download Project</span>
+      </button>
+      {onClearHistory && (
+        <button
+          type="button"
+          onClick={() => {
+            clearChatHistory();
+            setShowSettings(false);
+          }}
+          className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
+        >
+          <span className="text-[var(--text)]/60">
+            <Trash size={16} weight="bold" />
+          </span>
+          <span className="text-[var(--text)] text-sm">Clear Chat History</span>
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <form
       ref={containerRef}
@@ -767,112 +871,13 @@ export function ChatInput({
         />
       )}
 
-      {/* Settings / menu dropdown */}
-      {showSettings && (
-        <div ref={settingsRef} className="absolute bottom-full right-0 mb-2 mr-3">
-          <div className="bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg min-w-[200px]">
-            {/* Tool calls collapse toggle — always shown */}
-            {onToggleToolCallsCollapsed && (
-              <button
-                type="button"
-                onClick={() => {
-                  onToggleToolCallsCollapsed();
-                  setShowSettings(false);
-                }}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
-              >
-                <span
-                  className={
-                    toolCallsCollapsed ? 'text-[var(--primary)]' : 'text-[var(--text)]/60'
-                  }
-                >
-                  {toolCallsCollapsed ? (
-                    <ArrowsOutSimple size={16} weight="bold" />
-                  ) : (
-                    <ArrowsInSimple size={16} weight="bold" />
-                  )}
-                </span>
-                <span className="text-[var(--text)] text-sm">
-                  {toolCallsCollapsed ? 'Expand Tool Calls' : 'Collapse Tool Calls'}
-                </span>
-              </button>
-            )}
-
-            {/* Compact-only: commands shortcut */}
-            {isCompact && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMessage('/');
-                    setShowSettings(false);
-                    setShowCommands(true);
-                    textareaRef.current?.focus();
-                  }}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
-                >
-                  <span className="text-[var(--text)]/60 w-4 text-center font-mono font-bold text-base leading-none">
-                    /
-                  </span>
-                  <span className="text-[var(--text)] text-sm">Commands</span>
-                </button>
-                <div className="my-1 border-t border-[var(--border)]" />
-              </>
-            )}
-
-            {/* Admin-only: Debug tools */}
-            {isAdmin && onOpenDebugTools && (
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenDebugTools();
-                  setShowSettings(false);
-                }}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
-              >
-                <span className="text-[var(--text)]/60">
-                  <Bug size={16} weight="bold" />
-                </span>
-                <span className="text-[var(--text)] text-sm">Debug Tools</span>
-              </button>
-            )}
-
-            {/* Always-visible items: download + clear */}
-            <button
-              type="button"
-              onClick={() => {
-                downloadProject();
-                setShowSettings(false);
-              }}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
-            >
-              <span className="text-[var(--text)]/60">
-                <DownloadSimple size={16} weight="bold" />
-              </span>
-              <span className="text-[var(--text)] text-sm">Download Project</span>
-            </button>
-            {onClearHistory && (
-              <button
-                type="button"
-                onClick={() => {
-                  clearChatHistory();
-                  setShowSettings(false);
-                }}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
-              >
-                <span className="text-[var(--text)]/60">
-                  <Trash size={16} weight="bold" />
-                </span>
-                <span className="text-[var(--text)] text-sm">Clear Chat History</span>
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Settings / menu dropdown is now anchored to the trigger button
+          (gear / compact-menu) below — see the toolbar render. Keeping
+          this comment as a navigation breadcrumb. */}
 
       {/* Two-row layout */}
       <div
-        className={`flex flex-col bg-[var(--surface)] w-full ${isDocked ? '' : 'border border-[var(--border)] rounded-[var(--radius-medium)] shadow-sm'}`}
+        className={`flex flex-col bg-[var(--surface)] w-full ${isDocked ? '' : 'border border-[var(--border)] rounded-[var(--radius)] shadow-sm'}`}
       >
         {/* First row: Growing textarea / Command chip */}
         <div
@@ -945,29 +950,27 @@ export function ChatInput({
           <AttachmentStrip attachments={attachments} onRemove={removeAttachment} />
         )}
 
-        {/* Second row: Agent selector and buttons */}
+        {/* Second row toolbar.
+            Layout (left → right):
+              [+]  [edit-mode]  [gear]  [/]  ───spacer───  [agent]  [send]
+            The "+" opens a drop-up with photos/files + connectors.
+            The edit-mode chip opens a drop-up with the three edit modes,
+            each annotated with a tooltip describing its behaviour. */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 w-full min-w-0">
-          {/* Agent selector */}
-          <div className="min-w-0 shrink">
-            <AgentSelector
-              agents={agents}
-              currentAgent={currentAgent}
-              onSelectAgent={onSelectAgent}
-              onModelChange={onModelChange}
-              compact={isCompact}
+          {/* + (drop-up: add photos/files + connectors) */}
+          <div className="flex-shrink-0">
+            <PlusMenu
+              onAddImages={(files) => files.forEach((f) => addImage(f))}
+              disabled={disabled || viewerMode}
             />
           </div>
 
-          {/* Spacer */}
-          <div className="flex-1 min-w-0" />
-
-          {/* Edit Mode Status - icon-only when narrow */}
+          {/* Edit Mode Status — icon-only when narrow */}
           {onModeChange && (
             <div className="flex-shrink-0">
               <EditModeStatus
                 mode={editMode}
                 onModeChange={onModeChange}
-                className=""
                 compact={isEditModeCompact}
               />
             </div>
@@ -976,19 +979,22 @@ export function ChatInput({
           {/* Desktop: 2 individual buttons */}
           {!isCompact && (
             <>
-              {/* Settings gear */}
-              <button
-                ref={settingsButtonRef}
-                type="button"
-                onClick={() => {
-                  setShowSettings(!showSettings);
-                  setShowCommands(false);
-                }}
-                className={`btn btn-icon btn-sm ${showSettings ? 'btn-active' : ''}`}
-                title="Settings"
-              >
-                <Gear size={14} weight="bold" />
-              </button>
+              {/* Settings gear — drop-up anchored to this button */}
+              <div className="relative flex-shrink-0">
+                <button
+                  ref={settingsButtonRef}
+                  type="button"
+                  onClick={() => {
+                    setShowSettings(!showSettings);
+                    setShowCommands(false);
+                  }}
+                  className={`btn btn-icon btn-sm ${showSettings ? 'btn-active' : ''}`}
+                  title="Settings"
+                >
+                  <Gear size={14} weight="bold" />
+                </button>
+                {showSettings && renderSettingsMenu()}
+              </div>
 
               {/* Slash commands */}
               <button
@@ -1014,19 +1020,36 @@ export function ChatInput({
 
           {/* Compact/very compact: single menu button combining all 3 */}
           {isCompact && (
-            <button
-              ref={settingsButtonRef}
-              type="button"
-              onClick={() => {
-                setShowSettings(!showSettings);
-                setShowCommands(false);
-              }}
-              className={`btn btn-icon btn-sm ${showSettings ? 'btn-active' : ''}`}
-              title="Menu"
-            >
-              <DotsThreeVertical size={16} weight="bold" />
-            </button>
+            <div className="relative flex-shrink-0">
+              <button
+                ref={settingsButtonRef}
+                type="button"
+                onClick={() => {
+                  setShowSettings(!showSettings);
+                  setShowCommands(false);
+                }}
+                className={`btn btn-icon btn-sm ${showSettings ? 'btn-active' : ''}`}
+                title="Menu"
+              >
+                <DotsThreeVertical size={16} weight="bold" />
+              </button>
+              {showSettings && renderSettingsMenu()}
+            </div>
           )}
+
+          {/* Spacer pushes agent + send to the right edge */}
+          <div className="flex-1 min-w-0" />
+
+          {/* Agent selector — moved to the right */}
+          <div className="min-w-0 shrink">
+            <AgentSelector
+              agents={agents}
+              currentAgent={currentAgent}
+              onSelectAgent={onSelectAgent}
+              onModelChange={onModelChange}
+              compact={isCompact}
+            />
+          </div>
 
           {/* Send button - always visible */}
           <button

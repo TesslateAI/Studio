@@ -313,8 +313,8 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
           <div className="flex-1 flex items-center justify-center p-4 md:p-8">
             <div className="text-center max-w-md">
               <div className="mb-6 flex justify-center">
-                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-orange-500/20 to-blue-500/20 flex items-center justify-center backdrop-blur-sm border border-[var(--border)]">
-                  <FolderOpen size={48} weight="duotone" className="text-orange-500" />
+                <div className="w-24 h-24 rounded-2xl bg-[var(--surface)] flex items-center justify-center border border-[var(--border)]">
+                  <FolderOpen size={48} weight="duotone" className="text-[var(--text-muted)]" />
                 </div>
               </div>
               <h3 className="text-2xl font-bold text-white mb-3">Create Your First Directory</h3>
@@ -477,8 +477,8 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
                 <div className="flex items-center justify-center h-64 text-center">
                   <div>
                     <div className="mb-4 flex justify-center">
-                      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500/10 to-blue-500/10 flex items-center justify-center border border-[var(--border)]">
-                        <UploadSimple size={40} weight="duotone" className="text-gray-500" />
+                      <div className="w-20 h-20 rounded-2xl bg-[var(--surface)] flex items-center justify-center border border-[var(--border)]">
+                        <UploadSimple size={40} weight="duotone" className="text-[var(--text-muted)]" />
                       </div>
                     </div>
                     <h4 className="text-lg font-semibold text-white mb-2">

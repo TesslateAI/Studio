@@ -1,14 +1,9 @@
-import { PanelLeft, Plus } from 'lucide-react';
-import { ProjectConnector } from './ProjectConnector';
+import { PanelLeft, SquarePen } from 'lucide-react';
 
 interface ChatTopBarProps {
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
   sessionTitle: string;
-  projectId: string | null;
-  projectName: string | null;
-  onConnectProject: (projectId: string, projectName: string) => void;
-  onDisconnectProject: () => void;
   onNewSession: () => void;
 }
 
@@ -16,27 +11,18 @@ export function ChatTopBar({
   isSidebarOpen,
   onToggleSidebar,
   sessionTitle,
-  projectId,
-  projectName,
-  onConnectProject,
-  onDisconnectProject,
   onNewSession,
 }: ChatTopBarProps) {
   return (
     <div
-      className="flex items-center h-10 border-b border-[var(--border)] flex-shrink-0"
+      className="flex items-center gap-1 h-10 border-b border-[var(--border)] flex-shrink-0"
       style={{ paddingLeft: 7, paddingRight: 10 }}
     >
-      {/* Left: sidebar toggle + title */}
-      <div className="flex items-center gap-2 min-w-0">
-        <button
-          onClick={onNewSession}
-          className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
-          aria-label="New chat"
-        >
-          <Plus size={14} />
-        </button>
-        {!isSidebarOpen && (
+      {/* When the sidebar is closed, the toggle + new buttons live here in
+          the same slot the sidebar header would occupy — same icons, same
+          gap, same padding — so toggling doesn't shift anything visually. */}
+      {!isSidebarOpen && (
+        <>
           <button
             onClick={onToggleSidebar}
             className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
@@ -44,21 +30,18 @@ export function ChatTopBar({
           >
             <PanelLeft size={14} />
           </button>
-        )}
-        <span className="text-xs font-medium text-[var(--text)] truncate max-w-[120px] sm:max-w-[200px]">
-          {sessionTitle}
-        </span>
-      </div>
-
-      {/* Right: Project connector */}
-      <div className="flex-1 flex items-center justify-end">
-        <ProjectConnector
-          projectId={projectId}
-          projectName={projectName}
-          onConnect={onConnectProject}
-          onDisconnect={onDisconnectProject}
-        />
-      </div>
+          <button
+            onClick={onNewSession}
+            className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
+            aria-label="New session"
+          >
+            <SquarePen size={14} />
+          </button>
+        </>
+      )}
+      <span className="text-xs font-medium text-[var(--text)] truncate max-w-[120px] sm:max-w-[200px] ml-1">
+        {sessionTitle}
+      </span>
     </div>
   );
 }

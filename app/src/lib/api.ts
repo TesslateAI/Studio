@@ -441,7 +441,9 @@ export interface GitCommit {
   files_changed: number | null;
 }
 
-export type GitApiStatus = 'ready' | 'no_remote' | 'error';
+// 'local' = repo has no GitHub remote; payload comes from local `git`.
+// Tabs render the same shape but hide GitHub-specific affordances.
+export type GitApiStatus = 'ready' | 'local' | 'no_remote' | 'error';
 
 export interface GitCommitsResponse {
   status: GitApiStatus;

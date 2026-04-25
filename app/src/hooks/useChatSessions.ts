@@ -55,19 +55,19 @@ export function useChatSessions({
     }
   }, [standalone]);
 
-  // Initial load + re-fetch on team switch
+  // Initial load + re-fetch on team switch.
+  // Intentionally does NOT auto-select the most recent session — landing on
+  // /chat (e.g. via the Agents nav button) should drop the user on a fresh
+  // landing screen. The sidebar still lists existing sessions; users click
+  // an entry to resume one explicitly.
   useEffect(() => {
     setIsLoading(true);
     setCurrentSessionId(null);
-    fetchSessions().then((sessions) => {
+    fetchSessions().then(() => {
       if (!mountedRef.current) return;
-      // Auto-select the most recent session
-      if (sessions && sessions.length > 0) {
-        setCurrentSessionId(sessions[0].id);
-      }
       setIsLoading(false);
     });
-  }, [fetchSessions, teamSwitchKey]); // Re-fetch when team changes
+  }, [fetchSessions, teamSwitchKey]);
 
   const createSession = useCallback(async () => {
     const tempId = `temp-${Date.now()}`;
@@ -136,7 +136,9 @@ export function useChatSessions({
     }
   }, []);
 
-  const switchSession = useCallback((sessionId: string) => {
+  // Pass `null` to deselect the current session and return to landing
+  // (used by handleNewSession — clears the canvas without writing to DB).
+  const switchSession = useCallback((sessionId: string | null) => {
     setCurrentSessionId(sessionId);
   }, []);
 

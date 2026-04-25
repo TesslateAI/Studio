@@ -190,6 +190,13 @@ body,
   height: 100%;
   margin: 0;
   padding: 0;
+  /* App-shell layout: the page itself never scrolls. Any scrolling
+     happens inside explicit overflow-auto containers (sidebar list,
+     chat thread, etc.). Without this, wheel events that fall on
+     non-scrollable areas (e.g., the sidebar header / team-switcher row)
+     bubble up to the document and yank the whole layout. */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {

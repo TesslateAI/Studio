@@ -89,8 +89,13 @@ export function ChatSessionSidebar({
 
   return (
     <div className="flex-shrink-0 w-[260px] h-full flex flex-col border-r border-[var(--border)] bg-[var(--bg)]">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 pt-3 pb-2">
+      {/* Header — height + padding mirrored on ChatTopBar so toggle/new
+          buttons sit in the same place whether the sidebar is open or
+          closed (no visual jump on toggle). */}
+      <div
+        className="flex items-center gap-1 h-10 border-b border-[var(--border)]"
+        style={{ paddingLeft: 7, paddingRight: 10 }}
+      >
         <button
           onClick={onToggle}
           className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"

@@ -70,7 +70,10 @@ function readInitialTab(): TabId {
   } catch {
     // ignore — default below
   }
-  return 'github';
+  // Default to Overview — works for both GitHub-connected and local-only
+  // repos. (Previously defaulted to GitHub, which made local-only projects
+  // look broken on first load.)
+  return 'overview';
 }
 
 export function RepositoryPanel({ projectSlug, projectId }: RepositoryPanelProps) {

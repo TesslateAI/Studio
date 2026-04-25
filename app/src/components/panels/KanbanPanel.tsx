@@ -9,6 +9,11 @@ import {
   ArrowsDownUp,
   Funnel,
   ChatCircle,
+  Sparkle,
+  Bug,
+  ListChecks,
+  Flag,
+  type Icon,
 } from '@phosphor-icons/react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import api from '../../lib/api';
@@ -88,11 +93,13 @@ const priorityColors = {
   critical: 'text-red-400',
 };
 
-const taskTypeIcons = {
-  feature: '✨',
-  bug: '🐛',
-  task: '📋',
-  epic: '🎯',
+// Phosphor icons replace the previous emoji glyphs — keeps glyphs consistent
+// with the rest of the app and respects monochrome theme tokens.
+const taskTypeIcons: Record<'feature' | 'bug' | 'task' | 'epic', Icon> = {
+  feature: Sparkle,
+  bug: Bug,
+  task: ListChecks,
+  epic: Flag,
 };
 
 export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
@@ -463,9 +470,15 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
                                     {task.title}
                                   </h4>
                                 </div>
-                                {task.task_type && (
-                                  <span className="text-base" title={task.task_type}>
-                                    {taskTypeIcons[task.task_type]}
+                                {task.task_type && taskTypeIcons[task.task_type] && (
+                                  <span
+                                    className="text-[var(--text-muted)] flex-shrink-0"
+                                    title={task.task_type}
+                                  >
+                                    {(() => {
+                                      const TaskTypeIcon = taskTypeIcons[task.task_type];
+                                      return <TaskTypeIcon size={14} weight="bold" />;
+                                    })()}
                                   </span>
                                 )}
                               </div>
@@ -650,8 +663,13 @@ export function KanbanPanel({ projectId, readOnly = false }: KanbanPanelProps) {
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-[var(--text)]/15 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {selectedTask.task_type && (
-                  <span className="text-2xl">{taskTypeIcons[selectedTask.task_type]}</span>
+                {selectedTask.task_type && taskTypeIcons[selectedTask.task_type] && (
+                  <span className="text-[var(--text-muted)]">
+                    {(() => {
+                      const TaskTypeIcon = taskTypeIcons[selectedTask.task_type];
+                      return <TaskTypeIcon size={22} weight="bold" />;
+                    })()}
+                  </span>
                 )}
                 <div className="flex items-center gap-2">
                   {selectedTask.ref_number != null && (

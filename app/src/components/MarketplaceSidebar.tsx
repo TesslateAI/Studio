@@ -264,9 +264,9 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                     <div
                       draggable
                       onDragStart={onBrowserDragStart}
-                      className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-move bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 hover:border-purple-400 transition-colors"
+                      className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-move bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)] transition-colors"
                     >
-                      <Browser size={18} weight="fill" className="text-purple-400" />
+                      <Browser size={18} weight="fill" className="text-[var(--text-muted)]" />
                       <div className="flex-1 min-w-0">
                         <span className="text-sm font-medium text-[var(--text)]">
                           Browser Preview
@@ -275,7 +275,7 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                           Preview running containers
                         </p>
                       </div>
-                      <Plus size={14} className="text-purple-400" weight="bold" />
+                      <Plus size={14} className="text-[var(--text-muted)]" weight="bold" />
                     </div>
                   </div>
 

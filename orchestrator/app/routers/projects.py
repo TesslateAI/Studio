@@ -945,6 +945,164 @@ def _no_remote_payload(kind: str) -> dict[str, object]:
     }
 
 
+def _local_git_manager(project: Project, user: User):
+    """Build a GitManager bound to (user, project) for local-repo reads.
+
+    Used as a fallback when a project has no GitHub remote so the
+    Repository panel can still render commits/branches/overview from
+    the on-disk git history.
+    """
+    from ..services.git_manager import GitManager
+
+    return GitManager(
+        user_id=user.id,
+        project_id=str(project.id),
+        user_name=getattr(user, "username", None) or "Tesslate User",
+        user_email=str(user.email) if getattr(user, "email", None) else "user@tesslate.com",
+    )
+
+
+async def _local_commits_payload(
+    project: Project, user: User, branch: str | None, limit: int
+) -> dict[str, object]:
+    """Build a {status:'local', commits:[...]} payload for the Graph/Overview tabs.
+
+    Returns the GitHub-shaped commit envelope so the frontend renders the
+    same way; GitHub-only fields (login, avatar_url, html_url) are nulled.
+    Errors are swallowed into an empty list — "no data" beats a panel crash.
+    """
+    git_mgr = _local_git_manager(project, user)
+    try:
+        raw = await git_mgr.get_commit_history(limit=limit, branch=branch)
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[GIT_COMMITS_LOCAL] {project.slug}: {exc}")
+        raw = []
+
+    def _normalize(c: dict[str, object]) -> dict[str, object]:
+        sha = str(c.get("sha") or "")
+        message = str(c.get("message") or "")
+        title = message.split("\n", 1)[0] if message else ""
+        return {
+            "sha": sha,
+            "short_sha": sha[:7] if sha else "",
+            "message": message,
+            "title": title,
+            "html_url": None,
+            "parents": [],
+            "author": {
+                "login": None,
+                "avatar_url": None,
+                "name": c.get("author"),
+                "email": c.get("email"),
+                "date": c.get("date"),
+            },
+            "committer": {
+                "login": None,
+                "avatar_url": None,
+                "name": c.get("author"),
+                "email": c.get("email"),
+                "date": c.get("date"),
+            },
+            "files_changed": None,
+        }
+
+    return {
+        "status": "local",
+        "owner": None,
+        "repo": None,
+        "branch": branch,
+        "html_url": None,
+        "commits": [_normalize(c) for c in raw if isinstance(c, dict)],
+    }
+
+
+async def _local_branches_payload(project: Project, user: User) -> dict[str, object]:
+    """Build a {status:'local', branches:[...]} payload for the Branches tab.
+
+    ahead/behind counts are unavailable without a remote; we leave them
+    null. The default branch is whichever local branch is currently
+    checked out (falls back to "main").
+    """
+    git_mgr = _local_git_manager(project, user)
+    try:
+        raw = await git_mgr.list_branches()
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[GIT_BRANCHES_LOCAL] {project.slug}: {exc}")
+        raw = []
+
+    default_branch = "main"
+    for b in raw:
+        if isinstance(b, dict) and b.get("current"):
+            default_branch = str(b.get("name") or default_branch)
+            break
+
+    branches = [
+        {
+            "name": str(b.get("name") or ""),
+            "is_default": bool(b.get("name") == default_branch),
+            "protected": False,
+            "sha": None,
+            "html_url": None,
+            "ahead_by": None,
+            "behind_by": None,
+        }
+        for b in raw
+        if isinstance(b, dict) and not b.get("remote")
+    ]
+
+    return {
+        "status": "local",
+        "owner": None,
+        "repo": None,
+        "default_branch": default_branch,
+        "html_url": None,
+        "branches": branches,
+    }
+
+
+async def _local_repo_info_payload(project: Project, user: User) -> dict[str, object]:
+    """Build a {status:'local', ...} payload for the Overview tab.
+
+    Pulls a few cheap stats (current branch, last commit) from local git
+    and leaves GitHub-specific fields (stars, forks, contributors, PRs)
+    null. The Overview tab's UI treats missing fields gracefully.
+    """
+    git_mgr = _local_git_manager(project, user)
+
+    default_branch = "main"
+    last_commit_date: str | None = None
+    try:
+        status = await git_mgr.get_status()
+        if isinstance(status, dict):
+            default_branch = str(status.get("branch") or default_branch)
+            last = status.get("last_commit")
+            if isinstance(last, dict):
+                last_commit_date = last.get("date") if isinstance(last.get("date"), str) else None
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[GIT_REPO_INFO_LOCAL] {project.slug}: status failed: {exc}")
+
+    return {
+        "status": "local",
+        "owner": None,
+        "repo": None,
+        "html_url": None,
+        "description": project.description if hasattr(project, "description") else None,
+        "default_branch": default_branch,
+        "stars": None,
+        "watchers": None,
+        "forks": None,
+        "open_issues": None,
+        "pushed_at": last_commit_date,
+        "updated_at": last_commit_date,
+        "created_at": None,
+        "is_private": True,
+        "topics": [],
+        "contributors": [],
+        "open_pulls": [],
+        "open_pulls_count": 0,
+    }
+
+
 def _error_payload(kind: str, exc: Exception) -> dict[str, object]:
     """Return a safe error envelope for GitHub failures.
 
@@ -994,12 +1152,12 @@ async def get_git_commits(
         files_changed: int | None (only when include_stats=true)
     """
     project = await get_project_by_slug(db, project_slug, current_user)
+    capped = max(1, min(limit, 100))
     resolved = await _resolve_github_client(db, project, current_user)
     if resolved is None:
-        return _no_remote_payload("commit history")
+        return await _local_commits_payload(project, current_user, branch, capped)
 
     owner, repo, client = resolved
-    capped = max(1, min(limit, 100))
 
     try:
         raw_commits = await client.list_commits(owner, repo, sha=branch, per_page=capped)
@@ -1104,7 +1262,7 @@ async def get_git_branches(
     project = await get_project_by_slug(db, project_slug, current_user)
     resolved = await _resolve_github_client(db, project, current_user)
     if resolved is None:
-        return _no_remote_payload("branches")
+        return await _local_branches_payload(project, current_user)
 
     owner, repo, client = resolved
 
@@ -1185,7 +1343,7 @@ async def get_git_repo_info(
     project = await get_project_by_slug(db, project_slug, current_user)
     resolved = await _resolve_github_client(db, project, current_user)
     if resolved is None:
-        return _no_remote_payload("repository info")
+        return await _local_repo_info_payload(project, current_user)
 
     owner, repo, client = resolved
 
