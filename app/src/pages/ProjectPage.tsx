@@ -198,13 +198,9 @@ function ProjectPageInner() {
         }
         const parts: string[] = [];
         if (payload.updated_keys.length) parts.push(`${payload.updated_keys.length} updated`);
-        if (payload.rotated_secrets.length)
-          parts.push(`${payload.rotated_secrets.length} rotated`);
-        if (payload.cleared_secrets.length)
-          parts.push(`${payload.cleared_secrets.length} cleared`);
-        toast.success(
-          parts.length > 0 ? `Config saved · ${parts.join(', ')}` : 'Config saved'
-        );
+        if (payload.rotated_secrets.length) parts.push(`${payload.rotated_secrets.length} rotated`);
+        if (payload.cleared_secrets.length) parts.push(`${payload.cleared_secrets.length} cleared`);
+        toast.success(parts.length > 0 ? `Config saved · ${parts.join(', ')}` : 'Config saved');
       })
     );
 
@@ -233,8 +229,7 @@ function ProjectPageInner() {
             preset: cfg.preset,
           });
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : 'Failed to load container config';
+          const message = err instanceof Error ? err.message : 'Failed to load container config';
           toast.error(message);
         }
       })
@@ -641,7 +636,7 @@ function ProjectPageInner() {
       const libraryData = await marketplaceApi.getMyAgents();
       const enabledAgents = libraryData.agents.filter(
         (agent: Record<string, unknown>) =>
-          agent.is_enabled && !agent.is_admin_disabled && agent.slug !== 'librarian'
+          agent.is_enabled && !agent.is_admin_disabled && !agent.is_system
       );
       const uiAgents = enabledAgents.map((agent: Record<string, unknown>) => ({
         id: agent.slug as string,
